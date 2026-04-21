@@ -19,6 +19,7 @@ import Header from "../src/components/header";
 import Navbar from "../src/components/navbar";
 import Skeleton from "../src/components/Skeleton";
 import CustomAlert, { AlertType } from "../src/components/CustomAlert";
+import { useBottomBarClearance } from "../src/hooks/useBottomBarClearance";
 import { useAuth } from "../src/context/AuthContext";
 import { showTopToast } from "../src/context/TopToastContext";
 import { useTheme } from "../src/context/ThemeContext";
@@ -32,6 +33,7 @@ const moderateScale = (size: number, factor = 0.3) => {
 
 export default function ProducerProjectDetailsScreen() {
   const { colors } = useTheme();
+  const { contentBottomPadding } = useBottomBarClearance(24);
   const { session, userId, userRole } = useAuth();
   const { project_id } = useLocalSearchParams();
   const isProducer = userRole === "producer";
@@ -267,7 +269,7 @@ export default function ProducerProjectDetailsScreen() {
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <Header title={project.title} onBackPress={() => router.back()} />
 
-      <ScrollView style={styles.content}>
+      <ScrollView style={styles.content} contentContainerStyle={{ paddingBottom: contentBottomPadding }}>
         {/* Cover image */}
         {project.cover_image_url ? (
           <CachedImage uri={project.cover_image_url } style={styles.coverImage} />
@@ -463,7 +465,6 @@ export default function ProducerProjectDetailsScreen() {
           </View>
         )}
 
-        <View style={{ height: 100 }} />
       </ScrollView>
 
       {/* Apply Modal */}

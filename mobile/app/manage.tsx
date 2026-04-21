@@ -6,11 +6,13 @@ import GuestSignInGate from '../src/components/GuestSignInGate';
 import Header from '../src/components/header';
 import Navbar from '../src/components/navbar';
 import Skeleton from '../src/components/Skeleton';
+import { useBottomBarClearance } from '../src/hooks/useBottomBarClearance';
 import { useAuth } from '../src/context/AuthContext';
 import { useTheme } from '../src/context/ThemeContext';
 
 export default function ManageScreen() {
     const { colors } = useTheme();
+    const { contentBottomPadding } = useBottomBarClearance(24);
     const { session, loading: authLoading, userId, userRole, isGuest } = useAuth();
     const isAuthenticated = !!session;
     const [loading, setLoading] = useState(true);
@@ -82,10 +84,12 @@ export default function ManageScreen() {
     const handleRedirect = (role: string) => {
         if (role === 'studio-owner') {
             router.replace('/my_studio');
-        } else if (role === 'musician') {
+        } else if (role === 'musician' || role === 'manager' || role === 'musician-member') {
             router.replace('/my_group');
         } else if (role === 'venue-owner') {
             router.replace('/my_venue');
+        } else if (role === 'producer') {
+            router.replace('/my_production');
         } else {
             setLoading(false);
         }
@@ -120,7 +124,7 @@ export default function ManageScreen() {
         <View style={[styles.flex1, { backgroundColor: colors.background }]}>
             <Header title="Manage" />
 
-            <ScrollView contentContainerStyle={styles.scrollContent}>
+            <ScrollView contentContainerStyle={[styles.scrollContent, { paddingBottom: contentBottomPadding }]}>
                 <View style={styles.dashboardContainer}>
                     <Text style={[styles.title, { color: colors.text }]}>
                         Management Dashboard

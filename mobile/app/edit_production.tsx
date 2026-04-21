@@ -1,0 +1,237 @@
+import { Ionicons } from '@expo/vector-icons';
+import { router, useLocalSearchParams } from 'expo-router';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { ActivityIndicator, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { supabase } from '../lib/supabase';
+import CustomAlert, { AlertType } from '../src/components/CustomAlert';
+import Header from '../src/components/header';
+import ImageUploader from '../src/components/ImageUploader';
+import Navbar from '../src/components/navbar';
+import Skeleton from '../src/components/Skeleton';
+import { useBottomBarClearance } from '../src/hooks/useBottomBarClearance';
+import { useAuth, useRequireAuth } from '../src/context/AuthContext';
+import { showTopToast } from '../src/context/TopToastContext';
+import { useTheme } from '../src/context/ThemeContext';
+
+type TeamRecord = {
+  id: string;
+  name: string;
+  description: string | null;
+  logo_url: string | null;
+  owner_id: string;
+  member_role: string;
+  created_at: string;
+};
+
+export default function EditProductionScreen() {
+  const { colors, isDark } = useTheme();
+  const { contentBottomPadding } = useBottomBarClearance(24);
+  const { userId } = useRequireAuth();
+  const { session, userRole } = useAuth();
+  const params = useLocalSearchParams<{ id?: string }>();
+  const teamId = useMemo(() => (Array.isArray(params.id) ? params.id[0] : params.id) || '', [params.id]);
+
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [team, setTeam] = useState<TeamRecord | null>(null);
+  const [teamName, setTeamName] = useState('');
+  const [description, setDescription] = useState('');
+  const [logoImages, setLogoImages] = useState<string[]>([]);
+  const [thumbnailIndex, setThumbnailIndex] = useState(0);
+  const [alert, setAlert] = useState<{ type: AlertType; title: string; message: string } | null>(null);
+
+  const hasIncompleteRequiredFields = !logoImages.length || !teamName.trim() || !description.trim();
+
+  const invokeDeals = useCallback(async (body: Record<string, unknown>) => {
+    const { data, error } = await supabase.functions.invoke('manage-deals', { body });
+    if (error) {
+      console.error('manage-deals failed', {
+        message: error.message,
+        status: (error as any).status,
+        code: (error as any).code,
+        details: (error as any).details,
+        hint: (error as any).hint,
+        context: (error as any).context,
+        body,
+      });
+      throw error;
+    }
+    return data;
+  }, []);
+
+  const fetchTeam = useCallback(async () => {
+    if (!teamId) {
+      setAlert({ type: 'error', title: 'Missing Team', message: 'No production team was selected.' });
+      setLoading(false);
+      return;
+    }
+
+    try {
+      const data = await invokeDeals({ action: 'list_my_teams' });
+      const existingTeam = ((data?.teams || []) as TeamRecord[]).find((item) => item.id === teamId);
+      if (!existingTeam) {
+        throw new Error('Production team not found.');
+      }
+
+      if (existingTeam.member_role !== 'owner' && existingTeam.member_role !== 'manager') {
+        throw new Error('Only team owners or managers can edit this production team.');
+      }
+
+      setTeam(existingTeam);
+      setTeamName(existingTeam.name || '');
+      setDescription(existingTeam.description || '');
+      setLogoImages(existingTeam.logo_url ? [existingTeam.logo_url] : []);
+      setThumbnailIndex(0);
+    } catch (error: any) {
+      setAlert({ type: 'error', title: 'Error', message: error?.message || 'Failed to load production team.' });
+    } finally {
+      setLoading(false);
+    }
+  }, [invokeDeals, teamId]);
+
+  useEffect(() => {
+    if (userRole && userRole !== 'producer') {
+      setAlert({ type: 'warning', title: 'Production Only', message: 'Only production users can edit production teams.' });
+      router.replace('/manage');
+      return;
+    }
+
+    fetchTeam();
+  }, [fetchTeam, userRole]);
+
+  const handleSubmit = async () => {
+    if (!team?.id) return;
+
+    if (!logoImages.length) {
+      setAlert({ type: 'warning', title: 'Missing Logo', message: 'Upload a production team logo.' });
+      return;
+    }
+
+    if (!teamName.trim()) {
+      setAlert({ type: 'warning', title: 'Missing Name', message: 'Enter a production team name.' });
+      return;
+    }
+
+    if (!description.trim()) {
+      setAlert({ type: 'warning', title: 'Missing Description', message: 'Enter a production team description.' });
+      return;
+    }
+
+    setSaving(true);
+    try {
+      const primaryLogo = logoImages[thumbnailIndex] || logoImages[0] || null;
+      const data = await invokeDeals({
+        action: 'update_production_team',
+        team_id: team.id,
+        name: teamName.trim(),
+        description: description.trim() || null,
+        logo_url: primaryLogo,
+      });
+
+      if (!data?.success) {
+        throw new Error(data?.error || 'Failed to update production team.');
+      }
+
+      showTopToast({
+        type: 'success',
+        title: 'Production Team Updated',
+        message: 'Your production team details have been saved.',
+      });
+      router.replace({ pathname: '/my_production', params: { refresh: String(Date.now()) } });
+    } catch (error: any) {
+      setAlert({ type: 'error', title: 'Error', message: error?.message || 'Failed to update production team.' });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <View style={[styles.container, { backgroundColor: colors.background }]}> 
+      <Header title="Edit Production" onBackPress={() => router.back()} />
+
+      <ScrollView contentContainerStyle={[styles.content, { paddingBottom: contentBottomPadding }]} showsVerticalScrollIndicator={false}>
+        {loading ? (
+          <View style={styles.loadingState}>
+            <Skeleton width="100%" height={180} borderRadius={22} />
+            <Skeleton width="100%" height={320} borderRadius={22} style={{ marginTop: 14 }} />
+          </View>
+        ) : (
+          <>
+            <View style={[styles.heroCard, { backgroundColor: colors.surface, borderColor: isDark ? '#334155' : '#E2E8F0' }]}>
+              <View style={[styles.heroIcon, { backgroundColor: colors.primary + '14' }]}>
+                <Ionicons name="color-wand-outline" size={24} color={colors.primary} />
+              </View>
+              <Text style={[styles.heroTitle, { color: colors.text }]}>Update your production team</Text>
+              <Text style={[styles.heroText, { color: colors.textSecondary }]}>Keep your team profile aligned with your current production brand, members, and deal work.</Text>
+            </View>
+
+            <View style={[styles.formCard, { backgroundColor: colors.surface, borderColor: isDark ? '#334155' : '#E2E8F0' }]}>
+              <Text style={[styles.label, { color: colors.text }]}>Team Logo *</Text>
+              <ImageUploader
+                images={logoImages}
+                onImagesChange={setLogoImages}
+                thumbnailIndex={thumbnailIndex}
+                onThumbnailChange={setThumbnailIndex}
+                maxImages={1}
+                bucketName="listings"
+                userId={userId || session?.user?.id || 'production-user'}
+                folder="production"
+              />
+
+              <Text style={[styles.label, { color: colors.text }]}>Team Name *</Text>
+              <TextInput
+                style={[styles.input, { color: colors.text, borderColor: colors.border, backgroundColor: colors.background }]}
+                value={teamName}
+                onChangeText={setTeamName}
+                placeholder="Enter your production team name"
+                placeholderTextColor={colors.textSecondary}
+              />
+
+              <Text style={[styles.label, { color: colors.text }]}>Description *</Text>
+              <TextInput
+                style={[styles.input, styles.textArea, { color: colors.text, borderColor: colors.border, backgroundColor: colors.background }]}
+                value={description}
+                onChangeText={setDescription}
+                placeholder="Describe your production team's focus, experience, or specialties"
+                placeholderTextColor={colors.textSecondary}
+                multiline
+              />
+
+              {hasIncompleteRequiredFields ? (
+                <Text style={[styles.helperText, { color: '#F59E0B' }]}>Complete all required fields before saving your production team.</Text>
+              ) : null}
+
+              <TouchableOpacity activeOpacity={1}
+                style={[styles.submitBtn, { backgroundColor: hasIncompleteRequiredFields ? colors.textSecondary : colors.primary, opacity: saving ? 0.65 : 1 }]}
+                onPress={handleSubmit}
+                disabled={saving || hasIncompleteRequiredFields}
+              >
+                {saving ? <ActivityIndicator color="#fff" /> : <Text style={styles.submitBtnText}>Save Changes</Text>}
+              </TouchableOpacity>
+            </View>
+          </>
+        )}
+      </ScrollView>
+
+      {alert ? <CustomAlert visible type={alert.type} title={alert.title} message={alert.message} onClose={() => setAlert(null)} /> : null}
+      <Navbar />
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { flex: 1 },
+  content: { padding: 16, gap: 14 },
+  loadingState: { gap: 14 },
+  heroCard: { borderWidth: 1, borderRadius: 22, padding: 18 },
+  heroIcon: { width: 48, height: 48, borderRadius: 24, alignItems: 'center', justifyContent: 'center', marginBottom: 12 },
+  heroTitle: { fontSize: 20, fontFamily: 'Poppins_700Bold' },
+  heroText: { marginTop: 6, fontSize: 13, lineHeight: 20, fontFamily: 'Poppins_400Regular' },
+  formCard: { borderWidth: 1, borderRadius: 22, padding: 18 },
+  label: { marginTop: 14, marginBottom: 8, fontSize: 13, fontFamily: 'Poppins_600SemiBold' },
+  input: { borderWidth: 1, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, fontSize: 14, fontFamily: 'Poppins_400Regular' },
+  textArea: { minHeight: 110, textAlignVertical: 'top' },
+  helperText: { marginTop: 12, fontSize: 12, fontFamily: 'Poppins_500Medium' },
+  submitBtn: { marginTop: 24, borderRadius: 14, paddingVertical: 14, alignItems: 'center', justifyContent: 'center' },
+  submitBtnText: { color: '#fff', fontSize: 15, fontFamily: 'Poppins_700Bold' },
+});

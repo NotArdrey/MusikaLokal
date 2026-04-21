@@ -13,12 +13,15 @@ import {
 } from "react-native";
 import { supabase } from "../lib/supabase";
 import CustomAlert, { AlertType } from "../src/components/CustomAlert";
+import GroupLinkedPlaylistsSection from "../src/components/GroupLinkedPlaylistsSection";
 import Header from "../src/components/header";
 import Modal from "../src/components/modal";
 import Navbar from "../src/components/navbar";
+import { useBottomBarClearance } from "../src/hooks/useBottomBarClearance";
 import { useAuth } from "../src/context/AuthContext";
 import { useTheme } from "../src/context/ThemeContext";
 import { getGroupMembersLabel, isGroupLeaderMember } from "../src/utils/groupMembers";
+import { fetchGroupLinkedPlaylists } from "../src/utils/groupPlaylists";
 import {
     hasValidCoordinates,
     openNavigationDirections,
@@ -28,6 +31,7 @@ import { useLocalSearchParams } from "expo-router";
 
 export default function GroupDetailsScreen() {
   const { colors, isDark } = useTheme();
+  const { contentBottomPadding } = useBottomBarClearance(24);
   const { isSystemLocked, showLockAlert } = useAuth();
   const { id } = useLocalSearchParams();
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
@@ -49,6 +53,8 @@ export default function GroupDetailsScreen() {
   const [groupMembers, setGroupMembers] = useState<any[]>([]);
   const [applications, setApplications] = useState<any[]>([]);
   const [reviews, setReviews] = useState<any[]>([]);
+  const [groupPlaylists, setGroupPlaylists] = useState<any[]>([]);
+  const [loadingGroupPlaylists, setLoadingGroupPlaylists] = useState(false);
   const [loading, setLoading] = useState(true);
   const [alertVisible, setAlertVisible] = useState(false);
   const [alertConfig, setAlertConfig] = useState<{
@@ -99,6 +105,15 @@ export default function GroupDetailsScreen() {
     }
   };
 
+  const handlePlaylistPress = (playlistId: string) => {
+    if (!playlistId) return;
+
+    router.push({
+      pathname: "/playlist_details",
+      params: { playlist_id: playlistId },
+    });
+  };
+
   // Role-based access control
   useEffect(() => {
     checkAuthorization();
@@ -113,6 +128,39 @@ export default function GroupDetailsScreen() {
     if (!authorized || !currentUserId || !supportsGigVisibilityPreference) return;
     fetchVisibilityPreference(currentUserId);
   }, [authorized, currentUserId, supportsGigVisibilityPreference]);
+
+  useEffect(() => {
+    let isActive = true;
+
+    if (!group?.id) {
+      setGroupPlaylists([]);
+      setLoadingGroupPlaylists(false);
+      return () => {
+        isActive = false;
+      };
+    }
+
+    setLoadingGroupPlaylists(true);
+
+    fetchGroupLinkedPlaylists(group.id)
+      .then((playlistRows) => {
+        if (!isActive) return;
+        setGroupPlaylists(playlistRows);
+      })
+      .catch((playlistError) => {
+        if (!isActive) return;
+        console.log("[manage_group] Failed to fetch group playlists:", playlistError);
+        setGroupPlaylists([]);
+      })
+      .finally(() => {
+        if (!isActive) return;
+        setLoadingGroupPlaylists(false);
+      });
+
+    return () => {
+      isActive = false;
+    };
+  }, [group?.id]);
 
   const fetchVisibilityPreference = async (userId: string) => {
     try {
@@ -561,7 +609,7 @@ export default function GroupDetailsScreen() {
 
         <ScrollView
           showsVerticalScrollIndicator={false}
-          contentContainerStyle={styles.scrollContent}
+          contentContainerStyle={[styles.scrollContent, { paddingBottom: contentBottomPadding }]}
         >
           {/* Header Image & Info */}
           <View style={styles.headerContainer}>
@@ -901,6 +949,16 @@ export default function GroupDetailsScreen() {
                     </Text>
                   )}
                 </View>
+
+                <GroupLinkedPlaylistsSection
+                  colors={colors}
+                  isDark={isDark}
+                  playlists={groupPlaylists}
+                  loading={loadingGroupPlaylists}
+                  onPlaylistPress={handlePlaylistPress}
+                  title="Featured Playlists"
+                  emptyMessage="Link playlists from Edit Group to feature them on this profile."
+                />
 
                 <View>
                   <Text

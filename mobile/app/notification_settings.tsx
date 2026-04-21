@@ -10,6 +10,7 @@ import { showTopToast } from '../src/context/TopToastContext';
 import { useTheme } from '../src/context/ThemeContext';
 
 const DEFAULT_PREFERENCES = {
+  push_enabled: true,
   booking_confirmed: true,
   awaiting_confirmation: true,
   upload_required: false,
@@ -26,6 +27,11 @@ type PreferenceOption = {
 };
 
 const PREFERENCE_OPTIONS: PreferenceOption[] = [
+  {
+    key: 'push_enabled',
+    label: 'Push Notifications',
+    description: 'Send system notifications to your device when the app is backgrounded or closed.',
+  },
   {
     key: 'booking_confirmed',
     label: 'Booking Confirmed',
@@ -85,7 +91,7 @@ export default function NotificationSettingsScreen() {
 
       const { data, error } = await supabase
         .from('notification_preferences')
-        .select('booking_confirmed, awaiting_confirmation, upload_required, event_reminder, leave_review')
+        .select('push_enabled, booking_confirmed, awaiting_confirmation, upload_required, event_reminder, leave_review')
         .eq('user_id', user.id)
         .maybeSingle();
 
@@ -110,6 +116,7 @@ export default function NotificationSettingsScreen() {
       }
 
       setPreferences({
+        push_enabled: data.push_enabled ?? DEFAULT_PREFERENCES.push_enabled,
         booking_confirmed: data.booking_confirmed ?? DEFAULT_PREFERENCES.booking_confirmed,
         awaiting_confirmation: data.awaiting_confirmation ?? DEFAULT_PREFERENCES.awaiting_confirmation,
         upload_required: data.upload_required ?? DEFAULT_PREFERENCES.upload_required,

@@ -94,6 +94,8 @@ Detailed phase guide: [phase-2-producer-social-media-marketplace.md](./phase-2-p
 - Keep radio as a curated playlist station, not true synchronized streaming.
 - Use Storage only for teaser clips and art assets in the MVP.
 
+Detailed profile-first station plan: [profile-radio-station-plan.md](./profile-radio-station-plan.md)
+
 ### Phase 7. Marketplace and digital drops
 
 - Add products, variants, orders, order items, digital entitlements, and payout references.

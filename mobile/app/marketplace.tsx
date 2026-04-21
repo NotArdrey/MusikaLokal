@@ -22,6 +22,7 @@ import ImageUploader from "../src/components/ImageUploader";
 import Navbar from "../src/components/navbar";
 import Skeleton from "../src/components/Skeleton";
 import CustomAlert, { AlertType } from "../src/components/CustomAlert";
+import { useBottomBarClearance } from "../src/hooks/useBottomBarClearance";
 import { useAuth } from "../src/context/AuthContext";
 import { showTopToast } from "../src/context/TopToastContext";
 import { useTheme } from "../src/context/ThemeContext";
@@ -56,6 +57,7 @@ const getProductImage = (product: any) => product?.cover_image_url || product?.p
 
 export default function MarketplaceScreen() {
   const { colors, isDark } = useTheme();
+  const { contentBottomPadding } = useBottomBarClearance(24);
   const { session, userRole, isGuest, userId } = useAuth();
   const isSeller = userRole === "producer" || userRole === "musician";
 
@@ -75,12 +77,33 @@ export default function MarketplaceScreen() {
   const [newCategory, setNewCategory] = useState("");
   const [listingImages, setListingImages] = useState<string[]>([]);
   const [listingThumbnailIndex, setListingThumbnailIndex] = useState(0);
+  const [editingProductId, setEditingProductId] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const [statusUpdatingId, setStatusUpdatingId] = useState<string | null>(null);
+  const [deleteLoadingId, setDeleteLoadingId] = useState<string | null>(null);
 
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [alert, setAlert] = useState<{ type: AlertType; title: string; message: string } | null>(null);
+  const [alert, setAlert] = useState<{ type: AlertType; title: string; message: string; buttons?: any[] } | null>(null);
+
+  const invokeMarketplace = useCallback(async (body: Record<string, unknown>) => {
+    const { data, error } = await supabase.functions.invoke("manage-marketplace", { body });
+
+    if (error) {
+      console.error("manage-marketplace failed", {
+        message: error.message,
+        status: (error as any).status,
+        code: (error as any).code,
+        details: (error as any).details,
+        hint: (error as any).hint,
+        context: (error as any).context,
+        body,
+      });
+      throw error;
+    }
+
+    return data;
+  }, []);
 
   const fetchAll = useCallback(async () => {
     if (!session) {
@@ -95,22 +118,22 @@ export default function MarketplaceScreen() {
       const browseBody: any = { action: "browse_products", limit: 40 };
       if (category) browseBody.category = category;
 
-      const promises: Promise<any>[] = [supabase.functions.invoke("manage-marketplace", { body: browseBody })];
+      const promises: Promise<any>[] = [invokeMarketplace(browseBody)];
 
       if (isSeller) {
-        promises.push(supabase.functions.invoke("manage-marketplace", { body: { action: "list_my_products" } }));
+        promises.push(invokeMarketplace({ action: "list_my_products" }));
       }
 
       const results = await Promise.all(promises);
-      setProducts(results[0]?.data?.data || []);
-      setSellerProducts(isSeller ? results[1]?.data?.data || [] : []);
+      setProducts(results[0]?.data || []);
+      setSellerProducts(isSeller ? results[1]?.data || [] : []);
     } catch (e: any) {
       console.error("Marketplace fetch error:", e);
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [session, category, isSeller]);
+  }, [session, category, invokeMarketplace, isSeller]);
 
   useFocusEffect(useCallback(() => {
     setLoading(true);
@@ -139,10 +162,11 @@ export default function MarketplaceScreen() {
   const formatPrice = (price: number | string | null | undefined) => {
     const amount = Number(price ?? 0);
     if (!Number.isFinite(amount) || amount <= 0) return "Free";
-    return `â‚±${amount.toLocaleString()}`;
+    return `₱${amount.toLocaleString()}`;
   };
 
   const resetCreateListingForm = useCallback(() => {
+    setEditingProductId(null);
     setNewTitle("");
     setNewDescription("");
     setNewPrice("");
@@ -151,7 +175,71 @@ export default function MarketplaceScreen() {
     setListingThumbnailIndex(0);
   }, []);
 
-  const handleAddProduct = async () => {
+  const openEditListing = async (productId: string) => {
+    setStatusUpdatingId(productId);
+    try {
+      const data = await invokeMarketplace({ action: "get_product_details", product_id: productId });
+      const product = data?.data;
+
+      if (!product) {
+        throw new Error("Product not found");
+      }
+
+      const mediaUrls = (product.media || [])
+        .map((item: any) => item?.url || item?.storage_path)
+        .filter((value: unknown): value is string => typeof value === "string" && value.trim().length > 0);
+
+      setEditingProductId(product.id);
+      setNewTitle(product.title || "");
+      setNewDescription(product.description || "");
+      setNewPrice(String(product.price || product.base_price || ""));
+      setNewCategory(product.category || "");
+      setListingImages(mediaUrls);
+      setListingThumbnailIndex(0);
+      setShowAddProduct(true);
+      setTab("sell");
+    } catch (e: any) {
+      setAlert({ type: "error", title: "Error", message: e.message || "Unable to load listing." });
+    } finally {
+      setStatusUpdatingId(null);
+    }
+  };
+
+  const handleDeleteProduct = async (productId: string) => {
+    setDeleteLoadingId(productId);
+    try {
+      const data = await invokeMarketplace({ action: "delete_product", product_id: productId });
+
+      if (!data?.success) {
+        throw new Error(data?.error || "Unable to delete listing");
+      }
+
+      showTopToast({
+        type: "success",
+        title: "Listing Deleted",
+        message: "The product has been removed from your seller inventory.",
+      });
+      fetchAll();
+    } catch (e: any) {
+      setAlert({ type: "error", title: "Error", message: e.message || "Unable to delete listing." });
+    } finally {
+      setDeleteLoadingId(null);
+    }
+  };
+
+  const promptDeleteProduct = (product: any) => {
+    setAlert({
+      type: "warning",
+      title: "Delete Listing",
+      message: `Delete \"${product.title || "this listing"}\"? This cannot be undone.`,
+      buttons: [
+        { text: "Cancel", style: "cancel" },
+        { text: "Delete", style: "destructive", onPress: () => handleDeleteProduct(product.id) },
+      ],
+    });
+  };
+
+  const handleSubmitProduct = async () => {
     if (!newTitle.trim()) {
       setAlert({ type: "warning", title: "Missing Title", message: "Enter a listing title." });
       return;
@@ -172,9 +260,9 @@ export default function MarketplaceScreen() {
           ].filter((imageUrl, index, array) => Boolean(imageUrl) && array.indexOf(imageUrl) === index)
         : [];
 
-      const { data } = await supabase.functions.invoke("manage-marketplace", {
-        body: {
-          action: "create_product",
+      const listingBody = {
+        action: editingProductId ? "update_product" : "create_product",
+        ...(editingProductId ? { product_id: editingProductId } : {}),
           title: newTitle.trim(),
           description: newDescription.trim() || null,
           base_price: price || 0,
@@ -184,26 +272,27 @@ export default function MarketplaceScreen() {
             media_type: "image",
             storage_path: imageUrl,
           })),
-        },
-      });
+      };
+
+      const data = await invokeMarketplace(listingBody);
 
       if (data?.success) {
         const createdProductId = data?.data?.id;
         let listingIsLive = false;
 
-        if (createdProductId) {
-          const { data: publishData } = await supabase.functions.invoke("manage-marketplace", {
-            body: { action: "publish_product", product_id: createdProductId },
-          });
+        if (!editingProductId && createdProductId) {
+          const publishData = await invokeMarketplace({ action: "publish_product", product_id: createdProductId });
           listingIsLive = Boolean(publishData?.success);
         }
 
         showTopToast({
           type: "success",
-          title: listingIsLive ? "Listing Live" : "Listing Saved",
-          message: listingIsLive
-            ? "Buyers can now message you about this item."
-            : "Your listing was saved. Publish it from Sell when you're ready.",
+          title: editingProductId ? "Listing Updated" : listingIsLive ? "Listing Live" : "Listing Saved",
+          message: editingProductId
+            ? "Your listing changes are now saved."
+            : listingIsLive
+              ? "Buyers can now message you about this item."
+              : "Your listing was saved. Publish it from Sell when you're ready.",
         });
         setShowAddProduct(false);
         resetCreateListingForm();
@@ -222,9 +311,7 @@ export default function MarketplaceScreen() {
   const handleListingStatus = async (productId: string, action: "publish_product" | "mark_product_sold" | "relist_product") => {
     setStatusUpdatingId(productId);
     try {
-      const { data } = await supabase.functions.invoke("manage-marketplace", {
-        body: { action, product_id: productId },
-      });
+      const data = await invokeMarketplace({ action, product_id: productId });
 
       if (data?.success) {
         const title = action === "mark_product_sold"
@@ -420,7 +507,7 @@ export default function MarketplaceScreen() {
         sellerProducts.map((product) => {
           const isLive = product.status === "active";
           const isSold = product.status === "sold_out";
-          const isBusy = statusUpdatingId === product.id;
+          const isBusy = statusUpdatingId === product.id || deleteLoadingId === product.id;
           const statusColor = isLive ? "#22c55e" : isSold ? "#f97316" : "#f59e0b";
           const statusLabel = isLive ? "Live" : isSold ? "Sold" : product.status || "Draft";
           const categoryLabel = getCategoryLabel(product.category);
@@ -474,6 +561,14 @@ export default function MarketplaceScreen() {
                     </Text>
                   </TouchableOpacity>
                 )}
+                <View style={styles.sellerActionButtons}>
+                  <TouchableOpacity activeOpacity={1} disabled={isBusy} onPress={() => openEditListing(product.id)} style={[styles.iconActionBtn, { borderColor: colors.border }]}> 
+                    <Ionicons name="pencil-outline" size={16} color={colors.text} />
+                  </TouchableOpacity>
+                  <TouchableOpacity activeOpacity={1} disabled={isBusy} onPress={() => promptDeleteProduct(product)} style={[styles.iconActionBtn, { borderColor: "#FCA5A5", backgroundColor: "#FEE2E2" }]}> 
+                    <Ionicons name="trash-outline" size={16} color="#DC2626" />
+                  </TouchableOpacity>
+                </View>
               </View>
             </TouchableOpacity>
           );
@@ -514,6 +609,7 @@ export default function MarketplaceScreen() {
 
       <ScrollView
         style={styles.content}
+        contentContainerStyle={{ paddingBottom: contentBottomPadding }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
       >
         {loading ? (
@@ -527,7 +623,6 @@ export default function MarketplaceScreen() {
           </>
         )}
 
-        <View style={{ height: 100 }} />
       </ScrollView>
 
       {/* Add Product Modal */}
@@ -543,7 +638,7 @@ export default function MarketplaceScreen() {
         <View style={styles.modalOverlay}>
           <View style={[styles.modalBox, { backgroundColor: colors.surface }]}>
             <View style={styles.modalHeader}>
-              <Text style={[styles.sectionTitle, { color: colors.text }]}>Create Listing</Text>
+              <Text style={[styles.sectionTitle, { color: colors.text }]}>{editingProductId ? "Edit Listing" : "Create Listing"}</Text>
               <TouchableOpacity activeOpacity={1}
                 onPress={() => {
                   setShowAddProduct(false);
@@ -583,7 +678,7 @@ export default function MarketplaceScreen() {
                 onChangeText={setNewDescription}
                 multiline
               />
-              <Text style={[styles.inputLabel, { color: colors.text }]}>Price (â‚±)</Text>
+              <Text style={[styles.inputLabel, { color: colors.text }]}>Price (₱)</Text>
               <TextInput
                 style={[styles.input, { color: colors.text, borderColor: isDark ? "#334155" : "#E2E8F0", backgroundColor: colors.surface }]}
                 placeholder="0.00"
@@ -623,17 +718,17 @@ export default function MarketplaceScreen() {
               </ScrollView>
               <TouchableOpacity activeOpacity={1}
                 style={[styles.submitBtn, { backgroundColor: colors.primary, opacity: adding ? 0.6 : 1 }]}
-                onPress={handleAddProduct}
+                onPress={handleSubmitProduct}
                 disabled={adding}
               >
-                {adding ? <ActivityIndicator color="#fff" /> : <Text style={styles.submitBtnText}>Post Listing</Text>}
+                {adding ? <ActivityIndicator color="#fff" /> : <Text style={styles.submitBtnText}>{editingProductId ? "Save Changes" : "Post Listing"}</Text>}
               </TouchableOpacity>
             </ScrollView>
           </View>
         </View>
       </Modal>
 
-      {alert && <CustomAlert visible type={alert.type} title={alert.title} message={alert.message} onClose={() => setAlert(null)} />}
+      {alert && <CustomAlert visible type={alert.type} title={alert.title} message={alert.message} buttons={alert.buttons} onClose={() => setAlert(null)} />}
       <Navbar />
     </View>
   );
@@ -695,6 +790,8 @@ const styles = StyleSheet.create({
   sellerProductTitle: { fontSize: moderateScale(14), fontFamily: "Poppins_600SemiBold" },
   sellerProductPrice: { fontSize: moderateScale(13), marginTop: 2, fontFamily: "Poppins_700Bold" },
   sellerProductMeta: { fontSize: moderateScale(11), marginTop: 4 },
+  sellerActionButtons: { flexDirection: "row", gap: 8 },
+  iconActionBtn: { width: 34, height: 34, borderRadius: 10, borderWidth: 1, alignItems: "center", justifyContent: "center" },
   emptyContainer: { flex: 1, alignItems: "center", justifyContent: "center", minHeight: 400 },
   emptyText: { textAlign: "center", marginTop: 12, fontSize: moderateScale(15), fontFamily: "Poppins_500Medium" },
   modalOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "flex-end" },

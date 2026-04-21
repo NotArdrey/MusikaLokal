@@ -16,23 +16,26 @@ BEGIN
     DELETE FROM auth.identities WHERE user_id IN (
         '00000000-0000-0000-0000-000000000001', 
         '00000000-0000-0000-0000-000000000002', 
-        '00000000-0000-0000-0000-000000000003'
+      '00000000-0000-0000-0000-000000000003',
+      '00000000-0000-0000-0000-000000000004'
     );
-    DELETE FROM auth.users WHERE email IN ('manager@test.com', 'musician@tet.com', 'studio@test.com');
+    DELETE FROM auth.users WHERE email IN ('manager@test.com', 'musician@test.com', 'studio@test.com', 'producer@test.com');
 
     -- 1. Create Users (Now safe to insert with known IDs)
     INSERT INTO auth.users (id, instance_id, aud, role, email, encrypted_password, email_confirmed_at, recovery_sent_at, last_sign_in_at, raw_app_meta_data, raw_user_meta_data, created_at, updated_at, confirmation_token, email_change, email_change_token_new, recovery_token)
     VALUES 
         ('00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'manager@test.com', crypt('pass123', gen_salt('bf')), now(), now(), now(), '{"provider":"email","providers":["email"]}', '{}', now(), now(), '', '', '', ''),
-        ('00000000-0000-0000-0000-000000000002', '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'musician@tet.com', crypt('pass123', gen_salt('bf')), now(), now(), now(), '{"provider":"email","providers":["email"]}', '{}', now(), now(), '', '', '', ''),
-        ('00000000-0000-0000-0000-000000000003', '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'studio@test.com', crypt('pass123', gen_salt('bf')), now(), now(), now(), '{"provider":"email","providers":["email"]}', '{}', now(), now(), '', '', '', '');
+        ('00000000-0000-0000-0000-000000000002', '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'musician@test.com', crypt('pass123', gen_salt('bf')), now(), now(), now(), '{"provider":"email","providers":["email"]}', '{}', now(), now(), '', '', '', ''),
+      ('00000000-0000-0000-0000-000000000003', '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'studio@test.com', crypt('pass123', gen_salt('bf')), now(), now(), now(), '{"provider":"email","providers":["email"]}', '{}', now(), now(), '', '', '', ''),
+      ('00000000-0000-0000-0000-000000000004', '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'producer@test.com', crypt('pass123', gen_salt('bf')), now(), now(), now(), '{"provider":"email","providers":["email"]}', '{"role":"producer"}', now(), now(), '', '', '', '');
 
     -- 2. Create Identities
     INSERT INTO auth.identities (id, user_id, identity_data, provider, provider_id, last_sign_in_at, created_at, updated_at)
     VALUES 
         (uuid_generate_v4(), '00000000-0000-0000-0000-000000000001', format('{"sub":"%s","email":"%s"}', '00000000-0000-0000-0000-000000000001', 'manager@test.com')::jsonb, 'email', '00000000-0000-0000-0000-000000000001', now(), now(), now()),
-        (uuid_generate_v4(), '00000000-0000-0000-0000-000000000002', format('{"sub":"%s","email":"%s"}', '00000000-0000-0000-0000-000000000002', 'musician@tet.com')::jsonb, 'email', '00000000-0000-0000-0000-000000000002', now(), now(), now()),
-        (uuid_generate_v4(), '00000000-0000-0000-0000-000000000003', format('{"sub":"%s","email":"%s"}', '00000000-0000-0000-0000-000000000003', 'studio@test.com')::jsonb, 'email', '00000000-0000-0000-0000-000000000003', now(), now(), now());
+        (uuid_generate_v4(), '00000000-0000-0000-0000-000000000002', format('{"sub":"%s","email":"%s"}', '00000000-0000-0000-0000-000000000002', 'musician@test.com')::jsonb, 'email', '00000000-0000-0000-0000-000000000002', now(), now(), now()),
+      (uuid_generate_v4(), '00000000-0000-0000-0000-000000000003', format('{"sub":"%s","email":"%s"}', '00000000-0000-0000-0000-000000000003', 'studio@test.com')::jsonb, 'email', '00000000-0000-0000-0000-000000000003', now(), now(), now()),
+      (uuid_generate_v4(), '00000000-0000-0000-0000-000000000004', format('{"sub":"%s","email":"%s"}', '00000000-0000-0000-0000-000000000004', 'producer@test.com')::jsonb, 'email', '00000000-0000-0000-0000-000000000004', now(), now(), now());
 
 END $$;
 
@@ -40,6 +43,7 @@ END $$;
 DO $$
 DECLARE
     user1_id UUID;
+    user4_id UUID;
     user2_id UUID;
     user3_id UUID;
     group_ids UUID[];
@@ -52,11 +56,14 @@ BEGIN
     -- We assume users exist in auth.users. If not, this block handles it gracefully by checking.
     
     -- 1. Specific User Mapping
-    -- User 1: Musician (musician@tet.com)
-    SELECT id INTO user1_id FROM auth.users WHERE email = 'musician@tet.com' LIMIT 1;
+    -- User 1: Musician (musician@test.com)
+    SELECT id INTO user1_id FROM auth.users WHERE email = 'musician@test.com' LIMIT 1;
     
     -- User 2: Studio Owner (studio@test.com)
     SELECT id INTO user2_id FROM auth.users WHERE email = 'studio@test.com' LIMIT 1;
+
+    -- User 4: Producer (producer@test.com)
+    SELECT id INTO user4_id FROM auth.users WHERE email = 'producer@test.com' LIMIT 1;
     
     -- User 3: Venue Owner / Manager (manager@test.com)
     SELECT id INTO user3_id FROM auth.users WHERE email = 'manager@test.com' LIMIT 1;
@@ -65,11 +72,13 @@ BEGIN
     IF user1_id IS NULL THEN SELECT id INTO user1_id FROM auth.users ORDER BY created_at ASC LIMIT 1 OFFSET 0; END IF;
     IF user2_id IS NULL THEN SELECT id INTO user2_id FROM auth.users ORDER BY created_at ASC LIMIT 1 OFFSET 1; END IF;
     IF user3_id IS NULL THEN SELECT id INTO user3_id FROM auth.users ORDER BY created_at ASC LIMIT 1 OFFSET 2; END IF;
+    IF user4_id IS NULL THEN SELECT id INTO user4_id FROM auth.users ORDER BY created_at ASC LIMIT 1 OFFSET 3; END IF;
 
     -- SELF-HEALING FALLBACK: If we still don't have 3 distinct users, reuse what we have.
     IF user1_id IS NOT NULL THEN
         IF user2_id IS NULL THEN user2_id := user1_id; END IF;
         IF user3_id IS NULL THEN user3_id := user1_id; END IF;
+        IF user4_id IS NULL THEN user4_id := user1_id; END IF;
     END IF;
 
     -- Final Check
@@ -83,7 +92,8 @@ BEGIN
     -- 2. Create Profiles if they don't exist (Upsert)
     INSERT INTO public.profiles (id, email, full_name, role, location, avatar_url, verification_status)
     VALUES 
-         (user1_id, 'musician@tet.com', 'Gabriel dela Cruz', 'musician', 'Quezon City, Metro Manila', 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=200&fit=crop', 'APPROVED'),
+         (user1_id, 'musician@test.com', 'Gabriel dela Cruz', 'musician', 'Quezon City, Metro Manila', 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=200&fit=crop', 'APPROVED'),
+      (user4_id, 'producer@test.com', 'Paolo Ramirez', 'producer', 'Pasig City, Metro Manila', 'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=200&fit=crop', 'APPROVED'),
       (user2_id, 'studio@test.com', 'Studio Owner User', 'studio-owner', 'Makati City', 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=200&fit=crop', 'APPROVED'),
          (user3_id, 'manager@test.com', 'Marco Reyes', 'venue-owner', 'Quezon City, Metro Manila', 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=200&fit=crop', 'APPROVED')
     ON CONFLICT (id) DO UPDATE 
@@ -166,74 +176,17 @@ BEGIN
     group_ids := array_append(group_ids, temp_id);
 
 
-    -- 4. Create Studios
-    -- Studio 1
+    -- 4. Create Studio
     INSERT INTO public.studios (owner_id, name, address, hourly_rate, description, amenities, images, latitude, longitude)
     VALUES (
         user2_id,
-      'SoundLab Manila',
-      'Makati City, Metro Manila',
-      1200,
-      'State of the art recording studio in the heart of Makati. Features a fully treated live room, vocal booth, and premium analog gear.',
-      ARRAY['Wifi', 'Aircon', 'Lounge', 'Parking', 'Stage'],
-        ARRAY['https://images.unsplash.com/photo-1598488035139-bdbb2231ce04?w=800&fit=crop', 'https://images.unsplash.com/photo-1514320291840-2e0a9bf2a9ae?w=800&fit=crop'],
-        14.5547, 121.0244
-    ) RETURNING id INTO temp_id;
-    studio_ids := array_append(studio_ids, temp_id);
-
-    -- Studio 2
-    INSERT INTO public.studios (owner_id, name, address, hourly_rate, description, amenities, images, latitude, longitude)
-    VALUES (
-        user2_id,
-      'Basement Beats',
-      'Marikina City',
-      500,
-      'Affordable rehearsal space for up-and-coming bands. Basic backline provided. Open 24/7.',
-      ARRAY['Aircon', 'Vending Machine', 'Drum Kit'],
-        ARRAY['https://images.unsplash.com/photo-1520523831597-d8c3be5287c2?w=800&fit=crop'],
-        14.6333, 121.0980
-    ) RETURNING id INTO temp_id;
-    studio_ids := array_append(studio_ids, temp_id);
-
-    -- Studio 3
-    INSERT INTO public.studios (owner_id, name, address, hourly_rate, description, amenities, images, latitude, longitude)
-    VALUES (
-        user2_id,
-      'The Red Room',
-      'Quezon City',
-      800,
-      'Cozy recording booth perfect for vocal tracking and mixing.',
-        ARRAY['Wifi', 'Coffee', 'Vocal Booth'],
-        ARRAY['https://images.unsplash.com/photo-1525201548942-d8732f6617a0?w=800&fit=crop'],
-        14.6760, 121.0437
-    ) RETURNING id INTO temp_id;
-    studio_ids := array_append(studio_ids, temp_id);
-
-    -- Studio 4
-    INSERT INTO public.studios (owner_id, name, address, hourly_rate, description, amenities, images, latitude, longitude)
-    VALUES (
-        user2_id,
-      'ProAudio Hub',
-      'Pasig City',
+      'OneRoots Records',
+      'MacArthur Highway, Tabang, Ilang-ilang, Guiguinto, Bulacan, Philippines',
       1500,
-      'Professional studio with mastering services available.',
-      ARRAY['Wifi', 'Lounge', 'Valet', 'Mixing Console'],
-        ARRAY['https://images.unsplash.com/photo-1581368129683-176c2688825e?w=800&fit=crop'],
-        14.5764, 121.0851
-    ) RETURNING id INTO temp_id;
-    studio_ids := array_append(studio_ids, temp_id);
-
-    -- Studio 5
-    INSERT INTO public.studios (owner_id, name, address, hourly_rate, description, amenities, images, latitude, longitude)
-    VALUES (
-        user2_id,
-      'Garage Jam',
-      'Parañaque',
-      400,
-      'No frills jamming studio. Bring your own cymbals.',
-        ARRAY['Fan', 'Amps'],
-        ARRAY['https://images.unsplash.com/photo-1519508234439-4f23643125c1?w=800&fit=crop'],
-        14.4793, 121.0198
+      'Recording and music production studio in Guiguinto, Bulacan for solo artists, bands, and local releases.',
+      ARRAY['Recording', 'Mixing', 'Music Production', 'Wi-Fi'],
+        ARRAY['https://onerootsrecords.weebly.com/uploads/1/2/6/0/126010163/published/oneroots-logo-ping.png?1559873743'],
+        14.8336802, 120.8656847
     ) RETURNING id INTO temp_id;
     studio_ids := array_append(studio_ids, temp_id);
 
@@ -354,7 +307,7 @@ END $$;
 
 UPDATE public.profiles 
 SET is_verified = true 
-WHERE email IN ('manager@test.com', 'musician@tet.com', 'studio@test.com');
+WHERE email IN ('manager@test.com', 'musician@test.com', 'studio@test.com', 'producer@test.com');
 
 
 
@@ -396,7 +349,7 @@ VALUES (
     'studio@test.com',
   'Maria Santos',
     'studio-owner',
-  'Owner of Santos Recording Studio, serving artists since 2015.',
+  'Independent recording and music production studio operating under the OneRoots Records banner in Bulacan.',
   'Quezon City, Philippines',
     TRUE,
     'APPROVED'
@@ -405,6 +358,27 @@ VALUES (
     verification_status = 'APPROVED',
     role = 'studio-owner',
   full_name = 'Maria Santos';
+
+-- Test User 4: Producer
+-- Email: producer@test.com / Password: pass123
+-- User ID from your dashboard: 00000000-0000-0000-0000-000000000004
+INSERT INTO profiles (id, email, full_name, role, bio, location, skills, genres, is_verified, verification_status)
+VALUES (
+    '00000000-0000-0000-0000-000000000004',
+    'producer@test.com',
+  'Paolo Ramirez',
+    'producer',
+  'Live event producer coordinating venue partnerships, stage logistics, and commercial show planning across Metro Manila.',
+  'Pasig City, Metro Manila, Philippines',
+  ARRAY['Event Production', 'Show Calling', 'Talent Coordination'],
+  ARRAY['OPM', 'Pop', 'Live Events'],
+    TRUE,
+    'APPROVED'
+) ON CONFLICT (id) DO UPDATE SET 
+    is_verified = TRUE,
+    verification_status = 'APPROVED',
+    role = 'producer',
+  full_name = 'Paolo Ramirez';
 
 -- Test User 3: Manager/Venue Owner
 -- Email: manager@test.com / Password: pass123
@@ -436,11 +410,10 @@ VALUES
   (uuid_generate_v4(), '14d2e916-8d1c-4c04-9877-7ccd9bea6149', 'Harana Duo', 'Acoustic OPM', 'Acoustic duo for cafe nights, proposals, and intimate receptions around Metro Manila.', 'San Juan City, Philippines', ARRAY['https://picsum.photos/400/300?random=2'], '["Ella", "Migs"]'::jsonb, 6500, 14.6019, 121.0355)
 ON CONFLICT DO NOTHING;
 
--- Sample Studios (owned by studio owner)
+-- Sample Studio (owned by studio owner)
 INSERT INTO studios (id, owner_id, name, address, hourly_rate, description, amenities, images, latitude, longitude)
 VALUES 
-  (uuid_generate_v4(), '00000000-0000-0000-0000-000000000003', 'Santos Recording Studio', '123 Music Ave, Quezon City', 1500, 'Professional recording studio with state-of-the-art equipment', ARRAY['Air Conditioning', 'Drum Kit', 'Amplifiers', 'Mixing Console'], ARRAY['https://picsum.photos/400/300?random=3'], 14.6760, 121.0437),
-  (uuid_generate_v4(), '00000000-0000-0000-0000-000000000003', 'Pocket Studio QC', '456 Sound St, Quezon City', 800, 'Affordable rehearsal and recording space', ARRAY['Air Conditioning', 'Basic PA System'], ARRAY['https://picsum.photos/400/300?random=4'], 14.6760, 121.0437)
+  (uuid_generate_v4(), '00000000-0000-0000-0000-000000000003', 'OneRoots Records', 'MacArthur Highway, Tabang, Ilang-ilang, Guiguinto, Bulacan, Philippines', 1500, 'Recording and music production studio in Guiguinto, Bulacan for solo artists, bands, and local releases.', ARRAY['Recording', 'Mixing', 'Music Production', 'Wi-Fi'], ARRAY['https://onerootsrecords.weebly.com/uploads/1/2/6/0/126010163/published/oneroots-logo-ping.png?1559873743'], 14.8336802, 120.8656847)
 ON CONFLICT DO NOTHING;
 
 -- Sample Gigs (organized by venue owner/manager)
@@ -461,7 +434,7 @@ VALUES
     (
         uuid_generate_v4(), 
         '14d2e916-8d1c-4c04-9877-7ccd9bea6149',
-        (SELECT id FROM studios WHERE owner_id = '00000000-0000-0000-0000-000000000003' LIMIT 1),
+        (SELECT id FROM studios WHERE name = 'OneRoots Records' LIMIT 1),
         NOW() + INTERVAL '3 days',
         '14:00:00',
         '18:00:00',
@@ -535,6 +508,7 @@ ON CONFLICT DO NOTHING;
 -- 1. Go to Supabase Dashboard > Authentication > Users
 -- 2. Click "Add user" and create these test accounts:
 --    - musician@test.com / pass123
+--    - producer@test.com / pass123
 --    - studio@test.com / pass123
 --    - manager@test.com / pass123
 -- 3. Copy each user's UUID from the dashboard
@@ -553,11 +527,7 @@ DECLARE
 BEGIN
     -- 1. GET ACTUAL USER IDs (based on email)
     SELECT id INTO v_studio_owner_id FROM auth.users WHERE email = 'studio@test.com' LIMIT 1;
-    SELECT id INTO v_musician_id FROM auth.users WHERE email = 'musician@test.com' LIMIT 1;  -- Note: Seed used 'musician@tet.com' in one place, verify which one user uses. User said 'musician@test.com'.
-    -- Try 'musician@tet.com' if 'musician@test.com' not found
-    IF v_musician_id IS NULL THEN
-        SELECT id INTO v_musician_id FROM auth.users WHERE email = 'musician@tet.com' LIMIT 1;
-    END IF;
+    SELECT id INTO v_musician_id FROM auth.users WHERE email = 'musician@test.com' LIMIT 1;
     
     SELECT id INTO v_manager_id FROM auth.users WHERE email = 'manager@test.com' LIMIT 1;
 
@@ -576,7 +546,7 @@ BEGIN
         -- A. Update specific named studios from seed
         UPDATE public.studios 
         SET owner_id = v_studio_owner_id 
-        WHERE name IN ('Santos Recording Studio', 'Pocket Studio QC', 'SoundLab Manila', 'Basement Beats', 'The Red Room', 'ProAudio Hub', 'Garage Jam', 'Sampaguita Sound Lab', 'Bahay Tugtugan Marikina', 'Kundiman Room QC', 'Amihan Audio House', 'Tambayan Jam Studio') 
+        WHERE name IN ('OneRoots Records') 
            OR owner_id = '00000000-0000-0000-0000-000000000003'; -- Catch the dummy ID
     ELSE
         RAISE NOTICE 'WARNING: studio@test.com not found';

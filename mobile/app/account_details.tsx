@@ -7,10 +7,12 @@ import Header from '../src/components/header';
 import Modal from '../src/components/modal';
 import Navbar from '../src/components/navbar';
 import Skeleton from '../src/components/Skeleton';
+import { useBottomBarClearance } from '../src/hooks/useBottomBarClearance';
 import { useTheme } from '../src/context/ThemeContext';
 
 export default function AccountDetailsScreen() {
   const { colors, isDark } = useTheme();
+  const { contentBottomPadding } = useBottomBarClearance(24);
   const [modalVisible, setModalVisible] = useState(false);
   const [profile, setProfile] = useState<any>(null);
   const [userEmail, setUserEmail] = useState<string | null>(null);
@@ -110,7 +112,7 @@ export default function AccountDetailsScreen() {
 
         <ScrollView
           showsVerticalScrollIndicator={false}
-          contentContainerStyle={[styles.scrollContent, styles.loadingSkeletonContent]}
+          contentContainerStyle={[styles.scrollContent, { paddingBottom: contentBottomPadding }]}
         >
           <View style={styles.profileHeader}>
             <Skeleton width={96} height={96} borderRadius={48} />
@@ -148,7 +150,10 @@ export default function AccountDetailsScreen() {
       <View style={[styles.container, { backgroundColor: colors.background }]}>
         <Header title="Account Details" />
 
-        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
+        <ScrollView
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={[styles.scrollContent, { paddingBottom: contentBottomPadding }]}
+        >
 
           <View style={styles.profileHeader}>
             <View style={[styles.avatarContainer, { borderColor: colors.card }]}>

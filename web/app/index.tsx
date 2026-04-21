@@ -22,8 +22,9 @@ interface AlertState {
 const TEMP_LOGIN_PASSWORD = 'pass123';
 const TEMP_LOGIN_OPTIONS = [
   { label: 'Login as Musician', email: 'musician@test.com' },
+  { label: 'Login as Producer', email: 'producer@test.com' },
   { label: 'Login as Studio', email: 'studio@test.com' },
-  { label: 'Login as Venue', email: 'venue2@test.com' },
+  { label: 'Login as Venue', email: 'manager@test.com' },
 ] as const;
 
 export default function LoginScreen() {
@@ -35,7 +36,8 @@ export default function LoginScreen() {
 
   const resolvePostLoginRoute = (role?: string | null) => {
     const normalizedRole = typeof role === 'string' ? role.trim().toLowerCase() : '';
-    return normalizedRole === 'admin' ? '/admin' : '/home';
+    if (normalizedRole === 'admin') return '/admin';
+    return '/home';
   };
 
   const isSchemaQueryError = (errorLike: unknown) => {

@@ -2,6 +2,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 // @ts-ignore
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { withNotificationRouteMeta } from "../_shared/notificationRoutes.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -14,6 +15,16 @@ function jsonResponse(body: Record<string, unknown>, status = 200) {
     headers: { ...corsHeaders, "Content-Type": "application/json" },
     status,
   });
+}
+
+async function getProfileRole(supabaseAdmin: any, userId: string) {
+  const { data } = await supabaseAdmin
+    .from("profiles")
+    .select("role")
+    .eq("id", userId)
+    .maybeSingle();
+
+  return typeof data?.role === "string" ? data.role.trim().toLowerCase() : null;
 }
 
 async function insertNotification(
@@ -29,6 +40,7 @@ async function insertNotification(
 ) {
   await supabaseAdmin.from("notifications").insert({
     ...payload,
+    meta: withNotificationRouteMeta(payload.meta),
     read: false,
   });
 }
@@ -127,6 +139,11 @@ serve(async (req: Request) => {
       const { name, description, logo_url } = params;
       if (!name?.trim()) return jsonResponse({ error: "Team name is required" }, 400);
 
+      const callerRole = await getProfileRole(supabaseAdmin, authUser.id);
+      if (callerRole !== "producer") {
+        return jsonResponse({ error: "Only production users can create a production team" }, 403);
+      }
+
       const { data: team, error: teamErr } = await supabaseAdmin
         .from("production_teams")
         .insert({ owner_id: authUser.id, name: name.trim(), description, logo_url })
@@ -143,6 +160,85 @@ serve(async (req: Request) => {
       });
 
       return jsonResponse({ success: true, team });
+    }
+
+    if (action === "update_production_team") {
+      const { team_id, name, description, logo_url } = params;
+      if (!team_id) return jsonResponse({ error: "team_id is required" }, 400);
+      if (!name?.trim()) return jsonResponse({ error: "Team name is required" }, 400);
+
+      const { data: membership } = await supabaseAdmin
+        .from("production_team_members")
+        .select("role")
+        .eq("team_id", team_id)
+        .eq("user_id", authUser.id)
+        .in("role", ["owner", "manager"])
+        .maybeSingle();
+
+      if (!membership) {
+        return jsonResponse({ error: "Only team owners or managers can update this team" }, 403);
+      }
+
+      const { data: team, error: teamErr } = await supabaseAdmin
+        .from("production_teams")
+        .update({
+          name: name.trim(),
+          description: description?.trim() || null,
+          logo_url: logo_url || null,
+        })
+        .eq("id", team_id)
+        .select()
+        .single();
+
+      if (teamErr) return jsonResponse({ error: teamErr.message }, 500);
+
+      return jsonResponse({ success: true, team });
+    }
+
+    if (action === "delete_production_team") {
+      const { team_id } = params;
+      if (!team_id) return jsonResponse({ error: "team_id is required" }, 400);
+
+      const { data: team } = await supabaseAdmin
+        .from("production_teams")
+        .select("id, owner_id, name")
+        .eq("id", team_id)
+        .maybeSingle();
+
+      if (!team) return jsonResponse({ error: "Production team not found" }, 404);
+      if (team.owner_id !== authUser.id) {
+        return jsonResponse({ error: "Only the team owner can delete this team" }, 403);
+      }
+
+      const { count: dealCount, error: dealCountError } = await supabaseAdmin
+        .from("venue_partnership_deals")
+        .select("id", { count: "exact", head: true })
+        .eq("production_team_id", team_id);
+
+      if (dealCountError) return jsonResponse({ error: dealCountError.message }, 500);
+      if ((dealCount || 0) > 0) {
+        return jsonResponse({
+          error: "This production team already has venue deals and cannot be deleted.",
+          code: "TEAM_HAS_DEALS",
+        }, 409);
+      }
+
+      const { error: memberDeleteError } = await supabaseAdmin
+        .from("production_team_members")
+        .delete()
+        .eq("team_id", team_id);
+
+      if (memberDeleteError) return jsonResponse({ error: memberDeleteError.message }, 500);
+
+      const { error: teamDeleteError } = await supabaseAdmin
+        .from("production_teams")
+        .delete()
+        .eq("id", team_id)
+        .eq("owner_id", authUser.id);
+
+      if (teamDeleteError) return jsonResponse({ error: teamDeleteError.message }, 500);
+
+      return jsonResponse({ success: true, team: { id: team.id, name: team.name } });
     }
 
     if (action === "add_team_member") {

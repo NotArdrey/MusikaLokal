@@ -21,6 +21,7 @@ import {
   resolveRecordingRule,
 } from "../utils/recordingRule";
 import CachedImage from "./CachedImage";
+import TrackedBottomSheetModal from "./TrackedBottomSheetModal";
 
 const debugLog = (..._args: unknown[]) => { };
 
@@ -365,7 +366,7 @@ const BookingDetailsSheet = forwardRef<
   const applicationLabel = getApplicationDisplayLabel(booking);
 
   return (
-    <BottomSheetModal
+    <TrackedBottomSheetModal
       ref={ref}
       index={0}
       snapPoints={snapPoints}
@@ -1431,7 +1432,7 @@ const BookingDetailsSheet = forwardRef<
           )}
         </View>
       </BottomSheetScrollView>
-    </BottomSheetModal>
+    </TrackedBottomSheetModal>
   );
 });
 

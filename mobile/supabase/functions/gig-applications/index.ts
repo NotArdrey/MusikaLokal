@@ -1,5 +1,6 @@
 // @ts-ignore
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { buildNotificationRouteMeta } from "../_shared/notificationRoutes.ts";
 
 const corsHeaders = {
     'Access-Control-Allow-Origin': '*',
@@ -224,11 +225,11 @@ Deno.serve(async (req: Request) => {
                         type: notificationType,
                         title: notificationTitle,
                         message: notificationMessage,
-                        meta: {
+                        meta: buildNotificationRouteMeta('/bookings', undefined, {
                             gig_id: appDetails.gig_id,
                             application_id: applicationId,
                             status: normalizedStatus
-                        }
+                        })
                     });
             }
 
@@ -334,12 +335,12 @@ Deno.serve(async (req: Request) => {
                             normalizedDecision === 'approved'
                                 ? `Your ${groupName} application for "${gigName}" was approved by your group leader and sent to the venue owner.`
                                 : `Your ${groupName} application for "${gigName}" was rejected by your group leader.`,
-                        meta: {
+                        meta: buildNotificationRouteMeta('/bookings', undefined, {
                             gig_id: appDetails.gig_id,
                             application_id: applicationId,
                             group_id: appDetails.group_id,
                             leader_approval_status: normalizedDecision,
-                        },
+                        }),
                     });
             }
 
@@ -351,14 +352,14 @@ Deno.serve(async (req: Request) => {
                         type: 'info',
                         title: 'New Gig Application',
                         message: `${groupName} has a new application for "${gigName}" awaiting your review.`,
-                        meta: {
+                        meta: buildNotificationRouteMeta('/manage_gig', { id: appDetails.gig_id }, {
                             gig_id: appDetails.gig_id,
                             application_id: applicationId,
                             applicant_id: appDetails.applicant_id,
                             group_id: appDetails.group_id,
                             submitted_by_user_id: appDetails.submitted_by_user_id,
                             leader_approved_by: effectiveUserId,
-                        },
+                        }),
                     });
             }
 

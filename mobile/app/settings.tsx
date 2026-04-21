@@ -3,11 +3,11 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router, useFocusEffect } from 'expo-router';
 import React, { useCallback, useState } from 'react';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { supabase } from '../lib/supabase';
 import Modal from '../src/components/modal';
 import Navbar from '../src/components/navbar';
 import { useAuth } from '../src/context/AuthContext';
+import { useBottomBarClearance } from '../src/hooks/useBottomBarClearance';
 import { useTheme } from '../src/context/ThemeContext';
 
 const RECENTLY_VIEWED_STORAGE_KEY = 'recently_viewed_items';
@@ -18,7 +18,7 @@ export default function SettingsScreen() {
   const [modalVisible, setModalVisible] = useState(false);
   const { theme, setTheme, colors, isDark } = useTheme();
   const { isGuest, setGuestMode } = useAuth();
-  const insets = useSafeAreaInsets();
+  const { contentBottomPadding } = useBottomBarClearance(24);
   const [userRole, setUserRole] = useState<string | null>(null);
   const [recentPreviewHistory, setRecentPreviewHistory] = useState<any[]>([]);
 
@@ -150,7 +150,7 @@ export default function SettingsScreen() {
           showsVerticalScrollIndicator={false}
           contentContainerStyle={[
             styles.scrollContent,
-            { paddingBottom: 190 + insets.bottom },
+            { paddingBottom: contentBottomPadding },
           ]}
         >
 

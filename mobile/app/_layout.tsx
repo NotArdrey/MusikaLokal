@@ -7,6 +7,7 @@ import {
     useFonts,
 } from "@expo-google-fonts/poppins";
 import { BottomSheetModalProvider } from "@gorhom/bottom-sheet";
+import { PortalProvider } from "@gorhom/portal";
 import * as Linking from "expo-linking";
 import { router, Stack, useSegments } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
@@ -16,6 +17,13 @@ import { GestureHandlerRootView } from "react-native-gesture-handler";
 import "../global.css";
 import { supabase } from "../lib/supabase";
 import { AuthProvider, useAuth } from "../src/context/AuthContext";
+import Navbar from "../src/components/navbar";
+import { BottomOverlayProvider } from "../src/context/BottomOverlayContext";
+import { usePushNotifications } from "../src/hooks/usePushNotifications";
+import {
+  GlobalRadioMiniPlayer,
+  RadioPlayerProvider,
+} from "../src/context/RadioPlayerContext";
 import {
   showTopToast,
   TopToastProvider,
@@ -78,9 +86,15 @@ export default function RootLayout() {
       <ThemeProvider>
         <TopToastProvider>
           <AuthProvider>
-            <BottomSheetModalProvider>
-              <RootContent />
-            </BottomSheetModalProvider>
+            <PortalProvider>
+              <BottomSheetModalProvider>
+                <BottomOverlayProvider>
+                  <RadioPlayerProvider>
+                    <RootContent />
+                  </RadioPlayerProvider>
+                </BottomOverlayProvider>
+              </BottomSheetModalProvider>
+            </PortalProvider>
           </AuthProvider>
         </TopToastProvider>
       </ThemeProvider>
@@ -99,6 +113,7 @@ function RootContent() {
     identityChecked,
   } =
     useAuth();
+  usePushNotifications(session?.user?.id ?? null);
   const segments = useSegments();
   const processedDeepLinksRef = useRef<Set<string>>(new Set());
   const shownNotificationToastIdsRef = useRef<Set<string>>(new Set());
@@ -235,6 +250,9 @@ function RootContent() {
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
     let latestSubscribeStartedAt = Date.now();
 
+    const isNotificationAppActive = () =>
+      notificationAppStateRef.current === "active";
+
     const clearReconnectTimer = () => {
       if (reconnectTimer) {
         clearTimeout(reconnectTimer);
@@ -242,16 +260,23 @@ function RootContent() {
       }
     };
 
-    const disposeChannel = () => {
+    const disposeChannel = (reason: string) => {
       if (activeChannel) {
-        supabase.removeChannel(activeChannel);
+        const channelToDispose = activeChannel;
         activeChannel = null;
+        activeChannelGeneration += 1;
+        supabase.removeChannel(channelToDispose);
       }
+
+      logNotificationToastDebug("Disposed notification toast channel", {
+        reason,
+        activeUserId,
+      });
       activeChannelStatus = "CLOSED";
     };
 
     const scheduleReconnect = (reason: string) => {
-      if (isDisposed || reconnectTimer) return;
+      if (isDisposed || reconnectTimer || !isNotificationAppActive()) return;
 
       reconnectTimer = setTimeout(() => {
         reconnectTimer = null;
@@ -263,7 +288,16 @@ function RootContent() {
 
     const connectChannel = (reason: string) => {
       clearReconnectTimer();
-      disposeChannel();
+      disposeChannel(`connect:${reason}`);
+
+      if (isDisposed || !isNotificationAppActive()) {
+        logNotificationToastDebug("Skipping notification toast connect while app inactive", {
+          reason,
+          activeUserId,
+          appState: notificationAppStateRef.current,
+        });
+        return;
+      }
 
       latestSubscribeStartedAt = Date.now();
       activeChannelStatus = "CONNECTING";
@@ -312,11 +346,17 @@ function RootContent() {
             return;
           }
 
-          if (
-            status === "CHANNEL_ERROR" ||
-            status === "TIMED_OUT" ||
-            status === "CLOSED"
-          ) {
+          if (status === "CLOSED") {
+            logNotificationToastDebug("Notification toast channel closed; reconnecting", {
+              reason,
+              status,
+              activeUserId,
+            });
+            scheduleReconnect("closed");
+            return;
+          }
+
+          if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
             console.warn("[notification-toast] Realtime channel unavailable", {
               reason,
               status,
@@ -339,6 +379,8 @@ function RootContent() {
 
       if (previousState === "active" && nextState !== "active") {
         notificationBackgroundedAtRef.current = Date.now();
+        clearReconnectTimer();
+        disposeChannel(`app-state:${nextState}`);
         return;
       }
 
@@ -364,7 +406,7 @@ function RootContent() {
       isDisposed = true;
       clearReconnectTimer();
       appStateSub.remove();
-      disposeChannel();
+      disposeChannel("cleanup");
     };
   }, [
     backfillRecentNotificationToasts,
@@ -561,6 +603,9 @@ function RootContent() {
           animation: "fade", // Smooth fade transition for tab switching
         }}
       />
+
+      <Navbar global />
+      <GlobalRadioMiniPlayer />
 
       {showSubscriptionModal && (
         <View style={{

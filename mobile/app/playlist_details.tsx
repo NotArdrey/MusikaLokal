@@ -4,6 +4,7 @@ import React, { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Dimensions,
+  Modal,
   ScrollView,
   StyleSheet,
   Text,
@@ -17,9 +18,18 @@ import Header from "../src/components/header";
 import Navbar from "../src/components/navbar";
 import Skeleton from "../src/components/Skeleton";
 import CustomAlert, { AlertType } from "../src/components/CustomAlert";
+import { useBottomBarClearance } from "../src/hooks/useBottomBarClearance";
 import { useAuth } from "../src/context/AuthContext";
 import { showTopToast } from "../src/context/TopToastContext";
 import { useTheme } from "../src/context/ThemeContext";
+import {
+  MAX_PLAYLIST_AUDIO_DURATION_SECONDS,
+  ensurePlaylistAudioDuration,
+  pickPlaylistAudioFile,
+  resolvePlaylistAudioUrlDuration,
+  uploadPlaylistAudioFile,
+  type PlaylistAudioFile,
+} from "../src/utils/playlistAudio";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const moderateScale = (size: number, factor = 0.3) => {
@@ -29,12 +39,22 @@ const moderateScale = (size: number, factor = 0.3) => {
 
 export default function PlaylistDetailsScreen() {
   const { colors } = useTheme();
-  const { session, userId } = useAuth();
+  const { userId } = useAuth();
   const { playlist_id } = useLocalSearchParams();
+  const { contentBottomPadding } = useBottomBarClearance(24);
 
   const [playlist, setPlaylist] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [alert, setAlert] = useState<{ type: AlertType; title: string; message: string } | null>(null);
+
+  // Add track modal state
+  const [addTrackVisible, setAddTrackVisible] = useState(false);
+  const [newTrackTitle, setNewTrackTitle] = useState("");
+  const [newTrackArtist, setNewTrackArtist] = useState("");
+  const [newTrackAudioUrl, setNewTrackAudioUrl] = useState("");
+  const [newTrackDurationSeconds, setNewTrackDurationSeconds] = useState("");
+  const [newTrackAudioFile, setNewTrackAudioFile] = useState<PlaylistAudioFile | null>(null);
+  const [addingTrack, setAddingTrack] = useState(false);
 
   const isOwner = playlist?.creator_id === userId;
 
@@ -53,6 +73,15 @@ export default function PlaylistDetailsScreen() {
   }, [playlist_id]);
 
   useEffect(() => { fetchPlaylist(); }, [fetchPlaylist]);
+
+  const resetAddTrackForm = useCallback(() => {
+    setAddTrackVisible(false);
+    setNewTrackTitle("");
+    setNewTrackArtist("");
+    setNewTrackAudioUrl("");
+    setNewTrackDurationSeconds("");
+    setNewTrackAudioFile(null);
+  }, []);
 
   const handleRecordPlay = async () => {
     if (!playlist) return;
@@ -93,6 +122,74 @@ export default function PlaylistDetailsScreen() {
     }
   };
 
+  const handleAddTrack = async () => {
+    if (!newTrackTitle.trim()) {
+      setAlert({ type: "warning", title: "Missing Title", message: "Please enter a track title." });
+      return;
+    }
+
+    setAddingTrack(true);
+    try {
+      let durationSeconds = newTrackDurationSeconds.trim() ? Number(newTrackDurationSeconds.trim()) : null;
+      if (durationSeconds !== null) {
+        durationSeconds = ensurePlaylistAudioDuration(durationSeconds);
+      }
+
+      let sourceUrl = newTrackAudioUrl.trim() || null;
+      if (newTrackAudioFile) {
+        const upload = await uploadPlaylistAudioFile(newTrackAudioFile, playlist.id);
+        sourceUrl = upload.publicUrl;
+        durationSeconds = upload.durationSeconds;
+      } else if (sourceUrl) {
+        durationSeconds = await resolvePlaylistAudioUrlDuration(sourceUrl, durationSeconds);
+      }
+
+      const { data, error } = await supabase.functions.invoke("manage-playlists", {
+        body: {
+          action: "add_playlist_item",
+          playlist_id: playlist.id,
+          title: newTrackTitle.trim(),
+          artist_name: newTrackArtist.trim() || null,
+          audio_url: sourceUrl,
+          duration_seconds: durationSeconds,
+        },
+      });
+
+      if (error) {
+        throw error;
+      }
+
+      if (data?.success) {
+        showTopToast({ type: "success", title: "Track Added", message: "Track added to playlist." });
+        resetAddTrackForm();
+        fetchPlaylist();
+      } else {
+        setAlert({ type: "error", title: "Error", message: data?.error || "Failed to add track" });
+      }
+    } catch (e: any) {
+      setAlert({ type: "error", title: "Error", message: e.message });
+    } finally {
+      setAddingTrack(false);
+    }
+  };
+
+  const handlePickTrackAudio = useCallback(async () => {
+    try {
+      const audioFile = await pickPlaylistAudioFile();
+      if (!audioFile) return;
+
+      setNewTrackAudioFile(audioFile);
+      setNewTrackAudioUrl("");
+      setNewTrackDurationSeconds(String(audioFile.durationSeconds));
+    } catch (error: any) {
+      setAlert({
+        type: "warning",
+        title: "Audio Not Allowed",
+        message: error?.message || "Only MP3 or MP4 audio files up to 5 minutes are allowed.",
+      });
+    }
+  }, []);
+
   if (loading) {
     return (
       <View style={[styles.container, { backgroundColor: colors.background }]}>
@@ -128,7 +225,7 @@ export default function PlaylistDetailsScreen() {
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <Header title={playlist.title} onBackPress={() => router.back()} />
 
-      <ScrollView style={styles.content}>
+      <ScrollView style={styles.content} contentContainerStyle={{ paddingBottom: contentBottomPadding }}>
         {/* Cover */}
         {playlist.cover_url ? (
           <CachedImage uri={playlist.cover_url } style={styles.cover} />
@@ -170,7 +267,15 @@ export default function PlaylistDetailsScreen() {
 
         {/* Tracks */}
         <View style={styles.section}>
-          <Text style={[styles.sectionTitle, { color: colors.text }]}>Tracks</Text>
+          <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+            <Text style={[styles.sectionTitle, { color: colors.text, marginBottom: 0 }]}>Tracks</Text>
+            {isOwner && (
+              <TouchableOpacity activeOpacity={0.8} onPress={() => setAddTrackVisible(true)} style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+                <Ionicons name="add-circle-outline" size={18} color={colors.primary} />
+                <Text style={{ color: colors.primary, fontSize: moderateScale(13), fontWeight: "600" }}>Add Track</Text>
+              </TouchableOpacity>
+            )}
+          </View>
           {items.length > 0 ? (
             items.map((item: any, idx: number) => (
               <View key={item.id} style={[styles.trackRow, { borderColor: colors.border }]}>
@@ -179,6 +284,9 @@ export default function PlaylistDetailsScreen() {
                   <Text style={[styles.trackTitle, { color: colors.text }]} numberOfLines={1}>{item.title || "Untitled"}</Text>
                   <Text style={[styles.trackArtist, { color: colors.textSecondary }]}>{item.artist_name || ""}</Text>
                 </View>
+                {item.audio_url ? (
+                  <Ionicons name="musical-note" size={14} color={colors.primary} style={{ marginRight: 6 }} />
+                ) : null}
                 {item.duration_seconds && (
                   <Text style={[styles.trackDuration, { color: colors.textSecondary }]}>
                     {Math.floor(item.duration_seconds / 60)}:{String(item.duration_seconds % 60).padStart(2, "0")}
@@ -257,10 +365,108 @@ export default function PlaylistDetailsScreen() {
           </View>
         )}
 
-        <View style={{ height: 100 }} />
       </ScrollView>
 
       {alert && <CustomAlert visible type={alert.type} title={alert.title} message={alert.message} onClose={() => setAlert(null)} />}
+
+      {/* Add Track Modal */}
+      <Modal visible={addTrackVisible} transparent animationType="slide" onRequestClose={resetAddTrackForm}>
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalSheet, { backgroundColor: colors.card || colors.background, borderColor: colors.border }]}>
+            <Text style={[styles.modalTitle, { color: colors.text }]}>Add Track</Text>
+
+            <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Title *</Text>
+            <TextInput
+              style={[styles.modalInput, { color: colors.text, borderColor: colors.border, backgroundColor: colors.background }]}
+              placeholder="Track title"
+              placeholderTextColor={colors.textSecondary}
+              value={newTrackTitle}
+              onChangeText={setNewTrackTitle}
+            />
+
+            <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Artist Name</Text>
+            <TextInput
+              style={[styles.modalInput, { color: colors.text, borderColor: colors.border, backgroundColor: colors.background }]}
+              placeholder="Artist or band name (optional)"
+              placeholderTextColor={colors.textSecondary}
+              value={newTrackArtist}
+              onChangeText={setNewTrackArtist}
+            />
+
+            <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Audio URL</Text>
+            <TextInput
+              style={[styles.modalInput, { color: colors.text, borderColor: colors.border, backgroundColor: colors.background }]}
+              placeholder="Paste a public MP3 or audio URL"
+              placeholderTextColor={colors.textSecondary}
+              value={newTrackAudioUrl}
+              onChangeText={(value) => {
+                setNewTrackAudioUrl(value);
+                if (value.trim().length > 0) {
+                  setNewTrackAudioFile(null);
+                }
+              }}
+              autoCapitalize="none"
+              keyboardType="url"
+            />
+            <Text style={[{ fontSize: moderateScale(11), marginTop: -8, marginBottom: 12, color: colors.textSecondary }]}>
+              Used as the audio source when your track plays on radio stations.
+            </Text>
+
+            <TouchableOpacity
+              activeOpacity={0.8}
+              style={[styles.uploadAudioBtn, { borderColor: colors.border, backgroundColor: colors.background }]}
+              onPress={() => void handlePickTrackAudio()}
+              disabled={addingTrack}
+            >
+              <Ionicons name="cloud-upload-outline" size={16} color={colors.primary} />
+              <Text style={[styles.uploadAudioBtnText, { color: colors.primary }]}>Upload MP3 / MP4</Text>
+            </TouchableOpacity>
+            <Text style={[styles.audioHelperText, { color: colors.textSecondary }]}>MP4 is treated as audio only. URL or uploaded file must be 5 minutes or less.</Text>
+
+            {newTrackAudioFile ? (
+              <View style={[styles.audioFileChip, { backgroundColor: colors.primary + "12", borderColor: colors.primary + "30" }]}>
+                <Ionicons name="musical-note" size={14} color={colors.primary} />
+                <Text style={[styles.audioFileChipText, { color: colors.text }]} numberOfLines={1}>
+                  {newTrackAudioFile.name} • {newTrackAudioFile.durationSeconds}s
+                </Text>
+                <TouchableOpacity activeOpacity={0.7} onPress={() => setNewTrackAudioFile(null)}>
+                  <Ionicons name="close-circle" size={18} color={colors.textSecondary} />
+                </TouchableOpacity>
+              </View>
+            ) : null}
+
+            <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Duration in Seconds</Text>
+            <TextInput
+              style={[styles.modalInput, { color: colors.text, borderColor: colors.border, backgroundColor: colors.background }]}
+              placeholder={`Max ${MAX_PLAYLIST_AUDIO_DURATION_SECONDS}`}
+              placeholderTextColor={colors.textSecondary}
+              keyboardType="number-pad"
+              value={newTrackDurationSeconds}
+              onChangeText={setNewTrackDurationSeconds}
+            />
+
+            <View style={{ flexDirection: "row", gap: 10 }}>
+              <TouchableOpacity
+                activeOpacity={0.8}
+                style={[styles.modalBtn, { backgroundColor: colors.border, flex: 1 }]}
+                onPress={resetAddTrackForm}
+                disabled={addingTrack}
+              >
+                <Text style={{ color: colors.text, fontWeight: "600", fontSize: moderateScale(14) }}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                activeOpacity={0.8}
+                style={[styles.modalBtn, { backgroundColor: colors.primary, flex: 1 }]}
+                onPress={handleAddTrack}
+                disabled={addingTrack}
+              >
+                {addingTrack ? <ActivityIndicator size="small" color="#fff" /> : <Text style={{ color: "#fff", fontWeight: "700", fontSize: moderateScale(14) }}>Add</Text>}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
       <Navbar />
     </View>
   );
@@ -298,4 +504,15 @@ const styles = StyleSheet.create({
   actionBtn: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 18, paddingVertical: 10, borderRadius: 10 },
   actionBtnText: { color: "#fff", fontSize: moderateScale(13), fontWeight: "600" },
   emptyText: { textAlign: "center", fontSize: moderateScale(13), marginTop: 12 },
+  modalOverlay: { flex: 1, justifyContent: "flex-end", backgroundColor: "transparent" },
+  modalSheet: { borderTopLeftRadius: 20, borderTopRightRadius: 20, borderTopWidth: 1, borderLeftWidth: 1, borderRightWidth: 1, padding: 20, paddingBottom: 36 },
+  modalTitle: { fontSize: moderateScale(18), fontWeight: "800", marginBottom: 16 },
+  inputLabel: { fontSize: moderateScale(12), fontWeight: "600", marginBottom: 4 },
+  modalInput: { borderWidth: 1, borderRadius: 10, padding: 12, fontSize: moderateScale(14), marginBottom: 12 },
+  uploadAudioBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, borderWidth: 1, borderRadius: 10, paddingVertical: 12, marginBottom: 10 },
+  uploadAudioBtnText: { fontSize: moderateScale(13), fontWeight: "700" },
+  audioHelperText: { fontSize: moderateScale(11), lineHeight: 16, marginTop: -2, marginBottom: 12 },
+  audioFileChip: { flexDirection: "row", alignItems: "center", gap: 8, borderWidth: 1, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 8, marginBottom: 12 },
+  audioFileChipText: { flex: 1, fontSize: moderateScale(12), fontWeight: "500" },
+  modalBtn: { paddingVertical: 12, borderRadius: 10, alignItems: "center", justifyContent: "center" },
 });

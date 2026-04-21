@@ -18,6 +18,7 @@ import CustomAlert, { AlertType } from "../src/components/CustomAlert";
 import Header from "../src/components/header";
 import Modal from "../src/components/modal";
 import Navbar from "../src/components/navbar";
+import { useBottomBarClearance } from "../src/hooks/useBottomBarClearance";
 import { useTheme } from "../src/context/ThemeContext";
 import {
     hasValidCoordinates,
@@ -51,6 +52,7 @@ const inferStudioTypeFromRows = (rows: unknown[]): "Rehearsal" | "Recording" | "
 
 export default function StudioDetailsScreen() {
   const { colors, isDark } = useTheme();
+  const { contentBottomPadding } = useBottomBarClearance(24);
   const { id } = useLocalSearchParams(); // Get Studio ID
   const [activeTab, setActiveTab] = useState("About");
   const [modalVisible, setModalVisible] = useState(false);
@@ -720,7 +722,7 @@ export default function StudioDetailsScreen() {
 
         <ScrollView
           showsVerticalScrollIndicator={false}
-          contentContainerStyle={styles.scrollContent}
+          contentContainerStyle={[styles.scrollContent, { paddingBottom: contentBottomPadding }]}
         >
           {/* Header Image & Info */}
           <View style={styles.headerContainer}>

@@ -29,15 +29,23 @@ import {
     View,
 } from "react-native";
 import { Easing } from "react-native-reanimated";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { supabase } from "../../lib/supabase";
 import { useAuth } from "../context/AuthContext";
+import {
+  RADIO_MINI_PLAYER_HEIGHT,
+  RADIO_MINI_PLAYER_STACK_GAP,
+  useRadioPlayerPresence,
+} from "../context/RadioPlayerContext";
 import { showTopToast } from "../context/TopToastContext";
 import { useTheme } from "../context/ThemeContext";
 import {
   buildSocialFollowKey,
   getListingSocialFollowTarget,
 } from "../utils/socialFollow";
+import { NAVBAR_BOTTOM_OFFSET } from "./navbar";
 import ListingCard from "./ListingCard";
+import TrackedBottomSheetModal from "./TrackedBottomSheetModal";
 
 const debugLog = (..._args: unknown[]) => {};
 
@@ -174,10 +182,12 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
   function SearchBottomSheet({ onClose, onItemPress, onChat, onFollowChanged }, ref) {
     const { colors, isDark } = useTheme();
     const { userRole, isGuest, userId } = useAuth();
+    const insets = useSafeAreaInsets();
+    const { activeStation } = useRadioPlayerPresence();
     const snapPoints = useMemo(() => ["90%"], []);
     const animationConfigs = useBottomSheetTimingConfigs({
-      duration: 320,
-      easing: Easing.inOut(Easing.cubic),
+      duration: 260,
+      easing: Easing.out(Easing.cubic),
     });
 
     // Filter Chips - safely handle null userRole
@@ -187,8 +197,8 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
         isGuest
           ? []
           : isOwner
-            ? ["All", "Musician", "Producer Project", "Production Team"]
-            : ["All", "Musician", "Studio", "Gig", "Producer Project", "Production Team"],
+            ? ["All", "Musician", "Production Team"]
+            : ["All", "Musician", "Studio", "Gig", "Production Team"],
       [isGuest, isOwner],
     );
 
@@ -303,25 +313,21 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
             tables = ["groups_with_stats", "profiles"];
           } else if (isOwner) {
             if (activeFilter === "All") {
-              tables = ["groups_with_stats", "profiles", "producer_projects_with_summary", "production_teams"];
+              tables = ["groups_with_stats", "profiles", "production_teams"];
             } else if (activeFilter === "Musician") {
               tables = ["groups_with_stats", "profiles"];
-            } else if (activeFilter === "Producer Project") {
-              tables = ["producer_projects_with_summary"];
             } else if (activeFilter === "Production Team") {
               tables = ["production_teams"];
             }
           } else {
             if (activeFilter === "All") {
-              tables = ["groups_with_stats", "profiles", "studios_with_stats", "gigs_with_stats", "producer_projects_with_summary", "production_teams"];
+              tables = ["groups_with_stats", "profiles", "studios_with_stats", "gigs_with_stats", "production_teams"];
             } else if (activeFilter === "Musician") {
               tables = ["groups_with_stats", "profiles"];
             } else if (activeFilter === "Studio") {
               tables = ["studios_with_stats"];
             } else if (activeFilter === "Gig") {
               tables = ["gigs_with_stats"];
-            } else if (activeFilter === "Producer Project") {
-              tables = ["producer_projects_with_summary"];
             } else if (activeFilter === "Production Team") {
               tables = ["production_teams"];
             }
@@ -751,7 +757,6 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
         "studios",
         "groups",
         "profiles",
-        "producer_projects",
         "production_teams",
         "production_team_members",
         "studio_promotions",
@@ -1316,8 +1321,8 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
                     style={[styles.searchInput, { color: colors.text }]}
                     placeholder={
                       isOwner
-                        ? "Find musicians, producer projects, teams..."
-                        : "Find studios, gigs, venues..."
+                        ? "Find musicians and teams..."
+                        : "Find musicians, studios, gigs, and teams..."
                     }
                     placeholderTextColor={colors.textSecondary}
                     value={searchQuery}
@@ -1460,7 +1465,7 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
     );
 
     return (
-      <BottomSheetModal
+      <TrackedBottomSheetModal
         ref={ref}
         index={0}
         snapPoints={snapPoints}
@@ -1515,7 +1520,7 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
             removeClippedSubviews={Platform.OS === "android"}
           />
         )}
-      </BottomSheetModal>
+      </TrackedBottomSheetModal>
     );
   },
 );

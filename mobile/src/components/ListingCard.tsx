@@ -1603,6 +1603,7 @@ const styles = StyleSheet.create({
   },
   // Smaller variant used in vertical list cards
   tagBadgeSmall: {
+    alignSelf: "center",
     paddingHorizontal: 8,
     paddingVertical: 3,
     borderRadius: 6,
@@ -1679,6 +1680,8 @@ const styles = StyleSheet.create({
     fontFamily: "Poppins_600SemiBold",
     fontSize: 12,
     color: "#1F2937",
+    includeFontPadding: false,
+    lineHeight: 16,
   },
   iconBtn: {
     width: 38,
@@ -1733,7 +1736,6 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 4,
-    minHeight: 26,
     marginLeft: 2,
   },
   title: {

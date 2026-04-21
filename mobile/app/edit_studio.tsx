@@ -28,6 +28,7 @@ import Modal from "../src/components/modal";
 import Navbar from "../src/components/navbar";
 import { useTheme } from "../src/context/ThemeContext";
 import { ensureUploadPassesSafetyScreening } from "../src/services/uploadSafetyScreen";
+import { buildNotificationRouteMeta } from "../src/utils/notificationNavigation";
 import {
   formatRecordingRuleSentence,
   formatRecordingRuleShort,
@@ -2441,7 +2442,10 @@ export default function EditStudioScreen() {
               type: "warning",
               title: "Booking Cancelled",
               message: `Your booking at ${studioName} on ${new Date(conflict.booking_date).toLocaleDateString()} has been cancelled due to schedule changes. You will receive a refund.`,
-              meta: { bookingId: resolution.bookingId, studioId },
+              meta: buildNotificationRouteMeta("/bookings", undefined, {
+                bookingId: resolution.bookingId,
+                studioId,
+              }),
             });
           }
         } else if (resolution.action === "move" && resolution.newSlot) {
@@ -2567,7 +2571,7 @@ export default function EditStudioScreen() {
               type: "warning",
               title: "Booking Relocation Request",
               message: `Your booking at ${studioName} needs relocation to ${new Date(resolution.newSlot.date).toLocaleDateString()} at ${resolution.newSlot.start_time}. Please accept within 24 hours or your booking will be cancelled and refunded.`,
-              meta: {
+              meta: buildNotificationRouteMeta("/bookings", undefined, {
                 bookingId: resolution.bookingId,
                 studioId,
                 relocation: {
@@ -2577,7 +2581,7 @@ export default function EditStudioScreen() {
                   proposed_end_time: resolution.newSlot.end_time,
                   expires_at: relocationExpiresAt,
                 },
-              },
+              }),
             });
           }
         }

@@ -1,5 +1,6 @@
 // @ts-ignore
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { withNotificationRouteMeta } from "../_shared/notificationRoutes.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -66,6 +67,21 @@ function normalizeMediaRecord(media: any) {
   };
 }
 
+function normalizeUniqueMedia(media: unknown[]) {
+  return media
+    .map((item: any, index) => ({
+      media_type: item?.media_type || "image",
+      storage_path: item?.storage_path || item?.url || null,
+      mime_type: item?.mime_type || null,
+      display_order: index,
+      is_primary: item?.is_primary === true || index === 0,
+    }))
+    .filter((item) => typeof item.storage_path === "string" && item.storage_path.trim().length > 0)
+    .filter((item, index, array) =>
+      array.findIndex((candidate) => candidate.storage_path === item.storage_path) === index,
+    );
+}
+
 function extractAccessToken(authHeader: string): string | null {
   const trimmed = (authHeader || "").trim();
   if (!trimmed) return null;
@@ -87,7 +103,11 @@ async function insertNotification(
     meta?: Record<string, any>;
   },
 ) {
-  await supabaseAdmin.from("notifications").insert({ ...payload, read: false });
+  await supabaseAdmin.from("notifications").insert({
+    ...payload,
+    meta: withNotificationRouteMeta(payload.meta),
+    read: false,
+  });
 }
 
 Deno.serve(async (req: Request) => {
@@ -288,7 +308,79 @@ Deno.serve(async (req: Request) => {
         .single();
 
       if (error) return jsonResponse({ error: error.message }, 500);
+
+      if (Array.isArray(updates.media)) {
+        const mediaRows = normalizeUniqueMedia(updates.media);
+
+        const { error: deleteMediaError } = await supabaseAdmin
+          .from("product_media")
+          .delete()
+          .eq("product_id", product_id);
+
+        if (deleteMediaError) return jsonResponse({ error: deleteMediaError.message }, 500);
+
+        if (mediaRows.length > 0) {
+          const { error: insertMediaError } = await supabaseAdmin
+            .from("product_media")
+            .insert(mediaRows.map((item) => ({ ...item, product_id })));
+
+          if (insertMediaError) return jsonResponse({ error: insertMediaError.message }, 500);
+        }
+      }
+
       return jsonResponse({ success: true, data: normalizeProductRecord(data) });
+    }
+
+    // ── delete_product ──────────────────────────────────────────────
+    if (action === "delete_product") {
+      const { product_id } = params;
+      if (!product_id) return jsonResponse({ error: "product_id is required" }, 400);
+
+      const { data: existing } = await supabaseAdmin
+        .from("products")
+        .select("id, seller_id, title")
+        .eq("id", product_id)
+        .single();
+
+      if (!existing) return jsonResponse({ error: "Product not found" }, 404);
+      if (existing.seller_id !== uid) return jsonResponse({ error: "Forbidden" }, 403);
+
+      const { count: orderItemCount, error: orderCountError } = await supabaseAdmin
+        .from("order_items")
+        .select("id", { count: "exact", head: true })
+        .eq("product_id", product_id);
+
+      if (orderCountError) return jsonResponse({ error: orderCountError.message }, 500);
+      if ((orderItemCount || 0) > 0) {
+        return jsonResponse({
+          error: "This product already has order history and cannot be deleted.",
+          code: "PRODUCT_HAS_ORDER_HISTORY",
+        }, 409);
+      }
+
+      const { error: deleteVariantsError } = await supabaseAdmin
+        .from("product_variants")
+        .delete()
+        .eq("product_id", product_id);
+
+      if (deleteVariantsError) return jsonResponse({ error: deleteVariantsError.message }, 500);
+
+      const { error: deleteMediaError } = await supabaseAdmin
+        .from("product_media")
+        .delete()
+        .eq("product_id", product_id);
+
+      if (deleteMediaError) return jsonResponse({ error: deleteMediaError.message }, 500);
+
+      const { error: deleteProductError } = await supabaseAdmin
+        .from("products")
+        .delete()
+        .eq("id", product_id)
+        .eq("seller_id", uid);
+
+      if (deleteProductError) return jsonResponse({ error: deleteProductError.message }, 500);
+
+      return jsonResponse({ success: true, data: { id: product_id, title: existing.title } });
     }
 
     // ── get_product_details ─────────────────────────────────────────

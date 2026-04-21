@@ -18,11 +18,13 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { supabase } from '../lib/supabase';
 import CustomAlert, { AlertType } from '../src/components/CustomAlert';
+import GroupLinkedPlaylistsSection from '../src/components/GroupLinkedPlaylistsSection';
 import Modal from '../src/components/modal';
 import ReportModal from '../src/components/ReportModal';
 import { useAuth } from '../src/context/AuthContext';
 import { useTheme } from '../src/context/ThemeContext';
 import { getGroupMembersLabel, getGroupTypeLabel, isGroupLeaderMember } from '../src/utils/groupMembers';
+import { fetchGroupLinkedPlaylists } from '../src/utils/groupPlaylists';
 import {
     hasValidCoordinates,
     openNavigationDirections,
@@ -37,6 +39,8 @@ export default function GroupDetailsScreen() {
   const insets = useSafeAreaInsets();
   const [loading, setLoading] = useState(true);
   const [group, setGroup] = useState<any>(null);
+  const [groupPlaylists, setGroupPlaylists] = useState<any[]>([]);
+  const [loadingGroupPlaylists, setLoadingGroupPlaylists] = useState(false);
   const [isFavorited, setIsFavorited] = useState(false);
   const [favoriteCount, setFavoriteCount] = useState(0);
   const [modalVisible, setModalVisible] = useState(false);
@@ -56,6 +60,39 @@ export default function GroupDetailsScreen() {
   useEffect(() => {
     fetchGroupDetails();
   }, [id]);
+
+  useEffect(() => {
+    let isActive = true;
+
+    if (!group?.id) {
+      setGroupPlaylists([]);
+      setLoadingGroupPlaylists(false);
+      return () => {
+        isActive = false;
+      };
+    }
+
+    setLoadingGroupPlaylists(true);
+
+    fetchGroupLinkedPlaylists(group.id)
+      .then((playlistRows) => {
+        if (!isActive) return;
+        setGroupPlaylists(playlistRows);
+      })
+      .catch((playlistError) => {
+        if (!isActive) return;
+        console.log('[group_details] Failed to fetch linked playlists:', playlistError);
+        setGroupPlaylists([]);
+      })
+      .finally(() => {
+        if (!isActive) return;
+        setLoadingGroupPlaylists(false);
+      });
+
+    return () => {
+      isActive = false;
+    };
+  }, [group?.id]);
 
   const fetchGroupDetails = async () => {
     try {
@@ -101,6 +138,15 @@ export default function GroupDetailsScreen() {
     } catch {
       // No-op if cancelled
     }
+  };
+
+  const handlePlaylistPress = (playlistId: string) => {
+    if (!playlistId) return;
+
+    router.push({
+      pathname: '/playlist_details',
+      params: { playlist_id: playlistId },
+    });
   };
 
   const toggleFavorite = async () => {
@@ -336,6 +382,20 @@ export default function GroupDetailsScreen() {
                 </Text>
               </View>
             </View>
+          </View>
+
+          <View style={[styles.divider, { backgroundColor: colors.border }]} />
+
+          <View style={styles.section}>
+            <GroupLinkedPlaylistsSection
+              colors={colors}
+              isDark={isDark}
+              playlists={groupPlaylists}
+              loading={loadingGroupPlaylists}
+              onPlaylistPress={handlePlaylistPress}
+              title="Featured Playlists"
+              emptyMessage="This group has not linked any playlists yet."
+            />
           </View>
 
           <View style={[styles.divider, { backgroundColor: colors.border }]} />

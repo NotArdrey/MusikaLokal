@@ -18,7 +18,8 @@ import CustomAlert, { AlertType } from "../src/components/CustomAlert";
 import Header from "../src/components/header";
 import Navbar from "../src/components/navbar";
 import Skeleton from "../src/components/Skeleton";
-import { useRequireAuth } from "../src/context/AuthContext";
+import { useBottomBarClearance } from "../src/hooks/useBottomBarClearance";
+import { useAuth, useRequireAuth } from "../src/context/AuthContext";
 import { useTheme } from "../src/context/ThemeContext";
 
 interface Team {
@@ -40,9 +41,12 @@ interface TeamMember {
 
 export default function ProductionTeamScreen() {
   const { colors, isDark } = useTheme();
+  const { contentBottomPadding } = useBottomBarClearance(24);
   const { isAuthenticated, loading: authLoading, userId } = useRequireAuth();
+  const { userRole } = useAuth();
   const params = useLocalSearchParams<{ teamId?: string }>();
   const routeTeamId = Array.isArray(params.teamId) ? params.teamId[0] : params.teamId;
+  const isProducer = userRole === "producer";
 
   const [teams, setTeams] = useState<Team[]>([]);
   const [loading, setLoading] = useState(true);
@@ -172,6 +176,11 @@ export default function ProductionTeamScreen() {
   );
 
   const handleCreateTeam = async () => {
+    if (!isProducer) {
+      showAlert("warning", "Production Only", "Only production users can create a production team.");
+      return;
+    }
+
     if (!newTeamName.trim()) {
       showAlert("warning", "Required", "Team name is required");
       return;
@@ -357,9 +366,21 @@ export default function ProductionTeamScreen() {
       selectedTeam.member_role === "manager";
 
     return (
-      <View style={[styles.flex1, { backgroundColor: colors.background }]}>
-        <Header title={selectedTeam.name} onBackPress={closeTeamDetail} />
-        <ScrollView contentContainerStyle={styles.scrollContent}>
+      <View style={[styles.detailShell, { backgroundColor: isDark ? "rgba(2, 6, 23, 0.78)" : "rgba(15, 23, 42, 0.28)" }]}>
+        <TouchableOpacity activeOpacity={1} style={styles.detailBackdrop} onPress={closeTeamDetail} />
+        <View style={[styles.detailSheet, { backgroundColor: colors.background, borderColor: colors.border }]}>
+          <View style={[styles.detailHandle, { backgroundColor: isDark ? "#334155" : "#CBD5E1" }]} />
+          <View style={styles.detailHeaderRow}>
+            <View style={{ flex: 1, paddingRight: 12 }}>
+              <Text style={[styles.detailEyebrow, { color: colors.textSecondary }]}>Production Team</Text>
+              <Text style={[styles.detailTitle, { color: colors.text }]} numberOfLines={1}>{selectedTeam.name}</Text>
+            </View>
+            <TouchableOpacity activeOpacity={1} onPress={closeTeamDetail} style={[styles.detailCloseBtn, { borderColor: colors.border, backgroundColor: colors.card }]}> 
+              <Ionicons name="close" size={18} color={colors.text} />
+            </TouchableOpacity>
+          </View>
+
+          <ScrollView contentContainerStyle={[styles.detailScrollContent, { paddingBottom: contentBottomPadding }]}>
           {/* Team Info */}
           <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
             {selectedTeam.logo_url ? (
@@ -467,16 +488,8 @@ export default function ProductionTeamScreen() {
             <Text style={styles.dealsBtnText}>View Deals</Text>
           </TouchableOpacity>
 
-          {/* Back button */}
-          <TouchableOpacity activeOpacity={1}
-            style={[styles.backBtn, { borderColor: colors.border }]}
-            onPress={closeTeamDetail}
-          >
-            <Text style={[styles.backBtnText, { color: colors.text }]}>
-              {routeTeamId ? "Back" : "Back to Teams"}
-            </Text>
-          </TouchableOpacity>
-        </ScrollView>
+          </ScrollView>
+        </View>
 
         {/* Add Member Modal */}
         <RNModal
@@ -663,7 +676,6 @@ export default function ProductionTeamScreen() {
           message={alertConfig.message}
           onClose={() => setAlertVisible(false)}
         />
-        <Navbar />
       </View>
     );
   }
@@ -673,7 +685,7 @@ export default function ProductionTeamScreen() {
     <View style={[styles.flex1, { backgroundColor: colors.background }]}>
       <Header title="Production Teams" onBackPress={routeTeamId ? () => router.back() : undefined} />
       <ScrollView
-        contentContainerStyle={styles.scrollContent}
+        contentContainerStyle={[styles.scrollContent, { paddingBottom: contentBottomPadding }]}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
@@ -692,9 +704,11 @@ export default function ProductionTeamScreen() {
         ) : teams.length === 0 ? (
           <View style={styles.emptyContainer}>
             <Ionicons name="people-outline" size={56} color={colors.textSecondary} />
-            <Text style={[styles.emptyTitle, { color: colors.text }]}>No Production Teams</Text>
+            <Text style={[styles.emptyTitle, { color: colors.text }]}>{isProducer ? "No Production Teams" : "No Teams Yet"}</Text>
             <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
-              Create a team to start proposing venue partnership deals.
+              {isProducer
+                ? "Create a team to start proposing venue partnership deals."
+                : "Only production users can create a production team, but you can still open shared team links and deal details."}
             </Text>
           </View>
         ) : (
@@ -729,13 +743,14 @@ export default function ProductionTeamScreen() {
         )}
       </ScrollView>
 
-      {/* FAB to create team */}
-      <TouchableOpacity activeOpacity={1}
-        style={[styles.fab, { backgroundColor: colors.primary }]}
-        onPress={() => setCreateModalVisible(true)}
-      >
-        <Ionicons name="add" size={28} color="#fff" />
-      </TouchableOpacity>
+      {isProducer ? (
+        <TouchableOpacity activeOpacity={1}
+          style={[styles.fab, { backgroundColor: colors.primary }]}
+          onPress={() => setCreateModalVisible(true)}
+        >
+          <Ionicons name="add" size={28} color="#fff" />
+        </TouchableOpacity>
+      ) : null}
 
       {/* Create Team Modal */}
       <RNModal
@@ -801,6 +816,47 @@ export default function ProductionTeamScreen() {
 
 const styles = StyleSheet.create({
   flex1: { flex: 1 },
+  detailShell: { flex: 1, justifyContent: "flex-end" },
+  detailBackdrop: { flex: 1 },
+  detailSheet: {
+    maxHeight: "88%",
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    borderWidth: 1,
+    borderBottomWidth: 0,
+    overflow: "hidden",
+  },
+  detailHandle: {
+    width: 44,
+    height: 5,
+    borderRadius: 999,
+    alignSelf: "center",
+    marginTop: 10,
+    marginBottom: 14,
+  },
+  detailHeaderRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 18,
+    paddingBottom: 14,
+  },
+  detailEyebrow: {
+    fontFamily: "Poppins_500Medium",
+    fontSize: 11,
+    textTransform: "uppercase",
+    letterSpacing: 0.6,
+    marginBottom: 2,
+  },
+  detailTitle: { fontFamily: "Poppins_600SemiBold", fontSize: 20 },
+  detailCloseBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+  },
+  detailScrollContent: { paddingHorizontal: 16, paddingBottom: 180 },
   scrollContent: { paddingHorizontal: 16, paddingTop: 16, paddingBottom: 180 },
   loadingContainer: { marginTop: 8 },
   emptyContainer: { alignItems: "center", paddingTop: 60 },
