@@ -657,7 +657,7 @@ const ProductionTeamDetailsSheet = forwardRef<
                 </View>
 
                 <Text style={[styles.infoLabel, { color: colors.textSecondary, marginTop: 16 }]}>
-                  {currentUserRole === "venue-owner" ? "Invite Context" : "Application Context"}
+                  {currentUserRole === "venue-owner" ? "Invite Context *" : "Application Context *"}
                 </Text>
                 <View style={[styles.messageBox, { backgroundColor: colors.background, borderColor: colors.border, marginTop: 8 }]}> 
                   <TextInput
@@ -672,7 +672,7 @@ const ProductionTeamDetailsSheet = forwardRef<
                 </View>
 
                 <DocumentUploader
-                  label={currentUserRole === "venue-owner" ? "Upload Contract" : "Upload CV/Resume"}
+                  label={currentUserRole === "venue-owner" ? "Upload Contract *" : "Upload CV/Resume *"}
                   onFileSelect={(file) => {
                     setRequestDocumentFile(file);
                     setRequestDocumentUrl("");

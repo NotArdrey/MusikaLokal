@@ -260,12 +260,17 @@ const ListingDetailsSheet = forwardRef<
     [productionRoster, selectedSlotType],
   );
   const selectedProductionRosterEntry = useMemo(
-    () =>
-      filteredRequestRoster.find((entry: any) => entry.id === selectedProductionRosterId) ||
-      productionRoster.find((entry: any) => entry.id === selectedProductionRosterId) ||
-      null,
-    [filteredRequestRoster, productionRoster, selectedProductionRosterId],
+    () => filteredRequestRoster.find((entry: any) => entry.id === selectedProductionRosterId) || null,
+    [filteredRequestRoster, selectedProductionRosterId],
   );
+
+  useEffect(() => {
+    setSelectedProductionRosterId((current) =>
+      current && filteredRequestRoster.some((entry: any) => entry.id === current)
+        ? current
+        : null,
+    );
+  }, [filteredRequestRoster]);
 
   // Review State
   const [reviews, setReviews] = useState<any[]>([]);
@@ -2837,6 +2842,8 @@ const ListingDetailsSheet = forwardRef<
       notificationImage?: string | null;
       requestKind: "invite" | "application";
       contextLabel?: string;
+      requireSlotSelection?: boolean;
+      requireRosterSelection?: boolean;
       extraMeta?: Record<string, unknown> | null;
     }) => {
       if (!currentUserId) {
@@ -2875,6 +2882,29 @@ const ListingDetailsSheet = forwardRef<
       if (request.requestKind === "application" && !normalizedVideoUrl) {
         showSheetAlert("error", "Video Required", "Add a video or reel link before sending this application.");
         return;
+      }
+
+      if (request.requireSlotSelection && requestSlotOptions.length > 0 && !selectedSlotType) {
+        showSheetAlert("error", "Preferred Slot Required", "Choose the slot you want to fill before sending this application.");
+        return;
+      }
+
+      if (request.requireRosterSelection) {
+        if (!filteredRequestRoster.length) {
+          showSheetAlert(
+            "error",
+            "Featured Performer Required",
+            selectedProductionTeam
+              ? `Add a matching roster entry to ${selectedProductionTeam.name} before sending this application.`
+              : "Add a matching roster entry before sending this application.",
+          );
+          return;
+        }
+
+        if (!selectedProductionRosterEntry) {
+          showSheetAlert("error", "Featured Performer Required", "Choose which performer this application is for before sending it.");
+          return;
+        }
       }
 
       let uploadedDocumentUrl = requestDocumentUrl.trim() || null;
@@ -2966,9 +2996,12 @@ const ListingDetailsSheet = forwardRef<
       requestDocumentUrl,
       requestPitchMessage,
       requestVideoUrl,
+      filteredRequestRoster,
       selectedProductionRosterEntry,
+      selectedProductionTeam,
       selectedSlotType,
       showSheetAlert,
+      requestSlotOptions.length,
     ],
   );
 
@@ -3030,6 +3063,8 @@ const ListingDetailsSheet = forwardRef<
       notificationImage: selectedProductionTeam.logo_url || null,
       requestKind: "application",
       contextLabel: "Application Context",
+      requireSlotSelection: true,
+      requireRosterSelection: true,
       extraMeta: { request_kind: "application" },
     });
   }, [createListingRequest, group, selectedProductionTeam, showSheetAlert]);
@@ -3107,7 +3142,7 @@ const ListingDetailsSheet = forwardRef<
 
           {options.showSlotSelector && requestSlotOptions.length > 0 ? (
             <>
-              <Text style={[styles.label, { color: colors.textSecondary, marginTop: 14 }]}>Preferred Slot</Text>
+              <Text style={[styles.label, { color: colors.textSecondary, marginTop: 14 }]}>Preferred Slot *</Text>
               {renderRequestSelectorChips(
                 requestSlotOptions.map((slot) => ({ id: slot.id, name: slot.name })),
                 selectedSlotType,
@@ -3119,7 +3154,7 @@ const ListingDetailsSheet = forwardRef<
 
           {options.showRosterSelector && selectedProductionTeam ? (
             <>
-              <Text style={[styles.label, { color: colors.textSecondary, marginTop: 14 }]}>Featured Performer</Text>
+              <Text style={[styles.label, { color: colors.textSecondary, marginTop: 14 }]}>Featured Performer *</Text>
               {rosterChipItems.length > 0 ? (
                 renderRequestSelectorChips(
                   rosterChipItems,
@@ -3128,13 +3163,13 @@ const ListingDetailsSheet = forwardRef<
                   "person-outline",
                 )
               ) : (
-                <Text style={[styles.description, { color: colors.textSecondary, marginTop: 8 }]}>Add a matching roster entry to {selectedProductionTeam.name} if you want this request to point to a specific performer.</Text>
+                <Text style={[styles.description, { color: colors.textSecondary, marginTop: 8 }]}>Add a matching roster entry to {selectedProductionTeam.name} before you can send this application.</Text>
               )}
             </>
           ) : null}
 
           <DocumentUploader
-            label={options.requestKind === "invite" ? "Upload Contract" : "Upload CV/Resume"}
+            label={options.requestKind === "invite" ? "Upload Contract *" : "Upload CV/Resume *"}
             onFileSelect={(file) => {
               setRequestDocumentFile(file);
               setRequestDocumentUrl("");
@@ -3159,7 +3194,7 @@ const ListingDetailsSheet = forwardRef<
             </>
           ) : null}
 
-          <Text style={[styles.label, { color: colors.textSecondary, marginTop: 14 }]}>{options.contextLabel}</Text>
+              <Text style={[styles.label, { color: colors.textSecondary, marginTop: 14 }]}>{options.contextLabel} *</Text>
           <View style={[styles.inputWrapper, { backgroundColor: isDark ? "#374151" : "#F9FAFB", marginTop: 8, height: 96 }]}> 
             <TextInput
               style={[styles.input, { color: colors.text, height: "100%" }]}

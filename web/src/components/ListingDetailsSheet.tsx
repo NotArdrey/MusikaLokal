@@ -2422,6 +2422,7 @@ const ListingDetailsSheet = forwardRef<
       notificationImage?: string | null;
       requestKind: "invite" | "application";
       contextLabel?: string;
+      requireSlotSelection?: boolean;
       extraMeta?: Record<string, unknown> | null;
     }) => {
       if (!currentUserId) {
@@ -2459,6 +2460,11 @@ const ListingDetailsSheet = forwardRef<
 
       if (request.requestKind === "application" && !normalizedVideoUrl) {
         showSheetAlert("error", "Video Required", "Add a video or reel link before sending this application.");
+        return;
+      }
+
+      if (request.requireSlotSelection && requestSlotOptions.length > 0 && !selectedSlotType) {
+        showSheetAlert("error", "Preferred Slot Required", "Choose the slot you want to fill before sending this application.");
         return;
       }
 
@@ -2544,6 +2550,7 @@ const ListingDetailsSheet = forwardRef<
       requestDocumentUrl,
       requestPitchMessage,
       requestVideoUrl,
+      requestSlotOptions.length,
       selectedSlotType,
       showSheetAlert,
     ],
@@ -2607,6 +2614,7 @@ const ListingDetailsSheet = forwardRef<
       notificationImage: selectedProductionTeam.logo_url || null,
       requestKind: "application",
       contextLabel: "Application Context",
+      requireSlotSelection: true,
       extraMeta: { request_kind: "application" },
     });
   }, [createListingRequest, group, selectedProductionTeam, showSheetAlert]);
@@ -2665,7 +2673,7 @@ const ListingDetailsSheet = forwardRef<
         <Text style={[styles.label, { color: colors.textSecondary, marginTop: 14 }]}>Pitch / Intro *</Text>
 
         <DocumentUploader
-          label={options.requestKind === "invite" ? "Upload Contract" : "Upload CV/Resume"}
+          label={options.requestKind === "invite" ? "Upload Contract *" : "Upload CV/Resume *"}
           onFileSelect={(file) => {
             setRequestDocumentFile(file);
             setRequestDocumentUrl("");
@@ -2703,7 +2711,7 @@ const ListingDetailsSheet = forwardRef<
 
         {options.showSlotSelector && requestSlotOptions.length > 0 ? (
           <>
-            <Text style={[styles.label, { color: colors.textSecondary, marginTop: 14 }]}>Preferred Slot</Text>
+            <Text style={[styles.label, { color: colors.textSecondary, marginTop: 14 }]}>Preferred Slot *</Text>
             {renderRequestSelectorChips(
               requestSlotOptions.map((slot) => ({ id: slot.id, name: slot.name })),
               selectedSlotType,
@@ -2713,7 +2721,7 @@ const ListingDetailsSheet = forwardRef<
           </>
         ) : null}
 
-        <Text style={[styles.label, { color: colors.textSecondary, marginTop: 14 }]}>{options.contextLabel}</Text>
+        <Text style={[styles.label, { color: colors.textSecondary, marginTop: 14 }]}>{options.contextLabel} *</Text>
         <View style={[styles.inputWrapper, { backgroundColor: isDark ? "#374151" : "#F9FAFB", marginTop: 8, height: 96 }]}> 
           <TextInput
             style={[styles.input, { color: colors.text, height: "100%" }]}
