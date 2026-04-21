@@ -18,6 +18,7 @@ import { supabase } from "../lib/supabase";
 import CachedImage from "../src/components/CachedImage";
 import Header from "../src/components/header";
 import Navbar from "../src/components/navbar";
+import ReportModal from "../src/components/ReportModal";
 import CustomAlert, { AlertType } from "../src/components/CustomAlert";
 import { useAuth } from "../src/context/AuthContext";
 import { showTopToast } from "../src/context/TopToastContext";
@@ -31,7 +32,7 @@ const moderateScale = (size: number, factor = 0.3) => {
 
 export default function ProducerProjectDetailsScreen() {
   const { colors, isDark } = useTheme();
-  const { session, userId, userRole } = useAuth();
+  const { userId, isGuest } = useAuth();
   const { project_id } = useLocalSearchParams();
   const { width } = useWindowDimensions();
   const isWebDesktop = Platform.OS === "web" && width >= 768;
@@ -53,6 +54,7 @@ export default function ProducerProjectDetailsScreen() {
   const [inviteRoleId, setInviteRoleId] = useState<string | null>(null);
   const [inviteMessage, setInviteMessage] = useState("");
   const [inviting, setInviting] = useState(false);
+  const [showReportModal, setShowReportModal] = useState(false);
 
   const bg = isWebDesktop ? (isDark ? "#0F172A" : "#F1F5F9") : colors.background;
   const cardBg = isWebDesktop ? (isDark ? "#1E293B" : "#FFFFFF") : colors.surface;
@@ -134,6 +136,53 @@ export default function ProducerProjectDetailsScreen() {
     if (data?.success) { showTopToast({ type: "success", title: decision === "accepted" ? "Accepted" : "Rejected", message: `Application ${decision}.` }); fetchProject(); }
   };
 
+  const openReportModal = () => {
+    if (!project?.id) {
+      setAlert({ type: "error", title: "Unable to Report", message: "Project details are missing." });
+      return;
+    }
+
+    setShowReportModal(true);
+  };
+
+  const submitProjectReport = async (reason: string, details?: string) => {
+    if (!userId || isGuest) {
+      throw new Error("You need to sign in to report producer projects.");
+    }
+
+    if (!project?.id) {
+      throw new Error("Project details are missing.");
+    }
+
+    const body = {
+      action: "report",
+      type: "project",
+      id: project.id,
+      userId,
+      reason,
+      details: details || null,
+    };
+
+    const { data, error } = await supabase.functions.invoke("manage-details", { body });
+
+    if (error) {
+      console.error("manage-details report failed", {
+        message: error.message,
+        status: (error as any).status,
+        code: (error as any).code,
+        details: (error as any).details,
+        hint: (error as any).hint,
+        context: (error as any).context,
+        body,
+      });
+      throw new Error(error.message || "Failed to submit report.");
+    }
+
+    if (data && !Array.isArray(data) && data.already_reported) {
+      throw new Error("You already have a pending report for this producer project.");
+    }
+  };
+
   if (loading) return <View style={[styles.container, { backgroundColor: bg }]}><Header title="Project Details" onBackPress={() => router.back()} /><ActivityIndicator size="large" color={colors.primary} style={{ marginTop: 40 }} /><Navbar /></View>;
   if (!project) return <View style={[styles.container, { backgroundColor: bg }]}><Header title="Project Details" onBackPress={() => router.back()} /><View style={styles.centered}><Text style={{ color: colors.textSecondary }}>Project not found</Text></View><Navbar /></View>;
 
@@ -141,10 +190,23 @@ export default function ProducerProjectDetailsScreen() {
   const pendingApps = project.applications?.filter((a: any) => a.status === "pending") || [];
   const myApplication = project.applications?.find((a: any) => a.applicant_id === userId);
   const myInvite = project.invites?.find((i: any) => i.invitee_id === userId);
+  const canReportProject = !isOwner && !!userId && !isGuest;
+  const reportHeaderAction = canReportProject ? (
+    <TouchableOpacity
+      activeOpacity={1}
+      onPress={openReportModal}
+      style={[
+        styles.headerReportBtn,
+        { backgroundColor: isDark ? "#111827" : "#F8FAFC", borderColor: borderCol },
+      ]}
+    >
+      <Ionicons name="flag-outline" size={18} color="#EF4444" />
+    </TouchableOpacity>
+  ) : null;
 
   return (
     <View style={[styles.container, { backgroundColor: bg }]}>
-      <Header title={project.title} onBackPress={() => router.back()} />
+      <Header title={project.title} onBackPress={() => router.back()} rightComponent={reportHeaderAction} />
       <ScrollView style={styles.content} contentContainerStyle={isWebDesktop ? { alignItems: "center" } : undefined}>
         <View style={isWebDesktop ? { width: "100%", maxWidth: 800, paddingHorizontal: 16 } : { paddingHorizontal: 16 }}>
           {project.cover_image_url ? <CachedImage uri={project.cover_image_url } style={styles.cover} /> : (
@@ -296,6 +358,16 @@ export default function ProducerProjectDetailsScreen() {
           </View>
         </View>
       </Modal>
+
+      <ReportModal
+        visible={showReportModal}
+        onClose={() => setShowReportModal(false)}
+        onSubmit={submitProjectReport}
+        targetName={project.title}
+        title="Report Producer Project"
+        reportType="project"
+      />
+
       {alert && <CustomAlert visible type={alert.type} title={alert.title} message={alert.message} onClose={() => setAlert(null)} />}
       <Navbar />
     </View>
@@ -320,6 +392,7 @@ const styles = StyleSheet.create({
   actionBtn: { paddingHorizontal: 18, paddingVertical: 10, borderRadius: 10 },
   actionBtnText: { color: "#fff", fontWeight: "600" },
   appCard: { flexDirection: "row", alignItems: "center", padding: 12, borderRadius: 10, borderWidth: 1, marginBottom: 8, gap: 8 },
+  headerReportBtn: { width: 40, height: 40, borderRadius: 14, borderWidth: 1, alignItems: "center", justifyContent: "center" },
   reviewBtn: { width: 32, height: 32, borderRadius: 16, alignItems: "center", justifyContent: "center" },
   input: { borderWidth: 1, borderRadius: 10, padding: 12, fontSize: moderateScale(14) },
   submitBtn: { alignItems: "center", paddingVertical: 14, borderRadius: 12, marginTop: 20 },

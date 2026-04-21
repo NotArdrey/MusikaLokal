@@ -39,6 +39,14 @@ interface TeamMember {
   avatar_url: string | null;
 }
 
+interface TeamRosterEntry {
+  id: string;
+  entity_kind: "musician" | "duo" | "group";
+  display_name: string;
+  avatar_url: string | null;
+  group_type: string | null;
+}
+
 export default function ProductionTeamScreen() {
   const { colors, isDark } = useTheme();
   const { contentBottomPadding } = useBottomBarClearance(24);
@@ -62,12 +70,22 @@ export default function ProductionTeamScreen() {
   const [selectedTeam, setSelectedTeam] = useState<Team | null>(null);
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
   const [loadingMembers, setLoadingMembers] = useState(false);
+  const [teamRoster, setTeamRoster] = useState<TeamRosterEntry[]>([]);
+  const [loadingRoster, setLoadingRoster] = useState(false);
 
   // Add member modal
   const [addMemberModalVisible, setAddMemberModalVisible] = useState(false);
   const [memberEmail, setMemberEmail] = useState("");
   const [memberRole, setMemberRole] = useState<"member" | "manager">("member");
   const [addingMember, setAddingMember] = useState(false);
+
+  // Add roster modal
+  const [addRosterModalVisible, setAddRosterModalVisible] = useState(false);
+  const [rosterMode, setRosterMode] = useState<"musician" | "group">("musician");
+  const [rosterMusicianEmail, setRosterMusicianEmail] = useState("");
+  const [accessibleGroups, setAccessibleGroups] = useState<any[]>([]);
+  const [selectedRosterGroupId, setSelectedRosterGroupId] = useState<string | null>(null);
+  const [addingRoster, setAddingRoster] = useState(false);
 
   // Propose deal modal
   const [proposeDealVisible, setProposeDealVisible] = useState(false);
@@ -133,6 +151,70 @@ export default function ProductionTeamScreen() {
     }
   }, []);
 
+  const fetchTeamRoster = useCallback(async (teamId: string) => {
+    setLoadingRoster(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("manage-deals", {
+        body: { action: "list_team_roster", teamId },
+      });
+
+      if (error) throw error;
+      setTeamRoster(data?.roster || []);
+    } catch (e: any) {
+      showAlert("error", "Error", e.message || "Failed to fetch team roster");
+      setTeamRoster([]);
+    } finally {
+      setLoadingRoster(false);
+    }
+  }, []);
+
+  const fetchAccessibleGroups = useCallback(async () => {
+    if (!userId) return;
+
+    try {
+      const { data: ownedGroups, error: ownedError } = await supabase
+        .from("groups_with_stats")
+        .select("id, owner_id, name, images, genre, group_type")
+        .eq("owner_id", userId);
+
+      const { data: membershipRows, error: memberError } = await supabase
+        .from("group_members")
+        .select("group_id")
+        .eq("user_id", userId);
+
+      if (ownedError) throw ownedError;
+      if (memberError) throw memberError;
+
+      const memberGroupIds = Array.from(
+        new Set(
+          (membershipRows || [])
+            .map((row: any) => row.group_id)
+            .filter((id: any) => typeof id === "string" && id.length > 0),
+        ),
+      );
+
+      let memberGroups: any[] = [];
+      if (memberGroupIds.length > 0) {
+        const { data: memberGroupData, error: memberGroupDataError } = await supabase
+          .from("groups_with_stats")
+          .select("id, owner_id, name, images, genre, group_type")
+          .in("id", memberGroupIds);
+
+        if (memberGroupDataError) throw memberGroupDataError;
+        memberGroups = memberGroupData || [];
+      }
+
+      const uniqueGroups = [...(ownedGroups || []), ...memberGroups].filter(
+        (groupItem, index, array) => array.findIndex((candidate) => candidate.id === groupItem.id) === index,
+      );
+
+      setAccessibleGroups(uniqueGroups.filter((groupItem) => ["duo", "band"].includes(groupItem.group_type)));
+    } catch (e: any) {
+      showAlert("error", "Error", e.message || "Failed to fetch groups");
+      setAccessibleGroups([]);
+    }
+  }, [userId]);
+
   const fetchTeamById = useCallback(async (teamId: string) => {
     try {
       const { data, error } = await supabase
@@ -149,18 +231,25 @@ export default function ProductionTeamScreen() {
         return;
       }
 
+      const { data: membershipData } = await supabase
+        .from("production_team_members")
+        .select("role")
+        .eq("team_id", teamId)
+        .eq("user_id", userId)
+        .maybeSingle();
+
       setSelectedTeam({
         ...data,
-        member_role: data.owner_id === userId ? "owner" : "viewer",
+        member_role: data.owner_id === userId ? "owner" : membershipData?.role || "viewer",
       });
-      await fetchTeamMembers(teamId);
+      await Promise.all([fetchTeamMembers(teamId), fetchTeamRoster(teamId)]);
     } catch (e: any) {
       showAlert("error", "Error", e.message || "Failed to fetch team");
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [fetchTeamMembers, userId]);
+  }, [fetchTeamMembers, fetchTeamRoster, userId]);
 
   useFocusEffect(
     useCallback(() => {
@@ -272,6 +361,94 @@ export default function ProductionTeamScreen() {
     }
   };
 
+  const handleAddRoster = async () => {
+    if (!selectedTeam) return;
+
+    setAddingRoster(true);
+    try {
+      if (rosterMode === "musician") {
+        if (!rosterMusicianEmail.trim()) {
+          showAlert("warning", "Required", "Musician email is required");
+          setAddingRoster(false);
+          return;
+        }
+
+        const { data: profileData, error: profileErr } = await supabase
+          .from("profiles")
+          .select("id")
+          .eq("email", rosterMusicianEmail.trim().toLowerCase())
+          .maybeSingle();
+
+        if (profileErr) throw profileErr;
+        if (!profileData) {
+          showAlert("warning", "Not Found", "No registered musician found with that email.");
+          setAddingRoster(false);
+          return;
+        }
+
+        const { data, error } = await supabase.functions.invoke("manage-deals", {
+          body: {
+            action: "add_team_roster_profile",
+            teamId: selectedTeam.id,
+            profileId: profileData.id,
+          },
+        });
+
+        if (error) throw error;
+        if (data?.error) throw new Error(data.error);
+      } else {
+        if (!selectedRosterGroupId) {
+          showAlert("warning", "Required", "Select a duo or group to add.");
+          setAddingRoster(false);
+          return;
+        }
+
+        const { data, error } = await supabase.functions.invoke("manage-deals", {
+          body: {
+            action: "add_team_roster_group",
+            teamId: selectedTeam.id,
+            groupId: selectedRosterGroupId,
+          },
+        });
+
+        if (error) throw error;
+        if (data?.error) throw new Error(data.error);
+      }
+
+      setAddRosterModalVisible(false);
+      setRosterMode("musician");
+      setRosterMusicianEmail("");
+      setSelectedRosterGroupId(null);
+      showAlert("success", "Success", "Production roster updated.");
+      fetchTeamRoster(selectedTeam.id);
+    } catch (e: any) {
+      showAlert("error", "Error", e.message || "Failed to update roster");
+    } finally {
+      setAddingRoster(false);
+    }
+  };
+
+  const handleRemoveRosterEntry = async (entryId: string) => {
+    if (!selectedTeam) return;
+
+    try {
+      const { data, error } = await supabase.functions.invoke("manage-deals", {
+        body: {
+          action: "remove_team_roster_entry",
+          teamId: selectedTeam.id,
+          rosterId: entryId,
+        },
+      });
+
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+      showAlert("success", "Removed", "Performer removed from production roster.");
+      fetchTeamRoster(selectedTeam.id);
+    } catch (e: any) {
+      showAlert("error", "Error", e.message || "Failed to remove performer");
+    }
+  };
+
   const handleProposeDeal = async () => {
     if (!dealTitle.trim()) {
       showAlert("warning", "Required", "Deal title is required");
@@ -336,6 +513,7 @@ export default function ProductionTeamScreen() {
   const openTeamDetail = (team: Team) => {
     setSelectedTeam(team);
     fetchTeamMembers(team.id);
+    fetchTeamRoster(team.id);
   };
 
   const closeTeamDetail = () => {
@@ -468,13 +646,76 @@ export default function ProductionTeamScreen() {
             ))
           )}
 
+          {/* Performer Roster */}
+          <View style={[styles.sectionHeader, { marginTop: 20 }]}> 
+            <Text style={[styles.sectionTitle, { color: colors.text }]}>Performer Roster</Text>
+            {canManage && (
+              <TouchableOpacity activeOpacity={1}
+                onPress={async () => {
+                  setAddRosterModalVisible(true);
+                  await fetchAccessibleGroups();
+                }}
+                style={[styles.addBtn, { backgroundColor: colors.primary }]}
+              >
+                <Ionicons name="albums-outline" size={16} color="#fff" />
+                <Text style={styles.addBtnText}>Add</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+
+          {loadingRoster ? (
+            <View style={styles.loadingContainer}>
+              <Skeleton width="100%" height={56} borderRadius={12} />
+              <Skeleton width="100%" height={56} borderRadius={12} style={{ marginTop: 8 }} />
+            </View>
+          ) : teamRoster.length === 0 ? (
+            <Text style={[styles.emptyText, { color: colors.textSecondary }]}>No performers have been added yet.</Text>
+          ) : (
+            teamRoster.map((entry) => (
+              <View
+                key={entry.id}
+                style={[styles.memberCard, { backgroundColor: colors.card, borderColor: colors.border }]}
+              >
+                <View style={styles.memberRow}>
+                  {entry.avatar_url ? (
+                    <CachedImage uri={entry.avatar_url} style={styles.avatar} />
+                  ) : (
+                    <View style={[styles.avatarPlaceholder, { backgroundColor: colors.border }]}>
+                      <Ionicons name={entry.entity_kind === "musician" ? "person" : "people"} size={18} color={colors.textSecondary} />
+                    </View>
+                  )}
+                  <View style={styles.memberInfo}>
+                    <Text style={[styles.memberName, { color: colors.text }]}>
+                      {entry.display_name}
+                    </Text>
+                    <Text style={[styles.memberRole, { color: colors.textSecondary }]}>
+                      {entry.entity_kind === "musician"
+                        ? "Musician"
+                        : entry.group_type === "duo"
+                          ? "Duo"
+                          : "Group"}
+                    </Text>
+                  </View>
+                  {canManage && (
+                    <TouchableOpacity activeOpacity={1}
+                      onPress={() => handleRemoveRosterEntry(entry.id)}
+                      style={styles.removeBtn}
+                    >
+                      <Ionicons name="close-circle" size={22} color="#EF4444" />
+                    </TouchableOpacity>
+                  )}
+                </View>
+              </View>
+            ))
+          )}
+
           {/* Propose a venue partnership deal */}
           {canManage && (
             <TouchableOpacity activeOpacity={1}
               style={[styles.dealsBtn, { backgroundColor: "#8B5CF6", marginTop: 20 }]}
               onPress={() => setProposeDealVisible(true)}
             >
-              <Ionicons name="handshake-outline" size={18} color="#fff" />
+              <Ionicons name="briefcase-outline" size={18} color="#fff" />
               <Text style={styles.dealsBtnText}>Propose Venue Deal</Text>
             </TouchableOpacity>
           )}
@@ -552,6 +793,123 @@ export default function ProductionTeamScreen() {
             </TouchableOpacity>
           </View>
               <TouchableOpacity activeOpacity={1} onPress={() => setAddMemberModalVisible(false)} style={{ marginTop: 8, alignItems: "center" }}>
+                <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_500Medium" }}>Close</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </RNModal>
+
+        {/* Add Roster Modal */}
+        <RNModal
+          visible={addRosterModalVisible}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setAddRosterModalVisible(false)}
+        >
+          <View style={{ flex: 1, justifyContent: "center", alignItems: "center", backgroundColor: "rgba(0,0,0,0.5)" }}>
+            <View style={{ backgroundColor: colors.card, borderRadius: 16, padding: 20, width: "88%", maxWidth: 420 }}>
+              <Text style={{ fontFamily: "Poppins_600SemiBold", fontSize: 17, color: colors.text, marginBottom: 14 }}>Add Performer To Roster</Text>
+              <View style={styles.modalContent}>
+                <Text style={[styles.inputLabel, { color: colors.text }]}>Roster Type</Text>
+                <View style={styles.roleSelector}>
+                  {([
+                    { id: "musician", label: "Musician" },
+                    { id: "group", label: "Duo / Group" },
+                  ] as const).map((option) => (
+                    <TouchableOpacity activeOpacity={1}
+                      key={option.id}
+                      onPress={() => setRosterMode(option.id)}
+                      style={[
+                        styles.roleOption,
+                        {
+                          backgroundColor: rosterMode === option.id ? colors.primary : colors.card,
+                          borderColor: rosterMode === option.id ? colors.primary : colors.border,
+                        },
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.roleOptionText,
+                          { color: rosterMode === option.id ? "#fff" : colors.text },
+                        ]}
+                      >
+                        {option.label}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+
+                {rosterMode === "musician" ? (
+                  <>
+                    <Text style={[styles.inputLabel, { color: colors.text, marginTop: 12 }]}>Musician Email</Text>
+                    <TextInput
+                      style={[styles.input, { color: colors.text, borderColor: colors.border, backgroundColor: colors.card }]}
+                      value={rosterMusicianEmail}
+                      onChangeText={setRosterMusicianEmail}
+                      placeholder="musician@example.com"
+                      placeholderTextColor={colors.textSecondary}
+                      autoCapitalize="none"
+                      keyboardType="email-address"
+                    />
+                  </>
+                ) : (
+                  <>
+                    <Text style={[styles.inputLabel, { color: colors.text, marginTop: 12 }]}>Select Duo / Group</Text>
+                    {accessibleGroups.length === 0 ? (
+                      <Text style={[styles.emptyText, { color: colors.textSecondary, marginTop: 8 }]}>No eligible duo or group profiles found.</Text>
+                    ) : (
+                      <View style={{ gap: 10, marginTop: 8 }}>
+                        {accessibleGroups.map((groupItem) => {
+                          const isSelected = selectedRosterGroupId === groupItem.id;
+                          return (
+                            <TouchableOpacity activeOpacity={1}
+                              key={groupItem.id}
+                              onPress={() => setSelectedRosterGroupId(groupItem.id)}
+                              style={{
+                                flexDirection: "row",
+                                alignItems: "center",
+                                paddingVertical: 12,
+                                paddingHorizontal: 14,
+                                borderRadius: 12,
+                                borderWidth: 1.5,
+                                borderColor: isSelected ? colors.primary : colors.border,
+                                backgroundColor: isSelected
+                                  ? isDark ? `${colors.primary}26` : `${colors.primary}14`
+                                  : isDark ? "#374151" : "#F9FAFB",
+                              }}
+                            >
+                              <View style={{ flex: 1 }}>
+                                <Text style={{ color: colors.text, fontFamily: "Poppins_600SemiBold", fontSize: 14 }}>
+                                  {groupItem.name}
+                                </Text>
+                                <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_400Regular", fontSize: 12, marginTop: 1 }}>
+                                  {groupItem.group_type === "duo" ? "Duo" : "Group"}
+                                </Text>
+                              </View>
+                              {isSelected && (
+                                <Ionicons name="checkmark-circle" size={20} color={colors.primary} />
+                              )}
+                            </TouchableOpacity>
+                          );
+                        })}
+                      </View>
+                    )}
+                  </>
+                )}
+
+                <TouchableOpacity activeOpacity={1}
+                  onPress={handleAddRoster}
+                  disabled={addingRoster}
+                  style={[styles.submitBtn, { backgroundColor: colors.primary, opacity: addingRoster ? 0.6 : 1, marginTop: 16 }]}
+                >
+                  {addingRoster ? (
+                    <ActivityIndicator size="small" color="#fff" />
+                  ) : (
+                    <Text style={styles.submitBtnText}>Add To Roster</Text>
+                  )}
+                </TouchableOpacity>
+              </View>
+              <TouchableOpacity activeOpacity={1} onPress={() => setAddRosterModalVisible(false)} style={{ marginTop: 8, alignItems: "center" }}>
                 <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_500Medium" }}>Close</Text>
               </TouchableOpacity>
             </View>

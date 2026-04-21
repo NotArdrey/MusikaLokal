@@ -891,7 +891,30 @@ export default function GigDetailsScreen() {
                     No applications yet.
                   </Text>
                 ) : (
-                  applications.map((app) => (
+                  applications.map((app) => {
+                    const rosterProfile = app.production_roster?.roster_profile;
+                    const rosterGroup = app.production_roster?.roster_group;
+                    const displayGroup = app.group || rosterGroup;
+                    const displayApplicant = rosterProfile || app.applicant;
+                    const displayName =
+                      displayGroup?.name ||
+                      displayApplicant?.full_name ||
+                      "Unknown Applicant";
+                    const displayGenres =
+                      displayGroup?.genre ||
+                      displayApplicant?.genres?.join(", ") ||
+                      (app.production_team?.name ? "Production submission" : "Musician");
+                    const displayLocation =
+                      displayGroup?.location || displayApplicant?.location;
+                    const displaySkills = displayApplicant?.skills || [];
+                    const displayPortfolio = displayApplicant?.portfolio_urls || [];
+                    const displayAvatar =
+                      displayGroup?.images?.[0] ||
+                      displayApplicant?.avatar_url ||
+                      app.production_team?.logo_url ||
+                      "https://i.pravatar.cc/100";
+
+                    return (
                     <View
                       key={app.id}
                       style={[
@@ -903,10 +926,7 @@ export default function GigDetailsScreen() {
                       <View style={styles.applicantHeader}>
                         <Image
                           source={{
-                            uri:
-                              app.group?.images?.[0] ||
-                              app.applicant?.avatar_url ||
-                              "https://i.pravatar.cc/100",
+                            uri: displayAvatar,
                           }}
                           style={styles.applicantImage}
                         />
@@ -926,9 +946,7 @@ export default function GigDetailsScreen() {
                                 color: colors.text,
                               }}
                             >
-                              {app.group?.name ||
-                                app.applicant?.full_name ||
-                                "Unknown Applicant"}
+                              {displayName}
                             </Text>
                             <View
                               style={[
@@ -982,18 +1000,26 @@ export default function GigDetailsScreen() {
                               color: colors.textSecondary,
                             }}
                           >
-                            {app.group?.genre ||
-                              app.applicant?.genres?.join(", ") ||
-                              "Musician"}
-                            {(app.group?.location || app.applicant?.location) &&
-                              ` â€¢ ${app.group?.location || app.applicant?.location}`}
+                            {displayGenres}
+                            {displayLocation && ` • ${displayLocation}`}
                           </Text>
+                          {app.production_team?.name && (
+                            <Text
+                              style={{
+                                fontFamily: "Poppins_500Medium",
+                                fontSize: 11,
+                                color: colors.primary,
+                                marginTop: 4,
+                              }}
+                            >
+                              Submitted via {app.production_team.name}
+                            </Text>
+                          )}
                         </View>
                       </View>
 
                       {/* Skills/Instruments */}
-                      {app.applicant?.skills &&
-                        app.applicant.skills.length > 0 && (
+                      {displaySkills.length > 0 && (
                           <View style={{ marginBottom: 12 }}>
                             <Text
                               style={{
@@ -1012,7 +1038,7 @@ export default function GigDetailsScreen() {
                                 gap: 6,
                               }}
                             >
-                              {app.applicant.skills
+                              {displaySkills
                                 .slice(0, 5)
                                 .map((skill: string, idx: number) => (
                                   <View
@@ -1035,7 +1061,7 @@ export default function GigDetailsScreen() {
                                     </Text>
                                   </View>
                                 ))}
-                              {app.applicant.skills.length > 5 && (
+                              {displaySkills.length > 5 && (
                                 <View
                                   style={[
                                     styles.skillTag,
@@ -1049,7 +1075,7 @@ export default function GigDetailsScreen() {
                                       color: colors.primary,
                                     }}
                                   >
-                                    +{app.applicant.skills.length - 5}
+                                    +{displaySkills.length - 5}
                                   </Text>
                                 </View>
                               )}
@@ -1058,7 +1084,7 @@ export default function GigDetailsScreen() {
                         )}
 
                       {/* Group Members */}
-                      {app.group?.members && app.group.members.length > 0 && (
+                      {displayGroup?.members && displayGroup.members.length > 0 && (
                         <View style={{ marginBottom: 12 }}>
                           <Text
                             style={{
@@ -1068,7 +1094,7 @@ export default function GigDetailsScreen() {
                               marginBottom: 6,
                             }}
                           >
-                            Group Members ({app.group.members.length})
+                            Group Members ({displayGroup.members.length})
                           </Text>
                           <Text
                             style={{
@@ -1077,7 +1103,7 @@ export default function GigDetailsScreen() {
                               color: colors.text,
                             }}
                           >
-                            {app.group.members
+                            {displayGroup.members
                               .map((m: any) =>
                                 typeof m === "string" ? m : m.name,
                               )
@@ -1238,8 +1264,7 @@ export default function GigDetailsScreen() {
                       )}
 
                       {/* Portfolio/Music - Instagram Style Grid */}
-                      {app.applicant?.portfolio_urls &&
-                        app.applicant.portfolio_urls.length > 0 && (
+                      {displayPortfolio.length > 0 && (
                           <View style={{ marginBottom: 12 }}>
                             <Text
                               style={{
@@ -1252,7 +1277,7 @@ export default function GigDetailsScreen() {
                               Music & Portfolio
                             </Text>
                             <View style={styles.portfolioGrid}>
-                              {app.applicant.portfolio_urls.map(
+                              {displayPortfolio.map(
                                 (url: string, idx: number) => {
                                   const isImage =
                                     /\.(jpg|jpeg|png|gif|webp)$/i.test(url);
@@ -1362,8 +1387,7 @@ export default function GigDetailsScreen() {
                         )}
 
                       {/* Legacy Portfolio Links (for non-media URLs) */}
-                      {app.applicant?.portfolio_urls &&
-                        app.applicant.portfolio_urls.filter(
+                      {displayPortfolio.filter(
                           (url: string) =>
                             !/\.(jpg|jpeg|png|gif|webp|mp4|mov|webm)$/i.test(
                               url,
@@ -1384,7 +1408,7 @@ export default function GigDetailsScreen() {
                             >
                               Other Links
                             </Text>
-                            {app.applicant.portfolio_urls
+                            {displayPortfolio
                               .filter(
                                 (url: string) =>
                                   !/\.(jpg|jpeg|png|gif|webp|mp4|mov|webm)$/i.test(
@@ -1448,40 +1472,22 @@ export default function GigDetailsScreen() {
                       {/* View Full Profile Button */}
                       <TouchableOpacity activeOpacity={1}
                         onPress={() => {
-                          console.log("ðŸ‘¤ View Profile pressed");
-                          console.log("ðŸ‘¤ app.group:", app.group);
-                          console.log("ðŸ‘¤ app.applicant:", app.applicant);
-                          console.log("ðŸ‘¤ app.applicant_id:", app.applicant_id);
-
-                          if (app.group?.id) {
-                            console.log(
-                              "ðŸ‘¤ Navigating to group:",
-                              app.group.id,
-                            );
+                          if (displayGroup?.id) {
                             router.push({
                               pathname: "/group_details",
-                              params: { id: app.group.id },
+                              params: { id: displayGroup.id },
                             });
-                          } else if (app.applicant?.id) {
-                            console.log(
-                              "ðŸ‘¤ Navigating to profile with applicant.id:",
-                              app.applicant.id,
-                            );
+                          } else if (displayApplicant?.id) {
                             router.push({
                               pathname: "/profile",
-                              params: { userId: app.applicant.id },
+                              params: { userId: displayApplicant.id },
                             });
                           } else if (app.applicant_id) {
-                            console.log(
-                              "ðŸ‘¤ Navigating to profile with applicant_id:",
-                              app.applicant_id,
-                            );
                             router.push({
                               pathname: "/profile",
                               params: { userId: app.applicant_id },
                             });
                           } else {
-                            console.log("âŒ No ID available for navigation");
                             Alert.alert("Error", "Unable to view profile");
                           }
                         }}
@@ -1503,7 +1509,7 @@ export default function GigDetailsScreen() {
                             marginLeft: 8,
                           }}
                         >
-                          View Full {app.group ? "Group" : "Profile"}
+                          View Full {displayGroup ? "Group" : "Profile"}
                         </Text>
                       </TouchableOpacity>
 
@@ -1545,7 +1551,8 @@ export default function GigDetailsScreen() {
                         </View>
                       )}
                     </View>
-                  ))
+                    );
+                  })
                 )}
               </View>
             )}

@@ -17,6 +17,7 @@ import { supabase } from "../lib/supabase";
 import CachedImage from "../src/components/CachedImage";
 import Header from "../src/components/header";
 import Navbar from "../src/components/navbar";
+import ReportModal from "../src/components/ReportModal";
 import Skeleton from "../src/components/Skeleton";
 import CustomAlert, { AlertType } from "../src/components/CustomAlert";
 import { useBottomBarClearance } from "../src/hooks/useBottomBarClearance";
@@ -34,7 +35,7 @@ const moderateScale = (size: number, factor = 0.3) => {
 export default function ProducerProjectDetailsScreen() {
   const { colors } = useTheme();
   const { contentBottomPadding } = useBottomBarClearance(24);
-  const { session, userId, userRole } = useAuth();
+  const { userId, userRole, isGuest } = useAuth();
   const { project_id } = useLocalSearchParams();
   const isProducer = userRole === "producer";
 
@@ -54,6 +55,7 @@ export default function ProducerProjectDetailsScreen() {
   const [inviteRoleId, setInviteRoleId] = useState<string | null>(null);
   const [inviteMessage, setInviteMessage] = useState("");
   const [inviting, setInviting] = useState(false);
+  const [showReportModal, setShowReportModal] = useState(false);
   const [musicianSearch, setMusicianSearch] = useState("");
   const [musicianResults, setMusicianResults] = useState<any[]>([]);
   const [searchingMusicians, setSearchingMusicians] = useState(false);
@@ -234,6 +236,53 @@ export default function ProducerProjectDetailsScreen() {
     }
   };
 
+  const openReportModal = () => {
+    if (!project?.id) {
+      setAlert({ type: "error", title: "Unable to Report", message: "Project details are missing." });
+      return;
+    }
+
+    setShowReportModal(true);
+  };
+
+  const submitProjectReport = async (reason: string, details?: string) => {
+    if (!userId || isGuest) {
+      throw new Error("You need to sign in to report producer projects.");
+    }
+
+    if (!project?.id) {
+      throw new Error("Project details are missing.");
+    }
+
+    const body = {
+      action: "report",
+      type: "project",
+      id: project.id,
+      userId,
+      reason,
+      details: details || null,
+    };
+
+    const { data, error } = await supabase.functions.invoke("manage-details", { body });
+
+    if (error) {
+      console.error("manage-details report failed", {
+        message: error.message,
+        status: (error as any).status,
+        code: (error as any).code,
+        details: (error as any).details,
+        hint: (error as any).hint,
+        context: (error as any).context,
+        body,
+      });
+      throw new Error(error.message || "Failed to submit report.");
+    }
+
+    if (data && !Array.isArray(data) && data.already_reported) {
+      throw new Error("You already have a pending report for this producer project.");
+    }
+  };
+
   if (loading) {
     return (
       <View style={[styles.container, { backgroundColor: colors.background }]}>
@@ -264,10 +313,23 @@ export default function ProducerProjectDetailsScreen() {
   const pendingApps = project.applications?.filter((a: any) => a.status === "pending") || [];
   const myApplication = project.applications?.find((a: any) => a.applicant_id === userId);
   const myInvite = project.invites?.find((i: any) => i.invitee_id === userId);
+  const canReportProject = !isOwner && !!userId && !isGuest;
+  const reportHeaderAction = canReportProject ? (
+    <TouchableOpacity
+      activeOpacity={1}
+      onPress={openReportModal}
+      style={[
+        styles.headerReportBtn,
+        { backgroundColor: colors.surface, borderColor: colors.border },
+      ]}
+    >
+      <Ionicons name="flag-outline" size={20} color="#EF4444" />
+    </TouchableOpacity>
+  ) : null;
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
-      <Header title={project.title} onBackPress={() => router.back()} />
+      <Header title={project.title} onBackPress={() => router.back()} rightComponent={reportHeaderAction} />
 
       <ScrollView style={styles.content} contentContainerStyle={{ paddingBottom: contentBottomPadding }}>
         {/* Cover image */}
@@ -609,6 +671,15 @@ export default function ProducerProjectDetailsScreen() {
         </View>
       </Modal>
 
+      <ReportModal
+        visible={showReportModal}
+        onClose={() => setShowReportModal(false)}
+        onSubmit={submitProjectReport}
+        targetName={project.title}
+        title="Report Producer Project"
+        reportType="project"
+      />
+
       {alert && (
         <CustomAlert visible type={alert.type} title={alert.title} message={alert.message} onClose={() => setAlert(null)} />
       )}
@@ -656,4 +727,5 @@ const styles = StyleSheet.create({
   rolePill: { borderWidth: 1, borderRadius: 20, paddingHorizontal: 14, paddingVertical: 6, marginRight: 8 },
   submitBtn: { alignItems: "center", justifyContent: "center", paddingVertical: 14, borderRadius: 12, marginTop: 20 },
   submitBtnText: { color: "#fff", fontSize: moderateScale(15), fontWeight: "700" },
+  headerReportBtn: { width: 40, height: 40, borderRadius: 14, borderWidth: 1, alignItems: "center", justifyContent: "center" },
 });

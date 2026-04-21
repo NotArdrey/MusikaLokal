@@ -30,6 +30,7 @@ import Navbar, {
   NAVBAR_CLEARANCE,
   NAVBAR_HEIGHT,
 } from "../src/components/navbar";
+import ProductionTeamDetailsSheet from "../src/components/ProductionTeamDetailsSheet";
 import SearchBottomSheet from "../src/components/SearchBottomSheet";
 import Skeleton from "../src/components/Skeleton";
 import CustomAlert, { AlertType } from "../src/components/CustomAlert";
@@ -500,12 +501,14 @@ export default function FeedScreen() {
   const [alert, setAlert] = useState<{ type: AlertType; title: string; message: string } | null>(null);
   const searchSheetRef = React.useRef<import("@gorhom/bottom-sheet").BottomSheetModal>(null);
   const bottomSheetRef = React.useRef<import("@gorhom/bottom-sheet").BottomSheetModal>(null);
+  const productionTeamSheetRef = React.useRef<import("@gorhom/bottom-sheet").BottomSheetModal>(null);
   const activeStationIdRef = React.useRef<string | null>(activeStation?.id || null);
   const activeTabRef = React.useRef<FeedTab>(tab);
   const feedCacheRef = React.useRef<Record<FeedTab, FeedCacheEntry>>(createFeedCache(geminiModelLabel));
   const feedRequestIdRef = React.useRef<Record<FeedTab, number>>({ for_you: 0, following: 0 });
   const hasFocusedFeedRef = React.useRef(false);
   const [selectedListingId, setSelectedListingId] = useState<string | null>(null);
+  const [selectedProductionTeamId, setSelectedProductionTeamId] = useState<string | null>(null);
   const [pendingReopenListingId, setPendingReopenListingId] = useState<string | null>(null);
 
   const [liveStations, setLiveStations] = useState<any[]>([]);
@@ -589,6 +592,10 @@ export default function FeedScreen() {
     presentModalWithRetry(searchSheetRef as any);
   }, [presentModalWithRetry]);
 
+  const openProductionTeamSheet = useCallback(() => {
+    presentModalWithRetry(productionTeamSheetRef as any);
+  }, [presentModalWithRetry]);
+
   const openDetailsSheet = useCallback(() => {
     presentModalWithRetry(bottomSheetRef as any);
   }, [presentModalWithRetry]);
@@ -600,6 +607,15 @@ export default function FeedScreen() {
       openDetailsSheet();
     },
     [openDetailsSheet],
+  );
+
+  const openProductionTeamDetails = useCallback(
+    (teamId: string) => {
+      if (!teamId) return;
+      setSelectedProductionTeamId(teamId);
+      openProductionTeamSheet();
+    },
+    [openProductionTeamSheet],
   );
 
   const openLiveStationCreator = useCallback((station: any) => {
@@ -633,6 +649,11 @@ export default function FeedScreen() {
     clearBottomOverlays();
     setSelectedListingId(null);
     setPendingReopenListingId(null);
+  }, [clearBottomOverlays]);
+
+  const handleProductionTeamSheetDismiss = useCallback(() => {
+    clearBottomOverlays();
+    setSelectedProductionTeamId(null);
   }, [clearBottomOverlays]);
 
   const handleLiveStationPress = useCallback(async (station: any) => {
@@ -1773,7 +1794,7 @@ export default function FeedScreen() {
               }
 
               if (item?.type === "Production" && nextId) {
-                router.push({ pathname: "/production_team", params: { teamId: nextId } });
+                openProductionTeamDetails(nextId);
                 return;
               }
 
@@ -2331,10 +2352,17 @@ export default function FeedScreen() {
         ref={searchSheetRef}
         onClose={handleSearchSheetClose}
         onItemPress={(id) => openListingDetails(id)}
+        onProductionTeamPress={(teamId) => openProductionTeamDetails(teamId)}
         onFollowChanged={() => {
           invalidateFeedCache("following");
           void fetchFeed(activeTabRef.current);
         }}
+      />
+
+      <ProductionTeamDetailsSheet
+        ref={productionTeamSheetRef}
+        teamId={selectedProductionTeamId}
+        onDismiss={handleProductionTeamSheetDismiss}
       />
 
       <ListingDetailsSheet

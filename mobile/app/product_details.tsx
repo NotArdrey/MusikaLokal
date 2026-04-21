@@ -14,6 +14,7 @@ import { supabase } from "../lib/supabase";
 import CachedImage from "../src/components/CachedImage";
 import Header from "../src/components/header";
 import Navbar from "../src/components/navbar";
+import ReportModal from "../src/components/ReportModal";
 import Skeleton from "../src/components/Skeleton";
 import CustomAlert, { AlertType } from "../src/components/CustomAlert";
 import { useAuth } from "../src/context/AuthContext";
@@ -36,6 +37,7 @@ export default function ProductDetailsScreen() {
   const [selectedVariant, setSelectedVariant] = useState<any>(null);
   const [statusUpdating, setStatusUpdating] = useState(false);
   const [alert, setAlert] = useState<{ type: AlertType; title: string; message: string } | null>(null);
+  const [showReportModal, setShowReportModal] = useState(false);
 
   const invokeMarketplace = useCallback(async (body: Record<string, unknown>) => {
     const { data, error } = await supabase.functions.invoke("manage-marketplace", { body });
@@ -134,6 +136,53 @@ export default function ProductDetailsScreen() {
     }
   };
 
+  const openReportModal = () => {
+    if (!product?.id) {
+      setAlert({ type: "error", title: "Unable to Report", message: "Listing details are missing." });
+      return;
+    }
+
+    setShowReportModal(true);
+  };
+
+  const submitProductReport = async (reason: string, details?: string) => {
+    if (!userId || isGuest) {
+      throw new Error("You need to sign in to report marketplace items.");
+    }
+
+    if (!product?.id) {
+      throw new Error("Listing details are missing.");
+    }
+
+    const body = {
+      action: "report",
+      type: "product",
+      id: product.id,
+      userId,
+      reason,
+      details: details || null,
+    };
+
+    const { data, error } = await supabase.functions.invoke("manage-details", { body });
+
+    if (error) {
+      console.error("manage-details report failed", {
+        message: error.message,
+        status: (error as any).status,
+        code: (error as any).code,
+        details: (error as any).details,
+        hint: (error as any).hint,
+        context: (error as any).context,
+        body,
+      });
+      throw new Error(error.message || "Failed to submit report.");
+    }
+
+    if (data && !Array.isArray(data) && data.already_reported) {
+      throw new Error("You already have a pending report for this marketplace item.");
+    }
+  };
+
   const formatPrice = (price: number | string | null | undefined) => {
     const amount = Number(price ?? 0);
     if (!Number.isFinite(amount) || amount <= 0) return "Free";
@@ -175,10 +224,23 @@ export default function ProductDetailsScreen() {
     .filter((value: unknown): value is string => typeof value === "string" && value.length > 0);
   const isSold = product.status === "sold_out";
   const isDraft = product.status === "draft";
+  const canReportProduct = !isSeller && !!userId && !isGuest;
+  const reportHeaderAction = canReportProduct ? (
+    <TouchableOpacity
+      activeOpacity={1}
+      onPress={openReportModal}
+      style={[
+        styles.headerReportBtn,
+        { backgroundColor: colors.surface, borderColor: colors.border },
+      ]}
+    >
+      <Ionicons name="flag-outline" size={20} color="#EF4444" />
+    </TouchableOpacity>
+  ) : null;
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
-      <Header title={product.title} onBackPress={() => router.back()} />
+      <Header title={product.title} onBackPress={() => router.back()} rightComponent={reportHeaderAction} />
 
       <ScrollView style={styles.content}>
         {/* Image gallery */}
@@ -359,6 +421,15 @@ export default function ProductDetailsScreen() {
         </View>
       )}
 
+      <ReportModal
+        visible={showReportModal}
+        onClose={() => setShowReportModal(false)}
+        onSubmit={submitProductReport}
+        targetName={product.title}
+        title="Report Marketplace Item"
+        reportType="product"
+      />
+
       {alert && <CustomAlert visible type={alert.type} title={alert.title} message={alert.message} onClose={() => setAlert(null)} />}
       <Navbar />
     </View>
@@ -391,6 +462,7 @@ const styles = StyleSheet.create({
   sellerBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", paddingVertical: 12, borderWidth: 1, borderRadius: 10 },
   primarySellerBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, paddingVertical: 12, borderRadius: 10 },
   primarySellerBtnText: { color: "#fff", fontSize: moderateScale(13), fontWeight: "700" },
+  headerReportBtn: { width: 40, height: 40, borderRadius: 14, borderWidth: 1, alignItems: "center", justifyContent: "center" },
   buyBar: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", padding: 16, paddingBottom: 24, borderTopWidth: 1 },
   buyPrice: { fontSize: moderateScale(18), fontWeight: "700" },
   buyVariant: { fontSize: moderateScale(11), marginTop: 2 },

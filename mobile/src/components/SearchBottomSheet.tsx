@@ -174,12 +174,16 @@ const collectProfileValues = (rows: any[] | null | undefined, valueKey: string) 
 interface SearchBottomSheetProps {
   onClose?: () => void;
   onItemPress?: (listingId: string) => void;
+  onProductionTeamPress?: (teamId: string) => void;
   onChat?: (item: any) => void;
   onFollowChanged?: () => void;
 }
 
 const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
-  function SearchBottomSheet({ onClose, onItemPress, onChat, onFollowChanged }, ref) {
+  function SearchBottomSheet(
+    { onClose, onItemPress, onProductionTeamPress, onChat, onFollowChanged },
+    ref,
+  ) {
     const { colors, isDark } = useTheme();
     const { userRole, isGuest, userId } = useAuth();
     const insets = useSafeAreaInsets();
@@ -800,6 +804,11 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
               }
 
               if (item?.type === "Production") {
+                if (onProductionTeamPress) {
+                  onProductionTeamPress(listingId);
+                  return;
+                }
+
                 router.push({ pathname: "/production_team", params: { teamId: listingId } });
                 return;
               }
@@ -809,7 +818,7 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
           });
         });
       },
-      [dismissSheet, onItemPress],
+      [dismissSheet, onItemPress, onProductionTeamPress],
     );
 
     const clearSearch = () => setSearchQuery("");

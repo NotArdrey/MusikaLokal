@@ -24,6 +24,7 @@ interface GigApplyTabProps {
   group: any;
   applicationContext?: "gig" | "group";
   userId: string | null;
+  userRole?: string | null;
   pitchMessage: string;
   setPitchMessage: (value: string) => void;
   cvFile: any;
@@ -40,6 +41,13 @@ interface GigApplyTabProps {
   userGroups: any[];
   selectedGroupId: string | null;
   setSelectedGroupId: (value: string | null) => void;
+  productionTeams: any[];
+  loadingProductionTeams: boolean;
+  selectedProductionTeamId: string | null;
+  setSelectedProductionTeamId: (value: string | null) => void;
+  productionRoster: any[];
+  selectedProductionRosterId: string | null;
+  setSelectedProductionRosterId: (value: string | null) => void;
   selectedSlotType: "solo" | "duo" | "band" | null;
   setSelectedSlotType: (value: "solo" | "duo" | "band" | null) => void;
   groupAlreadyApplied: boolean;
@@ -53,6 +61,7 @@ const GigApplyTab = ({
   group,
   applicationContext = "gig",
   userId,
+  userRole,
   pitchMessage,
   setPitchMessage,
   cvFile,
@@ -69,6 +78,13 @@ const GigApplyTab = ({
   userGroups,
   selectedGroupId,
   setSelectedGroupId,
+  productionTeams,
+  loadingProductionTeams,
+  selectedProductionTeamId,
+  setSelectedProductionTeamId,
+  productionRoster,
+  selectedProductionRosterId,
+  setSelectedProductionRosterId,
   selectedSlotType,
   setSelectedSlotType,
   groupAlreadyApplied,
@@ -86,11 +102,12 @@ const GigApplyTab = ({
 
   const [isSystemTermsAccepted, setIsSystemTermsAccepted] = React.useState(false);
   const [isCustomContractAccepted, setIsCustomContractAccepted] = React.useState(false);
-  const hasCustomContract = !isGroupApplicationFlow && Boolean(group?.contract_url);
-
-  const musicianTypeRequired = group?.requirements?.musician_type || "both";
   const isGroupApplicationFlow = applicationContext === "group";
+  const isProducerFlow = !isGroupApplicationFlow && userRole === "producer";
+  const hasCustomContract = !isGroupApplicationFlow && Boolean(group?.contract_url);
+  const musicianTypeRequired = group?.requirements?.musician_type || "both";
   const hasGroups = userGroups.length > 0;
+  const selectedProductionTeam = productionTeams.find((team) => team.id === selectedProductionTeamId) || null;
   const slots = group?.requirements?.slots || {};
   const requiredSlotTypes = (["solo", "duo", "band"] as const).filter(
     (slotType) => (slots?.[slotType]?.needed || 0) > 0,
@@ -105,12 +122,36 @@ const GigApplyTab = ({
     return true;
   });
 
+  const getProductionRosterGroupType = (entry: any) => {
+    if (!entry) return null;
+    if (entry.group_type) return entry.group_type;
+    if (entry.group?.group_type) return entry.group.group_type;
+    if (entry.entity_kind === "duo") return "duo";
+    if (entry.entity_kind === "group") return "band";
+    return null;
+  };
+
+  const filteredProductionRoster = productionRoster.filter((entry) => {
+    const entryGroupType = getProductionRosterGroupType(entry);
+
+    if (selectedSlotType === "solo") return entry.entity_kind === "musician";
+    if (selectedSlotType === "duo") return entryGroupType === "duo";
+    if (selectedSlotType === "band") return entryGroupType === "band";
+    return true;
+  });
+
   const getEnabledSlotTypes = () => {
     if (requiredSlotTypes.length === 0) return [] as ("solo" | "duo" | "band")[];
 
     return requiredSlotTypes.filter((slotType) => {
       if (musicianTypeRequired === "solo" && slotType !== "solo") return false;
       if (musicianTypeRequired === "group" && slotType === "solo") return false;
+      if (isProducerFlow) {
+        if (slotType === "solo") return productionRoster.some((entry) => entry.entity_kind === "musician");
+        if (slotType === "duo") return productionRoster.some((entry) => getProductionRosterGroupType(entry) === "duo");
+        if (slotType === "band") return productionRoster.some((entry) => getProductionRosterGroupType(entry) === "band");
+        return true;
+      }
       if (slotType === "duo" && !userGroups.some((g) => isDuoType(g))) return false;
       if (slotType === "band" && !userGroups.some((g) => isBandType(g))) return false;
       return true;
@@ -154,6 +195,14 @@ const GigApplyTab = ({
   }, [filteredGroups, selectedGroupId, setSelectedGroupId]);
 
   React.useEffect(() => {
+    if (!selectedProductionRosterId) return;
+    const stillVisible = filteredProductionRoster.some((entry) => entry.id === selectedProductionRosterId);
+    if (!stillVisible) {
+      setSelectedProductionRosterId(null);
+    }
+  }, [filteredProductionRoster, selectedProductionRosterId, setSelectedProductionRosterId]);
+
+  React.useEffect(() => {
     const enabledSlotTypes = getEnabledSlotTypes();
 
     if (enabledSlotTypes.length === 0) {
@@ -177,8 +226,11 @@ const GigApplyTab = ({
 
   const requiresGroupSelection =
     !isGroupApplicationFlow &&
+    !isProducerFlow &&
     group.requirements?.musician_type === "group" &&
     !selectedGroupId;
+  const requiresProductionSelection =
+    isProducerFlow && (!selectedProductionTeamId || !selectedProductionRosterId);
   const isApplicationsClosed = isGroupApplicationFlow
     ? group?.open_group_applications !== true
     : Boolean(getGigApplicationDeadlineInfo(group)?.isPassed);
@@ -191,6 +243,7 @@ const GigApplyTab = ({
     isCvMissing ||
     isVideoMissing ||
     requiresGroupSelection ||
+    requiresProductionSelection ||
     isApplicationsClosed ||
     isTermsIncomplete;
   const isSubmitDisabled =
@@ -225,6 +278,24 @@ const GigApplyTab = ({
       (!selectedSlotType || !enabledSlotTypes.includes(selectedSlotType))
     ) {
       setSelectedSlotType(enabledSlotTypes[0]);
+    }
+
+    if (
+      !isGroupApplicationFlow &&
+      isProducerFlow &&
+      !selectedProductionTeamId &&
+      productionTeams.length > 0
+    ) {
+      setSelectedProductionTeamId(productionTeams[0].id);
+    }
+
+    if (
+      !isGroupApplicationFlow &&
+      isProducerFlow &&
+      !selectedProductionRosterId &&
+      filteredProductionRoster.length > 0
+    ) {
+      setSelectedProductionRosterId(filteredProductionRoster[0].id);
     }
 
     if (
@@ -303,7 +374,7 @@ const GigApplyTab = ({
           musicianTypeRequired === "group" || musicianTypeRequired === "both";
         const availableSlotTypes = requiredSlotTypes;
 
-        if (!canApplyAsSolo && !hasGroups) {
+        if (!isProducerFlow && !canApplyAsSolo && !hasGroups) {
           return (
             <View
               style={[
@@ -437,6 +508,161 @@ const GigApplyTab = ({
             </View>
           );
         };
+
+        if (isProducerFlow) {
+          return (
+            <>
+              {renderSlotTypeSelector()}
+              <View style={styles.inputContainer}>
+                <Text style={[styles.label, { color: colors.textSecondary }]}>Select Production Team *</Text>
+                {loadingProductionTeams ? (
+                  <View style={{ paddingVertical: 12 }}>
+                    <ActivityIndicator color={colors.primary} />
+                  </View>
+                ) : productionTeams.length === 0 ? (
+                  <View
+                    style={[
+                      styles.infoBox,
+                      {
+                        backgroundColor: "#F59E0B20",
+                        borderColor: "#F59E0B",
+                      },
+                    ]}
+                  >
+                    <Ionicons name="information-circle" size={20} color="#F59E0B" />
+                    <Text style={[styles.infoText, { color: colors.text }]}>Create a production team first, then add musicians, duos, or groups to its roster before applying.</Text>
+                  </View>
+                ) : (
+                  <View style={{ gap: 10 }}>
+                    {productionTeams.map((team) => {
+                      const isSelected = selectedProductionTeamId === team.id;
+                      return (
+                        <TouchableOpacity activeOpacity={1}
+                          key={team.id}
+                          onPress={() => setSelectedProductionTeamId(team.id)}
+                          style={{
+                            flexDirection: "row",
+                            alignItems: "center",
+                            paddingVertical: 12,
+                            paddingHorizontal: 14,
+                            borderRadius: 12,
+                            borderWidth: 1.5,
+                            borderColor: isSelected ? colors.primary : colors.border,
+                            backgroundColor: isSelected
+                              ? isDark ? `${colors.primary}26` : `${colors.primary}14`
+                              : isDark ? "#374151" : "#F9FAFB",
+                          }}
+                        >
+                          <View
+                            style={{
+                              width: 36,
+                              height: 36,
+                              borderRadius: 10,
+                              alignItems: "center",
+                              justifyContent: "center",
+                              backgroundColor: isSelected ? colors.primary : isDark ? "#1F2937" : "#FFFFFF",
+                              borderWidth: 1,
+                              borderColor: isSelected ? colors.primary : colors.border,
+                            }}
+                          >
+                            <Ionicons name="briefcase" size={16} color={isSelected ? "#FFF" : colors.primary} />
+                          </View>
+                          <View style={{ marginLeft: 12, flex: 1 }}>
+                            <Text style={{ color: colors.text, fontFamily: "Poppins_600SemiBold", fontSize: 14 }}>
+                              {team.name}
+                            </Text>
+                            <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_400Regular", fontSize: 12, marginTop: 1 }}>
+                              {team.member_role === "owner" ? "Owner" : team.member_role === "manager" ? "Manager" : "Team member"}
+                            </Text>
+                          </View>
+                          {isSelected && (
+                            <Ionicons name="checkmark-circle" size={20} color={colors.primary} />
+                          )}
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+                )}
+              </View>
+
+              {selectedProductionTeam && (
+                <View style={styles.inputContainer}>
+                  <Text style={[styles.label, { color: colors.textSecondary }]}>Select Performer From {selectedProductionTeam.name} *</Text>
+                  {filteredProductionRoster.length === 0 ? (
+                    <View
+                      style={[
+                        styles.infoBox,
+                        {
+                          backgroundColor: isDark ? "#374151" : "#F9FAFB",
+                          borderColor: colors.border,
+                        },
+                      ]}
+                    >
+                      <Ionicons name="albums-outline" size={18} color={colors.textSecondary} />
+                      <Text style={[styles.infoText, { color: colors.text }]}>No matching roster entry is available for the selected slot. Add a musician, duo, or group to this production team first.</Text>
+                    </View>
+                  ) : (
+                    <View style={{ gap: 10 }}>
+                      {filteredProductionRoster.map((entry) => {
+                        const isSelected = selectedProductionRosterId === entry.id;
+                        const entryType = entry.entity_kind === "musician"
+                          ? "Musician"
+                          : getProductionRosterGroupType(entry) === "duo"
+                            ? "Duo"
+                            : "Group";
+
+                        return (
+                          <TouchableOpacity activeOpacity={1}
+                            key={entry.id}
+                            onPress={() => setSelectedProductionRosterId(entry.id)}
+                            style={{
+                              flexDirection: "row",
+                              alignItems: "center",
+                              paddingVertical: 12,
+                              paddingHorizontal: 14,
+                              borderRadius: 12,
+                              borderWidth: 1.5,
+                              borderColor: isSelected ? colors.primary : colors.border,
+                              backgroundColor: isSelected
+                                ? isDark ? `${colors.primary}26` : `${colors.primary}14`
+                                : isDark ? "#374151" : "#F9FAFB",
+                            }}
+                          >
+                            <View
+                              style={{
+                                width: 36,
+                                height: 36,
+                                borderRadius: 10,
+                                alignItems: "center",
+                                justifyContent: "center",
+                                backgroundColor: isSelected ? colors.primary : isDark ? "#1F2937" : "#FFFFFF",
+                                borderWidth: 1,
+                                borderColor: isSelected ? colors.primary : colors.border,
+                              }}
+                            >
+                              <Ionicons name={entry.entity_kind === "musician" ? "person" : "people"} size={16} color={isSelected ? "#FFF" : colors.primary} />
+                            </View>
+                            <View style={{ marginLeft: 12, flex: 1 }}>
+                              <Text style={{ color: colors.text, fontFamily: "Poppins_600SemiBold", fontSize: 14 }}>
+                                {entry.display_name}
+                              </Text>
+                              <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_400Regular", fontSize: 12, marginTop: 1 }}>
+                                {entryType}
+                              </Text>
+                            </View>
+                            {isSelected && (
+                              <Ionicons name="checkmark-circle" size={20} color={colors.primary} />
+                            )}
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </View>
+                  )}
+                </View>
+              )}
+            </>
+          );
+        }
 
         if (musicianTypeRequired === "solo") {
           return (
@@ -740,6 +966,8 @@ const GigApplyTab = ({
                 ? "Group Already Applied"
                 : isApplicationsClosed
                   ? "Applications Closed"
+                : requiresProductionSelection
+                  ? "Select Team and Performer"
                 : requiresGroupSelection
                   ? "Select a Group to Apply"
                   : isPitchMissing || isCvMissing || isVideoMissing

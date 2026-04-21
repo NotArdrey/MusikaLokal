@@ -241,6 +241,9 @@ const reportTargetTableMap: Record<string, string> = {
   gig: "gigs",
   user: "profiles",
   profile: "profiles",
+  product: "products",
+  project: "producer_projects",
+  playlist: "playlists",
 };
 
 async function insertNotificationIfMissing(
@@ -347,6 +350,8 @@ async function fetchReportTargetDetails(client: any, rawTargetType: unknown, raw
   let ownerId = String(
     record?.owner_id ||
     record?.organizer_id ||
+    record?.seller_id ||
+    record?.creator_id ||
     record?.user_id ||
     "",
   ).trim();

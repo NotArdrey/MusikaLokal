@@ -15,7 +15,7 @@ metadata:
 Comprehensive performance optimization guide for Postgres, maintained by Supabase. Contains rules across 8 categories, prioritized by impact to guide automated query optimization and schema design.
 
 ## When to Apply
-
+Don't forget to apply all migrations needed to the supabase database. You can use environment variables to manage different environments.
 Reference these guidelines when:
 - Writing SQL queries or designing schemas
 - Implementing indexes or query optimization

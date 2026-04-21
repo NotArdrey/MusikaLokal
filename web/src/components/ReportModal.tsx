@@ -55,6 +55,38 @@ export const REPORT_REASONS_BY_TYPE: Record<string, string[]> = {
         'Spam',
         'Other',
     ],
+    product: [
+        'False or misleading listing',
+        'Counterfeit or prohibited item',
+        'Inappropriate images or description',
+        'Spam or scam',
+        'Unsafe or suspicious seller behavior',
+        'Other',
+    ],
+    project: [
+        'Misleading project details',
+        'Spam or scam',
+        'Harassment or bullying',
+        'Inappropriate content',
+        'Unsafe or exploitative request',
+        'Other',
+    ],
+    playlist: [
+        'Inappropriate or offensive content',
+        'Misleading or fake upload',
+        'Spam or scam',
+        'Harassment or bullying',
+        'Unsafe or unauthorized content',
+        'Other',
+    ],
+    music: [
+        'Inappropriate or offensive content',
+        'Misleading or fake upload',
+        'Spam or scam',
+        'Harassment or bullying',
+        'Unsafe or unauthorized content',
+        'Other',
+    ],
 };
 
 // Fallback list (generic)
@@ -83,6 +115,7 @@ export default function ReportModal({
     const [details, setDetails] = useState('');
     const [submitting, setSubmitting] = useState(false);
     const [submitted, setSubmitted] = useState(false);
+    const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
     // Pick reasons based on type; fallback to generic group reasons
     const reasons = (reportType && REPORT_REASONS_BY_TYPE[reportType.toLowerCase()])
@@ -93,15 +126,19 @@ export default function ReportModal({
         setSelectedReason(null);
         setDetails('');
         setSubmitted(false);
+        setErrorMessage(null);
         onClose();
     };
 
     const handleSubmit = async () => {
         if (!selectedReason) return;
         setSubmitting(true);
+        setErrorMessage(null);
         try {
             await onSubmit(selectedReason, details.trim() || undefined);
             setSubmitted(true);
+        } catch (error: any) {
+            setErrorMessage(error?.message || 'Unable to submit report right now.');
         } finally {
             setSubmitting(false);
         }
@@ -245,6 +282,10 @@ export default function ReportModal({
                                 )}
                             </ScrollView>
 
+                            {errorMessage ? (
+                                <Text style={[styles.errorText, { color: '#EF4444' }]}>{errorMessage}</Text>
+                            ) : null}
+
                             {/* Submit + Cancel */}
                             <View style={styles.footer}>
                                 <TouchableOpacity
@@ -294,6 +335,11 @@ const styles = StyleSheet.create({
     overlay: {
         flex: 1,
         justifyContent: 'flex-end',
+    },
+    errorText: {
+        fontSize: 13,
+        fontWeight: '500',
+        marginTop: 10,
     },
     sheet: {
         borderTopLeftRadius: 28,

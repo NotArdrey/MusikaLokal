@@ -22,6 +22,35 @@ function extractAccessToken(authHeader: string): string | null {
 const ALLOWED_ORGANIZER_STATUSES = new Set(['accepted', 'rejected', 'cancelled', 'completed', 'fired'])
 const ALLOWED_LEADER_DECISIONS = new Set(['approved', 'rejected'])
 
+const GIG_APPLICATION_SELECT = `
+    *,
+    applicant:profiles!applicant_id(id, full_name, avatar_url, role, skills, genres, bio, location, portfolio_urls),
+    submitter:profiles!submitted_by_user_id(id, full_name, avatar_url, email),
+    group:groups!group_id(id, name, genre, images, members, description, location, rate, group_type),
+    production_team:production_team_id(id, name, logo_url),
+    production_roster:production_roster_id(
+        id,
+        entity_kind,
+        profile_id,
+        group_id,
+        roster_profile:profile_id(id, full_name, avatar_url, role, skills, genres, bio, location, portfolio_urls),
+        roster_group:group_id(id, name, genre, images, members, description, location, rate, group_type)
+    )
+`
+
+const ORGANIZER_APPLICATION_SELECT = `
+    *,
+    gig:gig_id(name, organizer_id),
+    applicant:applicant_id(full_name),
+    group:group_id(name),
+    production_team:production_team_id(name),
+    production_roster:production_roster_id(
+        entity_kind,
+        roster_profile:profile_id(full_name),
+        roster_group:group_id(name)
+    )
+`
+
 Deno.serve(async (req: Request) => {
     if (req.method === 'OPTIONS') {
         return new Response('ok', { headers: corsHeaders })
@@ -113,11 +142,7 @@ Deno.serve(async (req: Request) => {
 
             const { data, error } = await supabaseClient
                 .from('gig_applications')
-                .select(`
-                    *,
-                    applicant:profiles!applicant_id(id, full_name, avatar_url, role, skills, genres, bio, location, portfolio_urls),
-                    group:groups!group_id(id, name, genre, images, members, description, location, rate)
-                `)
+                .select(GIG_APPLICATION_SELECT)
                 .eq('gig_id', gigId)
                 .or('leader_approval_status.is.null,leader_approval_status.eq.approved')
                 .order('created_at', { ascending: false });
@@ -146,6 +171,230 @@ Deno.serve(async (req: Request) => {
             return new Response(JSON.stringify(data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 });
         }
 
+        // SUBMIT PRODUCTION GIG APPLICATION
+        if (action === 'submit_production_gig_application') {
+            const { gigId, teamId, rosterId, pitchMessage, videoUrl, cvUrl, slotType } = params;
+
+            if (!gigId || !teamId || !rosterId) {
+                return new Response(JSON.stringify({ error: 'gigId, teamId, and rosterId are required' }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 400,
+                })
+            }
+
+            const { data: teamMembership, error: teamMembershipError } = await supabaseClient
+                .from('production_team_members')
+                .select('role')
+                .eq('team_id', teamId)
+                .eq('user_id', effectiveUserId)
+                .in('role', ['owner', 'manager'])
+                .maybeSingle();
+
+            if (teamMembershipError) throw teamMembershipError;
+
+            if (!teamMembership) {
+                return new Response(JSON.stringify({ error: 'Only production team owners or managers can submit production applications' }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 403,
+                })
+            }
+
+            const { data: gigRecord, error: gigError } = await supabaseClient
+                .from('gigs')
+                .select('id, name, organizer_id, status')
+                .eq('id', gigId)
+                .single();
+
+            if (gigError || !gigRecord) {
+                return new Response(JSON.stringify({ error: 'Gig not found' }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 404,
+                })
+            }
+
+            if (gigRecord.status && String(gigRecord.status).toLowerCase() !== 'open') {
+                return new Response(JSON.stringify({ error: 'This gig is not currently accepting applications' }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 409,
+                })
+            }
+
+            const { data: rosterRecord, error: rosterError } = await supabaseClient
+                .from('production_team_roster')
+                .select(`
+                    id,
+                    team_id,
+                    entity_kind,
+                    profile_id,
+                    group_id,
+                    group:group_id(id, name, group_type)
+                `)
+                .eq('id', rosterId)
+                .eq('team_id', teamId)
+                .maybeSingle();
+
+            if (rosterError) throw rosterError;
+
+            if (!rosterRecord) {
+                return new Response(JSON.stringify({ error: 'Selected production roster entry was not found' }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 404,
+                })
+            }
+
+            const resolvedSlotType = String(
+                slotType ||
+                (rosterRecord.group?.group_type === 'duo'
+                    ? 'duo'
+                    : rosterRecord.group
+                        ? 'band'
+                        : 'solo'),
+            ).toLowerCase();
+
+            if (rosterRecord.profile_id && resolvedSlotType !== 'solo') {
+                return new Response(JSON.stringify({ error: 'A musician roster entry can only be submitted to a solo slot' }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 400,
+                })
+            }
+
+            if (rosterRecord.group_id && rosterRecord.group?.group_type === 'duo' && resolvedSlotType !== 'duo') {
+                return new Response(JSON.stringify({ error: 'A duo roster entry can only be submitted to a duo slot' }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 400,
+                })
+            }
+
+            if (rosterRecord.group_id && rosterRecord.group?.group_type === 'band' && resolvedSlotType !== 'band') {
+                return new Response(JSON.stringify({ error: 'A group roster entry can only be submitted to a band slot' }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 400,
+                })
+            }
+
+            const { data: existingTeamApplication, error: existingTeamApplicationError } = await supabaseClient
+                .from('gig_applications')
+                .select('id, status')
+                .eq('gig_id', gigId)
+                .eq('production_team_id', teamId)
+                .neq('status', 'rejected')
+                .maybeSingle();
+
+            if (existingTeamApplicationError) throw existingTeamApplicationError;
+
+            if (existingTeamApplication) {
+                return new Response(JSON.stringify({ error: 'This production team already has an active application for the selected gig' }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 409,
+                })
+            }
+
+            const applicationPayload: Record<string, unknown> = {
+                applicant_id: effectiveUserId,
+                gig_id: gigId,
+                group_id: rosterRecord.group_id || null,
+                pitch_message: pitchMessage || null,
+                video_url: videoUrl || null,
+                cv_url: cvUrl || null,
+                status: 'pending',
+                is_solo_application: !rosterRecord.group_id,
+                slot_type: resolvedSlotType,
+                submitted_by_user_id: effectiveUserId,
+                leader_approval_status: rosterRecord.group_id ? 'approved' : null,
+                production_team_id: teamId,
+                production_roster_id: rosterId,
+            };
+
+            const { data: insertedApplication, error: insertError } = await supabaseClient
+                .from('gig_applications')
+                .insert(applicationPayload)
+                .select(GIG_APPLICATION_SELECT)
+                .single();
+
+            if (insertError) {
+                if (insertError.code === '23505') {
+                    return new Response(JSON.stringify({ error: 'This production application already exists for the selected gig' }), {
+                        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                        status: 409,
+                    })
+                }
+                throw insertError;
+            }
+
+            const performerName =
+                rosterRecord.group?.name ||
+                insertedApplication?.production_roster?.roster_profile?.full_name ||
+                'the selected performer';
+            const teamName = insertedApplication?.production_team?.name || 'Production team';
+
+            if (gigRecord.organizer_id && gigRecord.organizer_id !== effectiveUserId) {
+                await supabaseClient
+                    .from('notifications')
+                    .insert({
+                        user_id: gigRecord.organizer_id,
+                        type: 'info',
+                        title: 'New Production Application',
+                        message: `${teamName} submitted ${performerName} for "${gigRecord.name}".`,
+                        meta: buildNotificationRouteMeta('/manage_gig', { id: gigId }, {
+                            gig_id: gigId,
+                            application_id: insertedApplication.id,
+                            production_team_id: teamId,
+                            production_roster_id: rosterId,
+                            performer_name: performerName,
+                        }),
+                    });
+            }
+
+            return new Response(JSON.stringify(insertedApplication), {
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                status: 201,
+            })
+        }
+
+        // CHECK EXISTING PRODUCTION GIG APPLICATION
+        if (action === 'check_existing_production_application') {
+            const { gigId, teamId } = params;
+
+            if (!gigId || !teamId) {
+                return new Response(JSON.stringify({ error: 'gigId and teamId are required' }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 400,
+                })
+            }
+
+            const { data: membership, error: membershipError } = await supabaseClient
+                .from('production_team_members')
+                .select('role')
+                .eq('team_id', teamId)
+                .eq('user_id', effectiveUserId)
+                .maybeSingle();
+
+            if (membershipError) throw membershipError;
+
+            if (!membership) {
+                return new Response(JSON.stringify({ error: 'Only team members can check production applications' }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 403,
+                })
+            }
+
+            const { data: application, error } = await supabaseClient
+                .from('gig_applications')
+                .select(GIG_APPLICATION_SELECT)
+                .eq('gig_id', gigId)
+                .eq('production_team_id', teamId)
+                .order('created_at', { ascending: false })
+                .limit(1)
+                .maybeSingle();
+
+            if (error) throw error;
+
+            return new Response(JSON.stringify({ application: application || null }), {
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                status: 200,
+            })
+        }
+
         // UPDATE APPLICATION STATUS
         if (action === 'update_application_status') {
             const { applicationId, status } = params;
@@ -167,12 +416,7 @@ Deno.serve(async (req: Request) => {
 
             const { data: appDetails, error: appError } = await supabaseClient
                 .from('gig_applications')
-                .select(`
-                    *,
-                    gig:gig_id(name, organizer_id),
-                    applicant:applicant_id(full_name),
-                    group:group_id(name)
-                `)
+                .select(ORGANIZER_APPLICATION_SELECT)
                 .eq('id', applicationId)
                 .single();
 
@@ -202,6 +446,17 @@ Deno.serve(async (req: Request) => {
             if (error) throw error;
 
             const gigName = appDetails.gig?.name || 'the gig';
+            const performerName =
+                appDetails.group?.name ||
+                appDetails.production_roster?.roster_profile?.full_name ||
+                appDetails.production_roster?.roster_group?.name ||
+                appDetails.applicant?.full_name ||
+                'Applicant';
+            const productionLabel = appDetails.production_team?.name
+                ? ` via ${appDetails.production_team.name}`
+                : '';
+            const notificationRecipientId =
+                appDetails.production_team ? (appDetails.submitted_by_user_id || appDetails.applicant_id) : appDetails.applicant_id;
 
             let notificationType = 'info';
             let notificationTitle = '';
@@ -210,25 +465,27 @@ Deno.serve(async (req: Request) => {
             if (normalizedStatus === 'rejected') {
                 notificationType = 'warning';
                 notificationTitle = 'Application Declined';
-                notificationMessage = `Your application for "${gigName}" has been declined.`;
+                notificationMessage = `Your application for "${gigName}"${productionLabel} has been declined.`;
             } else if (normalizedStatus === 'accepted') {
                 notificationType = 'success';
                 notificationTitle = 'Application Accepted! 🎉';
-                notificationMessage = `Congratulations! Your application for "${gigName}" has been accepted.`;
+                notificationMessage = `Congratulations! Your application for "${gigName}"${productionLabel} has been accepted.`;
             }
 
             if (notificationTitle) {
                 await supabaseClient
                     .from('notifications')
                     .insert({
-                        user_id: appDetails.applicant_id,
+                        user_id: notificationRecipientId,
                         type: notificationType,
                         title: notificationTitle,
                         message: notificationMessage,
                         meta: buildNotificationRouteMeta('/bookings', undefined, {
                             gig_id: appDetails.gig_id,
                             application_id: applicationId,
-                            status: normalizedStatus
+                            status: normalizedStatus,
+                            production_team_id: appDetails.production_team_id || null,
+                            performer_name: performerName,
                         })
                     });
             }
@@ -400,7 +657,7 @@ Deno.serve(async (req: Request) => {
 
             const { data: existingApp, error: fetchError } = await supabaseClient
                 .from('gig_applications')
-                .select('applicant_id, group_id, group:groups!group_id(owner_id)')
+                .select('applicant_id, group_id, production_team_id, group:groups!group_id(owner_id)')
                 .eq('id', applicationId)
                 .single();
 
@@ -409,8 +666,22 @@ Deno.serve(async (req: Request) => {
 
             const isApplicant = existingApp.applicant_id === effectiveUserId;
             const isGroupOwner = existingApp.group?.owner_id === effectiveUserId;
+            let isProductionManager = false;
 
-            if (!isApplicant && !isGroupOwner) {
+            if (existingApp.production_team_id) {
+                const { data: teamMembership, error: teamMembershipError } = await supabaseClient
+                    .from('production_team_members')
+                    .select('role')
+                    .eq('team_id', existingApp.production_team_id)
+                    .eq('user_id', effectiveUserId)
+                    .in('role', ['owner', 'manager'])
+                    .maybeSingle();
+
+                if (teamMembershipError) throw teamMembershipError;
+                isProductionManager = !!teamMembership;
+            }
+
+            if (!isApplicant && !isGroupOwner && !isProductionManager) {
                 return new Response(JSON.stringify({ error: 'Unauthorized to cancel this application' }), {
                     headers: { ...corsHeaders, 'Content-Type': 'application/json' },
                     status: 403,

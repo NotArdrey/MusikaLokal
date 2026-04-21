@@ -16,6 +16,7 @@ import { supabase } from "../lib/supabase";
 import CachedImage from "../src/components/CachedImage";
 import Header from "../src/components/header";
 import Navbar from "../src/components/navbar";
+import ReportModal from "../src/components/ReportModal";
 import CustomAlert, { AlertType } from "../src/components/CustomAlert";
 import { useAuth } from "../src/context/AuthContext";
 import { showTopToast } from "../src/context/TopToastContext";
@@ -29,7 +30,7 @@ const moderateScale = (size: number, factor = 0.3) => {
 
 export default function ProductDetailsScreen() {
   const { colors, isDark } = useTheme();
-  const { session, userId } = useAuth();
+  const { userId, isGuest } = useAuth();
   const { product_id } = useLocalSearchParams();
   const { width } = useWindowDimensions();
   const isWebDesktop = Platform.OS === "web" && width >= 768;
@@ -41,6 +42,7 @@ export default function ProductDetailsScreen() {
   const [loading, setLoading] = useState(true);
   const [ordering, setOrdering] = useState(false);
   const [alert, setAlert] = useState<{ type: AlertType; title: string; message: string } | null>(null);
+  const [showReportModal, setShowReportModal] = useState(false);
 
   const bg = isWebDesktop ? (isDark ? "#0F172A" : "#F1F5F9") : colors.background;
   const cardBg = isWebDesktop ? (isDark ? "#1E293B" : "#FFFFFF") : colors.surface;
@@ -79,12 +81,74 @@ export default function ProductDetailsScreen() {
     finally { setOrdering(false); }
   };
 
+  const openReportModal = () => {
+    if (!product?.id) {
+      setAlert({ type: "error", title: "Unable to Report", message: "Listing details are missing." });
+      return;
+    }
+
+    setShowReportModal(true);
+  };
+
+  const submitProductReport = async (reason: string, details?: string) => {
+    if (!userId || isGuest) {
+      throw new Error("You need to sign in to report marketplace items.");
+    }
+
+    if (!product?.id) {
+      throw new Error("Listing details are missing.");
+    }
+
+    const body = {
+      action: "report",
+      type: "product",
+      id: product.id,
+      userId,
+      reason,
+      details: details || null,
+    };
+
+    const { data, error } = await supabase.functions.invoke("manage-details", { body });
+
+    if (error) {
+      console.error("manage-details report failed", {
+        message: error.message,
+        status: (error as any).status,
+        code: (error as any).code,
+        details: (error as any).details,
+        hint: (error as any).hint,
+        context: (error as any).context,
+        body,
+      });
+      throw new Error(error.message || "Failed to submit report.");
+    }
+
+    if (data && !Array.isArray(data) && data.already_reported) {
+      throw new Error("You already have a pending report for this marketplace item.");
+    }
+  };
+
   if (loading) return <View style={[styles.container, { backgroundColor: bg }]}><Header title="Product" onBackPress={() => router.back()} /><ActivityIndicator size="large" color={colors.primary} style={{ marginTop: 40 }} /><Navbar /></View>;
   if (!product) return <View style={[styles.container, { backgroundColor: bg }]}><Header title="Product" onBackPress={() => router.back()} /><View style={styles.centered}><Text style={{ color: colors.textSecondary }}>Product not found</Text></View><Navbar /></View>;
 
+  const isSeller = product?.seller_id === userId;
+  const canReportProduct = !isSeller && !!userId && !isGuest;
+  const reportHeaderAction = canReportProduct ? (
+    <TouchableOpacity
+      activeOpacity={1}
+      onPress={openReportModal}
+      style={[
+        styles.headerReportBtn,
+        { backgroundColor: isDark ? "#111827" : "#F8FAFC", borderColor: borderCol },
+      ]}
+    >
+      <Ionicons name="flag-outline" size={18} color="#EF4444" />
+    </TouchableOpacity>
+  ) : null;
+
   return (
     <View style={[styles.container, { backgroundColor: bg }]}>
-      <Header title="Product" onBackPress={() => router.back()} />
+      <Header title="Product" onBackPress={() => router.back()} rightComponent={reportHeaderAction} />
       <ScrollView style={{ flex: 1 }} contentContainerStyle={isWebDesktop ? { alignItems: "center" } : undefined}>
         <View style={isWebDesktop ? { width: "100%", maxWidth: 700, paddingHorizontal: 16 } : { paddingHorizontal: 16 }}>
           {media.length > 0 ? (
@@ -140,6 +204,15 @@ export default function ProductDetailsScreen() {
         </TouchableOpacity>
       </View>
 
+      <ReportModal
+        visible={showReportModal}
+        onClose={() => setShowReportModal(false)}
+        onSubmit={submitProductReport}
+        targetName={product.title}
+        title="Report Marketplace Item"
+        reportType="product"
+      />
+
       {alert && <CustomAlert visible type={alert.type} title={alert.title} message={alert.message} onClose={() => setAlert(null)} />}
       <Navbar />
     </View>
@@ -154,6 +227,7 @@ const styles = StyleSheet.create({
   badge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12 },
   variantsRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 8 },
   variantPill: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 18, borderWidth: 1 },
+  headerReportBtn: { width: 40, height: 40, borderRadius: 14, borderWidth: 1, alignItems: "center", justifyContent: "center" },
   sellerRow: { flexDirection: "row", alignItems: "center", paddingVertical: 14, borderTopWidth: 1, marginTop: 20 },
   buyBar: { flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingVertical: 10, paddingBottom: 16, borderTopWidth: 1 },
   buyBtn: { paddingHorizontal: 28, paddingVertical: 12, borderRadius: 10 },

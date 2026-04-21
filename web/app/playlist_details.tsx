@@ -17,6 +17,7 @@ import { supabase } from "../lib/supabase";
 import CachedImage from "../src/components/CachedImage";
 import Header from "../src/components/header";
 import Navbar from "../src/components/navbar";
+import ReportModal from "../src/components/ReportModal";
 import CustomAlert, { AlertType } from "../src/components/CustomAlert";
 import { useAuth } from "../src/context/AuthContext";
 import { showTopToast } from "../src/context/TopToastContext";
@@ -30,7 +31,7 @@ const moderateScale = (size: number, factor = 0.3) => {
 
 export default function PlaylistDetailsScreen() {
   const { colors, isDark } = useTheme();
-  const { session, userId } = useAuth();
+  const { userId, isGuest } = useAuth();
   const { playlist_id } = useLocalSearchParams();
   const { width } = useWindowDimensions();
   const isWebDesktop = Platform.OS === "web" && width >= 768;
@@ -41,6 +42,7 @@ export default function PlaylistDetailsScreen() {
   const [externalLinks, setExternalLinks] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [alert, setAlert] = useState<{ type: AlertType; title: string; message: string } | null>(null);
+  const [showReportModal, setShowReportModal] = useState(false);
 
   const bg = isWebDesktop ? (isDark ? "#0F172A" : "#F1F5F9") : colors.background;
   const cardBg = isWebDesktop ? (isDark ? "#1E293B" : "#FFFFFF") : colors.surface;
@@ -77,14 +79,74 @@ export default function PlaylistDetailsScreen() {
     showTopToast({ type: "info", title: "Playing", message: "Teaser playing..." });
   };
 
+  const openReportModal = () => {
+    if (!playlist?.id) {
+      setAlert({ type: "error", title: "Unable to Report", message: "Playlist details are missing." });
+      return;
+    }
+
+    setShowReportModal(true);
+  };
+
+  const submitPlaylistReport = async (reason: string, details?: string) => {
+    if (!userId || isGuest) {
+      throw new Error("You need to sign in to report music.");
+    }
+
+    if (!playlist?.id) {
+      throw new Error("Playlist details are missing.");
+    }
+
+    const body = {
+      action: "report",
+      type: "playlist",
+      id: playlist.id,
+      userId,
+      reason,
+      details: details || null,
+    };
+
+    const { data, error } = await supabase.functions.invoke("manage-details", { body });
+
+    if (error) {
+      console.error("manage-details report failed", {
+        message: error.message,
+        status: (error as any).status,
+        code: (error as any).code,
+        details: (error as any).details,
+        hint: (error as any).hint,
+        context: (error as any).context,
+        body,
+      });
+      throw new Error(error.message || "Failed to submit report.");
+    }
+
+    if (data && !Array.isArray(data) && data.already_reported) {
+      throw new Error("You already have a pending report for this music release.");
+    }
+  };
+
   if (loading) return <View style={[styles.container, { backgroundColor: bg }]}><Header title="Playlist" onBackPress={() => router.back()} /><ActivityIndicator size="large" color={colors.primary} style={{ marginTop: 40 }} /><Navbar /></View>;
   if (!playlist) return <View style={[styles.container, { backgroundColor: bg }]}><Header title="Playlist" onBackPress={() => router.back()} /><View style={styles.centered}><Text style={{ color: colors.textSecondary }}>Playlist not found</Text></View><Navbar /></View>;
 
-  const isOwner = playlist.owner_id === userId;
+  const isOwner = (playlist.owner_id || playlist.creator_id) === userId;
+  const canReportPlaylist = !isOwner && !!userId && !isGuest;
+  const reportHeaderAction = canReportPlaylist ? (
+    <TouchableOpacity
+      activeOpacity={1}
+      onPress={openReportModal}
+      style={[
+        styles.headerReportBtn,
+        { backgroundColor: isDark ? "#111827" : "#F8FAFC", borderColor: borderCol },
+      ]}
+    >
+      <Ionicons name="flag-outline" size={18} color="#EF4444" />
+    </TouchableOpacity>
+  ) : null;
 
   return (
     <View style={[styles.container, { backgroundColor: bg }]}>
-      <Header title="Playlist" onBackPress={() => router.back()} />
+      <Header title="Playlist" onBackPress={() => router.back()} rightComponent={reportHeaderAction} />
       <ScrollView style={{ flex: 1 }} contentContainerStyle={isWebDesktop ? { alignItems: "center" } : undefined}>
         <View style={isWebDesktop ? { width: "100%", maxWidth: 700, paddingHorizontal: 16 } : { paddingHorizontal: 16 }}>
           {playlist.cover_url && <CachedImage uri={playlist.cover_url } style={styles.cover} />}
@@ -151,6 +213,16 @@ export default function PlaylistDetailsScreen() {
           <View style={{ height: 100 }} />
         </View>
       </ScrollView>
+
+      <ReportModal
+        visible={showReportModal}
+        onClose={() => setShowReportModal(false)}
+        onSubmit={submitPlaylistReport}
+        targetName={playlist.title}
+        title="Report Music"
+        reportType="music"
+      />
+
       {alert && <CustomAlert visible type={alert.type} title={alert.title} message={alert.message} onClose={() => setAlert(null)} />}
       <Navbar />
     </View>
@@ -163,6 +235,7 @@ const styles = StyleSheet.create({
   cover: { width: "100%", height: 200, borderRadius: 14, marginTop: 16 },
   metaRow: { flexDirection: "row", alignItems: "center", gap: 8, marginTop: 10, flexWrap: "wrap" },
   badge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12 },
+  headerReportBtn: { width: 40, height: 40, borderRadius: 14, borderWidth: 1, alignItems: "center", justifyContent: "center" },
   ownerRow: { flexDirection: "row", gap: 12, marginTop: 14 },
   ownerBtn: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 8 },
   ownerBtnText: { color: "#fff", fontWeight: "600", fontSize: 13 },

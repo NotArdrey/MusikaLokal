@@ -19,13 +19,82 @@ interface AlertState {
   buttons: { text: string; onPress?: () => void; style?: 'default' | 'cancel' | 'destructive' }[];
 }
 
+type TempLoginRole = 'musician' | 'producer' | 'studio-owner' | 'venue-owner';
+
+type TempLoginOption = {
+  label: string;
+  details: string;
+  email: string;
+  expectedRole: TempLoginRole;
+  destinationLabel: string;
+};
+
 const TEMP_LOGIN_PASSWORD = 'pass123';
-const TEMP_LOGIN_OPTIONS = [
-  { label: 'Login as Musician', email: 'musician@test.com' },
-  { label: 'Login as Producer', email: 'producer@test.com' },
-  { label: 'Login as Studio', email: 'studio@test.com' },
-  { label: 'Login as Venue', email: 'manager@test.com' },
+const TEMP_LOGIN_OPTIONS: TempLoginOption[] = [
+  {
+    label: 'Login as Gabriel dela Cruz',
+    details: 'Musician | musician@test.com',
+    email: 'musician@test.com',
+    expectedRole: 'musician',
+    destinationLabel: 'My Group',
+  },
+  {
+    label: 'Login as Jonathan Santos',
+    details: 'Producer | producer1@test.com',
+    email: 'producer1@test.com',
+    expectedRole: 'producer',
+    destinationLabel: 'Production Team',
+  },
+  {
+    label: 'Login as OneRoots Records',
+    details: 'Studio owner | studio@test.com',
+    email: 'studio@test.com',
+    expectedRole: 'studio-owner',
+    destinationLabel: 'My Studio',
+  },
+  {
+    label: 'Login as Marco Reyes',
+    details: 'Venue owner | manager@test.com',
+    email: 'manager@test.com',
+    expectedRole: 'venue-owner',
+    destinationLabel: 'My Venue',
+  },
 ] as const;
+
+const isOwnerTempRole = (role: string | null | undefined) => {
+  return role === 'studio-owner' || role === 'venue-owner';
+};
+
+const formatTempRoleLabel = (role: string | null | undefined) => {
+  if (role === 'studio-owner') return 'Studio Owner';
+  if (role === 'venue-owner') return 'Venue Owner';
+  if (role === 'producer') return 'Producer';
+  if (role === 'musician') return 'Musician';
+  if (!role) return 'Unknown';
+  return role;
+};
+
+const hasActiveOwnerSubscription = (status: unknown, expiresAt: unknown) => {
+  const normalizedStatus = typeof status === 'string' ? status.trim().toLowerCase() : '';
+  if (normalizedStatus !== 'active') return false;
+  if (typeof expiresAt !== 'string' || expiresAt.trim().length === 0) return true;
+
+  const parsedExpiry = new Date(expiresAt);
+  if (Number.isNaN(parsedExpiry.getTime())) return false;
+
+  return parsedExpiry > new Date();
+};
+
+const describeOwnerSubscription = (role: string | null | undefined, status: unknown, expiresAt: unknown) => {
+  if (!isOwnerTempRole(role)) return 'Not required';
+  if (!hasActiveOwnerSubscription(status, expiresAt)) return 'Inactive or expired';
+  if (typeof expiresAt !== 'string' || expiresAt.trim().length === 0) return 'Active';
+
+  const parsedExpiry = new Date(expiresAt);
+  if (Number.isNaN(parsedExpiry.getTime())) return 'Active';
+
+  return `Active until ${parsedExpiry.toLocaleDateString()}`;
+};
 
 export default function LoginScreen() {
   const { colors, isDark } = useTheme();
@@ -140,6 +209,91 @@ export default function LoginScreen() {
 
   const closeAlert = () => {
     setAlertState(prev => ({ ...prev, visible: false }));
+  };
+
+  const openTemporaryLoginValidation = async (option: TempLoginOption) => {
+    try {
+      const { data: profile, error } = await supabase
+        .from('profiles')
+        .select('role, is_verified, subscription_status, subscription_expires_at')
+        .eq('email', option.email)
+        .maybeSingle();
+
+      if (error) {
+        throw error;
+      }
+
+      if (!profile) {
+        showAlert(
+          'warning',
+          'Test Account Missing',
+          `${option.label} is not available in this environment.`,
+          [{ text: 'OK', style: 'default' }],
+        );
+        return;
+      }
+
+      const actualRole = typeof profile.role === 'string' ? profile.role.trim().toLowerCase() : null;
+      if (actualRole !== option.expectedRole) {
+        showAlert(
+          'warning',
+          'Test Account Mismatch',
+          `${option.label} is configured as ${formatTempRoleLabel(actualRole)} instead of ${formatTempRoleLabel(option.expectedRole)}.`,
+          [{ text: 'OK', style: 'default' }],
+        );
+        return;
+      }
+
+      const identityVerified = profile.is_verified === true;
+      const subscriptionReady = !isOwnerTempRole(actualRole) || hasActiveOwnerSubscription(profile.subscription_status, profile.subscription_expires_at);
+      const issues: string[] = [];
+
+      if (!identityVerified) {
+        issues.push('Identity verification is incomplete.');
+      }
+
+      if (isOwnerTempRole(actualRole) && !subscriptionReady) {
+        issues.push('Owner subscription is inactive or expired.');
+      }
+
+      const summary = [
+        option.label,
+        option.email,
+        '',
+        `Role: ${formatTempRoleLabel(actualRole)}`,
+        `Identity: ${identityVerified ? 'Verified' : 'Needs verification'}`,
+        `Subscription: ${describeOwnerSubscription(actualRole, profile.subscription_status, profile.subscription_expires_at)}`,
+        `Expected destination: ${option.destinationLabel}`,
+      ].join('\n');
+
+      const message = issues.length > 0
+        ? `${summary}\n\nCurrent issues:\n- ${issues.join('\n- ')}\n\nContinue anyway?`
+        : `${summary}\n\nContinue with this test account?`;
+
+      showAlert(
+        issues.length > 0 ? 'warning' : 'info',
+        'Temporary Login Validation',
+        message,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: issues.length > 0 ? 'Continue Anyway' : 'Continue',
+            onPress: () => {
+              void signInWithCredentials(option.email, TEMP_LOGIN_PASSWORD);
+            },
+            style: 'default',
+          },
+        ],
+      );
+    } catch (error) {
+      console.log('Temporary login validation failed:', error);
+      showAlert(
+        'error',
+        'Validation Error',
+        'Unable to validate this temporary login right now. Please try again.',
+        [{ text: 'OK', style: 'default' }],
+      );
+    }
   };
 
   // Check for Account Created success (New User)
@@ -350,13 +504,13 @@ export default function LoginScreen() {
     await signInWithCredentials(email, password);
   };
 
-  const handleTemporaryLogin = async (tempEmail: string) => {
-    setEmail(tempEmail);
+  const handleTemporaryLogin = async (option: TempLoginOption) => {
+    setEmail(option.email);
     setPassword(TEMP_LOGIN_PASSWORD);
     setErrors({});
     setLoginMessage(null);
 
-    await signInWithCredentials(tempEmail, TEMP_LOGIN_PASSWORD);
+    await openTemporaryLoginValidation(option);
   };
 
 
@@ -543,7 +697,7 @@ export default function LoginScreen() {
                 {TEMP_LOGIN_OPTIONS.map((option) => (
                   <TouchableOpacity
                     key={option.email}
-                    onPress={() => handleTemporaryLogin(option.email)}
+                    onPress={() => handleTemporaryLogin(option)}
                     disabled={loading}
                     activeOpacity={1}
                     style={[
@@ -553,6 +707,9 @@ export default function LoginScreen() {
                   >
                     <Text style={[styles.tempLoginButtonText, themeStyles.primaryText]}>
                       {option.label}
+                    </Text>
+                    <Text style={[styles.tempLoginButtonDetails, themeStyles.textSecondary]}>
+                      {option.details}
                     </Text>
                   </TouchableOpacity>
                 ))}
@@ -772,6 +929,13 @@ const styles = StyleSheet.create({
   tempLoginButtonText: {
     fontFamily: 'Poppins_500Medium',
     fontSize: 14,
+    textAlign: 'center',
+  },
+  tempLoginButtonDetails: {
+    fontFamily: 'Poppins_400Regular',
+    fontSize: 11,
+    marginTop: 2,
+    textAlign: 'center',
   },
   guestButton: {
     height: 64,

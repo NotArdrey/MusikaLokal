@@ -16,6 +16,7 @@ import { supabase } from "../lib/supabase";
 import CachedImage from "../src/components/CachedImage";
 import Header from "../src/components/header";
 import Navbar from "../src/components/navbar";
+import ReportModal from "../src/components/ReportModal";
 import Skeleton from "../src/components/Skeleton";
 import CustomAlert, { AlertType } from "../src/components/CustomAlert";
 import { useBottomBarClearance } from "../src/hooks/useBottomBarClearance";
@@ -39,7 +40,7 @@ const moderateScale = (size: number, factor = 0.3) => {
 
 export default function PlaylistDetailsScreen() {
   const { colors } = useTheme();
-  const { userId } = useAuth();
+  const { userId, isGuest } = useAuth();
   const { playlist_id } = useLocalSearchParams();
   const { contentBottomPadding } = useBottomBarClearance(24);
 
@@ -55,8 +56,9 @@ export default function PlaylistDetailsScreen() {
   const [newTrackDurationSeconds, setNewTrackDurationSeconds] = useState("");
   const [newTrackAudioFile, setNewTrackAudioFile] = useState<PlaylistAudioFile | null>(null);
   const [addingTrack, setAddingTrack] = useState(false);
+  const [showReportModal, setShowReportModal] = useState(false);
 
-  const isOwner = playlist?.creator_id === userId;
+  const isOwner = (playlist?.creator_id || playlist?.owner_id) === userId;
 
   const fetchPlaylist = useCallback(async () => {
     if (!playlist_id) return;
@@ -190,6 +192,53 @@ export default function PlaylistDetailsScreen() {
     }
   }, []);
 
+  const openReportModal = () => {
+    if (!playlist?.id) {
+      setAlert({ type: "error", title: "Unable to Report", message: "Playlist details are missing." });
+      return;
+    }
+
+    setShowReportModal(true);
+  };
+
+  const submitPlaylistReport = async (reason: string, details?: string) => {
+    if (!userId || isGuest) {
+      throw new Error("You need to sign in to report music.");
+    }
+
+    if (!playlist?.id) {
+      throw new Error("Playlist details are missing.");
+    }
+
+    const body = {
+      action: "report",
+      type: "playlist",
+      id: playlist.id,
+      userId,
+      reason,
+      details: details || null,
+    };
+
+    const { data, error } = await supabase.functions.invoke("manage-details", { body });
+
+    if (error) {
+      console.error("manage-details report failed", {
+        message: error.message,
+        status: (error as any).status,
+        code: (error as any).code,
+        details: (error as any).details,
+        hint: (error as any).hint,
+        context: (error as any).context,
+        body,
+      });
+      throw new Error(error.message || "Failed to submit report.");
+    }
+
+    if (data && !Array.isArray(data) && data.already_reported) {
+      throw new Error("You already have a pending report for this music release.");
+    }
+  };
+
   if (loading) {
     return (
       <View style={[styles.container, { backgroundColor: colors.background }]}>
@@ -220,10 +269,23 @@ export default function PlaylistDetailsScreen() {
   const items = playlist.items || [];
   const teaserAssets = playlist.teaser_assets || [];
   const externalLinks = playlist.external_links || [];
+  const canReportPlaylist = !isOwner && !!userId && !isGuest;
+  const reportHeaderAction = canReportPlaylist ? (
+    <TouchableOpacity
+      activeOpacity={1}
+      onPress={openReportModal}
+      style={[
+        styles.headerReportBtn,
+        { backgroundColor: colors.surface, borderColor: colors.border },
+      ]}
+    >
+      <Ionicons name="flag-outline" size={20} color="#EF4444" />
+    </TouchableOpacity>
+  ) : null;
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
-      <Header title={playlist.title} onBackPress={() => router.back()} />
+      <Header title={playlist.title} onBackPress={() => router.back()} rightComponent={reportHeaderAction} />
 
       <ScrollView style={styles.content} contentContainerStyle={{ paddingBottom: contentBottomPadding }}>
         {/* Cover */}
@@ -367,6 +429,15 @@ export default function PlaylistDetailsScreen() {
 
       </ScrollView>
 
+      <ReportModal
+        visible={showReportModal}
+        onClose={() => setShowReportModal(false)}
+        onSubmit={submitPlaylistReport}
+        targetName={playlist.title}
+        title="Report Music"
+        reportType="music"
+      />
+
       {alert && <CustomAlert visible type={alert.type} title={alert.title} message={alert.message} onClose={() => setAlert(null)} />}
 
       {/* Add Track Modal */}
@@ -503,6 +574,7 @@ const styles = StyleSheet.create({
   ownerActions: { flexDirection: "row", gap: 10 },
   actionBtn: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 18, paddingVertical: 10, borderRadius: 10 },
   actionBtnText: { color: "#fff", fontSize: moderateScale(13), fontWeight: "600" },
+  headerReportBtn: { width: 40, height: 40, borderRadius: 14, borderWidth: 1, alignItems: "center", justifyContent: "center" },
   emptyText: { textAlign: "center", fontSize: moderateScale(13), marginTop: 12 },
   modalOverlay: { flex: 1, justifyContent: "flex-end", backgroundColor: "transparent" },
   modalSheet: { borderTopLeftRadius: 20, borderTopRightRadius: 20, borderTopWidth: 1, borderLeftWidth: 1, borderRightWidth: 1, padding: 20, paddingBottom: 36 },

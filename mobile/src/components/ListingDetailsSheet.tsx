@@ -181,6 +181,11 @@ const ListingDetailsSheet = forwardRef<
   // Group Selection State (for gig applications)
   const [userGroups, setUserGroups] = useState<any[]>([]);
   const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
+  const [productionTeams, setProductionTeams] = useState<any[]>([]);
+  const [loadingProductionTeams, setLoadingProductionTeams] = useState(false);
+  const [selectedProductionTeamId, setSelectedProductionTeamId] = useState<string | null>(null);
+  const [productionRoster, setProductionRoster] = useState<any[]>([]);
+  const [selectedProductionRosterId, setSelectedProductionRosterId] = useState<string | null>(null);
   const [selectedSlotType, setSelectedSlotType] = useState<
     "solo" | "duo" | "band" | null
   >(null);
@@ -918,6 +923,58 @@ const ListingDetailsSheet = forwardRef<
 
     if (group.type !== "Gig") return;
 
+    if (userRole === "producer") {
+      if (!selectedProductionTeamId) {
+        setHasExistingApplication(false);
+        setExistingApplicationStatus(null);
+        setCvUrl("");
+        return;
+      }
+
+      try {
+        const { data, error } = await supabase.functions.invoke(
+          "gig-applications",
+          {
+            body: {
+              action: "check_existing_production_application",
+              userId,
+              gigId: listingId,
+              teamId: selectedProductionTeamId,
+            },
+          },
+        );
+
+        if (error) {
+          console.error("Error checking existing production application:", error);
+          return;
+        }
+
+        const application = data?.application || null;
+
+        if (application) {
+          setHasExistingApplication(true);
+          setExistingApplicationStatus(application.status || "pending");
+          setSelectedProductionRosterId(application.production_roster_id || null);
+          if (
+            application.slot_type === "solo" ||
+            application.slot_type === "duo" ||
+            application.slot_type === "band"
+          ) {
+            setSelectedSlotType(application.slot_type);
+          }
+          if (application.cv_url) setCvUrl(application.cv_url);
+        } else {
+          setHasExistingApplication(false);
+          setExistingApplicationStatus(null);
+          setCvUrl("");
+        }
+      } catch (err) {
+        console.error("Error checking production application:", err);
+      }
+
+      return;
+    }
+
     try {
       // Check for any existing application to this specific gig
       // Once rejected, musician cannot re-apply to the same gig
@@ -945,6 +1002,34 @@ const ListingDetailsSheet = forwardRef<
       }
     } catch (err) {
       console.error("Error checking application:", err);
+    }
+  };
+
+  const fetchProductionTeamRoster = async (teamId: string) => {
+    if (!teamId) {
+      setProductionRoster([]);
+      setSelectedProductionRosterId(null);
+      return;
+    }
+
+    try {
+      const { data, error } = await supabase.functions.invoke("manage-deals", {
+        body: { action: "list_team_roster", teamId },
+      });
+
+      if (error) throw error;
+
+      const rosterEntries = data?.roster || [];
+      setProductionRoster(rosterEntries);
+      setSelectedProductionRosterId((current) =>
+        current && rosterEntries.some((entry: any) => entry.id === current)
+          ? current
+          : null,
+      );
+    } catch (err) {
+      console.error("Error fetching production roster:", err);
+      setProductionRoster([]);
+      setSelectedProductionRosterId(null);
     }
   };
 
@@ -1013,6 +1098,38 @@ const ListingDetailsSheet = forwardRef<
       console.error("Error fetching groups:", err);
     } finally {
       setLoadingGroups(false);
+    }
+  };
+
+  const fetchProductionTeams = async () => {
+    if (!userId || !group || group.type !== "Gig" || userRole !== "producer") {
+      return;
+    }
+
+    setLoadingProductionTeams(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("manage-deals", {
+        body: { action: "list_my_teams" },
+      });
+
+      if (error) throw error;
+
+      const teams = data?.teams || [];
+      setProductionTeams(teams);
+      setSelectedProductionTeamId((current) => {
+        if (current && teams.some((team: any) => team.id === current)) {
+          return current;
+        }
+        return teams[0]?.id || null;
+      });
+    } catch (err) {
+      console.error("Error fetching production teams:", err);
+      setProductionTeams([]);
+      setSelectedProductionTeamId(null);
+      setProductionRoster([]);
+      setSelectedProductionRosterId(null);
+    } finally {
+      setLoadingProductionTeams(false);
     }
   };
 
@@ -1139,11 +1256,15 @@ const ListingDetailsSheet = forwardRef<
 
   const { handleSubmitApplication } = useApplicationSubmissionAction({
     userId,
+    userRole,
     listingId,
     group,
     groupAlreadyApplied,
     groupApplicationBy,
     selectedGroupId,
+    selectedProductionTeamId,
+    selectedProductionRosterId,
+    productionRoster,
     selectedSlotType,
     pitchMessage,
     cvFile,
@@ -1204,6 +1325,11 @@ const ListingDetailsSheet = forwardRef<
       setSelectedGroupId(null);
       setSelectedSlotType(null);
       setUserGroups([]);
+      setProductionTeams([]);
+      setLoadingProductionTeams(false);
+      setSelectedProductionTeamId(null);
+      setProductionRoster([]);
+      setSelectedProductionRosterId(null);
       // Reset venue selection state
       setSelectedVenueId(null);
       setUserVenues([]);
@@ -1220,12 +1346,34 @@ const ListingDetailsSheet = forwardRef<
   // Check for existing application when group data is loaded
   useEffect(() => {
     if (group && userId && (group.type === "Gig" || group.type === "Group")) {
-      checkExistingApplication();
+      if (group.type === "Group") {
+        checkExistingApplication();
+      }
       if (group.type === "Gig") {
+        if (userRole === "producer") {
+          fetchProductionTeams();
+        } else {
+          checkExistingApplication();
+        }
+      }
+      if (group.type === "Gig" && userRole !== "producer") {
         fetchUserGroups();
       }
     }
-  }, [group, userId]);
+  }, [group, userId, userRole]);
+
+  useEffect(() => {
+    if (group?.type !== "Gig" || userRole !== "producer") return;
+
+    if (selectedProductionTeamId) {
+      fetchProductionTeamRoster(selectedProductionTeamId);
+    } else {
+      setProductionRoster([]);
+      setSelectedProductionRosterId(null);
+    }
+
+    checkExistingApplication();
+  }, [group?.id, userId, userRole, selectedProductionTeamId]);
 
   // Check for existing studio booking when group data is loaded
   useEffect(() => {
@@ -1244,6 +1392,12 @@ const ListingDetailsSheet = forwardRef<
 
   // Check if selected group has already applied (group-level deduplication)
   useEffect(() => {
+    if (userRole === "producer") {
+      setGroupAlreadyApplied(false);
+      setGroupApplicationBy(null);
+      return;
+    }
+
     if (selectedGroupId) {
       checkGroupApplication(selectedGroupId);
     } else {
@@ -2435,6 +2589,14 @@ const ListingDetailsSheet = forwardRef<
       userGroups={userGroups}
       selectedGroupId={selectedGroupId}
       setSelectedGroupId={setSelectedGroupId}
+      userRole={userRole}
+      productionTeams={productionTeams}
+      loadingProductionTeams={loadingProductionTeams}
+      selectedProductionTeamId={selectedProductionTeamId}
+      setSelectedProductionTeamId={setSelectedProductionTeamId}
+      productionRoster={productionRoster}
+      selectedProductionRosterId={selectedProductionRosterId}
+      setSelectedProductionRosterId={setSelectedProductionRosterId}
       selectedSlotType={selectedSlotType}
       setSelectedSlotType={setSelectedSlotType}
       groupAlreadyApplied={groupAlreadyApplied}
@@ -2466,6 +2628,14 @@ const ListingDetailsSheet = forwardRef<
       userGroups={userGroups}
       selectedGroupId={selectedGroupId}
       setSelectedGroupId={setSelectedGroupId}
+      userRole={userRole}
+      productionTeams={productionTeams}
+      loadingProductionTeams={loadingProductionTeams}
+      selectedProductionTeamId={selectedProductionTeamId}
+      setSelectedProductionTeamId={setSelectedProductionTeamId}
+      productionRoster={productionRoster}
+      selectedProductionRosterId={selectedProductionRosterId}
+      setSelectedProductionRosterId={setSelectedProductionRosterId}
       selectedSlotType={selectedSlotType}
       setSelectedSlotType={setSelectedSlotType}
       groupAlreadyApplied={groupAlreadyApplied}

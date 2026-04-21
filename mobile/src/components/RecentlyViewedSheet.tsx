@@ -30,10 +30,11 @@ const moderateScale = (size: number, factor = 0.3) => {
 interface RecentlyViewedSheetProps {
     onClose?: () => void;
     onItemPress?: (listingId: string) => void;
+    onProductionTeamPress?: (teamId: string) => void;
     onChat?: (item: any) => void;
 }
 
-const RecentlyViewedSheet = forwardRef<BottomSheetModal, RecentlyViewedSheetProps>(({ onClose, onItemPress, onChat }, ref) => {
+const RecentlyViewedSheet = forwardRef<BottomSheetModal, RecentlyViewedSheetProps>(({ onClose, onItemPress, onProductionTeamPress, onChat }, ref) => {
     const { colors, isDark } = useTheme();
     const snapPoints = useMemo(() => ['90%'], []);
     const animationConfigs = useBottomSheetTimingConfigs({
@@ -66,13 +67,20 @@ const RecentlyViewedSheet = forwardRef<BottomSheetModal, RecentlyViewedSheetProp
     }, [ref]);
 
     const handleCardPress = useCallback((item: any) => {
-        if (onItemPress) {
+        if (onItemPress || onProductionTeamPress) {
             closeSheet();
             setTimeout(() => {
-                onItemPress(item.id);
+                if (item?.type === 'Production' && onProductionTeamPress) {
+                    onProductionTeamPress(item.id);
+                    return;
+                }
+
+                if (onItemPress) {
+                    onItemPress(item.id);
+                }
             }, 120);
         }
-    }, [closeSheet, onItemPress]);
+    }, [closeSheet, onItemPress, onProductionTeamPress]);
 
     // Fetch recently viewed items - uses full objects stored by home.tsx
     useEffect(() => {

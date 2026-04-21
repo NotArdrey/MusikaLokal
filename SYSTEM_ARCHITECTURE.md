@@ -24,6 +24,12 @@ The dominant architecture style is:
 - Action-based Edge Functions for business workflows and privileged mutations
 - Realtime subscriptions instead of a separate message broker or websocket server
 
+For venue hiring, the product needs three performer-entry models that converge on the same downstream review pipeline:
+
+- direct individual musician applications
+- direct duo or group applications from existing registered profiles
+- producer-managed production-team applications, where a producer assembles existing in-system musicians and existing duo or group entities into one venue-facing submission
+
 ## 2. Repository Topology
 
 ### Top-level structure
@@ -70,7 +76,7 @@ flowchart LR
 
 - Frontends own presentation, routing, client-side caching, and most feature orchestration.
 - Supabase Auth owns user sessions and token refresh.
-- Postgres owns content, bookings, messaging, subscriptions, reporting, and admin audit trails.
+- Postgres owns content, bookings, production organizations and rosters, messaging, subscriptions, reporting, and admin audit trails.
 - Edge Functions own privileged workflows, business rules spanning multiple tables, external API calls, and administrative actions.
 - Realtime provides live notification counts, profile refresh triggers, messaging updates, and presence.
 
@@ -107,7 +113,7 @@ Main providers:
 Auth state is more than signed-in versus signed-out. The main auth providers track:
 
 - guest mode
-- resolved role and admin status
+- resolved role and admin status, including producer-only gates for production-team surfaces
 - unpaid booking lock state
 - subscription status and subscription-required gates
 - identity verification status and identity-required gates
@@ -151,9 +157,9 @@ Primary feature areas include:
 - authentication and onboarding: [mobile/app/index.tsx](mobile/app/index.tsx), [mobile/app/signup.tsx](mobile/app/signup.tsx), [mobile/app/forget_password.tsx](mobile/app/forget_password.tsx), [mobile/app/change_password.tsx](mobile/app/change_password.tsx)
 - discovery and home: [mobile/app/home.tsx](mobile/app/home.tsx), [mobile/app/feed.tsx](mobile/app/feed.tsx), [mobile/app/ai_suggestions.tsx](mobile/app/ai_suggestions.tsx)
 - listings and ownership flows: [mobile/app/add_gig.tsx](mobile/app/add_gig.tsx), [mobile/app/add_studio.tsx](mobile/app/add_studio.tsx), [mobile/app/add_group.tsx](mobile/app/add_group.tsx), [mobile/app/manage_gig.tsx](mobile/app/manage_gig.tsx), [mobile/app/manage_studio.tsx](mobile/app/manage_studio.tsx), [mobile/app/manage_group.tsx](mobile/app/manage_group.tsx)
-- bookings and wallet: [mobile/app/bookings.tsx](mobile/app/bookings.tsx), [mobile/app/wallet.tsx](mobile/app/wallet.tsx), [mobile/app/payment-result.tsx](mobile/app/payment-result.tsx). [mobile/app/bookings.tsx](mobile/app/bookings.tsx) also serves as a role-aware activity inbox for producer project applications, sent invites, and commercial deals, with open deals folded into Pending and closed deals folded into History. Match cards are navigable (tap to open project details) and include inline action buttons (accept/reject/withdraw/decline).
+- bookings and wallet: [mobile/app/bookings.tsx](mobile/app/bookings.tsx), [mobile/app/wallet.tsx](mobile/app/wallet.tsx), [mobile/app/payment-result.tsx](mobile/app/payment-result.tsx). [mobile/app/bookings.tsx](mobile/app/bookings.tsx) also serves as a role-aware activity inbox for producer project applications, sent invites, direct musician or group applications, production-routed venue applications, and commercial deals, with open deals folded into Pending and closed deals folded into History. Match cards are navigable (tap to open project details) and include inline action buttons (accept/reject/withdraw/decline).
 - messaging and notifications: [mobile/app/chat.tsx](mobile/app/chat.tsx), [mobile/app/notifications.tsx](mobile/app/notifications.tsx). Chat route accepts `dealId` and `producerProjectId` params for context-scoped conversations.
-- commercial deals: [mobile/app/deal_details.tsx](mobile/app/deal_details.tsx) — deal negotiation with accept/reject/counter/dispute actions, settlement recording modal (gross revenue input → split calculation), and "Message" button for contextual deal chat. [mobile/app/production_team.tsx](mobile/app/production_team.tsx) — production team management with "Propose Venue Deal" flow (searches venue owner by email, creates partnership proposal with revenue split).
+- commercial deals and production organizations: [mobile/app/deal_details.tsx](mobile/app/deal_details.tsx) — deal negotiation with accept/reject/counter/dispute actions, settlement recording modal (gross revenue input → split calculation), and "Message" button for contextual deal chat. [mobile/app/production_team.tsx](mobile/app/production_team.tsx) — producer users create and manage production teams from existing registered musicians and existing duo or group profiles in the system. Team creation auto-seeds the creator as the lead member at the top permission level, and the team becomes the venue-facing unit for invitations and applications. Venue owners can invite a production team from listing details, while the production side can apply back to a venue by choosing which musician, duo, or group will represent that production on the specific application. The venue still reviews that submission through the same lifecycle used for direct solo, duo, and group applications.
 - profile and policy screens: [mobile/app/profile.tsx](mobile/app/profile.tsx), [mobile/app/settings.tsx](mobile/app/settings.tsx), [mobile/app/account_details.tsx](mobile/app/account_details.tsx), [mobile/app/identity_verification.tsx](mobile/app/identity_verification.tsx). The profile Playlists tab uses a **unified playlist list with radio toggles** — there is no separate "My Radio Station" section. Each playlist card shows a 📡 toggle button; tapping it calls `toggle_radio_slot` which adds/removes the playlist from the user's station and auto-creates the station on first use. Cards on radio show a green border, radio icon, and "ON AIR" badge. A header badge shows how many playlists are currently broadcasting.
 - Phase 2 producer network: [mobile/app/producer_projects.tsx](mobile/app/producer_projects.tsx), [mobile/app/producer_project_details.tsx](mobile/app/producer_project_details.tsx). Project details now include role selector in apply modal, musician search-based invite flow, withdraw application, and accept/decline invite with expiry display.
 - Phase 2 social feed: [mobile/app/post_details.tsx](mobile/app/post_details.tsx)
@@ -220,6 +226,8 @@ Supporting utilities:
 - commercial agreement items from [mobile/supabase/functions/manage-deals](mobile/supabase/functions/manage-deals), folded into `Pending` while action is still required and into `History` once closed
 
 Architecturally, commercial deals are still a distinct workflow for venue partnerships and recording deals, but they no longer have their own tab. The current mobile client uses the bookings screen as a unified activity container where `Pending` represents action-needed items, `Upcoming` / `Ongoing` / `Review` remain the live booking workflow, and `History` holds closed activity. One current nuance in the implementation is that approved gig applications are still mixed into `Upcoming` and `Ongoing`, so the screen remains broader than a pure bookings-only surface.
+
+The same inbox architecture is also the convergence point for production-routed venue applications. A production submission still lands in the standard venue review lifecycle, but it carries production-team context plus the selected musician, duo, or group that is representing that team for the specific listing. This keeps venue-side review behavior aligned with the existing direct musician and direct group application flow instead of introducing a separate production-only review engine.
 
 ### Mobile chat architecture
 
@@ -317,7 +325,7 @@ This shell mirrors the mobile app closely but adapts layout for desktop and larg
 Feature routes under [web/app](web/app) largely mirror the mobile surface:
 
 - auth and account
-- home, feed (social home), bookings, manage, profile, notifications, wallet
+- home, feed (social home), bookings, manage, profile, notifications, wallet, production_team, deal_details
 - listing creation and management
 - AI suggestions
 - verification and subscription flows
@@ -335,6 +343,8 @@ Additional admin pages:
 - [web/app/admin/audit.tsx](web/app/admin/audit.tsx)
 
 Shared admin state and UI orchestration live in [web/app/admin/_AdminPanel.tsx](web/app/admin/_AdminPanel.tsx).
+
+The Expo web shell follows the same production workflow as mobile: a producer creates a production team, the creator becomes the lead owner or manager for that team, venue owners can invite the team from listing details, and the team can apply back to venue listings by selecting the specific registered musician, duo, or group that should be presented on that one application.
 
 ### Web Expo composition model
 
@@ -423,14 +433,14 @@ Important domains:
 
 - profile and account: [mobile/supabase/functions/manage-profile](mobile/supabase/functions/manage-profile), [mobile/supabase/functions/user-profile](mobile/supabase/functions/user-profile), [mobile/supabase/functions/delete-account](mobile/supabase/functions/delete-account)
 - listing and detail workflows: [mobile/supabase/functions/manage-details](mobile/supabase/functions/manage-details), [mobile/supabase/functions/manage-listings](mobile/supabase/functions/manage-listings), [mobile/supabase/functions/listings-crud](mobile/supabase/functions/listings-crud), [mobile/supabase/functions/search-content](mobile/supabase/functions/search-content)
-- bookings and applications: [mobile/supabase/functions/manage-bookings](mobile/supabase/functions/manage-bookings), [mobile/supabase/functions/bookings-manage](mobile/supabase/functions/bookings-manage), [mobile/supabase/functions/gig-applications](mobile/supabase/functions/gig-applications), [mobile/supabase/functions/group-members](mobile/supabase/functions/group-members)
+- bookings and applications: [mobile/supabase/functions/manage-bookings](mobile/supabase/functions/manage-bookings), [mobile/supabase/functions/bookings-manage](mobile/supabase/functions/bookings-manage), [mobile/supabase/functions/gig-applications](mobile/supabase/functions/gig-applications), [mobile/supabase/functions/group-members](mobile/supabase/functions/group-members). This application stack is still the core venue review path for direct musician submissions, direct duo or group submissions, and production-routed submissions.
 - notifications: [mobile/supabase/functions/manage-notifications](mobile/supabase/functions/manage-notifications)
 - payments and wallet: [mobile/supabase/functions/paymongo](mobile/supabase/functions/paymongo), [mobile/supabase/functions/withdrawals](mobile/supabase/functions/withdrawals)
 - verification and onboarding: [mobile/supabase/functions/create-didit-session](mobile/supabase/functions/create-didit-session), [mobile/supabase/functions/create-address-verification](mobile/supabase/functions/create-address-verification), [mobile/supabase/functions/verify-identity](mobile/supabase/functions/verify-identity), [mobile/supabase/functions/didit-webhook](mobile/supabase/functions/didit-webhook), [mobile/supabase/functions/verification-redirect](mobile/supabase/functions/verification-redirect), [mobile/supabase/functions/login-redirect](mobile/supabase/functions/login-redirect), [mobile/supabase/functions/create-unverified-user](mobile/supabase/functions/create-unverified-user)
 - AI and recommendation: [mobile/supabase/functions/home-feed](mobile/supabase/functions/home-feed), [mobile/supabase/functions/instrument-suggestions](mobile/supabase/functions/instrument-suggestions), [mobile/supabase/functions/upload-safety-screen](mobile/supabase/functions/upload-safety-screen)
 - storage lifecycle: [mobile/supabase/functions/upload-file](mobile/supabase/functions/upload-file), [mobile/supabase/functions/setup-storage](mobile/supabase/functions/setup-storage), [mobile/supabase/functions/delete-studio-with-storage](mobile/supabase/functions/delete-studio-with-storage)
 - Phase 2 producer network: [mobile/supabase/functions/manage-producer-network](mobile/supabase/functions/manage-producer-network) — create/publish/archive projects, apply/review/withdraw applications, invite musicians (with search_musicians discovery), accept/reject invites with expiry enforcement, save talent, browse projects and match scores. Slot acceptance uses atomic `increment_role_filled_slot` RPC with `FOR UPDATE` locking. Invite rejection and application withdrawal now notify the other party. Applications use `cover_message` (not `message`) as the payload field.
-- Phase 2 commercial deals: [mobile/supabase/functions/manage-deals](mobile/supabase/functions/manage-deals) — venue partnership and recording deal lifecycle (create, counter, accept, reject, settle, dispute), production team CRUD, settlement calculation via `calculate_deal_settlement` RPC. Deal creation, acceptance, and settlement insert system messages into contextual deal conversations via `insertDealSystemMessage` helper.
+- Phase 2 commercial deals: [mobile/supabase/functions/manage-deals](mobile/supabase/functions/manage-deals) — venue partnership and recording deal lifecycle (create, counter, accept, reject, settle, dispute), production team CRUD, and settlement calculation via `calculate_deal_settlement` RPC. Production teams are the producer-owned coordination layer for venue work; team creation auto-seeds the creator as the top-level member, and accepted venue matches can escalate into commercial deal negotiation. Deal creation, acceptance, and settlement insert system messages into contextual deal conversations via `insertDealSystemMessage` helper.
 - Phase 2 social feed: [mobile/supabase/functions/manage-social-feed](mobile/supabase/functions/manage-social-feed) — follow/unfollow, create/update/delete posts, get_feed (public + following), post reactions, comments, reporting, user post history
 - Phase 2 playlists and radio: [mobile/supabase/functions/manage-playlists](mobile/supabase/functions/manage-playlists) — CRUD playlists and items (including `audio_url` field per item), teaser assets, external links, play events, CRUD radio stations and slot schedules. Key actions: `create_playlist`, `list_user_playlists`, `list_my_playlists`, `get_playlist_details`, `add_playlist_item`, `remove_playlist_item`, `create_station`, `update_station`, `get_station_details`, `list_user_stations` (returns `slot_playlist_ids[]` for profile radio-state hydration), `browse_stations` (returns slot-enriched stations with nested `playlist.items` for feed audio playback), `add_station_slot`, `remove_station_slot`, `toggle_radio_slot` (idempotent on/off toggle that auto-creates a station if the user has none). Current deployed version: v4 (ACTIVE, verify_jwt=false).
 - Phase 2 marketplace: [mobile/supabase/functions/manage-marketplace](mobile/supabase/functions/manage-marketplace) — create/publish/update products, attach and normalize product media, browse products, fetch product details, list seller inventory, mark products sold, relist products, and still expose order, fulfillment, and shipping actions for richer commerce clients
@@ -444,6 +454,8 @@ The web function workspace adds administrative services not present in the mobil
 - [web/supabase/functions/admin-users-management](web/supabase/functions/admin-users-management)
 
 This means the admin architecture is currently web-centered at the backend layer, even though the broader product surface is cross-platform.
+
+Architecturally, production-to-venue applications should not fork the existing venue review engine. The production layer sits in front of the same application lifecycle already used by direct solo and direct group submissions: venue owners invite a production team from listing details, the producer selects which registered musician, duo, or group will represent the team on that listing, and the resulting submission still moves through the same pending, approved, rejected, withdrawn, and review states.
 
 ### Edge Function design pattern
 
@@ -536,6 +548,20 @@ This domain models the marketplace inventory and the social proof around it.
 - subscription_payments
 
 This domain handles booking lifecycle, revenue collection, balance tracking, and subscription monetization.
+
+### Production organization and commercial venue domain
+
+- production_teams
+- production_team_members
+- venue_partnership_deals
+- deal_term_versions
+- deal_negotiation_events
+- studio_recording_deals
+- recording_deal_packages
+- booking_cancellation_policies
+- booking_penalty_events
+
+This domain adds the producer-side organization layer for venue work. A user with the `producer` role creates a production team and is automatically inserted as the lead owner-level member for that team. The production team then acts as the organizational wrapper over existing registered musicians plus existing duo or group entities when working with venues. Venue owners can invite the production team from listing details, and the production side can apply to a venue by selecting the exact musician, duo, or group that should represent the team on that specific application. From the venue's perspective, the result is one production-side application that still follows the same downstream review and booking states used for direct musician and direct group applications.
 
 ### Messaging and notification domain
 
@@ -634,8 +660,11 @@ Typical examples:
 - booking actions from [mobile/app/bookings.tsx](mobile/app/bookings.tsx) and [web/app/bookings.tsx](web/app/bookings.tsx) invoke manage-bookings and related functions
 - profile fetch and mutation from account pages invoke manage-profile
 - detail pages invoke manage-details for enriched listing payloads and favorite behavior
+- venue-side listing details are also the entry point for production-team invitations, while production users reuse the same application stack by selecting which musician, duo, or group represents the team on a specific venue application
 - chat hooks read and write conversations directly, then subscribe to Realtime channels
 - marketplace listing creation, seller inventory refresh, and sold or relist actions from [mobile/app/marketplace.tsx](mobile/app/marketplace.tsx) and [mobile/app/product_details.tsx](mobile/app/product_details.tsx) invoke `manage-marketplace`, while buyer conversion continues in [mobile/app/chat.tsx](mobile/app/chat.tsx) instead of `create_order`
+
+The production layer is therefore compositional rather than parallel: it wraps existing registered performer entities, then hands the submission off to the same venue-side application lifecycle already used elsewhere in the app.
 
 ## 9.2 Admin flow
 
@@ -691,7 +720,7 @@ If you need to think about this codebase as one system, the cleanest mental mode
 
 - Product clients: mobile Expo app, Expo web app, and a parallel Vite SPA
 - Shared control plane: Supabase Auth, Postgres, Realtime, Storage, Edge Functions
-- Domain cores: marketplace listings, bookings, messaging, wallet and subscription payments, identity verification, moderation and admin
+- Domain cores: marketplace listings, direct and production-routed venue applications, production organizations, messaging, wallet and subscription payments, identity verification, moderation and admin
 - Integration edges: PayMongo for payments, Didit and Smile webhooks for verification, Groq-backed AI for recommendation and screening
 
 ## 11. Expansion Roadmap
@@ -702,7 +731,7 @@ If you need to think about this codebase as one system, the cleanest mental mode
 
 ### Phase 1 summary (delivered)
 
-Added the commercial booking layer on top of the existing studio and gig listings: time-boxed holds, booking requests, payment-linked attendance events, booking incidents, payout-linked wallet transactions, and a per-profile unpaid-booking lock gate.
+Added the commercial booking layer on top of the existing studio and gig listings: production teams for producer users, venue partnership negotiation, time-boxed holds, booking requests, payment-linked attendance events, booking incidents, payout-linked wallet transactions, and a per-profile unpaid-booking lock gate.
 
 ### Phase 2 summary (delivered)
 

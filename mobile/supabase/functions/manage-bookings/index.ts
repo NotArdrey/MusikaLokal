@@ -239,6 +239,9 @@ const reportTargetTableMap: Record<string, string> = {
   gig: "gigs",
   user: "profiles",
   profile: "profiles",
+  product: "products",
+  project: "producer_projects",
+  playlist: "playlists",
 };
 
 async function fetchReportTargetDetails(
@@ -278,9 +281,21 @@ async function fetchReportTargetDetails(
 
   if (recordError) throw recordError;
 
+  if (targetType === "profile" || targetType === "user") {
+    return {
+      type: targetType,
+      id: targetId,
+      table,
+      record: record || null,
+      owner_profile: record || null,
+    };
+  }
+
   const ownerId = String(
     record?.owner_id ||
       record?.organizer_id ||
+      record?.seller_id ||
+      record?.creator_id ||
       record?.user_id ||
       "",
   ).trim();
@@ -1003,6 +1018,146 @@ serve(async (req: Request) => {
         });
       }
 
+      // C2. For Producers: Fetch production-routed gig applications
+      if (userRole === "producer") {
+        const { data: teamMemberships, error: teamMembershipError } = await supabaseClient
+          .from("production_team_members")
+          .select("team_id")
+          .eq("user_id", userId);
+
+        if (teamMembershipError) {
+          console.log("Error fetching producer teams:", teamMembershipError);
+        }
+
+        const teamIds = Array.from(
+          new Set((teamMemberships || []).map((row: any) => row.team_id).filter(Boolean)),
+        );
+
+        if (teamIds.length > 0) {
+          const { data: productionApps, error: productionAppsError } = await supabaseClient
+            .from("gig_applications")
+            .select(
+              `
+                *,
+                gig:gig_id(name, event_date, location, organizer:organizer_id(avatar_url), gig_media(media_url, sort_order)),
+                group:group_id(name, images, group_type),
+                production_team:production_team_id(id, name, logo_url),
+                production_roster:production_roster_id(
+                  entity_kind,
+                  roster_profile:profile_id(full_name, avatar_url),
+                  roster_group:group_id(name, images, group_type)
+                )
+              `,
+            )
+            .in("production_team_id", teamIds)
+            .order("created_at", { ascending: false });
+
+          if (productionAppsError) {
+            console.log("Error fetching production gig apps:", productionAppsError);
+          }
+
+          productionApps?.forEach((app: any) => {
+            const normalizedStatus = (app.status || "").toLowerCase();
+            const gig = app.gig;
+            const dateStr = gig?.event_date || app.created_at?.split("T")[0] || "TBA";
+            const performerName =
+              app.group?.name ||
+              app.production_roster?.roster_profile?.full_name ||
+              app.production_roster?.roster_group?.name ||
+              "Performer";
+
+            let eventDate: Date | null = null;
+            if (gig?.event_date) {
+              eventDate = new Date(gig.event_date);
+              eventDate.setHours(23, 59, 59, 999);
+            }
+
+            const item = {
+              id: app.id,
+              type_id: "gig_application",
+              gig_id: app.gig_id,
+              group_id: app.group_id,
+              applicant_id: app.applicant_id,
+              production_team_id: app.production_team_id,
+              production_team_name: app.production_team?.name || null,
+              performer: performerName,
+              customer_name: performerName,
+              raw_date: dateStr,
+              start_time: gig?.event_date,
+              name: gig?.name || "Unknown Gig",
+              date: dateStr,
+              image:
+                app.group?.images?.[0] ||
+                app.production_roster?.roster_profile?.avatar_url ||
+                app.production_team?.logo_url ||
+                gig?.organizer?.avatar_url ||
+                "https://images.unsplash.com/photo-1516280440614-37939bbacd81?w=400&h=200&fit=crop",
+              status:
+                normalizedStatus === "pending"
+                  ? "Applied"
+                  : normalizedStatus === "accepted"
+                    ? "Accepted"
+                    : normalizedStatus === "completed"
+                      ? "Completed"
+                      : normalizedStatus === "rejected" ||
+                          normalizedStatus === "cancelled" ||
+                          normalizedStatus === "fired"
+                        ? "Fired"
+                        : app.status,
+              type:
+                app.group?.group_type === "duo"
+                  ? "Production Duo Application"
+                  : app.group_id
+                    ? "Production Group Application"
+                    : "Production Musician Application",
+              isCancelled:
+                normalizedStatus === "cancelled" ||
+                normalizedStatus === "rejected" ||
+                normalizedStatus === "fired",
+              action: normalizedStatus === "accepted" ? "View Details" : "Details",
+              location: gig?.location,
+              reviewed_by_applicant: app.reviewed_by_applicant || false,
+            };
+
+            if (normalizedStatus === "pending") {
+              // @ts-ignore
+              categorized.Pending.push(item);
+            } else if (normalizedStatus === "accepted") {
+              if (eventDate) {
+                const eventStart = new Date(gig.event_date);
+                eventStart.setHours(0, 0, 0, 0);
+
+                if (now >= eventStart && now <= eventDate) {
+                  // @ts-ignore
+                  categorized.Ongoing.push({ ...item, status: "Happening Now" });
+                } else if (now > eventDate) {
+                  if (!app.reviewed_by_applicant) {
+                    // @ts-ignore
+                    categorized.Review.push({ ...item, status: "Completed" });
+                  }
+                } else {
+                  // @ts-ignore
+                  categorized.Upcoming.push(item);
+                }
+              } else {
+                // @ts-ignore
+                categorized.Upcoming.push(item);
+              }
+            } else if (
+              normalizedStatus === "rejected" ||
+              normalizedStatus === "cancelled" ||
+              normalizedStatus === "fired"
+            ) {
+              // @ts-ignore
+              categorized.Review.push({ ...item, status: "Fired" });
+            } else if (normalizedStatus === "completed") {
+              // @ts-ignore
+              categorized.Review.push({ ...item, status: "Completed" });
+            }
+          });
+        }
+      }
+
       // D. For Venue Owners: Fetch accepted applications for their gigs
       if (userRole === "venue-owner") {
         // First get their gigs
@@ -1020,7 +1175,14 @@ serve(async (req: Request) => {
               `
                             *,
                             applicant:applicant_id(full_name, avatar_url),
-                            group:group_id(name)
+                            submitter:submitted_by_user_id(full_name, avatar_url),
+                            group:group_id(name, images, group_type),
+                            production_team:production_team_id(id, name, logo_url),
+                            production_roster:production_roster_id(
+                              entity_kind,
+                              roster_profile:profile_id(full_name, avatar_url),
+                              roster_group:group_id(name, group_type)
+                            )
                         `,
             )
             .in("gig_id", gigIds)
@@ -1037,7 +1199,11 @@ serve(async (req: Request) => {
             const gig = gigs?.find((g: any) => g.id === app.gig_id);
             const dateStr = gig?.event_date || "TBA";
             const performerName =
-              app.group?.name || app.applicant?.full_name || "Performer";
+              app.group?.name ||
+              app.production_roster?.roster_profile?.full_name ||
+              app.production_roster?.roster_group?.name ||
+              app.applicant?.full_name ||
+              "Performer";
 
             // Parse event date for time-based categorization
             let eventDate: Date | null = null;
@@ -1053,10 +1219,16 @@ serve(async (req: Request) => {
               group_id: app.group_id, // Include group_id
               applicant_id: app.applicant_id, // For renew contract
               user_id: app.applicant_id, // For profile link
+              production_team_id: app.production_team_id,
+              production_team_name: app.production_team?.name || null,
+              submitted_by_name: app.submitter?.full_name || null,
               raw_date: dateStr,
               name: `${gig?.name || "Gig"} - ${performerName}`,
               date: dateStr,
               image:
+                app.group?.images?.[0] ||
+                app.production_roster?.roster_profile?.avatar_url ||
+                app.production_team?.logo_url ||
                 app.applicant?.avatar_url ||
                 "https://picsum.photos/400/300",
               status:
@@ -1067,13 +1239,24 @@ serve(async (req: Request) => {
                     : app.status === "rejected" || app.status === "cancelled"
                       ? "Fired"
                       : "Completed",
-              type: app.group_id ? "Group Application" : "Solo Application",
+              type: app.production_team?.name
+                ? app.group?.group_type === "duo"
+                  ? "Production Duo Application"
+                  : app.group_id
+                    ? "Production Group Application"
+                    : "Production Musician Application"
+                : app.group_id
+                  ? "Group Application"
+                  : "Solo Application",
               isCancelled: app.status === "rejected" || app.status === "cancelled",
               action: app.status === "pending" ? "Confirm Now" : "View Details",
               location: gig?.location,
               performer: performerName,
               customer_name: performerName,
-              customer_avatar: app.applicant?.avatar_url,
+              customer_avatar:
+                app.group?.images?.[0] ||
+                app.production_roster?.roster_profile?.avatar_url ||
+                app.applicant?.avatar_url,
               video_url: app.video_url,
               cv_url: app.cv_url, // Added CV URL
               note: app.note,

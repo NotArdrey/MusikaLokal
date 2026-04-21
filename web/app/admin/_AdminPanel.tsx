@@ -458,6 +458,47 @@ const userFilters: { value: UserFilter; label: string }[] = [
 const auditEntityTypes: AuditEntityFilter[] = ['all', 'studio', 'gig'];
 const auditActions: AuditActionFilter[] = ['all', 'approved', 'rejected', 'submitted', 'resubmitted'];
 const REPORTS_PAGE_SIZE = 50;
+const reportTargetLabels: Record<string, string> = {
+  group: 'Group',
+  studio: 'Studio',
+  venue: 'Studio',
+  gig: 'Gig',
+  user: 'User Profile',
+  profile: 'User Profile',
+  product: 'Marketplace Item',
+  project: 'Producer Project',
+  'producer project': 'Producer Project',
+  producer_project: 'Producer Project',
+  playlist: 'Music',
+  music: 'Music',
+};
+
+const formatReportTargetType = (rawType: unknown) => {
+  const normalized = String(rawType || '').trim().toLowerCase();
+  if (!normalized) return 'Unknown';
+
+  return reportTargetLabels[normalized] || normalized.replace(/[_-]+/g, ' ').replace(/\b\w/g, (match) => match.toUpperCase());
+};
+
+const extractReportTargetName = (record?: Record<string, unknown> | null) => {
+  if (!record) return null;
+
+  const candidates = [
+    record.title,
+    record.name,
+    record.full_name,
+    record.display_name,
+    record.headline,
+  ];
+
+  for (const candidate of candidates) {
+    if (typeof candidate === 'string' && candidate.trim().length > 0) {
+      return candidate.trim();
+    }
+  }
+
+  return null;
+};
 
 const normalizeUserRole = (rawRole: unknown): UserRole => {
   const normalized = String(rawRole || '').trim().toLowerCase();
@@ -2644,7 +2685,7 @@ export default function AdminPanel({ initialTab, children }: AdminPanelProps) {
                     <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Status: {report.status}</Text>
                     <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Escalation: {String(report.escalation_status || 'none').replace(/_/g, ' ')}</Text>
                     <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Reporter: {report.reporter_name || 'Unknown'} ({report.reporter_email || 'no email'})</Text>
-                    <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Target: {report.target_type} ({report.target_id})</Text>
+                    <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Target: {formatReportTargetType(report.target_type)} ({report.target_id})</Text>
                     <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Created: {formatDateTime(report.created_at)}</Text>
                     {report.reviewed_at ? (
                       <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Reviewed: {formatDateTime(report.reviewed_at)} {report.reviewer_name ? `by ${report.reviewer_name}` : ''}</Text>
@@ -3368,8 +3409,9 @@ export default function AdminPanel({ initialTab, children }: AdminPanelProps) {
                 'Target Reference',
                 reportDetailsTarget?.target
                   ? {
-                    target_type: reportDetailsTarget.target.type,
+                    target_type: formatReportTargetType(reportDetailsTarget.target.type),
                     target_id: reportDetailsTarget.target.id,
+                    target_name: extractReportTargetName(reportDetailsTarget.target.record),
                     source_table: reportDetailsTarget.target.table,
                   }
                   : null,

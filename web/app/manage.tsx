@@ -37,7 +37,7 @@ export default function ManageScreen() {
             ? '#94A3B8'
             : '#475569'
         : colors.textSecondary;
-    const { session, loading: authLoading, userId, userRole, isGuest } = useAuth();
+    const { session, loading: authLoading, userId, userRole, roleResolved, isGuest } = useAuth();
     const isAuthenticated = !!session;
     const [loading, setLoading] = useState(true);
     const [fetchedRole, setFetchedRole] = useState<string | null>(null);
@@ -58,6 +58,10 @@ export default function ManageScreen() {
         }
 
         if (isAuthenticated && userId) {
+            if (!roleResolved) {
+                return;
+            }
+
             // Try to get role from context first, or fetch directly
             if (userRole) {
                 handleRedirect(userRole);
@@ -68,7 +72,7 @@ export default function ManageScreen() {
         } else if (!authLoading) {
             setLoading(false);
         }
-    }, [authLoading, isAuthenticated, userRole, userId]);
+    }, [authLoading, isAuthenticated, roleResolved, userRole, userId]);
 
     const fetchRoleAndRedirect = async () => {
         console.log('🎯 Manage - User ID from context:', userId);
@@ -108,10 +112,12 @@ export default function ManageScreen() {
     const handleRedirect = (role: string) => {
         if (role === 'studio-owner') {
             router.replace('/my_studio');
-        } else if (role === 'musician') {
+        } else if (role === 'musician' || role === 'manager' || role === 'musician-member') {
             router.replace('/my_group');
         } else if (role === 'venue-owner') {
             router.replace('/my_venue');
+        } else if (role === 'producer') {
+            router.replace('/production_team');
         } else if (role === 'admin') {
             router.replace('/admin');
         } else {

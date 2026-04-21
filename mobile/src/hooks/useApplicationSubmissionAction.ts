@@ -11,11 +11,15 @@ interface AlertConfig {
 
 interface UseApplicationSubmissionActionParams {
   userId: string | null;
+  userRole?: string | null;
   listingId: string | null;
   group: any;
   groupAlreadyApplied: boolean;
   groupApplicationBy: string | null;
   selectedGroupId: string | null;
+  selectedProductionTeamId: string | null;
+  selectedProductionRosterId: string | null;
+  productionRoster: any[];
   selectedSlotType: "solo" | "duo" | "band" | null;
   pitchMessage: string;
   cvFile: any;
@@ -42,11 +46,15 @@ interface UseApplicationSubmissionActionParams {
 
 export const useApplicationSubmissionAction = ({
   userId,
+  userRole,
   listingId,
   group,
   groupAlreadyApplied,
   groupApplicationBy,
   selectedGroupId,
+  selectedProductionTeamId,
+  selectedProductionRosterId,
+  productionRoster,
   selectedSlotType,
   pitchMessage,
   cvFile,
@@ -125,9 +133,17 @@ export const useApplicationSubmissionAction = ({
 
     try {
       const isGroupListing = group?.type === "Group";
+      const isProducerGigFlow =
+        group?.type === "Gig" &&
+        userRole === "producer" &&
+        !!selectedProductionTeamId &&
+        !!selectedProductionRosterId;
       let uploadedCvUrl = null;
       const selectedGroup = selectedGroupId
         ? userGroups.find((g) => g.id === selectedGroupId)
+        : null;
+      const selectedProductionRoster = selectedProductionRosterId
+        ? productionRoster.find((entry) => entry.id === selectedProductionRosterId)
         : null;
       const needsLeaderApproval =
         !!selectedGroupId && !!selectedGroup && selectedGroup.owner_id !== userId;
@@ -263,6 +279,69 @@ export const useApplicationSubmissionAction = ({
           title: "Application Submitted!",
           message:
             "Your application has been sent to the group leader. They can review your pitch, CV, and video.",
+        });
+        setAlertVisible(true);
+
+        setPitchMessage("");
+        setVideoUrl("");
+        setCvFile(null);
+        setCvUrl("");
+
+        setTimeout(() => {
+          closeSheet();
+        }, 2500);
+
+        return;
+      }
+
+      if (isProducerGigFlow) {
+        const { data, error } = await supabase.functions.invoke("gig-applications", {
+          body: {
+            action: "submit_production_gig_application",
+            userId,
+            gigId: listingId,
+            teamId: selectedProductionTeamId,
+            rosterId: selectedProductionRosterId,
+            pitchMessage,
+            videoUrl: videoUrl || null,
+            cvUrl: uploadedCvUrl,
+            slotType: selectedSlotType || null,
+          },
+        });
+
+        if (error) {
+          console.error("Error submitting production application:", error);
+          setAlertConfig({
+            type: "error",
+            title: "Submission Failed",
+            message:
+              error.message ||
+              "Failed to submit production application. Please try again.",
+          });
+          setAlertVisible(true);
+          return;
+        }
+
+        setHasExistingApplication(true);
+        setExistingApplicationStatus("pending");
+
+        if (group && group.embedding) {
+          try {
+            await supabase.rpc("update_user_interest", {
+              p_user_id: userId,
+              p_item_vector: group.embedding,
+              p_weight: 0.4,
+            });
+            console.log("🤖 AI learned from production application:", group.name);
+          } catch (e) {
+            console.log("Error updating AI interest from production application:", e);
+          }
+        }
+
+        setAlertConfig({
+          type: "success",
+          title: "Application Submitted!",
+          message: `${selectedProductionRoster?.display_name || "Your selected performer"} has been submitted through your production team. The venue owner will review it through the normal application flow.`,
         });
         setAlertVisible(true);
 
@@ -456,7 +535,10 @@ export const useApplicationSubmissionAction = ({
     group,
     listingId,
     pitchMessage,
+    productionRoster,
     selectedGroupId,
+    selectedProductionRosterId,
+    selectedProductionTeamId,
     setAlertConfig,
     setAlertVisible,
     setCvFile,
@@ -470,6 +552,7 @@ export const useApplicationSubmissionAction = ({
     invokeListingsCrudAction,
     userGroups,
     userId,
+    userRole,
     videoUrl,
   ]);
 
@@ -573,9 +656,35 @@ export const useApplicationSubmissionAction = ({
     }
 
     const musicianTypeRequired = group.requirements?.musician_type || "both";
+    const isProducerGigFlow = group.type === "Gig" && userRole === "producer";
     const isGroupApplication = !!selectedGroupId;
+    const selectedProductionRoster = selectedProductionRosterId
+      ? productionRoster.find((entry) => entry.id === selectedProductionRosterId)
+      : null;
 
-    if (musicianTypeRequired === "group" && !isGroupApplication) {
+    if (isProducerGigFlow) {
+      if (!selectedProductionTeamId) {
+        setAlertConfig({
+          type: "error",
+          title: "Production Team Required",
+          message: "Select the production team that will manage this application.",
+        });
+        setAlertVisible(true);
+        return;
+      }
+
+      if (!selectedProductionRosterId || !selectedProductionRoster) {
+        setAlertConfig({
+          type: "error",
+          title: "Performer Required",
+          message: "Select the musician, duo, or group from your production roster that will apply to this gig.",
+        });
+        setAlertVisible(true);
+        return;
+      }
+    }
+
+    if (musicianTypeRequired === "group" && !isGroupApplication && !isProducerGigFlow) {
       setAlertConfig({
         type: "error",
         title: "Group Required",
@@ -614,7 +723,11 @@ export const useApplicationSubmissionAction = ({
         return;
       }
 
-      if (selectedSlotType !== "solo" && !isGroupApplication) {
+      if (
+        selectedSlotType !== "solo" &&
+        !isGroupApplication &&
+        !isProducerGigFlow
+      ) {
         setAlertConfig({
           type: "error",
           title: "Group Needed",
@@ -625,12 +738,23 @@ export const useApplicationSubmissionAction = ({
         return;
       }
 
-      if (selectedSlotType === "duo" || selectedSlotType === "band") {
-        const selectedGroup = userGroups.find((g) => g.id === selectedGroupId);
-        const requiredGroupType = selectedSlotType === "duo" ? "duo" : "band";
-        const selectedGroupType = selectedGroup?.group_type || "band";
+      if (isProducerGigFlow && selectedSlotType === "solo" && selectedProductionRoster?.entity_kind !== "musician") {
+        setAlertConfig({
+          type: "error",
+          title: "Category Mismatch",
+          message: "Solo slots require a musician profile from your production roster.",
+        });
+        setAlertVisible(true);
+        return;
+      }
 
-        if (!selectedGroup || selectedGroupType !== requiredGroupType) {
+      if (selectedSlotType === "duo" || selectedSlotType === "band") {
+        const requiredGroupType = selectedSlotType === "duo" ? "duo" : "band";
+        const selectedEntityGroupType = isProducerGigFlow
+          ? selectedProductionRoster?.group_type || selectedProductionRoster?.group?.group_type || null
+          : userGroups.find((g) => g.id === selectedGroupId)?.group_type || "band";
+
+        if (selectedEntityGroupType !== requiredGroupType) {
           setAlertConfig({
             type: "error",
             title: "Category Mismatch",
@@ -742,12 +866,16 @@ export const useApplicationSubmissionAction = ({
     listingId,
     pitchMessage,
     processApplicationSubmission,
+    productionRoster,
     selectedGroupId,
+    selectedProductionRosterId,
+    selectedProductionTeamId,
     selectedSlotType,
     setAlertConfig,
     setAlertVisible,
     requestConfirmation,
     userId,
+    userRole,
     videoUrl,
   ]);
 

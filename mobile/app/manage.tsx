@@ -13,7 +13,7 @@ import { useTheme } from '../src/context/ThemeContext';
 export default function ManageScreen() {
     const { colors } = useTheme();
     const { contentBottomPadding } = useBottomBarClearance(24);
-    const { session, loading: authLoading, userId, userRole, isGuest } = useAuth();
+    const { session, loading: authLoading, userId, userRole, roleResolved, isGuest } = useAuth();
     const isAuthenticated = !!session;
     const [loading, setLoading] = useState(true);
     const [fetchedRole, setFetchedRole] = useState<string | null>(null);
@@ -34,6 +34,10 @@ export default function ManageScreen() {
         }
 
         if (isAuthenticated && userId) {
+            if (!roleResolved) {
+                return;
+            }
+
             // Try to get role from context first, or fetch directly
             if (userRole) {
                 handleRedirect(userRole);
@@ -44,7 +48,7 @@ export default function ManageScreen() {
         } else if (!authLoading) {
             setLoading(false);
         }
-    }, [authLoading, isAuthenticated, userRole, userId]);
+    }, [authLoading, isAuthenticated, roleResolved, userRole, userId]);
 
     const fetchRoleAndRedirect = async () => {
         console.log('🎯 Manage - User ID from context:', userId);

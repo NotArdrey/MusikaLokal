@@ -169,6 +169,8 @@ export default function SidebarNav() {
                     setManageRoute('/my_group');
                 } else if (data.role === 'venue-owner') {
                     setManageRoute('/my_venue');
+                } else if (data.role === 'producer') {
+                    setManageRoute('/production_team');
                 } else if (data.role === 'admin') {
                     setManageRoute('/admin');
                 } else {
