@@ -22,6 +22,7 @@ import ImageUploader from "../src/components/ImageUploader";
 import Navbar from "../src/components/navbar";
 import Skeleton from "../src/components/Skeleton";
 import CustomAlert, { AlertType } from "../src/components/CustomAlert";
+import { useBottomBarClearance } from "../src/hooks/useBottomBarClearance";
 import { useAuth } from "../src/context/AuthContext";
 import { showTopToast } from "../src/context/TopToastContext";
 import { useTheme } from "../src/context/ThemeContext";
@@ -56,6 +57,7 @@ const getProductImage = (product: any) => product?.cover_image_url || product?.p
 
 export default function MarketplaceScreen() {
   const { colors, isDark } = useTheme();
+  const { contentBottomPadding } = useBottomBarClearance(24);
   const { session, userRole, isGuest, userId } = useAuth();
   const isSeller = userRole === "producer" || userRole === "musician";
 
@@ -514,6 +516,7 @@ export default function MarketplaceScreen() {
 
       <ScrollView
         style={styles.content}
+        contentContainerStyle={{ paddingBottom: contentBottomPadding }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
       >
         {loading ? (
@@ -527,7 +530,6 @@ export default function MarketplaceScreen() {
           </>
         )}
 
-        <View style={{ height: 100 }} />
       </ScrollView>
 
       {/* Add Product Modal */}

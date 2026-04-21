@@ -29,15 +29,23 @@ import {
     View,
 } from "react-native";
 import { Easing } from "react-native-reanimated";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { supabase } from "../../lib/supabase";
 import { useAuth } from "../context/AuthContext";
+import {
+  RADIO_MINI_PLAYER_HEIGHT,
+  RADIO_MINI_PLAYER_STACK_GAP,
+  useRadioPlayerPresence,
+} from "../context/RadioPlayerContext";
 import { showTopToast } from "../context/TopToastContext";
 import { useTheme } from "../context/ThemeContext";
 import {
   buildSocialFollowKey,
   getListingSocialFollowTarget,
 } from "../utils/socialFollow";
+import { NAVBAR_BOTTOM_OFFSET } from "./navbar";
 import ListingCard from "./ListingCard";
+import TrackedBottomSheetModal from "./TrackedBottomSheetModal";
 
 const debugLog = (..._args: unknown[]) => {};
 
@@ -174,10 +182,12 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
   function SearchBottomSheet({ onClose, onItemPress, onChat, onFollowChanged }, ref) {
     const { colors, isDark } = useTheme();
     const { userRole, isGuest, userId } = useAuth();
+    const insets = useSafeAreaInsets();
+    const { activeStation } = useRadioPlayerPresence();
     const snapPoints = useMemo(() => ["90%"], []);
     const animationConfigs = useBottomSheetTimingConfigs({
-      duration: 320,
-      easing: Easing.inOut(Easing.cubic),
+      duration: 260,
+      easing: Easing.out(Easing.cubic),
     });
 
     // Filter Chips - safely handle null userRole
@@ -1460,7 +1470,7 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
     );
 
     return (
-      <BottomSheetModal
+      <TrackedBottomSheetModal
         ref={ref}
         index={0}
         snapPoints={snapPoints}
@@ -1515,7 +1525,7 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
             removeClippedSubviews={Platform.OS === "android"}
           />
         )}
-      </BottomSheetModal>
+      </TrackedBottomSheetModal>
     );
   },
 );

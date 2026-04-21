@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
-import { router, useLocalSearchParams } from "expo-router";
-import { useEffect, useState } from "react";
+import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
+import { useCallback, useEffect, useState } from "react";
 import {
     ActivityIndicator,
     Image,
@@ -18,6 +18,7 @@ import {
 import { supabase } from "../lib/supabase";
 import CustomAlert, { AlertType } from "../src/components/CustomAlert";
 import Header from "../src/components/header";
+import PlaylistSelectionSection from "../src/components/PlaylistSelectionSection";
 import ImageUploader from "../src/components/ImageUploader";
 import LocationPicker from "../src/components/LocationPicker";
 import Modal from "../src/components/modal";
@@ -31,6 +32,10 @@ import {
 import { useAuth } from "../src/context/AuthContext";
 import { useTheme } from "../src/context/ThemeContext";
 import { isGroupLeaderMember } from "../src/utils/groupMembers";
+import {
+  fetchUserOwnedPlaylists,
+  syncGroupLinkedPlaylists,
+} from "../src/utils/groupPlaylists";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 const GENRES = [
@@ -343,6 +348,46 @@ export default function AddGroupScreen() {
 
   const [creating, setCreating] = useState(false);
   const [newGroupId, setNewGroupId] = useState<string | null>(null);
+  const [successModalMessage, setSuccessModalMessage] = useState("");
+  const [ownedPlaylists, setOwnedPlaylists] = useState<any[]>([]);
+  const [selectedPlaylistIds, setSelectedPlaylistIds] = useState<string[]>([]);
+  const [loadingPlaylists, setLoadingPlaylists] = useState(false);
+
+  const fetchOwnedPlaylists = useCallback(async (ownerId: string) => {
+    setLoadingPlaylists(true);
+    try {
+      const playlistRows = await fetchUserOwnedPlaylists(ownerId);
+      setOwnedPlaylists(playlistRows);
+    } catch (playlistError) {
+      console.log("[add_group] Failed to fetch playlists:", playlistError);
+      setOwnedPlaylists([]);
+    } finally {
+      setLoadingPlaylists(false);
+    }
+  }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (!authorized || !currentUserId) {
+        return undefined;
+      }
+
+      void fetchOwnedPlaylists(currentUserId);
+      return undefined;
+    }, [authorized, currentUserId, fetchOwnedPlaylists]),
+  );
+
+  const handleTogglePlaylist = useCallback((playlistId: string) => {
+    setSelectedPlaylistIds((prev) =>
+      prev.includes(playlistId)
+        ? prev.filter((id) => id !== playlistId)
+        : [...prev, playlistId],
+    );
+  }, []);
+
+  const handleCreatePlaylist = useCallback(() => {
+    router.push("/create_playlist");
+  }, []);
 
   const getLeaderIndex = () =>
     members.findIndex(
@@ -709,7 +754,21 @@ export default function AddGroupScreen() {
         }
       }
 
+      let playlistLinkWarning = "";
+      if (selectedPlaylistIds.length > 0) {
+        try {
+          await syncGroupLinkedPlaylists(data.id, selectedPlaylistIds);
+        } catch (playlistError: any) {
+          console.log("[add_group] Failed to link playlists:", playlistError);
+          playlistLinkWarning =
+            "The group was created, but the selected playlists could not be linked yet.";
+        }
+      }
+
       setNewGroupId(data.id);
+      setSuccessModalMessage(
+        playlistLinkWarning || `"${groupName}" has been successfully created.`,
+      );
       setModalVisible(true);
       console.log("Group Created");
     } catch (e: any) {
@@ -1861,6 +1920,27 @@ export default function AddGroupScreen() {
                       ))}
                     </View>
                   </View>
+
+                  <View
+                    style={[
+                      styles.divider,
+                      { backgroundColor: isDark ? "#374151" : "#E5E7EB" },
+                    ]}
+                  />
+
+                  <PlaylistSelectionSection
+                    colors={colors}
+                    isDark={isDark}
+                    playlists={ownedPlaylists}
+                    selectedPlaylistIds={selectedPlaylistIds}
+                    loading={loadingPlaylists}
+                    onTogglePlaylist={handleTogglePlaylist}
+                    onCreatePlaylist={handleCreatePlaylist}
+                    title="Linked Playlists"
+                    subtitle="Select the playlists that should appear on this group profile. Any linked playlist will show up on the manage page and listing details."
+                    emptyMessage="Create a playlist first, then come back here to link it to this group."
+                    disabled={creating}
+                  />
                 </View>
 
                 <Text style={styles.termsText}>
@@ -1949,7 +2029,7 @@ export default function AddGroupScreen() {
       <Modal
         visible={modalVisible}
         title="Success!"
-        message={`"${groupName}" has been successfully created.`}
+        message={successModalMessage || `"${groupName}" has been successfully created.`}
         buttonText={"Manage Group"}
         onClose={handleSuccessRedirect}
       />

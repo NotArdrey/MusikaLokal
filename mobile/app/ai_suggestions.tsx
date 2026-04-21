@@ -17,7 +17,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { supabase } from '../lib/supabase';
 import GuestSignInGate from '../src/components/GuestSignInGate';
 import Header from '../src/components/header';
-import Navbar, { NAVBAR_CLEARANCE } from '../src/components/navbar';
+import Navbar from '../src/components/navbar';
+import { useBottomBarClearance } from '../src/hooks/useBottomBarClearance';
 import { useAuth } from '../src/context/AuthContext';
 import { useTheme } from '../src/context/ThemeContext';
 import {
@@ -57,6 +58,7 @@ export default function AiSuggestionsScreen() {
     const { colors, isDark } = useTheme();
     const { isGuest } = useAuth();
     const insets = useSafeAreaInsets();
+    const { bottomBarClearance, contentBottomPadding } = useBottomBarClearance(24);
     const params = useLocalSearchParams<{ refresh?: string }>();
     const refreshKey = Array.isArray(params.refresh) ? params.refresh[0] : params.refresh;
 
@@ -877,7 +879,7 @@ export default function AiSuggestionsScreen() {
     const renderPreferencesStep = () => (
         <ScrollView
             style={styles.scrollView}
-            contentContainerStyle={[styles.scrollContent, { paddingBottom: 160 + insets.bottom }]}
+            contentContainerStyle={[styles.scrollContent, { paddingBottom: contentBottomPadding }]}
             showsVerticalScrollIndicator={false}
         >
             {/* Profile Section - Shows user's current role */}
@@ -926,7 +928,7 @@ export default function AiSuggestionsScreen() {
         return (
             <ScrollView
                 style={styles.scrollView}
-                contentContainerStyle={[styles.scrollContent, { paddingBottom: 160 + insets.bottom }]}
+                contentContainerStyle={[styles.scrollContent, { paddingBottom: contentBottomPadding }]}
                 showsVerticalScrollIndicator={false}
             >
             {/* Back Button */}
@@ -1031,7 +1033,7 @@ export default function AiSuggestionsScreen() {
         }
 
         const accentColor = isAIPowered ? '#8B5CF6' : colors.primary;
-        const followupBottomOffset = NAVBAR_CLEARANCE + insets.bottom;
+        const followupBottomOffset = bottomBarClearance + 12;
 
         return (
             <View pointerEvents="box-none" style={[styles.followupLayer, { bottom: followupBottomOffset }]}> 

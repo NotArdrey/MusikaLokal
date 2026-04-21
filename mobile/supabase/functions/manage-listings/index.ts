@@ -2,6 +2,10 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 // @ts-ignore
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import {
+    buildNotificationRouteMeta,
+    withNotificationRouteMeta,
+} from "../_shared/notificationRoutes.ts";
 
 const corsHeaders = {
     'Access-Control-Allow-Origin': '*',
@@ -233,7 +237,7 @@ serve(async (req: Request) => {
                     title,
                     message,
                     image: image || null,
-                    meta: meta || null,
+                    meta: withNotificationRouteMeta(meta),
                     read: false
                 })
                 .select()
@@ -266,7 +270,7 @@ serve(async (req: Request) => {
                     title: n.title,
                     message: n.message,
                     image: n.image || null,
-                    meta: n.meta || null,
+                    meta: withNotificationRouteMeta(n.meta),
                     read: false
                 }))
 
@@ -1765,7 +1769,10 @@ serve(async (req: Request) => {
                 type: 'success',
                 title: 'Added to Group',
                 message: `You have been added to the group "${group.name}"`,
-                meta: { type: 'group_member_added', group_id: groupId }
+                meta: buildNotificationRouteMeta('/group_details', { id: groupId }, {
+                    type: 'group_member_added',
+                    group_id: groupId,
+                })
             });
 
             return new Response(JSON.stringify(data), {
@@ -1831,7 +1838,10 @@ serve(async (req: Request) => {
                     type: 'warning',
                     title: 'Removed from Group',
                     message: `You have been removed from the group "${group.name}"`,
-                    meta: { type: 'group_member_removed', group_id: groupId }
+                    meta: buildNotificationRouteMeta('/group_details', { id: groupId }, {
+                        type: 'group_member_removed',
+                        group_id: groupId,
+                    })
                 });
             }
 

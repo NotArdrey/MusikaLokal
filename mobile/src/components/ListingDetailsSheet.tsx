@@ -34,6 +34,7 @@ import { supabase } from "../../lib/supabase";
 import { useAuth } from "../context/AuthContext";
 import { useTheme } from "../context/ThemeContext";
 import { useApplicationSubmissionAction } from "../hooks/useApplicationSubmissionAction";
+import { useBottomBarClearance } from "../hooks/useBottomBarClearance";
 import { useBookingRequestAction } from "../hooks/useBookingRequestAction";
 import { useCurrentUserVenueRole } from "../hooks/useCurrentUserVenueRole";
 import { useListingSheetDerived } from "../hooks/useListingSheetDerived";
@@ -57,6 +58,7 @@ import StudioGigVenueAboutTab from "./listingDetails/StudioGigVenueAboutTab";
 import StudioSetupTab from "./listingDetails/StudioSetupTab";
 import { isRecordingStudioMode, normalizeStudioType } from "./listingDetails/availability";
 import Modal from "./modal";
+import TrackedBottomSheetModal from "./TrackedBottomSheetModal";
 
 const debugLog = (..._args: unknown[]) => { };
 
@@ -150,6 +152,7 @@ const ListingDetailsSheet = forwardRef<
 >(function ListingDetailsSheet({ listingId, onDismiss }, ref) {
   const { colors, isDark } = useTheme();
   const { userId, userRole, isGuest, isSystemLocked, showLockAlert } = useAuth();
+  const { contentBottomPadding } = useBottomBarClearance(24);
   const { isProfileComplete } = useProfileCompletion();
   const [loading, setLoading] = useState(false);
   const [group, setGroup] = useState<any>(null);
@@ -486,7 +489,7 @@ const ListingDetailsSheet = forwardRef<
     // System Lock Check - Block if user has unpaid balance
     if (isSystemLocked) {
       // Dismiss the bottom sheet first so navigation is visible after "Pay Now" is pressed
-      showLockAlert(() => onDismiss());
+      showLockAlert(() => onDismiss?.());
       return;
     }
 
@@ -1167,9 +1170,13 @@ const ListingDetailsSheet = forwardRef<
   // Fixed sheet height
   const snapPoints = useMemo(() => ["90%"], []);
   const animationConfigs = useBottomSheetTimingConfigs({
-    duration: 320,
-    easing: Easing.inOut(Easing.cubic),
+    duration: 260,
+    easing: Easing.out(Easing.cubic),
   });
+  const scrollContentStyle = useMemo(
+    () => [styles.scrollContent, { paddingBottom: contentBottomPadding }],
+    [contentBottomPadding],
+  );
 
   useEffect(() => {
     debugLog("=== ListingDetailsSheet useEffect triggered ===");
@@ -2605,7 +2612,7 @@ const ListingDetailsSheet = forwardRef<
 
   return (
     <>
-      <BottomSheetModal
+      <TrackedBottomSheetModal
         ref={ref}
         index={0}
         snapPoints={snapPoints}
@@ -2635,7 +2642,7 @@ const ListingDetailsSheet = forwardRef<
           </View>
         ) : group ? (
           <BottomSheetScrollView
-            contentContainerStyle={styles.scrollContent}
+            contentContainerStyle={scrollContentStyle}
             showsVerticalScrollIndicator={false}
             showsHorizontalScrollIndicator={false}
             nestedScrollEnabled
@@ -2691,7 +2698,7 @@ const ListingDetailsSheet = forwardRef<
             )}
           </BottomSheetScrollView>
         ) : null}
-      </BottomSheetModal>
+      </TrackedBottomSheetModal>
 
       <CustomAlert
         visible={alertVisible}

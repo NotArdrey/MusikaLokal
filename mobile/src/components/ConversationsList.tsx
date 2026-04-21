@@ -11,12 +11,11 @@ import {
     TouchableOpacity,
     View
 } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { DEFAULT_AVATAR } from '../constants/Images';
 import { useTheme } from '../context/ThemeContext';
+import { useBottomBarClearance } from '../hooks/useBottomBarClearance';
 import { Conversation, useConversations } from '../hooks/useChat';
 import Header from './header';
-import { NAVBAR_CLEARANCE } from './navbar';
 import UserSearchModal from './UserSearchModal';
 
 interface ConversationsListProps {
@@ -31,7 +30,7 @@ const ConversationsList: React.FC<ConversationsListProps> = ({
     onNewConversation,
 }) => {
     const { colors, isDark } = useTheme();
-    const insets = useSafeAreaInsets();
+    const { contentBottomPadding } = useBottomBarClearance();
     const { conversations, loading, refetch } = useConversations(currentUserId);
     const [showNewMessageModal, setShowNewMessageModal] = useState(false);
 
@@ -239,7 +238,7 @@ const ConversationsList: React.FC<ConversationsListProps> = ({
                     data={conversations}
                     keyExtractor={(item) => item.id}
                     renderItem={renderConversation}
-                    contentContainerStyle={[styles.list, { paddingBottom: insets.bottom + NAVBAR_CLEARANCE }]}
+                    contentContainerStyle={[styles.list, { paddingBottom: contentBottomPadding }]}
                     initialNumToRender={14}
                     maxToRenderPerBatch={20}
                     windowSize={10}

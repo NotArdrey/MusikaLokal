@@ -1,6 +1,7 @@
 import { useCallback } from "react";
 import { supabase } from "../../lib/supabase";
 import { getGigApplicationDeadlineInfo } from "../utils/gigApplication";
+import { buildNotificationRouteMeta } from "../utils/notificationNavigation";
 
 interface AlertConfig {
   type: "success" | "error" | "warning" | "info";
@@ -178,6 +179,12 @@ export const useApplicationSubmissionAction = ({
           submitted_at: new Date().toISOString(),
           status: "pending",
         };
+        const ownerApplicationMeta = listingId
+          ? buildNotificationRouteMeta("/manage_group", { id: listingId }, applicationMeta)
+          : applicationMeta;
+        const selfApplicationMeta = listingId
+          ? buildNotificationRouteMeta("/group_details", { id: listingId }, applicationMeta)
+          : applicationMeta;
 
         const { error: ownerNotificationError } = await invokeListingsCrudAction(
           {
@@ -186,7 +193,7 @@ export const useApplicationSubmissionAction = ({
             type: "info",
             title: "New Group Application",
             message: `You have a new application for "${group.name}".`,
-            meta: applicationMeta,
+            meta: ownerApplicationMeta,
           },
         );
 
@@ -220,7 +227,7 @@ export const useApplicationSubmissionAction = ({
                 type: "info",
                 title: "Group Application Submitted",
                 message: `You applied to join "${group.name}".`,
-                meta: applicationMeta,
+                meta: selfApplicationMeta,
               });
 
             if (selfNotificationError) {
@@ -338,18 +345,27 @@ export const useApplicationSubmissionAction = ({
       if (group?.organizer_id && data && !needsLeaderApproval) {
         try {
           if (group.organizer_id !== userId) {
+            const organizerNotificationMeta = listingId
+              ? buildNotificationRouteMeta("/manage_gig", { id: listingId }, {
+                  gig_id: listingId,
+                  application_id: data.id,
+                  applicant_id: userId,
+                  group_id: selectedGroupId || null,
+                })
+              : {
+                  gig_id: listingId,
+                  application_id: data.id,
+                  applicant_id: userId,
+                  group_id: selectedGroupId || null,
+                };
+
             await invokeListingsCrudAction({
               action: "create_notification",
               targetUserId: group.organizer_id,
               type: "info",
               title: "New Gig Application",
               message: `You have a new application for "${group.name}".`,
-              meta: {
-                gig_id: listingId,
-                application_id: data.id,
-                applicant_id: userId,
-                group_id: selectedGroupId || null,
-              },
+              meta: organizerNotificationMeta,
             });
           }
         } catch (notifyErr) {

@@ -2,6 +2,10 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 // @ts-ignore
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import {
+  buildNotificationRouteMeta,
+  withNotificationRouteMeta,
+} from "../_shared/notificationRoutes.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -201,6 +205,7 @@ async function insertNotificationIfMissing(
 
   await supabaseAdmin.from("notifications").insert({
     ...payload,
+    meta: withNotificationRouteMeta(payload.meta),
     read: false,
   });
 }
@@ -2661,11 +2666,11 @@ serve(async (req: Request) => {
             title: "Booking Declined",
             message: `Your booking request for ${bookingDetails.studio?.name || "this studio"} has been declined.`,
             read: false,
-            meta: {
+            meta: buildNotificationRouteMeta("/bookings", undefined, {
               booking_id,
               studio_id: bookingDetails.studio_id,
               event_type: "booking_all_slots_declined",
-            },
+            }),
           });
 
         return new Response(
@@ -2770,7 +2775,7 @@ serve(async (req: Request) => {
               ? `Your booking was partially approved. Accepted slots: ${slotLabel}.`
               : `Your booking at ${bookingDetails.studio?.name || "the studio"} has been confirmed.`,
           read: false,
-          meta: {
+          meta: buildNotificationRouteMeta("/bookings", undefined, {
             booking_id,
             studio_id: bookingDetails.studio_id,
             accepted_slots: normalizedAcceptedSlots,
@@ -2779,7 +2784,7 @@ serve(async (req: Request) => {
               safeDeclinedSlots.length > 0
                 ? "booking_partial_slot_approval"
                 : "booking_confirmed",
-          },
+          }),
         });
 
       return new Response(
@@ -3201,12 +3206,12 @@ serve(async (req: Request) => {
           title: "Contract Renewal Offer! 🎉",
           message: `Great news! The venue wants to work with you again for "${gigName}". Check the gig listing to apply!`,
           read: false,
-          meta: {
+          meta: buildNotificationRouteMeta("/bookings", undefined, {
             type: "contract_renewal",
             gig_id: gig_id,
             original_application_id: application_id,
             organizer_id: organizer_id,
-          },
+          }),
         });
 
       if (notifyError) {
@@ -3302,10 +3307,10 @@ serve(async (req: Request) => {
           title: "Payment Successful! 🎉",
           message: `Your booking at ${booking.studio?.name} has been confirmed.`,
           read: false,
-          meta: {
+          meta: buildNotificationRouteMeta("/bookings", undefined, {
             booking_id: booking.id,
             type: "booking_confirmation"
-          }
+          })
         });
       } catch (notifyError) {
         console.error("❌ Notification error:", notifyError);
@@ -3447,11 +3452,11 @@ serve(async (req: Request) => {
           title: "Balance Cleared! ✅",
           message: `Your remaining balance of ₱${balanceAmount.toLocaleString()} for ${booking.studio?.name || "your booking"} has been marked as paid.`,
           read: false,
-          meta: {
+          meta: buildNotificationRouteMeta("/bookings", undefined, {
             type: "balance_cleared",
             booking_id: booking_id,
             amount: balanceAmount,
-          },
+          }),
         });
 
       if (notifyError) {

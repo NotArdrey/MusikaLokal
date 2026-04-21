@@ -154,10 +154,10 @@ Primary feature areas include:
 - bookings and wallet: [mobile/app/bookings.tsx](mobile/app/bookings.tsx), [mobile/app/wallet.tsx](mobile/app/wallet.tsx), [mobile/app/payment-result.tsx](mobile/app/payment-result.tsx). [mobile/app/bookings.tsx](mobile/app/bookings.tsx) also serves as a role-aware activity inbox for producer project applications, sent invites, and commercial deals, with open deals folded into Pending and closed deals folded into History. Match cards are navigable (tap to open project details) and include inline action buttons (accept/reject/withdraw/decline).
 - messaging and notifications: [mobile/app/chat.tsx](mobile/app/chat.tsx), [mobile/app/notifications.tsx](mobile/app/notifications.tsx). Chat route accepts `dealId` and `producerProjectId` params for context-scoped conversations.
 - commercial deals: [mobile/app/deal_details.tsx](mobile/app/deal_details.tsx) — deal negotiation with accept/reject/counter/dispute actions, settlement recording modal (gross revenue input → split calculation), and "Message" button for contextual deal chat. [mobile/app/production_team.tsx](mobile/app/production_team.tsx) — production team management with "Propose Venue Deal" flow (searches venue owner by email, creates partnership proposal with revenue split).
-- profile and policy screens: [mobile/app/profile.tsx](mobile/app/profile.tsx), [mobile/app/settings.tsx](mobile/app/settings.tsx), [mobile/app/account_details.tsx](mobile/app/account_details.tsx), [mobile/app/identity_verification.tsx](mobile/app/identity_verification.tsx)
+- profile and policy screens: [mobile/app/profile.tsx](mobile/app/profile.tsx), [mobile/app/settings.tsx](mobile/app/settings.tsx), [mobile/app/account_details.tsx](mobile/app/account_details.tsx), [mobile/app/identity_verification.tsx](mobile/app/identity_verification.tsx). The profile Playlists tab uses a **unified playlist list with radio toggles** — there is no separate "My Radio Station" section. Each playlist card shows a 📡 toggle button; tapping it calls `toggle_radio_slot` which adds/removes the playlist from the user's station and auto-creates the station on first use. Cards on radio show a green border, radio icon, and "ON AIR" badge. A header badge shows how many playlists are currently broadcasting.
 - Phase 2 producer network: [mobile/app/producer_projects.tsx](mobile/app/producer_projects.tsx), [mobile/app/producer_project_details.tsx](mobile/app/producer_project_details.tsx). Project details now include role selector in apply modal, musician search-based invite flow, withdraw application, and accept/decline invite with expiry display.
 - Phase 2 social feed: [mobile/app/post_details.tsx](mobile/app/post_details.tsx)
-- Phase 2 playlists: [mobile/app/create_playlist.tsx](mobile/app/create_playlist.tsx), [mobile/app/playlist_details.tsx](mobile/app/playlist_details.tsx)
+- Phase 2 playlists and radio: [mobile/app/create_playlist.tsx](mobile/app/create_playlist.tsx), [mobile/app/playlist_details.tsx](mobile/app/playlist_details.tsx), [mobile/app/station_details.tsx](mobile/app/station_details.tsx)
 - Phase 2 marketplace: [mobile/app/marketplace.tsx](mobile/app/marketplace.tsx), [mobile/app/product_details.tsx](mobile/app/product_details.tsx). Legacy surfaces such as [mobile/app/seller_hub.tsx](mobile/app/seller_hub.tsx) and [mobile/app/orders.tsx](mobile/app/orders.tsx) still exist in the repo, but they are no longer the primary mobile marketplace path.
 
 ### Mobile composition model
@@ -254,6 +254,8 @@ The home screen landscape changed in Phase 2. There are now two distinct home-ar
 - FlatList with infinite scroll pagination, pull-to-refresh, and optimistic reaction and follow toggles
 - rich post cards: media grids, linked playlist and product tiles, reaction summary row, Like / Comment / Share action bar
 - a Facebook-style create post modal with visibility control
+- **Live Radio section**: horizontal `ScrollView` of active radio station cards rendered above the social feed (only shown when at least one station with slots exists). Each card shows station name, creator, genre badge, and slot count. Stations fetched via `browse_stations` (returns fully-enriched `slots[].playlist.items` for audio playback).
+- **Radio mini-player bar**: sticky bar above the bottom navbar when a station is active. Shows play/pause, station name, current playlist title (tappable → `/station_details`), skip-next (if multiple slots), mute toggle, and close. Audio powered by `expo-av` — plays `teaser_asset` signed URL or `audio_url` fallback from `playlist_items`.
 
 The feed data is served by the `manage-social-feed` Edge Function (actions: `get_feed`, `create_post`, `react_to_post`, `remove_reaction`, `follow`, `unfollow`).
 
@@ -430,7 +432,7 @@ Important domains:
 - Phase 2 producer network: [mobile/supabase/functions/manage-producer-network](mobile/supabase/functions/manage-producer-network) — create/publish/archive projects, apply/review/withdraw applications, invite musicians (with search_musicians discovery), accept/reject invites with expiry enforcement, save talent, browse projects and match scores. Slot acceptance uses atomic `increment_role_filled_slot` RPC with `FOR UPDATE` locking. Invite rejection and application withdrawal now notify the other party. Applications use `cover_message` (not `message`) as the payload field.
 - Phase 2 commercial deals: [mobile/supabase/functions/manage-deals](mobile/supabase/functions/manage-deals) — venue partnership and recording deal lifecycle (create, counter, accept, reject, settle, dispute), production team CRUD, settlement calculation via `calculate_deal_settlement` RPC. Deal creation, acceptance, and settlement insert system messages into contextual deal conversations via `insertDealSystemMessage` helper.
 - Phase 2 social feed: [mobile/supabase/functions/manage-social-feed](mobile/supabase/functions/manage-social-feed) — follow/unfollow, create/update/delete posts, get_feed (public + following), post reactions, comments, reporting, user post history
-- Phase 2 playlists and radio: [mobile/supabase/functions/manage-playlists](mobile/supabase/functions/manage-playlists) — CRUD playlists, manage items and teaser assets, external links, record play events, CRUD radio stations and time-slot schedules
+- Phase 2 playlists and radio: [mobile/supabase/functions/manage-playlists](mobile/supabase/functions/manage-playlists) — CRUD playlists and items (including `audio_url` field per item), teaser assets, external links, play events, CRUD radio stations and slot schedules. Key actions: `create_playlist`, `list_user_playlists`, `list_my_playlists`, `get_playlist_details`, `add_playlist_item`, `remove_playlist_item`, `create_station`, `update_station`, `get_station_details`, `list_user_stations` (returns `slot_playlist_ids[]` for profile radio-state hydration), `browse_stations` (returns slot-enriched stations with nested `playlist.items` for feed audio playback), `add_station_slot`, `remove_station_slot`, `toggle_radio_slot` (idempotent on/off toggle that auto-creates a station if the user has none). Current deployed version: v4 (ACTIVE, verify_jwt=false).
 - Phase 2 marketplace: [mobile/supabase/functions/manage-marketplace](mobile/supabase/functions/manage-marketplace) — create/publish/update products, attach and normalize product media, browse products, fetch product details, list seller inventory, mark products sold, relist products, and still expose order, fulfillment, and shipping actions for richer commerce clients
 
 ### Web-only administrative backend additions
@@ -582,14 +584,18 @@ This domain powers the social graph, the ranked home feed, and post engagement. 
 ### Phase 2 playlists and radio domain
 
 - playlists
-- playlist_items
+- playlist_items (includes `audio_url` column for direct playback fallback)
 - playlist_teaser_assets
-- playlist_external_links
-- radio_stations
-- radio_station_slots
-- play_events
+- external_platform_links (referenced as `playlist_external_links` in earlier docs)
+- stations (not `radio_stations` — confirmed table name in schema)
+- station_playlist_slots (includes `is_active` bool; not `radio_station_slots`)
+- playlist_play_events (not `play_events`)
 
 This domain powers the teaser playlist product and the radio station scheduling layer. Playlists are linkable from feed posts and embeddable in marketplace products.
+
+**Radio station UX pattern**: A user has at most one primary station (the system uses the earliest created station as the canonical station). Playlists are added to the station as `station_playlist_slots`. The `toggle_radio_slot` edge function action handles the full add/remove/auto-create lifecycle in a single call. Station state on the profile is hydrated by `list_user_stations` which returns `slot_playlist_ids[]` — no secondary query needed to know which playlists are on air.
+
+**Audio playback priority**: `expo-av` resolves the audio URI as: (1) signed URL from `playlist_teaser_assets.storage_path` (Supabase Storage bucket `playlist-assets`), (2) `playlist_items.audio_url` direct fallback. This means playlists can be playable without a storage upload by setting `audio_url` directly.
 
 ### Phase 2 marketplace domain
 
@@ -718,7 +724,7 @@ Key tables: `follows`, `feed_posts`, `post_media`, `post_reactions`, `post_comme
 
 Musicians and producers create teaser playlists with tracks, cover art, and short preview clips. A radio station layer allows producers to build timed slot schedules from existing playlist items. Play events are recorded for analytics. Playlists are linkable from feed posts and embedded in product listings.
 
-Key tables: `playlists`, `playlist_items`, `playlist_teaser_assets`, `playlist_external_links`, `radio_stations`, `radio_station_slots`, `play_events`
+Key tables: `playlists`, `playlist_items` (with `audio_url`), `playlist_teaser_assets`, `external_platform_links`, `stations`, `station_playlist_slots`, `playlist_play_events`
 
 **Workstream D — Merchandise and Digital Marketplace** (`manage-marketplace`)
 

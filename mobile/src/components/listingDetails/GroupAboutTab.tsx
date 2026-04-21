@@ -1,13 +1,15 @@
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
-import React, { useMemo } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Text, TouchableOpacity, View } from "react-native";
 import { getGroupMembersLabel, isGroupLeaderMember } from "../../utils/groupMembers";
+import { fetchGroupLinkedPlaylists } from "../../utils/groupPlaylists";
 import {
     hasNavigationDestination,
     openNavigationDirections,
 } from "../../utils/navigation";
 import CachedImage from "../CachedImage";
+import GroupLinkedPlaylistsSection from "../GroupLinkedPlaylistsSection";
 import ListingMediaCarousel from "./ListingMediaCarousel";
 
 interface GroupAboutTabProps {
@@ -34,6 +36,8 @@ const GroupAboutTab = ({
   listingId,
 }: GroupAboutTabProps) => {
   const completionRate = calculateCompletion();
+  const [groupPlaylists, setGroupPlaylists] = useState<any[]>([]);
+  const [loadingGroupPlaylists, setLoadingGroupPlaylists] = useState(false);
   const managerId = group.owner_id || group.organizer_id;
   const destinationText =
     group?.location || group?.address || group?.name || "Destination";
@@ -127,6 +131,54 @@ const GroupAboutTab = ({
     }
   };
 
+  useEffect(() => {
+    let isActive = true;
+
+    if (!group?.id) {
+      setGroupPlaylists([]);
+      setLoadingGroupPlaylists(false);
+      return () => {
+        isActive = false;
+      };
+    }
+
+    setLoadingGroupPlaylists(true);
+
+    fetchGroupLinkedPlaylists(group.id)
+      .then((playlistRows) => {
+        if (!isActive) return;
+        setGroupPlaylists(playlistRows);
+      })
+      .catch((playlistError) => {
+        if (!isActive) return;
+        console.log("[GroupAboutTab] Failed to fetch linked playlists:", playlistError);
+        setGroupPlaylists([]);
+      })
+      .finally(() => {
+        if (!isActive) return;
+        setLoadingGroupPlaylists(false);
+      });
+
+    return () => {
+      isActive = false;
+    };
+  }, [group?.id]);
+
+  const handlePlaylistPress = (playlistId: string) => {
+    if (!playlistId) return;
+
+    if (sheetRef && "current" in sheetRef && sheetRef.current) {
+      sheetRef.current.dismiss();
+    }
+
+    setTimeout(() => {
+      router.push({
+        pathname: "/playlist_details",
+        params: { playlist_id: playlistId },
+      });
+    }, 200);
+  };
+
   return (
     <View style={styles.tabContent}>
       <View style={styles.section}>
@@ -201,6 +253,18 @@ const GroupAboutTab = ({
           isDark={isDark}
           styles={styles}
           cacheVersion={group.updated_at || group.created_at || group.id}
+        />
+      </View>
+
+      <View style={[styles.section, { marginBottom: 24 }]}>
+        <GroupLinkedPlaylistsSection
+          colors={colors}
+          isDark={isDark}
+          playlists={groupPlaylists}
+          loading={loadingGroupPlaylists}
+          onPlaylistPress={handlePlaylistPress}
+          title="Featured Playlists"
+          emptyMessage="This group has not linked any playlists yet."
         />
       </View>
 

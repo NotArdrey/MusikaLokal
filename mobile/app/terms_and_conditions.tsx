@@ -1,13 +1,13 @@
 import React from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Header from '../src/components/header';
 import Navbar from '../src/components/navbar';
+import { useBottomBarClearance } from '../src/hooks/useBottomBarClearance';
 import { useTheme } from '../src/context/ThemeContext';
 
 export default function TermsAndConditionsScreen() {
   const { colors } = useTheme();
-  const insets = useSafeAreaInsets();
+  const { contentBottomPadding } = useBottomBarClearance(24);
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
@@ -17,7 +17,7 @@ export default function TermsAndConditionsScreen() {
         showsVerticalScrollIndicator={false}
         contentContainerStyle={[
           styles.scrollContent,
-          { paddingBottom: 190 + insets.bottom },
+          { paddingBottom: contentBottomPadding },
         ]}
       >
         <View style={styles.contentContainer}>

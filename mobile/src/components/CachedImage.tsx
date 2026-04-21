@@ -1,5 +1,5 @@
 import { Image as ExpoImage, ImageContentFit } from "expo-image";
-import React, { useEffect, useMemo, useState } from "react";
+import React, { memo, useEffect, useMemo, useState } from "react";
 import { ImageStyle, StyleProp } from "react-native";
 import {
     optimizeSupabaseImageUrl,
@@ -13,6 +13,7 @@ interface CachedImageProps extends SupabaseTransformOptions {
   contentFit?: ImageContentFit;
   transition?: number;
   cachePolicy?: "none" | "disk" | "memory" | "memory-disk";
+  disableRecyclingKey?: boolean;
 }
 
 const CachedImage = ({
@@ -28,6 +29,7 @@ const CachedImage = ({
   contentFit = "cover",
   transition = 0,
   cachePolicy = "memory-disk",
+  disableRecyclingKey = false,
 }: CachedImageProps) => {
   const primarySourceUri = useMemo(() => {
     const raw = (uri || "").trim();
@@ -78,7 +80,7 @@ const CachedImage = ({
       contentFit={contentFit}
       transition={transition}
       cachePolicy={cachePolicy}
-      recyclingKey={resolvedUri}
+      recyclingKey={disableRecyclingKey ? undefined : resolvedUri}
       onError={() => {
         if (primarySourceUri && resolvedUri !== primarySourceUri) {
           setResolvedUri(primarySourceUri);
@@ -92,10 +94,13 @@ const CachedImage = ({
 
         if (backupSourceUri && resolvedUri !== backupSourceUri) {
           setResolvedUri(backupSourceUri);
+          return;
         }
+
+        setResolvedUri(null);
       }}
     />
   );
 };
 
-export default CachedImage;
+export default memo(CachedImage);

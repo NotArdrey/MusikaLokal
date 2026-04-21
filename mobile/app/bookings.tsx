@@ -30,6 +30,7 @@ import { useAuth } from "../src/context/AuthContext";
 import { showTopToast } from "../src/context/TopToastContext";
 import { useTheme } from "../src/context/ThemeContext";
 import { createBookingCheckout } from "../src/services/paymongo";
+import { buildNotificationRouteMeta } from "../src/utils/notificationNavigation";
 import {
   formatRecordingHours,
   formatRecordingRuleShort,
@@ -1952,11 +1953,11 @@ export default function BookingsScreen() {
             type: "success",
             title: "Relocation Accepted",
             message: `The musician accepted your relocation request for ${item.name}.`,
-            meta: {
+            meta: buildNotificationRouteMeta("/bookings", undefined, {
               bookingId: item.id,
               studioId: item.studio_id,
               event_type: "relocation_accepted",
-            },
+            }),
           });
         }
 
@@ -1989,11 +1990,11 @@ export default function BookingsScreen() {
             type: "warning",
             title: "Relocation Declined",
             message: `The musician declined your relocation request for ${item.name}. Booking was cancelled.`,
-            meta: {
+            meta: buildNotificationRouteMeta("/bookings", undefined, {
               bookingId: item.id,
               studioId: item.studio_id,
               event_type: "relocation_declined",
-            },
+            }),
           });
         }
 
@@ -2385,11 +2386,11 @@ export default function BookingsScreen() {
         title: "Balance Cleared! âœ…",
         message: `Your remaining balance of â‚±${balanceAmount.toLocaleString()} for ${booking.studio?.name || "your booking"} has been marked as paid.`,
         read: false,
-        meta: {
+        meta: buildNotificationRouteMeta("/bookings", undefined, {
           type: "balance_cleared",
           booking_id: bookingId,
           amount: balanceAmount,
-        },
+        }),
       });
 
       debugLog(`ðŸ’µ Balance cleared: â‚±${balanceAmount} for booking ${bookingId}`);

@@ -1,5 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
-import { router } from "expo-router";
+import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import React, { useCallback, useEffect, useState } from "react";
 import {
     ActivityIndicator,
@@ -15,6 +15,7 @@ import {
     View
 } from "react-native";
 import CustomAlert, { AlertType } from "../src/components/CustomAlert";
+import PlaylistSelectionSection from "../src/components/PlaylistSelectionSection";
 import Header from "../src/components/header";
 import ImageUploader from "../src/components/ImageUploader";
 import LocationPicker from "../src/components/LocationPicker";
@@ -32,8 +33,13 @@ import {
     getGroupTypeLabel,
     isGroupLeaderMember,
 } from "../src/utils/groupMembers";
+import {
+  fetchGroupLinkedPlaylists,
+  fetchUserOwnedPlaylists,
+  syncGroupLinkedPlaylists,
+} from "../src/utils/groupPlaylists";
+import { buildNotificationRouteMeta } from "../src/utils/notificationNavigation";
 
-import { useLocalSearchParams } from "expo-router";
 import { supabase } from "../lib/supabase";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -178,6 +184,9 @@ export default function EditGroupScreen() {
     activeApplications: 0,
     activeBookings: 0,
   });
+  const [ownedPlaylists, setOwnedPlaylists] = useState<any[]>([]);
+  const [selectedPlaylistIds, setSelectedPlaylistIds] = useState<string[]>([]);
+  const [loadingPlaylists, setLoadingPlaylists] = useState(false);
 
   // Role-based access control
   useEffect(() => {
@@ -225,6 +234,55 @@ export default function EditGroupScreen() {
       fetchGroupDetails();
     }
   }, [id, authorized]);
+
+  const fetchPlaylistOptions = useCallback(async () => {
+    const groupId = Array.isArray(id) ? id[0] : id;
+    if (!groupId || !currentUserId) {
+      return;
+    }
+
+    setLoadingPlaylists(true);
+    try {
+      const [playlistRows, linkedPlaylists] = await Promise.all([
+        fetchUserOwnedPlaylists(currentUserId),
+        fetchGroupLinkedPlaylists(groupId),
+      ]);
+
+      setOwnedPlaylists(playlistRows);
+      setSelectedPlaylistIds(
+        linkedPlaylists.map((playlist) => playlist.playlist_id),
+      );
+    } catch (playlistError) {
+      console.log("[edit_group] Failed to fetch linked playlists:", playlistError);
+      setOwnedPlaylists([]);
+      setSelectedPlaylistIds([]);
+    } finally {
+      setLoadingPlaylists(false);
+    }
+  }, [currentUserId, id]);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (!authorized || !currentUserId || !id) {
+        return undefined;
+      }
+
+      void fetchPlaylistOptions();
+      return undefined;
+    }, [authorized, currentUserId, fetchPlaylistOptions, id]),
+  );
+
+  const handleTogglePlaylist = useCallback((playlistId: string) => {
+    setSelectedPlaylistIds((prev) =>
+      prev.includes(playlistId)
+        ? prev.filter((id) => id !== playlistId)
+        : [...prev, playlistId],
+    );
+  }, []);
+
+  const handleCreatePlaylist = useCallback(() => {
+    router.push("/create_playlist");
+  }, []);
 
   useEffect(() => {
     const backSubscription = BackHandler.addEventListener(
@@ -770,6 +828,17 @@ export default function EditGroupScreen() {
         }
       }
 
+      try {
+        await syncGroupLinkedPlaylists(groupId, selectedPlaylistIds);
+      } catch (playlistError: any) {
+        showAlert(
+          "warning",
+          "Playlists Not Synced",
+          `Group details were saved, but linked playlists could not be updated: ${playlistError?.message || "Unknown error"}`,
+        );
+        return;
+      }
+
       console.log("✅ Group Updated");
       showAlert("success", "Success", "Group updated successfully!", [
         {
@@ -1267,12 +1336,12 @@ export default function EditGroupScreen() {
         type: "info",
         title: "Leadership Transfer Request",
         message: `You have been invited to become the leader of "${groupName}". Open to accept or decline.`,
-        meta: {
+        meta: buildNotificationRouteMeta('/notifications', undefined, {
           type: "leadership_transfer",
           request_id: data.id,
           group_id: groupId,
           group_name: groupName,
-        },
+        }),
         read: false,
       });
 
@@ -2121,6 +2190,22 @@ export default function EditGroupScreen() {
               );
             })}
           </View>
+
+          {renderSectionHeader("Playlists", "musical-notes")}
+
+          <PlaylistSelectionSection
+            colors={colors}
+            isDark={isDark}
+            playlists={ownedPlaylists}
+            selectedPlaylistIds={selectedPlaylistIds}
+            loading={loadingPlaylists}
+            onTogglePlaylist={handleTogglePlaylist}
+            onCreatePlaylist={handleCreatePlaylist}
+            title="Linked Playlists"
+            subtitle="Choose the playlists that should appear on this group profile. Linked playlists show up on the manage page and listing details."
+            emptyMessage="Create a playlist first, then return here to link it to the group."
+            disabled={saving}
+          />
 
           {/* Leadership Transfer Section */}
           {renderSectionHeader("Leadership", "shield-checkmark")}

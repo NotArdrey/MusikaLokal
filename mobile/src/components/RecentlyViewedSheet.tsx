@@ -7,6 +7,7 @@ import { Easing } from 'react-native-reanimated';
 import { supabase } from '../../lib/supabase';
 import { useTheme } from '../context/ThemeContext';
 import ListingCard from './ListingCard';
+import TrackedBottomSheetModal from './TrackedBottomSheetModal';
 
 const { width, height } = Dimensions.get('window');
 
@@ -205,7 +206,7 @@ const RecentlyViewedSheet = forwardRef<BottomSheetModal, RecentlyViewedSheetProp
 
     return (
         <>
-            <BottomSheetModal
+            <TrackedBottomSheetModal
                 ref={ref}
                 index={0}
                 snapPoints={snapPoints}
@@ -258,7 +259,7 @@ const RecentlyViewedSheet = forwardRef<BottomSheetModal, RecentlyViewedSheetProp
                         removeClippedSubviews
                     />
                 )}
-            </BottomSheetModal>
+            </TrackedBottomSheetModal>
         </>
     );
 });

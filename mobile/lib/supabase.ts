@@ -3,6 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 import Constants from 'expo-constants';
 import { Platform } from 'react-native';
 import 'react-native-url-polyfill/auto';
+import { getStoredPushInstallationId } from '../src/notifications/pushInstallation';
 
 const supabaseUrl = Constants.expoConfig?.extra?.supabaseUrl || process.env.EXPO_PUBLIC_SUPABASE_URL || '';
 const supabaseAnonKey = Constants.expoConfig?.extra?.supabaseAnonKey || process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || '';
@@ -82,6 +83,8 @@ export const clearSupabaseAuthStorage = async () => {
 // version (auto-token injection + retry-on-401).
 const _functionsInstance = supabase.functions;               // capture one instance
 const originalInvoke = _functionsInstance.invoke.bind(_functionsInstance) as any;
+const _authInstance = supabase.auth;
+const originalSignOut = _authInstance.signOut.bind(_authInstance);
 type InvokeOptions = { body?: any; headers?: Record<string, string> };
 type NormalizedFunctionsError = Error & {
     context?: unknown;
@@ -333,6 +336,32 @@ const withoutAuthorizationHeader = (options?: InvokeOptions): InvokeOptions | un
     };
 };
 
+const unregisterCurrentPushDevice = async () => {
+    if (Platform.OS === 'web') {
+        return;
+    }
+
+    const installationId = await getStoredPushInstallationId();
+    if (!installationId) {
+        return;
+    }
+
+    try {
+        const { error } = await supabase.rpc('unregister_push_device', {
+            p_installation_id: installationId,
+            p_reason: 'signed_out',
+        });
+
+        if (error && __DEV__) {
+            console.warn('[push] Failed to unregister push device during sign-out', error);
+        }
+    } catch (error) {
+        if (__DEV__) {
+            console.warn('[push] Unexpected sign-out cleanup error', error);
+        }
+    }
+};
+
 (_functionsInstance as any).invoke = async function<T = any>(
     functionName: string,
     options?: InvokeOptions,
@@ -379,6 +408,13 @@ const withoutAuthorizationHeader = (options?: InvokeOptions): InvokeOptions | un
             error: normalizeFunctionsError(err, 'Unknown error invoking function'),
         };
     }
+};
+
+(_authInstance as any).signOut = async function(
+    ...args: Parameters<typeof _authInstance.signOut>
+) {
+    await unregisterCurrentPushDevice();
+    return originalSignOut(...args);
 };
 
 // Bust token cache on auth changes so subsequent invokes hydrate from

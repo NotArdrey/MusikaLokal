@@ -4,6 +4,7 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 // @ts-ignore
 import { crypto } from "https://deno.land/std@0.168.0/crypto/mod.ts";
+import { withNotificationRouteMeta } from "../_shared/notificationRoutes.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -114,6 +115,25 @@ async function paymongoRequest(
   }
 
   return data;
+}
+
+async function insertNotification(
+  supabaseAdmin: any,
+  payload: {
+    user_id: string;
+    type: string;
+    title: string;
+    message: string;
+    image?: string | null;
+    meta?: Record<string, unknown> | null;
+    read?: boolean;
+  },
+) {
+  await supabaseAdmin.from("notifications").insert({
+    ...payload,
+    meta: withNotificationRouteMeta(payload.meta),
+    read: payload.read ?? false,
+  });
 }
 
 // Helper to credit owner's wallet when a booking payment is received
@@ -272,7 +292,7 @@ async function createSubscriptionActivatedNotificationIfNeeded(
       return;
     }
 
-    await supabaseAdmin.from("notifications").insert({
+    await insertNotification(supabaseAdmin, {
       user_id: userId,
       type: "success",
       title: "Subscription Activated! 🎉",
@@ -1168,7 +1188,7 @@ serve(async (req: Request) => {
           const userAvatar = fullBooking.profile?.avatar_url;
 
           // Notify musician — downpayment lands in Pending (balance due), full payment lands in Upcoming
-          await supabaseAdmin.from("notifications").insert({
+          await insertNotification(supabaseAdmin, {
             user_id: fullBooking.user_id,
             type: "success",
             title: "Payment Successful!",
@@ -1181,7 +1201,7 @@ serve(async (req: Request) => {
 
           // Notify studio owner
           if (fullBooking.studio?.owner_id) {
-            await supabaseAdmin.from("notifications").insert({
+            await insertNotification(supabaseAdmin, {
               user_id: fullBooking.studio.owner_id,
               type: "info",
               title: "Booking Payment Received",
@@ -1333,7 +1353,7 @@ serve(async (req: Request) => {
                     ? `Your downpayment for ${fullBooking.studio?.name} has been received. Remaining balance: ₱${remainingBalance.toLocaleString()}`
                     : `Your booking at ${fullBooking.studio?.name} has been confirmed and moved to Upcoming.`;
 
-                  await supabaseAdmin.from("notifications").insert({
+                  await insertNotification(supabaseAdmin, {
                     user_id: fullBooking.user_id,
                     type: "success",
                     title: musicianTitle,
@@ -1349,7 +1369,7 @@ serve(async (req: Request) => {
                       ? `Downpayment received for booking at ${fullBooking.studio?.name} on ${fullBooking.booking_date}. Remaining balance: ₱${remainingBalance.toLocaleString()}`
                       : `Payment received for booking at ${fullBooking.studio?.name} on ${fullBooking.booking_date}.`;
 
-                    await supabaseAdmin.from("notifications").insert({
+                    await insertNotification(supabaseAdmin, {
                       user_id: fullBooking.studio.owner_id,
                       type: "info",
                       title: ownerTitle,
@@ -1686,7 +1706,7 @@ serve(async (req: Request) => {
             ? `Your downpayment for ${booking.studio?.name} has been received. Remaining balance: ₱${remainingBalance.toLocaleString()}`
             : `Your booking at ${booking.studio?.name} is now confirmed.`;
 
-          await supabaseAdmin.from("notifications").insert({
+          await insertNotification(supabaseAdmin, {
             user_id: booking.user_id,
             type: "success",
             title: notificationTitle,
@@ -1699,7 +1719,7 @@ serve(async (req: Request) => {
             const ownerMessage = isDownpayment
               ? `Downpayment received for ${booking.studio?.name} on ${booking.booking_date}. Remaining balance: ₱${remainingBalance.toLocaleString()}`
               : `Payment received for ${booking.studio?.name} on ${booking.booking_date}.`;
-            await supabaseAdmin.from("notifications").insert({
+            await insertNotification(supabaseAdmin, {
               user_id: booking.studio.owner_id,
               type: "info",
               title: isDownpayment ? "Downpayment Received" : "New Paid Booking",
@@ -1850,7 +1870,7 @@ serve(async (req: Request) => {
             .single();
 
           if (booking) {
-            await supabaseAdmin.from("notifications").insert({
+            await insertNotification(supabaseAdmin, {
               user_id: booking.user_id,
               type: "warning",
               title: "Payment Failed",
@@ -1893,7 +1913,7 @@ serve(async (req: Request) => {
             .single();
 
           if (booking) {
-            await supabaseAdmin.from("notifications").insert({
+            await insertNotification(supabaseAdmin, {
               user_id: booking.user_id,
               type: "success",
               title: "Refund Completed",
@@ -1922,7 +1942,7 @@ serve(async (req: Request) => {
             .single();
 
           if (booking) {
-            await supabaseAdmin.from("notifications").insert({
+            await insertNotification(supabaseAdmin, {
               user_id: booking.user_id,
               type: "warning",
               title: "Refund Failed",
@@ -2162,7 +2182,7 @@ serve(async (req: Request) => {
 
         // Notify studio owner about manual refund needed
         if (booking.studio?.owner_id) {
-          await supabaseAdmin.from("notifications").insert({
+          await insertNotification(supabaseAdmin, {
             user_id: booking.studio.owner_id,
             type: "warning",
             title: "Manual Refund Required",
@@ -2219,7 +2239,7 @@ serve(async (req: Request) => {
           .eq("id", booking_id);
 
         // Notify user
-        await supabaseAdmin.from("notifications").insert({
+        await insertNotification(supabaseAdmin, {
           user_id: booking.user_id,
           type: "success",
           title: "Refund Processed",
@@ -2229,7 +2249,7 @@ serve(async (req: Request) => {
 
         // Notify studio owner
         if (booking.studio?.owner_id) {
-          await supabaseAdmin.from("notifications").insert({
+          await insertNotification(supabaseAdmin, {
             user_id: booking.studio.owner_id,
             type: "info",
             title: "Booking Cancelled & Refunded",
@@ -2490,7 +2510,7 @@ serve(async (req: Request) => {
       }
 
       // Notify user
-      await supabaseAdmin.from("notifications").insert({
+      await insertNotification(supabaseAdmin, {
         user_id,
         type: "success",
         title: "Wallet Topped Up!",

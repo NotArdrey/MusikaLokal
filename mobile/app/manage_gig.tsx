@@ -17,6 +17,7 @@ import CustomAlert, { AlertType } from "../src/components/CustomAlert";
 import Header from "../src/components/header";
 import Modal from "../src/components/modal";
 import Navbar from "../src/components/navbar";
+import { useBottomBarClearance } from "../src/hooks/useBottomBarClearance";
 import { useTheme } from "../src/context/ThemeContext";
 import {
     hasValidCoordinates,
@@ -30,6 +31,7 @@ import { useLocalSearchParams } from "expo-router";
 
 export default function GigDetailsScreen() {
   const { colors, isDark } = useTheme();
+  const { contentBottomPadding } = useBottomBarClearance(24);
   const { id } = useLocalSearchParams();
   const [activeTab, setActiveTab] = useState("About");
   const [modalVisible, setModalVisible] = useState(false);
@@ -393,7 +395,7 @@ export default function GigDetailsScreen() {
 
         <ScrollView
           showsVerticalScrollIndicator={false}
-          contentContainerStyle={styles.scrollContent}
+          contentContainerStyle={[styles.scrollContent, { paddingBottom: contentBottomPadding }]}
         >
           {/* Header Image & Info */}
           <View style={styles.headerContainer}>

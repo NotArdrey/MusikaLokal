@@ -15,9 +15,17 @@ import { supabase } from "../lib/supabase";
 import Header from "../src/components/header";
 import Navbar from "../src/components/navbar";
 import CustomAlert, { AlertType } from "../src/components/CustomAlert";
-import { useAuth } from "../src/context/AuthContext";
+import { useBottomBarClearance } from "../src/hooks/useBottomBarClearance";
 import { showTopToast } from "../src/context/TopToastContext";
 import { useTheme } from "../src/context/ThemeContext";
+import {
+  MAX_PLAYLIST_AUDIO_DURATION_SECONDS,
+  ensurePlaylistAudioDuration,
+  pickPlaylistAudioFile,
+  resolvePlaylistAudioUrlDuration,
+  uploadPlaylistAudioFile,
+  type PlaylistAudioFile,
+} from "../src/utils/playlistAudio";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const moderateScale = (size: number, factor = 0.3) => {
@@ -25,16 +33,43 @@ const moderateScale = (size: number, factor = 0.3) => {
   return size + (scaled - size) * factor;
 };
 
+type PlaylistDraftTrack = {
+  id: string;
+  title: string;
+  artist_name: string;
+  audio_url: string;
+  duration_seconds: string;
+  audio_file: PlaylistAudioFile | null;
+};
+
+const createTrackDraft = (): PlaylistDraftTrack => ({
+  id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+  title: "",
+  artist_name: "",
+  audio_url: "",
+  duration_seconds: "",
+  audio_file: null,
+});
+
+type DraftTrackPayload = {
+  title: string;
+  artist_name: string | null;
+  audio_url: string | null;
+  duration_seconds: number | null;
+  audio_file: PlaylistAudioFile | null;
+};
+
 export default function CreatePlaylistScreen() {
   const { colors } = useTheme();
-  const { session } = useAuth();
   const { edit_id } = useLocalSearchParams();
   const isEditing = !!edit_id;
+  const { contentBottomPadding } = useBottomBarClearance(24);
 
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [genre, setGenre] = useState("");
   const [visibility, setVisibility] = useState<"public" | "private">("public");
+  const [trackDrafts, setTrackDrafts] = useState<PlaylistDraftTrack[]>([]);
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(isEditing);
   const [alert, setAlert] = useState<{ type: AlertType; title: string; message: string } | null>(null);
@@ -61,13 +96,102 @@ export default function CreatePlaylistScreen() {
     })();
   }, [edit_id, isEditing]);
 
+  const addTrackDraft = useCallback(() => {
+    setTrackDrafts((current) => [...current, createTrackDraft()]);
+  }, []);
+
+  const updateTrackDraft = useCallback((trackId: string, field: keyof Omit<PlaylistDraftTrack, "id">, value: string) => {
+    setTrackDrafts((current) => current.map((track) => (
+      track.id === trackId
+        ? {
+            ...track,
+            [field]: value,
+            ...(field === "audio_url" && value.trim().length > 0 ? { audio_file: null } : null),
+          }
+        : track
+    )));
+  }, []);
+
+  const setTrackAudioFile = useCallback((trackId: string, audioFile: PlaylistAudioFile | null) => {
+    setTrackDrafts((current) => current.map((track) => (
+      track.id === trackId
+        ? {
+            ...track,
+            audio_file: audioFile,
+            audio_url: audioFile ? "" : track.audio_url,
+            duration_seconds: audioFile ? String(audioFile.durationSeconds) : track.duration_seconds,
+          }
+        : track
+    )));
+  }, []);
+
+  const removeTrackDraft = useCallback((trackId: string) => {
+    setTrackDrafts((current) => current.filter((track) => track.id !== trackId));
+  }, []);
+
+  const handlePickTrackAudio = useCallback(async (trackId: string) => {
+    try {
+      const audioFile = await pickPlaylistAudioFile();
+      if (!audioFile) return;
+
+      setTrackAudioFile(trackId, audioFile);
+    } catch (error: any) {
+      setAlert({
+        type: "warning",
+        title: "Audio Not Allowed",
+        message: error?.message || "Only MP3 or MP4 audio files up to 5 minutes are allowed.",
+      });
+    }
+  }, [setTrackAudioFile]);
+
+  const prepareDraftTrackPayloads = useCallback(async (): Promise<DraftTrackPayload[]> => {
+    const items = trackDrafts
+      .map((track) => ({
+        id: track.id,
+        title: track.title.trim(),
+        artist_name: track.artist_name.trim() || null,
+        audio_url: track.audio_url.trim() || null,
+        duration_seconds: track.duration_seconds.trim() ? Number(track.duration_seconds.trim()) : null,
+        audio_file: track.audio_file,
+      }))
+      .filter((track) => track.title || track.artist_name || track.audio_url || track.duration_seconds !== null || track.audio_file);
+
+    if (items.some((track) => !track.title)) {
+      throw new Error("Each added music needs a title before you save the playlist.");
+    }
+
+    return Promise.all(items.map(async (track) => {
+      let durationSeconds = track.duration_seconds;
+
+      if (durationSeconds !== null) {
+        durationSeconds = ensurePlaylistAudioDuration(durationSeconds);
+      }
+
+      if (track.audio_file) {
+        durationSeconds = ensurePlaylistAudioDuration(track.audio_file.durationSeconds);
+      } else if (track.audio_url) {
+        durationSeconds = await resolvePlaylistAudioUrlDuration(track.audio_url, durationSeconds);
+      }
+
+      return {
+        title: track.title,
+        artist_name: track.artist_name,
+        audio_url: track.audio_url,
+        duration_seconds: durationSeconds,
+        audio_file: track.audio_file,
+      };
+    }));
+  }, [trackDrafts]);
+
   const handleSave = async () => {
     if (!title.trim()) {
       setAlert({ type: "warning", title: "Missing Title", message: "Please enter a playlist title." });
       return;
     }
+
     setSaving(true);
     try {
+      const draftItems = !isEditing ? await prepareDraftTrackPayloads() : [];
       const action = isEditing ? "update_playlist" : "create_playlist";
       const body: any = {
         action,
@@ -78,9 +202,52 @@ export default function CreatePlaylistScreen() {
       };
       if (isEditing) body.playlist_id = edit_id;
 
-      const { data } = await supabase.functions.invoke("manage-playlists", { body });
+      const { data, error } = await supabase.functions.invoke("manage-playlists", { body });
+
+      if (error) {
+        throw error;
+      }
 
       if (data?.success) {
+        const playlistId = data.data?.id;
+
+        if (!isEditing && playlistId && draftItems.length > 0) {
+          const failedTracks: string[] = [];
+
+          for (const track of draftItems) {
+            try {
+              const sourceUrl = track.audio_file
+                ? (await uploadPlaylistAudioFile(track.audio_file, playlistId)).publicUrl
+                : track.audio_url;
+
+              const { error: itemError } = await supabase.functions.invoke("manage-playlists", {
+                body: {
+                  action: "add_playlist_item",
+                  playlist_id: playlistId,
+                  title: track.title,
+                  artist_name: track.artist_name,
+                  audio_url: sourceUrl,
+                  duration_seconds: track.duration_seconds,
+                },
+              });
+
+              if (itemError) {
+                throw itemError;
+              }
+            } catch (_) {
+              failedTracks.push(track.title);
+            }
+          }
+
+          if (failedTracks.length > 0) {
+            showTopToast({
+              type: "warning",
+              title: "Playlist Created",
+              message: `${failedTracks.length} track${failedTracks.length === 1 ? "" : "s"} could not be uploaded.`,
+            });
+          }
+        }
+
         showTopToast({
           type: "success",
           title: isEditing ? "Updated" : "Created",
@@ -110,7 +277,7 @@ export default function CreatePlaylistScreen() {
         <View style={styles.centered}>
           <ActivityIndicator size="large" color={colors.primary} />
         </View>
-        
+        <Navbar />
       </View>
     );
   }
@@ -119,7 +286,7 @@ export default function CreatePlaylistScreen() {
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <Header title={isEditing ? "Edit Playlist" : "Create Playlist"} onBackPress={() => router.back()} />
 
-      <ScrollView style={styles.content}>
+      <ScrollView style={styles.content} contentContainerStyle={{ paddingBottom: contentBottomPadding }}>
         <Text style={[styles.label, { color: colors.text }]}>Title *</Text>
         <TextInput
           style={[styles.input, { color: colors.text, borderColor: colors.border, backgroundColor: colors.surface }]}
@@ -181,6 +348,100 @@ export default function CreatePlaylistScreen() {
           ))}
         </View>
 
+        {!isEditing ? (
+          <>
+            <View style={styles.sectionHeader}>
+              <Text style={[styles.label, styles.sectionLabel, { color: colors.text }]}>Musics</Text>
+              <TouchableOpacity
+                activeOpacity={0.8}
+                style={[styles.addTrackBtn, { backgroundColor: colors.primary + "18", borderColor: colors.primary + "30" }]}
+                onPress={addTrackDraft}
+              >
+                <Ionicons name="add" size={16} color={colors.primary} />
+                <Text style={[styles.addTrackBtnText, { color: colors.primary }]}>Add Music</Text>
+              </TouchableOpacity>
+            </View>
+            <Text style={[styles.helperText, { color: colors.textSecondary }]}>Add the tracks now so the playlist is ready as soon as it is created.</Text>
+
+            {trackDrafts.length === 0 ? (
+              <View style={[styles.trackEmptyCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+                <Ionicons name="musical-notes-outline" size={20} color={colors.textSecondary} />
+                <Text style={[styles.trackEmptyTitle, { color: colors.text }]}>No musics added yet</Text>
+                <Text style={[styles.trackEmptyText, { color: colors.textSecondary }]}>Tap Add Music to include titles plus a direct URL or MP3/MP4 audio file up to 5 minutes.</Text>
+              </View>
+            ) : (
+              trackDrafts.map((track, index) => (
+                <View key={track.id} style={[styles.trackCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+                  <View style={styles.trackCardHeader}>
+                    <Text style={[styles.trackCardTitle, { color: colors.text }]}>Music {index + 1}</Text>
+                    <TouchableOpacity activeOpacity={0.7} onPress={() => removeTrackDraft(track.id)} style={styles.trackRemoveBtn}>
+                      <Ionicons name="trash-outline" size={16} color="#ef4444" />
+                    </TouchableOpacity>
+                  </View>
+
+                  <TextInput
+                    style={[styles.input, styles.trackInput, { color: colors.text, borderColor: colors.border, backgroundColor: colors.background }]}
+                    placeholder="Track title"
+                    placeholderTextColor={colors.textSecondary}
+                    value={track.title}
+                    onChangeText={(value) => updateTrackDraft(track.id, "title", value)}
+                  />
+                  <TextInput
+                    style={[styles.input, styles.trackInput, { color: colors.text, borderColor: colors.border, backgroundColor: colors.background }]}
+                    placeholder="Artist name"
+                    placeholderTextColor={colors.textSecondary}
+                    value={track.artist_name}
+                    onChangeText={(value) => updateTrackDraft(track.id, "artist_name", value)}
+                  />
+                  <TextInput
+                    style={[styles.input, styles.trackInput, { color: colors.text, borderColor: colors.border, backgroundColor: colors.background }]}
+                    placeholder="Public audio URL"
+                    placeholderTextColor={colors.textSecondary}
+                    autoCapitalize="none"
+                    value={track.audio_url}
+                    onChangeText={(value) => updateTrackDraft(track.id, "audio_url", value)}
+                  />
+                  <TouchableOpacity
+                    activeOpacity={0.8}
+                    style={[styles.audioPickerBtn, { borderColor: colors.border, backgroundColor: colors.background }]}
+                    onPress={() => void handlePickTrackAudio(track.id)}
+                  >
+                    <Ionicons name="cloud-upload-outline" size={16} color={colors.primary} />
+                    <Text style={[styles.audioPickerBtnText, { color: colors.primary }]}>Upload MP3 / MP4</Text>
+                  </TouchableOpacity>
+                  <Text style={[styles.audioHelperText, { color: colors.textSecondary }]}>
+                    MP4 is treated as audio only. URL or uploaded file must be 5 minutes or less.
+                  </Text>
+                  {track.audio_file ? (
+                    <View style={[styles.audioFileChip, { backgroundColor: colors.primary + "12", borderColor: colors.primary + "30" }]}>
+                      <Ionicons name="musical-note" size={14} color={colors.primary} />
+                      <Text style={[styles.audioFileChipText, { color: colors.text }]} numberOfLines={1}>
+                        {track.audio_file.name} • {track.audio_file.durationSeconds}s
+                      </Text>
+                      <TouchableOpacity activeOpacity={0.7} onPress={() => setTrackAudioFile(track.id, null)}>
+                        <Ionicons name="close-circle" size={18} color={colors.textSecondary} />
+                      </TouchableOpacity>
+                    </View>
+                  ) : null}
+                  <TextInput
+                    style={[styles.input, styles.trackInput, { color: colors.text, borderColor: colors.border, backgroundColor: colors.background }]}
+                    placeholder={`Duration in seconds (max ${MAX_PLAYLIST_AUDIO_DURATION_SECONDS})`}
+                    placeholderTextColor={colors.textSecondary}
+                    keyboardType="number-pad"
+                    value={track.duration_seconds}
+                    onChangeText={(value) => updateTrackDraft(track.id, "duration_seconds", value)}
+                  />
+                </View>
+              ))
+            )}
+          </>
+        ) : (
+          <View style={[styles.editHintCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+            <Ionicons name="information-circle-outline" size={18} color={colors.primary} />
+            <Text style={[styles.editHintText, { color: colors.textSecondary }]}>Track management for existing playlists stays in the playlist details screen.</Text>
+          </View>
+        )}
+
         <TouchableOpacity activeOpacity={1}
           style={[styles.saveBtn, { backgroundColor: colors.primary, opacity: saving ? 0.6 : 1 }]}
           onPress={handleSave}
@@ -193,13 +454,13 @@ export default function CreatePlaylistScreen() {
           )}
         </TouchableOpacity>
 
-        <View style={{ height: 100 }} />
       </ScrollView>
 
       {alert && (
         <CustomAlert visible type={alert.type} title={alert.title} message={alert.message} onClose={() => setAlert(null)} />
       )}
-      
+
+      <Navbar />
     </View>
   );
 }
@@ -209,10 +470,30 @@ const styles = StyleSheet.create({
   content: { flex: 1, paddingHorizontal: 16, paddingTop: 16 },
   centered: { flex: 1, alignItems: "center", justifyContent: "center" },
   label: { fontSize: moderateScale(13), fontWeight: "600", marginBottom: 6, marginTop: 16 },
+  sectionHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: 16, marginBottom: 6 },
+  sectionLabel: { marginTop: 0, marginBottom: 0 },
+  helperText: { fontSize: moderateScale(12), lineHeight: 18 },
   input: { borderWidth: 1, borderRadius: 10, padding: 12, fontSize: moderateScale(14) },
   textArea: { minHeight: 100, textAlignVertical: "top" },
   visibilityRow: { flexDirection: "row", gap: 10, marginTop: 4 },
   visibilityPill: { flexDirection: "row", alignItems: "center", borderWidth: 1, borderRadius: 20, paddingHorizontal: 16, paddingVertical: 8 },
+  addTrackBtn: { flexDirection: "row", alignItems: "center", borderWidth: 1, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 8, gap: 6 },
+  addTrackBtnText: { fontSize: moderateScale(12), fontWeight: "700" },
+  trackEmptyCard: { borderWidth: 1, borderRadius: 14, padding: 16, marginTop: 12, alignItems: "center" },
+  trackEmptyTitle: { fontSize: moderateScale(14), fontWeight: "700", marginTop: 8 },
+  trackEmptyText: { fontSize: moderateScale(12), lineHeight: 18, marginTop: 4, textAlign: "center" },
+  trackCard: { borderWidth: 1, borderRadius: 14, padding: 14, marginTop: 12 },
+  trackCardHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 10 },
+  trackCardTitle: { fontSize: moderateScale(13), fontWeight: "700" },
+  trackRemoveBtn: { padding: 4 },
+  trackInput: { marginTop: 10 },
+  audioPickerBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, borderWidth: 1, borderRadius: 10, paddingVertical: 10, marginTop: 10 },
+  audioPickerBtnText: { fontSize: moderateScale(13), fontWeight: "700" },
+  audioHelperText: { fontSize: moderateScale(11), lineHeight: 16, marginTop: 8 },
+  audioFileChip: { flexDirection: "row", alignItems: "center", gap: 8, borderWidth: 1, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 8, marginTop: 10 },
+  audioFileChipText: { flex: 1, fontSize: moderateScale(12), fontWeight: "500" },
+  editHintCard: { flexDirection: "row", alignItems: "center", gap: 10, borderWidth: 1, borderRadius: 14, padding: 14, marginTop: 18 },
+  editHintText: { flex: 1, fontSize: moderateScale(12), lineHeight: 18 },
   saveBtn: { alignItems: "center", justifyContent: "center", paddingVertical: 16, borderRadius: 12, marginTop: 32 },
   saveBtnText: { color: "#fff", fontSize: moderateScale(16), fontWeight: "700" },
 });

@@ -6,6 +6,7 @@ import * as ImagePicker from "expo-image-picker";
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  ActivityIndicator,
   Dimensions,
   Image,
   Modal,
@@ -20,12 +21,21 @@ import {
 import { supabase } from "../lib/supabase";
 import CustomAlert, { AlertType } from "../src/components/CustomAlert";
 import ReportModal from "../src/components/ReportModal";
+import { isTrackPlayerAvailable } from "../src/audio/safeTrackPlayer";
 import Header from "../src/components/header";
 import Navbar from "../src/components/navbar";
 import Skeleton from "../src/components/Skeleton";
 import { DEFAULT_AVATAR } from "../src/constants/Images";
 import { useAuth } from "../src/context/AuthContext";
+import {
+  useRadioPlayerActions,
+  useRadioPlayerPlayback,
+  useRadioPlayerPresence,
+} from "../src/context/RadioPlayerContext";
+import CachedImage from "../src/components/CachedImage";
+import { showTopToast } from "../src/context/TopToastContext";
 import { useTheme } from "../src/context/ThemeContext";
+import { buildSocialFollowKey } from "../src/utils/socialFollow";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const PROFILE_CONTENT_HORIZONTAL_PADDING = 24;
@@ -34,6 +44,14 @@ const NUM_COLUMNS = 3;
 const SECTION_SIDE_MARGIN = 16;
 const GRID_PADDING = 16;
 const DRAWER_WIDTH = Math.min(SCREEN_WIDTH * 0.78, 320);
+const KNOWN_PROFILE_MEDIA_BUCKETS = [
+  "avatars",
+  "images",
+  "documents",
+  "post-media",
+  "posts",
+  "listings",
+];
 const ITEM_SIZE = Math.floor(
   (
     SCREEN_WIDTH -
@@ -78,7 +96,49 @@ const sanitizeAvatarUrl = (value: unknown): string | null => {
   const lower = trimmed.toLowerCase();
   if (lower === "null" || lower === "undefined") return null;
 
-  return trimmed.replace("/storage/v1/object/avatars/", "/storage/v1/object/public/avatars/");
+  if (trimmed.startsWith("/storage/v1/") || trimmed.startsWith("storage/v1/")) {
+    const normalizedPath = trimmed.startsWith("/") ? trimmed : `/${trimmed}`;
+    const envBase = (process.env.EXPO_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || "").trim();
+    if (!envBase) {
+      return normalizedPath;
+    }
+
+    const base = envBase.endsWith("/") ? envBase.slice(0, -1) : envBase;
+    return `${base}${normalizedPath}`;
+  }
+
+  if (trimmed.includes("/storage/v1/object/avatars/")) {
+    return trimmed.replace("/storage/v1/object/avatars/", "/storage/v1/object/public/avatars/");
+  }
+
+  if (trimmed.includes("/storage/v1/object/public/")) {
+    return trimmed;
+  }
+
+  if (/^(https?:\/\/|data:|file:\/\/)/i.test(trimmed)) {
+    return trimmed;
+  }
+
+  const normalized = trimmed.replace(/^\/+/, "");
+  const directParts = normalized.split("/");
+
+  if (directParts.length > 1) {
+    const directBucket = directParts[0];
+    const directPath = directParts.slice(1).join("/");
+    const { data } = supabase.storage.from(directBucket).getPublicUrl(directPath);
+    if (data?.publicUrl) {
+      return data.publicUrl;
+    }
+  }
+
+  for (const bucket of KNOWN_PROFILE_MEDIA_BUCKETS) {
+    const { data } = supabase.storage.from(bucket).getPublicUrl(normalized);
+    if (data?.publicUrl) {
+      return data.publicUrl;
+    }
+  }
+
+  return normalized;
 };
 
 // Decode base64 to Uint8Array without using fetch().arrayBuffer() which crashes on Android New Architecture
@@ -105,6 +165,9 @@ const base64ToUint8Array = (base64: string): Uint8Array => {
 export default function ProfileScreen() {
   const { colors, isDark } = useTheme();
   const { loading: authLoading, userId: currentUserId, isGuest } = useAuth();
+  const { activeStation } = useRadioPlayerPresence();
+  const { isPlaying } = useRadioPlayerPlayback();
+  const { togglePlayPause, tuneIn } = useRadioPlayerActions();
   const params = useLocalSearchParams<{
     userId?: string;
     returnToHome?: string;
@@ -133,6 +196,12 @@ export default function ProfileScreen() {
   const [bookmarkFilter, setBookmarkFilter] = useState<"all" | "studios" | "gigs" | "musicians" | "productions">("all");
   const [userPlaylists, setUserPlaylists] = useState<any[]>([]);
   const [loadingPlaylists, setLoadingPlaylists] = useState(false);
+  const [userStation, setUserStation] = useState<any>(null);
+  const [loadingStation, setLoadingStation] = useState(false);
+  const [radioPlaylistIds, setRadioPlaylistIds] = useState<Set<string>>(new Set());
+  const [togglingRadio, setTogglingRadio] = useState<string | null>(null);
+  const [isProfileFollowing, setIsProfileFollowing] = useState(false);
+  const [isProfileFollowBusy, setIsProfileFollowBusy] = useState(false);
   const profileFetchInFlightRef = useRef(false);
 
   useEffect(() => {
@@ -449,6 +518,79 @@ export default function ProfileScreen() {
     }
   }, []);
 
+  // Fetch user station (first/primary) and which playlists are on radio
+  const fetchStation = useCallback(async (targetUserId: string) => {
+    setLoadingStation(true);
+    try {
+      const { data } = await supabase.functions.invoke("manage-playlists", {
+        body: { action: "list_user_stations", user_id: targetUserId },
+      });
+      const stations = data?.data || [];
+      const station = stations.length > 0 ? stations[0] : null;
+      setUserStation(station);
+      setRadioPlaylistIds(new Set(station?.slot_playlist_ids || []));
+    } catch (_) {
+      setUserStation(null);
+      setRadioPlaylistIds(new Set());
+    } finally {
+      setLoadingStation(false);
+    }
+  }, []);
+
+  // Toggle a playlist on/off the user's radio station
+  const handleToggleRadio = useCallback(async (playlistId: string) => {
+    setTogglingRadio(playlistId);
+    try {
+      const { data } = await supabase.functions.invoke("manage-playlists", {
+        body: { action: "toggle_radio_slot", playlist_id: playlistId },
+      });
+      if (data?.success) {
+        setRadioPlaylistIds((prev) => {
+          const next = new Set(prev);
+          if (data.on_radio) {
+            next.add(playlistId);
+          } else {
+            next.delete(playlistId);
+          }
+          return next;
+        });
+
+        setUserStation((prev: any) => {
+          const previousSlotCount = prev
+            ? typeof prev.slot_count === "number"
+              ? prev.slot_count
+              : Array.isArray(prev.slot_playlist_ids)
+                ? prev.slot_playlist_ids.length
+                : 0
+            : 0;
+
+          if (prev) {
+            return {
+              ...prev,
+              slot_count: Math.max(previousSlotCount + (data.on_radio ? 1 : -1), 0),
+              is_active: data.on_radio ? true : prev.is_active,
+            };
+          }
+
+          if (data.station_id) {
+            return {
+              id: data.station_id,
+              name: `${profile?.full_name || "My"}'s Radio`,
+              slot_count: data.on_radio ? 1 : 0,
+              is_active: data.on_radio,
+            };
+          }
+
+          return prev;
+        });
+      }
+    } catch (_) {
+      // silently fail
+    } finally {
+      setTogglingRadio(null);
+    }
+  }, [profile?.full_name]);
+
   // Refresh profile data every time the screen comes into focus
   const fetchProfile = useCallback(async () => {
     if (profileFetchInFlightRef.current) {
@@ -674,13 +816,14 @@ export default function ProfileScreen() {
 
       await fetchBookmarkedListings(targetId, !!ownership && !isGuest);
       fetchPlaylists(targetId);
+      fetchStation(targetId);
     } catch (e) {
       console.log("Error fetching profile:", e);
     } finally {
       profileFetchInFlightRef.current = false;
       setLoading(false);
     }
-  }, [currentUserId, fetchBookmarkedListings, fetchPlaylists, isGuest, normalizedParamUserId]);
+  }, [currentUserId, fetchBookmarkedListings, fetchPlaylists, fetchStation, isGuest, normalizedParamUserId]);
 
   useFocusEffect(
     useCallback(() => {
@@ -949,6 +1092,179 @@ export default function ProfileScreen() {
     }
   };
 
+  const portfolioCount = profile?.portfolio_urls?.length ?? 0;
+  const profileAvatarUrl = sanitizeAvatarUrl(profile?.avatar_url);
+  const viewedProfileId = typeof profile?.id === "string" ? profile.id.trim() : "";
+  const profileFollowKey = buildSocialFollowKey("profile", viewedProfileId);
+  const canFollowProfile = !isGuest && !isOwner && viewedProfileId.length > 0;
+  const mediaSummary =
+    portfolioCount > 0
+      ? `${portfolioCount} ${portfolioCount === 1 ? "item" : "items"} in ${isOwner ? "your" : "this"} portfolio`
+      : isOwner
+        ? "Add photos and short clips that show your sound, setup, or stage presence."
+        : "No portfolio uploads yet.";
+  const stationSlotCount = Number(
+    userStation?.slot_count ??
+      userStation?.slot_playlist_ids?.length ??
+      radioPlaylistIds.size ??
+      0,
+  );
+  const hasStation = Boolean(userStation?.id);
+  const stationArtworkUrl =
+    sanitizeAvatarUrl(userStation?.creator?.avatar_url) ||
+    profileAvatarUrl;
+  const stationName =
+    typeof userStation?.name === "string" && userStation.name.trim().length > 0
+      ? userStation.name.trim()
+      : `${profile?.full_name || "Artist"}'s Radio`;
+  const stationCreatorName =
+    typeof userStation?.creator?.full_name === "string" &&
+    userStation.creator.full_name.trim().length > 0
+      ? userStation.creator.full_name.trim()
+      : profile?.full_name || "Artist";
+  const stationGenre =
+    typeof userStation?.genre === "string" && userStation.genre.trim().length > 0
+      ? userStation.genre.trim()
+      : Array.isArray(profile?.genres) && typeof profile.genres[0] === "string"
+        ? profile.genres[0]
+        : "";
+  const stationIsLive = hasStation && userStation?.is_active !== false && stationSlotCount > 0;
+  const stationIsCurrentSource = Boolean(
+    hasStation && activeStation?.id && activeStation.id === userStation?.id,
+  );
+  const canPlayStationFromProfile = stationIsLive && isTrackPlayerAvailable;
+  const loadProfileFollowState = useCallback(async () => {
+    if (!canFollowProfile || !profileFollowKey) {
+      setIsProfileFollowing(false);
+      return;
+    }
+
+    try {
+      const { data: followingResponse, error } = await supabase.functions.invoke("manage-social-feed", {
+        body: { action: "get_following" },
+      });
+
+      if (error) {
+        throw error;
+      }
+
+      const nextFollowingKeys = new Set<string>(
+        (Array.isArray(followingResponse?.data) ? followingResponse.data : [])
+          .map((row: any) => buildSocialFollowKey(row?.followed_type, row?.followed_id))
+          .filter((value: string) => value.length > 0),
+      );
+
+      setIsProfileFollowing(nextFollowingKeys.has(profileFollowKey));
+    } catch {
+      // Keep the current profile follow state when lookup fails.
+    }
+  }, [canFollowProfile, profileFollowKey]);
+
+  useEffect(() => {
+    void loadProfileFollowState();
+  }, [loadProfileFollowState]);
+
+  const handleProfileFollowToggle = useCallback(async () => {
+    if (!canFollowProfile || !viewedProfileId || isProfileFollowBusy) {
+      return;
+    }
+
+    const wasFollowing = isProfileFollowing;
+    setIsProfileFollowBusy(true);
+    setIsProfileFollowing(!wasFollowing);
+
+    try {
+      const { error } = await supabase.functions.invoke("manage-social-feed", {
+        body: {
+          action: wasFollowing ? "unfollow" : "follow",
+          target_id: viewedProfileId,
+          target_type: "profile",
+        },
+      });
+
+      if (error) {
+        throw error;
+      }
+
+      showTopToast({
+        type: "success",
+        title: wasFollowing ? "Unfollowed" : "Following",
+        message: "",
+      });
+    } catch (error: any) {
+      setIsProfileFollowing(wasFollowing);
+      showTopToast({
+        type: "error",
+        title: "Follow failed",
+        message: error?.message || "Please try again.",
+      });
+    } finally {
+      setIsProfileFollowBusy(false);
+    }
+  }, [canFollowProfile, isProfileFollowBusy, isProfileFollowing, viewedProfileId]);
+
+  const playlistSectionHint = hasStation
+    ? isOwner && !isGuest
+      ? "Tap the station card to listen live, then use the radio button on each playlist to control what stays on air."
+      : "Tap the station card to listen live, or open any playlist card to view its tracks."
+    : isOwner && !isGuest
+      ? "Create a station to feature your playlists, then put music on air with the radio button on each card."
+      : "Tap any playlist card to open it.";
+  const stationPrimaryLabel = !hasStation
+    ? "Create Station"
+    : canPlayStationFromProfile
+      ? stationIsCurrentSource
+        ? isPlaying
+          ? "Pause Live Audio"
+          : "Resume Live Audio"
+        : "Listen Live"
+      : isOwner && !isGuest
+        ? "Manage Station"
+        : "Open Station";
+  const stationStatusLabel = stationIsLive
+    ? stationIsCurrentSource && isPlaying
+      ? "LIVE NOW"
+      : "LIVE"
+    : "OFFLINE";
+
+  const openStationScreen = () => {
+    if (hasStation && userStation?.id) {
+      router.push({
+        pathname: "/station_details" as any,
+        params: { station_id: String(userStation.id) },
+      });
+      return;
+    }
+
+    if (isOwner && !isGuest) {
+      router.push("/create_station" as any);
+    }
+  };
+
+  const handleStationPrimaryAction = async () => {
+    if (!hasStation) {
+      openStationScreen();
+      return;
+    }
+
+    if (!canPlayStationFromProfile) {
+      openStationScreen();
+      return;
+    }
+
+    try {
+      if (stationIsCurrentSource) {
+        await togglePlayPause();
+        return;
+      }
+
+      await tuneIn(userStation);
+    } catch (stationError) {
+      console.log("[profile] Failed to start station playback:", stationError);
+      openStationScreen();
+    }
+  };
+
   if (loading) {
     return (
       <View style={[styles.flex1, { backgroundColor: colors.background }]}>
@@ -994,14 +1310,6 @@ export default function ProfileScreen() {
       </View>
     );
   }
-
-  const portfolioCount = profile?.portfolio_urls?.length ?? 0;
-  const mediaSummary =
-    portfolioCount > 0
-      ? `${portfolioCount} ${portfolioCount === 1 ? "item" : "items"} in ${isOwner ? "your" : "this"} portfolio`
-      : isOwner
-        ? "Add photos and short clips that show your sound, setup, or stage presence."
-        : "No portfolio uploads yet.";
 
   return (
     <>
@@ -1049,15 +1357,18 @@ export default function ProfileScreen() {
                   { borderColor: colors.surface },
                 ]}
               >
-                <Image
-                  source={
-                    profile?.avatar_url
-                      ? { uri: profile.avatar_url }
-                      : DEFAULT_AVATAR
-                  }
-                  style={styles.avatarImage}
-                  resizeMode="cover"
-                />
+                <Image source={DEFAULT_AVATAR} style={styles.avatarImage} resizeMode="cover" />
+                {profileAvatarUrl ? (
+                  <CachedImage
+                    uri={profileAvatarUrl}
+                    style={[styles.avatarImage, styles.avatarImageOverlay]}
+                    contentFit="cover"
+                    transition={120}
+                    width={240}
+                    height={240}
+                    disableRecyclingKey
+                  />
+                ) : null}
               </View>
 
               {isOwner && (
@@ -1087,8 +1398,37 @@ export default function ProfileScreen() {
                       ? profile.role.charAt(0).toUpperCase() +
                       profile.role.slice(1)
                       : "User"}{" "}
-              â€¢ {profile?.location || "Unknown"}
+              {"\u2022"} {profile?.location || "Unknown"}
             </Text>
+
+            {canFollowProfile ? (
+              <TouchableOpacity
+                activeOpacity={0.9}
+                disabled={isProfileFollowBusy}
+                onPress={() => void handleProfileFollowToggle()}
+                style={[
+                  styles.profileFollowBtn,
+                  {
+                    backgroundColor: isProfileFollowing ? (isDark ? "#111827" : "#FFFFFF") : colors.primary,
+                    borderColor: isProfileFollowing ? (isDark ? "#374151" : "#CBD5E1") : colors.primary,
+                    opacity: isProfileFollowBusy ? 0.7 : 1,
+                  },
+                ]}
+              >
+                {isProfileFollowBusy ? (
+                  <ActivityIndicator size="small" color={isProfileFollowing ? colors.textSecondary : "#FFFFFF"} />
+                ) : (
+                  <Text
+                    style={[
+                      styles.profileFollowBtnText,
+                      { color: isProfileFollowing ? colors.textSecondary : "#FFFFFF" },
+                    ]}
+                  >
+                    {isProfileFollowing ? "Following" : "Follow"}
+                  </Text>
+                )}
+              </TouchableOpacity>
+            ) : null}
 
             <View style={styles.genreRow}>
               {(profile?.genres || ["Rock", "Indie"]).map((genre: string) => (
@@ -1262,10 +1602,10 @@ export default function ProfileScreen() {
                                   year: "numeric",
                                 })
                                 : "Date TBA"}
-                              {" â€¢ "}
+                              {" \u2022 "}
                               {gig.location || "Location TBA"}
                             </Text>
-                            <Text style={[styles.gigCardBudget, { color: colors.primary }]}>Budget: â‚±{Number(gig.budget || 0).toLocaleString()}</Text>
+                            <Text style={[styles.gigCardBudget, { color: colors.primary }]}>Budget: {"\u20B1"}{Number(gig.budget || 0).toLocaleString()}</Text>
                           </View>
                         ))}
                       </ScrollView>
@@ -1370,24 +1710,236 @@ export default function ProfileScreen() {
             {/* TAB CONTENT: PLAYLISTS */}
             {activeTab === "playlists" && (
               <View style={{ paddingHorizontal: 16, paddingTop: 16 }}>
-                {isOwner && !isGuest && (
-                  <TouchableOpacity activeOpacity={1}
+                <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 10 }}>
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 8, flexShrink: 1 }}>
+                    <Text style={{ fontSize: 13, fontFamily: "Poppins_600SemiBold", color: colors.textSecondary, textTransform: "uppercase", letterSpacing: 0.5 }}>
+                      Playlists
+                    </Text>
+                    {stationSlotCount > 0 && (
+                      <View style={{ backgroundColor: "#22C55E20", paddingHorizontal: 8, paddingVertical: 3, borderRadius: 12 }}>
+                        <Text style={{ fontSize: 10, fontFamily: "Poppins_600SemiBold", color: "#22C55E" }}>
+                          {stationSlotCount} on air
+                        </Text>
+                      </View>
+                    )}
+                  </View>
+
+                  {isOwner && !isGuest && (
+                    <TouchableOpacity
+                      activeOpacity={0.8}
+                      style={{
+                        flexDirection: "row",
+                        alignItems: "center",
+                        gap: 6,
+                        paddingHorizontal: 12,
+                        paddingVertical: 7,
+                        borderRadius: 10,
+                        backgroundColor: colors.primary,
+                      }}
+                      onPress={() => router.push("/create_playlist" as any)}
+                    >
+                      <Ionicons name="add" size={14} color="#fff" />
+                      <Text style={{ color: "#fff", fontSize: 12, fontFamily: "Poppins_600SemiBold" }}>New Playlist</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+
+                <Text style={{ fontSize: 11, color: colors.textSecondary, marginBottom: 14, lineHeight: 17 }}>
+                  {playlistSectionHint}
+                </Text>
+
+                {loadingStation ? (
+                  <View style={{ gap: 10, marginBottom: 16 }}>
+                    <Skeleton width={SCREEN_WIDTH - 32} height={148} style={{ borderRadius: 18 }} />
+                  </View>
+                ) : hasStation ? (
+                  <View
                     style={{
-                      flexDirection: "row",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      paddingVertical: 14,
-                      borderRadius: 12,
-                      backgroundColor: colors.primary,
                       marginBottom: 16,
-                      gap: 6,
+                      borderRadius: 18,
+                      borderWidth: 1,
+                      borderColor: stationIsCurrentSource && isPlaying ? colors.primary : colors.border,
+                      backgroundColor: stationIsCurrentSource && isPlaying
+                        ? (isDark ? "rgba(59,130,246,0.14)" : "rgba(59,130,246,0.08)")
+                        : colors.surface,
+                      overflow: "hidden",
                     }}
-                    onPress={() => router.push("/create_playlist" as any)}
                   >
-                    <Ionicons name="add" size={20} color="#fff" />
-                    <Text style={{ color: "#fff", fontSize: 15, fontFamily: "Poppins_700Bold" }}>Create Playlist</Text>
-                  </TouchableOpacity>
-                )}
+                    <TouchableOpacity
+                      activeOpacity={0.88}
+                      onPress={() => void handleStationPrimaryAction()}
+                      style={{ paddingHorizontal: 14, paddingTop: 14, paddingBottom: 12 }}
+                    >
+                      <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
+                        <View
+                          style={{
+                            width: 56,
+                            height: 56,
+                            borderRadius: 16,
+                            overflow: "hidden",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            backgroundColor: stationIsLive ? colors.primary + "18" : (isDark ? "#1E293B" : "#EEF2FF"),
+                          }}
+                        >
+                          {stationArtworkUrl ? (
+                            <Image source={{ uri: stationArtworkUrl }} style={{ width: "100%", height: "100%" }} resizeMode="cover" />
+                          ) : (
+                            <Ionicons name="radio" size={26} color={stationIsLive ? colors.primary : colors.textSecondary} />
+                          )}
+                        </View>
+
+                        <View style={{ flex: 1 }}>
+                          <View style={{ flexDirection: "row", alignItems: "center", gap: 6, flexWrap: "wrap", marginBottom: 4 }}>
+                            <Text style={{ flexShrink: 1, fontSize: 15, fontFamily: "Poppins_600SemiBold", color: colors.text }} numberOfLines={1}>
+                              {stationName}
+                            </Text>
+                            <View
+                              style={{
+                                paddingHorizontal: 8,
+                                paddingVertical: 3,
+                                borderRadius: 999,
+                                backgroundColor: stationIsLive ? "#22C55E20" : (isDark ? "#334155" : "#E2E8F0"),
+                              }}
+                            >
+                              <Text style={{ color: stationIsLive ? "#22C55E" : colors.textSecondary, fontSize: 10, fontFamily: "Poppins_600SemiBold" }}>
+                                {stationStatusLabel}
+                              </Text>
+                            </View>
+                          </View>
+
+                          <Text style={{ fontSize: 12, color: colors.textSecondary, fontFamily: "Poppins_400Regular" }} numberOfLines={1}>
+                            {isOwner && !isGuest ? "Your radio station" : `${stationCreatorName}'s radio station`}
+                          </Text>
+
+                          <Text style={{ fontSize: 11, color: colors.textSecondary, marginTop: 4 }} numberOfLines={1}>
+                            {stationSlotCount} playlist{stationSlotCount === 1 ? "" : "s"}
+                            {stationGenre ? ` \u2022 ${stationGenre}` : ""}
+                          </Text>
+                        </View>
+
+                        <Ionicons
+                          name={canPlayStationFromProfile && stationIsCurrentSource && isPlaying ? "pause-circle" : "play-circle"}
+                          size={30}
+                          color={canPlayStationFromProfile ? colors.primary : colors.textSecondary}
+                        />
+                      </View>
+
+                      <Text style={{ fontSize: 11, color: colors.textSecondary, lineHeight: 17, marginTop: 12 }}>
+                        {canPlayStationFromProfile
+                          ? "Tap this card to start listening live. Open the station screen anytime for more controls."
+                          : isOwner && !isGuest
+                            ? "This station is ready to manage, but it needs at least one playlist on air before listeners can tune in."
+                            : "Open the station to browse its rotation and live details."}
+                      </Text>
+                    </TouchableOpacity>
+
+                    <View style={{ flexDirection: "row", gap: 10, paddingHorizontal: 14, paddingBottom: 14 }}>
+                      <TouchableOpacity
+                        activeOpacity={0.85}
+                        onPress={() => void handleStationPrimaryAction()}
+                        style={{
+                          flex: 1,
+                          minHeight: 42,
+                          borderRadius: 12,
+                          backgroundColor: canPlayStationFromProfile ? colors.primary : (isDark ? "#1E293B" : "#F3F4F6"),
+                          flexDirection: "row",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          gap: 8,
+                          paddingHorizontal: 12,
+                        }}
+                      >
+                        <Ionicons
+                          name={canPlayStationFromProfile && stationIsCurrentSource && isPlaying ? "pause" : canPlayStationFromProfile ? "radio" : "open-outline"}
+                          size={16}
+                          color={canPlayStationFromProfile ? "#fff" : colors.text}
+                        />
+                        <Text style={{ color: canPlayStationFromProfile ? "#fff" : colors.text, fontSize: 12, fontFamily: "Poppins_600SemiBold" }}>
+                          {stationPrimaryLabel}
+                        </Text>
+                      </TouchableOpacity>
+
+                      {canPlayStationFromProfile && (
+                        <TouchableOpacity
+                          activeOpacity={0.85}
+                          onPress={openStationScreen}
+                          style={{
+                            minWidth: 128,
+                            minHeight: 42,
+                            borderRadius: 12,
+                            borderWidth: 1,
+                            borderColor: colors.border,
+                            backgroundColor: isDark ? "#0F172A" : "#FFFFFF",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            paddingHorizontal: 12,
+                          }}
+                        >
+                          <Text style={{ color: colors.text, fontSize: 12, fontFamily: "Poppins_600SemiBold" }}>
+                            {isOwner && !isGuest ? "Manage Station" : "Open Station"}
+                          </Text>
+                        </TouchableOpacity>
+                      )}
+                    </View>
+                  </View>
+                ) : isOwner && !isGuest ? (
+                  <View
+                    style={{
+                      marginBottom: 16,
+                      borderRadius: 18,
+                      borderWidth: 1,
+                      borderColor: colors.border,
+                      backgroundColor: colors.surface,
+                      padding: 16,
+                    }}
+                  >
+                    <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
+                      <View
+                        style={{
+                          width: 52,
+                          height: 52,
+                          borderRadius: 16,
+                          alignItems: "center",
+                          justifyContent: "center",
+                          backgroundColor: colors.primary + "16",
+                        }}
+                      >
+                        <Ionicons name="radio-outline" size={24} color={colors.primary} />
+                      </View>
+
+                      <View style={{ flex: 1 }}>
+                        <Text style={{ fontSize: 15, fontFamily: "Poppins_600SemiBold", color: colors.text }}>
+                          Create your radio station
+                        </Text>
+                        <Text style={{ fontSize: 11, color: colors.textSecondary, lineHeight: 17, marginTop: 4 }}>
+                          Your station lives above your playlists and lets visitors listen live from your profile.
+                        </Text>
+                      </View>
+                    </View>
+
+                    <TouchableOpacity
+                      activeOpacity={0.85}
+                      onPress={() => router.push("/create_station" as any)}
+                      style={{
+                        marginTop: 14,
+                        minHeight: 42,
+                        borderRadius: 12,
+                        backgroundColor: colors.primary,
+                        alignItems: "center",
+                        justifyContent: "center",
+                        flexDirection: "row",
+                        gap: 8,
+                      }}
+                    >
+                      <Ionicons name="add" size={16} color="#fff" />
+                      <Text style={{ color: "#fff", fontSize: 12, fontFamily: "Poppins_600SemiBold" }}>
+                        Create Station
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                ) : null}
+
                 {loadingPlaylists ? (
                   <View style={{ gap: 10 }}>
                     {[1, 2, 3].map((i) => (
@@ -1395,49 +1947,165 @@ export default function ProfileScreen() {
                     ))}
                   </View>
                 ) : userPlaylists.length > 0 ? (
-                  userPlaylists.map((pl: any) => (
-                    <TouchableOpacity activeOpacity={1}
-                      key={pl.id}
+                  userPlaylists.map((pl: any) => {
+                    const isOnRadio = radioPlaylistIds.has(pl.id);
+                    const isToggling = togglingRadio === pl.id;
+                    const playlistTrackCount = pl.track_count || pl.item_count || 0;
+
+                    return (
+                      <View
+                        key={pl.id}
+                        style={{
+                          flexDirection: "row",
+                          alignItems: "center",
+                          padding: 12,
+                          borderRadius: 16,
+                          borderWidth: 1,
+                          borderColor: isOnRadio ? "#22C55E40" : (isDark ? "#334155" : "#E2E8F0"),
+                          backgroundColor: isOnRadio ? (isDark ? "#22C55E10" : "#F0FDF4") : colors.surface,
+                          marginBottom: 10,
+                        }}
+                      >
+                        <TouchableOpacity
+                          activeOpacity={0.82}
+                          style={{ flex: 1, flexDirection: "row", alignItems: "center" }}
+                          onPress={() => router.push({ pathname: "/playlist_details" as any, params: { playlist_id: pl.id } })}
+                        >
+                          <View
+                            style={{
+                              width: 50,
+                              height: 50,
+                              borderRadius: 14,
+                              alignItems: "center",
+                              justifyContent: "center",
+                              backgroundColor: isOnRadio ? "#22C55E20" : colors.primary + "15",
+                              marginRight: 12,
+                            }}
+                          >
+                            <Ionicons name={isOnRadio ? "radio" : "musical-notes"} size={20} color={isOnRadio ? "#22C55E" : colors.primary} />
+                          </View>
+
+                          <View style={{ flex: 1, minWidth: 0 }}>
+                            <View style={{ flexDirection: "row", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                              <Text style={{ fontSize: 14, fontFamily: "Poppins_600SemiBold", color: colors.text, flexShrink: 1 }} numberOfLines={1}>
+                                {pl.title}
+                              </Text>
+                              {isOnRadio && (
+                                <View style={{
+                                  backgroundColor: "#22C55E",
+                                  paddingHorizontal: 6, paddingVertical: 1, borderRadius: 4,
+                                }}>
+                                  <Text style={{ fontSize: 9, fontFamily: "Poppins_600SemiBold", color: "#fff" }}>ON AIR</Text>
+                                </View>
+                              )}
+                            </View>
+
+                            {pl.genre && (
+                              <Text style={{ fontSize: 12, color: colors.textSecondary, marginTop: 2 }}>{pl.genre}</Text>
+                            )}
+
+                            <Text style={{ fontSize: 11, color: colors.textSecondary, marginTop: 2 }}>
+                              {playlistTrackCount} track{playlistTrackCount !== 1 ? "s" : ""} {"\u2022"} {pl.visibility === "private" ? "Private" : "Public"}
+                            </Text>
+                          </View>
+
+                          <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} style={{ marginLeft: 10 }} />
+                        </TouchableOpacity>
+
+                        {isOwner && !isGuest && (
+                          <TouchableOpacity
+                            activeOpacity={0.6}
+                            style={{
+                              minWidth: 96,
+                              minHeight: 36,
+                              borderRadius: 999,
+                              alignItems: "center",
+                              justifyContent: "center",
+                              backgroundColor: isOnRadio ? "#22C55E20" : (isDark ? "#334155" : "#F1F5F9"),
+                              marginLeft: 8,
+                              paddingHorizontal: 12,
+                            }}
+                            onPress={() => handleToggleRadio(pl.id)}
+                            disabled={isToggling}
+                          >
+                            {isToggling ? (
+                              <ActivityIndicator size="small" color={colors.primary} />
+                            ) : (
+                              <Text
+                                style={{
+                                  color: isOnRadio ? "#22C55E" : colors.textSecondary,
+                                  fontSize: 11,
+                                  fontFamily: "Poppins_600SemiBold",
+                                }}
+                              >
+                                {isOnRadio ? "On Radio" : "Add to Radio"}
+                              </Text>
+                            )}
+                          </TouchableOpacity>
+                        )}
+
+                      </View>
+                    );
+                  })
+                ) : (
+                  <View
+                    style={{
+                      alignItems: "center",
+                      justifyContent: "center",
+                      minHeight: 188,
+                      borderRadius: 18,
+                      borderWidth: 1,
+                      borderColor: colors.border,
+                      backgroundColor: colors.surface,
+                      paddingHorizontal: 20,
+                      paddingVertical: 24,
+                    }}
+                  >
+                    <View
                       style={{
-                        flexDirection: "row",
-                        alignItems: "center",
-                        padding: 12,
-                        borderRadius: 12,
-                        borderWidth: 1,
-                        borderColor: isDark ? "#334155" : "#E2E8F0",
-                        backgroundColor: colors.surface,
-                        marginBottom: 10,
-                      }}
-                      onPress={() => router.push({ pathname: "/playlist_details" as any, params: { playlist_id: pl.id } })}
-                    >
-                      <View style={{
-                        width: 48,
-                        height: 48,
-                        borderRadius: 8,
-                        backgroundColor: colors.primary + "15",
+                        width: 56,
+                        height: 56,
+                        borderRadius: 18,
                         alignItems: "center",
                         justifyContent: "center",
-                      }}>
-                        <Ionicons name="musical-notes" size={22} color={colors.primary} />
-                      </View>
-                      <View style={{ flex: 1, marginLeft: 12 }}>
-                        <Text style={{ fontSize: 14, fontFamily: "Poppins_600SemiBold", color: colors.text }} numberOfLines={1}>{pl.title}</Text>
-                        {pl.genre && (
-                          <Text style={{ fontSize: 12, color: colors.textSecondary, marginTop: 2 }}>{pl.genre}</Text>
-                        )}
-                        <Text style={{ fontSize: 11, color: colors.textSecondary, marginTop: 2 }}>
-                          {pl.item_count || 0} track{(pl.item_count || 0) !== 1 ? "s" : ""} â€¢ {pl.visibility === "private" ? "Private" : "Public"}
-                        </Text>
-                      </View>
-                      <Ionicons name="chevron-forward" size={20} color={colors.textSecondary} />
-                    </TouchableOpacity>
-                  ))
-                ) : (
-                  <View style={{ alignItems: "center", justifyContent: "center", minHeight: 200 }}>
-                    <Ionicons name="musical-notes-outline" size={48} color={isDark ? "#334155" : "#E2E8F0"} />
-                    <Text style={{ color: colors.textSecondary, marginTop: 12, fontSize: 15, fontFamily: "Poppins_500Medium", textAlign: "center" }}>
-                      {isOwner ? "No playlists yet. Create your first!" : "No playlists"}
+                        backgroundColor: isDark ? "#1E293B" : "#F1F5F9",
+                      }}
+                    >
+                      <Ionicons name="musical-notes-outline" size={24} color={colors.textSecondary} />
+                    </View>
+
+                    <Text style={{ color: colors.text, fontSize: 15, fontFamily: "Poppins_600SemiBold", textAlign: "center", marginTop: 14 }}>
+                      {isOwner && !isGuest ? "No playlists yet" : "No playlists to show"}
                     </Text>
+
+                    <Text style={{ color: colors.textSecondary, fontSize: 12, fontFamily: "Poppins_400Regular", textAlign: "center", lineHeight: 18, marginTop: 6 }}>
+                      {isOwner && !isGuest
+                        ? "Create your first playlist to start building your station rotation and featured profile section."
+                        : "This profile has not shared any playlists yet."}
+                    </Text>
+
+                    {isOwner && !isGuest && (
+                      <TouchableOpacity
+                        activeOpacity={0.85}
+                        onPress={() => router.push("/create_playlist" as any)}
+                        style={{
+                          marginTop: 16,
+                          minHeight: 42,
+                          paddingHorizontal: 16,
+                          borderRadius: 12,
+                          backgroundColor: colors.primary,
+                          flexDirection: "row",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          gap: 8,
+                        }}
+                      >
+                        <Ionicons name="add" size={16} color="#fff" />
+                        <Text style={{ color: "#fff", fontSize: 12, fontFamily: "Poppins_600SemiBold" }}>
+                          Create Playlist
+                        </Text>
+                      </TouchableOpacity>
+                    )}
                   </View>
                 )}
               </View>
@@ -1585,10 +2253,20 @@ export default function ProfileScreen() {
           >
             {/* Drawer top â€” avatar + name */}
             <View style={[styles.drawerTop, { borderBottomColor: colors.border }]}>
-              <Image
-                source={profile?.avatar_url ? { uri: profile.avatar_url } : DEFAULT_AVATAR}
-                style={styles.drawerAvatar}
-              />
+              <View style={styles.drawerAvatar}>
+                <Image source={DEFAULT_AVATAR} style={styles.drawerAvatarImage} resizeMode="cover" />
+                {profileAvatarUrl ? (
+                  <CachedImage
+                    uri={profileAvatarUrl}
+                    style={[styles.drawerAvatarImage, styles.avatarImageOverlay]}
+                    contentFit="cover"
+                    transition={120}
+                    width={88}
+                    height={88}
+                    disableRecyclingKey
+                  />
+                ) : null}
+              </View>
               <View style={styles.drawerTopInfo}>
                 <Text style={[styles.drawerName, { color: colors.text }]} numberOfLines={1}>
                   {profile?.full_name || profile?.name || "Profile"}
@@ -1748,6 +2426,13 @@ const styles = StyleSheet.create({
     width: "100%",
     height: "100%",
   },
+  avatarImageOverlay: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+  },
   editIconBtn: {
     position: "absolute",
     bottom: 16,
@@ -1771,6 +2456,21 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     textAlign: "center",
     fontFamily: "Poppins_400Regular",
+  },
+  profileFollowBtn: {
+    minWidth: 132,
+    minHeight: 42,
+    borderRadius: 999,
+    borderWidth: 1,
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 18,
+  },
+  profileFollowBtnText: {
+    fontFamily: "Poppins_600SemiBold",
+    fontSize: 13,
   },
   genreRow: {
     flexDirection: "row",
@@ -2363,6 +3063,13 @@ const styles = StyleSheet.create({
     height: 44,
     borderRadius: 22,
     backgroundColor: "#1E293B",
+    overflow: "hidden",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  drawerAvatarImage: {
+    width: "100%",
+    height: "100%",
   },
   drawerTopInfo: {
     flex: 1,

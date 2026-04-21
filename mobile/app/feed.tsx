@@ -2,7 +2,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect } from "@react-navigation/native";
 import { router } from "expo-router";
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Dimensions,
@@ -11,25 +11,41 @@ import {
   InteractionManager,
   Modal,
   RefreshControl,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
   View,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { supabase } from "../lib/supabase";
 import CachedImage from "../src/components/CachedImage";
 import GuestSignInGate from "../src/components/GuestSignInGate";
 import Header from "../src/components/header";
 import ListingCard from "../src/components/ListingCard";
 import ListingDetailsSheet from "../src/components/ListingDetailsSheet";
-import Navbar from "../src/components/navbar";
+import Navbar, {
+  NAVBAR_BOTTOM_OFFSET,
+  NAVBAR_CLEARANCE,
+  NAVBAR_HEIGHT,
+} from "../src/components/navbar";
 import SearchBottomSheet from "../src/components/SearchBottomSheet";
 import Skeleton from "../src/components/Skeleton";
 import CustomAlert, { AlertType } from "../src/components/CustomAlert";
+import { isTrackPlayerAvailable } from "../src/audio/safeTrackPlayer";
 import { useAuth } from "../src/context/AuthContext";
+import { useBottomOverlay } from "../src/context/BottomOverlayContext";
+import {
+  RADIO_MINI_PLAYER_HEIGHT,
+  RADIO_MINI_PLAYER_STACK_GAP,
+  useRadioPlayerActions,
+  useRadioPlayerPlayback,
+  useRadioPlayerPresence,
+} from "../src/context/RadioPlayerContext";
 import { showTopToast } from "../src/context/TopToastContext";
 import { useTheme } from "../src/context/ThemeContext";
+import { getGroupTypeLabel } from "../src/utils/groupMembers";
 import {
   buildSocialFollowKey,
   getListingSocialFollowTarget,
@@ -48,6 +64,36 @@ const moderateScale = (size: number, factor = 0.3) => {
 };
 
 type FeedTab = "for_you" | "following";
+
+type FeedAiCardsResult = {
+  cards: any[];
+  provider: string;
+  message: string;
+};
+
+type FeedCacheEntry = {
+  posts: any[];
+  aiCards: any[];
+  aiFeedMessage: string;
+  aiFeedProvider: string;
+  hasMore: boolean;
+  loaded: boolean;
+};
+
+const createEmptyFeedCacheEntry = (provider: string): FeedCacheEntry => ({
+  posts: [],
+  aiCards: [],
+  aiFeedMessage: "",
+  aiFeedProvider: provider,
+  hasMore: false,
+  loaded: false,
+});
+
+const createFeedCache = (provider: string): Record<FeedTab, FeedCacheEntry> => ({
+  for_you: createEmptyFeedCacheEntry(provider),
+  following: createEmptyFeedCacheEntry(provider),
+});
+
 const FEED_PAGE_SIZE = 20;
 const AI_CARD_LIMIT = 20;
 const KNOWN_FEED_MEDIA_BUCKETS = [
@@ -59,13 +105,35 @@ const KNOWN_FEED_MEDIA_BUCKETS = [
   "avatars",
 ];
 
+const normalizeRelativeSupabaseStorageUrl = (value: string) => {
+  const trimmed = value.trim();
+  if (!trimmed) return "";
+
+  const normalizedPath = trimmed.startsWith("/") ? trimmed : `/${trimmed}`;
+  const envBase = (process.env.EXPO_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || "").trim();
+  if (!envBase) {
+    return normalizedPath;
+  }
+
+  const base = envBase.endsWith("/") ? envBase.slice(0, -1) : envBase;
+  return `${base}${normalizedPath}`;
+};
+
 const resolveFeedMediaUrl = (value: unknown) => {
   if (typeof value !== "string") return "";
   const candidate = value.trim();
   if (!candidate) return "";
 
+  if (candidate.startsWith("/storage/v1/") || candidate.startsWith("storage/v1/")) {
+    return normalizeRelativeSupabaseStorageUrl(candidate);
+  }
+
   if (candidate.includes("/storage/v1/object/avatars/")) {
     return candidate.replace("/storage/v1/object/avatars/", "/storage/v1/object/public/avatars/");
+  }
+
+  if (candidate.includes("/storage/v1/object/public/")) {
+    return candidate;
   }
 
   if (/^(https?:\/\/|data:|file:\/\/)/i.test(candidate)) {
@@ -129,7 +197,72 @@ const formatProfileRoleLabel = (role: unknown) => {
     .join(" ");
 };
 
-const normalizeFollowingEntity = (row: any) => {
+const getLiveStationCreatorCtaLabel = (station: any) => {
+  const creatorTarget = station?.creator_target;
+  if (!creatorTarget?.id) {
+    return "";
+  }
+
+  if (creatorTarget.kind === "group") {
+    const creatorGroupLabel = getGroupTypeLabel(creatorTarget?.group_type);
+    if (creatorGroupLabel === "Solo") {
+      return creatorTarget.isOwner ? "View Profile" : "View Musician";
+    }
+
+    if (creatorTarget.isOwner) {
+      return creatorGroupLabel === "Duo" ? "Manage Duo" : "Manage Group";
+    }
+
+    return creatorGroupLabel === "Duo" ? "View Duo" : "View Group";
+  }
+
+  return "View Musician";
+};
+
+const getLiveStationCreatorLabel = (station: any) => {
+  const targetName = typeof station?.creator_target?.name === "string"
+    ? station.creator_target.name.trim()
+    : "";
+  if (targetName) {
+    return targetName;
+  }
+
+  const creatorName = typeof station?.creator?.full_name === "string"
+    ? station.creator.full_name.trim()
+    : "";
+  return creatorName || "Unknown";
+};
+
+const getLiveStationGenreLabel = (station: any) => {
+  const resolvedGenre = typeof station?.resolved_genre === "string"
+    ? station.resolved_genre.trim()
+    : "";
+  if (resolvedGenre) {
+    return resolvedGenre;
+  }
+
+  const stationGenre = typeof station?.genre === "string" ? station.genre.trim() : "";
+  return stationGenre;
+};
+
+const getLiveStationCoverImageCandidates = (station: any) => {
+  const rawCandidates = [
+    station?.cover_image_url,
+    ...(Array.isArray(station?.creator_target?.images) ? station.creator_target.images : []),
+    station?.creator?.avatar_url,
+    ...(Array.isArray(station?.slots)
+      ? station.slots.map((slot: any) => slot?.playlist?.cover_image_url)
+      : []),
+  ];
+
+  return Array.from(new Set(
+    rawCandidates
+      .map((value) => resolveFeedMediaUrl(typeof value === "string" ? value : ""))
+      .filter((value) => value.length > 0),
+  ));
+};
+
+const normalizeFollowingEntity = (row: any, ownerAvatarById: Map<string, string> = new Map()) => {
   const followedType = normalizeSocialFollowTargetType(row?.followed_type);
 
   if (followedType === "group") {
@@ -148,13 +281,15 @@ const normalizeFollowingEntity = (row: any) => {
           .map((value: string) => resolveFeedMediaUrl(value))
           .filter((value: string) => value.length > 0)
       : [];
+    const ownerId = typeof group?.owner_id === "string" ? group.owner_id : "";
+    const ownerAvatarUrl = ownerId ? resolveFeedMediaUrl(ownerAvatarById.get(ownerId) || "") : "";
 
     return {
       __feedKind: "following_entity",
       followed_type: "group" as const,
       id,
       name: group?.name || formatGroupTypeLabel(group?.group_type),
-      avatar_url: images[0] || "",
+      avatar_url: images[0] || ownerAvatarUrl || "",
       group_type: group?.group_type || null,
       created_at: row?.created_at || null,
     };
@@ -335,6 +470,11 @@ const isGroqQuotaExhaustedMessage = (value: unknown) => {
 export default function FeedScreen() {
   const { colors, isDark } = useTheme();
   const { session, userId, isGuest, loading: authLoading } = useAuth();
+  const { clearBottomOverlays } = useBottomOverlay();
+  const { activeStation } = useRadioPlayerPresence();
+  const { isPlaying, loadingStationId } = useRadioPlayerPlayback();
+  const { syncStationData, tuneIn } = useRadioPlayerActions();
+  const insets = useSafeAreaInsets();
   const geminiModelLabel = getGeminiFlashLiteInfo().modelLabel;
 
   const [tab, setTab] = useState<FeedTab>("for_you");
@@ -360,10 +500,73 @@ export default function FeedScreen() {
   const [alert, setAlert] = useState<{ type: AlertType; title: string; message: string } | null>(null);
   const searchSheetRef = React.useRef<import("@gorhom/bottom-sheet").BottomSheetModal>(null);
   const bottomSheetRef = React.useRef<import("@gorhom/bottom-sheet").BottomSheetModal>(null);
+  const activeStationIdRef = React.useRef<string | null>(activeStation?.id || null);
+  const activeTabRef = React.useRef<FeedTab>(tab);
+  const feedCacheRef = React.useRef<Record<FeedTab, FeedCacheEntry>>(createFeedCache(geminiModelLabel));
+  const feedRequestIdRef = React.useRef<Record<FeedTab, number>>({ for_you: 0, following: 0 });
+  const hasFocusedFeedRef = React.useRef(false);
   const [selectedListingId, setSelectedListingId] = useState<string | null>(null);
   const [pendingReopenListingId, setPendingReopenListingId] = useState<string | null>(null);
 
+  const [liveStations, setLiveStations] = useState<any[]>([]);
+
+  useEffect(() => {
+    activeStationIdRef.current = activeStation?.id || null;
+  }, [activeStation?.id]);
+
+  useEffect(() => {
+    activeTabRef.current = tab;
+  }, [tab]);
+
+  const applyFeedSnapshot = useCallback((snapshot: FeedCacheEntry) => {
+    setPosts(snapshot.posts);
+    setAiCards(snapshot.aiCards);
+    setAiFeedMessage(snapshot.aiFeedMessage);
+    setAiFeedProvider(snapshot.aiFeedProvider || geminiModelLabel);
+    setHasMore(snapshot.hasMore);
+    setLoading(false);
+    setRefreshing(false);
+    setLoadingMore(false);
+  }, [geminiModelLabel]);
+
+  const hydrateCachedFeed = useCallback((feedTab: FeedTab) => {
+    const cached = feedCacheRef.current[feedTab];
+    if (!cached.loaded) {
+      return false;
+    }
+
+    applyFeedSnapshot(cached);
+    return true;
+  }, [applyFeedSnapshot]);
+
+  const invalidateFeedCache = useCallback((feedTab: FeedTab) => {
+    feedCacheRef.current[feedTab] = {
+      ...feedCacheRef.current[feedTab],
+      loaded: false,
+    };
+  }, []);
+
+  useEffect(() => {
+    if (loading) {
+      return;
+    }
+
+    feedCacheRef.current[tab] = {
+      posts,
+      aiCards,
+      aiFeedMessage,
+      aiFeedProvider,
+      hasMore,
+      loaded: true,
+    };
+  }, [aiCards, aiFeedMessage, aiFeedProvider, hasMore, loading, posts, tab]);
+
   const presentModalWithRetry = useCallback((modalRef: { current: any }) => {
+    if (modalRef.current) {
+      modalRef.current.present();
+      return;
+    }
+
     let attempts = 0;
     const maxAttempts = 6;
 
@@ -398,6 +601,54 @@ export default function FeedScreen() {
     },
     [openDetailsSheet],
   );
+
+  const openLiveStationCreator = useCallback((station: any) => {
+    const creatorTarget = station?.creator_target;
+
+    if (creatorTarget?.kind === "group" && creatorTarget?.id) {
+      if (creatorTarget.isOwner) {
+        router.push({ pathname: "/manage_group", params: { id: creatorTarget.id } });
+        return;
+      }
+
+      router.push({ pathname: "/group_details", params: { id: creatorTarget.id } });
+      return;
+    }
+
+    const creatorId = typeof creatorTarget?.id === "string" && creatorTarget.kind === "profile"
+      ? creatorTarget.id.trim()
+      : typeof station?.creator?.id === "string"
+        ? station.creator.id.trim()
+        : "";
+    if (creatorId) {
+      router.push({ pathname: "/profile", params: { userId: creatorId } });
+    }
+  }, []);
+
+  const handleSearchSheetClose = useCallback(() => {
+    clearBottomOverlays();
+  }, [clearBottomOverlays]);
+
+  const handleDetailsSheetDismiss = useCallback(() => {
+    clearBottomOverlays();
+    setSelectedListingId(null);
+    setPendingReopenListingId(null);
+  }, [clearBottomOverlays]);
+
+  const handleLiveStationPress = useCallback(async (station: any) => {
+    try {
+      await tuneIn(station);
+    } catch (error: any) {
+      console.error("Feed live station playback error:", error);
+      showTopToast({
+        type: "error",
+        title: "Playback Error",
+        message: typeof error?.message === "string"
+          ? error.message
+          : "Unable to play this live station right now.",
+      });
+    }
+  }, [tuneIn]);
 
   useEffect(() => {
     if (!pendingReopenListingId) return;
@@ -434,12 +685,9 @@ export default function FeedScreen() {
     };
   }, [pendingReopenListingId, selectedListingId]);
 
-  const fetchAiCardsForYou = useCallback(async () => {
+  const fetchAiCardsForYou = useCallback(async (): Promise<FeedAiCardsResult> => {
     if (!session || !userId) {
-      setAiCards([]);
-      setAiFeedProvider(geminiModelLabel);
-      setAiFeedMessage("");
-      return;
+      return { cards: [], provider: geminiModelLabel, message: "" };
     }
 
     setIsAiCardsLoading(true);
@@ -740,10 +988,7 @@ export default function FeedScreen() {
       ];
 
       if (allCandidates.length === 0) {
-        setAiCards([]);
-        setAiFeedProvider("");
-        setAiFeedMessage("");
-        return;
+        return { cards: [], provider: "", message: "" };
       }
 
       const [skillsResult, genresResult] = await Promise.all([
@@ -775,10 +1020,11 @@ export default function FeedScreen() {
       });
 
       if (isGroqQuotaExhaustedMessage(llmResult.message)) {
-        setAiCards(localRanked.slice(0, AI_CARD_LIMIT).map((item) => ({ ...item, __feedKind: "ai_card" })));
-        setAiFeedProvider("Normal Feed");
-        setAiFeedMessage("Groq free-tier limit reached. Showing normal recommendation cards.");
-        return;
+        return {
+          cards: localRanked.slice(0, AI_CARD_LIMIT).map((item) => ({ ...item, __feedKind: "ai_card" })),
+          provider: "Normal Feed",
+          message: "Groq free-tier limit reached. Showing normal recommendation cards.",
+        };
       }
 
       if (llmResult.aiPowered && llmResult.recommendations.length > 0) {
@@ -790,24 +1036,27 @@ export default function FeedScreen() {
           normalizedTeams.length > 0 ? 1 : 0,
         );
 
-        setAiCards(
-          ensuredRecommendations
+        return {
+          cards: ensuredRecommendations
             .slice(0, AI_CARD_LIMIT)
             .map((item: any) => ({ ...item, __feedKind: "ai_card" })),
-        );
-        setAiFeedProvider(llmResult.aiProvider || geminiModelLabel);
-        setAiFeedMessage(llmResult.message || `Realtime For You cards reranked by ${geminiModelLabel}.`);
-        return;
+          provider: llmResult.aiProvider || geminiModelLabel,
+          message: llmResult.message || `Realtime For You cards reranked by ${geminiModelLabel}.`,
+        };
       }
 
-      setAiCards(localRanked.slice(0, AI_CARD_LIMIT).map((item) => ({ ...item, __feedKind: "ai_card" })));
-      setAiFeedProvider(llmResult.aiProvider || "Local Ranker");
-      setAiFeedMessage(llmResult.message || "Using local ranking for Feed cards.");
+      return {
+        cards: localRanked.slice(0, AI_CARD_LIMIT).map((item) => ({ ...item, __feedKind: "ai_card" })),
+        provider: llmResult.aiProvider || "Local Ranker",
+        message: llmResult.message || "Using local ranking for Feed cards.",
+      };
     } catch (error: any) {
       console.error("Feed AI cards error:", error);
-      setAiCards([]);
-      setAiFeedProvider("Normal Feed");
-      setAiFeedMessage(error?.message || "Unable to load recommendation cards right now.");
+      return {
+        cards: [],
+        provider: "Normal Feed",
+        message: error?.message || "Unable to load recommendation cards right now.",
+      };
     } finally {
       setIsAiCardsLoading(false);
     }
@@ -829,13 +1078,35 @@ export default function FeedScreen() {
     }
 
     const rows = Array.isArray(followingResponse?.data) ? followingResponse.data : [];
+    const groupOwnerIds = Array.from(
+      new Set(
+        rows
+          .map((row: any) => row?.followed_group?.owner_id)
+          .filter((value: any): value is string => typeof value === "string" && value.length > 0),
+      ),
+    );
+    let ownerAvatarById = new Map<string, string>();
+
+    if (groupOwnerIds.length > 0) {
+      const { data: ownerRows } = await supabase
+        .from("profiles")
+        .select("id, avatar_url")
+        .in("id", groupOwnerIds);
+
+      ownerAvatarById = new Map(
+        (ownerRows || [])
+          .filter((row: any) => typeof row?.id === "string")
+          .map((row: any) => [row.id, typeof row?.avatar_url === "string" ? row.avatar_url : ""]),
+      );
+    }
+
     const keys = new Set<string>(
       rows
         .map((row: any) => buildSocialFollowKey(row?.followed_type, row?.followed_id))
         .filter((value: string) => value.length > 0),
     );
     const entities = rows
-      .map(normalizeFollowingEntity)
+      .map((row: any) => normalizeFollowingEntity(row, ownerAvatarById))
       .filter((value: any) => value !== null);
 
     setFollowingKeys(keys);
@@ -845,23 +1116,23 @@ export default function FeedScreen() {
   }, [session]);
 
   /* â”€â”€ Data fetching â”€â”€ */
-  const fetchFeed = useCallback(async (append = false, currentLength = 0) => {
+  const fetchFeed = useCallback(async (feedTab: FeedTab, append = false, currentLength = 0) => {
     if (authLoading) {
       return;
     }
 
+    const requestId = ++feedRequestIdRef.current[feedTab];
+
     if (!session) {
-      setPosts([]);
-      setAiCards([]);
-      setAiFeedMessage("");
-      setAiFeedProvider(geminiModelLabel);
+      feedCacheRef.current = createFeedCache(geminiModelLabel);
       setFollowingKeys(new Set());
       setFollowingEntities([]);
       setFollowBusyByKey({});
-      setHasMore(false);
-      setLoading(false);
-      setRefreshing(false);
-      setLoadingMore(false);
+
+      if (activeTabRef.current === feedTab) {
+        applyFeedSnapshot(createEmptyFeedCacheEntry(geminiModelLabel));
+      }
+
       return;
     }
 
@@ -869,7 +1140,7 @@ export default function FeedScreen() {
       const { data, error } = await supabase.functions.invoke("manage-social-feed", {
         body: {
           action: "get_feed",
-          feed_type: tab === "following" ? "following" : "public",
+          feed_type: feedTab === "following" ? "following" : "public",
           limit: FEED_PAGE_SIZE,
           offset: append ? currentLength : 0,
         },
@@ -897,51 +1168,280 @@ export default function FeedScreen() {
               ),
             }))
         : [];
-      if (append) {
-        setPosts((prev) => [...prev, ...page]);
-      } else {
-        setPosts(page);
+      const cachedEntry = feedCacheRef.current[feedTab];
+      const nextPosts = append ? [...cachedEntry.posts, ...page] : page;
+      let nextAiCards = append ? cachedEntry.aiCards : [];
+      let nextAiFeedMessage = append ? cachedEntry.aiFeedMessage : "";
+      let nextAiFeedProvider = append
+        ? (cachedEntry.aiFeedProvider || geminiModelLabel)
+        : geminiModelLabel;
 
-        if (tab === "for_you") {
-          if (page.length === 0) {
-            await fetchAiCardsForYou();
-          } else {
-            setAiCards([]);
-            setAiFeedMessage("");
-          }
+      if (!append) {
+        if (feedTab === "for_you" && page.length === 0) {
+          const aiResult = await fetchAiCardsForYou();
+          nextAiCards = aiResult.cards;
+          nextAiFeedMessage = aiResult.message;
+          nextAiFeedProvider = aiResult.provider || geminiModelLabel;
         } else {
-          setAiCards([]);
-          setAiFeedMessage("");
+          nextAiCards = [];
+          nextAiFeedMessage = "";
+          nextAiFeedProvider = geminiModelLabel;
         }
       }
 
-      setHasMore(page.length === FEED_PAGE_SIZE);
+      if (requestId !== feedRequestIdRef.current[feedTab]) {
+        return;
+      }
+
+      const nextSnapshot: FeedCacheEntry = {
+        posts: nextPosts,
+        aiCards: nextAiCards,
+        aiFeedMessage: nextAiFeedMessage,
+        aiFeedProvider: nextAiFeedProvider,
+        hasMore: page.length === FEED_PAGE_SIZE,
+        loaded: true,
+      };
+
+      feedCacheRef.current[feedTab] = nextSnapshot;
+
+      if (activeTabRef.current === feedTab) {
+        applyFeedSnapshot(nextSnapshot);
+      }
     } catch (e: any) {
       console.error("Feed fetch error:", e);
-      setHasMore(false);
 
-      if (!append && tab === "for_you") {
+      if (requestId !== feedRequestIdRef.current[feedTab]) {
+        return;
+      }
+
+      let fallbackSnapshot = feedCacheRef.current[feedTab];
+
+      if (!append && feedTab === "for_you") {
         try {
-          setAiFeedMessage("Social feed is unavailable. Loading recommendation cards.");
-          await fetchAiCardsForYou();
+          const aiResult = await fetchAiCardsForYou();
+          fallbackSnapshot = {
+            posts: [],
+            aiCards: aiResult.cards,
+            aiFeedMessage: aiResult.message || "Social feed is unavailable. Loading recommendation cards.",
+            aiFeedProvider: aiResult.provider || geminiModelLabel,
+            hasMore: false,
+            loaded: true,
+          };
         } catch (aiError) {
           console.error("Fallback AI cards error:", aiError);
+          fallbackSnapshot = {
+            ...createEmptyFeedCacheEntry(geminiModelLabel),
+            aiFeedProvider: geminiModelLabel,
+            hasMore: false,
+            loaded: true,
+          };
         }
+      } else if (!fallbackSnapshot.loaded) {
+        fallbackSnapshot = {
+          ...createEmptyFeedCacheEntry(geminiModelLabel),
+          hasMore: false,
+          loaded: true,
+        };
+      } else {
+        fallbackSnapshot = {
+          ...fallbackSnapshot,
+          hasMore: false,
+          loaded: true,
+        };
+      }
+
+      feedCacheRef.current[feedTab] = fallbackSnapshot;
+
+      if (activeTabRef.current === feedTab) {
+        applyFeedSnapshot(fallbackSnapshot);
       }
     } finally {
-      setLoading(false);
-      setRefreshing(false);
-      setLoadingMore(false);
+      if (requestId === feedRequestIdRef.current[feedTab] && activeTabRef.current === feedTab) {
+        setLoading(false);
+        setRefreshing(false);
+        setLoadingMore(false);
+      }
     }
-  }, [authLoading, fetchAiCardsForYou, geminiModelLabel, loadFollowingGraph, session, tab]);
+  }, [applyFeedSnapshot, authLoading, fetchAiCardsForYou, geminiModelLabel, loadFollowingGraph, session]);
+
+  // ── Radio station helpers ──────────────────────────────────────
+  const fetchLiveStations = useCallback(async () => {
+    try {
+      const { data, error } = await supabase.functions.invoke("manage-playlists", {
+        body: { action: "browse_stations", limit: 10 },
+      });
+
+      if (error) {
+        throw error;
+      }
+
+      const stations = (data?.data || []).filter((station: any) => (station.slots || []).length > 0);
+      const creatorIds = Array.from(new Set(
+        stations
+          .map((station: any) => (typeof station?.creator?.id === "string" ? station.creator.id.trim() : ""))
+          .filter((creatorId: string) => creatorId.length > 0),
+      ));
+
+      const playlistIds = Array.from(new Set(
+        stations
+          .flatMap((station: any) => Array.isArray(station?.slots) ? station.slots : [])
+          .map((slot: any) => (typeof slot?.playlist?.id === "string" ? slot.playlist.id.trim() : ""))
+          .filter((playlistId: string) => playlistId.length > 0),
+      ));
+
+      let creatorGenresById = new Map<string, string[]>();
+      let groupIdsByPlaylistId = new Map<string, Set<string>>();
+      let groupsById = new Map<string, any>();
+
+      const [creatorGenresResult, groupPlaylistLinksResult] = await Promise.all([
+        creatorIds.length > 0
+          ? supabase
+              .from("profile_genres")
+              .select("profile_id, genre")
+              .in("profile_id", creatorIds)
+          : Promise.resolve({ data: [], error: null } as any),
+        playlistIds.length > 0
+          ? supabase
+              .from("group_playlists")
+              .select("group_id, playlist_id")
+              .in("playlist_id", playlistIds)
+          : Promise.resolve({ data: [], error: null } as any),
+      ]);
+
+      if (creatorGenresResult.error) {
+        console.warn("Live station creator genre lookup failed:", creatorGenresResult.error);
+      } else {
+        for (const row of creatorGenresResult.data || []) {
+          if (typeof row?.profile_id !== "string" || typeof row?.genre !== "string") {
+            continue;
+          }
+
+          const nextGenres = creatorGenresById.get(row.profile_id) || [];
+          nextGenres.push(row.genre);
+          creatorGenresById.set(row.profile_id, nextGenres);
+        }
+      }
+
+      if (groupPlaylistLinksResult.error) {
+        console.warn("Live station group playlist lookup failed:", groupPlaylistLinksResult.error);
+      } else {
+        for (const row of groupPlaylistLinksResult.data || []) {
+          const playlistId = typeof row?.playlist_id === "string" ? row.playlist_id.trim() : "";
+          const groupId = typeof row?.group_id === "string" ? row.group_id.trim() : "";
+          if (!playlistId || !groupId) {
+            continue;
+          }
+
+          const nextGroupIds = groupIdsByPlaylistId.get(playlistId) || new Set<string>();
+          nextGroupIds.add(groupId);
+          groupIdsByPlaylistId.set(playlistId, nextGroupIds);
+        }
+
+        const uniqueGroupIds = Array.from(new Set(
+          Array.from(groupIdsByPlaylistId.values())
+            .flatMap((value) => Array.from(value))
+            .filter((groupId) => groupId.length > 0),
+        ));
+
+        if (uniqueGroupIds.length > 0) {
+          const { data: creatorGroups, error: creatorGroupsError } = await supabase
+            .from("groups_with_stats")
+            .select("id, owner_id, name, group_type, genre, images")
+            .in("id", uniqueGroupIds);
+
+          if (creatorGroupsError) {
+            console.warn("Live station creator group lookup failed:", creatorGroupsError);
+          } else {
+            groupsById = new Map(
+              (creatorGroups || [])
+                .filter((group: any) => typeof group?.id === "string")
+                .map((group: any) => [group.id, group]),
+            );
+          }
+        }
+      }
+
+      const enrichedStations = stations.map((station: any) => {
+        const creatorId = typeof station?.creator?.id === "string" ? station.creator.id.trim() : "";
+        const stationPlaylistIds = Array.from(new Set<string>(
+          (Array.isArray(station?.slots) ? station.slots : [])
+            .map((slot: any) => (typeof slot?.playlist?.id === "string" ? slot.playlist.id.trim() : ""))
+            .filter((playlistId: string) => playlistId.length > 0),
+        ));
+        const linkedGroupIds = Array.from(new Set<string>(
+          stationPlaylistIds.flatMap((playlistId) => Array.from(groupIdsByPlaylistId.get(playlistId) || [])),
+        ));
+        const soleLinkedGroupId = linkedGroupIds.length === 1 ? linkedGroupIds[0] : "";
+        const allPlaylistsLinkedToSameGroup =
+          stationPlaylistIds.length > 0 &&
+          soleLinkedGroupId.length > 0 &&
+          stationPlaylistIds.every((playlistId) => {
+            const playlistGroupIds = Array.from(groupIdsByPlaylistId.get(playlistId) || []);
+            return playlistGroupIds.length === 1 && playlistGroupIds[0] === soleLinkedGroupId;
+          });
+        const creatorGroup = allPlaylistsLinkedToSameGroup
+          ? groupsById.get(soleLinkedGroupId) || null
+          : null;
+        const creatorGenres = creatorGenresById.get(creatorId) || [];
+        const resolvedGenre = typeof station?.genre === "string" && station.genre.trim().length > 0
+          ? station.genre.trim()
+          : typeof creatorGroup?.genre === "string" && creatorGroup.genre.trim().length > 0
+            ? creatorGroup.genre.trim()
+            : creatorGenres[0] || "";
+
+        return {
+          ...station,
+          creator_group: creatorGroup,
+          creator_target: creatorGroup
+            ? {
+                kind: "group",
+                id: creatorGroup.id,
+                name: creatorGroup.name || formatGroupTypeLabel(creatorGroup.group_type),
+                group_type: creatorGroup.group_type || null,
+                genre: creatorGroup.genre || null,
+                images: Array.isArray(creatorGroup.images) ? creatorGroup.images : [],
+                isOwner: creatorGroup.owner_id === userId,
+              }
+            : creatorId
+              ? {
+                  kind: "profile",
+                  id: creatorId,
+                  name: station?.creator?.full_name || "Unknown",
+                  genre: creatorGenres[0] || null,
+                  images: typeof station?.creator?.avatar_url === "string" && station.creator.avatar_url.trim().length > 0
+                    ? [station.creator.avatar_url]
+                    : [],
+                  isOwner: creatorId === userId,
+                }
+              : null,
+          resolved_genre: resolvedGenre,
+        };
+      });
+
+      setLiveStations(enrichedStations);
+      const nextActiveStation = enrichedStations.find((station: any) => station.id === activeStationIdRef.current);
+      if (nextActiveStation) {
+        syncStationData(nextActiveStation);
+      }
+    } catch (_) {
+      setLiveStations([]);
+    }
+  }, [syncStationData, userId]);
 
   useFocusEffect(useCallback(() => {
     if (authLoading) {
       return;
     }
 
-    setLoading(true);
-    fetchFeed();
+    hasFocusedFeedRef.current = true;
+    clearBottomOverlays();
+    const currentTab = activeTabRef.current;
+    if (!hydrateCachedFeed(currentTab)) {
+      setLoading(true);
+    }
+
+    void fetchFeed(currentTab);
+    void fetchLiveStations();
 
     const restorePendingReopen = async () => {
       const storedListingId = await AsyncStorage.getItem("pending_reopen_listing_id");
@@ -954,7 +1454,18 @@ export default function FeedScreen() {
     };
 
     void restorePendingReopen();
-  }, [authLoading, fetchFeed]));
+  }, [authLoading, clearBottomOverlays, fetchFeed, fetchLiveStations, hydrateCachedFeed]));
+
+  useEffect(() => {
+    if (authLoading || !hasFocusedFeedRef.current) {
+      return;
+    }
+
+    if (!hydrateCachedFeed(tab)) {
+      setLoading(true);
+      void fetchFeed(tab);
+    }
+  }, [authLoading, fetchFeed, hydrateCachedFeed, tab]);
 
   const onRefresh = () => {
     if (authLoading) {
@@ -962,7 +1473,8 @@ export default function FeedScreen() {
     }
 
     setRefreshing(true);
-    fetchFeed();
+    void fetchFeed(tab);
+    void fetchLiveStations();
   };
 
   const loadMore = () => {
@@ -978,7 +1490,7 @@ export default function FeedScreen() {
     }
 
     setLoadingMore(true);
-    fetchFeed(true, posts.length);
+    void fetchFeed(tab, true, posts.length);
   };
 
   /* â”€â”€ Actions â”€â”€ */
@@ -1001,7 +1513,7 @@ export default function FeedScreen() {
         showTopToast({ type: "success", title: "Posted!", message: "Your post is live." });
         setShowCreate(false);
         setPostBody("");
-        fetchFeed();
+        void fetchFeed(activeTabRef.current);
       } else {
         setAlert({ type: "error", title: "Error", message: data?.error || "Failed to create post" });
       }
@@ -1083,8 +1595,10 @@ export default function FeedScreen() {
         ));
       }
 
+      invalidateFeedCache("following");
+
       if (tab === "following") {
-        fetchFeed();
+        void fetchFeed("following");
       } else if (nextIsFollowing) {
         void loadFollowingGraph();
       }
@@ -1147,10 +1661,28 @@ export default function FeedScreen() {
             { backgroundColor: isDark ? "#1E293B" : "#FFFFFF" },
           ]}
         >
-          <CachedImage
-            uri={post.avatar_url || "https://via.placeholder.com/64"}
-            style={styles.followingProfileAvatar}
-          />
+          {post.avatar_url ? (
+            <CachedImage
+              uri={post.avatar_url}
+              style={styles.followingProfileAvatar}
+            />
+          ) : (
+            <View
+              style={[
+                styles.followingProfileAvatarFallback,
+                {
+                  backgroundColor: isDark ? "#0F172A" : colors.primary + "14",
+                  borderColor: isDark ? "#334155" : colors.primary + "22",
+                },
+              ]}
+            >
+              <Ionicons
+                name={isGroup ? "people" : "person"}
+                size={24}
+                color={colors.primary}
+              />
+            </View>
+          )}
           <View style={styles.followingProfileBody}>
             <View
               style={[
@@ -1407,6 +1939,123 @@ export default function FeedScreen() {
           </TouchableOpacity>
         </View>
 
+        {/* Live Radio Section */}
+        {liveStations.length > 0 && (
+          <View style={{ paddingVertical: 10, backgroundColor: cardBg }}>
+            <View style={{ flexDirection: "row", alignItems: "center", paddingHorizontal: 14, marginBottom: 10, flexWrap: "wrap", gap: 6 }}>
+              <Ionicons name="radio" size={18} color="#ef4444" />
+              <Text style={{ color: colors.text, fontSize: moderateScale(14), fontWeight: "700" }}>Live Radio</Text>
+              <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: "#22c55e" }} />
+              <View
+                style={{
+                  marginLeft: 4,
+                  borderRadius: 999,
+                  paddingHorizontal: 8,
+                  paddingVertical: 4,
+                  backgroundColor: isDark ? "#111827" : "#EEF2FF",
+                  borderWidth: 1,
+                  borderColor: isDark ? "#334155" : "#DBEAFE",
+                }}
+              >
+                <Text style={{ color: colors.textSecondary, fontSize: moderateScale(9.5), fontWeight: "600" }}>
+                  Tap a card to listen
+                </Text>
+              </View>
+            </View>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 14, gap: 10 }}>
+              {liveStations.map((st: any) => {
+                const isActive = activeStation?.id === st.id;
+                const isStationPlaying = isActive && isPlaying;
+                const isLoadingStation = loadingStationId === st.id;
+                const creatorCtaLabel = getLiveStationCreatorCtaLabel(st);
+                const creatorLabel = getLiveStationCreatorLabel(st);
+                const genreLabel = getLiveStationGenreLabel(st);
+                const coverImageCandidates = getLiveStationCoverImageCandidates(st);
+                const coverImageUrl = coverImageCandidates[0] || "";
+                const fallbackCoverImageUrl = coverImageCandidates[1] || "";
+                return (
+                  <TouchableOpacity
+                    key={st.id}
+                    activeOpacity={0.9}
+                    onPress={() => void handleLiveStationPress(st)}
+                    style={[
+                      styles.radioCard,
+                      {
+                        backgroundColor: isActive ? (colors.primary + "18") : (isDark ? "#0F172A" : "#F8FAFC"),
+                        borderColor: isActive ? colors.primary : (isDark ? "#334155" : "#E2E8F0"),
+                      },
+                    ]}
+                  >
+                    <View style={styles.radioCardArtworkFrame}>
+                      <View style={[StyleSheet.absoluteFillObject, styles.radioCardArtworkPlaceholder, { backgroundColor: colors.primary + "12" }]}>
+                        <Ionicons name="radio" size={30} color={colors.primary} />
+                      </View>
+                      {coverImageUrl || fallbackCoverImageUrl ? (
+                        <CachedImage
+                          uri={coverImageUrl || undefined}
+                          fallbackUri={fallbackCoverImageUrl || undefined}
+                          style={styles.radioCardArtwork}
+                          contentFit="cover"
+                          transition={0}
+                          disableRecyclingKey
+                          width={320}
+                          height={220}
+                        />
+                      ) : null}
+                      {isLoadingStation ? (
+                        <View style={{ position: "absolute", top: 8, right: 8 }}>
+                          <ActivityIndicator size="small" color={colors.primary} />
+                        </View>
+                      ) : null}
+                      {isStationPlaying && (
+                        <View style={{ position: "absolute", top: 8, right: 8, backgroundColor: "#ef4444", borderRadius: 999, paddingHorizontal: 8, paddingVertical: 4, flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                          <View style={{ width: 4, height: 4, backgroundColor: '#fff', borderRadius: 2 }} />
+                          <Text style={{ color: "#fff", fontSize: 9, fontWeight: "800", letterSpacing: 0.5 }}>LIVE</Text>
+                        </View>
+                      )}
+                      {genreLabel ? (
+                        <View style={{ position: 'absolute', bottom: 8, left: 8, backgroundColor: 'rgba(0,0,0,0.65)', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 4 }}>
+                          <Text style={{ color: '#fff', fontSize: moderateScale(9), fontWeight: "600", letterSpacing: 0.2 }}>{genreLabel}</Text>
+                        </View>
+                      ) : null}
+                    </View>
+                    
+                    <View style={styles.radioCardContent}>
+                      <Text style={{ color: colors.text, fontSize: moderateScale(13), fontWeight: "700", marginBottom: 2 }} numberOfLines={1}>{st.name}</Text>
+                      <Text style={{ color: colors.textSecondary, fontSize: moderateScale(11) }} numberOfLines={1}>
+                        {creatorLabel}
+                      </Text>
+                      <Text style={{ color: colors.textSecondary, fontSize: moderateScale(10), marginTop: 2, marginBottom: 8 }} numberOfLines={1}>
+                        {st.slot_count || 0} tracks
+                      </Text>
+
+                      {creatorCtaLabel ? (
+                        <TouchableOpacity
+                          activeOpacity={0.8}
+                          onPress={(event) => {
+                            event.stopPropagation();
+                            openLiveStationCreator(st);
+                          }}
+                          style={[
+                            styles.radioCardLink,
+                            {
+                              backgroundColor: isDark ? "#1E293B" : "#E2E8F0",
+                            },
+                          ]}
+                        >
+                          <Text style={[styles.radioCardLinkText, { color: isDark ? "#E2E8F0" : "#0F172A" }]} numberOfLines={1}>
+                            {creatorCtaLabel}
+                          </Text>
+                        </TouchableOpacity>
+                      ) : null}
+                    </View>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+          </View>
+        )}
+
         {/* â”€â”€ Feed tabs â”€â”€ */}
         <View style={[styles.tabRow, { backgroundColor: cardBg, borderBottomColor: isDark ? "#334155" : "#E2E8F0" }]}>
           {(["for_you", "following"] as FeedTab[]).map((t) => (
@@ -1431,6 +2080,92 @@ export default function FeedScreen() {
     );
   };
 
+  const showInitialFeedSkeleton = loading && !refreshing && !loadingMore;
+
+  const renderFeedSkeleton = () => {
+    const cardBg = isDark ? "#1E293B" : "#FFFFFF";
+    const skeletonCardBg = isDark ? "#1E293B" : "#FFFFFF";
+    const skeletonBorder = isDark ? "#334155" : "#E2E8F0";
+
+    return (
+      <ScrollView
+        style={{ flex: 1 }}
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={[styles.feedSkeletonContent, { paddingBottom: feedBottomSpacer + 20 }]}
+      >
+        <View style={[styles.feedSkeletonSearchWrap, { backgroundColor: cardBg }]}>
+          <Skeleton width="100%" height={38} borderRadius={20} />
+        </View>
+
+        <View style={[styles.feedSkeletonRadioWrap, { backgroundColor: cardBg }]}>
+          <Skeleton width={118} height={18} style={{ marginLeft: 14, marginBottom: 10 }} />
+          <View style={styles.feedSkeletonRadioRow}>
+            {[1, 2, 3].map((item) => (
+              <View
+                key={`feed-radio-skeleton-${item}`}
+                style={[styles.feedSkeletonRadioCard, { backgroundColor: isDark ? "#0F172A" : "#F8FAFC", borderColor: skeletonBorder }]}
+              >
+                <Skeleton width="100%" height={110} borderRadius={0} />
+                <View style={{ padding: 12 }}>
+                  <Skeleton width="86%" height={14} style={{ marginBottom: 6 }} />
+                  <Skeleton width="54%" height={12} style={{ marginBottom: 10 }} />
+                  <Skeleton width="100%" height={32} borderRadius={10} style={{ marginTop: 4 }} />
+                </View>
+              </View>
+            ))}
+          </View>
+        </View>
+
+        <View style={[styles.tabRow, { backgroundColor: cardBg, borderBottomColor: skeletonBorder }]}>
+          <View style={styles.feedSkeletonTab}>
+            <Skeleton width={110} height={18} borderRadius={8} />
+          </View>
+          <View style={styles.feedSkeletonTab}>
+            <Skeleton width={110} height={18} borderRadius={8} />
+          </View>
+        </View>
+
+        {[1, 2, 3].map((item) => (
+          <View
+            key={`feed-post-skeleton-${item}`}
+            style={[styles.feedSkeletonPostCard, { backgroundColor: skeletonCardBg, borderColor: skeletonBorder }]}
+          >
+            <View style={styles.feedSkeletonAuthorRow}>
+              <Skeleton width={40} height={40} borderRadius={20} />
+              <View style={{ flex: 1, marginLeft: 10 }}>
+                <Skeleton width="42%" height={14} />
+                <Skeleton width="28%" height={10} style={{ marginTop: 8 }} />
+              </View>
+              <Skeleton width={74} height={28} borderRadius={8} />
+            </View>
+
+            <View style={styles.feedSkeletonBody}>
+              <Skeleton width="90%" height={14} />
+              <Skeleton width="72%" height={14} style={{ marginTop: 8 }} />
+            </View>
+
+            <View style={styles.feedSkeletonMediaWrap}>
+              <Skeleton width="100%" height={220} borderRadius={12} />
+            </View>
+
+            <View style={styles.feedSkeletonSummaryRow}>
+              <Skeleton width={74} height={12} />
+              <Skeleton width={90} height={12} />
+            </View>
+
+            <View style={[styles.feedSkeletonActionRow, { borderTopColor: skeletonBorder }]}>
+              {[1, 2, 3].map((action) => (
+                <View key={`feed-action-skeleton-${item}-${action}`} style={styles.feedSkeletonActionItem}>
+                  <Skeleton width={74} height={18} borderRadius={8} />
+                </View>
+              ))}
+            </View>
+          </View>
+        ))}
+      </ScrollView>
+    );
+  };
+
   const feedItems = useMemo(() => {
     if (loading) return [];
     if (tab === "for_you" && posts.length === 0 && aiCards.length > 0) {
@@ -1449,6 +2184,11 @@ export default function FeedScreen() {
   }, [aiCards, followingEntities, loading, posts, tab]);
 
   const isShowingAiCards = tab === "for_you" && posts.length === 0 && aiCards.length > 0;
+  const radioPlayerBottom = NAVBAR_BOTTOM_OFFSET + NAVBAR_HEIGHT + RADIO_MINI_PLAYER_STACK_GAP + insets.bottom;
+  const hasRadioMiniPlayer = Boolean(activeStation);
+  const feedBottomSpacer = hasRadioMiniPlayer
+    ? radioPlayerBottom + RADIO_MINI_PLAYER_HEIGHT + 24
+    : NAVBAR_CLEARANCE + insets.bottom;
 
   if (isGuest) {
     return (
@@ -1463,88 +2203,88 @@ export default function FeedScreen() {
   return (
     <View style={[styles.container, { backgroundColor: isDark ? "#0F172A" : "#F0F2F5" }]}>
       <Header title="MusikaLokal" />
-      <FlatList
-        data={feedItems}
-        keyExtractor={(item, index) => `${item.id || "row"}-${item.__feedKind || "post"}-${index}`}
-        renderItem={renderPost}
-        ListHeaderComponent={renderHeader}
-        ListEmptyComponent={
-          loading ? (
-            <View style={{ paddingHorizontal: 16, paddingTop: 8 }}>
-              {[1, 2, 3].map((i) => <Skeleton key={i} width={SCREEN_WIDTH - 32} height={180} style={{ marginBottom: 10, borderRadius: 12 }} />)}
-            </View>
-          ) : isAiCardsLoading ? (
-            <View style={{ paddingHorizontal: 16, paddingTop: 8 }}>
-              {[1, 2].map((i) => <Skeleton key={i} width={SCREEN_WIDTH - 32} height={180} style={{ marginBottom: 10, borderRadius: 12 }} />)}
-            </View>
-          ) : (
-            <View style={[styles.emptyStateContainer, { backgroundColor: isDark ? "#1E293B" : "#FFFFFF" }]}>
-              <View style={[styles.emptyIconCircle, { backgroundColor: isDark ? "#1E293B" : colors.primary + "10" }]}>
-                <Ionicons
-                  name={tab === "following" ? "people-outline" : "sparkles-outline"}
-                  size={48}
-                  color={colors.primary}
-                />
+      {showInitialFeedSkeleton ? (
+        renderFeedSkeleton()
+      ) : (
+        <FlatList
+          data={feedItems}
+          keyExtractor={(item, index) => `${item.id || "row"}-${item.__feedKind || "post"}-${index}`}
+          renderItem={renderPost}
+          ListHeaderComponent={renderHeader()}
+          ListEmptyComponent={
+            isAiCardsLoading ? (
+              <View style={{ paddingHorizontal: 16, paddingTop: 8 }}>
+                {[1, 2].map((i) => <Skeleton key={i} width={SCREEN_WIDTH - 32} height={180} style={{ marginBottom: 10, borderRadius: 12 }} />)}
               </View>
-              <Text style={[styles.emptyTitle, { color: colors.text }]}>
-                {tab === "following"
-                  ? "Your Following Feed is Empty"
-                  : "Your For You Feed is Empty"}
-              </Text>
-              <Text style={[styles.emptySubtitle, { color: colors.textSecondary }]}>
-                {tab === "following"
-                  ? "Follow musicians, groups, and duos to see their updates here. Followed profiles and groups will also appear until they have posts."
-                  : "Create a group, add a studio listing, or post a gig to start seeing AI-powered recommendations."}
-              </Text>
-
-              {tab === "for_you" ? (
-                <View style={styles.emptyActions}>
-                  <TouchableOpacity activeOpacity={1}
-                    style={[styles.emptyActionBtn, { backgroundColor: colors.primary }]}
-                    onPress={() => router.push("/add_group" as any)}
-                  >
-                    <Ionicons name="people" size={18} color="#fff" />
-                    <Text style={styles.emptyActionBtnText}>Create Group</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity activeOpacity={1}
-                    style={[styles.emptyActionBtn, { backgroundColor: isDark ? "#334155" : "#F1F5F9" }]}
-                    onPress={() => router.push("/add_studio" as any)}
-                  >
-                    <Ionicons name="business" size={18} color={colors.primary} />
-                    <Text style={[styles.emptyActionBtnTextAlt, { color: colors.text }]}>Add Studio</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity activeOpacity={1}
-                    style={[styles.emptyActionBtn, { backgroundColor: isDark ? "#334155" : "#F1F5F9" }]}
-                    onPress={() => router.push("/add_gig" as any)}
-                  >
-                    <Ionicons name="musical-notes" size={18} color={colors.primary} />
-                    <Text style={[styles.emptyActionBtnTextAlt, { color: colors.text }]}>Post Gig</Text>
-                  </TouchableOpacity>
+            ) : (
+              <View style={[styles.emptyStateContainer, { backgroundColor: isDark ? "#1E293B" : "#FFFFFF" }]}>
+                <View style={[styles.emptyIconCircle, { backgroundColor: isDark ? "#1E293B" : colors.primary + "10" }]}>
+                  <Ionicons
+                    name={tab === "following" ? "people-outline" : "sparkles-outline"}
+                    size={48}
+                    color={colors.primary}
+                  />
                 </View>
-              ) : (
-                <TouchableOpacity activeOpacity={1}
-                  style={[styles.emptyActionBtn, { backgroundColor: colors.primary, marginTop: 16 }]}
-                  onPress={openSearchSheet}
-                >
-                  <Ionicons name="search" size={18} color="#fff" />
-                  <Text style={styles.emptyActionBtnText}>Find Musicians</Text>
-                </TouchableOpacity>
-              )}
-            </View>
-          )
-        }
-        ListFooterComponent={
-          <>
-            {loadingMore && <ActivityIndicator style={{ marginVertical: 20 }} color={colors.primary} />}
-            <View style={{ height: 100 }} />
-          </>
-        }
-        onEndReached={loadMore}
-        onEndReachedThreshold={0.3}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
-        ItemSeparatorComponent={() => <View style={{ height: isShowingAiCards ? 10 : 8 }} />}
-        contentContainerStyle={{ paddingBottom: 20 }}
-      />
+                <Text style={[styles.emptyTitle, { color: colors.text }]}>
+                  {tab === "following"
+                    ? "Your Following Feed is Empty"
+                    : "Your For You Feed is Empty"}
+                </Text>
+                <Text style={[styles.emptySubtitle, { color: colors.textSecondary }]}>
+                  {tab === "following"
+                    ? "Follow musicians, groups, and duos to see their updates here. Followed profiles and groups will also appear until they have posts."
+                    : "Create a group, add a studio listing, or post a gig to start seeing AI-powered recommendations."}
+                </Text>
+
+                {tab === "for_you" ? (
+                  <View style={styles.emptyActions}>
+                    <TouchableOpacity activeOpacity={1}
+                      style={[styles.emptyActionBtn, { backgroundColor: colors.primary }]}
+                      onPress={() => router.push("/add_group" as any)}
+                    >
+                      <Ionicons name="people" size={18} color="#fff" />
+                      <Text style={styles.emptyActionBtnText}>Create Group</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity activeOpacity={1}
+                      style={[styles.emptyActionBtn, { backgroundColor: isDark ? "#334155" : "#F1F5F9" }]}
+                      onPress={() => router.push("/add_studio" as any)}
+                    >
+                      <Ionicons name="business" size={18} color={colors.primary} />
+                      <Text style={[styles.emptyActionBtnTextAlt, { color: colors.text }]}>Add Studio</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity activeOpacity={1}
+                      style={[styles.emptyActionBtn, { backgroundColor: isDark ? "#334155" : "#F1F5F9" }]}
+                      onPress={() => router.push("/add_gig" as any)}
+                    >
+                      <Ionicons name="musical-notes" size={18} color={colors.primary} />
+                      <Text style={[styles.emptyActionBtnTextAlt, { color: colors.text }]}>Post Gig</Text>
+                    </TouchableOpacity>
+                  </View>
+                ) : (
+                  <TouchableOpacity activeOpacity={1}
+                    style={[styles.emptyActionBtn, { backgroundColor: colors.primary, marginTop: 16 }]}
+                    onPress={openSearchSheet}
+                  >
+                    <Ionicons name="search" size={18} color="#fff" />
+                    <Text style={styles.emptyActionBtnText}>Find Musicians</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+            )
+          }
+          ListFooterComponent={
+            <>
+              {loadingMore && <ActivityIndicator style={{ marginVertical: 20 }} color={colors.primary} />}
+              <View style={{ height: feedBottomSpacer }} />
+            </>
+          }
+          onEndReached={loadMore}
+          onEndReachedThreshold={0.3}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
+          ItemSeparatorComponent={() => <View style={{ height: isShowingAiCards ? 10 : 8 }} />}
+          contentContainerStyle={{ paddingBottom: 20 }}
+        />
+      )}
 
       {/* Create Post Modal */}
       <Modal visible={showCreate} transparent animationType="slide" onRequestClose={() => setShowCreate(false)}>
@@ -1589,18 +2329,22 @@ export default function FeedScreen() {
 
       <SearchBottomSheet
         ref={searchSheetRef}
-        onClose={() => {}}
+        onClose={handleSearchSheetClose}
         onItemPress={(id) => openListingDetails(id)}
-        onFollowChanged={fetchFeed}
+        onFollowChanged={() => {
+          invalidateFeedCache("following");
+          void fetchFeed(activeTabRef.current);
+        }}
       />
 
       <ListingDetailsSheet
         ref={bottomSheetRef}
         listingId={selectedListingId}
-        onDismiss={() => {}}
+        onDismiss={handleDetailsSheetDismiss}
       />
 
       {alert && <CustomAlert visible type={alert.type} title={alert.title} message={alert.message} onClose={() => setAlert(null)} />}
+
       <Navbar />
     </View>
   );
@@ -1608,6 +2352,78 @@ export default function FeedScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
+
+  feedSkeletonContent: {
+    paddingBottom: 20,
+  },
+  feedSkeletonSearchWrap: {
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  feedSkeletonRadioWrap: {
+    paddingTop: 10,
+    paddingBottom: 12,
+  },
+  feedSkeletonRadioRow: {
+    flexDirection: "row",
+    gap: 10,
+    paddingHorizontal: 14,
+  },
+  feedSkeletonRadioCard: {
+    width: 160,
+    height: 190,
+    borderRadius: 16,
+    borderWidth: 1,
+    overflow: "hidden",
+  },
+  feedSkeletonTab: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 12,
+  },
+  feedSkeletonPostCard: {
+    marginHorizontal: 16,
+    marginTop: 8,
+    borderRadius: 16,
+    borderWidth: 1,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 8,
+    elevation: 2,
+  },
+  feedSkeletonAuthorRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    padding: 14,
+    paddingBottom: 6,
+  },
+  feedSkeletonBody: {
+    paddingHorizontal: 14,
+    paddingBottom: 12,
+  },
+  feedSkeletonMediaWrap: {
+    paddingHorizontal: 14,
+    marginBottom: 12,
+  },
+  feedSkeletonSummaryRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingHorizontal: 14,
+    paddingBottom: 12,
+  },
+  feedSkeletonActionRow: {
+    flexDirection: "row",
+    borderTopWidth: 1,
+    paddingVertical: 8,
+  },
+  feedSkeletonActionItem: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
 
   /* Composer prompt */
   composerRow: { flexDirection: "row", alignItems: "center", paddingHorizontal: 14, paddingVertical: 10, gap: 10 },
@@ -1755,7 +2571,6 @@ const styles = StyleSheet.create({
   composerAuthorName: { fontSize: moderateScale(14), fontWeight: "700" },
   visibilityChip: { flexDirection: "row", alignItems: "center", borderRadius: 4, paddingHorizontal: 6, paddingVertical: 2, marginTop: 2 },
   modalTextArea: { flex: 1, fontSize: moderateScale(16), paddingHorizontal: 14, paddingTop: 10, textAlignVertical: "top" },
-
   emptyText: { textAlign: "center", marginTop: 60, fontSize: moderateScale(14) },
 
   /* Empty state redesign */
@@ -1834,6 +2649,14 @@ const styles = StyleSheet.create({
     height: 58,
     borderRadius: 29,
   },
+  followingProfileAvatarFallback: {
+    width: 58,
+    height: 58,
+    borderRadius: 29,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
   followingProfileBody: {
     flex: 1,
     gap: 4,
@@ -1875,5 +2698,47 @@ const styles = StyleSheet.create({
   followingProfileBtnText: {
     fontSize: moderateScale(11),
     fontFamily: "Poppins_600SemiBold",
+  },
+
+  /* Radio cards */
+  radioCard: {
+    width: 160,
+    borderRadius: 16,
+    borderWidth: 1,
+    overflow: "hidden", // clip internal content nicely
+  },
+  radioCardArtworkFrame: {
+    width: "100%",
+    height: 110,
+    position: "relative",
+    backgroundColor: '#E2E8F0', // fallback loader background
+  },
+  radioCardArtwork: {
+    width: "100%",
+    height: "100%",
+    resizeMode: "cover",
+  },
+  radioCardArtworkPlaceholder: {
+    width: "100%",
+    height: "100%",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  radioCardContent: {
+    padding: 12,
+    paddingTop: 10,
+  },
+  radioCardLink: {
+    marginTop: 4,
+    minHeight: 38,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  radioCardLinkText: {
+    fontSize: moderateScale(11),
+    fontFamily: "Poppins_600SemiBold",
+    textAlign: "center",
   },
 });

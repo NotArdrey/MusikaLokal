@@ -26,6 +26,7 @@ import { ProfileCompletionBanner } from "../src/components/ProfileCompletionBann
 import RecentlyViewedSheet from "../src/components/RecentlyViewedSheet";
 import SearchBottomSheet from "../src/components/SearchBottomSheet";
 import Skeleton from "../src/components/Skeleton";
+import { useBottomBarClearance } from "../src/hooks/useBottomBarClearance";
 import { useTheme } from "../src/context/ThemeContext";
 import {
   getGeminiFlashLiteInfo,
@@ -357,6 +358,7 @@ export default function HomeScreen() {
   const { colors, isDark } = useTheme();
   const { userRole, userId, isGuest, roleResolved } = useAuth();
   const insets = useSafeAreaInsets();
+  const { contentBottomPadding } = useBottomBarClearance(24);
   const params = useLocalSearchParams<{ reopenListingId?: string }>();
 
   const homeCacheBaseParams = useMemo(
@@ -2762,7 +2764,10 @@ export default function HomeScreen() {
           </View>
         </View>
 
-        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 100 }}>
+        <ScrollView
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={{ paddingBottom: contentBottomPadding }}
+        >
           {/* Highlight/Featured Mocks */}
           <View style={{ marginTop: 32, paddingHorizontal: 24 }}>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 16 }}>
@@ -2814,7 +2819,7 @@ export default function HomeScreen() {
 
       <ScrollView
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ paddingBottom: 180 }}
+        contentContainerStyle={{ paddingBottom: contentBottomPadding }}
         bounces={true}
         onScroll={(e) => {
           const contentOffsetY = e.nativeEvent.contentOffset.y;

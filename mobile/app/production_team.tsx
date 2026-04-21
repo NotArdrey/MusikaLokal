@@ -18,6 +18,7 @@ import CustomAlert, { AlertType } from "../src/components/CustomAlert";
 import Header from "../src/components/header";
 import Navbar from "../src/components/navbar";
 import Skeleton from "../src/components/Skeleton";
+import { useBottomBarClearance } from "../src/hooks/useBottomBarClearance";
 import { useRequireAuth } from "../src/context/AuthContext";
 import { useTheme } from "../src/context/ThemeContext";
 
@@ -40,6 +41,7 @@ interface TeamMember {
 
 export default function ProductionTeamScreen() {
   const { colors, isDark } = useTheme();
+  const { contentBottomPadding } = useBottomBarClearance(24);
   const { isAuthenticated, loading: authLoading, userId } = useRequireAuth();
   const params = useLocalSearchParams<{ teamId?: string }>();
   const routeTeamId = Array.isArray(params.teamId) ? params.teamId[0] : params.teamId;
@@ -359,7 +361,7 @@ export default function ProductionTeamScreen() {
     return (
       <View style={[styles.flex1, { backgroundColor: colors.background }]}>
         <Header title={selectedTeam.name} onBackPress={closeTeamDetail} />
-        <ScrollView contentContainerStyle={styles.scrollContent}>
+        <ScrollView contentContainerStyle={[styles.scrollContent, { paddingBottom: contentBottomPadding }]}>
           {/* Team Info */}
           <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
             {selectedTeam.logo_url ? (
@@ -673,7 +675,7 @@ export default function ProductionTeamScreen() {
     <View style={[styles.flex1, { backgroundColor: colors.background }]}>
       <Header title="Production Teams" onBackPress={routeTeamId ? () => router.back() : undefined} />
       <ScrollView
-        contentContainerStyle={styles.scrollContent}
+        contentContainerStyle={[styles.scrollContent, { paddingBottom: contentBottomPadding }]}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
