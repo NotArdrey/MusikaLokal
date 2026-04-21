@@ -28,9 +28,10 @@ const moderateScale = (size: number, factor = 0.3) => {
 
 export default function CreateStationScreen() {
   const { colors } = useTheme();
-  const { session } = useAuth();
+  const { session, userRole } = useAuth();
   const { edit_id } = useLocalSearchParams();
   const isEditing = !!edit_id;
+  const canManageStations = userRole === "admin";
   const { contentBottomPadding } = useBottomBarClearance(24);
 
   const [name, setName] = useState("");
@@ -69,6 +70,11 @@ export default function CreateStationScreen() {
   }, [edit_id, isEditing]);
 
   const handleSave = async () => {
+    if (!canManageStations) {
+      setAlert({ type: "warning", title: "Admin Only", message: "Stations are managed by admins." });
+      return;
+    }
+
     if (!name.trim()) {
       setAlert({ type: "warning", title: "Missing Name", message: "Please enter a station name." });
       return;
@@ -117,6 +123,23 @@ export default function CreateStationScreen() {
         <View style={styles.centered}>
           <ActivityIndicator size="large" color={colors.primary} />
         </View>
+      </View>
+    );
+  }
+
+  if (!canManageStations) {
+    return (
+      <View style={[styles.container, { backgroundColor: colors.background }]}>
+        <Header title={isEditing ? "Edit Station" : "Create Station"} onBackPress={() => router.back()} />
+        <View style={[styles.centered, { paddingHorizontal: 24 }]}> 
+          <Ionicons name="shield-checkmark-outline" size={44} color={colors.primary} />
+          <Text style={[styles.lockedTitle, { color: colors.text }]}>Admin Managed</Text>
+          <Text style={[styles.lockedText, { color: colors.textSecondary }]}>Stations can only be created or edited by admins.</Text>
+        </View>
+        {alert && (
+          <CustomAlert visible type={alert.type} title={alert.title} message={alert.message} onClose={() => setAlert(null)} />
+        )}
+        <Navbar />
       </View>
     );
   }
@@ -212,4 +235,6 @@ const styles = StyleSheet.create({
   textArea: { minHeight: 100, textAlignVertical: "top" },
   saveBtn: { alignItems: "center", justifyContent: "center", paddingVertical: 16, borderRadius: 12, marginTop: 32 },
   saveBtnText: { color: "#fff", fontSize: moderateScale(16), fontWeight: "700" },
+  lockedTitle: { fontSize: moderateScale(18), fontWeight: "700", marginTop: 14 },
+  lockedText: { fontSize: moderateScale(13), textAlign: "center", lineHeight: 20, marginTop: 8 },
 });

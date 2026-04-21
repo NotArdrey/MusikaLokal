@@ -21,9 +21,9 @@ interface AlertState {
 const TEMP_LOGIN_PASSWORD = 'pass123';
 const TEMP_LOGIN_OPTIONS = [
   { label: 'Login as Musician', email: 'musician@test.com' },
-  { label: 'Login as Production', email: 'producer1@test.com' },
+  { label: 'Login as Producer', email: 'producer@test.com' },
   { label: 'Login as Studio', email: 'studio@test.com' },
-  { label: 'Login as Venue', email: 'venue2@test.com' },
+  { label: 'Login as Venue', email: 'manager@test.com' },
 ] as const;
 
 const isAdminRole = (role: unknown): boolean => {

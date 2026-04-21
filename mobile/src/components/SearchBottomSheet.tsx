@@ -197,8 +197,8 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
         isGuest
           ? []
           : isOwner
-            ? ["All", "Musician", "Producer Project", "Production Team"]
-            : ["All", "Musician", "Studio", "Gig", "Producer Project", "Production Team"],
+            ? ["All", "Musician", "Production Team"]
+            : ["All", "Musician", "Studio", "Gig", "Production Team"],
       [isGuest, isOwner],
     );
 
@@ -313,25 +313,21 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
             tables = ["groups_with_stats", "profiles"];
           } else if (isOwner) {
             if (activeFilter === "All") {
-              tables = ["groups_with_stats", "profiles", "producer_projects_with_summary", "production_teams"];
+              tables = ["groups_with_stats", "profiles", "production_teams"];
             } else if (activeFilter === "Musician") {
               tables = ["groups_with_stats", "profiles"];
-            } else if (activeFilter === "Producer Project") {
-              tables = ["producer_projects_with_summary"];
             } else if (activeFilter === "Production Team") {
               tables = ["production_teams"];
             }
           } else {
             if (activeFilter === "All") {
-              tables = ["groups_with_stats", "profiles", "studios_with_stats", "gigs_with_stats", "producer_projects_with_summary", "production_teams"];
+              tables = ["groups_with_stats", "profiles", "studios_with_stats", "gigs_with_stats", "production_teams"];
             } else if (activeFilter === "Musician") {
               tables = ["groups_with_stats", "profiles"];
             } else if (activeFilter === "Studio") {
               tables = ["studios_with_stats"];
             } else if (activeFilter === "Gig") {
               tables = ["gigs_with_stats"];
-            } else if (activeFilter === "Producer Project") {
-              tables = ["producer_projects_with_summary"];
             } else if (activeFilter === "Production Team") {
               tables = ["production_teams"];
             }
@@ -761,7 +757,6 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
         "studios",
         "groups",
         "profiles",
-        "producer_projects",
         "production_teams",
         "production_team_members",
         "studio_promotions",
@@ -1326,8 +1321,8 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
                     style={[styles.searchInput, { color: colors.text }]}
                     placeholder={
                       isOwner
-                        ? "Find musicians, producer projects, teams..."
-                        : "Find studios, gigs, venues..."
+                        ? "Find musicians and teams..."
+                        : "Find musicians, studios, gigs, and teams..."
                     }
                     placeholderTextColor={colors.textSecondary}
                     value={searchQuery}

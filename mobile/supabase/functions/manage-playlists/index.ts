@@ -140,6 +140,26 @@ function getStationRotationBaseTimestampMs(station: any, slots: any[]) {
   return Math.max(...candidateTimestamps);
 }
 
+async function getRequesterRole(supabaseAdmin: any, authUser: any, uid: string) {
+  const metadataRole = typeof authUser?.user_metadata?.role === "string"
+    ? authUser.user_metadata.role.trim().toLowerCase()
+    : typeof authUser?.app_metadata?.role === "string"
+      ? authUser.app_metadata.role.trim().toLowerCase()
+      : null;
+
+  const { data: profile } = await supabaseAdmin
+    .from("profiles")
+    .select("role")
+    .eq("id", uid)
+    .maybeSingle();
+
+  const profileRole = typeof profile?.role === "string"
+    ? profile.role.trim().toLowerCase()
+    : null;
+
+  return profileRole || metadataRole;
+}
+
 function isSlotScheduledForNow(slot: any, nowMs: number) {
   const startMs = readTimestampMs(slot?.starts_at);
   const endMs = readTimestampMs(slot?.ends_at);
@@ -293,6 +313,20 @@ Deno.serve(async (req: Request) => {
 
     const uid = authUser.id;
     const { action, ...params } = await req.json();
+    const stationAdminActions = new Set([
+      "create_station",
+      "update_station",
+      "add_station_slot",
+      "remove_station_slot",
+      "toggle_radio_slot",
+    ]);
+
+    if (stationAdminActions.has(action)) {
+      const requesterRole = await getRequesterRole(supabaseAdmin, authUser, uid);
+      if (requesterRole !== "admin") {
+        return jsonResponse({ error: "Stations are managed by admins." }, 403);
+      }
+    }
 
     // ── create_playlist ─────────────────────────────────────────────
     if (action === "create_playlist") {
@@ -665,7 +699,6 @@ Deno.serve(async (req: Request) => {
         .single();
 
       if (!existing) return jsonResponse({ error: "Station not found" }, 404);
-      if (existing.creator_id !== uid) return jsonResponse({ error: "Forbidden" }, 403);
 
       const allowed = ["name", "description", "genre", "cover_image_url", "is_active", "rotation_interval_minutes"];
       const patch: Record<string, any> = {};
@@ -809,7 +842,7 @@ Deno.serve(async (req: Request) => {
       if (!station_id || !playlist_id) return jsonResponse({ error: "station_id and playlist_id are required" }, 400);
 
       const { data: st } = await supabaseAdmin.from("stations").select("creator_id").eq("id", station_id).single();
-      if (!st || st.creator_id !== uid) return jsonResponse({ error: "Forbidden" }, 403);
+      if (!st) return jsonResponse({ error: "Station not found" }, 404);
 
       const { data: lastSlot } = await supabaseAdmin
         .from("station_playlist_slots")
@@ -852,7 +885,7 @@ Deno.serve(async (req: Request) => {
       if (!slot) return jsonResponse({ error: "Slot not found" }, 404);
 
       const { data: st } = await supabaseAdmin.from("stations").select("creator_id").eq("id", slot.station_id).single();
-      if (!st || st.creator_id !== uid) return jsonResponse({ error: "Forbidden" }, 403);
+      if (!st) return jsonResponse({ error: "Station not found" }, 404);
 
       const { error } = await supabaseAdmin.from("station_playlist_slots").delete().eq("id", slot_id);
       if (error) return jsonResponse({ error: error.message }, 500);

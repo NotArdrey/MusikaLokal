@@ -37,12 +37,29 @@ export default function ProductDetailsScreen() {
   const [statusUpdating, setStatusUpdating] = useState(false);
   const [alert, setAlert] = useState<{ type: AlertType; title: string; message: string } | null>(null);
 
+  const invokeMarketplace = useCallback(async (body: Record<string, unknown>) => {
+    const { data, error } = await supabase.functions.invoke("manage-marketplace", { body });
+
+    if (error) {
+      console.error("manage-marketplace failed", {
+        message: error.message,
+        status: (error as any).status,
+        code: (error as any).code,
+        details: (error as any).details,
+        hint: (error as any).hint,
+        context: (error as any).context,
+        body,
+      });
+      throw error;
+    }
+
+    return data;
+  }, []);
+
   const fetchProduct = useCallback(async () => {
     if (!product_id) return;
     try {
-      const { data } = await supabase.functions.invoke("manage-marketplace", {
-        body: { action: "get_product_details", product_id },
-      });
+      const data = await invokeMarketplace({ action: "get_product_details", product_id });
       if (data?.data) {
         setProduct(data.data);
         if (data.data.variants?.length > 0) {
@@ -54,7 +71,7 @@ export default function ProductDetailsScreen() {
     } finally {
       setLoading(false);
     }
-  }, [product_id]);
+  }, [invokeMarketplace, product_id]);
 
   useEffect(() => { fetchProduct(); }, [fetchProduct]);
 
@@ -93,9 +110,7 @@ export default function ProductDetailsScreen() {
 
     setStatusUpdating(true);
     try {
-      const { data } = await supabase.functions.invoke("manage-marketplace", {
-        body: { action, product_id: product.id },
-      });
+      const data = await invokeMarketplace({ action, product_id: product.id });
 
       if (data?.success) {
         showTopToast({
@@ -122,7 +137,7 @@ export default function ProductDetailsScreen() {
   const formatPrice = (price: number | string | null | undefined) => {
     const amount = Number(price ?? 0);
     if (!Number.isFinite(amount) || amount <= 0) return "Free";
-    return `â‚±${amount.toLocaleString()}`;
+    return `₱${amount.toLocaleString()}`;
   };
 
   if (loading) {

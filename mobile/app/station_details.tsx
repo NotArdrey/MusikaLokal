@@ -92,7 +92,7 @@ const getStationArtworkUrl = (station: any) => {
 
 export default function StationDetailsScreen() {
   const { colors, isDark } = useTheme();
-  const { userId } = useAuth();
+  const { userId, userRole } = useAuth();
   const { contentBottomPadding } = useBottomBarClearance(24);
   const {
     activeStation,
@@ -131,7 +131,7 @@ export default function StationDetailsScreen() {
   const [removingSlotId, setRemovingSlotId] = useState<string | null>(null);
   const [togglingPlaylistId, setTogglingPlaylistId] = useState<string | null>(null);
 
-  const isOwner = station?.creator_id === userId;
+  const canManageStation = userRole === "admin";
   const isActiveStation = activeStation?.id === station?.id;
   const playerIsPlaying = isActiveStation && isPlaying;
   const playerIsMuted = isActiveStation && isMuted;
@@ -504,7 +504,7 @@ export default function StationDetailsScreen() {
                 </Text>
               )}
             </View>
-            {isOwner && (
+            {canManageStation && (
               <TouchableOpacity activeOpacity={0.7} onPress={openAddSlotModal} style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
                 <Ionicons name="options" size={18} color={colors.primary} />
                 <Text style={{ color: colors.primary, fontSize: moderateScale(13), fontWeight: "600" }}>Manage Music</Text>
@@ -528,7 +528,7 @@ export default function StationDetailsScreen() {
                     <Text style={styles.liveNowBadgeText}>On Air</Text>
                   </View>
                 )}
-                {isOwner && (
+                {canManageStation && (
                   <TouchableOpacity
                     activeOpacity={0.7}
                     onPress={() => handleRemoveSlot(slot.id)}
@@ -546,13 +546,13 @@ export default function StationDetailsScreen() {
             ))
           ) : (
             <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
-              {isOwner ? "No playlists in rotation yet. Tap Add to get started." : "No playlists scheduled yet"}
+              {canManageStation ? "No playlists in rotation yet. Tap Add to get started." : "No playlists scheduled yet"}
             </Text>
           )}
         </View>
 
         {/* Owner actions */}
-        {isOwner && (
+        {canManageStation && (
           <View style={styles.section}>
             <TouchableOpacity activeOpacity={0.7}
               style={[styles.actionBtn, { backgroundColor: colors.primary }]}
@@ -618,7 +618,7 @@ export default function StationDetailsScreen() {
               onChangeText={setEditRotationIntervalMinutes}
               keyboardType="number-pad"
             />
-            <Text style={[styles.modalHelper, { color: colors.textSecondary }]}>Only the station owner can change this. Range: 5 to 120 minutes.</Text>
+            <Text style={[styles.modalHelper, { color: colors.textSecondary }]}>Only admins can change this. Range: 5 to 120 minutes.</Text>
 
             <View style={styles.modalButtons}>
               <TouchableOpacity activeOpacity={0.7} style={[styles.modalBtn, { borderColor: isDark ? "#334155" : "#E2E8F0" }]} onPress={() => setEditModalVisible(false)}>
@@ -638,7 +638,7 @@ export default function StationDetailsScreen() {
           <View style={[styles.modalContent, { backgroundColor: colors.surface, maxHeight: "75%" }]}>
             <Text style={[styles.modalTitle, { color: colors.text }]}>Manage Music</Text>
             <Text style={{ color: colors.textSecondary, fontSize: moderateScale(12), marginBottom: 16, marginTop: -8 }}>
-              Toggle which playlists play on your station
+              Toggle which playlists play on this station
             </Text>
 
             {loadingPlaylists ? (

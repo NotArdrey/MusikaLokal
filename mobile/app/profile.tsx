@@ -164,7 +164,7 @@ const base64ToUint8Array = (base64: string): Uint8Array => {
 
 export default function ProfileScreen() {
   const { colors, isDark } = useTheme();
-  const { loading: authLoading, userId: currentUserId, isGuest } = useAuth();
+  const { loading: authLoading, userId: currentUserId, isGuest, userRole } = useAuth();
   const { activeStation } = useRadioPlayerPresence();
   const { isPlaying } = useRadioPlayerPlayback();
   const { togglePlayPause, tuneIn } = useRadioPlayerActions();
@@ -203,6 +203,7 @@ export default function ProfileScreen() {
   const [isProfileFollowing, setIsProfileFollowing] = useState(false);
   const [isProfileFollowBusy, setIsProfileFollowBusy] = useState(false);
   const profileFetchInFlightRef = useRef(false);
+  const canManageStations = !isGuest && userRole === "admin";
 
   useEffect(() => {
     if (loading) return;
@@ -1204,21 +1205,25 @@ export default function ProfileScreen() {
   }, [canFollowProfile, isProfileFollowBusy, isProfileFollowing, viewedProfileId]);
 
   const playlistSectionHint = hasStation
-    ? isOwner && !isGuest
-      ? "Tap the station card to listen live, then use the radio button on each playlist to control what stays on air."
+    ? canManageStations
+      ? "Tap the station card to listen live, then use the station controls to curate what stays on air."
       : "Tap the station card to listen live, or open any playlist card to view its tracks."
-    : isOwner && !isGuest
-      ? "Create a station to feature your playlists, then put music on air with the radio button on each card."
+    : canManageStations
+      ? "Admins can create a station and curate the live rotation for this profile."
+      : isOwner && !isGuest
+        ? "Stations are managed by admins. Contact an admin to create or update your radio station."
       : "Tap any playlist card to open it.";
   const stationPrimaryLabel = !hasStation
-    ? "Create Station"
+    ? canManageStations
+      ? "Create Station"
+      : "Admin Managed"
     : canPlayStationFromProfile
       ? stationIsCurrentSource
         ? isPlaying
           ? "Pause Live Audio"
           : "Resume Live Audio"
         : "Listen Live"
-      : isOwner && !isGuest
+      : canManageStations
         ? "Manage Station"
         : "Open Station";
   const stationStatusLabel = stationIsLive
@@ -1236,7 +1241,7 @@ export default function ProfileScreen() {
       return;
     }
 
-    if (isOwner && !isGuest) {
+    if (canManageStations) {
       router.push("/create_station" as any);
     }
   };
@@ -1809,7 +1814,7 @@ export default function ProfileScreen() {
                           </View>
 
                           <Text style={{ fontSize: 12, color: colors.textSecondary, fontFamily: "Poppins_400Regular" }} numberOfLines={1}>
-                            {isOwner && !isGuest ? "Your radio station" : `${stationCreatorName}'s radio station`}
+                            {canManageStations ? "Admin managed station" : `${stationCreatorName}'s radio station`}
                           </Text>
 
                           <Text style={{ fontSize: 11, color: colors.textSecondary, marginTop: 4 }} numberOfLines={1}>
@@ -1828,8 +1833,8 @@ export default function ProfileScreen() {
                       <Text style={{ fontSize: 11, color: colors.textSecondary, lineHeight: 17, marginTop: 12 }}>
                         {canPlayStationFromProfile
                           ? "Tap this card to start listening live. Open the station screen anytime for more controls."
-                          : isOwner && !isGuest
-                            ? "This station is ready to manage, but it needs at least one playlist on air before listeners can tune in."
+                            : canManageStations
+                              ? "This station is ready to manage, but it needs at least one playlist on air before listeners can tune in."
                             : "Open the station to browse its rotation and live details."}
                       </Text>
                     </TouchableOpacity>
@@ -1877,7 +1882,7 @@ export default function ProfileScreen() {
                           }}
                         >
                           <Text style={{ color: colors.text, fontSize: 12, fontFamily: "Poppins_600SemiBold" }}>
-                            {isOwner && !isGuest ? "Manage Station" : "Open Station"}
+                            {canManageStations ? "Manage Station" : "Open Station"}
                           </Text>
                         </TouchableOpacity>
                       )}
@@ -1910,33 +1915,37 @@ export default function ProfileScreen() {
 
                       <View style={{ flex: 1 }}>
                         <Text style={{ fontSize: 15, fontFamily: "Poppins_600SemiBold", color: colors.text }}>
-                          Create your radio station
+                          {canManageStations ? "Create your radio station" : "Station managed by admin"}
                         </Text>
                         <Text style={{ fontSize: 11, color: colors.textSecondary, lineHeight: 17, marginTop: 4 }}>
-                          Your station lives above your playlists and lets visitors listen live from your profile.
+                          {canManageStations
+                            ? "Your station lives above your playlists and lets visitors listen live from your profile."
+                            : "Regular users can listen to stations here, but station creation and curation are handled by admins."}
                         </Text>
                       </View>
                     </View>
 
-                    <TouchableOpacity
-                      activeOpacity={0.85}
-                      onPress={() => router.push("/create_station" as any)}
-                      style={{
-                        marginTop: 14,
-                        minHeight: 42,
-                        borderRadius: 12,
-                        backgroundColor: colors.primary,
-                        alignItems: "center",
-                        justifyContent: "center",
-                        flexDirection: "row",
-                        gap: 8,
-                      }}
-                    >
-                      <Ionicons name="add" size={16} color="#fff" />
-                      <Text style={{ color: "#fff", fontSize: 12, fontFamily: "Poppins_600SemiBold" }}>
-                        Create Station
-                      </Text>
-                    </TouchableOpacity>
+                    {canManageStations && (
+                      <TouchableOpacity
+                        activeOpacity={0.85}
+                        onPress={() => router.push("/create_station" as any)}
+                        style={{
+                          marginTop: 14,
+                          minHeight: 42,
+                          borderRadius: 12,
+                          backgroundColor: colors.primary,
+                          alignItems: "center",
+                          justifyContent: "center",
+                          flexDirection: "row",
+                          gap: 8,
+                        }}
+                      >
+                        <Ionicons name="add" size={16} color="#fff" />
+                        <Text style={{ color: "#fff", fontSize: 12, fontFamily: "Poppins_600SemiBold" }}>
+                          Create Station
+                        </Text>
+                      </TouchableOpacity>
+                    )}
                   </View>
                 ) : null}
 
@@ -2012,7 +2021,7 @@ export default function ProfileScreen() {
                           <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} style={{ marginLeft: 10 }} />
                         </TouchableOpacity>
 
-                        {isOwner && !isGuest && (
+                        {canManageStations && (
                           <TouchableOpacity
                             activeOpacity={0.6}
                             style={{

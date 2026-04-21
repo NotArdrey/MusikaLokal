@@ -40,7 +40,7 @@ function Header({ title, transparent, onBackPress, leftComponent, rightComponent
     );
 
     const isMyListingPath = useMemo(
-        () => pathname === "/my_group" || pathname === "/my_venue" || pathname === "/my_studio",
+        () => pathname === "/my_group" || pathname === "/my_venue" || pathname === "/my_studio" || pathname === "/my_production",
         [pathname],
     );
 
@@ -75,9 +75,10 @@ function Header({ title, transparent, onBackPress, leftComponent, rightComponent
         return 'MusikaLokal';
     }, [pathname, title]);
 
-    const btn = useMemo<'/add_gig' | '/add_studio' | '/add_group'>(() => {
+    const btn = useMemo<'/add_gig' | '/add_studio' | '/add_group' | '/add_production'>(() => {
         if (pathname === "/my_venue") return '/add_gig';
         if (pathname === "/my_studio") return '/add_studio';
+        if (pathname === "/my_production") return '/add_production';
         return '/add_group';
     }, [pathname]);
 

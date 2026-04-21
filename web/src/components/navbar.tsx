@@ -37,7 +37,7 @@ function Navbar() {
             if (data && data.role) {
                 if (data.role === 'studio-owner') {
                     setManageRoute('/my_studio');
-                } else if (data.role === 'manager' || data.role === 'musician-member') {
+                } else if (data.role === 'musician' || data.role === 'manager' || data.role === 'musician-member') {
                     setManageRoute('/my_group');
                 } else if (data.role === 'venue-owner') {
                     setManageRoute('/my_venue');

@@ -84,10 +84,12 @@ export default function ManageScreen() {
     const handleRedirect = (role: string) => {
         if (role === 'studio-owner') {
             router.replace('/my_studio');
-        } else if (role === 'musician') {
+        } else if (role === 'musician' || role === 'manager' || role === 'musician-member') {
             router.replace('/my_group');
         } else if (role === 'venue-owner') {
             router.replace('/my_venue');
+        } else if (role === 'producer') {
+            router.replace('/my_production');
         } else {
             setLoading(false);
         }

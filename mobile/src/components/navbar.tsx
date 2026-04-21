@@ -20,6 +20,7 @@ const GLOBAL_NAVBAR_ROUTES = new Set([
     '/account_details',
     '/add_gig',
     '/add_group',
+    '/add_production',
     '/add_studio',
     '/ai_suggestions',
     '/bookings',
@@ -30,6 +31,7 @@ const GLOBAL_NAVBAR_ROUTES = new Set([
     '/edit_gig',
     '/edit_group',
     '/edit_profile',
+    '/edit_production',
     '/edit_studio',
     '/feed',
     '/help_support',
@@ -41,6 +43,7 @@ const GLOBAL_NAVBAR_ROUTES = new Set([
     '/manage_studio',
     '/marketplace',
     '/my_group',
+    '/my_production',
     '/my_studio',
     '/my_venue',
     '/notification_settings',
@@ -97,12 +100,12 @@ function Navbar({ global = false }: NavbarProps) {
             if (data && data.role) {
                 if (data.role === 'studio-owner') {
                     setManageRoute('/my_studio');
-                } else if (data.role === 'manager' || data.role === 'musician-member') {
+                } else if (data.role === 'musician' || data.role === 'manager' || data.role === 'musician-member') {
                     setManageRoute('/my_group');
                 } else if (data.role === 'venue-owner') {
                     setManageRoute('/my_venue');
                 } else if (data.role === 'producer') {
-                    setManageRoute('/production_team');
+                    setManageRoute('/my_production');
                 } else {
                     setManageRoute('/manage');
                 }
@@ -124,16 +127,34 @@ function Navbar({ global = false }: NavbarProps) {
         if (pathname.includes('feed') || pathname.includes('home')) return 'home';
         if (pathname.includes('marketplace') || pathname.includes('shop') || pathname.includes('seller_hub') || pathname.includes('orders') || pathname.includes('product_details')) return 'marketplace';
         if (pathname.includes('ai_suggestions')) return 'ai';
-        if (pathname.includes('bookings')) return 'activity';
-        if (pathname.includes('profile') || pathname.includes('settings') || pathname.includes('wallet')) {
+        if (pathname.includes('bookings') || pathname.includes('chat') || pathname.includes('notification') || pathname.includes('deal_details') || pathname.includes('submit_review') || pathname.includes('to_review')) return 'activity';
+        if (
+            pathname.includes('profile') ||
+            pathname.includes('settings') ||
+            pathname.includes('wallet') ||
+            pathname.includes('account_details') ||
+            pathname.includes('change_email') ||
+            pathname.includes('change_password') ||
+            pathname.includes('help_support') ||
+            pathname.includes('privacy_policy') ||
+            pathname.includes('terms_and_conditions') ||
+            pathname.includes('identity_verification') ||
+            pathname.includes('playlist_details') ||
+            pathname.includes('create_playlist') ||
+            pathname.includes('station_details') ||
+            pathname.includes('create_station')
+        ) {
             return 'profile';
         }
         if (
             pathname === '/manage' ||
             pathname.startsWith('/manage/') ||
+            pathname.includes('producer_projects') ||
+            pathname.includes('producer_project_details') ||
             pathname.includes('my_studio') ||
             pathname.includes('my_venue') ||
             pathname.includes('my_group') ||
+            pathname.includes('my_production') ||
             pathname.includes('production_team') ||
             pathname.includes('manage_') ||
             pathname.includes('edit_') ||
