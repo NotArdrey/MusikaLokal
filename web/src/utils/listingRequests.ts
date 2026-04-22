@@ -4,6 +4,187 @@ type EntityType = "musician" | "group" | "venue" | "production_team";
 
 type RouteParams = Record<string, string | number | null | undefined>;
 
+type FunctionsInvokeError = Error & {
+  context?: {
+    status?: number;
+    clone?: () => {
+      json?: () => Promise<unknown>;
+      text?: () => Promise<string>;
+    };
+    json?: () => Promise<unknown>;
+    text?: () => Promise<string>;
+  };
+  code?: string | number;
+  details?: string;
+  hint?: string;
+  status?: number;
+};
+
+type FunctionsErrorBody = {
+  error?: string;
+  message?: string;
+  code?: string | number;
+  details?: string;
+  hint?: string;
+};
+
+type ListingRequestPayload = {
+  currentUserId: string;
+  receiverUserId: string;
+  message: string;
+  senderEntityType: EntityType;
+  senderEntityName: string;
+  senderEntityId: string | null;
+  receiverEntityType: EntityType;
+  receiverEntityName: string;
+  receiverEntityId: string | null;
+  groupId: string | null;
+  studioId: string | null;
+  productionTeamId: string | null;
+  notificationTitle: string;
+  notificationMessage: string;
+  notificationImage: string | null;
+  attachmentUrl: string | null;
+  routePath?: string;
+  routeParams?: Record<string, string>;
+  extraMeta: Record<string, unknown> | null;
+};
+
+const toNonEmptyString = (value: unknown) => {
+  const normalized = String(value ?? "").trim();
+  return normalized.length > 0 ? normalized : null;
+};
+
+const normalizeExtraMeta = (value: unknown) => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {} as Record<string, unknown>;
+  }
+
+  return value as Record<string, unknown>;
+};
+
+const buildListingRequestEventDetails = (payload: ListingRequestPayload) => ({
+  type: "listing_connection_request",
+  sender_entity_type: payload.senderEntityType,
+  sender_entity_id: toNonEmptyString(payload.senderEntityId),
+  sender_entity_name: payload.senderEntityName,
+  receiver_entity_type: payload.receiverEntityType,
+  receiver_entity_id: toNonEmptyString(payload.receiverEntityId),
+  receiver_entity_name: payload.receiverEntityName,
+  production_team_id: toNonEmptyString(payload.productionTeamId),
+  route: toNonEmptyString(payload.routePath) || undefined,
+  route_params: payload.routeParams,
+  ...normalizeExtraMeta(payload.extraMeta),
+});
+
+const createListingRequestFallback = async (payload: ListingRequestPayload) => {
+  const eventDetails = buildListingRequestEventDetails(payload);
+
+  const { data, error } = await supabase
+    .from("booking_requests")
+    .insert({
+      sender_id: payload.currentUserId,
+      receiver_id: payload.receiverUserId,
+      group_id: payload.groupId,
+      studio_id: payload.studioId,
+      message: payload.message,
+      status: "pending",
+      attachment_url: payload.attachmentUrl,
+      event_details: eventDetails,
+    })
+    .select("id, created_at, sender_id, receiver_id, group_id, studio_id, status, event_details, attachment_url")
+    .single();
+
+  if (error) {
+    throw error;
+  }
+
+  return data;
+};
+
+const readFunctionsErrorBody = async (
+  error: FunctionsInvokeError,
+): Promise<FunctionsErrorBody | null> => {
+  const responseLike = error?.context;
+  if (!responseLike || typeof responseLike !== "object") {
+    return null;
+  }
+
+  const readable = typeof responseLike.clone === "function"
+    ? responseLike.clone()
+    : responseLike;
+
+  try {
+    if (typeof readable.json === "function") {
+      const parsed = await readable.json();
+      return parsed && typeof parsed === "object" ? (parsed as FunctionsErrorBody) : null;
+    }
+  } catch {
+    // Fall through to text parsing.
+  }
+
+  try {
+    if (typeof readable.text === "function") {
+      const text = await readable.text();
+      if (!text) {
+        return null;
+      }
+
+      try {
+        const parsed = JSON.parse(text);
+        return parsed && typeof parsed === "object" ? (parsed as FunctionsErrorBody) : { message: text };
+      } catch {
+        return { message: text };
+      }
+    }
+  } catch {
+    return null;
+  }
+
+  return null;
+};
+
+const getFunctionsErrorMessage = (
+  error: FunctionsInvokeError,
+  contextBody: FunctionsErrorBody | null,
+) => {
+  const messageCandidates = [
+    contextBody?.error,
+    contextBody?.message,
+    error?.details,
+    error?.hint,
+    error?.message,
+  ];
+
+  for (const candidate of messageCandidates) {
+    if (typeof candidate === "string" && candidate.trim().length > 0) {
+      return candidate.trim();
+    }
+  }
+
+  return "Failed to send request.";
+};
+
+const buildFunctionsError = (
+  error: FunctionsInvokeError,
+  contextBody: FunctionsErrorBody | null,
+) => {
+  const normalizedStatus = Number(error?.status || error?.context?.status || 0) || undefined;
+  const normalizedError = new Error(
+    getFunctionsErrorMessage(error, contextBody),
+  ) as FunctionsInvokeError & { contextBody?: FunctionsErrorBody | null };
+
+  normalizedError.name = error?.name || "FunctionsHttpError";
+  normalizedError.context = error?.context;
+  normalizedError.contextBody = contextBody;
+  normalizedError.status = normalizedStatus;
+  normalizedError.code = error?.code ?? contextBody?.code;
+  normalizedError.details = error?.details ?? contextBody?.details;
+  normalizedError.hint = error?.hint ?? contextBody?.hint;
+
+  return normalizedError;
+};
+
 export const uploadListingRequestDocument = async (
   userId: string,
   file: any,
@@ -132,16 +313,29 @@ export const submitListingRequest = async ({
   });
 
   if (error) {
+    const contextBody = await readFunctionsErrorBody(error as FunctionsInvokeError);
+    try {
+      const fallbackRequest = await createListingRequestFallback(body);
+      console.warn("create_listing_request edge function failed; used direct booking_requests fallback", {
+        status: (error as any).status || (error as any).context?.status,
+        message: getFunctionsErrorMessage(error as FunctionsInvokeError, contextBody),
+      });
+      return fallbackRequest || { id: fallbackRequest?.id || null };
+    } catch (fallbackError) {
+      console.error("create_listing_request fallback failed", fallbackError);
+    }
+
     console.error("create_listing_request failed", {
-      message: error.message,
-      status: (error as any).status,
-      code: (error as any).code,
-      details: (error as any).details,
-      hint: (error as any).hint,
+      message: getFunctionsErrorMessage(error as FunctionsInvokeError, contextBody),
+      status: (error as any).status || (error as any).context?.status,
+      code: (error as any).code || contextBody?.code,
+      details: (error as any).details || contextBody?.details,
+      hint: (error as any).hint || contextBody?.hint,
       context: (error as any).context,
+      contextBody,
       body,
     });
-    throw error;
+    throw buildFunctionsError(error as FunctionsInvokeError, contextBody);
   }
 
   if (!data?.success) {

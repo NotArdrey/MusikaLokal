@@ -24,7 +24,7 @@ import CachedImage from "../src/components/CachedImage";
 import CustomAlert, { AlertType } from "../src/components/CustomAlert";
 import GuestSignInGate from "../src/components/GuestSignInGate";
 import Header from "../src/components/header";
-import Modal from "../src/components/modal";
+import BookingActionModal from "../src/components/modal";
 import Navbar from "../src/components/navbar";
 import { useAuth } from "../src/context/AuthContext";
 import { useTheme } from "../src/context/ThemeContext";
@@ -5755,7 +5755,7 @@ export default function BookingsScreen() {
         </View>
       </View>
 
-      <Modal
+      <BookingActionModal
         visible={modalVisible}
         onClose={() => setModalVisible(false)}
         title={

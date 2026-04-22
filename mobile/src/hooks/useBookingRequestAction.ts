@@ -123,10 +123,14 @@ export const useBookingRequestAction = ({
           }, 2000);
         } catch (e) {
           console.error("Error sending request:", e);
+          const errorMessage =
+            e instanceof Error && e.message.trim().length > 0
+              ? e.message
+              : "Failed to send request. Please try again.";
           setAlertConfig({
             type: "error",
             title: "Error",
-            message: "Failed to send request. Please try again.",
+            message: errorMessage,
           });
           setAlertVisible(true);
         } finally {

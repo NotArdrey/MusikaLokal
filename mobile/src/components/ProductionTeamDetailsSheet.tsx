@@ -471,7 +471,11 @@ const ProductionTeamDetailsSheet = forwardRef<
       );
     } catch (error) {
       console.error("Error sending production team request:", error);
-      Alert.alert("Error", "We couldn't send that request right now.");
+      const errorMessage =
+        error instanceof Error && error.message.trim().length > 0
+          ? error.message
+          : "We couldn't send that request right now.";
+      Alert.alert("Error", errorMessage);
     } finally {
       setIsSendingRequest(false);
     }

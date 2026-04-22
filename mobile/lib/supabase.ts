@@ -250,6 +250,8 @@ const normalizeFunctionsError = (
         }
         if ('status' in rawError) {
             normalizedError.status = rawError.status;
+        } else if (rawError?.context?.status) {
+            normalizedError.status = rawError.context.status;
         }
     }
 

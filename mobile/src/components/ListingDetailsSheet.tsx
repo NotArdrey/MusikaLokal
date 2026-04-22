@@ -3049,7 +3049,11 @@ const ListingDetailsSheet = forwardRef<
         showSheetAlert("success", "Request Sent", "Your structured request has been sent.");
       } catch (error) {
         console.error("Error creating listing request:", error);
-        showSheetAlert("error", "Request Failed", "We couldn't send that request right now.");
+        const errorMessage =
+          error instanceof Error && error.message.trim().length > 0
+            ? error.message
+            : "We couldn't send that request right now.";
+        showSheetAlert("error", "Request Failed", errorMessage);
       } finally {
         setIsSendingRequest(false);
       }
