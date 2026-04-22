@@ -854,5 +854,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: scale(12),
     paddingVertical: scale(10),
     fontSize: moderateScale(14),
+    textAlignVertical: "center",
   },
 });

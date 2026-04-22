@@ -804,7 +804,7 @@ const styles = StyleSheet.create({
     textAlignVertical: "center",
   },
   inputLabel: { fontSize: moderateScale(13), fontFamily: "Poppins_600SemiBold", marginBottom: 6, marginTop: 12 },
-  input: { borderWidth: 1, borderRadius: 10, padding: 12, fontSize: moderateScale(14) },
+  input: { borderWidth: 1, borderRadius: 10, padding: 12, fontSize: moderateScale(14), textAlignVertical: "center" },
   textArea: { minHeight: 80, textAlignVertical: "top" },
   submitBtn: { alignItems: "center", justifyContent: "center", paddingVertical: 14, borderRadius: 12, marginTop: 20, marginBottom: 20 },
   submitBtnText: { color: "#fff", fontSize: moderateScale(15), fontFamily: "Poppins_700Bold" },

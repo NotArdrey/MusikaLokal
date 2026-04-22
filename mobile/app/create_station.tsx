@@ -238,7 +238,7 @@ const styles = StyleSheet.create({
   heroIcon: { width: 80, height: 80, borderRadius: 40, alignItems: "center", justifyContent: "center", marginBottom: 12 },
   heroText: { fontSize: moderateScale(13), textAlign: "center", lineHeight: 20 },
   label: { fontSize: moderateScale(13), fontWeight: "600", marginBottom: 6, marginTop: 16 },
-  input: { borderWidth: 1, borderRadius: 10, padding: 12, fontSize: moderateScale(14) },
+  input: { borderWidth: 1, borderRadius: 10, padding: 12, fontSize: moderateScale(14), textAlignVertical: "center" },
   helperText: { fontSize: moderateScale(12), lineHeight: 18, marginTop: 8 },
   textArea: { minHeight: 100, textAlignVertical: "top" },
   saveBtn: { alignItems: "center", justifyContent: "center", paddingVertical: 16, borderRadius: 12, marginTop: 32 },

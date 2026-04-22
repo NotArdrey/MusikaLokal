@@ -272,11 +272,13 @@ const styles = StyleSheet.create({
         flex: 1,
         marginLeft: 8,
         fontSize: 14,
+        textAlignVertical: 'center',
         outlineStyle: 'none', // Web specific
     } as any,
     searchBtn: {
         marginTop: 12,
         alignItems: 'center',
+        justifyContent: 'center',
         padding: 10,
     },
     searchBtnText: {
@@ -333,6 +335,7 @@ const styles = StyleSheet.create({
         paddingVertical: 14,
         borderRadius: 12,
         alignItems: 'center',
+        justifyContent: 'center',
     },
     disabledBtn: {
         backgroundColor: '#a5b4fc',

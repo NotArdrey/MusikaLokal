@@ -49,7 +49,7 @@ const GroupConnectTab = ({
   connectionPanel,
 }: GroupConnectTabProps) => (
   <View style={styles.tabContent}>
-    {(!currentUserRole || currentUserRole === "venue-owner") && (
+    {currentUserRole === "venue-owner" && (
       <View style={styles.section}>
         <View style={{ marginTop: 0 }}>
           {renderBookingControls()}
@@ -170,12 +170,12 @@ const GroupConnectTab = ({
       </View>
     )}
 
-    {(!currentUserRole || currentUserRole === "musician") &&
+    {currentUserRole === "musician" &&
       group.requirements?.audition && (
         <View
           style={[
             styles.section,
-            (!currentUserRole || currentUserRole === "venue-owner") && {
+            currentUserRole === "venue-owner" && {
               marginTop: 32,
             },
           ]}
@@ -279,8 +279,8 @@ const GroupConnectTab = ({
       <View
         style={{
           marginTop:
-            ((!currentUserRole || currentUserRole === "venue-owner") ||
-              ((!currentUserRole || currentUserRole === "musician") &&
+            ((currentUserRole === "venue-owner") ||
+              ((currentUserRole === "musician") &&
                 group?.requirements?.audition))
               ? 32
               : 0,

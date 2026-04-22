@@ -111,6 +111,83 @@ export default function ProductionTeamScreen() {
     setAlertVisible(true);
   };
 
+  const renderSheetModal = ({
+    visible,
+    onClose,
+    title,
+    subtitle,
+    children,
+    scrollable = false,
+  }: {
+    visible: boolean;
+    onClose: () => void;
+    title: string;
+    subtitle?: string;
+    children: React.ReactNode;
+    scrollable?: boolean;
+  }) => (
+    <RNModal
+      visible={visible}
+      transparent
+      animationType="slide"
+      onRequestClose={onClose}
+    >
+      <View style={styles.sheetOverlay}>
+        <TouchableOpacity
+          activeOpacity={1}
+          onPress={onClose}
+          style={styles.sheetBackdrop}
+        />
+        <View
+          style={[
+            styles.sheetContainer,
+            { backgroundColor: colors.background, borderColor: colors.border },
+          ]}
+        >
+          <View
+            style={[
+              styles.sheetHandle,
+              { backgroundColor: isDark ? "#4B5563" : "#E5E7EB" },
+            ]}
+          />
+          <View style={[styles.sheetHeader, { borderBottomColor: colors.border }]}>
+            <View style={styles.sheetHeaderCopy}>
+              {subtitle ? (
+                <Text style={[styles.sheetEyebrow, { color: colors.textSecondary }]}>
+                  {subtitle}
+                </Text>
+              ) : null}
+              <Text style={[styles.sheetTitle, { color: colors.text }]}>{title}</Text>
+            </View>
+            <TouchableOpacity
+              activeOpacity={1}
+              onPress={onClose}
+              style={[
+                styles.sheetCloseButton,
+                { backgroundColor: colors.card, borderColor: colors.border },
+              ]}
+            >
+              <Ionicons name="close" size={18} color={colors.text} />
+            </TouchableOpacity>
+          </View>
+
+          {scrollable ? (
+            <ScrollView
+              style={styles.sheetBody}
+              contentContainerStyle={styles.sheetBodyContent}
+              showsVerticalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
+            >
+              {children}
+            </ScrollView>
+          ) : (
+            <View style={styles.sheetBodyContent}>{children}</View>
+          )}
+        </View>
+      </View>
+    </RNModal>
+  );
+
   const fetchTeams = useCallback(async () => {
     if (!userId) return;
     try {
@@ -733,19 +810,23 @@ export default function ProductionTeamScreen() {
         </View>
 
         {/* Add Member Modal */}
-        <RNModal
-          visible={addMemberModalVisible}
-          transparent
-          animationType="fade"
-          onRequestClose={() => setAddMemberModalVisible(false)}
-        >
-          <View style={{ flex: 1, justifyContent: "center", alignItems: "center", backgroundColor: "rgba(0,0,0,0.5)" }}>
-            <View style={{ backgroundColor: colors.card, borderRadius: 16, padding: 20, width: "88%", maxWidth: 420 }}>
-              <Text style={{ fontFamily: "Poppins_600SemiBold", fontSize: 17, color: colors.text, marginBottom: 14 }}>Add Team Member</Text>
-          <View style={styles.modalContent}>
+        {renderSheetModal({
+          visible: addMemberModalVisible,
+          onClose: () => setAddMemberModalVisible(false),
+          title: "Add Team Member",
+          subtitle: "Production Team",
+          children: (
+            <View style={styles.modalContent}>
             <Text style={[styles.inputLabel, { color: colors.text }]}>Member Email</Text>
             <TextInput
-              style={[styles.input, { color: colors.text, borderColor: colors.border, backgroundColor: colors.card }]}
+              style={[
+                styles.input,
+                {
+                  color: colors.text,
+                  borderColor: colors.border,
+                  backgroundColor: colors.card,
+                },
+              ]}
               value={memberEmail}
               onChangeText={setMemberEmail}
               placeholder="user@example.com"
@@ -791,25 +872,19 @@ export default function ProductionTeamScreen() {
                 <Text style={styles.submitBtnText}>Add Member</Text>
               )}
             </TouchableOpacity>
-          </View>
-              <TouchableOpacity activeOpacity={1} onPress={() => setAddMemberModalVisible(false)} style={{ marginTop: 8, alignItems: "center" }}>
-                <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_500Medium" }}>Close</Text>
-              </TouchableOpacity>
             </View>
-          </View>
-        </RNModal>
+          ),
+        })}
 
         {/* Add Roster Modal */}
-        <RNModal
-          visible={addRosterModalVisible}
-          transparent
-          animationType="fade"
-          onRequestClose={() => setAddRosterModalVisible(false)}
-        >
-          <View style={{ flex: 1, justifyContent: "center", alignItems: "center", backgroundColor: "rgba(0,0,0,0.5)" }}>
-            <View style={{ backgroundColor: colors.card, borderRadius: 16, padding: 20, width: "88%", maxWidth: 420 }}>
-              <Text style={{ fontFamily: "Poppins_600SemiBold", fontSize: 17, color: colors.text, marginBottom: 14 }}>Add Performer To Roster</Text>
-              <View style={styles.modalContent}>
+        {renderSheetModal({
+          visible: addRosterModalVisible,
+          onClose: () => setAddRosterModalVisible(false),
+          title: "Add Performer To Roster",
+          subtitle: "Production Team",
+          scrollable: true,
+          children: (
+            <View style={styles.modalContent}>
                 <Text style={[styles.inputLabel, { color: colors.text }]}>Roster Type</Text>
                 <View style={styles.roleSelector}>
                   {([
@@ -843,7 +918,14 @@ export default function ProductionTeamScreen() {
                   <>
                     <Text style={[styles.inputLabel, { color: colors.text, marginTop: 12 }]}>Musician Email</Text>
                     <TextInput
-                      style={[styles.input, { color: colors.text, borderColor: colors.border, backgroundColor: colors.card }]}
+                      style={[
+                        styles.input,
+                        {
+                          color: colors.text,
+                          borderColor: colors.border,
+                          backgroundColor: colors.card,
+                        },
+                      ]}
                       value={rosterMusicianEmail}
                       onChangeText={setRosterMusicianEmail}
                       placeholder="musician@example.com"
@@ -908,29 +990,29 @@ export default function ProductionTeamScreen() {
                     <Text style={styles.submitBtnText}>Add To Roster</Text>
                   )}
                 </TouchableOpacity>
-              </View>
-              <TouchableOpacity activeOpacity={1} onPress={() => setAddRosterModalVisible(false)} style={{ marginTop: 8, alignItems: "center" }}>
-                <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_500Medium" }}>Close</Text>
-              </TouchableOpacity>
             </View>
-          </View>
-        </RNModal>
+          ),
+        })}
 
         {/* Propose Deal Modal */}
-        <RNModal
-          visible={proposeDealVisible}
-          transparent
-          animationType="fade"
-          onRequestClose={() => setProposeDealVisible(false)}
-        >
-          <View style={{ flex: 1, justifyContent: "center", alignItems: "center", backgroundColor: "rgba(0,0,0,0.5)" }}>
-            <View style={{ backgroundColor: colors.card, borderRadius: 16, padding: 20, width: "88%", maxWidth: 420 }}>
-              <Text style={{ fontFamily: "Poppins_600SemiBold", fontSize: 17, color: colors.text, marginBottom: 14 }}>Propose Venue Partnership</Text>
-              <ScrollView style={{ maxHeight: 400 }}>
-                <View style={styles.modalContent}>
+        {renderSheetModal({
+          visible: proposeDealVisible,
+          onClose: () => setProposeDealVisible(false),
+          title: "Propose Venue Partnership",
+          subtitle: "Production Team",
+          scrollable: true,
+          children: (
+            <View style={styles.modalContent}>
                   <Text style={[styles.inputLabel, { color: colors.text }]}>Deal Title *</Text>
                   <TextInput
-                    style={[styles.input, { color: colors.text, borderColor: colors.border, backgroundColor: colors.card }]}
+                    style={[
+                      styles.input,
+                      {
+                        color: colors.text,
+                        borderColor: colors.border,
+                        backgroundColor: colors.card,
+                      },
+                    ]}
                     value={dealTitle}
                     onChangeText={setDealTitle}
                     placeholder="e.g. Summer Concert Series"
@@ -939,7 +1021,14 @@ export default function ProductionTeamScreen() {
 
                   <Text style={[styles.inputLabel, { color: colors.text, marginTop: 12 }]}>Venue Owner Email *</Text>
                   <TextInput
-                    style={[styles.input, { color: colors.text, borderColor: colors.border, backgroundColor: colors.card }]}
+                    style={[
+                      styles.input,
+                      {
+                        color: colors.text,
+                        borderColor: colors.border,
+                        backgroundColor: colors.card,
+                      },
+                    ]}
                     value={dealVenueEmail}
                     onChangeText={setDealVenueEmail}
                     placeholder="venue@example.com"
@@ -957,7 +1046,14 @@ export default function ProductionTeamScreen() {
                       if (!isNaN(num)) setDealProductionPct(String(100 - num));
                     }}
                     keyboardType="numeric"
-                    style={[styles.input, { color: colors.text, borderColor: colors.border, backgroundColor: colors.card }]}
+                    style={[
+                      styles.input,
+                      {
+                        color: colors.text,
+                        borderColor: colors.border,
+                        backgroundColor: colors.card,
+                      },
+                    ]}
                     placeholder="60"
                     placeholderTextColor={colors.textSecondary}
                   />
@@ -971,7 +1067,14 @@ export default function ProductionTeamScreen() {
                       if (!isNaN(num)) setDealVenuePct(String(100 - num));
                     }}
                     keyboardType="numeric"
-                    style={[styles.input, { color: colors.text, borderColor: colors.border, backgroundColor: colors.card }]}
+                    style={[
+                      styles.input,
+                      {
+                        color: colors.text,
+                        borderColor: colors.border,
+                        backgroundColor: colors.card,
+                      },
+                    ]}
                     placeholder="40"
                     placeholderTextColor={colors.textSecondary}
                   />
@@ -981,7 +1084,14 @@ export default function ProductionTeamScreen() {
                     value={dealFixedFee}
                     onChangeText={setDealFixedFee}
                     keyboardType="numeric"
-                    style={[styles.input, { color: colors.text, borderColor: colors.border, backgroundColor: colors.card }]}
+                    style={[
+                      styles.input,
+                      {
+                        color: colors.text,
+                        borderColor: colors.border,
+                        backgroundColor: colors.card,
+                      },
+                    ]}
                     placeholder="0"
                     placeholderTextColor={colors.textSecondary}
                   />
@@ -991,14 +1101,29 @@ export default function ProductionTeamScreen() {
                     value={dealDeposit}
                     onChangeText={setDealDeposit}
                     keyboardType="numeric"
-                    style={[styles.input, { color: colors.text, borderColor: colors.border, backgroundColor: colors.card }]}
+                    style={[
+                      styles.input,
+                      {
+                        color: colors.text,
+                        borderColor: colors.border,
+                        backgroundColor: colors.card,
+                      },
+                    ]}
                     placeholder="0"
                     placeholderTextColor={colors.textSecondary}
                   />
 
                   <Text style={[styles.inputLabel, { color: colors.text, marginTop: 12 }]}>Notes</Text>
                   <TextInput
-                    style={[styles.input, styles.textArea, { color: colors.text, borderColor: colors.border, backgroundColor: colors.card }]}
+                    style={[
+                      styles.input,
+                      styles.textArea,
+                      {
+                        color: colors.text,
+                        borderColor: colors.border,
+                        backgroundColor: colors.card,
+                      },
+                    ]}
                     value={dealNotes}
                     onChangeText={setDealNotes}
                     placeholder="Optional deal notes..."
@@ -1018,14 +1143,9 @@ export default function ProductionTeamScreen() {
                       <Text style={styles.submitBtnText}>Propose Deal</Text>
                     )}
                   </TouchableOpacity>
-                </View>
-              </ScrollView>
-              <TouchableOpacity activeOpacity={1} onPress={() => setProposeDealVisible(false)} style={{ marginTop: 8, alignItems: "center" }}>
-                <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_500Medium" }}>Close</Text>
-              </TouchableOpacity>
             </View>
-          </View>
-        </RNModal>
+          ),
+        })}
 
         <CustomAlert
           visible={alertVisible}
@@ -1111,19 +1231,23 @@ export default function ProductionTeamScreen() {
       ) : null}
 
       {/* Create Team Modal */}
-      <RNModal
-        visible={createModalVisible}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setCreateModalVisible(false)}
-      >
-        <View style={{ flex: 1, justifyContent: "center", alignItems: "center", backgroundColor: "rgba(0,0,0,0.5)" }}>
-          <View style={{ backgroundColor: colors.card, borderRadius: 16, padding: 20, width: "88%", maxWidth: 420 }}>
-            <Text style={{ fontFamily: "Poppins_600SemiBold", fontSize: 17, color: colors.text, marginBottom: 14 }}>Create Production Team</Text>
-        <View style={styles.modalContent}>
+      {renderSheetModal({
+        visible: createModalVisible,
+        onClose: () => setCreateModalVisible(false),
+        title: "Create Production Team",
+        subtitle: "Production Team",
+        children: (
+          <View style={styles.modalContent}>
           <Text style={[styles.inputLabel, { color: colors.text }]}>Team Name *</Text>
           <TextInput
-            style={[styles.input, { color: colors.text, borderColor: colors.border, backgroundColor: colors.card }]}
+            style={[
+              styles.input,
+              {
+                color: colors.text,
+                borderColor: colors.border,
+                backgroundColor: colors.card,
+              },
+            ]}
             value={newTeamName}
             onChangeText={setNewTeamName}
             placeholder="e.g. Events Pro Team"
@@ -1132,7 +1256,15 @@ export default function ProductionTeamScreen() {
 
           <Text style={[styles.inputLabel, { color: colors.text, marginTop: 12 }]}>Description</Text>
           <TextInput
-            style={[styles.input, styles.textArea, { color: colors.text, borderColor: colors.border, backgroundColor: colors.card }]}
+            style={[
+              styles.input,
+              styles.textArea,
+              {
+                color: colors.text,
+                borderColor: colors.border,
+                backgroundColor: colors.card,
+              },
+            ]}
             value={newTeamDescription}
             onChangeText={setNewTeamDescription}
             placeholder="Brief description of the team..."
@@ -1152,13 +1284,9 @@ export default function ProductionTeamScreen() {
               <Text style={styles.submitBtnText}>Create Team</Text>
             )}
           </TouchableOpacity>
-        </View>
-            <TouchableOpacity activeOpacity={1} onPress={() => setCreateModalVisible(false)} style={{ marginTop: 8, alignItems: "center" }}>
-              <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_500Medium" }}>Close</Text>
-            </TouchableOpacity>
           </View>
-        </View>
-      </RNModal>
+        ),
+      })}
 
       <CustomAlert
         visible={alertVisible}
@@ -1266,6 +1394,66 @@ const styles = StyleSheet.create({
   fab: { position: "absolute", bottom: 100, right: 20, width: 56, height: 56, borderRadius: 28, alignItems: "center", justifyContent: "center", elevation: 4, shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.25, shadowRadius: 4 },
 
   // Modal
+  sheetOverlay: {
+    flex: 1,
+    justifyContent: "flex-end",
+    backgroundColor: "rgba(0,0,0,0.5)",
+  },
+  sheetBackdrop: { flex: 1 },
+  sheetContainer: {
+    maxHeight: "88%",
+    borderTopLeftRadius: 32,
+    borderTopRightRadius: 32,
+    borderWidth: 1,
+    borderBottomWidth: 0,
+    overflow: "hidden",
+  },
+  sheetHandle: {
+    width: 40,
+    height: 5,
+    borderRadius: 999,
+    alignSelf: "center",
+    marginTop: 10,
+    marginBottom: 10,
+  },
+  sheetHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 20,
+    paddingBottom: 14,
+    borderBottomWidth: 1,
+  },
+  sheetHeaderCopy: {
+    flex: 1,
+    paddingRight: 16,
+  },
+  sheetEyebrow: {
+    fontFamily: "Poppins_500Medium",
+    fontSize: 11,
+    textTransform: "uppercase",
+    letterSpacing: 0.6,
+    marginBottom: 2,
+  },
+  sheetTitle: {
+    fontFamily: "Poppins_600SemiBold",
+    fontSize: 18,
+  },
+  sheetCloseButton: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+  },
+  sheetBody: {
+    flexGrow: 0,
+  },
+  sheetBodyContent: {
+    paddingHorizontal: 20,
+    paddingTop: 16,
+    paddingBottom: 24,
+  },
   modalContent: { paddingHorizontal: 4 },
   inputLabel: { fontFamily: "Poppins_500Medium", fontSize: 13, marginBottom: 6 },
   input: { borderWidth: 1, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 10, fontFamily: "Poppins_400Regular", fontSize: 14 },

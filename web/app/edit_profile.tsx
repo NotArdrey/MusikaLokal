@@ -1063,7 +1063,7 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontFamily: "Poppins_600SemiBold",
     letterSpacing: 0.5,
-    marginBottom: 6,
+    marginBottom: 10,
   },
   input: {
     borderWidth: 1,

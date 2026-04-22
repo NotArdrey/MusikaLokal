@@ -19,7 +19,7 @@ interface GroupAboutTabProps {
   styles: any;
   currentUserId: string | null;
   onProfilePress: () => void;
-  calculateCompletion: () => number;
+  completionRate: number | null;
   sheetRef?: any;
   listingId?: string | null;
 }
@@ -31,11 +31,10 @@ const GroupAboutTab = ({
   styles,
   currentUserId,
   onProfilePress,
-  calculateCompletion,
+  completionRate,
   sheetRef,
   listingId,
 }: GroupAboutTabProps) => {
-  const completionRate = calculateCompletion();
   const [groupPlaylists, setGroupPlaylists] = useState<any[]>([]);
   const [loadingGroupPlaylists, setLoadingGroupPlaylists] = useState(false);
   const managerId = group.owner_id || group.organizer_id;
@@ -275,11 +274,12 @@ const GroupAboutTab = ({
           </Text>
           <View style={{ gap: 12 }}>
             {group.members.map((member: any, index: number) => {
-              const isLeader = isGroupLeaderMember(member, group.owner_id);
+              const isLeader = isGroupLeaderMember(member, group.owner_id) || member?.role === "Leader";
               const memberName =
                 typeof member === "string" ? member : member.name;
               const memberInstrument =
                 typeof member === "string" ? member : member.instrument;
+              const memberRole = member?.role || (isLeader ? "Leader" : "Member");
               const memberId = member.user_id || null;
               const memberCompletion = getMemberCompletion(member);
               return (
@@ -335,30 +335,35 @@ const GroupAboutTab = ({
                       )}
 
                       <View style={{ flex: 1, flexShrink: 1 }}>
-                        <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
-                          <Ionicons
-                            name="musical-note"
-                            size={12}
-                            color={colors.textSecondary}
-                          />
-                          <Text style={[styles.managerLabel, { color: colors.textSecondary }]}>
-                            {memberInstrument}
-                            {isLeader && (
-                              <Text
-                                style={{
-                                  color: colors.primary,
-                                  fontFamily: "Poppins_600SemiBold",
-                                }}
-                              >
-                                {" "}
-                                • Leader
-                              </Text>
-                            )}
-                          </Text>
-                        </View>
-                        <Text style={[styles.managerName, { color: colors.text, marginTop: 2 }]}>
+                        <Text style={[styles.managerName, { color: colors.text }]}>
                           {memberName}
                         </Text>
+                        <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginTop: 3, flexWrap: "wrap" }}>
+                          {memberRole ? (
+                            <View style={{
+                              paddingHorizontal: 8,
+                              paddingVertical: 2,
+                              borderRadius: 999,
+                              backgroundColor: isLeader ? colors.primary : (colors.card || "#E0E7FF"),
+                            }}>
+                              <Text style={{
+                                fontSize: 11,
+                                fontFamily: "Poppins_600SemiBold",
+                                color: isLeader ? "#FFF" : colors.textSecondary,
+                              }}>
+                                {memberRole}
+                              </Text>
+                            </View>
+                          ) : null}
+                          {memberInstrument && memberInstrument !== memberRole ? (
+                            <View style={{ flexDirection: "row", alignItems: "center", gap: 3 }}>
+                              <Ionicons name="musical-note" size={11} color={colors.textSecondary} />
+                              <Text style={[styles.managerLabel, { color: colors.textSecondary, fontSize: 12 }]}>
+                                {memberInstrument}
+                              </Text>
+                            </View>
+                          ) : null}
+                        </View>
                       </View>
                     </View>
 
@@ -467,43 +472,56 @@ const GroupAboutTab = ({
             </View>
           </View>
 
-          <View
-            style={{
-              marginTop: 12,
-              flexDirection: "row",
-              alignItems: "center",
-              gap: 8,
-            }}
-          >
+          {completionRate !== null ? (
             <View
               style={{
-                flex: 1,
-                height: 6,
-                backgroundColor: isDark ? "#374151" : "#E5E7EB",
-                borderRadius: 3,
-                overflow: "hidden",
+                marginTop: 12,
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 8,
               }}
             >
               <View
                 style={{
-                  width: `${completionRate}%`,
-                  height: "100%",
-                  backgroundColor:
-                    completionRate === 100 ? "#10B981" : colors.primary,
+                  flex: 1,
+                  height: 6,
+                  backgroundColor: isDark ? "#374151" : "#E5E7EB",
+                  borderRadius: 3,
+                  overflow: "hidden",
                 }}
-              />
+              >
+                <View
+                  style={{
+                    width: `${completionRate}%`,
+                    height: "100%",
+                    backgroundColor:
+                      completionRate === 100 ? "#10B981" : colors.primary,
+                  }}
+                />
+              </View>
+              <Text
+                style={{
+                  fontSize: 11,
+                  fontFamily: "Poppins_600SemiBold",
+                  color:
+                    completionRate === 100 ? "#10B981" : colors.textSecondary,
+                }}
+              >
+                {`${completionRate}% Complete`}
+              </Text>
             </View>
+          ) : (
             <Text
               style={{
+                marginTop: 12,
                 fontSize: 11,
-                fontFamily: "Poppins_600SemiBold",
-                color:
-                  completionRate === 100 ? "#10B981" : colors.textSecondary,
+                fontFamily: "Poppins_500Medium",
+                color: colors.textSecondary,
               }}
             >
-              {`${completionRate}% Complete`}
+              Completion rate unavailable
             </Text>
-          </View>
+          )}
         </View>
 
         <TouchableOpacity activeOpacity={1}

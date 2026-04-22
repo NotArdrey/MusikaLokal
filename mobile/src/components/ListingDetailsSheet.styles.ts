@@ -357,6 +357,7 @@ const styles = StyleSheet.create({
     fontFamily: "Poppins_400Regular",
     fontSize: moderateScale(14),
     padding: 0,
+    textAlignVertical: "center",
   },
   dateBtn: {
     flex: 1,
@@ -387,6 +388,7 @@ const styles = StyleSheet.create({
     paddingVertical: moderateScale(16),
     borderRadius: moderateScale(16),
     alignItems: "center",
+    justifyContent: "center",
   },
   primaryBtnText: {
     color: "#FFF",
@@ -619,6 +621,7 @@ const styles = StyleSheet.create({
   },
   timeButton: {
     alignItems: "center",
+    justifyContent: "center",
   },
   slotGrid: {
     flexDirection: "row",
@@ -632,6 +635,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     minWidth: 80,
     alignItems: "center",
+    justifyContent: "center",
   },
   sectionHeader: {
     flexDirection: "row",

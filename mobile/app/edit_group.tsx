@@ -1412,8 +1412,12 @@ export default function EditGroupScreen() {
     }
   }, [authorized, id, currentUserId]);
 
-  const renderSectionHeader = (title: string, icon: string) => (
-    <View style={styles.sectionHeader}>
+  const renderSectionHeader = (
+    title: string,
+    icon: string,
+    isFirstSection = false,
+  ) => (
+    <View style={[styles.sectionHeader, isFirstSection && styles.firstSectionHeader]}>
       <Ionicons name={icon as any} size={18} color={colors.primary} />
       <Text style={[styles.sectionTitle, { color: colors.text }]}>{title}</Text>
     </View>
@@ -1600,7 +1604,7 @@ export default function EditGroupScreen() {
           keyboardShouldPersistTaps="always"
           keyboardDismissMode="on-drag"
         >
-          {renderSectionHeader("Group Details", "people")}
+          {renderSectionHeader("Group Details", "people", true)}
 
           {/* Group Type Selection */}
           <View style={styles.inputContainer}>
@@ -2644,17 +2648,21 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
+    marginTop: 24,
     marginBottom: 16,
+  },
+  firstSectionHeader: {
+    marginTop: 0,
   },
   sectionTitle: {
     fontFamily: "Poppins_600SemiBold",
     fontSize: 16,
   },
   inputContainer: {
-    marginBottom: 16,
+    marginBottom: 20,
   },
   inputLabel: {
-    marginBottom: 8,
+    marginBottom: 10,
     fontSize: 12,
     textTransform: "uppercase",
     letterSpacing: 1,
@@ -2735,6 +2743,7 @@ const styles = StyleSheet.create({
     paddingLeft: 40,
     paddingRight: 40,
     fontFamily: "Poppins_400Regular",
+    textAlignVertical: "center",
   },
   searchSpinner: {
     position: "absolute",
@@ -2922,6 +2931,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     paddingVertical: 14,
     alignItems: "center",
+    justifyContent: "center",
     marginTop: 16,
   },
   transferConfirmButtonText: {

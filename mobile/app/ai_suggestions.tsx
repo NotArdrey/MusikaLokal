@@ -1250,6 +1250,7 @@ const styles = StyleSheet.create({
         fontFamily: 'Poppins_400Regular',
         padding: 0,
         margin: 0,
+        textAlignVertical: 'center',
     },
     selectedCount: {
         fontSize: 12,

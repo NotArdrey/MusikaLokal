@@ -5,12 +5,14 @@ import {
   BottomSheetScrollView,
   useBottomSheetTimingConfigs,
 } from "@gorhom/bottom-sheet";
+import { LinearGradient } from "expo-linear-gradient";
 import { router } from "expo-router";
 import React, { forwardRef, useCallback, useEffect, useMemo, useState } from "react";
 import {
   Alert,
   ActivityIndicator,
   InteractionManager,
+  Share,
   StyleSheet,
   Text,
   TextInput,
@@ -41,6 +43,28 @@ type ProductionTeamMember = {
   role: string;
   full_name: string;
   avatar_url: string | null;
+};
+
+type UserGroup = {
+  id: string;
+  owner_id: string;
+  name: string;
+  images?: string[] | null;
+  genre?: string | null;
+  group_type?: string | null;
+};
+
+type ReviewRecord = {
+  id: string;
+  rating: number | null;
+  content: string | null;
+  created_at: string;
+  author?: {
+    full_name?: string | null;
+    avatar_url?: string | null;
+    updated_at?: string | null;
+  } | null;
+  updated_at?: string | null;
 };
 
 interface ProductionTeamDetailsSheetProps {
@@ -84,14 +108,20 @@ const ProductionTeamDetailsSheet = forwardRef<
   const [errorMessage, setErrorMessage] = useState("");
   const [currentUserRole, setCurrentUserRole] = useState<string | null>(null);
   const [currentUserName, setCurrentUserName] = useState("Musician");
+  const [activeTab, setActiveTab] = useState<"About" | "Connect" | "Review">("About");
+  const [userGroups, setUserGroups] = useState<UserGroup[]>([]);
+  const [loadingGroups, setLoadingGroups] = useState(false);
+  const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
+  const [reviews, setReviews] = useState<ReviewRecord[]>([]);
+  const [loadingReviews, setLoadingReviews] = useState(false);
   const [requestMessage, setRequestMessage] = useState("");
   const [requestApplicationContext, setRequestApplicationContext] = useState("");
   const [requestDocumentFile, setRequestDocumentFile] = useState<any>(null);
   const [requestDocumentUrl, setRequestDocumentUrl] = useState("");
   const [requestVideoUrl, setRequestVideoUrl] = useState("");
   const [isSendingRequest, setIsSendingRequest] = useState(false);
-  const [userVenues, setUserVenues] = useState<Array<{ id: string; name: string }>>([]);
-  const [selectedVenueId, setSelectedVenueId] = useState<string | null>(null);
+  const [isFavorited, setIsFavorited] = useState(false);
+  const [favoriteCount, setFavoriteCount] = useState(0);
 
   const closeSheet = useCallback(() => {
     if (ref && typeof ref !== "function") {
@@ -111,12 +141,18 @@ const ProductionTeamDetailsSheet = forwardRef<
       setTeam(null);
       setMembers([]);
       setMembershipRole(null);
+      setActiveTab("About");
+      setUserGroups([]);
+      setSelectedGroupId(null);
+      setReviews([]);
       setErrorMessage("");
       setRequestMessage("");
       setRequestApplicationContext("");
       setRequestDocumentFile(null);
       setRequestDocumentUrl("");
       setRequestVideoUrl("");
+      setIsFavorited(false);
+      setFavoriteCount(0);
       return () => {
         active = false;
       };
@@ -206,8 +242,8 @@ const ProductionTeamDetailsSheet = forwardRef<
     if (!userId) {
       setCurrentUserRole(null);
       setCurrentUserName("Musician");
-      setUserVenues([]);
-      setSelectedVenueId(null);
+      setUserGroups([]);
+      setSelectedGroupId(null);
       return () => {
         active = false;
       };
@@ -227,42 +263,12 @@ const ProductionTeamDetailsSheet = forwardRef<
         const role = data?.role || null;
         setCurrentUserRole(role);
         setCurrentUserName(data?.full_name?.trim() || "Musician");
-
-        if (role === "venue-owner") {
-          const { data: venues, error: venuesError } = await supabase
-            .from("studios")
-            .select("id, name, studio_type")
-            .eq("owner_id", userId)
-            .order("created_at", { ascending: false });
-
-          if (venuesError) throw venuesError;
-          if (!active) return;
-
-          const venueRows = (venues || []).filter((row: any) => {
-            const normalizedType = String(row?.studio_type || "").toLowerCase();
-            return !normalizedType || normalizedType.includes("venue");
-          });
-          const nextVenues = (venueRows.length > 0 ? venueRows : venues || []).map((row: any) => ({
-            id: row.id,
-            name: row.name || "Venue",
-          }));
-
-          setUserVenues(nextVenues);
-          setSelectedVenueId((current) =>
-            current && nextVenues.some((venue) => venue.id === current)
-              ? current
-              : nextVenues[0]?.id || null,
-          );
-        } else {
-          setUserVenues([]);
-          setSelectedVenueId(null);
-        }
       } catch (error) {
         console.error("Error loading request context:", error);
         if (!active) return;
         setCurrentUserRole(null);
-        setUserVenues([]);
-        setSelectedVenueId(null);
+        setUserGroups([]);
+        setSelectedGroupId(null);
       }
     })();
 
@@ -270,6 +276,129 @@ const ProductionTeamDetailsSheet = forwardRef<
       active = false;
     };
   }, [userId]);
+
+  useEffect(() => {
+    let active = true;
+
+    if (!userId || currentUserRole !== "musician") {
+      setUserGroups([]);
+      setSelectedGroupId(null);
+      setLoadingGroups(false);
+      return () => {
+        active = false;
+      };
+    }
+
+    void (async () => {
+      setLoadingGroups(true);
+      try {
+        const { data: ownedGroups, error: ownedError } = await supabase
+          .from("groups_with_stats")
+          .select("id, owner_id, name, images, genre, group_type")
+          .eq("owner_id", userId);
+
+        const { data: membershipRows, error: memberError } = await supabase
+          .from("group_members")
+          .select("group_id")
+          .eq("user_id", userId);
+
+        const memberGroupIds = Array.from(
+          new Set(
+            (membershipRows || [])
+              .map((row: any) => row.group_id)
+              .filter((id: any) => typeof id === "string" && id.length > 0),
+          ),
+        );
+
+        let memberGroups: UserGroup[] = [];
+        if (memberGroupIds.length > 0) {
+          const { data: memberGroupData, error: memberGroupDataError } = await supabase
+            .from("groups_with_stats")
+            .select("id, owner_id, name, images, genre, group_type")
+            .in("id", memberGroupIds);
+
+          if (memberGroupDataError) {
+            console.error("Error fetching member group details:", memberGroupDataError);
+          } else {
+            memberGroups = (memberGroupData || []) as UserGroup[];
+          }
+        }
+
+        if (ownedError) {
+          console.error("Error fetching owned groups:", ownedError);
+        }
+        if (memberError) {
+          console.error("Error fetching member groups:", memberError);
+        }
+        if (!active) return;
+
+        const combinedGroups = [...((ownedGroups || []) as UserGroup[]), ...memberGroups];
+        const uniqueGroups = combinedGroups.filter(
+          (groupItem, index, array) => array.findIndex((entry) => entry.id === groupItem.id) === index,
+        );
+
+        setUserGroups(uniqueGroups);
+      } catch (error) {
+        console.error("Error fetching musician groups:", error);
+        if (!active) return;
+        setUserGroups([]);
+      } finally {
+        if (active) {
+          setLoadingGroups(false);
+        }
+      }
+    })();
+
+    return () => {
+      active = false;
+    };
+  }, [currentUserRole, userId]);
+
+  useEffect(() => {
+    let active = true;
+
+    if (!team?.owner_id) {
+      setReviews([]);
+      setLoadingReviews(false);
+      return () => {
+        active = false;
+      };
+    }
+
+    void (async () => {
+      setLoadingReviews(true);
+      try {
+        const reviewSelect = "*, author:profiles!reviews_author_id_fkey(id, full_name, avatar_url)";
+        const { data } = await supabase
+          .from("reviews")
+          .select(reviewSelect)
+          .eq("user_id", team.owner_id)
+          .order("created_at", { ascending: false })
+          .limit(5);
+
+        if (!active) return;
+
+        setReviews(
+          ((data || []) as any[]).map((row) => ({
+            ...row,
+            content: row?.content ?? row?.comment ?? null,
+          })) as ReviewRecord[],
+        );
+      } catch (error) {
+        console.error("Error loading production team reviews:", error);
+        if (!active) return;
+        setReviews([]);
+      } finally {
+        if (active) {
+          setLoadingReviews(false);
+        }
+      }
+    })();
+
+    return () => {
+      active = false;
+    };
+  }, [team?.owner_id]);
 
   const renderBackdrop = useCallback(
     (props: any) => (
@@ -288,10 +417,60 @@ const ProductionTeamDetailsSheet = forwardRef<
     () => members.find((member) => member.role === "owner") || null,
     [members],
   );
+  const applyAsGroups = useMemo(
+    () => userGroups.filter((groupItem) => groupItem.group_type === "duo" || groupItem.group_type === "band"),
+    [userGroups],
+  );
+  const selectedApplicationGroup = useMemo(
+    () => applyAsGroups.find((groupItem) => groupItem.id === selectedGroupId) || null,
+    [applyAsGroups, selectedGroupId],
+  );
+  const reviewAverage = useMemo(() => {
+    if (!reviews.length) return 0;
+    const ratings = reviews.map((review) => Number(review.rating) || 0).filter((rating) => rating > 0);
+    if (!ratings.length) return 0;
+    return ratings.reduce((sum, rating) => sum + rating, 0) / ratings.length;
+  }, [reviews]);
+  const canShowConnectTab = Boolean(
+    team && membershipRole == null && currentUserRole === "musician" && team.owner_id !== userId,
+  );
+  const tabsToRender = useMemo(
+    () => (canShowConnectTab ? (["About", "Connect", "Review"] as const) : (["About", "Review"] as const)),
+    [canShowConnectTab],
+  );
+  const showTabs = tabsToRender.length > 1;
   const primaryActionLabel =
     membershipRole === "owner" || membershipRole === "manager"
       ? "Open Team Workspace"
       : "Open Team Page";
+
+  const handleShare = useCallback(async () => {
+    if (!team) return;
+    try {
+      await Share.share({
+        message: `Check out ${team.name} (Production Team) on MusikaLokal!`,
+      });
+    } catch {
+      // user cancelled or share failed
+    }
+  }, [team]);
+
+  const toggleFavorite = useCallback(async () => {
+    if (!userId || !team?.id) return;
+    const prev = isFavorited;
+    const prevCount = favoriteCount;
+    setIsFavorited(!prev);
+    setFavoriteCount(Math.max(0, prevCount + (prev ? -1 : 1)));
+    try {
+      const { error } = await supabase.functions.invoke("manage-details", {
+        body: { action: "toggle_favorite", type: "production_team", id: team.id, userId },
+      });
+      if (error) throw error;
+    } catch {
+      setIsFavorited(prev);
+      setFavoriteCount(prevCount);
+    }
+  }, [userId, team?.id, isFavorited, favoriteCount]);
 
   const handleOpenFullPage = useCallback(() => {
     if (!team?.id) return;
@@ -308,10 +487,20 @@ const ProductionTeamDetailsSheet = forwardRef<
   const accentColor = "#F97316";
   const accentSoft = isDark ? "rgba(249, 115, 22, 0.18)" : "rgba(249, 115, 22, 0.12)";
   const canMessageTeamOwner = Boolean(team?.owner_id && team.owner_id !== userId);
-  const selectedVenue = useMemo(
-    () => userVenues.find((venue) => venue.id === selectedVenueId) || null,
-    [selectedVenueId, userVenues],
-  );
+
+  useEffect(() => {
+    if (!tabsToRender.includes(activeTab)) {
+      setActiveTab(tabsToRender[0]);
+    }
+  }, [activeTab, tabsToRender]);
+
+  useEffect(() => {
+    if (!selectedGroupId) return;
+    const stillVisible = applyAsGroups.some((groupItem) => groupItem.id === selectedGroupId);
+    if (!stillVisible) {
+      setSelectedGroupId(null);
+    }
+  }, [applyAsGroups, selectedGroupId]);
 
   const openTeamChat = useCallback(() => {
     if (!team?.owner_id || team.owner_id === userId) {
@@ -341,14 +530,14 @@ const ProductionTeamDetailsSheet = forwardRef<
       return;
     }
 
-    const normalizedPitchMessage = requestMessage.trim();
-    if (!normalizedPitchMessage) {
-      Alert.alert("Pitch Required", "Add a short pitch before sending the request.");
+    if (currentUserRole !== "musician") {
+      Alert.alert("Unavailable", "Only musicians can apply to this production team.");
       return;
     }
 
-    if (currentUserRole === "venue-owner" && !selectedVenue) {
-      Alert.alert("Select Venue", "Choose which venue is inviting this production team.");
+    const normalizedPitchMessage = requestMessage.trim();
+    if (!normalizedPitchMessage) {
+      Alert.alert("Pitch Required", "Add a short pitch before sending the request.");
       return;
     }
 
@@ -356,25 +545,21 @@ const ProductionTeamDetailsSheet = forwardRef<
     const normalizedVideoUrl = requestVideoUrl.trim();
     if (!normalizedApplicationContext) {
       Alert.alert(
-        currentUserRole === "venue-owner" ? "Invite Context Required" : "Application Context Required",
-        currentUserRole === "venue-owner"
-          ? "Add the invite context before sending this invite."
-          : "Add the application context before sending this application.",
+        "Application Context Required",
+        "Add the application context before sending this application.",
       );
       return;
     }
 
     if (!requestDocumentFile && !requestDocumentUrl.trim()) {
       Alert.alert(
-        currentUserRole === "venue-owner" ? "Contract Required" : "CV Required",
-        currentUserRole === "venue-owner"
-          ? "Upload a contract PDF before sending this invite."
-          : "Upload your CV before sending this application.",
+        "CV Required",
+        "Upload your CV before sending this application.",
       );
       return;
     }
 
-    if (currentUserRole !== "venue-owner" && !normalizedVideoUrl) {
+    if (!normalizedVideoUrl) {
       Alert.alert("Video Required", "Add a video or reel link before sending this application.");
       return;
     }
@@ -385,90 +570,64 @@ const ProductionTeamDetailsSheet = forwardRef<
         uploadedDocumentUrl = await uploadListingRequestDocument(
           userId,
           requestDocumentFile,
-          currentUserRole === "venue-owner" ? "contracts" : "applications",
+          "applications",
         );
       } catch (uploadError) {
         console.error("Error uploading request document:", uploadError);
-        Alert.alert(
-          "Upload Failed",
-          currentUserRole === "venue-owner"
-            ? "We couldn't upload the contract right now."
-            : "We couldn't upload the CV right now.",
-        );
+        Alert.alert("Upload Failed", "We couldn't upload the CV right now.");
         return;
       }
     }
 
+    const senderEntityType = selectedApplicationGroup ? "group" : "musician";
+    const senderEntityName = selectedApplicationGroup?.name || currentUserName;
+    const senderEntityId = selectedApplicationGroup?.id || userId;
+
     const requestDetails = {
       pitch_message: normalizedPitchMessage,
       application_context: normalizedApplicationContext,
-      context_label: currentUserRole === "venue-owner" ? "Invite Context" : "Application Context",
-      request_kind: currentUserRole === "venue-owner" ? "invite" : "application",
-      cv_url: currentUserRole === "venue-owner" ? null : uploadedDocumentUrl,
-      video_url: currentUserRole === "venue-owner" ? null : normalizedVideoUrl,
-      contract_url: currentUserRole === "venue-owner" ? uploadedDocumentUrl : null,
+      context_label: "Application Context",
+      request_kind: "application",
+      cv_url: uploadedDocumentUrl,
+      video_url: normalizedVideoUrl,
+      contract_url: null,
+      apply_as: selectedApplicationGroup ? "group" : "solo",
+      selected_group_id: selectedApplicationGroup?.id || null,
+      selected_group_type: selectedApplicationGroup?.group_type || null,
     };
 
     setIsSendingRequest(true);
     try {
-      if (currentUserRole === "venue-owner") {
-        await submitListingRequest({
-          currentUserId: userId,
-          receiverUserId: team.owner_id,
-          message: normalizedPitchMessage,
-          senderEntityType: "venue",
-          senderEntityName: selectedVenue?.name || "Venue",
-          senderEntityId: selectedVenue?.id || null,
-          receiverEntityType: "production_team",
-          receiverEntityName: team.name,
-          receiverEntityId: team.id,
-          studioId: selectedVenue?.id || null,
-          productionTeamId: team.id,
-          notificationTitle: "New venue invite",
-          notificationMessage: `${selectedVenue?.name || "A venue"} invited your team to connect on MusikaLokal.`,
-          notificationImage: team.logo_url || null,
-          attachmentUrl: uploadedDocumentUrl,
-          extraMeta: {
-            source: "production_team_details",
-            request_kind: "invite",
-            request_details: requestDetails,
-          },
-        });
-      } else {
-        await submitListingRequest({
-          currentUserId: userId,
-          receiverUserId: team.owner_id,
-          message: normalizedPitchMessage,
-          senderEntityType: "musician",
-          senderEntityName: currentUserName,
-          senderEntityId: userId,
-          receiverEntityType: "production_team",
-          receiverEntityName: team.name,
-          receiverEntityId: team.id,
-          productionTeamId: team.id,
-          notificationTitle: "New team application",
-          notificationMessage: `${currentUserName} wants to join ${team.name}.`,
-          notificationImage: team.logo_url || null,
-          attachmentUrl: uploadedDocumentUrl,
-          extraMeta: {
-            source: "production_team_details",
-            request_kind: "application",
-            request_details: requestDetails,
-          },
-        });
-      }
+      await submitListingRequest({
+        currentUserId: userId,
+        receiverUserId: team.owner_id,
+        message: normalizedPitchMessage,
+        senderEntityType,
+        senderEntityName,
+        senderEntityId,
+        receiverEntityType: "production_team",
+        receiverEntityName: team.name,
+        receiverEntityId: team.id,
+        groupId: selectedApplicationGroup?.id || null,
+        productionTeamId: team.id,
+        notificationTitle: "New team application",
+        notificationMessage: `${senderEntityName} wants to join ${team.name}.`,
+        notificationImage: team.logo_url || null,
+        attachmentUrl: uploadedDocumentUrl,
+        extraMeta: {
+          source: "production_team_details",
+          request_kind: "application",
+          request_details: requestDetails,
+        },
+      });
 
       setRequestMessage("");
       setRequestApplicationContext("");
       setRequestDocumentFile(null);
       setRequestDocumentUrl("");
       setRequestVideoUrl("");
-      Alert.alert(
-        "Success",
-        currentUserRole === "venue-owner"
-          ? "Your structured team invite has been sent."
-          : "Your structured application has been sent.",
-      );
+      setSelectedGroupId(null);
+      Alert.alert("Success", "Your structured application has been sent.");
     } catch (error) {
       console.error("Error sending production team request:", error);
       const errorMessage =
@@ -487,13 +646,349 @@ const ProductionTeamDetailsSheet = forwardRef<
     requestDocumentUrl,
     requestMessage,
     requestVideoUrl,
-    selectedVenue,
+    selectedApplicationGroup,
     team?.id,
     team?.logo_url,
     team?.name,
     team?.owner_id,
     userId,
   ]);
+
+  const renderTabs = () => (
+    <View style={[styles.tabsContainer, { borderBottomColor: colors.border }]}> 
+      {tabsToRender.map((tab) => (
+        <TouchableOpacity
+          key={tab}
+          activeOpacity={1}
+          style={[
+            styles.tab,
+            activeTab === tab && {
+              borderBottomColor: colors.primary,
+              borderBottomWidth: 2,
+            },
+          ]}
+          onPress={() => setActiveTab(tab)}
+        >
+          <Text
+            style={[
+              styles.tabText,
+              activeTab === tab
+                ? { color: colors.primary, fontFamily: "Poppins_600SemiBold" }
+                : { color: colors.textSecondary },
+            ]}
+          >
+            {tab}
+          </Text>
+        </TouchableOpacity>
+      ))}
+    </View>
+  );
+
+  const renderApplyAsOptions = () => {
+    const applyOptions = [
+      {
+        id: null,
+        name: "Individual",
+        subtitle: "Apply as a solo musician",
+        icon: "person" as const,
+      },
+      ...applyAsGroups.map((groupItem) => ({
+        id: groupItem.id,
+        name: groupItem.name,
+        subtitle: groupItem.group_type === "duo" ? "Duo" : "Group",
+        icon: "people" as const,
+      })),
+    ];
+
+    return (
+      <View style={styles.sectionBlock}>
+        <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>Apply As</Text>
+        {loadingGroups ? (
+          <View style={styles.selectorLoadingWrap}>
+            <ActivityIndicator color={colors.primary} />
+          </View>
+        ) : (
+          <View style={styles.optionList}>
+            {applyOptions.map((option) => {
+              const isSelected = selectedGroupId === option.id;
+              return (
+                <TouchableOpacity
+                  key={option.id ?? "__solo__"}
+                  activeOpacity={0.85}
+                  onPress={() => setSelectedGroupId(option.id)}
+                  style={[
+                    styles.optionCard,
+                    {
+                      borderColor: isSelected ? colors.primary : colors.border,
+                      backgroundColor: isSelected
+                        ? isDark
+                          ? `${colors.primary}26`
+                          : `${colors.primary}14`
+                        : colors.background,
+                    },
+                  ]}
+                >
+                  <View
+                    style={[
+                      styles.optionIconWrap,
+                      {
+                        backgroundColor: isSelected ? colors.primary : colors.card,
+                        borderColor: isSelected ? colors.primary : colors.border,
+                      },
+                    ]}
+                  >
+                    <Ionicons name={option.icon} size={16} color={isSelected ? "#FFF" : colors.primary} />
+                  </View>
+                  <View style={styles.optionCopy}>
+                    <Text style={[styles.optionTitle, { color: colors.text }]}>{option.name}</Text>
+                    <Text style={[styles.optionSubtitle, { color: colors.textSecondary }]}>{option.subtitle}</Text>
+                  </View>
+                  {isSelected ? <Ionicons name="checkmark-circle" size={20} color={colors.primary} /> : null}
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        )}
+      </View>
+    );
+  };
+
+  const renderAboutContent = () => (
+    <>
+      <View style={styles.sectionBlock}>
+        <Text style={[styles.sectionTitle, { color: colors.text }]}>About</Text>
+        <Text style={[styles.aboutDescription, { color: colors.textSecondary }]}> 
+          {team?.description?.trim() || "Production crew, management, and venue-ready coordination in one team."}
+        </Text>
+      </View>
+
+      <View style={styles.statsRow}>
+        <View
+          style={[
+            styles.statCard,
+            { backgroundColor: isDark ? "#1F2937" : "#F3F4F6", flex: 1 },
+          ]}
+        >
+          <Text style={[styles.statLabel, { color: colors.textSecondary }]}>Category</Text>
+          <Text style={[styles.statValue, { color: colors.text }]}>Production Team</Text>
+        </View>
+        <View
+          style={[
+            styles.statCard,
+            { backgroundColor: isDark ? "#1F2937" : "#F3F4F6", flex: 1 },
+          ]}
+        >
+          <Text style={[styles.statLabel, { color: colors.textSecondary }]}>Rating</Text>
+          <Text style={[styles.statValue, { color: colors.text }]}>-</Text>
+        </View>
+      </View>
+
+      <View style={styles.sectionBlock}>
+        <Text style={[styles.sectionTitle, { color: colors.text }]}>Overview</Text>
+        <View style={styles.infoGrid}>
+          <View style={[styles.infoCard, { backgroundColor: colors.card, borderColor: colors.border }]}> 
+            <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>Owner</Text>
+            <Text style={[styles.infoValue, { color: colors.text }]} numberOfLines={1}>
+              {ownerMember?.full_name || "Not listed"}
+            </Text>
+          </View>
+          <View style={[styles.infoCard, { backgroundColor: colors.card, borderColor: colors.border }]}> 
+            <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>Created</Text>
+            <Text style={[styles.infoValue, { color: colors.text }]} numberOfLines={1}>
+              {createdLabel || "Recently added"}
+            </Text>
+          </View>
+        </View>
+      </View>
+
+      <View style={styles.sectionBlock}>
+        <View style={styles.membersHeader}>
+          <Text style={[styles.sectionTitle, { color: colors.text }]}>Members</Text>
+          <Text style={[styles.membersCount, { color: colors.textSecondary }]}>
+            {members.length} total
+          </Text>
+        </View>
+
+        {members.length === 0 ? (
+          <View style={[styles.emptyMembersCard, { backgroundColor: colors.card, borderColor: colors.border }]}> 
+            <Text style={[styles.emptyMembersText, { color: colors.textSecondary }]}>No members were listed for this team yet.</Text>
+          </View>
+        ) : (
+          members.map((member) => (
+            <View
+              key={member.user_id}
+              style={[styles.memberCard, { backgroundColor: colors.card, borderColor: colors.border }]}
+            >
+              <View style={styles.memberRow}>
+                {member.avatar_url ? (
+                  <CachedImage uri={member.avatar_url} style={styles.avatar} />
+                ) : (
+                  <View style={[styles.avatarPlaceholder, { backgroundColor: colors.border }]}> 
+                    <Ionicons name="person" size={18} color={colors.textSecondary} />
+                  </View>
+                )}
+                <View style={styles.memberCopy}>
+                  <Text style={[styles.memberName, { color: colors.text }]} numberOfLines={1}>
+                    {member.full_name}
+                  </Text>
+                  <Text style={[styles.memberRole, { color: colors.textSecondary }]}>
+                    {formatRoleLabel(member.role)}
+                  </Text>
+                </View>
+                {member.role === "owner" ? (
+                  <View style={[styles.ownerBadge, { backgroundColor: accentSoft }]}> 
+                    <Text style={[styles.ownerBadgeText, { color: accentColor }]}>Owner</Text>
+                  </View>
+                ) : null}
+              </View>
+            </View>
+          ))
+        )}
+      </View>
+
+
+    </>
+  );
+
+  const renderConnectContent = () => {
+    if (!canShowConnectTab) {
+      return null;
+    }
+
+    return (
+      <View style={[styles.infoCard, { backgroundColor: colors.card, borderColor: colors.border }]}> 
+        <Text style={[styles.stateMessage, { color: colors.textSecondary, textAlign: "left", marginTop: 0 }]}> 
+          Introduce yourself with a pitch, application context, a required CV upload, and a required video link.
+        </Text>
+
+        {renderApplyAsOptions()}
+
+        <Text style={[styles.infoLabel, { color: colors.textSecondary, marginTop: 16 }]}>Pitch / Intro *</Text>
+        <View style={[styles.messageBox, { backgroundColor: colors.background, borderColor: colors.border, marginTop: 8 }]}> 
+          <TextInput
+            style={[styles.messageInput, { color: colors.text }]}
+            placeholder="Tell the team about your experience and why you'd be a good fit."
+            placeholderTextColor={colors.textSecondary}
+            multiline
+            textAlignVertical="top"
+            value={requestMessage}
+            onChangeText={setRequestMessage}
+          />
+        </View>
+
+        <Text style={[styles.infoLabel, { color: colors.textSecondary, marginTop: 16 }]}>Application Context *</Text>
+        <View style={[styles.messageBox, { backgroundColor: colors.background, borderColor: colors.border, marginTop: 8 }]}> 
+          <TextInput
+            style={[styles.messageInput, { color: colors.text }]}
+            placeholder="Share your strengths, availability, role interest, or what you can contribute."
+            placeholderTextColor={colors.textSecondary}
+            multiline
+            textAlignVertical="top"
+            value={requestApplicationContext}
+            onChangeText={setRequestApplicationContext}
+          />
+        </View>
+
+        <View style={styles.uploadFieldWrap}>
+          <DocumentUploader
+            label="Upload CV/Resume *"
+            onFileSelect={(file) => {
+              setRequestDocumentFile(file);
+              setRequestDocumentUrl("");
+            }}
+            existingUrl={requestDocumentUrl || undefined}
+          />
+        </View>
+
+        <Text style={[styles.infoLabel, { color: colors.textSecondary, marginTop: 16 }]}>Video / Reel Link *</Text>
+        <View style={[styles.compactInputBox, { backgroundColor: colors.background, borderColor: colors.border }]}> 
+          <TextInput
+            style={[styles.compactInput, { color: colors.text }]}
+            placeholder="Paste a YouTube, Drive, or portfolio video link"
+            placeholderTextColor={colors.textSecondary}
+            value={requestVideoUrl}
+            onChangeText={setRequestVideoUrl}
+            autoCapitalize="none"
+            autoCorrect={false}
+          />
+        </View>
+
+        <TouchableOpacity
+          activeOpacity={0.85}
+          onPress={handleSendConnectionRequest}
+          disabled={isSendingRequest}
+          style={[styles.primaryButton, { backgroundColor: colors.primary, marginTop: 16 }]}
+        >
+          {isSendingRequest ? (
+            <ActivityIndicator color="#FFF" />
+          ) : (
+            <Text style={styles.primaryButtonText}>
+              {selectedApplicationGroup
+                ? `Apply as ${selectedApplicationGroup.group_type === "duo" ? "Duo" : "Group"}`
+                : "Apply as Solo"}
+            </Text>
+          )}
+        </TouchableOpacity>
+      </View>
+    );
+  };
+
+  const renderReviewContent = () => (
+    <View>
+      <View style={styles.reviewHeader}>
+        <Text style={[styles.reviewRatingBig, { color: colors.text }]}>{reviewAverage.toFixed(1)}</Text>
+        <View>
+          <View style={{ flexDirection: "row" }}>
+            {[1, 2, 3, 4, 5].map((index) => (
+              <Ionicons
+                key={index}
+                name={index <= Math.round(reviewAverage) ? "star" : "star-outline"}
+                size={14}
+                color={colors.primary}
+              />
+            ))}
+          </View>
+          <Text style={{ color: colors.textSecondary, fontSize: 12, marginTop: 2 }}>
+            {reviews.length} reviews
+          </Text>
+        </View>
+      </View>
+
+      {loadingReviews ? (
+        <View style={styles.selectorLoadingWrap}>
+          <ActivityIndicator color={colors.primary} />
+        </View>
+      ) : reviews.length > 0 ? (
+        <View style={styles.reviewsScroll}>
+          {reviews.map((review) => (
+            <View key={review.id} style={[styles.reviewCard, { borderColor: colors.border }]}>
+              <View style={styles.reviewUser}>
+                <CachedImage
+                  uri={review.author?.avatar_url || null}
+                  style={styles.reviewAvatar}
+                  width={100}
+                  height={100}
+                  quality={68}
+                  cacheVersion={review.author?.updated_at || review.updated_at || review.created_at || review.id}
+                />
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.reviewName, { color: colors.text }]}>
+                    {review.author?.full_name || "Anonymous"}
+                  </Text>
+                  <Text style={[styles.reviewDate, { color: colors.textSecondary }]}>
+                    {new Date(review.created_at).toLocaleDateString()}
+                  </Text>
+                </View>
+              </View>
+              <Text style={[styles.reviewBody, { color: colors.text }]}>{review.content || "No written review."}</Text>
+            </View>
+          ))}
+        </View>
+      ) : (
+        <Text style={{ color: colors.textSecondary, fontStyle: "italic" }}>No reviews yet.</Text>
+      )}
+    </View>
+  );
 
   return (
     <TrackedBottomSheetModal
@@ -507,23 +1002,13 @@ const ProductionTeamDetailsSheet = forwardRef<
       enablePanDownToClose={true}
       backdropComponent={renderBackdrop}
       onDismiss={handleDismiss}
-      backgroundStyle={{ backgroundColor: colors.background }}
-      handleIndicatorStyle={{ backgroundColor: colors.textSecondary }}
+      backgroundStyle={{ backgroundColor: colors.background, borderRadius: 32 }}
+      handleIndicatorStyle={{
+        backgroundColor: isDark ? "#4B5563" : "#E5E7EB",
+        width: 40,
+        marginTop: 10,
+      }}
     >
-      <View style={[styles.header, { borderBottomColor: colors.border }]}> 
-        <View style={styles.headerCopy}>
-          <Text style={[styles.eyebrow, { color: colors.textSecondary }]}>Production Team</Text>
-          <Text style={[styles.title, { color: colors.text }]}>Team Details</Text>
-        </View>
-        <TouchableOpacity
-          activeOpacity={1}
-          onPress={closeSheet}
-          style={[styles.closeButton, { backgroundColor: colors.card, borderColor: colors.border }]}
-        >
-          <Ionicons name="close" size={18} color={colors.text} />
-        </TouchableOpacity>
-      </View>
-
       {loading ? (
         <View style={styles.stateContainer}>
           <ActivityIndicator size="large" color={colors.primary} />
@@ -551,237 +1036,76 @@ const ProductionTeamDetailsSheet = forwardRef<
           showsVerticalScrollIndicator={false}
           contentContainerStyle={[styles.scrollContent, { paddingBottom: contentBottomPadding }]}
         >
-          <View style={[styles.heroCard, { backgroundColor: colors.card, borderColor: colors.border }]}> 
+          <View style={styles.imageContainer}>
             {team.logo_url ? (
-              <CachedImage uri={team.logo_url} style={styles.teamLogo} />
+              <CachedImage
+                uri={team.logo_url}
+                style={[styles.image, { backgroundColor: colors.border }]}
+              />
             ) : (
-              <View style={[styles.teamLogoPlaceholder, { backgroundColor: accentSoft }]}> 
-                <Ionicons name="people" size={34} color={accentColor} />
+              <View style={[styles.image, { backgroundColor: accentColor }]}>
+                <View style={[styles.heroFallbackMark, { backgroundColor: accentSoft }]}> 
+                  <Ionicons name="people" size={42} color="#FFFFFF" />
+                </View>
               </View>
             )}
 
-            <Text style={[styles.teamName, { color: colors.text }]}>{team.name}</Text>
-            <Text style={[styles.teamDescription, { color: colors.textSecondary }]}>
-              {team.description?.trim() || "Production crew, management, and venue-ready coordination in one team."}
-            </Text>
+            <LinearGradient
+              colors={
+                team.logo_url
+                  ? ["rgba(0,0,0,0.48)", "transparent", "rgba(0,0,0,0.72)"]
+                  : ["rgba(0,0,0,0.12)", "rgba(0,0,0,0.28)", "rgba(0,0,0,0.56)"]
+              }
+              style={styles.gradient}
+            />
 
-            <View style={styles.chipRow}>
-              <View style={[styles.chip, { backgroundColor: accentSoft }]}> 
-                <Text style={[styles.chipText, { color: accentColor }]}>Production Team</Text>
-              </View>
-              <View style={[styles.chip, { backgroundColor: colors.border }]}> 
-                <Text style={[styles.chipText, { color: colors.text }]}> 
-                  {members.length} {members.length === 1 ? "Member" : "Members"}
-                </Text>
-              </View>
-              {membershipRole ? (
-                <View style={[styles.chip, { backgroundColor: colors.border }]}> 
-                  <Text style={[styles.chipText, { color: colors.text }]}>Your role: {formatRoleLabel(membershipRole)}</Text>
-                </View>
-              ) : null}
-            </View>
-          </View>
+            <View style={styles.headerActions}>
+              <TouchableOpacity activeOpacity={1} onPress={closeSheet} style={styles.roundBtn}>
+                <Ionicons name="close" size={22} color="#000" />
+              </TouchableOpacity>
 
-          <View style={styles.sectionBlock}>
-            <Text style={[styles.sectionTitle, { color: colors.text }]}>Overview</Text>
-            <View style={styles.infoGrid}>
-              <View style={[styles.infoCard, { backgroundColor: colors.card, borderColor: colors.border }]}> 
-                <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>Owner</Text>
-                <Text style={[styles.infoValue, { color: colors.text }]} numberOfLines={1}>
-                  {ownerMember?.full_name || "Not listed"}
-                </Text>
-              </View>
-              <View style={[styles.infoCard, { backgroundColor: colors.card, borderColor: colors.border }]}> 
-                <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>Created</Text>
-                <Text style={[styles.infoValue, { color: colors.text }]} numberOfLines={1}>
-                  {createdLabel || "Recently added"}
-                </Text>
-              </View>
-            </View>
-          </View>
-
-          {team && membershipRole == null && (currentUserRole === "musician" || currentUserRole === "venue-owner") ? (
-            <View style={styles.sectionBlock}>
-              <Text style={[styles.sectionTitle, { color: colors.text }]}>
-                {currentUserRole === "venue-owner" ? "Invite Production Team" : "Apply To This Team"}
-              </Text>
-              <View style={[styles.infoCard, { backgroundColor: colors.card, borderColor: colors.border }]}> 
-                <Text style={[styles.stateMessage, { color: colors.textSecondary, textAlign: "left", marginTop: 0 }]}> 
-                  {currentUserRole === "venue-owner"
-                    ? "Choose which venue is reaching out, then send a structured invite with a pitch, invite context, and a required contract upload."
-                    : "Introduce yourself with a pitch, application context, a required CV upload, and a required video link."}
-                </Text>
-
-                {currentUserRole === "venue-owner" ? (
-                  userVenues.length > 0 ? (
-                    <View style={styles.selectorWrap}>
-                      {userVenues.map((venue) => {
-                        const isSelected = selectedVenueId === venue.id;
-                        return (
-                          <TouchableOpacity
-                            key={venue.id}
-                            activeOpacity={0.85}
-                            onPress={() => setSelectedVenueId(venue.id)}
-                            style={[
-                              styles.selectorChip,
-                              {
-                                backgroundColor: isSelected ? colors.primary : colors.background,
-                                borderColor: isSelected ? colors.primary : colors.border,
-                              },
-                            ]}
-                          >
-                            <Ionicons name="business-outline" size={14} color={isSelected ? "#FFF" : colors.textSecondary} />
-                            <Text style={[styles.selectorChipText, { color: isSelected ? "#FFF" : colors.text }]}>{venue.name}</Text>
-                          </TouchableOpacity>
-                        );
-                      })}
-                    </View>
-                  ) : (
-                    <TouchableOpacity
-                      activeOpacity={0.85}
-                      onPress={() => router.push("/my_venue")}
-                      style={[styles.primaryButton, { backgroundColor: colors.primary, marginTop: 16 }]}
-                    >
-                      <Text style={styles.primaryButtonText}>Create Venue First</Text>
-                    </TouchableOpacity>
-                  )
+              <View style={styles.rightActions}>
+                {canMessageTeamOwner ? (
+                  <TouchableOpacity activeOpacity={1} onPress={openTeamChat} style={styles.roundBtn}>
+                    <Ionicons name="chatbubble-ellipses-outline" size={22} color="#000" />
+                  </TouchableOpacity>
                 ) : null}
-
-                <Text style={[styles.infoLabel, { color: colors.textSecondary, marginTop: 16 }]}>Pitch / Intro *</Text>
-                <View style={[styles.messageBox, { backgroundColor: colors.background, borderColor: colors.border, marginTop: 8 }]}> 
-                  <TextInput
-                    style={[styles.messageInput, { color: colors.text }]}
-                    placeholder={currentUserRole === "venue-owner" ? "Tell the team what kind of event or partnership you have in mind." : "Tell the team about your experience and why you'd be a good fit."}
-                    placeholderTextColor={colors.textSecondary}
-                    multiline
-                    textAlignVertical="top"
-                    value={requestMessage}
-                    onChangeText={setRequestMessage}
-                  />
-                </View>
-
-                <Text style={[styles.infoLabel, { color: colors.textSecondary, marginTop: 16 }]}>
-                  {currentUserRole === "venue-owner" ? "Invite Context *" : "Application Context *"}
-                </Text>
-                <View style={[styles.messageBox, { backgroundColor: colors.background, borderColor: colors.border, marginTop: 8 }]}> 
-                  <TextInput
-                    style={[styles.messageInput, { color: colors.text }]}
-                    placeholder={currentUserRole === "venue-owner" ? "Share event details, timing, technical scope, or partnership context." : "Share your strengths, availability, role interest, or what you can contribute."}
-                    placeholderTextColor={colors.textSecondary}
-                    multiline
-                    textAlignVertical="top"
-                    value={requestApplicationContext}
-                    onChangeText={setRequestApplicationContext}
-                  />
-                </View>
-
-                <DocumentUploader
-                  label={currentUserRole === "venue-owner" ? "Upload Contract *" : "Upload CV/Resume *"}
-                  onFileSelect={(file) => {
-                    setRequestDocumentFile(file);
-                    setRequestDocumentUrl("");
-                  }}
-                  existingUrl={requestDocumentUrl || undefined}
-                />
-
-                {currentUserRole !== "venue-owner" ? (
-                  <>
-                    <Text style={[styles.infoLabel, { color: colors.textSecondary, marginTop: 16 }]}>Video / Reel Link *</Text>
-                    <View style={[styles.compactInputBox, { backgroundColor: colors.background, borderColor: colors.border }]}> 
-                      <TextInput
-                        style={[styles.compactInput, { color: colors.text }]}
-                        placeholder="Paste a YouTube, Drive, or portfolio video link"
-                        placeholderTextColor={colors.textSecondary}
-                        value={requestVideoUrl}
-                        onChangeText={setRequestVideoUrl}
-                        autoCapitalize="none"
-                        autoCorrect={false}
-                      />
-                    </View>
-                  </>
-                ) : null}
-
-                <TouchableOpacity
-                  activeOpacity={0.85}
-                  onPress={handleSendConnectionRequest}
-                  disabled={isSendingRequest || (currentUserRole === "venue-owner" && userVenues.length === 0)}
-                  style={[styles.primaryButton, { backgroundColor: colors.primary, marginTop: 16 }]}
-                >
-                  {isSendingRequest ? (
-                    <ActivityIndicator color="#FFF" />
-                  ) : (
-                    <Text style={styles.primaryButtonText}>
-                      {currentUserRole === "venue-owner" ? "Send Venue Invite" : "Send Team Application"}
-                    </Text>
-                  )}
+                <TouchableOpacity activeOpacity={0.7} onPress={handleShare} style={styles.roundBtn}>
+                  <Ionicons name="share-outline" size={22} color="#000" />
+                </TouchableOpacity>
+                <TouchableOpacity activeOpacity={1} onPress={toggleFavorite} style={styles.roundBtn}>
+                  <Ionicons name={isFavorited ? "bookmark" : "bookmark-outline"} size={22} color={isFavorited ? "#6366F1" : "#000"} />
                 </TouchableOpacity>
               </View>
             </View>
-          ) : null}
 
-          <View style={styles.sectionBlock}>
-            <View style={styles.membersHeader}>
-              <Text style={[styles.sectionTitle, { color: colors.text }]}>Members</Text>
-              <Text style={[styles.membersCount, { color: colors.textSecondary }]}>
-                {members.length} total
-              </Text>
-            </View>
-
-            {members.length === 0 ? (
-              <View style={[styles.emptyMembersCard, { backgroundColor: colors.card, borderColor: colors.border }]}> 
-                <Text style={[styles.emptyMembersText, { color: colors.textSecondary }]}>No members were listed for this team yet.</Text>
+            <View style={styles.heroIdentity}>
+              <Text style={styles.heroTitle}>{team.name}</Text>
+              <View style={{ flexDirection: "row", alignItems: "center", marginTop: 4 }}>
+                <Ionicons name="people" size={14} color="#FFF" />
+                <Text style={[styles.heroMetaText, { marginLeft: 4 }]}>
+                  {members.length} {members.length === 1 ? "member" : "members"}
+                </Text>
+                <Text style={[styles.heroMetaText, { marginLeft: 12 }]}>
+                  {"• Led by "}{ownerMember?.full_name || "Production owner"}
+                </Text>
               </View>
-            ) : (
-              members.map((member) => (
-                <View
-                  key={member.user_id}
-                  style={[styles.memberCard, { backgroundColor: colors.card, borderColor: colors.border }]}
-                >
-                  <View style={styles.memberRow}>
-                    {member.avatar_url ? (
-                      <CachedImage uri={member.avatar_url} style={styles.avatar} />
-                    ) : (
-                      <View style={[styles.avatarPlaceholder, { backgroundColor: colors.border }]}> 
-                        <Ionicons name="person" size={18} color={colors.textSecondary} />
-                      </View>
-                    )}
-                    <View style={styles.memberCopy}>
-                      <Text style={[styles.memberName, { color: colors.text }]} numberOfLines={1}>
-                        {member.full_name}
-                      </Text>
-                      <Text style={[styles.memberRole, { color: colors.textSecondary }]}>
-                        {formatRoleLabel(member.role)}
-                      </Text>
-                    </View>
-                    {member.role === "owner" ? (
-                      <View style={[styles.ownerBadge, { backgroundColor: accentSoft }]}> 
-                        <Text style={[styles.ownerBadgeText, { color: accentColor }]}>Owner</Text>
-                      </View>
-                    ) : null}
-                  </View>
-                </View>
-              ))
-            )}
+              <View style={{ flexDirection: "row", alignItems: "center", marginTop: 4 }}>
+                <Ionicons name="bookmark" size={13} color="#FFF" />
+                <Text style={[styles.heroMetaText, { marginLeft: 6 }]}>
+                  {favoriteCount} bookmarked
+                </Text>
+              </View>
+            </View>
           </View>
 
-          <View style={styles.footerActions}>
-            {canMessageTeamOwner ? (
-              <TouchableOpacity
-                activeOpacity={0.85}
-                onPress={openTeamChat}
-                style={[styles.secondaryIconButton, { backgroundColor: colors.card, borderColor: colors.border }]}
-              >
-                <Ionicons name="chatbubble-ellipses-outline" size={18} color={colors.text} />
-              </TouchableOpacity>
-            ) : null}
-            <TouchableOpacity
-              activeOpacity={1}
-              onPress={handleOpenFullPage}
-              style={[styles.primaryButton, { backgroundColor: colors.primary, flex: 1, marginTop: 0 }]}
-            >
-              <Ionicons name="open-outline" size={18} color="#FFFFFF" />
-              <Text style={styles.primaryButtonText}>{primaryActionLabel}</Text>
-            </TouchableOpacity>
+          {showTabs ? renderTabs() : null}
+          <View style={styles.contentBody}>
+            {activeTab === "Connect"
+              ? renderConnectContent()
+              : activeTab === "Review"
+                ? renderReviewContent()
+                : renderAboutContent()}
           </View>
         </BottomSheetScrollView>
       )}
@@ -790,37 +1114,6 @@ const ProductionTeamDetailsSheet = forwardRef<
 });
 
 const styles = StyleSheet.create({
-  header: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingHorizontal: 20,
-    paddingBottom: 14,
-    borderBottomWidth: 1,
-  },
-  headerCopy: {
-    flex: 1,
-    paddingRight: 16,
-  },
-  eyebrow: {
-    fontFamily: "Poppins_500Medium",
-    fontSize: 11,
-    textTransform: "uppercase",
-    letterSpacing: 0.6,
-    marginBottom: 2,
-  },
-  title: {
-    fontFamily: "Poppins_700Bold",
-    fontSize: 24,
-  },
-  closeButton: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    alignItems: "center",
-    justifyContent: "center",
-    borderWidth: 1,
-  },
   stateContainer: {
     flex: 1,
     alignItems: "center",
@@ -849,40 +1142,166 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   scrollContent: {
-    paddingHorizontal: 16,
     paddingBottom: 24,
   },
-  heroCard: {
-    borderWidth: 1,
-    borderRadius: 24,
-    padding: 18,
-    alignItems: "center",
+  imageContainer: {
+    height: 280,
+    width: "100%",
+    position: "relative",
   },
-  teamLogo: {
-    width: 96,
-    height: 96,
-    borderRadius: 24,
-    marginBottom: 16,
-  },
-  teamLogoPlaceholder: {
-    width: 96,
-    height: 96,
-    borderRadius: 24,
+  image: {
+    width: "100%",
+    height: "100%",
     alignItems: "center",
     justifyContent: "center",
-    marginBottom: 16,
   },
-  teamName: {
+  gradient: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+  },
+  headerActions: {
+    position: "absolute",
+    top: 16,
+    left: 20,
+    right: 20,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    zIndex: 10,
+  },
+  rightActions: {
+    flexDirection: "row",
+    gap: 12,
+  },
+  roundBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: "#FFF",
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 4,
+    elevation: 4,
+  },
+  heroIdentity: {
+    position: "absolute",
+    left: 24,
+    right: 24,
+    bottom: 24,
+  },
+  statusRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+    marginBottom: 8,
+  },
+  heroPill: {
+    backgroundColor: "rgba(255,255,255,0.18)",
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  heroPillText: {
+    color: "#FFF",
+    fontFamily: "Poppins_500Medium",
+    fontSize: 12,
+  },
+  heroTitle: {
     fontFamily: "Poppins_700Bold",
-    fontSize: 22,
-    textAlign: "center",
+    fontSize: 28,
+    color: "#FFF",
+    textShadowColor: "rgba(0,0,0,0.5)",
+    textShadowOffset: { width: 0, height: 2 },
+    textShadowRadius: 4,
   },
-  teamDescription: {
+  heroMetaRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    flexWrap: "wrap",
+    gap: 6,
+    marginTop: 6,
+  },
+  heroMetaText: {
+    color: "#FFF",
+    fontFamily: "Poppins_400Regular",
+    fontSize: 14,
+  },
+  heroMetaBullet: {
+    color: "#FFF",
+    fontFamily: "Poppins_500Medium",
+    fontSize: 14,
+    marginHorizontal: 2,
+  },
+  heroFallbackMark: {
+    width: 96,
+    height: 96,
+    borderRadius: 28,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  contentBody: {
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    flex: 1,
+  },
+  tabsContainer: {
+    flexDirection: "row",
+    borderBottomWidth: 1,
+  },
+  tab: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 16,
+  },
+  tabText: {
+    fontFamily: "Poppins_500Medium",
+    fontSize: 14,
+  },
+  aboutDescription: {
     fontFamily: "Poppins_400Regular",
     fontSize: 14,
     lineHeight: 21,
-    textAlign: "center",
-    marginTop: 10,
+    textAlign: "left",
+  },
+  aboutActionButton: {
+    marginTop: 12,
+    alignSelf: "flex-start",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 999,
+  },
+  aboutActionButtonText: {
+    color: "#FFF",
+    fontFamily: "Poppins_600SemiBold",
+    fontSize: 12,
+  },
+  statsRow: {
+    flexDirection: "row",
+    gap: 12,
+    marginBottom: 24,
+  },
+  statCard: {
+    padding: 12,
+    borderRadius: 12,
+  },
+  statLabel: {
+    fontSize: 11,
+    textTransform: "uppercase",
+    fontFamily: "Poppins_600SemiBold",
+    marginBottom: 4,
+  },
+  statValue: {
+    fontSize: 16,
+    fontFamily: "Poppins_600SemiBold",
   },
   chipRow: {
     flexDirection: "row",
@@ -917,6 +1336,45 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderRadius: 18,
     padding: 14,
+  },
+  optionList: {
+    gap: 10,
+    marginTop: 10,
+  },
+  optionCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderRadius: 12,
+    borderWidth: 1.5,
+  },
+  optionIconWrap: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+  },
+  optionCopy: {
+    flex: 1,
+    marginLeft: 12,
+    marginRight: 10,
+  },
+  optionTitle: {
+    fontFamily: "Poppins_600SemiBold",
+    fontSize: 14,
+  },
+  optionSubtitle: {
+    fontFamily: "Poppins_400Regular",
+    fontSize: 12,
+    marginTop: 1,
+  },
+  selectorLoadingWrap: {
+    paddingVertical: 16,
+    alignItems: "center",
+    justifyContent: "center",
   },
   infoLabel: {
     fontFamily: "Poppins_500Medium",
@@ -992,6 +1450,52 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 21,
   },
+  reviewHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 16,
+    marginBottom: 24,
+    marginTop: 8,
+  },
+  reviewRatingBig: {
+    fontSize: 56,
+    fontFamily: "Poppins_600SemiBold",
+    lineHeight: 64,
+    letterSpacing: -1,
+  },
+  reviewsScroll: {
+    gap: 16,
+  },
+  reviewCard: {
+    width: "100%",
+    padding: 20,
+    borderRadius: 24,
+    borderWidth: 1,
+  },
+  reviewUser: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    marginBottom: 16,
+  },
+  reviewAvatar: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+  },
+  reviewName: {
+    fontFamily: "Poppins_600SemiBold",
+    fontSize: 15,
+  },
+  reviewDate: {
+    fontSize: 12,
+    opacity: 0.7,
+  },
+  reviewBody: {
+    fontFamily: "Poppins_400Regular",
+    fontSize: 14,
+    lineHeight: 22,
+  },
   primaryButton: {
     marginTop: 20,
     borderRadius: 18,
@@ -1052,6 +1556,9 @@ const styles = StyleSheet.create({
     fontFamily: "Poppins_400Regular",
     fontSize: 14,
   },
+  uploadFieldWrap: {
+    paddingTop: 16,
+  },
   compactInputBox: {
     marginTop: 8,
     borderRadius: 16,
@@ -1064,6 +1571,7 @@ const styles = StyleSheet.create({
     minHeight: 42,
     fontFamily: "Poppins_400Regular",
     fontSize: 14,
+    textAlignVertical: "center",
   },
 });
 

@@ -1255,6 +1255,7 @@ const styles = StyleSheet.create({
     optionCancelBtn: {
         marginTop: 12,
         alignItems: 'center',
+        justifyContent: 'center',
         paddingVertical: 14,
     },
     optionCancelText: {

@@ -34,7 +34,7 @@ export default function PlaylistSelectionSection({
   const selectedSet = new Set(selectedPlaylistIds);
 
   return (
-    <View style={{ marginTop: 20, gap: 12 }}>
+    <View style={{ marginTop: 24, marginBottom: 12, gap: 12 }}>
       <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 8, flex: 1 }}>
           <Text

@@ -224,6 +224,14 @@ const ListingDetailsSheet = forwardRef<
       { id: "band", name: "Band" },
     ] as const).filter(({ id }) => (slots?.[id]?.needed || 0) > 0);
   }, [group?.requirements?.slots]);
+  const listingCompletionRate = useMemo(() => {
+    const parsed = Number(group?.completion_rate);
+    if (!Number.isFinite(parsed)) {
+      return null;
+    }
+
+    return Math.max(0, Math.min(100, Math.round(parsed)));
+  }, [group?.completion_rate]);
 
   // Review State
   const [reviews, setReviews] = useState<any[]>([]);
@@ -1300,7 +1308,7 @@ const ListingDetailsSheet = forwardRef<
           } else {
             // Try Profile (Solo Artist)
             const { data: profileData } = await supabase
-              .from("profiles")
+              .from("profiles_with_stats")
               .select("*")
               .eq("id", listingId)
               .single();
@@ -2357,19 +2365,6 @@ const ListingDetailsSheet = forwardRef<
     }, 200);
   };
 
-  // Helper to calculate profile completion
-  const calculateCompletion = () => {
-    let score = 0;
-    let total = 5;
-    if (group.name) score++;
-    if (group.owner_avatar || group.image) score++;
-    if (group.description && group.description.length > 20) score++;
-    if (group.location) score++;
-    if (group.images && group.images.length > 1) score++;
-
-    return Math.round((score / total) * 100);
-  };
-
   const openListingChat = useCallback(() => {
     if (!userId) {
       showSheetAlert("info", "Login Required", "Please sign in to start chatting.");
@@ -2821,7 +2816,7 @@ const ListingDetailsSheet = forwardRef<
       styles={styles}
       currentUserId={currentUserId}
       onProfilePress={handleProfileNavigation}
-      calculateCompletion={calculateCompletion}
+      completionRate={listingCompletionRate}
       sheetRef={ref}
       listingId={listingId}
       connectionPanel={renderConnectionPanel()}
@@ -2896,7 +2891,7 @@ const ListingDetailsSheet = forwardRef<
       displayRate={effectiveDisplayRate}
       labels={labels}
       currentUserId={currentUserId}
-      calculateCompletion={calculateCompletion}
+      completionRate={listingCompletionRate}
       handleProfileNavigation={handleProfileNavigation}
       connectionPanel={renderConnectionPanel()}
     />

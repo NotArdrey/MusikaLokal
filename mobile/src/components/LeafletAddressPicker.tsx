@@ -361,6 +361,7 @@ const styles = StyleSheet.create({
         fontSize: 14,
         fontFamily: "Poppins_400Regular",
         paddingVertical: 10,
+        textAlignVertical: "center",
     },
     locationBtn: {
         width: 44,

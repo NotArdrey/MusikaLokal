@@ -261,6 +261,14 @@ const ListingDetailsSheet = forwardRef<
       }),
     [productionRoster, selectedSlotType],
   );
+  const listingCompletionRate = useMemo(() => {
+    const parsed = Number(group?.completion_rate);
+    if (!Number.isFinite(parsed)) {
+      return null;
+    }
+
+    return Math.max(0, Math.min(100, Math.round(parsed)));
+  }, [group?.completion_rate]);
   const selectedProductionRosterEntry = useMemo(
     () => filteredRequestRoster.find((entry: any) => entry.id === selectedProductionRosterId) || null,
     [filteredRequestRoster, selectedProductionRosterId],
@@ -1617,7 +1625,7 @@ const ListingDetailsSheet = forwardRef<
           } else {
             // Try Profile (Solo Artist)
             const { data: profileData } = await supabase
-              .from("profiles")
+              .from("profiles_with_stats")
               .select("*")
               .eq("id", listingId)
               .single();
@@ -1681,6 +1689,7 @@ const ListingDetailsSheet = forwardRef<
           const [
             mediaRowsResult,
             groupSettingsResult,
+            groupMembersResult,
           ] = await Promise.all([
             supabase
               .from("group_media")
@@ -1693,6 +1702,10 @@ const ListingDetailsSheet = forwardRef<
               .select("open_group_applications")
               .eq("id", data.id)
               .single(),
+            supabase
+              .from("group_members")
+              .select("user_id, role, profiles:user_id(full_name, avatar_url)")
+              .eq("group_id", data.id),
           ]);
 
           const mediaRows = mediaRowsResult.data;
@@ -1717,6 +1730,23 @@ const ListingDetailsSheet = forwardRef<
           if (!groupSettingsError && groupSettings) {
             resolvedOpenGroupApplications =
               groupSettings.open_group_applications === true;
+          }
+
+          if (!groupMembersResult.error && Array.isArray(groupMembersResult.data) && groupMembersResult.data.length > 0) {
+            const legacyMembers: any[] = Array.isArray(data.members) ? data.members : [];
+            const linkedMembers = groupMembersResult.data.map((row: any) => {
+              const legacy = legacyMembers.find((m: any) => m?.user_id && m.user_id === row.user_id);
+              return {
+                user_id: row.user_id,
+                name: row.profiles?.full_name || "Member",
+                avatar_url: row.profiles?.avatar_url || null,
+                instrument: legacy?.instrument || row.role || "Member",
+                role: row.role === "owner" || row.user_id === data.owner_id ? "Leader" : "Member",
+              };
+            });
+            // Sort: owner/leader first
+            linkedMembers.sort((a: any, b: any) => (a.role === "Leader" ? -1 : 1) - (b.role === "Leader" ? -1 : 1));
+            data = { ...data, members: linkedMembers };
           }
         }
         // Fetch owner profile separately
@@ -2519,8 +2549,7 @@ const ListingDetailsSheet = forwardRef<
     (group?.type === "Group" || group?.type === "Artist" || group?.type === "Venue");
   const hasGroupConnectContent =
     group?.type === "Group" &&
-    (!effectiveUserRole ||
-      effectiveUserRole === "venue-owner" ||
+    (effectiveUserRole === "venue-owner" ||
       (effectiveUserRole === "musician" && !!group?.requirements?.audition) ||
       hasStructuredConnectionTab);
   const shouldShowConnectTab = hasStructuredConnectionTab || hasGroupConnectContent;
@@ -2539,6 +2568,10 @@ const ListingDetailsSheet = forwardRef<
 
   const tabsToRender = useMemo(() => {
     const baseTabs = Array.isArray(labels.tabs) ? [...labels.tabs] : [];
+
+    if (!baseTabs.includes("Review")) {
+      baseTabs.push("Review");
+    }
 
     if (shouldShowConnectTab && !baseTabs.includes("Connect")) {
       const reviewTabIndex = baseTabs.indexOf("Review");
@@ -2837,19 +2870,6 @@ const ListingDetailsSheet = forwardRef<
         },
       });
     }, 200);
-  };
-
-  // Helper to calculate profile completion
-  const calculateCompletion = () => {
-    let score = 0;
-    let total = 5;
-    if (group.name) score++;
-    if (group.owner_avatar || group.image) score++;
-    if (group.description && group.description.length > 20) score++;
-    if (group.location) score++;
-    if (group.images && group.images.length > 1) score++;
-
-    return Math.round((score / total) * 100);
   };
 
   const openListingChat = useCallback(() => {
@@ -3388,7 +3408,7 @@ const ListingDetailsSheet = forwardRef<
       styles={styles}
       currentUserId={currentUserId}
       onProfilePress={handleProfileNavigation}
-      calculateCompletion={calculateCompletion}
+      completionRate={listingCompletionRate}
       sheetRef={ref}
       listingId={listingId}
     />
@@ -3478,7 +3498,7 @@ const ListingDetailsSheet = forwardRef<
       displayRate={effectiveDisplayRate}
       labels={labels}
       currentUserId={currentUserId}
-      calculateCompletion={calculateCompletion}
+      completionRate={listingCompletionRate}
       handleProfileNavigation={handleProfileNavigation}
       promotions={group?.promotions || []}
     />
@@ -4194,6 +4214,7 @@ const styles = StyleSheet.create({
     fontFamily: "Poppins_400Regular",
     fontSize: moderateScale(14),
     padding: 0,
+    textAlignVertical: "center",
   },
   dateBtn: {
     flex: 1,
@@ -4224,6 +4245,7 @@ const styles = StyleSheet.create({
     paddingVertical: moderateScale(16),
     borderRadius: moderateScale(16),
     alignItems: "center",
+    justifyContent: "center",
   },
   loadingButtonContent: {
     flexDirection: "row",
@@ -4470,6 +4492,7 @@ const styles = StyleSheet.create({
   },
   timeButton: {
     alignItems: "center",
+    justifyContent: "center",
   },
   slotGrid: {
     flexDirection: "row",
@@ -4483,6 +4506,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     minWidth: 80,
     alignItems: "center",
+    justifyContent: "center",
   },
   sectionHeader: {
     flexDirection: "row",

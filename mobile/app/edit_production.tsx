@@ -262,7 +262,7 @@ const styles = StyleSheet.create({
   heroTitle: { fontSize: 20, fontFamily: 'Poppins_700Bold' },
   heroText: { marginTop: 6, fontSize: 13, lineHeight: 20, fontFamily: 'Poppins_400Regular' },
   formCard: { borderWidth: 1, borderRadius: 22, padding: 18 },
-  label: { marginTop: 14, marginBottom: 8, fontSize: 13, fontFamily: 'Poppins_600SemiBold' },
+  label: { marginTop: 16, marginBottom: 10, fontSize: 13, fontFamily: 'Poppins_600SemiBold' },
   input: { borderWidth: 1, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, fontSize: 14, fontFamily: 'Poppins_400Regular' },
   textArea: { minHeight: 110, textAlignVertical: 'top' },
   helperText: { marginTop: 12, fontSize: 12, fontFamily: 'Poppins_500Medium' },

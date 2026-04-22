@@ -29,7 +29,7 @@ interface StudioGigVenueAboutTabProps {
   displayRate: string;
   labels: { aboutTitle: string };
   currentUserId: string | null;
-  calculateCompletion: () => number;
+  completionRate: number | null;
   handleProfileNavigation: () => void;
   promotions?: any[];
 }
@@ -45,15 +45,10 @@ const StudioGigVenueAboutTab = ({
   displayRate,
   labels,
   currentUserId,
-  calculateCompletion,
+  completionRate,
   handleProfileNavigation,
   promotions = [],
 }: StudioGigVenueAboutTabProps) => {
-  const parsedCompletionRate = Number(group.completion_rate);
-  const baseCompletionRate = Number.isFinite(parsedCompletionRate)
-    ? parsedCompletionRate
-    : calculateCompletion();
-  const completionRate = Math.max(0, Math.min(100, Math.round(baseCompletionRate)));
   const managerId = group.owner_id || group.organizer_id;
   const destinationText =
     group?.location || group?.address || group?.name || "Destination";
@@ -432,7 +427,7 @@ const StudioGigVenueAboutTab = ({
           >
             <Text style={[styles.statLabel, { color: colors.textSecondary }]}>Completion</Text>
             <Text style={[styles.statValue, { color: colors.text }]} numberOfLines={1}>
-              {`${completionRate}%`}
+              {completionRate !== null ? `${completionRate}%` : "N/A"}
             </Text>
           </View>
         </View>
@@ -657,43 +652,56 @@ const StudioGigVenueAboutTab = ({
             </View>
           </View>
 
-          <View
-            style={{
-              marginTop: 12,
-              flexDirection: "row",
-              alignItems: "center",
-              gap: 8,
-            }}
-          >
+          {completionRate !== null ? (
             <View
               style={{
-                flex: 1,
-                height: 6,
-                backgroundColor: isDark ? "#374151" : "#E5E7EB",
-                borderRadius: 3,
-                overflow: "hidden",
+                marginTop: 12,
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 8,
               }}
             >
               <View
                 style={{
-                  width: `${completionRate}%`,
-                  height: "100%",
-                  backgroundColor:
-                    completionRate === 100 ? "#10B981" : colors.primary,
+                  flex: 1,
+                  height: 6,
+                  backgroundColor: isDark ? "#374151" : "#E5E7EB",
+                  borderRadius: 3,
+                  overflow: "hidden",
                 }}
-              />
+              >
+                <View
+                  style={{
+                    width: `${completionRate}%`,
+                    height: "100%",
+                    backgroundColor:
+                      completionRate === 100 ? "#10B981" : colors.primary,
+                  }}
+                />
+              </View>
+              <Text
+                style={{
+                  fontSize: 11,
+                  fontFamily: "Poppins_600SemiBold",
+                  color:
+                    completionRate === 100 ? "#10B981" : colors.textSecondary,
+                }}
+              >
+                {`${completionRate}% Complete`}
+              </Text>
             </View>
+          ) : (
             <Text
               style={{
+                marginTop: 12,
                 fontSize: 11,
-                fontFamily: "Poppins_600SemiBold",
-                color:
-                  completionRate === 100 ? "#10B981" : colors.textSecondary,
+                fontFamily: "Poppins_500Medium",
+                color: colors.textSecondary,
               }}
             >
-              {`${completionRate}% Complete`}
+              Completion rate unavailable
             </Text>
-          </View>
+          )}
         </View>
 
         <TouchableOpacity
@@ -750,47 +758,60 @@ const StudioGigVenueAboutTab = ({
             </View>
           </View>
 
-          <View
-            style={{
-              marginTop: 12,
-              flexDirection: "row",
-              alignItems: "center",
-              gap: 8,
-            }}
-          >
+          {completionRate !== null ? (
             <View
               style={{
-                flex: 1,
-                height: 6,
-                backgroundColor: isDark ? "#374151" : "#E5E7EB",
-                borderRadius: 3,
-                overflow: "hidden",
+                marginTop: 12,
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 8,
               }}
             >
               <View
                 style={{
-                  width: `${completionRate}%`,
-                  height: "100%",
-                  backgroundColor:
+                  flex: 1,
+                  height: 6,
+                  backgroundColor: isDark ? "#374151" : "#E5E7EB",
+                  borderRadius: 3,
+                  overflow: "hidden",
+                }}
+              >
+                <View
+                  style={{
+                    width: `${completionRate}%`,
+                    height: "100%",
+                    backgroundColor:
+                      completionRate === 100
+                        ? "#10B981"
+                        : colors.primary,
+                  }}
+                />
+              </View>
+              <Text
+                style={{
+                  fontSize: 11,
+                  fontFamily: "Poppins_600SemiBold",
+                  color:
                     completionRate === 100
                       ? "#10B981"
-                      : colors.primary,
+                      : colors.textSecondary,
                 }}
-              />
+              >
+                {`${completionRate}% Complete`}
+              </Text>
             </View>
+          ) : (
             <Text
               style={{
+                marginTop: 12,
                 fontSize: 11,
-                fontFamily: "Poppins_600SemiBold",
-                color:
-                  completionRate === 100
-                    ? "#10B981"
-                    : colors.textSecondary,
+                fontFamily: "Poppins_500Medium",
+                color: colors.textSecondary,
               }}
             >
-              {`${completionRate}% Complete`}
+              Completion rate unavailable
             </Text>
-          </View>
+          )}
         </View>
 
         <TouchableOpacity

@@ -1158,7 +1158,7 @@ const styles = StyleSheet.create({
     inputContainer: {
         flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, height: 56, borderRadius: 16, borderWidth: 1
     },
-    input: { flex: 1, marginLeft: 12, height: '100%', fontFamily: 'Poppins_400Regular' },
+    input: { flex: 1, marginLeft: 12, height: '100%', fontFamily: 'Poppins_400Regular', textAlignVertical: 'center' },
     formGap: { gap: 16 },
     backLink: { flexDirection: 'row', alignItems: 'center', marginBottom: 24, gap: 4 },
     progressContainer: { flexDirection: 'row', gap: 8, marginBottom: 24, justifyContent: 'center' },

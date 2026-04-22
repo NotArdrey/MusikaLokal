@@ -2031,7 +2031,7 @@ const styles = StyleSheet.create({
     fontFamily: "Poppins_600SemiBold",
   },
   inputContainer: {
-    marginBottom: IS_WEB ? 18 : 16,
+    marginBottom: 20,
   },
   inputLabel: {
     marginBottom: 10,

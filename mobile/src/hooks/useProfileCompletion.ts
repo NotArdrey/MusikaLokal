@@ -27,18 +27,30 @@ export function useProfileCompletion() {
         try {
             const { data, error } = await supabase
                 .from('profiles')
-                .select('contact_number, address')
+                .select('contact_number, address, location')
                 .eq('id', userId)
-                .single();
+                .maybeSingle();
+
+            if (error) {
+                console.error('Error fetching profile:', error);
+                setIsProfileComplete(false);
+                return;
+            }
 
             if (data) {
-                const complete = !!(data.contact_number && data.address);
+                const hasContact = typeof data.contact_number === 'string' && data.contact_number.trim().length > 0;
+                const hasAddress =
+                    (typeof data.address === 'string' && data.address.trim().length > 0) ||
+                    (typeof data.location === 'string' && data.location.trim().length > 0);
+                const complete = hasContact && hasAddress;
                 setIsProfileComplete(complete);
-            } else if (error) {
-                console.error('Error fetching profile:', error);
+            } else {
+                // No profile row yet (first-login race): force incomplete state.
+                setIsProfileComplete(false);
             }
         } catch (e) {
             console.error('Error checking profile:', e);
+            setIsProfileComplete(false);
         } finally {
             setChecking(false);
         }

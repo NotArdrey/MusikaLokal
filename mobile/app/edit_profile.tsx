@@ -478,13 +478,63 @@ export default function EditProfileScreen() {
         profilePayload.avatar_url = uploadedAvatarUrl;
       }
 
-      const { error: profileUpdateError } = await supabase
+      const { data: updatedProfile, error: profileUpdateError } = await supabase
         .from("profiles")
         .update(profilePayload)
-        .eq("id", userId);
+        .eq("id", userId)
+        .select("id")
+        .maybeSingle();
 
       if (profileUpdateError) {
         throw profileUpdateError;
+      }
+
+      if (!updatedProfile) {
+        const {
+          data: { user },
+          error: userError,
+        } = await supabase.auth.getUser();
+
+        if (userError || !user) {
+          throw userError || new Error("Unable to resolve your account. Please sign in again.");
+        }
+
+        if (!user.email) {
+          throw new Error("Your account email is missing. Please sign in again.");
+        }
+
+        const metadataRole =
+          typeof user.user_metadata?.role === "string"
+            ? user.user_metadata.role.trim().toLowerCase()
+            : "";
+        const normalizedRole = ["musician", "studio-owner", "venue-owner", "producer"].includes(
+          metadataRole,
+        )
+          ? metadataRole
+          : "musician";
+
+        const fallbackName =
+          displayName.trim() ||
+          (typeof user.user_metadata?.full_name === "string"
+            ? user.user_metadata.full_name.trim()
+            : "") ||
+          (typeof user.user_metadata?.name === "string"
+            ? user.user_metadata.name.trim()
+            : "") ||
+          user.email.split("@")[0] ||
+          "MusikaLokal User";
+
+        const { error: profileInsertError } = await supabase.from("profiles").insert({
+          id: userId,
+          email: user.email,
+          role: normalizedRole,
+          full_name: fallbackName,
+          ...profilePayload,
+        });
+
+        if (profileInsertError) {
+          throw profileInsertError;
+        }
       }
 
       const { error: skillsDeleteError } = await supabase
@@ -1050,7 +1100,7 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontFamily: "Poppins_600SemiBold",
     letterSpacing: 0.5,
-    marginBottom: 6,
+    marginBottom: 10,
   },
   input: {
     borderWidth: 1,
@@ -1120,6 +1170,7 @@ const styles = StyleSheet.create({
     paddingVertical: 15,
     borderRadius: 10,
     alignItems: "center",
+    justifyContent: "center",
     marginTop: 10,
   },
   saveBtnText: {
@@ -1131,6 +1182,7 @@ const styles = StyleSheet.create({
     paddingVertical: 15,
     borderRadius: 10,
     alignItems: "center",
+    justifyContent: "center",
     borderWidth: 1,
     marginTop: 10,
   },

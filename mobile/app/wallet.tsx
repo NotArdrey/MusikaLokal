@@ -2473,6 +2473,7 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 24,
     fontFamily: 'Poppins_600SemiBold',
+    textAlignVertical: 'center',
   },
   inputHint: {
     fontSize: 12,
@@ -2490,6 +2491,7 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     borderWidth: 1,
     alignItems: 'center',
+    justifyContent: 'center',
   },
   quickAmountText: {
     fontSize: 14,
@@ -2662,6 +2664,7 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     fontSize: 16,
     fontFamily: 'Poppins_400Regular',
+    textAlignVertical: 'center',
   },
   // Withdrawal history styles
   withdrawalItem: {

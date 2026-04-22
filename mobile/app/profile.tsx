@@ -2757,6 +2757,7 @@ const styles = StyleSheet.create({
   tabButton: {
     flex: 1,
     alignItems: "center",
+    justifyContent: "center",
     paddingVertical: 14,
   },
   tabText: {
@@ -2783,6 +2784,7 @@ const styles = StyleSheet.create({
     fontFamily: "Poppins_400Regular",
     fontSize: 13,
     paddingVertical: 0,
+    textAlignVertical: "center",
   },
   gigTimelineBlock: {
     gap: 8,

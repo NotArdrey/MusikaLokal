@@ -990,8 +990,12 @@ export default function EditGigScreen() {
     );
   };
 
-  const renderSectionHeader = (title: string, icon: string) => (
-    <View style={styles.sectionHeader}>
+  const renderSectionHeader = (
+    title: string,
+    icon: string,
+    isFirstSection = false,
+  ) => (
+    <View style={[styles.sectionHeader, isFirstSection && styles.firstSectionHeader]}>
       <Ionicons name={icon as any} size={18} color={colors.primary} />
       <Text style={[styles.sectionTitle, { color: colors.text }]}>{title}</Text>
     </View>
@@ -1465,7 +1469,7 @@ export default function EditGigScreen() {
           contentContainerStyle={styles.scrollContent}
           style={styles.flex1}
         >
-          {renderSectionHeader("Basic Details", "information-circle")}
+          {renderSectionHeader("Basic Details", "information-circle", true)}
           {renderInput("Gig Title", gigName, setGigName, "e.g. Saturday Night Live")}
           {renderInput("Description", description, setDescription, "Brief description of the gig", true)}
 
@@ -3041,18 +3045,21 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
-    marginBottom: 16,
     marginTop: 24,
+    marginBottom: 16,
+  },
+  firstSectionHeader: {
+    marginTop: 0,
   },
   sectionTitle: {
     fontFamily: "Poppins_600SemiBold",
     fontSize: 16,
   },
   inputContainer: {
-    marginBottom: 16,
+    marginBottom: 20,
   },
   inputLabel: {
-    marginBottom: 8,
+    marginBottom: 10,
     fontSize: 12,
     textTransform: "uppercase",
     letterSpacing: 1,
@@ -3210,6 +3217,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     fontSize: 14,
     fontFamily: "Poppins_500Medium",
+    textAlignVertical: "center",
   },
   ampmBtn: {
     paddingVertical: 10,
@@ -3269,6 +3277,7 @@ const styles = StyleSheet.create({
     flex: 1,
     minWidth: "45%",
     alignItems: "center",
+    justifyContent: "center",
   },
   experienceButtonText: {
     fontSize: 13,
@@ -3277,6 +3286,7 @@ const styles = StyleSheet.create({
   textInput: {
     padding: 16,
     fontFamily: "Poppins_400Regular",
+    textAlignVertical: "center",
   },
   // Slot Card Styles
   slotCard: {

@@ -1259,8 +1259,12 @@ export default function EditGroupScreen() {
     }
   }, [authorized, id, currentUserId]);
 
-  const renderSectionHeader = (title: string, icon: string) => (
-    <View style={styles.sectionHeader}>
+  const renderSectionHeader = (
+    title: string,
+    icon: string,
+    isFirstSection = false,
+  ) => (
+    <View style={[styles.sectionHeader, isFirstSection && styles.firstSectionHeader]}>
       <Ionicons name={icon as any} size={18} color={colors.primary} />
       <Text style={[styles.sectionTitle, { color: colors.text }]}>{title}</Text>
     </View>
@@ -1417,7 +1421,7 @@ export default function EditGroupScreen() {
             },
           ]}
         >
-          {renderSectionHeader("Group Details", "people")}
+          {renderSectionHeader("Group Details", "people", true)}
 
           {/* Group Type Selection */}
           <View style={styles.inputContainer}>
@@ -2453,14 +2457,18 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
+    marginTop: 24,
     marginBottom: 16,
+  },
+  firstSectionHeader: {
+    marginTop: 0,
   },
   sectionTitle: {
     fontFamily: "Poppins_600SemiBold",
     fontSize: 16,
   },
   inputContainer: {
-    marginBottom: IS_WEB ? 18 : 16,
+    marginBottom: 20,
   },
   inputLabel: {
     marginBottom: 10,

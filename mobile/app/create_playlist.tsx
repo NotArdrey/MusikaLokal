@@ -561,7 +561,7 @@ const styles = StyleSheet.create({
   sectionHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: 16, marginBottom: 6 },
   sectionLabel: { marginTop: 0, marginBottom: 0 },
   helperText: { fontSize: moderateScale(12), lineHeight: 18 },
-  input: { borderWidth: 1, borderRadius: 10, padding: 12, fontSize: moderateScale(14) },
+  input: { borderWidth: 1, borderRadius: 10, padding: 12, fontSize: moderateScale(14), textAlignVertical: "center" },
   textArea: { minHeight: 100, textAlignVertical: "top" },
   visibilityRow: { flexDirection: "row", gap: 10, marginTop: 4 },
   visibilityPill: { flexDirection: "row", alignItems: "center", borderWidth: 1, borderRadius: 20, paddingHorizontal: 16, paddingVertical: 8 },

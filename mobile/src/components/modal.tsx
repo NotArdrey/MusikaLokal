@@ -320,6 +320,7 @@ const styles = StyleSheet.create({
     borderRadius: 12, // rounded-xl
     paddingVertical: 14, // py-3.5
     alignItems: 'center',
+    justifyContent: 'center',
   },
   confirmButtonText: {
     color: 'white',
@@ -331,6 +332,7 @@ const styles = StyleSheet.create({
     borderRadius: 12, // rounded-xl
     paddingVertical: 14, // py-3.5
     alignItems: 'center',
+    justifyContent: 'center',
   },
   cancelButtonText: {
     fontSize: 14, // text-sm

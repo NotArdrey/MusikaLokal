@@ -3567,8 +3567,12 @@ export default function EditStudioScreen() {
     }
   };
 
-  const renderSectionHeader = (title: string, icon: string) => (
-    <View style={styles.sectionHeader}>
+  const renderSectionHeader = (
+    title: string,
+    icon: string,
+    isFirstSection = false,
+  ) => (
+    <View style={[styles.sectionHeader, isFirstSection && styles.firstSectionHeader]}>
       <Ionicons name={icon as any} size={18} color={colors.primary} />
       <Text style={[styles.sectionTitle, { color: colors.text }]}>{title}</Text>
     </View>
@@ -3744,7 +3748,7 @@ export default function EditStudioScreen() {
           contentContainerStyle={styles.scrollContent}
           style={styles.flex1}
         >
-          {renderSectionHeader("Studio Details", "business")}
+          {renderSectionHeader("Studio Details", "business", true)}
           {renderInput("Studio Name", studioName, setStudioName)}
 
           {/* Studio Type Selection */}
@@ -6555,17 +6559,21 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
+    marginTop: 24,
     marginBottom: 16,
+  },
+  firstSectionHeader: {
+    marginTop: 0,
   },
   sectionTitle: {
     fontFamily: "Poppins_600SemiBold",
     fontSize: 16,
   },
   inputContainer: {
-    marginBottom: 16,
+    marginBottom: 20,
   },
   inputLabel: {
-    marginBottom: 8,
+    marginBottom: 10,
     fontSize: 12,
     textTransform: "uppercase",
     letterSpacing: 1,
