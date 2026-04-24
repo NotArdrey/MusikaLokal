@@ -24,6 +24,7 @@ import CustomAlert, { AlertType } from "../src/components/CustomAlert";
 import { useAuth } from "../src/context/AuthContext";
 import { showTopToast } from "../src/context/TopToastContext";
 import { useTheme } from "../src/context/ThemeContext";
+import { formatFriendlyDateTime } from "../src/utils/friendlyDateTime";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const moderateScale = (size: number, factor = 0.3) => {
@@ -279,7 +280,7 @@ export default function SellerHubScreen() {
                       </View>
                     </View>
                     <Text style={[styles.orderBuyer, { color: colors.textSecondary }]}>
-                      {o.buyer_name || "Buyer"} â€¢ {new Date(o.created_at).toLocaleDateString()}
+                      {o.buyer_name || "Buyer"} â€¢ {formatFriendlyDateTime(o.created_at)}
                     </Text>
                     <Text style={[styles.orderTotal, { color: colors.text }]}>{formatPrice(o.total_amount)}</Text>
                   </View>

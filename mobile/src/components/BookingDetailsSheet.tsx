@@ -13,6 +13,7 @@ import {
 } from "react-native";
 import { supabase } from "../../lib/supabase";
 import { useTheme } from "../context/ThemeContext";
+import { formatFriendlyDateTime } from "../utils/friendlyDateTime";
 import {
   formatRecordingHours,
   formatRecordingRuleShort,
@@ -170,9 +171,16 @@ const BookingDetailsSheet = forwardRef<
   const formatTime = (time?: string) => {
     if (!time) return "";
     try {
+      const normalized = time.trim();
+
+      // Preserve already formatted values like "2:30 PM".
+      if (/\b(am|pm)\b/i.test(normalized)) {
+        return normalized;
+      }
+
       // Handle ISO string
-      if (time.includes("T")) {
-        return new Date(time).toLocaleTimeString([], {
+      if (normalized.includes("T")) {
+        return new Date(normalized).toLocaleTimeString([], {
           hour: "2-digit",
           minute: "2-digit",
           hour12: true,
@@ -180,7 +188,7 @@ const BookingDetailsSheet = forwardRef<
       }
 
       // Handle both "HH:MM:SS" and "HH:MM" formats
-      const timeParts = time.split(":");
+      const timeParts = normalized.split(":");
       const hours = parseInt(timeParts[0]);
       const minutes = parseInt(timeParts[1] || "0");
 
@@ -197,22 +205,44 @@ const BookingDetailsSheet = forwardRef<
 
   const formatDateTime = (dateTime?: string | null) => {
     if (!dateTime) return null;
-    try {
-      return new Date(dateTime).toLocaleString([], {
-        month: "short",
-        day: "numeric",
-        hour: "numeric",
-        minute: "2-digit",
-      });
-    } catch {
-      return null;
+    const formatted = formatFriendlyDateTime(dateTime, {
+      forceIncludeTime: true,
+      fallback: "",
+    });
+    return formatted || null;
+  };
+
+  const splitDateAndTimeLabel = (value?: string | null) => {
+    const normalized = String(value || "").trim();
+    if (!normalized) {
+      return { dateLabel: "", timeLabel: "" };
     }
+
+    if (normalized.includes("•")) {
+      const [dateLabel, ...timeParts] = normalized.split("•");
+      return {
+        dateLabel: dateLabel?.trim() || normalized,
+        timeLabel: timeParts.join("•").trim(),
+      };
+    }
+
+    const atSeparator = /\s+at\s+/i;
+    if (atSeparator.test(normalized)) {
+      const split = normalized.split(atSeparator);
+      return {
+        dateLabel: split[0]?.trim() || normalized,
+        timeLabel: split.slice(1).join(" at ").trim(),
+      };
+    }
+
+    return { dateLabel: normalized, timeLabel: "" };
   };
 
   if (!booking) return null;
 
   const isStudio = booking.type_id === "studio_booking" || !!booking.studio_id;
   const isGig = booking.type_id === "gig_application" || !!booking.gig_id;
+  const bookingDateTimeLabel = splitDateAndTimeLabel(booking?.date);
   const normalizedSessionType =
     typeof booking.session_type === "string"
       ? booking.session_type.trim().toLowerCase()
@@ -885,9 +915,7 @@ const BookingDetailsSheet = forwardRef<
                             year: "numeric",
                           },
                         )
-                        : booking.date?.includes("•")
-                          ? booking.date.split("•")[0]
-                          : booking.date}
+                        : bookingDateTimeLabel.dateLabel || booking.date}
                     </Text>
                   </View>
 
@@ -903,9 +931,7 @@ const BookingDetailsSheet = forwardRef<
                     <Text style={[styles.detailValue, { color: colors.text }]}>
                       {formatTime(
                         booking.start_time ||
-                        (booking.date?.includes("•")
-                          ? booking.date.split("•")[1]?.trim()
-                          : ""),
+                        bookingDateTimeLabel.timeLabel,
                       )}
                       {booking.end_time
                         ? ` - ${formatTime(booking.end_time)}`

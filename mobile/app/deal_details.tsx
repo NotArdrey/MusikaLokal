@@ -19,6 +19,7 @@ import Modal from "../src/components/modal";
 import CustomAlert, { AlertType } from "../src/components/CustomAlert";
 import { useAuth } from "../src/context/AuthContext";
 import { useTheme } from "../src/context/ThemeContext";
+import { formatFriendlyDateTime } from "../src/utils/friendlyDateTime";
 
 const { width } = Dimensions.get("window");
 const scale = (size: number) => (width / 375) * size;
@@ -313,7 +314,7 @@ export default function DealDetailsScreen() {
         </View>
       )}
       <Text style={{ fontSize: moderateScale(11), color: colors.textSecondary, marginTop: moderateScale(4) }}>
-        {new Date(term.created_at).toLocaleString()}
+        {formatFriendlyDateTime(term.created_at)}
       </Text>
     </View>
   );
@@ -347,7 +348,7 @@ export default function DealDetailsScreen() {
             </Text>
           )}
           <Text style={{ fontSize: moderateScale(11), color: colors.textSecondary, marginTop: 2 }}>
-            {new Date(event.created_at).toLocaleString()}
+            {formatFriendlyDateTime(event.created_at)}
           </Text>
         </View>
       </View>

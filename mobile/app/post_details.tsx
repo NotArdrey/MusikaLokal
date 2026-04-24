@@ -22,6 +22,7 @@ import CustomAlert, { AlertType } from "../src/components/CustomAlert";
 import { useAuth } from "../src/context/AuthContext";
 import { showTopToast } from "../src/context/TopToastContext";
 import { useTheme } from "../src/context/ThemeContext";
+import { formatFriendlyDateTime } from "../src/utils/friendlyDateTime";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const moderateScale = (size: number, factor = 0.3) => {
@@ -251,7 +252,7 @@ export default function PostDetailsScreen() {
           <View style={{ flex: 1, marginLeft: 12 }}>
             <Text style={[styles.authorName, { color: colors.text }]}>{post.author_name || "User"}</Text>
             <Text style={[styles.postTime, { color: colors.textSecondary }]}>
-              {new Date(post.created_at).toLocaleString()} â€¢ {post.visibility === "followers" ? "Followers" : "Public"}
+              {formatFriendlyDateTime(post.created_at)} â€¢ {post.visibility === "followers" ? "Followers" : "Public"}
             </Text>
           </View>
           {isOwner ? (
@@ -307,7 +308,7 @@ export default function PostDetailsScreen() {
                   <Text style={[styles.commentAuthor, { color: colors.text }]}>{c.author_name || "User"}</Text>
                   <Text style={[styles.commentBody, { color: colors.textSecondary }]}>{c.body}</Text>
                   <Text style={[styles.commentTime, { color: colors.textSecondary }]}>
-                    {new Date(c.created_at).toLocaleString()}
+                    {formatFriendlyDateTime(c.created_at)}
                   </Text>
                 </View>
                 {c.author_id === userId && (

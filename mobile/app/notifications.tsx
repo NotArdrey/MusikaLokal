@@ -431,18 +431,61 @@ export default function NotificationsScreen() {
 
     const formatTime = (dateString: string) => {
         const date = new Date(dateString);
+        if (Number.isNaN(date.getTime())) {
+            return '';
+        }
+
         const now = new Date();
         const diffMs = now.getTime() - date.getTime();
-        const diffHrs = diffMs / (1000 * 60 * 60);
+        const minuteMs = 60 * 1000;
+        const hourMs = 60 * minuteMs;
+        const dayMs = 24 * hourMs;
 
-        if (diffHrs < 24) {
-            if (diffHrs < 1) {
-                const diffMins = Math.floor(diffMs / (1000 * 60));
-                return diffMins <= 1 ? 'Just now' : `${diffMins}m ago`;
-            }
-            return `${Math.floor(diffHrs)}h ago`;
+        const timeLabel = date.toLocaleTimeString([], {
+            hour: 'numeric',
+            minute: '2-digit',
+        });
+
+        if (diffMs < minuteMs) {
+            return 'Just now';
         }
-        return date.toLocaleDateString();
+
+        if (diffMs < hourMs) {
+            const diffMins = Math.floor(diffMs / minuteMs);
+            return `${diffMins}m ago`;
+        }
+
+        const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        const startOfDate = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+        const dayDiff = Math.floor((startOfToday.getTime() - startOfDate.getTime()) / dayMs);
+
+        if (dayDiff === 0) {
+            return `Today at ${timeLabel}`;
+        }
+
+        if (dayDiff === 1) {
+            return `Yesterday at ${timeLabel}`;
+        }
+
+        if (dayDiff < 7) {
+            const weekdayLabel = date.toLocaleDateString([], { weekday: 'short' });
+            return `${weekdayLabel} at ${timeLabel}`;
+        }
+
+        if (date.getFullYear() === now.getFullYear()) {
+            const monthDayLabel = date.toLocaleDateString([], {
+                month: 'short',
+                day: 'numeric',
+            });
+            return `${monthDayLabel} at ${timeLabel}`;
+        }
+
+        const fullDateLabel = date.toLocaleDateString([], {
+            month: 'short',
+            day: 'numeric',
+            year: 'numeric',
+        });
+        return `${fullDateLabel} at ${timeLabel}`;
     };
 
     const today = new Date().toDateString();

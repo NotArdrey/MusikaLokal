@@ -7,6 +7,7 @@ import CustomAlert, { AlertType } from '../src/components/CustomAlert';
 import VerificationModal from '../src/components/VerificationModal';
 import { useAuth } from '../src/context/AuthContext';
 import { useTheme } from '../src/context/ThemeContext';
+import { formatFriendlyDateTime } from '../src/utils/friendlyDateTime';
 
 
 
@@ -93,7 +94,7 @@ const describeOwnerSubscription = (role: string | null | undefined, status: unkn
   const parsedExpiry = new Date(expiresAt);
   if (Number.isNaN(parsedExpiry.getTime())) return 'Active';
 
-  return `Active until ${parsedExpiry.toLocaleDateString()}`;
+  return `Active until ${formatFriendlyDateTime(expiresAt, { fallback: 'Active' })}`;
 };
 
 const isAdminRole = (role: unknown): boolean => {

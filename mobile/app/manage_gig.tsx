@@ -23,6 +23,7 @@ import {
     hasValidCoordinates,
     openNavigationDirections,
 } from "../src/utils/navigation";
+import { formatFriendlyDateTime } from "../src/utils/friendlyDateTime";
 
 const { width: screenWidth } = Dimensions.get("window");
 const PORTFOLIO_ITEM_SIZE = (screenWidth - 48 - 8) / 3; // 3 columns with gaps
@@ -424,13 +425,13 @@ export default function GigDetailsScreen() {
               style={[styles.headerLocation, { color: colors.textSecondary }]}
             >
               {gig?.event_date
-                ? new Date(gig.event_date).toLocaleDateString()
+                ? formatFriendlyDateTime(gig.event_date, { forceDateOnly: true })
                 : "Date TBA"}
               {gig?.requirements?.event_start_time &&
                 gig?.requirements?.event_end_time
-                ? ` â€¢ ${gig.requirements.event_start_time} - ${gig.requirements.event_end_time}`
+                ? ` at ${gig.requirements.event_start_time} - ${gig.requirements.event_end_time}`
                 : ""}
-              {" â€¢ "}
+              {" - "}
               {gig?.location || "Location N/A"}
             </Text>
             {hasValidCoordinates(gig?.latitude, gig?.longitude) && (
@@ -1621,7 +1622,7 @@ export default function GigDetailsScreen() {
                             fontFamily: "Poppins_400Regular",
                           }}
                         >
-                          {new Date(review.created_at).toLocaleDateString()}
+                          {formatFriendlyDateTime(review.created_at)}
                         </Text>
                       </View>
                       <View style={[styles.starsRow, { marginBottom: 8 }]}>

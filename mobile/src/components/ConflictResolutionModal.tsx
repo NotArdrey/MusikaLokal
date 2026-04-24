@@ -12,6 +12,7 @@ import {
     View,
 } from 'react-native';
 import { useTheme } from '../context/ThemeContext';
+import { formatFriendlyDateTime } from '../utils/friendlyDateTime';
 
 export interface ConflictingBooking {
   id: string;
@@ -65,12 +66,9 @@ export default function ConflictResolutionModal({
   const [isResolving, setIsResolving] = useState(false);
 
   const formatDate = (dateStr: string) => {
-    const date = new Date(dateStr);
-    return date.toLocaleDateString('en-US', {
-      weekday: 'short',
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric',
+    return formatFriendlyDateTime(dateStr, {
+      forceDateOnly: true,
+      fallback: dateStr,
     });
   };
 
@@ -300,7 +298,7 @@ export default function ConflictResolutionModal({
                             },
                           ]}
                         >
-                          {formatDate(conflict.newAvailableSlot.date)},{' '}
+                          {formatDate(conflict.newAvailableSlot.date)} at{' '}
                           {formatTime(conflict.newAvailableSlot.start_time)} -{' '}
                           {formatTime(conflict.newAvailableSlot.end_time)}
                         </Text>

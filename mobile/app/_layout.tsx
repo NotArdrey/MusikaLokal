@@ -15,7 +15,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { AppState, LogBox, View } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import "../global.css";
-import { supabase } from "../lib/supabase";
+import { prepareRealtimeAuth, supabase } from "../lib/supabase";
 import { AuthProvider, useAuth } from "../src/context/AuthContext";
 import Navbar from "../src/components/navbar";
 import { BottomOverlayProvider } from "../src/context/BottomOverlayContext";
@@ -247,6 +247,7 @@ function RootContent() {
     let activeChannel: ReturnType<typeof supabase.channel> | null = null;
     let activeChannelStatus = "INITIAL";
     let activeChannelGeneration = 0;
+    let connectAttemptGeneration = 0;
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
     let latestSubscribeStartedAt = Date.now();
 
@@ -260,12 +261,17 @@ function RootContent() {
       }
     };
 
-    const disposeChannel = (reason: string) => {
+    const disposeChannel = async (reason: string) => {
       if (activeChannel) {
         const channelToDispose = activeChannel;
         activeChannel = null;
         activeChannelGeneration += 1;
-        supabase.removeChannel(channelToDispose);
+
+        try {
+          await supabase.removeChannel(channelToDispose);
+        } catch {
+          // Ignore remove failures; reconnect logic continues to self-heal.
+        }
       }
 
       logNotificationToastDebug("Disposed notification toast channel", {
@@ -281,14 +287,19 @@ function RootContent() {
       reconnectTimer = setTimeout(() => {
         reconnectTimer = null;
         if (!isDisposed) {
-          connectChannel(`retry:${reason}`);
+          void connectChannel(`retry:${reason}`);
         }
       }, NOTIFICATION_TOAST_RECONNECT_DELAY_MS);
     };
 
-    const connectChannel = (reason: string) => {
+    const connectChannel = async (reason: string) => {
       clearReconnectTimer();
-      disposeChannel(`connect:${reason}`);
+      const connectAttempt = ++connectAttemptGeneration;
+      await disposeChannel(`connect:${reason}`);
+
+      if (isDisposed || connectAttempt !== connectAttemptGeneration) {
+        return;
+      }
 
       if (isDisposed || !isNotificationAppActive()) {
         logNotificationToastDebug("Skipping notification toast connect while app inactive", {
@@ -296,6 +307,20 @@ function RootContent() {
           activeUserId,
           appState: notificationAppStateRef.current,
         });
+        return;
+      }
+
+      const realtimeAuthReady = await prepareRealtimeAuth();
+      if (isDisposed || connectAttempt !== connectAttemptGeneration) {
+        return;
+      }
+
+      if (!realtimeAuthReady) {
+        console.warn("[notification-toast] Realtime auth unavailable; retrying", {
+          reason,
+          activeUserId,
+        });
+        scheduleReconnect("auth-unavailable");
         return;
       }
 
@@ -367,7 +392,7 @@ function RootContent() {
         });
     };
 
-    connectChannel("initial");
+    void connectChannel("initial");
 
     const appStateSub = AppState.addEventListener("change", (nextState) => {
       const previousState = notificationAppStateRef.current;
@@ -380,7 +405,7 @@ function RootContent() {
       if (previousState === "active" && nextState !== "active") {
         notificationBackgroundedAtRef.current = Date.now();
         clearReconnectTimer();
-        disposeChannel(`app-state:${nextState}`);
+        void disposeChannel(`app-state:${nextState}`);
         return;
       }
 
@@ -389,7 +414,7 @@ function RootContent() {
         notificationBackgroundedAtRef.current = null;
 
         if (activeChannelStatus !== "SUBSCRIBED") {
-          connectChannel("foreground");
+          void connectChannel("foreground");
         }
 
         if (backgroundedAt) {
@@ -406,7 +431,7 @@ function RootContent() {
       isDisposed = true;
       clearReconnectTimer();
       appStateSub.remove();
-      disposeChannel("cleanup");
+      void disposeChannel("cleanup");
     };
   }, [
     backfillRecentNotificationToasts,

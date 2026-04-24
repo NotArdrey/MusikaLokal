@@ -31,6 +31,7 @@ import { showTopToast } from "../src/context/TopToastContext";
 import { useTheme } from "../src/context/ThemeContext";
 import { createBookingCheckout } from "../src/services/paymongo";
 import { buildNotificationRouteMeta } from "../src/utils/notificationNavigation";
+import { formatFriendlyDateTime } from "../src/utils/friendlyDateTime";
 import {
   formatRecordingHours,
   formatRecordingRuleShort,
@@ -897,6 +898,24 @@ export default function BookingsScreen() {
     (studioRows || []).forEach((b: any) => {
       const startDate = new Date(`${b.booking_date}T${b.start_time}`);
       const endDate = new Date(`${b.booking_date}T${b.end_time}`);
+      const bookingDateLabel = formatFriendlyDateTime(b.booking_date, {
+        forceDateOnly: true,
+        fallback: b.booking_date || "Date TBA",
+      });
+      const startTimeLabel = Number.isNaN(startDate.getTime())
+        ? b.start_time
+        : startDate.toLocaleTimeString([], {
+            hour: "numeric",
+            minute: "2-digit",
+            hour12: true,
+          });
+      const endTimeLabel = Number.isNaN(endDate.getTime())
+        ? b.end_time
+        : endDate.toLocaleTimeString([], {
+            hour: "numeric",
+            minute: "2-digit",
+            hour12: true,
+          });
       const isUnpaid =
         b.status === "pending" &&
         (!b.payment_status ||
@@ -915,7 +934,7 @@ export default function BookingsScreen() {
         start_time: b.start_time,
         end_time: b.end_time,
         name: b.studio?.name || "Unknown Studio",
-        date: `${b.booking_date} â€¢ ${b.start_time} - ${b.end_time}`,
+        date: `${bookingDateLabel} at ${startTimeLabel} - ${endTimeLabel}`,
         image:
           b.studio?.studio_media
             ?.sort((a: any, b: any) => (a.sort_order || 0) - (b.sort_order || 0))[0]
@@ -1189,7 +1208,7 @@ export default function BookingsScreen() {
               type_id: "booking_request",
               created_at: request.created_at,
               raw_date: request.created_at,
-              date: new Date(request.created_at).toLocaleDateString(),
+              date: formatFriendlyDateTime(request.created_at),
               name: counterpartyName,
               image: counterpartyProfile?.avatar_url || REQUEST_PLACEHOLDER_IMAGE,
               status: getConnectionRequestStatusLabel(request.status),
@@ -2533,11 +2552,7 @@ export default function BookingsScreen() {
     const timePart = timeValue.substring(0, 5);
     const parsed = new Date(`${dateValue}T${timePart}`);
     if (isNaN(parsed.getTime())) return `${dateValue} ${timePart}`;
-    return `${parsed.toLocaleDateString()} â€¢ ${parsed.toLocaleTimeString([], {
-      hour: "2-digit",
-      minute: "2-digit",
-      hour12: true,
-    })}`;
+    return formatFriendlyDateTime(parsed.toISOString());
   };
 
   const handleRelocationDecision = async (item: any, accepted: boolean) => {
@@ -3822,7 +3837,7 @@ export default function BookingsScreen() {
                         </Text>
                       )}
                       <Text style={{ fontSize: moderateScale(11), color: colors.textSecondary, marginTop: moderateScale(6) }}>
-                        {new Date(item.updated_at || item.created_at).toLocaleDateString()}
+                        {formatFriendlyDateTime(item.updated_at || item.created_at)}
                       </Text>
                     </View>
                   </TouchableOpacity>
@@ -3886,7 +3901,7 @@ export default function BookingsScreen() {
                         </Text>
                       )}
                       <Text style={{ fontSize: moderateScale(11), color: colors.textSecondary, marginTop: moderateScale(6) }}>
-                        {new Date(item.created_at).toLocaleDateString()}
+                        {formatFriendlyDateTime(item.created_at)}
                       </Text>
 
                       {/* Action buttons for pending items */}
@@ -4018,7 +4033,7 @@ export default function BookingsScreen() {
                         </Text>
                       ) : null}
                       <Text style={{ fontSize: moderateScale(11), color: colors.textSecondary, marginTop: moderateScale(6) }}>
-                        {new Date(item.created_at || item.raw_date).toLocaleDateString()}
+                        {formatFriendlyDateTime(item.created_at || item.raw_date)}
                       </Text>
 
                       {(item.request_contract_url || item.request_cv_url || item.request_video_url) && (
@@ -5202,8 +5217,8 @@ export default function BookingsScreen() {
                         <View style={{ marginTop: 8, gap: 4 }}>
                           {(() => {
                             const dateStr = item.raw_date
-                              ? new Date(item.raw_date).toLocaleDateString()
-                              : new Date(item.start_time).toLocaleDateString();
+                              ? formatFriendlyDateTime(item.raw_date, { forceDateOnly: true })
+                              : formatFriendlyDateTime(item.start_time, { forceDateOnly: true });
 
                             let timeStr = "";
                             if (item.start_time) {
@@ -5593,7 +5608,7 @@ export default function BookingsScreen() {
                                     fontFamily: "Poppins_400Regular",
                                   }}
                                 >
-                                  Respond before: {new Date(item.relocation_expires_at).toLocaleString()}
+                                  Respond before: {formatFriendlyDateTime(item.relocation_expires_at)}
                                 </Text>
                               ) : null}
                             </View>

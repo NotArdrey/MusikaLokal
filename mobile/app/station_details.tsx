@@ -24,6 +24,7 @@ import { useAuth } from "../src/context/AuthContext";
 import { useRadioPlayer } from "../src/context/RadioPlayerContext";
 import { showTopToast } from "../src/context/TopToastContext";
 import { useTheme } from "../src/context/ThemeContext";
+import { formatFriendlyDateTime } from "../src/utils/friendlyDateTime";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const moderateScale = (size: number, factor = 0.3) => {
@@ -526,7 +527,9 @@ export default function StationDetailsScreen() {
                     {slot.playlist?.title || slot.label || "Playlist"}
                   </Text>
                   <Text style={[styles.slotTime, { color: colors.textSecondary }]}>
-                    {slot.starts_at ? new Date(slot.starts_at).toLocaleString() : `Position ${slot.position + 1}`}
+                    {slot.starts_at
+                      ? formatFriendlyDateTime(slot.starts_at)
+                      : `Position ${slot.position + 1}`}
                   </Text>
                 </View>
                 {liveSlotIds.has(slot.id) && (

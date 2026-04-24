@@ -9,6 +9,7 @@ import Navbar from '../src/components/navbar';
 import Skeleton from '../src/components/Skeleton';
 import { useBottomBarClearance } from '../src/hooks/useBottomBarClearance';
 import { useTheme } from '../src/context/ThemeContext';
+import { formatFriendlyDateTime } from '../src/utils/friendlyDateTime';
 
 export default function AccountDetailsScreen() {
   const { colors, isDark } = useTheme();
@@ -51,12 +52,12 @@ export default function AccountDetailsScreen() {
     const isExpired = !!expiryDate && hasValidExpiry && expiryDate <= new Date();
 
     if (isExpired && expiryDate) {
-      return `Expired on ${expiryDate.toLocaleDateString()}`;
+      return `Expired on ${formatFriendlyDateTime(expiryRaw, { forceDateOnly: true })}`;
     }
 
     if (profile?.is_verified) {
       if (hasValidExpiry && expiryDate) {
-        return `Verified â€¢ Expires ${expiryDate.toLocaleDateString()}`;
+        return `Verified - Expires ${formatFriendlyDateTime(expiryRaw, { forceDateOnly: true })}`;
       }
       return 'Verified';
     }
@@ -199,7 +200,7 @@ export default function AccountDetailsScreen() {
           ))}
 
           <Text style={[styles.footerText, { color: colors.textSecondary }]}>
-            Member since {profile?.created_at ? new Date(profile.created_at).toLocaleDateString() : 'Unknown'}
+            Member since {profile?.created_at ? formatFriendlyDateTime(profile.created_at) : 'Unknown'}
           </Text>
 
         </ScrollView>

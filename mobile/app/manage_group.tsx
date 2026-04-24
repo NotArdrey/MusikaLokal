@@ -26,6 +26,7 @@ import {
     hasValidCoordinates,
     openNavigationDirections,
 } from "../src/utils/navigation";
+import { formatFriendlyDateTime } from "../src/utils/friendlyDateTime";
 
 import { useLocalSearchParams } from "expo-router";
 
@@ -1057,7 +1058,7 @@ export default function GroupDetailsScreen() {
                         <Text style={{ color: colors.textSecondary }}>
                           Applied on:{" "}
                           {app.created_at
-                            ? new Date(app.created_at).toLocaleDateString()
+                            ? formatFriendlyDateTime(app.created_at)
                             : "N/A"}
                         </Text>
                       </View>
@@ -1131,7 +1132,7 @@ export default function GroupDetailsScreen() {
                             fontFamily: "Poppins_400Regular",
                           }}
                         >
-                          {new Date(review.created_at).toLocaleDateString()}
+                          {formatFriendlyDateTime(review.created_at)}
                         </Text>
                       </View>
                       <View style={[styles.starsRow, { marginBottom: 8 }]}>

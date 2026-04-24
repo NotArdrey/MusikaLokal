@@ -11,6 +11,7 @@ import Navbar from '../src/components/navbar';
 import { useBottomBarClearance } from '../src/hooks/useBottomBarClearance';
 import { showTopToast } from '../src/context/TopToastContext';
 import { useTheme } from '../src/context/ThemeContext';
+import { formatFriendlyDateTime } from '../src/utils/friendlyDateTime';
 
 // Payout Method Type
 interface PayoutMethod {
@@ -931,7 +932,7 @@ export default function WalletScreen() {
 
       Alert.alert(
         'Subscription Cancelled',
-        `Your subscription will remain active until ${new Date(subscription.current_period_end).toLocaleDateString()}.`
+        `Your subscription will remain active until ${formatFriendlyDateTime(subscription.current_period_end)}.`
       );
 
       setCancelSubscriptionModalVisible(false);
@@ -1078,7 +1079,7 @@ export default function WalletScreen() {
                     <View style={styles.unpaidInfo}>
                       <Text style={styles.unpaidName} numberOfLines={1}>{booking.studio?.name}</Text>
                       <Text style={styles.unpaidDate}>
-                        {new Date(booking.booking_date).toLocaleDateString()} â€¢ {booking.start_time?.slice(0, 5)}
+                        {formatFriendlyDateTime(booking.booking_date, { forceDateOnly: true })} at {booking.start_time?.slice(0, 5) || 'Time TBA'}
                       </Text>
                       <Text style={styles.unpaidAmount}>
                         Balance: â‚±{booking.remaining_balance?.toLocaleString()}
@@ -1119,8 +1120,8 @@ export default function WalletScreen() {
                       <Text style={[styles.subscriptionTitle, { color: colors.text }]}>{subscription.plan?.name || 'Subscription'} Plan</Text>
                       <Text style={[styles.subscriptionDate, { color: colors.textSecondary }]}>
                         {subscription.cancel_at_period_end
-                          ? `Expires on ${new Date(subscription.current_period_end).toLocaleDateString()}`
-                          : `Renews on ${new Date(subscription.current_period_end).toLocaleDateString()}`
+                          ? `Expires on ${formatFriendlyDateTime(subscription.current_period_end)}`
+                          : `Renews on ${formatFriendlyDateTime(subscription.current_period_end)}`
                         }
                       </Text>
                     </View>
@@ -1211,7 +1212,7 @@ export default function WalletScreen() {
                           </View>
                         </View>
                         <Text style={[styles.transactionDate, { color: colors.textSecondary }]}>
-                          {new Date(withdrawal.created_at).toLocaleDateString()} â€¢ ****{withdrawal.payout_account_number.slice(-4)}
+                          {formatFriendlyDateTime(withdrawal.created_at)} â€¢ ****{withdrawal.payout_account_number.slice(-4)}
                         </Text>
                       </View>
                     </View>
@@ -1296,7 +1297,7 @@ export default function WalletScreen() {
                           </Text>
                         )}
                         <Text style={[styles.transactionDate, { color: colors.textSecondary }]}>
-                          {new Date(tx.created_at).toLocaleDateString()}
+                          {formatFriendlyDateTime(tx.created_at)}
                         </Text>
                       </View>
                     </View>
@@ -1821,7 +1822,7 @@ export default function WalletScreen() {
         visible={cancelSubscriptionModalVisible}
         onClose={() => setCancelSubscriptionModalVisible(false)}
         title="Cancel Subscription"
-        message={`Your subscription will remain active until ${subscription ? new Date(subscription.current_period_end).toLocaleDateString() : ''}. After that, you won't be charged again.`}
+        message={`Your subscription will remain active until ${subscription ? formatFriendlyDateTime(subscription.current_period_end) : ''}. After that, you won't be charged again.`}
         buttonText="Cancel Subscription"
         danger={true}
         onConfirm={handleCancelSubscription}

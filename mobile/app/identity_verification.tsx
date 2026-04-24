@@ -9,6 +9,7 @@ import Header from '../src/components/header';
 import Navbar from '../src/components/navbar';
 import { useAuth } from '../src/context/AuthContext';
 import { useTheme } from '../src/context/ThemeContext';
+import { formatFriendlyDateTime } from '../src/utils/friendlyDateTime';
 
 type IdentityProfile = {
   is_verified: boolean | null;
@@ -54,10 +55,7 @@ const statusColor = (status: string | null, isExpired: boolean): string => {
 };
 
 const formatDate = (value: string | null): string => {
-  if (!value) return 'Not available';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return 'Not available';
-  return date.toLocaleDateString();
+  return formatFriendlyDateTime(value, { fallback: 'Not available' });
 };
 
 const isDateExpired = (value: string | null): boolean => {

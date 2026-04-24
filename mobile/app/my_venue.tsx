@@ -12,6 +12,7 @@ import Skeleton from '../src/components/Skeleton';
 import { useBottomBarClearance } from '../src/hooks/useBottomBarClearance';
 import { useRequireAuth } from '../src/context/AuthContext';
 import { useTheme } from '../src/context/ThemeContext';
+import { formatFriendlyDateTime } from '../src/utils/friendlyDateTime';
 
 const normalizePermitStatus = (permitStatus: string | null | undefined) => {
     const normalizedPermitStatus = String(permitStatus || '').trim().toLowerCase();
@@ -353,8 +354,8 @@ export default function MyVenueScreen() {
                                 <View style={styles.cardContent}>
                                     <Text style={[styles.cardTitle, { color: colors.text }]}>{gig.name}</Text>
                                     <Text style={[styles.cardSubTitle, { color: colors.primary }]}>
-                                        {gig.event_date ? new Date(gig.event_date).toLocaleDateString() : 'Date TBA'}
-                                        {gig.requirements?.event_start_time && gig.requirements?.event_end_time ? ` • ${gig.requirements.event_start_time} - ${gig.requirements.event_end_time}` : ''} • {gig.location}
+                                        {gig.event_date ? formatFriendlyDateTime(gig.event_date, { forceDateOnly: true }) : 'Date TBA'}
+                                        {gig.requirements?.event_start_time && gig.requirements?.event_end_time ? ` at ${gig.requirements.event_start_time} - ${gig.requirements.event_end_time}` : ''} - {gig.location}
                                     </Text>
 
                                     <Text style={[styles.cardDescription, { color: colors.textSecondary }]} numberOfLines={2}>

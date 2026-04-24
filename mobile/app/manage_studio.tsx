@@ -24,6 +24,7 @@ import {
     hasValidCoordinates,
     openNavigationDirections,
 } from "../src/utils/navigation";
+import { formatFriendlyDateTime } from "../src/utils/friendlyDateTime";
 
 const canonicalizeStudioType = (
   value: unknown,
@@ -2032,7 +2033,7 @@ export default function StudioDetailsScreen() {
                           fontFamily: "Poppins_400Regular",
                         }}
                       >
-                        {new Date(review.created_at).toLocaleDateString()}
+                        {formatFriendlyDateTime(review.created_at)}
                       </Text>
                     </View>
                     <View style={[styles.starsRow, { marginBottom: 8 }]}>

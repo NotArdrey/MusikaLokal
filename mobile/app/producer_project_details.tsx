@@ -24,6 +24,7 @@ import { useBottomBarClearance } from "../src/hooks/useBottomBarClearance";
 import { useAuth } from "../src/context/AuthContext";
 import { showTopToast } from "../src/context/TopToastContext";
 import { useTheme } from "../src/context/ThemeContext";
+import { formatFriendlyDateTime } from "../src/utils/friendlyDateTime";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const scale = (size: number) => Math.max((SCREEN_WIDTH / 375) * size, size * 0.85);
@@ -505,7 +506,7 @@ export default function ProducerProjectDetailsScreen() {
                 </Text>
                 {myInvite.expires_at && (
                   <Text style={[styles.appRole, { color: colors.textSecondary }]}>
-                    Expires: {new Date(myInvite.expires_at).toLocaleDateString()}
+                    Expires: {formatFriendlyDateTime(myInvite.expires_at)}
                   </Text>
                 )}
               </View>

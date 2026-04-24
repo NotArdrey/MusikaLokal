@@ -224,6 +224,21 @@ const getFreshAccessToken = async (): Promise<string | null> => {
     return null;
 };
 
+// Ensure Realtime subscriptions use a current user JWT before connecting.
+export const prepareRealtimeAuth = async (): Promise<boolean> => {
+    try {
+        const token = await getFreshAccessToken();
+        if (!token) {
+            return false;
+        }
+
+        supabase.realtime.setAuth(token);
+        return true;
+    } catch {
+        return false;
+    }
+};
+
 const normalizeFunctionsError = (
     rawError: any,
     fallbackMessage: string,
@@ -421,8 +436,20 @@ const unregisterCurrentPushDevice = async () => {
 
 // Bust token cache on auth changes so subsequent invokes hydrate from
 // the latest persisted session state.
-supabase.auth.onAuthStateChange(() => {
+supabase.auth.onAuthStateChange((_event, session) => {
     invalidateTokenCache();
+
+    const token = session?.access_token;
+    if (token && isJwtLike(token)) {
+        _cachedToken = token;
+        _cachedTokenAt = Date.now();
+
+        try {
+            supabase.realtime.setAuth(token);
+        } catch {
+            // ignore realtime auth hydration failures; channel-specific retries handle recovery
+        }
+    }
 });
 
 // Replace the getter with a stable property returning our patched instance.

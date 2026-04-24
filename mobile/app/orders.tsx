@@ -18,6 +18,7 @@ import Navbar from "../src/components/navbar";
 import Skeleton from "../src/components/Skeleton";
 import { useAuth } from "../src/context/AuthContext";
 import { useTheme } from "../src/context/ThemeContext";
+import { formatFriendlyDateTime } from "../src/utils/friendlyDateTime";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const moderateScale = (size: number, factor = 0.3) => {
@@ -95,7 +96,7 @@ export default function OrdersScreen() {
         </View>
       </View>
       <Text style={[styles.orderDate, { color: colors.textSecondary }]}>
-        {new Date(order.created_at).toLocaleDateString()}
+        {formatFriendlyDateTime(order.created_at)}
       </Text>
       {isSelling && order.buyer_name && (
         <Text style={[styles.orderBuyer, { color: colors.textSecondary }]}>Buyer: {order.buyer_name}</Text>
