@@ -203,6 +203,7 @@ export default function ProfileScreen() {
   const [playlistActionId, setPlaylistActionId] = useState<string | null>(null);
   const [isProfileFollowing, setIsProfileFollowing] = useState(false);
   const [isProfileFollowBusy, setIsProfileFollowBusy] = useState(false);
+  const [profileFollowerCount, setProfileFollowerCount] = useState(0);
   const profileFetchInFlightRef = useRef(false);
   const canManageStations = !isGuest && userRole === "admin";
 
@@ -655,6 +656,7 @@ export default function ProfileScreen() {
           setGigTimeline({ active: [], upcoming: [], done: [] });
           setBookmarkedListings(createEmptyBookmarks());
           setLoadingBookmarks(false);
+          setProfileFollowerCount(0);
           setProfile({
             full_name: "Guest User",
             role: null,
@@ -823,6 +825,33 @@ export default function ProfileScreen() {
           .map((row: any) => row.portfolio_url)
           .filter(Boolean),
       });
+
+      const fallbackFollowerCount = Number(
+        profileStatsData?.followers_count ??
+          profileStatsData?.follower_count ??
+          profileData?.followers_count ??
+          profileData?.follower_count ??
+          0,
+      );
+      setProfileFollowerCount(
+        Number.isFinite(fallbackFollowerCount)
+          ? Math.max(0, Math.floor(fallbackFollowerCount))
+          : 0,
+      );
+
+      try {
+        const { count: followerCount, error: followerCountError } = await supabase
+          .from("follows")
+          .select("id", { count: "exact", head: true })
+          .eq("followed_id", targetId)
+          .eq("followed_type", "profile");
+
+        if (!followerCountError && typeof followerCount === "number") {
+          setProfileFollowerCount(Math.max(0, followerCount));
+        }
+      } catch {
+        // Keep the fallback count if follows query is unavailable.
+      }
 
       await fetchBookmarkedListings(targetId, !!ownership && !isGuest);
       fetchPlaylists(targetId);
@@ -1304,8 +1333,10 @@ export default function ProfileScreen() {
     }
 
     const wasFollowing = isProfileFollowing;
+    const previousFollowerCount = profileFollowerCount;
     setIsProfileFollowBusy(true);
     setIsProfileFollowing(!wasFollowing);
+    setProfileFollowerCount((prev) => Math.max(0, prev + (wasFollowing ? -1 : 1)));
 
     try {
       const { error } = await supabase.functions.invoke("manage-social-feed", {
@@ -1327,6 +1358,7 @@ export default function ProfileScreen() {
       });
     } catch (error: any) {
       setIsProfileFollowing(wasFollowing);
+      setProfileFollowerCount(previousFollowerCount);
       showTopToast({
         type: "error",
         title: "Follow failed",
@@ -1335,7 +1367,7 @@ export default function ProfileScreen() {
     } finally {
       setIsProfileFollowBusy(false);
     }
-  }, [canFollowProfile, isProfileFollowBusy, isProfileFollowing, viewedProfileId]);
+  }, [canFollowProfile, isProfileFollowBusy, isProfileFollowing, profileFollowerCount, viewedProfileId]);
 
   const playlistSectionHint = hasStation
     ? canManageStations
@@ -1646,6 +1678,16 @@ export default function ProfileScreen() {
                   style={[styles.statLabel, { color: colors.textSecondary }]}
                 >
                   Reviews
+                </Text>
+              </View>
+              <View style={styles.statItem}>
+                <Text style={[styles.statValue, { color: colors.text }]}>
+                  {profileFollowerCount}
+                </Text>
+                <Text
+                  style={[styles.statLabel, { color: colors.textSecondary }]}
+                >
+                  Followers
                 </Text>
               </View>
               <View style={styles.statItem}>

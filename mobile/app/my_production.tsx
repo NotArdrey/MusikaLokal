@@ -28,6 +28,7 @@ export default function MyProductionScreen() {
   const { contentBottomPadding } = useBottomBarClearance(24);
   const { isAuthenticated, userId } = useRequireAuth();
   const { userRole } = useAuth();
+  const isMusicianView = userRole === 'musician';
   const params = useLocalSearchParams<{ refresh?: string }>();
   const refreshKey = Array.isArray(params.refresh) ? params.refresh[0] : params.refresh;
 
@@ -146,13 +147,41 @@ export default function MyProductionScreen() {
   return (
     <>
       <View style={[styles.flex1, { backgroundColor: colors.background }]}>
-        <Header title="My Production" />
+        <Header
+          title="My Production"
+          rightComponent={isMusicianView ? <View style={styles.headerSpacer} /> : undefined}
+        />
 
         <ScrollView
           showsVerticalScrollIndicator={false}
           contentContainerStyle={[styles.scrollContent, { paddingBottom: contentBottomPadding }]}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
         >
+          {isMusicianView && (
+            <View style={[styles.pageTabsWrap, { borderColor: colors.border, backgroundColor: colors.surface }]}> 
+              {[{ key: 'group', label: 'My Group', route: '/my_group' }, { key: 'producer', label: 'My Producer', route: '/my_production' }, { key: 'venue', label: 'My Venue', route: '/my_venue' }].map((tab) => {
+                const isActive = tab.key === 'producer';
+                return (
+                  <TouchableOpacity
+                    activeOpacity={1}
+                    key={tab.key}
+                    onPress={() => {
+                      if (!isActive) {
+                        router.replace(tab.route as any);
+                      }
+                    }}
+                    style={[
+                      styles.pageTabBtn,
+                      isActive && { backgroundColor: colors.primary + '14', borderColor: colors.primary },
+                    ]}
+                  >
+                    <Text style={[styles.pageTabText, { color: isActive ? colors.primary : colors.textSecondary }]}>{tab.label}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          )}
+
           {loading ? (
             <View style={styles.skeletonList}>
               {[0, 1].map((index) => (
@@ -177,8 +206,10 @@ export default function MyProductionScreen() {
             </View>
           ) : (
             teams.map((team) => {
-              const canEdit = team.member_role === 'owner' || team.member_role === 'manager';
-              const canDelete = team.member_role === 'owner';
+              const isOwnerTeam = team.member_role === 'owner';
+              const canEdit = !isMusicianView && (team.member_role === 'owner' || team.member_role === 'manager');
+              const canDelete = !isMusicianView && team.member_role === 'owner';
+              const canOnlyViewAndChat = isMusicianView && !isOwnerTeam;
 
               return (
                 <View key={team.id} style={[styles.cardContainer, { backgroundColor: colors.surface, shadowColor: colors.primary }]}> 
@@ -207,9 +238,31 @@ export default function MyProductionScreen() {
                           onPress={() => router.push({ pathname: '/production_team', params: { teamId: team.id } })}
                           style={[styles.manageBtn, { backgroundColor: colors.primary }]}
                         >
-                          <Ionicons name="settings-outline" size={18} color="#FFF" />
-                          <Text style={styles.manageBtnText}>Manage</Text>
+                          <Ionicons name={canOnlyViewAndChat ? 'eye-outline' : 'settings-outline'} size={18} color="#FFF" />
+                          <Text style={styles.manageBtnText}>{canOnlyViewAndChat ? 'View' : 'Manage'}</Text>
                         </TouchableOpacity>
+
+                        {canOnlyViewAndChat ? (
+                          <TouchableOpacity
+                            activeOpacity={1}
+                            onPress={() => {
+                              if (!team.owner_id) {
+                                showAlert('warning', 'Chat Unavailable', 'Owner account is unavailable for this team.');
+                                return;
+                              }
+
+                              router.push({
+                                pathname: '/chat',
+                                params: {
+                                  recipientId: team.owner_id,
+                                },
+                              });
+                            }}
+                            style={[styles.editBtn, { borderColor: colors.border }]}
+                          >
+                            <Ionicons name="chatbubble-outline" size={20} color={colors.text} />
+                          </TouchableOpacity>
+                        ) : null}
 
                         {canEdit ? (
                           <TouchableOpacity activeOpacity={1}
@@ -270,7 +323,29 @@ export default function MyProductionScreen() {
 
 const styles = StyleSheet.create({
   flex1: { flex: 1 },
+  headerSpacer: { width: 40, height: 40 },
   scrollContent: { paddingHorizontal: 24, paddingBottom: 180, paddingTop: 16 },
+  pageTabsWrap: {
+    borderWidth: 1,
+    borderRadius: 14,
+    padding: 4,
+    marginBottom: 16,
+    flexDirection: 'row',
+    gap: 6,
+  },
+  pageTabBtn: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: 'transparent',
+  },
+  pageTabText: {
+    fontFamily: 'Poppins_600SemiBold',
+    fontSize: 12,
+  },
   skeletonList: { gap: 16 },
   skeletonCard: { borderRadius: 24, borderWidth: 1, padding: 16 },
   skeletonActionRow: { marginTop: 16, flexDirection: 'row', gap: 10 },

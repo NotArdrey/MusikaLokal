@@ -1,6 +1,10 @@
 import { Ionicons } from "@expo/vector-icons";
-import { BottomSheetModal, BottomSheetScrollView } from "@gorhom/bottom-sheet";
-import React, { forwardRef, useEffect, useMemo, useState } from "react";
+import {
+  BottomSheetBackdrop,
+  BottomSheetModal,
+  BottomSheetScrollView,
+} from "@gorhom/bottom-sheet";
+import React, { forwardRef, useCallback, useEffect, useMemo, useState } from "react";
 import {
     ActivityIndicator,
     Alert,
@@ -61,8 +65,27 @@ const BookingDetailsSheet = forwardRef<
   const [dateOverride, setDateOverride] = useState<any>(null);
 
   const snapPoints = useMemo(() => ["85%"], []);
+  const renderBackdrop = useCallback(
+    (props: any) => (
+      <BottomSheetBackdrop
+        {...props}
+        disappearsOnIndex={-1}
+        appearsOnIndex={0}
+        opacity={0.4}
+        pressBehavior="close"
+      />
+    ),
+    [],
+  );
 
   useEffect(() => {
+    if (booking?.type_id === "booking_request") {
+      setStudioDetails(null);
+      setDateOverride(null);
+      setLoading(false);
+      return;
+    }
+
     if (booking?.studio_id) {
       debugLog("BookingDetailsSheet - Booking data:", {
         start_time: booking.start_time,
@@ -140,6 +163,8 @@ const BookingDetailsSheet = forwardRef<
         return "#F59E0B";
       case "cancelled":
         return "#EF4444";
+      case "declined":
+        return "#EF4444";
       case "rejected":
         return "#EF4444"; // Gig application rejected
       case "completed":
@@ -158,6 +183,8 @@ const BookingDetailsSheet = forwardRef<
       case "pending":
         return "time-outline";
       case "cancelled":
+        return "close-circle";
+      case "declined":
         return "close-circle";
       case "rejected":
         return "close-circle"; // Gig application rejected
@@ -239,6 +266,283 @@ const BookingDetailsSheet = forwardRef<
   };
 
   if (!booking) return null;
+
+  const toStartCase = (value: string) =>
+    value
+      .split(" ")
+      .filter(Boolean)
+      .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+      .join(" ");
+
+  const formatRequestEntity = (name: unknown, entityType: unknown) => {
+    const normalizedName = String(name || "").trim();
+    const normalizedEntityType = String(entityType || "").trim();
+    const entityLabel = normalizedEntityType
+      ? toStartCase(normalizedEntityType.replace(/_/g, " "))
+      : "";
+
+    if (normalizedName && entityLabel) {
+      return `${normalizedName} (${entityLabel})`;
+    }
+
+    return normalizedName || entityLabel || "Unknown";
+  };
+
+  if (booking.type_id === "booking_request") {
+    const createdLabel = formatDateTime(booking?.created_at || booking?.raw_date);
+    const requestKindLabel = toStartCase(
+      String(booking?.request_kind || "application").replace(/_/g, " "),
+    );
+    const senderLabel = formatRequestEntity(
+      booking?.sender_entity_name,
+      booking?.sender_entity_type,
+    );
+    const receiverLabel = formatRequestEntity(
+      booking?.receiver_entity_name,
+      booking?.receiver_entity_type,
+    );
+    const listingTypeLabel = booking?.listing_type
+      ? toStartCase(String(booking.listing_type).replace(/_/g, " "))
+      : null;
+
+    const openRequestAttachment = async (url: string, label: string) => {
+      if (!url) return;
+
+      try {
+        await Linking.openURL(url);
+      } catch (error) {
+        Alert.alert("Unable to Open Link", `Could not open ${label}.`);
+      }
+    };
+
+    const attachmentButtons = [
+      booking?.request_contract_url
+        ? {
+            label: "Open Contract",
+            url: booking.request_contract_url,
+          }
+        : null,
+      booking?.request_cv_url
+        ? {
+            label: "Open CV",
+            url: booking.request_cv_url,
+          }
+        : null,
+      booking?.request_video_url
+        ? {
+            label: "Open Video",
+            url: booking.request_video_url,
+          }
+        : null,
+    ].filter(Boolean) as Array<{ label: string; url: string }>;
+
+    return (
+      <TrackedBottomSheetModal
+        ref={ref}
+        index={0}
+        snapPoints={snapPoints}
+        enableDynamicSizing={false}
+        enableContentPanningGesture={false}
+        enableOverDrag={false}
+        enablePanDownToClose={true}
+        backdropComponent={renderBackdrop}
+        backgroundStyle={{ backgroundColor: colors.background }}
+        handleIndicatorStyle={{ backgroundColor: isDark ? "#4B5563" : "#E5E7EB" }}
+      >
+        <BottomSheetScrollView
+          style={{ flex: 1 }}
+          contentContainerStyle={styles.scrollContent}
+        >
+          <View style={styles.container}>
+            <View style={styles.header}>
+              <View style={styles.headerTop}>
+                <Text style={[styles.title, { color: colors.text }]}>Request Details</Text>
+                <TouchableOpacity
+                  activeOpacity={1}
+                  onPress={() => (ref as any)?.current?.dismiss()}
+                  style={[
+                    styles.closeBtn,
+                    { backgroundColor: isDark ? "#374151" : "#F3F4F6" },
+                  ]}
+                >
+                  <Ionicons name="close" size={24} color={colors.text} />
+                </TouchableOpacity>
+              </View>
+
+              <View
+                style={[
+                  styles.statusBadge,
+                  { backgroundColor: getStatusColor(booking.status) + "20" },
+                ]}
+              >
+                <Ionicons
+                  name={getStatusIcon(booking.status) as any}
+                  size={18}
+                  color={getStatusColor(booking.status)}
+                />
+                <Text
+                  style={[
+                    styles.statusText,
+                    { color: getStatusColor(booking.status) },
+                  ]}
+                >
+                  {String(booking.status || "Pending").toUpperCase()}
+                </Text>
+              </View>
+            </View>
+
+            <View
+              style={[
+                styles.card,
+                { backgroundColor: isDark ? "#1F2937" : "#FFFFFF" },
+              ]}
+            >
+              <View style={styles.cardHeader}>
+                <Ionicons
+                  name="information-circle-outline"
+                  size={24}
+                  color={colors.primary}
+                />
+                <Text style={[styles.cardTitle, { color: colors.text }]}>Request Info</Text>
+              </View>
+
+              <View style={styles.detailsGrid}>
+                <View style={styles.detailItem}>
+                  <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>Type</Text>
+                  <Text style={[styles.detailValue, { color: colors.text }]}>
+                    {booking?.type || "Connection Request"}
+                  </Text>
+                </View>
+
+                <View style={styles.detailItem}>
+                  <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>Request Kind</Text>
+                  <Text style={[styles.detailValue, { color: colors.text }]}>{requestKindLabel}</Text>
+                </View>
+
+                <View style={styles.detailItem}>
+                  <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>From</Text>
+                  <Text style={[styles.detailValue, { color: colors.text }]}>{senderLabel}</Text>
+                </View>
+
+                <View style={styles.detailItem}>
+                  <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>To</Text>
+                  <Text style={[styles.detailValue, { color: colors.text }]}>{receiverLabel}</Text>
+                </View>
+
+                {listingTypeLabel ? (
+                  <View style={styles.detailItem}>
+                    <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>Listing Type</Text>
+                    <Text style={[styles.detailValue, { color: colors.text }]}>{listingTypeLabel}</Text>
+                  </View>
+                ) : null}
+
+                <View style={styles.detailItem}>
+                  <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>Pitch / Message</Text>
+                  <Text style={[styles.notesText, { color: colors.text }]}>
+                    {booking?.message || "No pitch provided."}
+                  </Text>
+                </View>
+
+                {booking?.request_application_context ? (
+                  <View style={styles.detailItem}>
+                    <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>
+                      {booking?.request_context_title || "Application Context"}
+                    </Text>
+                    <Text style={[styles.notesText, { color: colors.text }]}>
+                      {booking.request_application_context}
+                    </Text>
+                  </View>
+                ) : null}
+
+                {booking?.request_slot_type ? (
+                  <View style={styles.detailItem}>
+                    <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>Slot / Role</Text>
+                    <Text style={[styles.detailValue, { color: colors.text }]}>
+                      {toStartCase(String(booking.request_slot_type).replace(/_/g, " "))}
+                    </Text>
+                  </View>
+                ) : null}
+
+                {booking?.request_roster_entry_name ? (
+                  <View style={styles.detailItem}>
+                    <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>Featured Performer</Text>
+                    <Text style={[styles.detailValue, { color: colors.text }]}>
+                      {booking.request_roster_entry_name}
+                    </Text>
+                  </View>
+                ) : null}
+
+                {createdLabel ? (
+                  <View style={styles.detailItem}>
+                    <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>Created</Text>
+                    <Text style={[styles.detailValue, { color: colors.text }]}>{createdLabel}</Text>
+                  </View>
+                ) : null}
+              </View>
+            </View>
+
+            <View
+              style={[
+                styles.card,
+                { backgroundColor: isDark ? "#1F2937" : "#FFFFFF" },
+              ]}
+            >
+              <View style={styles.cardHeader}>
+                <Ionicons
+                  name="attach-outline"
+                  size={24}
+                  color={colors.primary}
+                />
+                <Text style={[styles.cardTitle, { color: colors.text }]}>Attachments</Text>
+              </View>
+
+              {attachmentButtons.length === 0 ? (
+                <Text style={[styles.notesText, { color: colors.textSecondary }]}>No files attached.</Text>
+              ) : (
+                <View style={styles.actions}>
+                  {attachmentButtons.map((attachment) => (
+                    <TouchableOpacity
+                      activeOpacity={1}
+                      key={attachment.label}
+                      style={[
+                        styles.actionBtn,
+                        styles.viewStudioBtn,
+                        { borderColor: colors.border },
+                      ]}
+                      onPress={() => openRequestAttachment(attachment.url, attachment.label)}
+                    >
+                      <Text style={[styles.viewStudioBtnText, { color: colors.primary }]}>
+                        {attachment.label}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              )}
+            </View>
+
+            <View style={styles.actions}>
+              <TouchableOpacity
+                activeOpacity={1}
+                style={[
+                  styles.actionBtn,
+                  styles.cancelBtn,
+                  { borderColor: colors.border },
+                ]}
+                onPress={() => (ref as any)?.current?.dismiss()}
+              >
+                <Ionicons
+                  name="close-circle-outline"
+                  size={20}
+                  color="#EF4444"
+                />
+                <Text style={styles.cancelBtnText}>Close</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </BottomSheetScrollView>
+      </TrackedBottomSheetModal>
+    );
+  }
 
   const isStudio = booking.type_id === "studio_booking" || !!booking.studio_id;
   const isGig = booking.type_id === "gig_application" || !!booking.gig_id;
@@ -400,10 +704,18 @@ const BookingDetailsSheet = forwardRef<
       ref={ref}
       index={0}
       snapPoints={snapPoints}
+      enableDynamicSizing={false}
+      enableContentPanningGesture={false}
+      enableOverDrag={false}
+      enablePanDownToClose={true}
+      backdropComponent={renderBackdrop}
       backgroundStyle={{ backgroundColor: colors.background }}
       handleIndicatorStyle={{ backgroundColor: isDark ? "#4B5563" : "#E5E7EB" }}
     >
-      <BottomSheetScrollView style={{ flex: 1 }}>
+      <BottomSheetScrollView
+        style={{ flex: 1 }}
+        contentContainerStyle={styles.scrollContent}
+      >
         <View style={styles.container}>
           {/* Header */}
           <View style={styles.header}>
@@ -1465,6 +1777,9 @@ const BookingDetailsSheet = forwardRef<
 BookingDetailsSheet.displayName = "BookingDetailsSheet";
 
 const styles = StyleSheet.create({
+  scrollContent: {
+    paddingBottom: height < 700 ? verticalScale(100) : verticalScale(116),
+  },
   container: {
     padding: height < 700 ? scale(16) : scale(24),
   },

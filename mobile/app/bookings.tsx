@@ -13,6 +13,7 @@ import {
     ScrollView,
     StyleSheet,
     Text,
+    TextInput,
     TouchableOpacity,
     useWindowDimensions,
     View,
@@ -27,6 +28,7 @@ import BookingActionModal from "../src/components/modal";
 import Navbar from "../src/components/navbar";
 import Skeleton from "../src/components/Skeleton";
 import { useAuth } from "../src/context/AuthContext";
+import { useBottomOverlay } from "../src/context/BottomOverlayContext";
 import { showTopToast } from "../src/context/TopToastContext";
 import { useTheme } from "../src/context/ThemeContext";
 import { createBookingCheckout } from "../src/services/paymongo";
@@ -249,6 +251,7 @@ type ViewMode = "bookings" | "applications";
 export default function BookingsScreen() {
   const { colors, isDark } = useTheme();
   const { session, loading: authLoading, userId, isGuest } = useAuth();
+  const { isBottomOverlayActive } = useBottomOverlay();
   const isAuthenticated = !!session;
   const params = useLocalSearchParams<{
     tab?: string;
@@ -325,6 +328,8 @@ export default function BookingsScreen() {
   const [locallyReportedLateBookings, setLocallyReportedLateBookings] = useState<Record<string, boolean>>({});
   const [locallyReportedAccessIssueBookings, setLocallyReportedAccessIssueBookings] = useState<Record<string, boolean>>({});
   const [requestActionId, setRequestActionId] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [activeFilter, setActiveFilter] = useState("All");
   const [alertVisible, setAlertVisible] = useState(false);
   const [alertConfig, setAlertConfig] = useState<{
     type: AlertType;
@@ -1924,41 +1929,6 @@ export default function BookingsScreen() {
   }
 
   const handleDetailsPress = (item: any) => {
-    if (item?.type_id === "booking_request") {
-      const detailButtons = [
-        item?.request_contract_url
-          ? {
-              text: "Open Contract",
-              onPress: () => openConnectionRequestLink(item.request_contract_url, "Contract"),
-            }
-          : null,
-        item?.request_cv_url
-          ? {
-              text: "Open CV",
-              onPress: () => openConnectionRequestLink(item.request_cv_url, "CV"),
-            }
-          : null,
-        item?.request_video_url
-          ? {
-              text: "Open Video",
-              onPress: () => openConnectionRequestLink(item.request_video_url, "Video"),
-            }
-          : null,
-        {
-          text: "Close",
-          style: item?.request_contract_url || item?.request_cv_url || item?.request_video_url ? "cancel" : "default",
-        },
-      ].filter(Boolean);
-
-      showAlert(
-        "info",
-        item?.type || "Connection Request",
-        buildConnectionRequestDetailLines(item).join("\n\n"),
-        detailButtons,
-      );
-      return;
-    }
-
     setSelectedItem(item);
     bookingDetailsRef.current?.present();
   };
@@ -3184,6 +3154,45 @@ export default function BookingsScreen() {
     }
   };
 
+  const getItemSortTimestamp = (item: any) => {
+    const dateTimeCandidate =
+      item?.raw_date && item?.start_time
+        ? `${item.raw_date}T${item.start_time}`
+        : null;
+
+    const candidates = [
+      item?.updated_at,
+      item?.created_at,
+      item?.paid_at,
+      dateTimeCandidate,
+      item?.raw_date,
+      item?.date,
+    ];
+
+    for (const candidate of candidates) {
+      if (!candidate) continue;
+      const timestamp = new Date(candidate).getTime();
+      if (!Number.isNaN(timestamp)) return timestamp;
+    }
+
+    return 0;
+  };
+
+  const getItemFilterLabel = (item: any) => {
+    if (item?.match_type === "invite") return "Invites";
+    if (item?.match_type === "application") return "Applications";
+    if (item?.type_id === "booking_request") return "Requests";
+    if (item?.type_id === "gig_application") return "Applications";
+    if (item?.type_id === "studio_booking") return "Bookings";
+    if (
+      item?.type_id === "venue_partnership_deal" ||
+      item?.type_id === "recording_deal"
+    ) {
+      return "Deals";
+    }
+    return "Other";
+  };
+
   // Determine items to show based on view mode
   const currentItems = userRole === "musician" && viewMode === "applications"
     ? applicationData[activeAppTab as keyof typeof applicationData] || []
@@ -3194,6 +3203,93 @@ export default function BookingsScreen() {
         : activeTab === "Sent Invites"
           ? projectInvites
           : data[activeTab as keyof typeof data] || [];
+
+  const activeListLabel =
+    userRole === "musician" && viewMode === "applications"
+      ? activeAppTab
+      : activeTab;
+
+  const sortedCurrentItems = React.useMemo(
+    () =>
+      [...currentItems].sort(
+        (a: any, b: any) => getItemSortTimestamp(b) - getItemSortTimestamp(a),
+      ),
+    [currentItems],
+  );
+
+  const availableFilters = React.useMemo(
+    () => [
+      "All",
+      ...Array.from(
+        new Set(
+          sortedCurrentItems
+            .map((item: any) => getItemFilterLabel(item))
+            .filter(Boolean),
+        ),
+      ),
+    ],
+    [sortedCurrentItems],
+  );
+
+  const normalizedSearchQuery = searchQuery.trim().toLowerCase();
+  const hasSearchOrFilter =
+    normalizedSearchQuery.length > 0 || activeFilter !== "All";
+
+  const filteredItems = React.useMemo(
+    () =>
+      sortedCurrentItems.filter((item: any) => {
+        const matchesFilter =
+          activeFilter === "All" || getItemFilterLabel(item) === activeFilter;
+
+        if (!matchesFilter) return false;
+        if (!normalizedSearchQuery) return true;
+
+        const searchableText = [
+          item?.name,
+          item?.counterparty_name,
+          item?.display_name,
+          item?.title,
+          item?.gig_title,
+          item?.studio_name,
+          item?.venue_name,
+          item?.type,
+          item?.status,
+          item?.display_status,
+          item?.message,
+          item?.request_application_context,
+          item?.request_context_title,
+          item?.request_kind,
+          item?.sender_entity_name,
+          item?.sender_entity_type,
+          item?.receiver_entity_name,
+          item?.receiver_entity_type,
+          item?.listing_type,
+          item?.request_slot_type,
+          item?.request_roster_entry_name,
+          item?.raw_date,
+          item?.date,
+        ]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase();
+
+        return searchableText.includes(normalizedSearchQuery);
+      }),
+    [sortedCurrentItems, activeFilter, normalizedSearchQuery],
+  );
+
+  useEffect(() => {
+    if (activeFilter !== "All" && !availableFilters.includes(activeFilter)) {
+      setActiveFilter("All");
+    }
+  }, [activeFilter, availableFilters]);
+
+  const shouldHideNavbar =
+    isBottomOverlayActive ||
+    modalVisible ||
+    showPaymentOptionModal ||
+    showScanModal ||
+    showRenewModal;
 
   // Render application tab for musicians
   const renderAppTab = (tab: ApplicationTab) => {
@@ -3489,6 +3585,79 @@ export default function BookingsScreen() {
           </ScrollView>
         </View>
 
+        <View style={styles.searchFilterContainer}>
+          <View
+            style={[
+              styles.searchInputContainer,
+              {
+                backgroundColor: colors.card,
+                borderColor: colors.border,
+              },
+            ]}
+          >
+            <Ionicons
+              name="search-outline"
+              size={moderateScale(18)}
+              color={colors.textSecondary}
+            />
+            <TextInput
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+              placeholder={`Search ${String(activeListLabel).toLowerCase()}`}
+              placeholderTextColor={colors.textSecondary}
+              style={[styles.searchInput, { color: colors.text }]}
+            />
+            {searchQuery.length > 0 ? (
+              <TouchableOpacity
+                activeOpacity={0.8}
+                onPress={() => setSearchQuery("")}
+              >
+                <Ionicons
+                  name="close-circle"
+                  size={moderateScale(18)}
+                  color={colors.textSecondary}
+                />
+              </TouchableOpacity>
+            ) : null}
+          </View>
+
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.filterScrollContent}
+          >
+            {availableFilters.map((filterLabel) => {
+              const isActiveFilter = activeFilter === filterLabel;
+
+              return (
+                <TouchableOpacity
+                  activeOpacity={0.9}
+                  key={filterLabel}
+                  onPress={() => setActiveFilter(filterLabel)}
+                  style={[
+                    styles.filterChip,
+                    {
+                      backgroundColor: isActiveFilter ? colors.primary : colors.card,
+                      borderColor: isActiveFilter ? colors.primary : colors.border,
+                    },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.filterChipText,
+                      {
+                        color: isActiveFilter ? "#FFFFFF" : colors.textSecondary,
+                      },
+                    ]}
+                  >
+                    {filterLabel}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+        </View>
+
         <ScrollView
           showsVerticalScrollIndicator={false}
           contentContainerStyle={styles.scrollContent}
@@ -3732,7 +3901,7 @@ export default function BookingsScreen() {
                 </View>
               ))}
             </View>
-          ) : currentItems.length === 0 ? (
+          ) : filteredItems.length === 0 ? (
             <View style={styles.centerContainer}>
               <Ionicons
                 name={userRole === "venue-owner" ? "people-outline" : "calendar-outline"}
@@ -3742,7 +3911,9 @@ export default function BookingsScreen() {
               <Text
                 style={[styles.emptyTitle, { color: colors.textSecondary }]}
               >
-                {userRole === "venue-owner"
+                {hasSearchOrFilter
+                  ? "No matches found for the selected search/filter."
+                  : userRole === "venue-owner"
                   ? activeTab === "Applicants"
                     ? "No pending applications"
                     : activeTab === "Active Musicians"
@@ -3774,7 +3945,7 @@ export default function BookingsScreen() {
               )}
             </View>
           ) : (
-            currentItems.map((item: any) => {
+            filteredItems.map((item: any) => {
               // ==========================================
               // 0. DEAL CARD (Venue Partnership or Recording)
               // ==========================================
@@ -6229,9 +6400,11 @@ export default function BookingsScreen() {
           )}
         </ScrollView>
 
-        <View style={styles.navbarPosition}>
-          <Navbar />
-        </View>
+        {!shouldHideNavbar ? (
+          <View style={styles.navbarPosition}>
+            <Navbar />
+          </View>
+        ) : null}
       </View>
 
       <BookingActionModal
@@ -6780,6 +6953,40 @@ const styles = StyleSheet.create({
   tabText: {
     fontSize: moderateScale(12),
     fontFamily: "Poppins_600SemiBold",
+  },
+  searchFilterContainer: {
+    paddingHorizontal: scale(24),
+    paddingBottom: moderateScale(10),
+    gap: moderateScale(10),
+  },
+  searchInputContainer: {
+    borderWidth: 1,
+    borderRadius: moderateScale(12),
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: scale(12),
+    minHeight: moderateScale(44),
+  },
+  searchInput: {
+    flex: 1,
+    marginLeft: scale(8),
+    fontSize: moderateScale(13),
+    fontFamily: "Poppins_400Regular",
+    paddingVertical: moderateScale(8),
+  },
+  filterScrollContent: {
+    paddingRight: scale(8),
+  },
+  filterChip: {
+    borderWidth: 1,
+    borderRadius: moderateScale(999),
+    paddingHorizontal: scale(12),
+    paddingVertical: moderateScale(7),
+    marginRight: scale(8),
+  },
+  filterChipText: {
+    fontSize: moderateScale(11),
+    fontFamily: "Poppins_500Medium",
   },
   scrollContent: {
     paddingBottom:

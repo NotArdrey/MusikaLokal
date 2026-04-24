@@ -10,13 +10,15 @@ import Modal from '../src/components/modal';
 import Navbar from '../src/components/navbar';
 import Skeleton from '../src/components/Skeleton';
 import { useBottomBarClearance } from '../src/hooks/useBottomBarClearance';
-import { useRequireAuth } from '../src/context/AuthContext';
+import { useAuth, useRequireAuth } from '../src/context/AuthContext';
 import { useTheme } from '../src/context/ThemeContext';
 
 export default function MyGroupScreen() {
     const { colors, isDark } = useTheme();
     const { contentBottomPadding } = useBottomBarClearance(24);
     const { isAuthenticated, loading: authLoading, userId } = useRequireAuth();
+    const { userRole } = useAuth();
+    const isMusicianView = userRole === 'musician';
     const params = useLocalSearchParams<{ refresh?: string }>();
     const refreshKey = Array.isArray(params.refresh) ? params.refresh[0] : params.refresh;
     const [modalVisible, setModalVisible] = useState(false);
@@ -58,33 +60,105 @@ export default function MyGroupScreen() {
         if (!userId) return;
         try {
             let groupRows: any[] = [];
+            const membershipRoleByGroupId = new Map<string, string>();
 
-            // Preferred source with aggregates.
-            const { data, error } = await supabase
-                .from('groups_with_stats')
-                .select('*')
-                .eq('owner_id', userId)
-                .order('created_at', { ascending: false });
-
-            if (!error) {
-                groupRows = data || [];
-            } else if (isMissingRelationError(error, 'groups_with_stats')) {
-                const { data: fallbackData, error: fallbackError } = await supabase
-                    .from('groups')
-                    .select('id, owner_id, name, genre, description, location, latitude, longitude, rate, created_at, group_type')
+            const fetchOwnedGroups = async () => {
+                const { data, error } = await supabase
+                    .from('groups_with_stats')
+                    .select('*')
                     .eq('owner_id', userId)
                     .order('created_at', { ascending: false });
 
-                if (fallbackError) throw fallbackError;
+                if (!error) {
+                    return data || [];
+                }
 
-                groupRows = (fallbackData || []).map((row: any) => ({
-                    ...row,
-                    rating: 0,
-                    review_count: 0,
-                    images: [],
-                }));
-            } else {
+                if (isMissingRelationError(error, 'groups_with_stats')) {
+                    const { data: fallbackData, error: fallbackError } = await supabase
+                        .from('groups')
+                        .select('id, owner_id, name, genre, description, location, latitude, longitude, rate, created_at, group_type')
+                        .eq('owner_id', userId)
+                        .order('created_at', { ascending: false });
+
+                    if (fallbackError) throw fallbackError;
+
+                    return (fallbackData || []).map((row: any) => ({
+                        ...row,
+                        rating: 0,
+                        review_count: 0,
+                        images: [],
+                    }));
+                }
+
                 throw error;
+            };
+
+            const fetchGroupsByIds = async (groupIds: string[]) => {
+                const { data, error } = await supabase
+                    .from('groups_with_stats')
+                    .select('*')
+                    .in('id', groupIds)
+                    .order('created_at', { ascending: false });
+
+                if (!error) {
+                    return data || [];
+                }
+
+                if (isMissingRelationError(error, 'groups_with_stats')) {
+                    const { data: fallbackData, error: fallbackError } = await supabase
+                        .from('groups')
+                        .select('id, owner_id, name, genre, description, location, latitude, longitude, rate, created_at, group_type')
+                        .in('id', groupIds)
+                        .order('created_at', { ascending: false });
+
+                    if (fallbackError) throw fallbackError;
+
+                    return (fallbackData || []).map((row: any) => ({
+                        ...row,
+                        rating: 0,
+                        review_count: 0,
+                        images: [],
+                    }));
+                }
+
+                throw error;
+            };
+
+            if (isMusicianView) {
+                const { data: memberRows, error: memberError } = await supabase
+                    .from('group_members')
+                    .select('group_id, role')
+                    .eq('user_id', userId);
+
+                if (memberError) {
+                    console.log('Error fetching group memberships, falling back to owned groups:', memberError);
+                    groupRows = await fetchOwnedGroups();
+                    groupRows.forEach((row: any) => {
+                        if (row?.id) {
+                            membershipRoleByGroupId.set(row.id, row.owner_id === userId ? 'owner' : 'member');
+                        }
+                    });
+                } else {
+                    const joinedGroupIds = Array.from(
+                        new Set(
+                            (memberRows || [])
+                                .map((row: any) => row?.group_id)
+                                .filter((value: any): value is string => typeof value === 'string' && value.length > 0),
+                        ),
+                    );
+
+                    (memberRows || []).forEach((row: any) => {
+                        if (!row?.group_id) return;
+                        membershipRoleByGroupId.set(
+                            row.group_id,
+                            String(row?.role || '').trim().toLowerCase() || 'member',
+                        );
+                    });
+
+                    groupRows = joinedGroupIds.length > 0 ? await fetchGroupsByIds(joinedGroupIds) : [];
+                }
+            } else {
+                groupRows = await fetchOwnedGroups();
             }
 
             const groupIds = groupRows.map((item: any) => item.id).filter(Boolean);
@@ -115,13 +189,17 @@ export default function MyGroupScreen() {
 
             setGroups(groupRows.map((item: any) => {
                 const mediaImages = mediaByGroupId.get(item.id) || [];
+                const membershipRole = membershipRoleByGroupId.get(item.id) || (item.owner_id === userId ? 'owner' : 'member');
+                const isOwnerGroup = membershipRole === 'owner' || item.owner_id === userId;
                 return {
                     ...item,
                     images: mediaImages.length > 0
                         ? mediaImages
                         : (Array.isArray(item.images) ? item.images : []),
                     rating: item.rating || 0,
-                    review_count: item.review_count || 0
+                    review_count: item.review_count || 0,
+                    membership_role: membershipRole,
+                    is_owner: isOwnerGroup,
                 };
             }));
         } catch (e) {
@@ -144,7 +222,7 @@ export default function MyGroupScreen() {
             return () => {
                 clearInterval(refreshInterval);
             };
-        }, [isAuthenticated, userId, refreshKey])
+        }, [isAuthenticated, userId, refreshKey, isMusicianView])
     );
 
     const onRefresh = () => {
@@ -251,7 +329,10 @@ export default function MyGroupScreen() {
     return (
         <>
             <View style={[styles.flex1, { backgroundColor: colors.background }]}>
-                <Header title="My Group" />
+                <Header
+                    title="My Group"
+                    rightComponent={isMusicianView ? <View style={styles.headerSpacer} /> : undefined}
+                />
 
                 <ScrollView
                     showsVerticalScrollIndicator={false}
@@ -259,6 +340,31 @@ export default function MyGroupScreen() {
                     style={styles.flex1}
                     refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
                 >
+                        {isMusicianView && (
+                            <View style={[styles.pageTabsWrap, { borderColor: colors.border, backgroundColor: colors.surface }]}>
+                                {[{ key: 'group', label: 'My Group', route: '/my_group' }, { key: 'producer', label: 'My Producer', route: '/my_production' }, { key: 'venue', label: 'My Venue', route: '/my_venue' }].map((tab) => {
+                                    const isActive = tab.key === 'group';
+                                    return (
+                                        <TouchableOpacity
+                                            activeOpacity={1}
+                                            key={tab.key}
+                                            onPress={() => {
+                                                if (!isActive) {
+                                                    router.replace(tab.route as any);
+                                                }
+                                            }}
+                                            style={[
+                                                styles.pageTabBtn,
+                                                isActive && { backgroundColor: colors.primary + '14', borderColor: colors.primary },
+                                            ]}
+                                        >
+                                            <Text style={[styles.pageTabText, { color: isActive ? colors.primary : colors.textSecondary }]}>{tab.label}</Text>
+                                        </TouchableOpacity>
+                                    );
+                                })}
+                            </View>
+                        )}
+
                         {loading ? (
                         <View style={styles.skeletonList}>
                             {[0, 1, 2].map((index) => (
@@ -284,72 +390,84 @@ export default function MyGroupScreen() {
                             <Text style={[styles.emptyText, { color: colors.textSecondary }]}>No groups found</Text>
                         </View>
                     ) : (
-                        groups.map((group) => (
-                            <View key={group.id} style={[styles.cardContainer, {
-                                backgroundColor: colors.surface,
-                                shadowColor: colors.primary,
-                            }]}>
-                                <View style={styles.imageWrapper}>
-                                    <CachedImage
-                                        uri={(group.images && group.images[0]) || 'https://images.unsplash.com/photo-1511735111819-9a3f7709049c?w=800&fit=crop'}
-                                        style={styles.cardImage}
-                                        width={800}
-                                        height={384}
-                                        quality={72}
-                                        cacheVersion={group.updated_at || group.created_at || group.id}
-                                    />
-                                    <View style={[styles.activeBadge, { backgroundColor: isDark ? 'rgba(0,0,0,0.6)' : 'rgba(255,255,255,0.9)' }]}>
-                                        <Text style={[styles.activeText, { color: colors.primary }]}>Active</Text>
-                                    </View>
-                                </View>
+                        groups.map((group) => {
+                            const canManageGroup = !isMusicianView || group.is_owner === true;
 
-                                <View style={styles.cardContent}>
-                                    <Text style={[styles.cardTitle, { color: colors.text }]}>{group.name}</Text>
-                                    <Text style={[styles.cardDescription, { color: colors.textSecondary }]} numberOfLines={2}>
-                                        {group.description}
-                                    </Text>
-
-                                    <View style={[styles.actionRow, { borderColor: colors.border }]}>
-                                        <View style={styles.actionLeft}>
-                                            <TouchableOpacity activeOpacity={1}
-                                                onPress={() => router.push({ pathname: '/manage_group', params: { id: group.id } })}
-                                                style={[styles.manageBtn, { backgroundColor: colors.primary }]}
-                                            >
-                                                <Ionicons name="settings-outline" size={18} color="#FFF" />
-                                                <Text style={styles.manageBtnText}>Manage</Text>
-                                            </TouchableOpacity>
-
-                                            <TouchableOpacity activeOpacity={1}
-                                                onPress={() => router.push({
-                                                    pathname: '/chat',
-                                                    params: {
-                                                        isGroupChat: 'true',
-                                                        groupChatId: group.id
-                                                    }
-                                                })}
-                                                style={[styles.editBtn, { borderColor: colors.border }]}
-                                            >
-                                                <Ionicons name="chatbubbles-outline" size={20} color={colors.text} />
-                                            </TouchableOpacity>
-
-                                            <TouchableOpacity activeOpacity={1}
-                                                onPress={() => router.push({ pathname: '/edit_group', params: { id: group.id } })}
-                                                style={[styles.editBtn, { borderColor: colors.border }]}
-                                            >
-                                                <Ionicons name="pencil-outline" size={20} color={colors.text} />
-                                            </TouchableOpacity>
+                            return (
+                                <View key={group.id} style={[styles.cardContainer, {
+                                    backgroundColor: colors.surface,
+                                    shadowColor: colors.primary,
+                                }]}> 
+                                    <View style={styles.imageWrapper}>
+                                        <CachedImage
+                                            uri={(group.images && group.images[0]) || 'https://images.unsplash.com/photo-1511735111819-9a3f7709049c?w=800&fit=crop'}
+                                            style={styles.cardImage}
+                                            width={800}
+                                            height={384}
+                                            quality={72}
+                                            cacheVersion={group.updated_at || group.created_at || group.id}
+                                        />
+                                        <View style={[styles.activeBadge, { backgroundColor: isDark ? 'rgba(0,0,0,0.6)' : 'rgba(255,255,255,0.9)' }]}>
+                                            <Text style={[styles.activeText, { color: colors.primary }]}>{canManageGroup ? 'Active' : 'Joined'}</Text>
                                         </View>
+                                    </View>
 
-                                        <TouchableOpacity activeOpacity={1}
-                                            onPress={() => confirmDelete(group.id, group.name)}
-                                            style={styles.deleteBtn}
-                                        >
-                                            <Ionicons name="trash-outline" size={20} color="#EF4444" />
-                                        </TouchableOpacity>
+                                    <View style={styles.cardContent}>
+                                        <Text style={[styles.cardTitle, { color: colors.text }]}>{group.name}</Text>
+                                        <Text style={[styles.cardDescription, { color: colors.textSecondary }]} numberOfLines={2}>
+                                            {group.description}
+                                        </Text>
+
+                                        <View style={[styles.actionRow, { borderColor: colors.border }]}>
+                                            <View style={styles.actionLeft}>
+                                                <TouchableOpacity activeOpacity={1}
+                                                    onPress={() =>
+                                                        canManageGroup
+                                                            ? router.push({ pathname: '/manage_group', params: { id: group.id } })
+                                                            : router.push({ pathname: '/group_details', params: { id: group.id } })
+                                                    }
+                                                    style={[styles.manageBtn, { backgroundColor: colors.primary }]}
+                                                >
+                                                    <Ionicons name={canManageGroup ? 'settings-outline' : 'eye-outline'} size={18} color="#FFF" />
+                                                    <Text style={styles.manageBtnText}>{canManageGroup ? 'Manage' : 'View'}</Text>
+                                                </TouchableOpacity>
+
+                                                <TouchableOpacity activeOpacity={1}
+                                                    onPress={() => router.push({
+                                                        pathname: '/chat',
+                                                        params: {
+                                                            isGroupChat: 'true',
+                                                            groupChatId: group.id
+                                                        }
+                                                    })}
+                                                    style={[styles.editBtn, { borderColor: colors.border }]}
+                                                >
+                                                    <Ionicons name="chatbubbles-outline" size={20} color={colors.text} />
+                                                </TouchableOpacity>
+
+                                                {canManageGroup ? (
+                                                    <TouchableOpacity activeOpacity={1}
+                                                        onPress={() => router.push({ pathname: '/edit_group', params: { id: group.id } })}
+                                                        style={[styles.editBtn, { borderColor: colors.border }]}
+                                                    >
+                                                        <Ionicons name="pencil-outline" size={20} color={colors.text} />
+                                                    </TouchableOpacity>
+                                                ) : null}
+                                            </View>
+
+                                            {canManageGroup ? (
+                                                <TouchableOpacity activeOpacity={1}
+                                                    onPress={() => confirmDelete(group.id, group.name)}
+                                                    style={styles.deleteBtn}
+                                                >
+                                                    <Ionicons name="trash-outline" size={20} color="#EF4444" />
+                                                </TouchableOpacity>
+                                            ) : null}
+                                        </View>
                                     </View>
                                 </View>
-                            </View>
-                        ))
+                            );
+                        })
                     )}
                 </ScrollView>
 
@@ -386,10 +504,35 @@ const styles = StyleSheet.create({
     flex1: {
         flex: 1,
     },
+    headerSpacer: {
+        width: 40,
+        height: 40,
+    },
     scrollContent: {
         paddingHorizontal: 24,
         paddingBottom: 180,
         paddingTop: 16,
+    },
+    pageTabsWrap: {
+        borderWidth: 1,
+        borderRadius: 14,
+        padding: 4,
+        marginBottom: 16,
+        flexDirection: 'row',
+        gap: 6,
+    },
+    pageTabBtn: {
+        flex: 1,
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingVertical: 10,
+        borderRadius: 10,
+        borderWidth: 1,
+        borderColor: 'transparent',
+    },
+    pageTabText: {
+        fontFamily: 'Poppins_600SemiBold',
+        fontSize: 12,
     },
     loadingText: {
         textAlign: 'center',
