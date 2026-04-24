@@ -6,10 +6,10 @@ user-invocable: true
 license: MIT
 metadata:
   author: supabase
-  version: "1.1.0"
+  version: "1.2.0"
   organization: Supabase
-  date: January 2026
-  abstract: Comprehensive Postgres performance optimization guide for developers using Supabase and Postgres. Contains rules across 8 categories, prioritized by impact from critical concerns such as query performance and connection management to incremental improvements in advanced features.
+  date: April 2026
+  abstract: Comprehensive Postgres performance optimization guide for developers using Supabase and Postgres. Contains rules across 8 categories, prioritized by impact from critical concerns such as query performance and connection management to incremental improvements in advanced features, plus MusikaLokal non-2xx and schema-drift triage patterns.
 ---
 
 # Supabase Postgres Best Practices
@@ -49,6 +49,18 @@ If the reported symptom is `PGRST204` with a message like `Could not find the 'c
 4. If the migration exists locally but the column is missing live, apply a catch-up migration to the target project.
 5. Re-check the column and any supporting indexes after the migration.
 6. Only treat it as a client/query bug if the live schema already contains the column.
+
+## Fast Path For PostgREST 400 From Nested Selects
+
+If the symptom is a 400 from a nested select (for example `studio:studios(...)`) and logs indicate a missing column in the joined table:
+
+1. Pull edge-function, API, and Postgres logs for the same time window.
+2. Copy the failing REST path and decode the `select=` clause to identify the exact nested field.
+3. Verify whether the column exists live using `information_schema.columns`.
+4. If the column is missing live but expected by repo code, apply a catch-up migration first.
+5. In parallel, harden brittle selects by removing non-critical columns from nested projections where possible.
+6. Redeploy the affected Edge Function and confirm the active version changed.
+7. Re-check logs for the same endpoint and confirm transition from 400 to 200 responses.
 
 ## Workflow
 
@@ -168,6 +180,28 @@ Start with these router functions first when the failure appears after recent fe
 - `manage-deals`
 - `manage-bookings`
 
+### Known Pattern: Bookings Fetch Drift (`studios.studio_type`)
+
+Use this exact playbook when bookings fail with generic non-2xx errors and logs point to nested `studio_bookings` selects:
+
+1. Confirm whether requests still include `studio:studios(..., studio_type, ...)`.
+2. Check live schema for `public.studios.studio_type`.
+3. If missing, apply a catch-up migration that adds the column and backfills a safe default.
+4. Also remove `studio_type` from non-essential nested selects in both the client fallback queries and `manage-bookings` fetch handler queries.
+5. Redeploy `manage-bookings` and verify active function version/status.
+6. Validate with fresh logs that `studio_bookings` fetches now return 200.
+
+This dual fix (schema catch-up plus query hardening) prevents immediate outages and reduces future drift risk.
+
+
+### MusikaLokal Deploy Reality Checks
+
+For this repository, include these checks whenever triaging non-2xx issues tied to router updates:
+
+1. If CLI deploy returns 401 but source is correct, treat it as auth/project access drift and retry via MCP.
+2. For functions that rely on a root `deno.json`, set `import_map_path` explicitly during MCP deploy.
+3. Confirm final state using function metadata (`slug`, `version`, `status`, `verify_jwt`) before declaring fix complete.
+
 Required logging pattern:
 
 ```ts
@@ -194,7 +228,9 @@ Known affected surfaces include playlist/radio, social feed, producer network, a
 - The chosen category and reference files match the actual problem.
 - The solution addresses the root cause, not just a symptom.
 - For `PGRST204` schema cache errors, repo migrations were compared against the live schema before changing application code.
+- For PostgREST 400 nested-select failures, the exact failing `select` projection was verified against live schema and logs.
 - For non-2xx Edge Function failures, deployment freshness, action existence, and structured error capture were verified before database debugging.
+- For router fixes, function version/status was verified after deployment and logs were checked for recovery (400 to 200).
 - SQL and schema changes are concrete and executable.
 - Security and RLS implications are called out explicitly.
 - Performance claims are either justified from known rules or paired with a measurement plan.

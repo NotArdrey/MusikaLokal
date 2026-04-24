@@ -496,7 +496,7 @@ serve(async (req: Request) => {
       if (userRole === "musician") {
         const { data: bookings, error: bookingError } = await supabaseClient
           .from("studio_bookings")
-          .select("*, studio:studios(name, owner_id, studio_type, studio_media(media_url, sort_order))")
+          .select("*, studio:studios(name, owner_id, studio_media(media_url, sort_order))")
           .eq("user_id", userId)
           .order("booking_date", { ascending: false });
 
@@ -664,7 +664,7 @@ serve(async (req: Request) => {
           const { data: bookings, error: bookingError } = await supabaseClient
             .from("studio_bookings")
             .select(
-              "*, studio:studios(name, owner_id, studio_type, studio_media(media_url, sort_order)), profile:user_id(full_name, avatar_url, email, contact_number, address)",
+              "*, studio:studios(name, owner_id, studio_media(media_url, sort_order)), profile:user_id(full_name, avatar_url, email, contact_number, address)",
             )
             .in("studio_id", studioIds)
             .order("booking_date", { ascending: false });

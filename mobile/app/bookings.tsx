@@ -812,7 +812,7 @@ export default function BookingsScreen() {
   ) {
     let studioQuery = supabase
       .from("studio_bookings")
-      .select("*, studio:studios(name, owner_id, studio_type, studio_media(media_url, sort_order))")
+      .select("*, studio:studios(name, owner_id, studio_media(media_url, sort_order))")
       .order("booking_date", { ascending: false });
 
     if (role === "musician") {
@@ -4244,36 +4244,37 @@ export default function BookingsScreen() {
                         quality={72}
                         cacheVersion={item.updated_at || item.created_at || item.id}
                       />
-                      <View style={styles.typeBadge}>
-                        <Text style={styles.typeBadgeText}>
+                      <View style={[styles.typeBadge, styles.topLeftImageBadge]}>
+                        <Text style={styles.typeBadgeText} numberOfLines={1}>
                           {applicationTypeBadge}
                         </Text>
                       </View>
-                      <View
-                        style={[
-                          styles.typeBadge,
-                          {
-                            left: undefined,
-                            right: scale(12),
-                            backgroundColor:
-                              item.status === "Accepted" ||
-                                item.status === "Happening Now" ||
-                                item.status === "Confirmed"
-                                ? "rgba(16, 185, 129, 0.85)"
-                                : item.status === "Declined"
-                                  ? "rgba(239, 68, 68, 0.85)"
-                                  : "rgba(0,0,0,0.6)",
-                          },
-                        ]}
-                      >
-                        <Text style={styles.typeBadgeText}>{item.status}</Text>
-                      </View>
-                      {item.status === "Happening Now" && (
-                        <View style={styles.liveBadge}>
-                          <View style={styles.liveDot} />
-                          <Text style={styles.liveText}>Live</Text>
+                      <View style={styles.topRightBadgeStack}>
+                        <View
+                          style={[
+                            styles.typeBadge,
+                            styles.stackedImageBadge,
+                            {
+                              backgroundColor:
+                                item.status === "Accepted" ||
+                                  item.status === "Happening Now" ||
+                                  item.status === "Confirmed"
+                                  ? "rgba(16, 185, 129, 0.85)"
+                                  : item.status === "Declined"
+                                    ? "rgba(239, 68, 68, 0.85)"
+                                    : "rgba(0,0,0,0.6)",
+                            },
+                          ]}
+                        >
+                          <Text style={styles.typeBadgeText} numberOfLines={1}>{item.status}</Text>
                         </View>
-                      )}
+                        {item.status === "Happening Now" && (
+                          <View style={[styles.liveBadge, styles.stackedImageBadge]}>
+                            <View style={styles.liveDot} />
+                            <Text style={styles.liveText}>Live</Text>
+                          </View>
+                        )}
+                      </View>
                     </View>
 
                     <View style={styles.cardContent}>
@@ -4955,31 +4956,41 @@ export default function BookingsScreen() {
                       quality={72}
                       cacheVersion={item.updated_at || item.created_at || item.id}
                     />
-                    <View style={styles.typeBadge}>
-                      <Text style={styles.typeBadgeText}>{item.type}</Text>
+                    <View style={[styles.typeBadge, styles.topLeftImageBadge]}>
+                      <Text style={styles.typeBadgeText} numberOfLines={1}>{item.type}</Text>
                     </View>
 
                     {/* Pax Badge for Studios */}
                     {item.pax && (
-                      <View
-                        style={[
-                          styles.typeBadge,
-                          {
-                            left: undefined,
-                            right: 10,
-                            backgroundColor: "#10B981",
-                          },
-                        ]}
-                      >
-                        <Text style={styles.typeBadgeText}>{item.pax} pax</Text>
+                      <View style={styles.topRightBadgeStack}>
+                        <View
+                          style={[
+                            styles.typeBadge,
+                            styles.stackedImageBadge,
+                            {
+                              backgroundColor: "#10B981",
+                            },
+                          ]}
+                        >
+                          <Text style={styles.typeBadgeText} numberOfLines={1}>{item.pax} pax</Text>
+                        </View>
+
+                        {/* Status Overlays */}
+                        {activeTab === "Ongoing" && (
+                          <View style={[styles.liveBadge, styles.stackedImageBadge]}>
+                            <View style={styles.liveDot} />
+                            <Text style={styles.liveText}>Live</Text>
+                          </View>
+                        )}
                       </View>
                     )}
 
-                    {/* Status Overlays */}
-                    {activeTab === "Ongoing" && (
-                      <View style={styles.liveBadge}>
-                        <View style={styles.liveDot} />
-                        <Text style={styles.liveText}>Live</Text>
+                    {!item.pax && activeTab === "Ongoing" && (
+                      <View style={styles.topRightBadgeStack}>
+                        <View style={[styles.liveBadge, styles.stackedImageBadge]}>
+                          <View style={styles.liveDot} />
+                          <Text style={styles.liveText}>Live</Text>
+                        </View>
                       </View>
                     )}
 
@@ -6779,6 +6790,24 @@ const styles = StyleSheet.create({
     borderRadius: moderateScale(9999),
     backgroundColor: "rgba(0,0,0,0.65)",
     backdropFilter: "blur(4px)",
+  },
+  topLeftImageBadge: {
+    maxWidth: "56%",
+  },
+  topRightBadgeStack: {
+    position: "absolute",
+    top: moderateScale(12),
+    right: scale(12),
+    alignItems: "flex-end",
+    gap: moderateScale(6),
+    maxWidth: "44%",
+  },
+  stackedImageBadge: {
+    position: "relative",
+    top: undefined,
+    left: undefined,
+    right: undefined,
+    maxWidth: "100%",
   },
   typeBadgeText: {
     color: "white",
