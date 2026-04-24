@@ -700,7 +700,7 @@ export default function GigDetailsScreen() {
                       <Text
                         style={[styles.payoutAmount, { color: colors.primary }]}
                       >
-                        â‚±{(gig?.budget || 0).toLocaleString()}
+                        ₱{(gig?.budget || 0).toLocaleString()}
                       </Text>
                     </View>
                   </View>

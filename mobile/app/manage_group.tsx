@@ -1053,7 +1053,7 @@ export default function GroupDetailsScreen() {
                         <Text
                           style={{ color: colors.textSecondary, marginBottom: 8 }}
                         >
-                          Payout: â‚±{Number(app.gig?.budget || 0).toLocaleString()}
+                          Payout: ₱{Number(app.gig?.budget || 0).toLocaleString()}
                         </Text>
                         <Text style={{ color: colors.textSecondary }}>
                           Applied on:{" "}

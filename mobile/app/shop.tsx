@@ -64,7 +64,7 @@ export default function ShopScreen() {
 
   const formatPrice = (price: number | null) => {
     if (!price) return "Free";
-    return `â‚±${price.toLocaleString()}`;
+    return `₱${price.toLocaleString()}`;
   };
 
   if (isGuest) {

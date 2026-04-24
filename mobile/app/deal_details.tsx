@@ -296,13 +296,13 @@ export default function DealDetailsScreen() {
       {term.fixed_fee > 0 && (
         <View style={styles.termRow}>
           <Text style={[styles.termKey, { color: colors.textSecondary }]}>Fixed Fee</Text>
-          <Text style={[styles.termValue, { color: colors.text }]}>â‚±{term.fixed_fee?.toLocaleString()}</Text>
+          <Text style={[styles.termValue, { color: colors.text }]}>₱{term.fixed_fee?.toLocaleString()}</Text>
         </View>
       )}
       {term.deposit_amount > 0 && (
         <View style={styles.termRow}>
           <Text style={[styles.termKey, { color: colors.textSecondary }]}>Deposit</Text>
-          <Text style={[styles.termValue, { color: colors.text }]}>â‚±{term.deposit_amount?.toLocaleString()}</Text>
+          <Text style={[styles.termValue, { color: colors.text }]}>₱{term.deposit_amount?.toLocaleString()}</Text>
         </View>
       )}
       {term.event_date && (
@@ -502,7 +502,7 @@ export default function DealDetailsScreen() {
                 )}
                 <View style={styles.termRow}>
                   <Text style={[styles.termKey, { color: colors.textSecondary }]}>Price</Text>
-                  <Text style={[styles.termValue, { color: colors.text }]}>â‚±{pkg.price?.toLocaleString()}</Text>
+                  <Text style={[styles.termValue, { color: colors.text }]}>₱{pkg.price?.toLocaleString()}</Text>
                 </View>
               </View>
             ))}
@@ -689,7 +689,7 @@ export default function DealDetailsScreen() {
                 placeholderTextColor={colors.textSecondary}
               />
               <Text style={{ fontSize: moderateScale(13), color: colors.textSecondary }}>
-                Fixed Fee (â‚±)
+                Fixed Fee (₱)
               </Text>
               <TextInput
                 value={counterFixedFee}
@@ -700,7 +700,7 @@ export default function DealDetailsScreen() {
                 placeholderTextColor={colors.textSecondary}
               />
               <Text style={{ fontSize: moderateScale(13), color: colors.textSecondary }}>
-                Deposit Amount (â‚±)
+                Deposit Amount (₱)
               </Text>
               <TextInput
                 value={counterDeposit}

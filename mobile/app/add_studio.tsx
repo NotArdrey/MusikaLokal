@@ -2623,7 +2623,7 @@ export default function AddStudioScreen() {
                           marginRight: 4,
                         }}
                       >
-                        â‚±
+                        ₱
                       </Text>
                       <TextInput
                         value={rehearsalRate}
@@ -2697,7 +2697,7 @@ export default function AddStudioScreen() {
                           marginRight: 4,
                         }}
                       >
-                        â‚±
+                        ₱
                       </Text>
                       <TextInput
                         value={recordingRate}
@@ -2934,14 +2934,14 @@ export default function AddStudioScreen() {
                           </Text>
                         </View>
                         <Text style={{ fontFamily: "Poppins_400Regular", color: colors.textSecondary, fontSize: 12, marginTop: 2 }}>
-                          {promo.discount_type === "percentage" ? `${promo.discount_value}% off` : `â‚±${promo.discount_value}/hr off`}
+                          {promo.discount_type === "percentage" ? `${promo.discount_value}% off` : `₱${promo.discount_value}/hr off`}
                           {" "}on {promo.applies_to === "both" ? "all" : promo.applies_to} bookings
                         </Text>
                         {(promo.criteria || promo.minimum_booking_hours || promo.minimum_spend) ? (
                           <Text style={{ fontFamily: "Poppins_400Regular", color: colors.textSecondary, fontSize: 11, marginTop: 2 }}>
                             {promo.criteria ? `${promo.criteria}. ` : ""}
                             {promo.minimum_booking_hours ? `Min ${promo.minimum_booking_hours} hr. ` : ""}
-                            {promo.minimum_spend ? `Min â‚±${promo.minimum_spend}.` : ""}
+                            {promo.minimum_spend ? `Min ₱${promo.minimum_spend}.` : ""}
                           </Text>
                         ) : null}
                         <Text style={{ fontFamily: "Poppins_400Regular", color: colors.textSecondary, fontSize: 11, marginTop: 2 }}>
@@ -3127,7 +3127,7 @@ export default function AddStudioScreen() {
                               color: promotionForm.discount_type === dt ? colors.primary : colors.textSecondary,
                             }}
                           >
-                            {dt === "percentage" ? "Percentage (%)" : "Fixed Amount (â‚±)"}
+                            {dt === "percentage" ? "Percentage (%)" : "Fixed Amount (₱)"}
                           </Text>
                         </TouchableOpacity>
                       ))}
@@ -3150,7 +3150,7 @@ export default function AddStudioScreen() {
                       }}
                     >
                       {promotionForm.discount_type === "fixed_amount" && (
-                        <Text style={{ fontFamily: "Poppins_600SemiBold", color: colors.text, marginRight: 4 }}>â‚±</Text>
+                        <Text style={{ fontFamily: "Poppins_600SemiBold", color: colors.text, marginRight: 4 }}>₱</Text>
                       )}
                       <TextInput
                         value={promotionForm.discount_value}
@@ -5063,7 +5063,7 @@ export default function AddStudioScreen() {
                           fontFamily: "Poppins_500Medium",
                         }}
                       >
-                        Rehearsal: â‚±{rehearsalRate || "0"}/hr
+                        Rehearsal: ₱{rehearsalRate || "0"}/hr
                       </Text>
                     </View>
                   )}
@@ -5083,7 +5083,7 @@ export default function AddStudioScreen() {
                           fontFamily: "Poppins_500Medium",
                         }}
                       >
-                        Recording: â‚±{recordingRate || "0"}/song
+                        Recording: ₱{recordingRate || "0"}/song
                       </Text>
                     </View>
                   )}
@@ -5128,11 +5128,11 @@ export default function AddStudioScreen() {
                         <View key={promo.id} style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 6, marginTop: 4 }}>
                           <Ionicons name="pricetag-outline" size={12} color={colors.primary} />
                           <Text style={{ color: colors.text, fontFamily: "Poppins_500Medium", fontSize: 12 }}>
-                            "{promo.name}": {promo.discount_type === "percentage" ? `${promo.discount_value}% off` : `â‚±${promo.discount_value}/hr off`}
+                            "{promo.name}": {promo.discount_type === "percentage" ? `${promo.discount_value}% off` : `₱${promo.discount_value}/hr off`}
                             {" "}({promo.applies_to === "both" ? "All" : promo.applies_to})
                             {promo.criteria ? ` â€¢ ${promo.criteria}` : ""}
                             {promo.minimum_booking_hours ? ` â€¢ Min ${promo.minimum_booking_hours} hr` : ""}
-                            {promo.minimum_spend ? ` â€¢ Min â‚±${promo.minimum_spend}` : ""}
+                            {promo.minimum_spend ? ` â€¢ Min ₱${promo.minimum_spend}` : ""}
                             {" "}â€¢ {promo.is_permanent ? "Regular" : `${promo.start_date} â€“ ${promo.end_date}`}
                           </Text>
                         </View>

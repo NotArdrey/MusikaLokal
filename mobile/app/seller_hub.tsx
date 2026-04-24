@@ -80,8 +80,8 @@ export default function SellerHubScreen() {
   const onRefresh = () => { setRefreshing(true); fetchData(); };
 
   const formatPrice = (price: number | null) => {
-    if (!price) return "â‚±0";
-    return `â‚±${price.toLocaleString()}`;
+    if (!price) return "₱0";
+    return `₱${price.toLocaleString()}`;
   };
 
   const handleAddProduct = async () => {
@@ -325,7 +325,7 @@ export default function SellerHubScreen() {
             onChangeText={setNewDescription}
             multiline
           />
-          <Text style={[styles.inputLabel, { color: colors.text }]}>Price (â‚±)</Text>
+          <Text style={[styles.inputLabel, { color: colors.text }]}>Price (₱)</Text>
           <TextInput
             style={[styles.input, { color: colors.text, borderColor: isDark ? "#334155" : "#E2E8F0", backgroundColor: colors.surface }]}
             placeholder="0.00"

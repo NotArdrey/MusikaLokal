@@ -3051,7 +3051,7 @@ export default function AddGigScreen() {
                       marginTop: 4,
                     }}
                   >
-                    Payout: â‚±{cost}
+                    Payout: ₱{cost}
                   </Text>
                 </View>
 

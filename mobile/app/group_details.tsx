@@ -457,7 +457,7 @@ export default function GroupDetailsScreen() {
           <View style={[styles.bottomBar, { backgroundColor: colors.background, borderTopColor: colors.border, paddingBottom: insets.bottom + 16 }]}>
             <View style={styles.priceContainer}>
               <Text style={[styles.priceText, { color: colors.text }]}>
-                â‚±{group.rate || '1,500'} <Text style={{ fontSize: 14, fontWeight: '400', color: colors.textSecondary }}>night</Text>
+                ₱{group.rate || '1,500'} <Text style={{ fontSize: 14, fontWeight: '400', color: colors.textSecondary }}>night</Text>
               </Text>
               <Text style={{ fontSize: 12, textDecorationLine: 'underline', color: colors.text, fontFamily: 'Poppins_600SemiBold' }}>
                 Oct 25 - 30
