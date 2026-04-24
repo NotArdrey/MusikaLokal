@@ -45,6 +45,7 @@ import { submitListingRequest, uploadListingRequestDocument } from "../utils/lis
 import CustomAlert from "./CustomAlert";
 import DocumentUploader from "./DocumentUploader";
 import ReportModal from "./ReportModal";
+import VideoUploader from "./VideoUploader";
 import BookingControls from "./listingDetails/BookingControls";
 import GigApplyTab from "./listingDetails/GigApplyTab";
 import GigInfoTab from "./listingDetails/GigInfoTab";
@@ -2968,7 +2969,7 @@ const ListingDetailsSheet = forwardRef<
       }
 
       if (request.requestKind === "application" && !normalizedVideoUrl) {
-        showSheetAlert("error", "Video Required", "Add a video or reel link before sending this application.");
+        showSheetAlert("error", "Video Required", "Upload a video or reel before sending this application.");
         return;
       }
 
@@ -3179,8 +3180,10 @@ const ListingDetailsSheet = forwardRef<
             style={{
               flexDirection: "row",
               alignItems: "center",
+              justifyContent: "center",
               gap: 8,
               borderRadius: 999,
+              minHeight: 40,
               paddingHorizontal: 12,
               paddingVertical: 8,
               backgroundColor: isSelected ? colors.primary : colors.card,
@@ -3194,6 +3197,9 @@ const ListingDetailsSheet = forwardRef<
                 color: isSelected ? "#FFF" : colors.text,
                 fontFamily: "Poppins_500Medium",
                 fontSize: 12,
+                lineHeight: 14,
+                includeFontPadding: false,
+                textAlignVertical: "center",
               }}
             >
               {item.name}
@@ -3301,16 +3307,15 @@ const ListingDetailsSheet = forwardRef<
 
           {options.requestKind === "application" ? (
             <>
-              <Text style={[styles.label, { color: colors.textSecondary, marginTop: 14 }]}>Video / Reel Link *</Text>
-              <View style={[styles.inputWrapper, { backgroundColor: isDark ? "#374151" : "#F9FAFB", marginTop: 8 }]}> 
-                <TextInput
-                  style={[styles.input, { color: colors.text }]}
-                  placeholder="Paste a YouTube, Drive, or portfolio video link"
-                  placeholderTextColor={colors.textSecondary}
-                  value={requestVideoUrl}
-                  onChangeText={setRequestVideoUrl}
-                  autoCapitalize="none"
-                  autoCorrect={false}
+              <Text style={[styles.label, { color: colors.textSecondary, marginTop: 14 }]}>Upload Video / Reel *</Text>
+              <View style={{ marginTop: 8 }}>
+                <VideoUploader
+                  videoUrl={requestVideoUrl || null}
+                  onVideoChange={(url) => setRequestVideoUrl(url || "")}
+                  userId={activeUserId || ""}
+                  bucketName="documents"
+                  folder="performance-videos"
+                  maxSizeMB={50}
                 />
               </View>
             </>

@@ -638,7 +638,7 @@ export default function GroupDetailsScreen() {
             <Text
               style={[styles.headerLocation, { color: colors.textSecondary }]}
             >
-              {group?.genre || "Genre N/A"} â€¢{" "}
+              {group?.genre || "Genre N/A"} |{" "}
               {group?.location || "Location N/A"}
             </Text>
             {hasValidCoordinates(group?.latitude, group?.longitude) && (
@@ -913,7 +913,7 @@ export default function GroupDetailsScreen() {
                                 ]}
                               >
                                 {memberInstrument}
-                                {memberInstrument && memberRole ? " â€¢ " : ""}
+                                {memberInstrument && memberRole ? " | " : ""}
                                 {memberRole}
                               </Text>
                             )}

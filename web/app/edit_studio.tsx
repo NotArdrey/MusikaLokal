@@ -980,7 +980,7 @@ export default function EditStudioScreen() {
           .order('created_at', { ascending: true }),
       ]);
 
-      console.log("� ===== EDGE FUNCTION RESPONSE =====");
+      console.log("===== EDGE FUNCTION RESPONSE =====");
       console.log("📥 Response timestamp:", new Date().toISOString());
       console.log("📥 Error object:", baseError);
       console.log("📥 Data object:", baseData);

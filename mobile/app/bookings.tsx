@@ -143,6 +143,12 @@ const toNonEmptyString = (value: unknown) => {
   return normalized.length > 0 ? normalized : null;
 };
 
+const formatBookingCardDateTime = (value: unknown) => {
+  const raw = String(value ?? "").trim();
+  if (!raw) return "TBA";
+  return formatFriendlyDateTime(raw, { fallback: raw });
+};
+
 const extractConnectionRequestDetails = (eventDetails: any, attachmentUrl: unknown) => {
   const requestDetails =
     eventDetails?.request_details && typeof eventDetails.request_details === "object"
@@ -3053,7 +3059,7 @@ export default function BookingsScreen() {
       await supabase.from("notifications").insert({
         user_id: booking.user_id,
         type: "success",
-        title: "Balance Cleared! âœ…",
+        title: "Balance Cleared!",
         message: `Your remaining balance of ₱${balanceAmount.toLocaleString()} for ${booking.studio?.name || "your booking"} has been marked as paid.`,
         read: false,
         meta: buildNotificationRouteMeta("/bookings", undefined, {
@@ -3965,9 +3971,6 @@ export default function BookingsScreen() {
               if (item.type_id === "booking_request") {
                 const canRespond = canRespondToConnectionRequest(item);
                 const isRequestActionPending = requestActionId === item.id;
-                const requestStatusColors = getConnectionRequestStatusColors(
-                  item.raw_status || item.status,
-                );
                 const connectionMetaLine = [
                   item.request_slot_type
                     ? `Slot: ${formatConnectionEntityType(item.request_slot_type)}`
@@ -3992,9 +3995,46 @@ export default function BookingsScreen() {
                       },
                     ]}
                   >
+                    <View>
+                      <CachedImage
+                        uri={item.image}
+                        fallbackUri={REQUEST_PLACEHOLDER_IMAGE}
+                        style={styles.cardImage}
+                        width={800}
+                        height={400}
+                        quality={72}
+                        cacheVersion={item.updated_at || item.created_at || item.id}
+                      />
+                      <View style={[styles.typeBadge, styles.topLeftImageBadge]}>
+                        <Text style={styles.typeBadgeText} numberOfLines={1}>
+                          {item.type}
+                        </Text>
+                      </View>
+                      <View style={styles.topRightBadgeStack}>
+                        <View
+                          style={[
+                            styles.typeBadge,
+                            styles.stackedImageBadge,
+                            {
+                              backgroundColor:
+                                item.status === "Accepted"
+                                  ? "rgba(16, 185, 129, 0.85)"
+                                  : item.status === "Declined"
+                                    ? "rgba(239, 68, 68, 0.85)"
+                                    : "rgba(0,0,0,0.6)",
+                            },
+                          ]}
+                        >
+                          <Text style={styles.typeBadgeText} numberOfLines={1}>
+                            {item.status}
+                          </Text>
+                        </View>
+                      </View>
+                    </View>
+
                     <View style={{ padding: scale(16) }}>
-                      <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: moderateScale(8), gap: scale(8) }}>
-                        <View style={{ flexDirection: "row", alignItems: "center", gap: scale(8), flex: 1 }}>
+                      <View style={{ flexDirection: "row", alignItems: "center", marginBottom: moderateScale(8), gap: scale(8) }}>
+                        <View style={{ flexDirection: "row", alignItems: "center", gap: scale(8), flex: 1, minWidth: 0 }}>
                           <Ionicons
                             name={item.request_direction === "incoming" ? "mail-unread-outline" : "paper-plane-outline"}
                             size={moderateScale(20)}
@@ -4002,11 +4042,6 @@ export default function BookingsScreen() {
                           />
                           <Text style={{ fontSize: moderateScale(16), fontWeight: "700", color: colors.text, flex: 1 }} numberOfLines={1}>
                             {item.name || item.counterparty_name || "Connection Request"}
-                          </Text>
-                        </View>
-                        <View style={{ backgroundColor: requestStatusColors.backgroundColor, paddingHorizontal: scale(10), paddingVertical: scale(4), borderRadius: moderateScale(12) }}>
-                          <Text style={{ fontSize: moderateScale(12), fontWeight: "600", color: requestStatusColors.textColor }}>
-                            {item.status}
                           </Text>
                         </View>
                       </View>
@@ -4246,8 +4281,8 @@ export default function BookingsScreen() {
                     {/* Banner Image */}
                     <View>
                       <CachedImage
-                        uri={
-                          item.image ||
+                        uri={item.image}
+                        fallbackUri={
                           "https://images.unsplash.com/photo-1516280440614-37939bbacd81?w=400&h=200&fit=crop"
                         }
                         style={[
@@ -4356,7 +4391,7 @@ export default function BookingsScreen() {
                                   style={[styles.cardDetailText, { color: colors.textSecondary }]}
                                   numberOfLines={1}
                                 >
-                                  {item.date}
+                                  {formatBookingCardDateTime(item.date)}
                                 </Text>
                               </View>
                             )}
@@ -4962,6 +4997,9 @@ export default function BookingsScreen() {
                   <View>
                     <CachedImage
                       uri={item.image}
+                      fallbackUri={
+                        "https://images.unsplash.com/photo-1633332755192-727a05c4013d?w=400&h=400&fit=crop"
+                      }
                       style={[
                         styles.cardImage,
                         { opacity: item.isCancelled ? 0.6 : 1 },
@@ -5050,8 +5088,8 @@ export default function BookingsScreen() {
                               }
                             >
                               <CachedImage
-                                uri={
-                                  item.customer_avatar ||
+                                uri={item.customer_avatar}
+                                fallbackUri={
                                   "https://images.unsplash.com/photo-1633332755192-727a05c4013d?w=100&h=100&fit=crop"
                                 }
                                 style={styles.customerAvatar}
@@ -5372,7 +5410,7 @@ export default function BookingsScreen() {
                                             { color: colors.textSecondary },
                                           ]}
                                         >
-                                          Recording â€¢ {recordingSongCount} song
+                                          Recording | {recordingSongCount} song
                                           {recordingSongCount > 1 ? "s" : ""}
                                         </Text>
                                       </View>
@@ -5390,7 +5428,7 @@ export default function BookingsScreen() {
                                             { color: colors.textSecondary },
                                           ]}
                                         >
-                                          Rule â€¢ {recordingRuleLabel}
+                                          Rule | {recordingRuleLabel}
                                         </Text>
                                       </View>
                                     ) : null}
@@ -5408,11 +5446,11 @@ export default function BookingsScreen() {
                                           ]}
                                         >
                                           {requiredBlocks
-                                            ? `Need ${requiredBlocks} block${requiredBlocks > 1 ? "s" : ""} â€¢ `
+                                            ? `Need ${requiredBlocks} block${requiredBlocks > 1 ? "s" : ""} | `
                                             : ""}
                                           Min {formatRecordingHours(requiredTotalHours)}h
                                           {selectedTotalHours
-                                            ? ` â€¢ Selected ${formatRecordingHours(selectedTotalHours)}h`
+                                            ? ` | Selected ${formatRecordingHours(selectedTotalHours)}h`
                                             : ""}
                                         </Text>
                                       </View>
@@ -7243,11 +7281,13 @@ const styles = StyleSheet.create({
   cardDetailRow: {
     flexDirection: "row",
     alignItems: "center",
+    minHeight: moderateScale(16),
     marginTop: moderateScale(6),
     gap: scale(6),
   },
   cardDetailText: {
     fontSize: moderateScale(12),
+    lineHeight: moderateScale(16),
     fontFamily: "Poppins_400Regular",
     flex: 1,
   },

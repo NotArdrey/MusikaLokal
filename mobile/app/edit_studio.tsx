@@ -4214,13 +4214,13 @@ export default function EditStudioScreen() {
                           promo.minimum_spend ? `Min spend ₱${promo.minimum_spend}` : null,
                         ]
                           .filter(Boolean)
-                          .join(" â€¢ ")}
+                          .join(" | ")}
                       </Text>
                     )}
                     <Text style={{ fontFamily: "Poppins_400Regular", color: colors.textSecondary, fontSize: 11, marginTop: 2 }}>
                       {promo.is_permanent
                         ? "Always available"
-                        : `${new Date(promo.start_date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })} â€“ ${new Date(promo.end_date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}`}
+                        : `${new Date(promo.start_date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })} - ${new Date(promo.end_date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}`}
                     </Text>
                   </View>
                   <View style={{ flexDirection: "row", gap: 8 , flexWrap: "wrap", minWidth: "100%" }}>
@@ -5779,7 +5779,7 @@ export default function EditStudioScreen() {
                                 marginTop: 8,
                               }}
                             >
-                              âš ï¸ This overrides weekly {dayName} schedule (
+                              Warning: This overrides weekly {dayName} schedule (
                               {weeklySchedule.slots[0]?.start} -{" "}
                               {weeklySchedule.slots[0]?.end})
                             </Text>

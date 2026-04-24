@@ -387,7 +387,7 @@ export default function ProducerProjectDetailsScreen() {
                 <Text style={[styles.roleStatus, {
                   color: role.status === "filled" ? "#22c55e" : role.status === "open" ? colors.primary : colors.textSecondary
                 }]}>
-                  {role.status} {role.filled_by_name ? `â€¢ ${role.filled_by_name}` : ""}
+                  {role.status} {role.filled_by_name ? `| ${role.filled_by_name}` : ""}
                 </Text>
               </View>
               {!isOwner && role.status === "open" && (

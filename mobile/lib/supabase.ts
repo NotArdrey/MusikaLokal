@@ -95,6 +95,8 @@ type NormalizedFunctionsError = Error & {
 };
 
 const FUNCTIONS_INVOKE_DEBUG_LOGS = false;
+const TRANSIENT_FUNCTION_STATUS_CODES = new Set([502, 503, 504]);
+const TRANSIENT_FUNCTION_RETRY_DELAY_MS = 350;
 
 const isJwtLike = (token?: string | null): token is string => {
     if (typeof token !== 'string') return false;
@@ -278,17 +280,61 @@ const isInvalidJwtError = (rawError: any): boolean => {
     const details = String(rawError?.details || '').toLowerCase();
     const hint = String(rawError?.hint || '').toLowerCase();
     const contextMessage = String(rawError?.context?.message || '').toLowerCase();
+    const contextError = String(rawError?.context?.error || '').toLowerCase();
+    const contextDetails = String(rawError?.context?.details || '').toLowerCase();
 
     return (
         message.includes('invalid jwt') ||
         details.includes('invalid jwt') ||
         hint.includes('invalid jwt') ||
         contextMessage.includes('invalid jwt') ||
+        contextError.includes('invalid jwt') ||
+        contextDetails.includes('invalid jwt') ||
+        message.includes('invalid token') ||
+        details.includes('invalid token') ||
+        hint.includes('invalid token') ||
+        contextMessage.includes('invalid token') ||
+        contextError.includes('invalid token') ||
+        contextDetails.includes('invalid token') ||
+        message.includes('token is expired') ||
+        details.includes('token is expired') ||
+        hint.includes('token is expired') ||
+        contextMessage.includes('token is expired') ||
+        contextError.includes('token is expired') ||
+        contextDetails.includes('token is expired') ||
         message.includes('jwt') ||
         details.includes('jwt') ||
         hint.includes('jwt') ||
-        contextMessage.includes('jwt')
+        contextMessage.includes('jwt') ||
+        contextError.includes('jwt') ||
+        contextDetails.includes('jwt')
     );
+};
+
+const getFunctionsErrorStatus = (rawError: any): number | null => {
+    const normalized = Number(rawError?.status || rawError?.context?.status || 0);
+    return Number.isFinite(normalized) && normalized > 0 ? normalized : null;
+};
+
+const isTransientFunctionsError = (rawError: any): boolean => {
+    const status = getFunctionsErrorStatus(rawError);
+    if (status && TRANSIENT_FUNCTION_STATUS_CODES.has(status)) {
+        return true;
+    }
+
+    const message = String(rawError?.message || '').toLowerCase();
+    return (
+        !status &&
+        (message.includes('network request failed') ||
+            message.includes('failed to fetch') ||
+            message.includes('fetch failed'))
+    );
+};
+
+const delay = async (ms: number) => {
+    await new Promise<void>((resolve) => {
+        setTimeout(resolve, ms);
+    });
 };
 
 const hasAuthorizationHeader = (options?: InvokeOptions): boolean => {
@@ -384,7 +430,7 @@ const unregisterCurrentPushDevice = async () => {
     options?: InvokeOptions,
 ): Promise<{ data: T | null; error: Error | null }> {
     try {
-        const invokeOptions = await withSessionAuthorization(options);
+        let invokeOptions = await withSessionAuthorization(options);
         const firstAttemptHadAuthorization = hasAuthorizationHeader(invokeOptions);
         let result = (await originalInvoke(functionName, invokeOptions)) as {
             data: T | null;
@@ -403,8 +449,26 @@ const unregisterCurrentPushDevice = async () => {
 
             await refreshAccessToken();
 
-            const retryOptions = await withSessionAuthorization(withoutAuthorizationHeader(options));
-            result = (await originalInvoke(functionName, retryOptions)) as {
+            invokeOptions = await withSessionAuthorization(withoutAuthorizationHeader(options));
+            result = (await originalInvoke(functionName, invokeOptions)) as {
+                data: T | null;
+                error: any;
+            };
+        }
+
+        if (result.error && isTransientFunctionsError(result.error)) {
+            if (__DEV__) {
+                const status = getFunctionsErrorStatus(result.error);
+                console.warn('[supabase.functions.invoke] Transient function invoke error, retrying once', {
+                    functionName,
+                    status,
+                    message: result.error?.message,
+                });
+            }
+
+            await delay(TRANSIENT_FUNCTION_RETRY_DELAY_MS);
+            invokeOptions = await withSessionAuthorization(withoutAuthorizationHeader(invokeOptions || options));
+            result = (await originalInvoke(functionName, invokeOptions)) as {
                 data: T | null;
                 error: any;
             };

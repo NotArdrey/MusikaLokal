@@ -49,15 +49,23 @@ export default function EditProductionScreen() {
   const invokeDeals = useCallback(async (body: Record<string, unknown>) => {
     const { data, error } = await supabase.functions.invoke('manage-deals', { body });
     if (error) {
-      console.error('manage-deals failed', {
+      const status = Number((error as any)?.status || (error as any)?.context?.status || 0);
+      console.warn('manage-deals failed', {
         message: error.message,
-        status: (error as any).status,
+        status,
         code: (error as any).code,
         details: (error as any).details,
         hint: (error as any).hint,
         context: (error as any).context,
         body,
       });
+
+      if ([502, 503, 504].includes(status)) {
+        const transientError = new Error('Production services are temporarily unavailable. Please try again.');
+        (transientError as any).status = status;
+        throw transientError;
+      }
+
       throw error;
     }
     return data;
@@ -83,7 +91,11 @@ export default function EditProductionScreen() {
 
       setTeam(existingTeam);
       setTeamName(existingTeam.name || '');
-      setDescription(existingTeam.description || '');
+      const normalizedDescription = (existingTeam.description || '').trim();
+      setDescription(
+        normalizedDescription ||
+          `${existingTeam.name || 'This production team'} focuses on live events, talent coordination, and venue partnerships.`,
+      );
       setLogoImages(existingTeam.logo_url ? [existingTeam.logo_url] : []);
       setThumbnailIndex(0);
     } catch (error: any) {
@@ -221,6 +233,9 @@ export default function EditProductionScreen() {
                 placeholderTextColor={colors.textSecondary}
                 multiline
               />
+              <Text style={[styles.descriptionHint, { color: colors.textSecondary }]}>
+                This description is shown on your Manage Production About section.
+              </Text>
 
               <ProductionInviteSection
                 currentUserId={userId || session?.user?.id || null}
@@ -265,6 +280,7 @@ const styles = StyleSheet.create({
   label: { marginTop: 16, marginBottom: 10, fontSize: 13, fontFamily: 'Poppins_600SemiBold' },
   input: { borderWidth: 1, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, fontSize: 14, fontFamily: 'Poppins_400Regular' },
   textArea: { minHeight: 110, textAlignVertical: 'top' },
+  descriptionHint: { marginTop: 8, fontSize: 12, fontFamily: 'Poppins_400Regular' },
   helperText: { marginTop: 12, fontSize: 12, fontFamily: 'Poppins_500Medium' },
   submitBtn: { marginTop: 24, borderRadius: 14, paddingVertical: 14, alignItems: 'center', justifyContent: 'center' },
   submitBtnText: { color: '#fff', fontSize: 15, fontFamily: 'Poppins_700Bold' },

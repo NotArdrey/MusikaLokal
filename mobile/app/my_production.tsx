@@ -54,15 +54,23 @@ export default function MyProductionScreen() {
   const invokeDeals = useCallback(async (body: Record<string, unknown>) => {
     const { data, error } = await supabase.functions.invoke('manage-deals', { body });
     if (error) {
-      console.error('manage-deals failed', {
+      const status = Number((error as any)?.status || (error as any)?.context?.status || 0);
+      console.warn('manage-deals failed', {
         message: error.message,
-        status: (error as any).status,
+        status,
         code: (error as any).code,
         details: (error as any).details,
         hint: (error as any).hint,
         context: (error as any).context,
         body,
       });
+
+      if ([502, 503, 504].includes(status)) {
+        const transientError = new Error('Production services are temporarily unavailable. Please try again.');
+        (transientError as any).status = status;
+        throw transientError;
+      }
+
       throw error;
     }
     return data;

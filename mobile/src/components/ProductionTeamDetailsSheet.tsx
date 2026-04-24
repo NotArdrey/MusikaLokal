@@ -26,8 +26,10 @@ import { useTheme } from "../context/ThemeContext";
 import { useBottomBarClearance } from "../hooks/useBottomBarClearance";
 import { submitListingRequest, uploadListingRequestDocument } from "../utils/listingRequests";
 import CachedImage from "./CachedImage";
+import CustomAlert, { AlertType } from "./CustomAlert";
 import DocumentUploader from "./DocumentUploader";
 import TrackedBottomSheetModal from "./TrackedBottomSheetModal";
+import VideoUploader from "./VideoUploader";
 
 type ProductionTeamRecord = {
   id: string;
@@ -71,6 +73,12 @@ interface ProductionTeamDetailsSheetProps {
   teamId: string | null;
   onDismiss?: () => void;
 }
+
+type SheetAlertButton = {
+  text: string;
+  onPress?: () => void;
+  style?: "default" | "cancel" | "destructive";
+};
 
 const formatRoleLabel = (value: string | null | undefined) => {
   if (!value) return "Member";
@@ -122,6 +130,26 @@ const ProductionTeamDetailsSheet = forwardRef<
   const [isSendingRequest, setIsSendingRequest] = useState(false);
   const [isFavorited, setIsFavorited] = useState(false);
   const [favoriteCount, setFavoriteCount] = useState(0);
+  const [alertVisible, setAlertVisible] = useState(false);
+  const [alertConfig, setAlertConfig] = useState<{
+    type: AlertType;
+    title: string;
+    message: string;
+    buttons?: SheetAlertButton[];
+  }>({ type: "info", title: "", message: "" });
+
+  const showSheetAlert = useCallback(
+    (
+      type: AlertType,
+      title: string,
+      message: string,
+      buttons?: SheetAlertButton[],
+    ) => {
+      setAlertConfig({ type, title, message, buttons });
+      setAlertVisible(true);
+    },
+    [],
+  );
 
   const closeSheet = useCallback(() => {
     if (ref && typeof ref !== "function") {
@@ -526,25 +554,26 @@ const ProductionTeamDetailsSheet = forwardRef<
 
   const handleSendConnectionRequest = useCallback(async () => {
     if (!userId || !team?.id || !team.owner_id) {
-      Alert.alert("Error", "This request is unavailable right now.");
+      showSheetAlert("error", "Error", "This request is unavailable right now.");
       return;
     }
 
     if (currentUserRole !== "musician") {
-      Alert.alert("Unavailable", "Only musicians can apply to this production team.");
+      showSheetAlert("warning", "Unavailable", "Only musicians can apply to this production team.");
       return;
     }
 
     const normalizedPitchMessage = requestMessage.trim();
     if (!normalizedPitchMessage) {
-      Alert.alert("Pitch Required", "Add a short pitch before sending the request.");
+      showSheetAlert("warning", "Pitch Required", "Add a short pitch before sending the request.");
       return;
     }
 
     const normalizedApplicationContext = requestApplicationContext.trim();
     const normalizedVideoUrl = requestVideoUrl.trim();
     if (!normalizedApplicationContext) {
-      Alert.alert(
+      showSheetAlert(
+        "warning",
         "Application Context Required",
         "Add the application context before sending this application.",
       );
@@ -552,7 +581,8 @@ const ProductionTeamDetailsSheet = forwardRef<
     }
 
     if (!requestDocumentFile && !requestDocumentUrl.trim()) {
-      Alert.alert(
+      showSheetAlert(
+        "warning",
         "CV Required",
         "Upload your CV before sending this application.",
       );
@@ -560,7 +590,7 @@ const ProductionTeamDetailsSheet = forwardRef<
     }
 
     if (!normalizedVideoUrl) {
-      Alert.alert("Video Required", "Add a video or reel link before sending this application.");
+      showSheetAlert("warning", "Video Required", "Upload a video or reel before sending this application.");
       return;
     }
 
@@ -574,7 +604,7 @@ const ProductionTeamDetailsSheet = forwardRef<
         );
       } catch (uploadError) {
         console.error("Error uploading request document:", uploadError);
-        Alert.alert("Upload Failed", "We couldn't upload the CV right now.");
+        showSheetAlert("error", "Upload Failed", "We couldn't upload the CV right now.");
         return;
       }
     }
@@ -627,18 +657,31 @@ const ProductionTeamDetailsSheet = forwardRef<
       setRequestDocumentUrl("");
       setRequestVideoUrl("");
       setSelectedGroupId(null);
-      Alert.alert("Success", "Your structured application has been sent.");
+      showSheetAlert(
+        "success",
+        "Success",
+        "Your structured application has been sent.",
+        [
+          {
+            text: "OK",
+            onPress: () => {
+              closeSheet();
+            },
+          },
+        ],
+      );
     } catch (error) {
       console.error("Error sending production team request:", error);
       const errorMessage =
         error instanceof Error && error.message.trim().length > 0
           ? error.message
           : "We couldn't send that request right now.";
-      Alert.alert("Error", errorMessage);
+      showSheetAlert("error", "Error", errorMessage);
     } finally {
       setIsSendingRequest(false);
     }
   }, [
+    closeSheet,
     currentUserName,
     currentUserRole,
     requestApplicationContext,
@@ -651,6 +694,7 @@ const ProductionTeamDetailsSheet = forwardRef<
     team?.logo_url,
     team?.name,
     team?.owner_id,
+    showSheetAlert,
     userId,
   ]);
 
@@ -858,7 +902,7 @@ const ProductionTeamDetailsSheet = forwardRef<
     return (
       <View style={[styles.infoCard, { backgroundColor: colors.card, borderColor: colors.border }]}> 
         <Text style={[styles.stateMessage, { color: colors.textSecondary, textAlign: "left", marginTop: 0 }]}> 
-          Introduce yourself with a pitch, application context, a required CV upload, and a required video link.
+          Introduce yourself with a pitch, application context, a required CV upload, and a required video upload.
         </Text>
 
         {renderApplyAsOptions()}
@@ -900,18 +944,15 @@ const ProductionTeamDetailsSheet = forwardRef<
           />
         </View>
 
-        <Text style={[styles.infoLabel, { color: colors.textSecondary, marginTop: 16 }]}>Video / Reel Link *</Text>
-        <View style={[styles.compactInputBox, { backgroundColor: colors.background, borderColor: colors.border }]}> 
-          <TextInput
-            style={[styles.compactInput, { color: colors.text }]}
-            placeholder="Paste a YouTube, Drive, or portfolio video link"
-            placeholderTextColor={colors.textSecondary}
-            value={requestVideoUrl}
-            onChangeText={setRequestVideoUrl}
-            autoCapitalize="none"
-            autoCorrect={false}
-          />
-        </View>
+        <Text style={[styles.infoLabel, { color: colors.textSecondary, marginTop: 16 }]}>Upload Video / Reel *</Text>
+        <VideoUploader
+          videoUrl={requestVideoUrl || null}
+          onVideoChange={(url) => setRequestVideoUrl(url || "")}
+          userId={userId || ""}
+          bucketName="documents"
+          folder="performance-videos"
+          maxSizeMB={50}
+        />
 
         <TouchableOpacity
           activeOpacity={0.85}
@@ -991,125 +1032,136 @@ const ProductionTeamDetailsSheet = forwardRef<
   );
 
   return (
-    <TrackedBottomSheetModal
-      ref={ref}
-      index={0}
-      snapPoints={snapPoints}
-      animationConfigs={animationConfigs}
-      animateOnMount={true}
-      enableDynamicSizing={false}
-      enableOverDrag={false}
-      enablePanDownToClose={true}
-      backdropComponent={renderBackdrop}
-      onDismiss={handleDismiss}
-      backgroundStyle={{ backgroundColor: colors.background, borderRadius: 32 }}
-      handleIndicatorStyle={{
-        backgroundColor: isDark ? "#4B5563" : "#E5E7EB",
-        width: 40,
-        marginTop: 10,
-      }}
-    >
-      {loading ? (
-        <View style={styles.stateContainer}>
-          <ActivityIndicator size="large" color={colors.primary} />
-          <Text style={[styles.stateTitle, { color: colors.text }]}>Loading team details</Text>
-          <Text style={[styles.stateMessage, { color: colors.textSecondary }]}>Fetching the latest production team info.</Text>
-        </View>
-      ) : errorMessage ? (
-        <View style={styles.stateContainer}>
-          <View style={[styles.stateIcon, { backgroundColor: colors.card }]}> 
-            <Ionicons name="alert-circle-outline" size={28} color={accentColor} />
+    <>
+      <TrackedBottomSheetModal
+        ref={ref}
+        index={0}
+        snapPoints={snapPoints}
+        animationConfigs={animationConfigs}
+        animateOnMount={true}
+        enableDynamicSizing={false}
+        enableOverDrag={false}
+        enablePanDownToClose={true}
+        backdropComponent={renderBackdrop}
+        onDismiss={handleDismiss}
+        backgroundStyle={{ backgroundColor: colors.background, borderRadius: 32 }}
+        handleIndicatorStyle={{
+          backgroundColor: isDark ? "#4B5563" : "#E5E7EB",
+          width: 40,
+          marginTop: 10,
+        }}
+      >
+        {loading ? (
+          <View style={styles.stateContainer}>
+            <ActivityIndicator size="large" color={colors.primary} />
+            <Text style={[styles.stateTitle, { color: colors.text }]}>Loading team details</Text>
+            <Text style={[styles.stateMessage, { color: colors.textSecondary }]}>Fetching the latest production team info.</Text>
           </View>
-          <Text style={[styles.stateTitle, { color: colors.text }]}>Unable to load this team</Text>
-          <Text style={[styles.stateMessage, { color: colors.textSecondary }]}>{errorMessage}</Text>
-        </View>
-      ) : !team ? (
-        <View style={styles.stateContainer}>
-          <View style={[styles.stateIcon, { backgroundColor: colors.card }]}> 
-            <Ionicons name="people-outline" size={28} color={colors.textSecondary} />
+        ) : errorMessage ? (
+          <View style={styles.stateContainer}>
+            <View style={[styles.stateIcon, { backgroundColor: colors.card }]}> 
+              <Ionicons name="alert-circle-outline" size={28} color={accentColor} />
+            </View>
+            <Text style={[styles.stateTitle, { color: colors.text }]}>Unable to load this team</Text>
+            <Text style={[styles.stateMessage, { color: colors.textSecondary }]}>{errorMessage}</Text>
           </View>
-          <Text style={[styles.stateTitle, { color: colors.text }]}>Team unavailable</Text>
-          <Text style={[styles.stateMessage, { color: colors.textSecondary }]}>This production team could not be found.</Text>
-        </View>
-      ) : (
-        <BottomSheetScrollView
-          showsVerticalScrollIndicator={false}
-          contentContainerStyle={[styles.scrollContent, { paddingBottom: contentBottomPadding }]}
-        >
-          <View style={styles.imageContainer}>
-            {team.logo_url ? (
-              <CachedImage
-                uri={team.logo_url}
-                style={[styles.image, { backgroundColor: colors.border }]}
+        ) : !team ? (
+          <View style={styles.stateContainer}>
+            <View style={[styles.stateIcon, { backgroundColor: colors.card }]}> 
+              <Ionicons name="people-outline" size={28} color={colors.textSecondary} />
+            </View>
+            <Text style={[styles.stateTitle, { color: colors.text }]}>Team unavailable</Text>
+            <Text style={[styles.stateMessage, { color: colors.textSecondary }]}>This production team could not be found.</Text>
+          </View>
+        ) : (
+          <BottomSheetScrollView
+            showsVerticalScrollIndicator={false}
+            contentContainerStyle={[styles.scrollContent, { paddingBottom: contentBottomPadding }]}
+          >
+            <View style={styles.imageContainer}>
+              {team.logo_url ? (
+                <CachedImage
+                  uri={team.logo_url}
+                  style={[styles.image, { backgroundColor: colors.border }]}
+                />
+              ) : (
+                <View style={[styles.image, { backgroundColor: accentColor }]}>
+                  <View style={[styles.heroFallbackMark, { backgroundColor: accentSoft }]}> 
+                    <Ionicons name="people" size={42} color="#FFFFFF" />
+                  </View>
+                </View>
+              )}
+
+              <LinearGradient
+                colors={
+                  team.logo_url
+                    ? ["rgba(0,0,0,0.48)", "transparent", "rgba(0,0,0,0.72)"]
+                    : ["rgba(0,0,0,0.12)", "rgba(0,0,0,0.28)", "rgba(0,0,0,0.56)"]
+                }
+                style={styles.gradient}
               />
-            ) : (
-              <View style={[styles.image, { backgroundColor: accentColor }]}>
-                <View style={[styles.heroFallbackMark, { backgroundColor: accentSoft }]}> 
-                  <Ionicons name="people" size={42} color="#FFFFFF" />
+
+              <View style={styles.headerActions}>
+                <TouchableOpacity activeOpacity={1} onPress={closeSheet} style={styles.roundBtn}>
+                  <Ionicons name="close" size={22} color="#000" />
+                </TouchableOpacity>
+
+                <View style={styles.rightActions}>
+                  {canMessageTeamOwner ? (
+                    <TouchableOpacity activeOpacity={1} onPress={openTeamChat} style={styles.roundBtn}>
+                      <Ionicons name="chatbubble-ellipses-outline" size={22} color="#000" />
+                    </TouchableOpacity>
+                  ) : null}
+                  <TouchableOpacity activeOpacity={0.7} onPress={handleShare} style={styles.roundBtn}>
+                    <Ionicons name="share-outline" size={22} color="#000" />
+                  </TouchableOpacity>
+                  <TouchableOpacity activeOpacity={1} onPress={toggleFavorite} style={styles.roundBtn}>
+                    <Ionicons name={isFavorited ? "bookmark" : "bookmark-outline"} size={22} color={isFavorited ? "#6366F1" : "#000"} />
+                  </TouchableOpacity>
                 </View>
               </View>
-            )}
 
-            <LinearGradient
-              colors={
-                team.logo_url
-                  ? ["rgba(0,0,0,0.48)", "transparent", "rgba(0,0,0,0.72)"]
-                  : ["rgba(0,0,0,0.12)", "rgba(0,0,0,0.28)", "rgba(0,0,0,0.56)"]
-              }
-              style={styles.gradient}
-            />
-
-            <View style={styles.headerActions}>
-              <TouchableOpacity activeOpacity={1} onPress={closeSheet} style={styles.roundBtn}>
-                <Ionicons name="close" size={22} color="#000" />
-              </TouchableOpacity>
-
-              <View style={styles.rightActions}>
-                {canMessageTeamOwner ? (
-                  <TouchableOpacity activeOpacity={1} onPress={openTeamChat} style={styles.roundBtn}>
-                    <Ionicons name="chatbubble-ellipses-outline" size={22} color="#000" />
-                  </TouchableOpacity>
-                ) : null}
-                <TouchableOpacity activeOpacity={0.7} onPress={handleShare} style={styles.roundBtn}>
-                  <Ionicons name="share-outline" size={22} color="#000" />
-                </TouchableOpacity>
-                <TouchableOpacity activeOpacity={1} onPress={toggleFavorite} style={styles.roundBtn}>
-                  <Ionicons name={isFavorited ? "bookmark" : "bookmark-outline"} size={22} color={isFavorited ? "#6366F1" : "#000"} />
-                </TouchableOpacity>
+              <View style={styles.heroIdentity}>
+                <Text style={styles.heroTitle}>{team.name}</Text>
+                <View style={{ flexDirection: "row", alignItems: "center", marginTop: 4 }}>
+                  <Ionicons name="people" size={14} color="#FFF" />
+                  <Text style={[styles.heroMetaText, { marginLeft: 4 }]}>
+                    {members.length} {members.length === 1 ? "member" : "members"}
+                  </Text>
+                  <Text style={[styles.heroMetaText, { marginLeft: 12 }]}>
+                    {"• Led by "}{ownerMember?.full_name || "Production owner"}
+                  </Text>
+                </View>
+                <View style={{ flexDirection: "row", alignItems: "center", marginTop: 4 }}>
+                  <Ionicons name="bookmark" size={13} color="#FFF" />
+                  <Text style={[styles.heroMetaText, { marginLeft: 6 }]}>
+                    {favoriteCount} bookmarked
+                  </Text>
+                </View>
               </View>
             </View>
 
-            <View style={styles.heroIdentity}>
-              <Text style={styles.heroTitle}>{team.name}</Text>
-              <View style={{ flexDirection: "row", alignItems: "center", marginTop: 4 }}>
-                <Ionicons name="people" size={14} color="#FFF" />
-                <Text style={[styles.heroMetaText, { marginLeft: 4 }]}>
-                  {members.length} {members.length === 1 ? "member" : "members"}
-                </Text>
-                <Text style={[styles.heroMetaText, { marginLeft: 12 }]}>
-                  {"• Led by "}{ownerMember?.full_name || "Production owner"}
-                </Text>
-              </View>
-              <View style={{ flexDirection: "row", alignItems: "center", marginTop: 4 }}>
-                <Ionicons name="bookmark" size={13} color="#FFF" />
-                <Text style={[styles.heroMetaText, { marginLeft: 6 }]}>
-                  {favoriteCount} bookmarked
-                </Text>
-              </View>
+            {showTabs ? renderTabs() : null}
+            <View style={styles.contentBody}>
+              {activeTab === "Connect"
+                ? renderConnectContent()
+                : activeTab === "Review"
+                  ? renderReviewContent()
+                  : renderAboutContent()}
             </View>
-          </View>
+          </BottomSheetScrollView>
+        )}
+      </TrackedBottomSheetModal>
 
-          {showTabs ? renderTabs() : null}
-          <View style={styles.contentBody}>
-            {activeTab === "Connect"
-              ? renderConnectContent()
-              : activeTab === "Review"
-                ? renderReviewContent()
-                : renderAboutContent()}
-          </View>
-        </BottomSheetScrollView>
-      )}
-    </TrackedBottomSheetModal>
+      <CustomAlert
+        visible={alertVisible}
+        type={alertConfig.type}
+        title={alertConfig.title}
+        message={alertConfig.message}
+        buttons={alertConfig.buttons}
+        onClose={() => setAlertVisible(false)}
+      />
+    </>
   );
 });
 

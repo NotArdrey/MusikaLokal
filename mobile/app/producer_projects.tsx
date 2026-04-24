@@ -304,7 +304,7 @@ export default function ProducerProjectsScreen() {
       <View style={styles.cardContent}>
         <Text style={[styles.cardTitle, { color: colors.text }]} numberOfLines={1}>{item.title}</Text>
         <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>
-          {item.owner_name || "Producer"} {item.genre ? `â€¢ ${item.genre}` : ""}
+          {item.owner_name || "Producer"} {item.genre ? `| ${item.genre}` : ""}
         </Text>
         <View style={styles.cardStats}>
           <Text style={[styles.cardStat, { color: colors.textSecondary }]}>
@@ -339,10 +339,10 @@ export default function ProducerProjectsScreen() {
       <View style={{ flex: 1, marginLeft: 12 }}>
         <Text style={[styles.matchName, { color: colors.text }]}>{item.musician_name}</Text>
         <Text style={[styles.matchProject, { color: colors.textSecondary }]} numberOfLines={1}>
-          {item.project_title} {item.role_title ? `â€¢ ${item.role_title}` : ""}
+          {item.project_title} {item.role_title ? `| ${item.role_title}` : ""}
         </Text>
         <Text style={[styles.matchType, { color: item.match_type === "invite" ? colors.primary : "#f59e0b" }]}>
-          {item.match_type === "invite" ? "Invite" : "Application"} â€¢ {item.status}
+          {item.match_type === "invite" ? "Invite" : "Application"} | {item.status}
         </Text>
       </View>
     </TouchableOpacity>

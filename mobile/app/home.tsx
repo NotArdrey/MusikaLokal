@@ -2984,7 +2984,7 @@ export default function HomeScreen() {
                         marginTop: -2,
                       }}
                     >
-                      {`Engine: ${aiFeedProvider}${aiRecommendations.length > 0 ? ` â€¢ ${aiRecommendations.length} picks` : ""}`}
+                      {`Engine: ${aiFeedProvider}${aiRecommendations.length > 0 ? ` | ${aiRecommendations.length} picks` : ""}`}
                     </Text>
                   </View>
                 </View>

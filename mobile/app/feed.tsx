@@ -95,6 +95,25 @@ const createFeedCache = (provider: string): Record<FeedTab, FeedCacheEntry> => (
   following: createEmptyFeedCacheEntry(provider),
 });
 
+const logFeedInvokeError = (
+  scope: string,
+  error: any,
+  extra: Record<string, unknown> = {},
+) => {
+  const rawStatus = Number(error?.status || error?.context?.status || 0);
+  const status = Number.isFinite(rawStatus) && rawStatus > 0 ? rawStatus : null;
+
+  console.error(`[FeedInvokeError] ${scope}`, {
+    message: error?.message || "Unknown function invoke error",
+    status,
+    code: error?.code ?? error?.context?.code ?? null,
+    details: error?.details ?? error?.context?.details ?? null,
+    hint: error?.hint ?? error?.context?.hint ?? null,
+    context: error?.context ?? null,
+    ...extra,
+  });
+};
+
 const FEED_PAGE_SIZE = 20;
 const AI_CARD_LIMIT = 20;
 const KNOWN_FEED_MEDIA_BUCKETS = [
@@ -1095,6 +1114,9 @@ export default function FeedScreen() {
     });
 
     if (error) {
+      logFeedInvokeError("manage-social-feed:get_following", error, {
+        action: "get_following",
+      });
       throw error;
     }
 
@@ -1168,6 +1190,13 @@ export default function FeedScreen() {
       });
 
       if (error) {
+        logFeedInvokeError("manage-social-feed:get_feed", error, {
+          action: "get_feed",
+          feedTab,
+          feedType: feedTab === "following" ? "following" : "public",
+          append,
+          currentLength,
+        });
         throw error;
       }
 
@@ -1229,7 +1258,11 @@ export default function FeedScreen() {
         applyFeedSnapshot(nextSnapshot);
       }
     } catch (e: any) {
-      console.error("Feed fetch error:", e);
+      logFeedInvokeError("fetchFeed", e, {
+        feedTab,
+        append,
+        currentLength,
+      });
 
       if (requestId !== feedRequestIdRef.current[feedTab]) {
         return;
@@ -2249,39 +2282,15 @@ export default function FeedScreen() {
                 <Text style={[styles.emptyTitle, { color: colors.text }]}>
                   {tab === "following"
                     ? "Your Following Feed is Empty"
-                    : "Your For You Feed is Empty"}
+                    : "There is no"}
                 </Text>
-                <Text style={[styles.emptySubtitle, { color: colors.textSecondary }]}>
-                  {tab === "following"
-                    ? "Follow musicians, groups, and duos to see their updates here. Followed profiles and groups will also appear until they have posts."
-                    : "Create a group, add a studio listing, or post a gig to start seeing AI-powered recommendations."}
-                </Text>
+                {tab === "following" ? (
+                  <Text style={[styles.emptySubtitle, { color: colors.textSecondary }]}>
+                    Follow musicians, groups, and duos to see their updates here. Followed profiles and groups will also appear until they have posts.
+                  </Text>
+                ) : null}
 
-                {tab === "for_you" ? (
-                  <View style={styles.emptyActions}>
-                    <TouchableOpacity activeOpacity={1}
-                      style={[styles.emptyActionBtn, { backgroundColor: colors.primary }]}
-                      onPress={() => router.push("/add_group" as any)}
-                    >
-                      <Ionicons name="people" size={18} color="#fff" />
-                      <Text style={styles.emptyActionBtnText}>Create Group</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity activeOpacity={1}
-                      style={[styles.emptyActionBtn, { backgroundColor: isDark ? "#334155" : "#F1F5F9" }]}
-                      onPress={() => router.push("/add_studio" as any)}
-                    >
-                      <Ionicons name="business" size={18} color={colors.primary} />
-                      <Text style={[styles.emptyActionBtnTextAlt, { color: colors.text }]}>Add Studio</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity activeOpacity={1}
-                      style={[styles.emptyActionBtn, { backgroundColor: isDark ? "#334155" : "#F1F5F9" }]}
-                      onPress={() => router.push("/add_gig" as any)}
-                    >
-                      <Ionicons name="musical-notes" size={18} color={colors.primary} />
-                      <Text style={[styles.emptyActionBtnTextAlt, { color: colors.text }]}>Post Gig</Text>
-                    </TouchableOpacity>
-                  </View>
-                ) : (
+                {tab === "following" ? (
                   <TouchableOpacity activeOpacity={1}
                     style={[styles.emptyActionBtn, { backgroundColor: colors.primary, marginTop: 16 }]}
                     onPress={openSearchSheet}
@@ -2289,7 +2298,7 @@ export default function FeedScreen() {
                     <Ionicons name="search" size={18} color="#fff" />
                     <Text style={styles.emptyActionBtnText}>Find Musicians</Text>
                   </TouchableOpacity>
-                )}
+                ) : null}
               </View>
             )
           }

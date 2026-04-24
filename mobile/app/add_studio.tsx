@@ -2510,7 +2510,7 @@ export default function AddStudioScreen() {
                           Please verify your identity first before you can verify your address
                         </Text>
                         <Text style={{ color: '#F59E0B', fontFamily: "Poppins_500Medium", fontSize: 12, marginTop: 8 }}>
-                          Tap here to verify â†’
+                          Tap here to verify ->
                         </Text>
                       </View>
                     </View>
@@ -2947,7 +2947,7 @@ export default function AddStudioScreen() {
                         <Text style={{ fontFamily: "Poppins_400Regular", color: colors.textSecondary, fontSize: 11, marginTop: 2 }}>
                           {promo.is_permanent
                             ? "Always available"
-                            : `${new Date(promo.start_date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })} â€“ ${new Date(promo.end_date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}`}
+                            : `${new Date(promo.start_date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })} - ${new Date(promo.end_date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}`}
                         </Text>
                       </View>
                       <View style={{ flexDirection: "row", gap: 8 , flexWrap: "wrap", minWidth: "100%" }}>
@@ -4604,7 +4604,7 @@ export default function AddStudioScreen() {
                                     marginTop: 8,
                                   }}
                                 >
-                                  âš ï¸ This overrides weekly {dayName} schedule (
+                                  Warning: This overrides weekly {dayName} schedule (
                                   {weeklySchedule.slots[0]?.start} -{" "}
                                   {weeklySchedule.slots[0]?.end})
                                 </Text>
@@ -5130,10 +5130,10 @@ export default function AddStudioScreen() {
                           <Text style={{ color: colors.text, fontFamily: "Poppins_500Medium", fontSize: 12 }}>
                             "{promo.name}": {promo.discount_type === "percentage" ? `${promo.discount_value}% off` : `₱${promo.discount_value}/hr off`}
                             {" "}({promo.applies_to === "both" ? "All" : promo.applies_to})
-                            {promo.criteria ? ` â€¢ ${promo.criteria}` : ""}
-                            {promo.minimum_booking_hours ? ` â€¢ Min ${promo.minimum_booking_hours} hr` : ""}
-                            {promo.minimum_spend ? ` â€¢ Min ₱${promo.minimum_spend}` : ""}
-                            {" "}â€¢ {promo.is_permanent ? "Regular" : `${promo.start_date} â€“ ${promo.end_date}`}
+                            {promo.criteria ? ` | ${promo.criteria}` : ""}
+                            {promo.minimum_booking_hours ? ` | Min ${promo.minimum_booking_hours} hr` : ""}
+                            {promo.minimum_spend ? ` | Min ₱${promo.minimum_spend}` : ""}
+                            {" | "}{promo.is_permanent ? "Regular" : `${promo.start_date} - ${promo.end_date}`}
                           </Text>
                         </View>
                       ))}

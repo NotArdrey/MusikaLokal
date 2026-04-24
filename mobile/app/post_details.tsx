@@ -252,7 +252,7 @@ export default function PostDetailsScreen() {
           <View style={{ flex: 1, marginLeft: 12 }}>
             <Text style={[styles.authorName, { color: colors.text }]}>{post.author_name || "User"}</Text>
             <Text style={[styles.postTime, { color: colors.textSecondary }]}>
-              {formatFriendlyDateTime(post.created_at)} â€¢ {post.visibility === "followers" ? "Followers" : "Public"}
+              {formatFriendlyDateTime(post.created_at)} | {post.visibility === "followers" ? "Followers" : "Public"}
             </Text>
           </View>
           {isOwner ? (

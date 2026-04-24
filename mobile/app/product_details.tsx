@@ -318,7 +318,7 @@ export default function ProductDetailsScreen() {
                   </Text>
                   <Text style={{ color: colors.textSecondary, fontSize: moderateScale(11), marginTop: 2 }}>
                     {formatPrice(v.price)}
-                    {v.stock_qty != null && ` â€¢ ${v.stock_qty} left`}
+                    {v.stock_qty != null && ` | ${v.stock_qty} left`}
                   </Text>
                 </TouchableOpacity>
               ))}

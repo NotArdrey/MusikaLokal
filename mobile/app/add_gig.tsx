@@ -3156,7 +3156,7 @@ export default function AddGigScreen() {
                         {soloSlotsNeeded > 0 && (soloPreferredGenres.length > 0 || soloPreferredInstruments.length > 0) && (
                           <Text style={{ color: colors.textSecondary, fontSize: 12, marginLeft: 24 }}>
                             {soloPreferredGenres.length > 0 ? `Genres: ${soloPreferredGenres.join(", ")}` : ""}
-                            {soloPreferredGenres.length > 0 && soloPreferredInstruments.length > 0 ? " â€¢ " : ""}
+                            {soloPreferredGenres.length > 0 && soloPreferredInstruments.length > 0 ? " | " : ""}
                             {soloPreferredInstruments.length > 0 ? `Instruments: ${soloPreferredInstruments.join(", ")}` : ""}
                           </Text>
                         )}
@@ -3172,7 +3172,7 @@ export default function AddGigScreen() {
                         {duoSlotsNeeded > 0 && (duoPreferredGenres.length > 0 || duoPreferredInstruments.length > 0) && (
                           <Text style={{ color: colors.textSecondary, fontSize: 12, marginLeft: 24 }}>
                             {duoPreferredGenres.length > 0 ? `Genres: ${duoPreferredGenres.join(", ")}` : ""}
-                            {duoPreferredGenres.length > 0 && duoPreferredInstruments.length > 0 ? " â€¢ " : ""}
+                            {duoPreferredGenres.length > 0 && duoPreferredInstruments.length > 0 ? " | " : ""}
                             {duoPreferredInstruments.length > 0 ? `Instruments: ${duoPreferredInstruments.join(", ")}` : ""}
                           </Text>
                         )}
@@ -3188,7 +3188,7 @@ export default function AddGigScreen() {
                         {bandSlotsNeeded > 0 && (bandPreferredGenres.length > 0 || bandPreferredInstruments.length > 0) && (
                           <Text style={{ color: colors.textSecondary, fontSize: 12, marginLeft: 24 }}>
                             {bandPreferredGenres.length > 0 ? `Genres: ${bandPreferredGenres.join(", ")}` : ""}
-                            {bandPreferredGenres.length > 0 && bandPreferredInstruments.length > 0 ? " â€¢ " : ""}
+                            {bandPreferredGenres.length > 0 && bandPreferredInstruments.length > 0 ? " | " : ""}
                             {bandPreferredInstruments.length > 0 ? `Instruments: ${bandPreferredInstruments.join(", ")}` : ""}
                           </Text>
                         )}

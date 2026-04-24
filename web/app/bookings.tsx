@@ -29,6 +29,7 @@ import Navbar from "../src/components/navbar";
 import { useAuth } from "../src/context/AuthContext";
 import { useTheme } from "../src/context/ThemeContext";
 import { createBookingCheckout } from "../src/services/paymongo";
+import { formatFriendlyDateTime } from "../src/utils/friendlyDateTime";
 import {
   formatRecordingHours,
   formatRecordingRuleShort,
@@ -139,6 +140,12 @@ const getConnectionRequestStatusColors = (status: unknown) => {
 const toNonEmptyString = (value: unknown) => {
   const normalized = String(value ?? "").trim();
   return normalized.length > 0 ? normalized : null;
+};
+
+const formatBookingCardDateTime = (value: unknown) => {
+  const raw = String(value ?? "").trim();
+  if (!raw) return "TBA";
+  return formatFriendlyDateTime(raw, { fallback: raw });
 };
 
 const extractConnectionRequestDetails = (eventDetails: any, attachmentUrl: unknown) => {
@@ -3873,8 +3880,8 @@ export default function BookingsScreen() {
                     {/* Banner Image */}
                     <View>
                       <CachedImage
-                        uri={
-                          item.image ||
+                        uri={item.image}
+                        fallbackUri={
                           "https://images.unsplash.com/photo-1516280440614-37939bbacd81?w=400&h=200&fit=crop"
                         }
                         style={[
@@ -3984,7 +3991,7 @@ export default function BookingsScreen() {
                                   style={[styles.cardDetailText, { color: colors.textSecondary }]}
                                   numberOfLines={1}
                                 >
-                                  {item.date}
+                                  {formatBookingCardDateTime(item.date)}
                                 </Text>
                               </View>
                             )}
@@ -4579,6 +4586,9 @@ export default function BookingsScreen() {
                   <View>
                     <CachedImage
                       uri={item.image}
+                      fallbackUri={
+                        "https://images.unsplash.com/photo-1633332755192-727a05c4013d?w=400&h=400&fit=crop"
+                      }
                       style={[
                         styles.cardImage,
                         { opacity: item.isCancelled ? 0.6 : 1 },
@@ -4657,8 +4667,8 @@ export default function BookingsScreen() {
                               }
                             >
                               <CachedImage
-                                uri={
-                                  item.customer_avatar ||
+                                uri={item.customer_avatar}
+                                fallbackUri={
                                   "https://images.unsplash.com/photo-1633332755192-727a05c4013d?w=100&h=100&fit=crop"
                                 }
                                 style={styles.customerAvatar}
@@ -4824,8 +4834,14 @@ export default function BookingsScreen() {
                         <View style={{ marginTop: 8, gap: 4 }}>
                           {(() => {
                             const dateStr = item.raw_date
-                              ? new Date(item.raw_date).toLocaleDateString()
-                              : new Date(item.start_time).toLocaleDateString();
+                              ? formatFriendlyDateTime(item.raw_date, {
+                                  forceDateOnly: true,
+                                  fallback: "Date TBA",
+                                })
+                              : formatFriendlyDateTime(item.start_time, {
+                                  forceDateOnly: true,
+                                  fallback: "Date TBA",
+                                });
 
                             let timeStr = "";
                             if (item.start_time) {
@@ -5215,7 +5231,7 @@ export default function BookingsScreen() {
                                     fontFamily: "Poppins_400Regular",
                                   }}
                                 >
-                                  Respond before: {new Date(item.relocation_expires_at).toLocaleString()}
+                                  Respond before: {formatFriendlyDateTime(item.relocation_expires_at)}
                                 </Text>
                               ) : null}
                             </View>

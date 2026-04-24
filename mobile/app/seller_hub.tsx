@@ -280,7 +280,7 @@ export default function SellerHubScreen() {
                       </View>
                     </View>
                     <Text style={[styles.orderBuyer, { color: colors.textSecondary }]}>
-                      {o.buyer_name || "Buyer"} â€¢ {formatFriendlyDateTime(o.created_at)}
+                      {o.buyer_name || "Buyer"} | {formatFriendlyDateTime(o.created_at)}
                     </Text>
                     <Text style={[styles.orderTotal, { color: colors.text }]}>{formatPrice(o.total_amount)}</Text>
                   </View>

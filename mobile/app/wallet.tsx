@@ -693,7 +693,7 @@ export default function WalletScreen() {
       const isMockCashout = Boolean((data as any)?.mock_cashout);
 
       Alert.alert(
-        isMockCashout ? 'Mock Cashout Success (Test Mode)' : 'Withdrawal Submitted! âœ“',
+        isMockCashout ? 'Mock Cashout Success (Test Mode)' : 'Withdrawal Submitted!',
         data?.message || (isMockCashout
           ? 'Mock cashout recorded. No real money was transferred.'
           : 'Your payout will be processed within 1-3 business days.'),
@@ -1103,7 +1103,7 @@ export default function WalletScreen() {
                 ))}
 
                 <Text style={styles.unpaidWarning}>
-                  âš ï¸ Please settle your outstanding balance to continue using the app
+                  Warning: Please settle your outstanding balance to continue using the app
                 </Text>
               </View>
             </View>
@@ -1212,7 +1212,7 @@ export default function WalletScreen() {
                           </View>
                         </View>
                         <Text style={[styles.transactionDate, { color: colors.textSecondary }]}>
-                          {formatFriendlyDateTime(withdrawal.created_at)} â€¢ ****{withdrawal.payout_account_number.slice(-4)}
+                          {formatFriendlyDateTime(withdrawal.created_at)} | ****{withdrawal.payout_account_number.slice(-4)}
                         </Text>
                       </View>
                     </View>
@@ -1602,7 +1602,7 @@ export default function WalletScreen() {
                                 {method.bank_name ? ` - ${method.bank_name}` : ''}
                               </Text>
                               <Text style={[styles.payoutMethodAccount, { color: colors.textSecondary }]}>
-                                {method.account_name} â€¢ ****{method.account_number.slice(-4)}
+                                {method.account_name} | ****{method.account_number.slice(-4)}
                               </Text>
                             </View>
                           </View>

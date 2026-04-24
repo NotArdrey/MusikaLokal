@@ -16,6 +16,30 @@ interface CachedImageProps extends SupabaseTransformOptions {
   disableRecyclingKey?: boolean;
 }
 
+const DATE_ONLY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+const ISO_TIMESTAMP_PATTERN =
+  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d{1,6})?)?(Z|[+-]\d{2}:?\d{2})?$/i;
+
+const normalizeImageUriCandidate = (value?: string | null) => {
+  const raw = (value || "").trim();
+  if (!raw) return null;
+
+  if (DATE_ONLY_PATTERN.test(raw) || ISO_TIMESTAMP_PATTERN.test(raw)) {
+    return null;
+  }
+
+  const hasKnownScheme = /^(https?:|data:|file:|content:|blob:|asset:|ph:)/i.test(raw);
+  const isSupabaseRelativePath = raw.startsWith("/storage/v1/");
+  const hasPathSeparator = raw.includes("/");
+  const hasFileLikeSuffix = /\.[a-z0-9]{2,5}(\?|#|$)/i.test(raw);
+
+  if (!hasKnownScheme && !isSupabaseRelativePath && !hasPathSeparator && !hasFileLikeSuffix) {
+    return null;
+  }
+
+  return raw;
+};
+
 const CachedImage = ({
   uri,
   fallbackUri,
@@ -32,13 +56,11 @@ const CachedImage = ({
   disableRecyclingKey = false,
 }: CachedImageProps) => {
   const primarySourceUri = useMemo(() => {
-    const raw = (uri || "").trim();
-    if (!raw) return null;
-    return raw;
+    return normalizeImageUriCandidate(uri);
   }, [uri]);
 
   const backupSourceUri = useMemo(() => {
-    const raw = (fallbackUri || "").trim();
+    const raw = normalizeImageUriCandidate(fallbackUri);
     if (!raw || raw === primarySourceUri) return null;
     return raw;
   }, [fallbackUri, primarySourceUri]);

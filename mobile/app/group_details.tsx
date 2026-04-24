@@ -321,7 +321,7 @@ export default function GroupDetailsScreen() {
             <View style={styles.ratingLocationRow}>
               <Ionicons name="star" size={16} color={colors.text} />
               <Text style={[styles.ratingText, { color: colors.text }]}>
-                {group.rating?.toFixed(2) || '4.95'} Â· <Text style={{ textDecorationLine: 'underline' }}>{group.review_count || 12} reviews</Text>
+                {group.rating?.toFixed(2) || '4.95'} - <Text style={{ textDecorationLine: 'underline' }}>{group.review_count || 12} reviews</Text>
               </Text>
             </View>
             <Text style={[styles.locationText, { color: colors.textSecondary }]}>
@@ -428,7 +428,7 @@ export default function GroupDetailsScreen() {
                           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
                             <Ionicons name="musical-note" size={12} color={colors.primary} />
                             <Text style={{ color: colors.textSecondary, fontSize: 13 }}>{memberInstrument}</Text>
-                            {isLeader && <Text style={{ color: colors.primary, fontSize: 11, marginLeft: 4 }}>â€¢ Leader</Text>}
+                            {isLeader && <Text style={{ color: colors.primary, fontSize: 11, marginLeft: 4 }}>| Leader</Text>}
                           </View>
                         </View>
                       </View>
@@ -445,7 +445,7 @@ export default function GroupDetailsScreen() {
             <View style={styles.reviewHeader}>
               <Ionicons name="star" size={20} color={colors.text} />
               <Text style={[styles.sectionTitle, { color: colors.text, marginBottom: 0 }]}>
-                {group.rating?.toFixed(2) || '0.0'} Â· {group.review_count || 0} reviews
+                {group.rating?.toFixed(2) || '0.0'} - {group.review_count || 0} reviews
               </Text>
             </View>
             <Text style={{ color: colors.textSecondary, fontStyle: 'italic' }}>

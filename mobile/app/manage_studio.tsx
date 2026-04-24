@@ -1095,7 +1095,7 @@ export default function StudioDetailsScreen() {
                       studio.instruments.map((item: any, i: number) => {
                         const name = item?.name || item;
                         const quantity = item?.quantity
-                          ? ` Ã—${item.quantity}`
+                          ? ` x${item.quantity}`
                           : "";
                         return (
                           <View
@@ -1932,7 +1932,7 @@ export default function StudioDetailsScreen() {
                     <ActivityIndicator size="small" color={colors.primary} />
                   ) : recordingDeals.length === 0 ? (
                     <Text style={{ fontFamily: "Poppins_400Regular", color: colors.textSecondary, fontSize: 13 }}>
-                      No recording deals for this studio yet. Recording deals can be created from the Bookings â†’ Deals tab.
+                      No recording deals for this studio yet. Recording deals can be created from the Bookings -> Deals tab.
                     </Text>
                   ) : (
                     recordingDeals.map((deal: any) => (
