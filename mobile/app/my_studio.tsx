@@ -375,7 +375,7 @@ export default function MyStudioScreen() {
 
                                     {(normalizedPermitStatus === 'pending' || normalizedPermitStatus === 'pending_review' || normalizedPermitStatus === 'resubmitted') && (
                                         <Text style={[styles.permitHintText, { color: colors.textSecondary }]}>
-                                            Hidden from Home until admin permit approval is completed.
+                                            Hidden from Home right now.
                                         </Text>
                                     )}
 

@@ -20,7 +20,7 @@ import { supabase } from '../../lib/supabase';
 import { getAdminPageCacheKey, readAdminPageCache, writeAdminPageCache } from './_cache';
 import { formatDetailLabel, formatDetailValue } from './_formatters';
 
-type Tab = 'dashboard' | 'permits' | 'users' | 'reports' | 'audit' | 'deals' | 'posts' | 'products' | 'projects';
+type Tab = 'dashboard' | 'users' | 'reports' | 'audit' | 'deals' | 'posts' | 'products' | 'projects';
 
 type DealType = 'all' | 'venue_partnership' | 'studio_recording';
 type DealStatus = 'all' | 'proposed' | 'countered' | 'accepted' | 'rejected' | 'cancelled' | 'settled' | 'disputed';
@@ -28,7 +28,6 @@ type PenaltyFilter = 'all' | 'late_cancellation' | 'no_show';
 
 const adminTabRoutes: Record<Tab, string> = {
   dashboard: '/admin',
-  permits: '/admin/permits',
   users: '/admin/users',
   reports: '/admin/reports',
   audit: '/admin/audit',
@@ -116,7 +115,6 @@ interface SettlementHold {
 
 const tabItems: Array<{ key: Tab; label: string; icon: string }> = [
   { key: 'dashboard', label: 'Dashboard', icon: 'stats-chart-outline' },
-  { key: 'permits', label: 'Permits', icon: 'document-text-outline' },
   { key: 'users', label: 'Users', icon: 'people-outline' },
   { key: 'reports', label: 'Reports', icon: 'shield-checkmark-outline' },
   { key: 'audit', label: 'Audit', icon: 'time-outline' },

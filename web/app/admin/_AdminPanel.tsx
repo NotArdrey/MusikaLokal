@@ -21,7 +21,7 @@ import Header from '../../src/components/header';
 import { useAuth } from '../../src/context/AuthContext';
 import { useTheme } from '../../src/context/ThemeContext';
 
-export type Tab = 'dashboard' | 'permits' | 'users' | 'reports' | 'audit' | 'deals';
+export type Tab = 'dashboard' | 'users' | 'reports' | 'audit' | 'deals';
 type PermitFilter = 'all' | 'pending_review' | 'approved' | 'rejected' | 'resubmitted';
 type EntityFilter = 'all' | 'studio' | 'gig';
 type ReportStatus = 'pending' | 'resolved' | 'dismissed';
@@ -46,7 +46,6 @@ type AuditActionFilter = 'all' | 'approved' | 'rejected' | 'submitted' | 'resubm
 
 const adminTabRoutes: Record<Tab, string> = {
   dashboard: '/admin',
-  permits: '/admin/permits',
   users: '/admin/users',
   reports: '/admin/reports',
   audit: '/admin/audit',
@@ -1965,7 +1964,6 @@ export default function AdminPanel({ initialTab, children }: AdminPanelProps) {
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tabsRow}>
             {[
               { key: 'dashboard', label: 'Dashboard', icon: 'stats-chart-outline' },
-              { key: 'permits', label: 'Permits', icon: 'document-text-outline' },
               { key: 'users', label: 'Users', icon: 'people-outline' },
               { key: 'reports', label: 'Reports', icon: 'shield-checkmark-outline' },
               { key: 'audit', label: 'Audit', icon: 'time-outline' },

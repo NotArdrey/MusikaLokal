@@ -90,11 +90,10 @@ const readErrorContextMessage = async (context: unknown): Promise<string | null>
   }
 };
 
-type Tab = 'dashboard' | 'permits' | 'users' | 'reports' | 'audit' | 'deals' | 'posts' | 'products' | 'projects';
+type Tab = 'dashboard' | 'users' | 'reports' | 'audit' | 'deals' | 'posts' | 'products' | 'projects';
 
 const adminTabRoutes: Record<Tab, string> = {
   dashboard: '/admin',
-  permits: '/admin/permits',
   users: '/admin/users',
   reports: '/admin/reports',
   audit: '/admin/audit',
@@ -546,7 +545,6 @@ const styles = StyleSheet.create({
 
 const tabItems: Array<{ key: Tab; label: string; icon: string }> = [
   { key: 'dashboard', label: 'Dashboard', icon: 'stats-chart-outline' },
-  { key: 'permits', label: 'Permits', icon: 'document-text-outline' },
   { key: 'users', label: 'Users', icon: 'people-outline' },
   { key: 'reports', label: 'Reports', icon: 'shield-checkmark-outline' },
   { key: 'audit', label: 'Audit', icon: 'time-outline' },
@@ -858,11 +856,6 @@ export default function AdminDashboardPage() {
                   <Text style={[styles.tabText, { color: active ? '#FFFFFF' : colors.textSecondary }]}>
                     {item.label}
                   </Text>
-                  {item.key === 'permits' && metrics.pendingPermits > 0 && (
-                    <View style={styles.badge}>
-                      <Text style={styles.badgeText}>{metrics.pendingPermits}</Text>
-                    </View>
-                  )}
                 </TouchableOpacity>
               );
             })}

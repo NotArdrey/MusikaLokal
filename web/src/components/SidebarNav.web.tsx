@@ -29,7 +29,7 @@ type TopbarNotification = {
     meta?: any;
 };
 
-type AdminTab = 'dashboard' | 'permits' | 'users' | 'reports' | 'audit';
+type AdminTab = 'dashboard' | 'users' | 'reports' | 'audit';
 type ReportsSection = 'reports_list' | 'booking_incidents';
 
 const REPORTS_SECTION_ITEMS: {
@@ -53,7 +53,6 @@ const REPORTS_SECTION_ITEMS: {
     ];
 
 const resolveAdminTab = (pathname: string): AdminTab => {
-    if (pathname.startsWith('/admin/permits')) return 'permits';
     if (pathname.startsWith('/admin/users')) return 'users';
     if (pathname.startsWith('/admin/reports')) return 'reports';
     if (pathname.startsWith('/admin/audit')) return 'audit';
@@ -406,7 +405,6 @@ export default function SidebarNav() {
         if (isAdminContext) {
             return [
                 { id: 'dashboard', icon: 'stats-chart', label: 'Dashboard', route: '/admin' },
-                { id: 'permits', icon: 'document-text', label: 'Permits', route: '/admin/permits' },
                 { id: 'users', icon: 'people', label: 'Users', route: '/admin/users' },
                 { id: 'reports', icon: 'shield-checkmark', label: 'Reports', route: '/admin/reports' },
                 { id: 'audit', icon: 'time', label: 'Audit', route: '/admin/audit' },

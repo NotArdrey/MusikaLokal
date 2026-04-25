@@ -542,7 +542,6 @@ export default function AddGigScreen() {
         status: "open",
         images: images,
         contract_url: contractUrl || null,
-        business_permit_url: businessPermitUrl || null,
         latitude,
         longitude,
         event_date: primarySchedule?.date || eventDate,
@@ -601,12 +600,12 @@ export default function AddGigScreen() {
           budget: payload.budget,
           status: payload.status,
           contract_url: payload.contract_url,
-          business_permit_url: payload.business_permit_url,
+          business_permit_url: null,
           latitude: payload.latitude,
           longitude: payload.longitude,
           event_date: payload.event_date,
           reapplication_cooldown_days: payload.reapplication_cooldown_days,
-          permit_status: 'pending_review',
+          permit_status: 'approved',
         })
         .select()
         .single();
@@ -1270,15 +1269,6 @@ export default function AddGigScreen() {
           type="file"
           accept="application/pdf"
           onChange={handleWebFileSelect}
-          style={{ display: "none" }}
-        />
-      )}
-      {Platform.OS === "web" && (
-        <input
-          ref={businessPermitInputRef as any}
-          type="file"
-          accept="application/pdf,image/*"
-          onChange={handleWebBusinessPermitSelect}
           style={{ display: "none" }}
         />
       )}
@@ -1980,127 +1970,6 @@ export default function AddGigScreen() {
                           ]}
                         >
                           Tap to browse files
-                        </Text>
-                      </>
-                    )}
-                  </TouchableOpacity>
-                )}
-              </View>
-
-              {/* Business Permit Upload */}
-              <View style={styles.inputContainer}>
-                <Text
-                  style={[styles.inputLabel, { color: colors.textSecondary }]}
-                >
-                  Business Permit
-                </Text>
-                <Text
-                  style={[
-                    styles.inputSubLabel,
-                    { color: colors.textSecondary },
-                  ]}
-                >
-                  Upload your business permit (PDF or Image)
-                </Text>
-                <Text
-                  style={[
-                    styles.inputSubLabel,
-                    { color: colors.textSecondary, marginTop: 4 },
-                  ]}
-                >
-                  If declined, only one resubmission is allowed after correction.
-                </Text>
-                {businessPermitUrl ? (
-                  <View
-                    style={[
-                      styles.contractPreview,
-                      {
-                        backgroundColor: isDark ? "#1F2937" : "#F3F4F6",
-                        borderColor: isDark ? "#374151" : "#E5E7EB",
-                      },
-                    ]}
-                  >
-                    <View
-                      style={{
-                        flexDirection: "row",
-                        alignItems: "center",
-                        gap: 12,
-                        flex: 1,
-                      minWidth: 150 }}
-                    >
-                      <View
-                        style={[
-                          styles.pdfIcon,
-                          { backgroundColor: "#10B981" },
-                        ]}
-                      >
-                        <Ionicons name="shield-checkmark" size={24} color="#fff" />
-                      </View>
-                      <View style={{ flex: 1 }}>
-                        <Text
-                          style={[
-                            styles.contractFileName,
-                            { color: colors.text },
-                          ]}
-                          numberOfLines={1}
-                        >
-                          {businessPermitFileName}
-                        </Text>
-                        <Text
-                          style={[
-                            styles.contractFileSize,
-                            { color: colors.textSecondary },
-                          ]}
-                        >
-                          Business Permit
-                        </Text>
-                      </View>
-                    </View>
-                    <TouchableOpacity activeOpacity={1}
-                      onPress={removeBusinessPermit}
-                      style={styles.removeContractBtn}
-                    >
-                      <Ionicons
-                        name="trash-outline"
-                        size={20}
-                        color="#EF4444"
-                      />
-                    </TouchableOpacity>
-                  </View>
-                ) : (
-                  <TouchableOpacity
-                    onPress={handleBusinessPermitUpload}
-                    disabled={uploadingBusinessPermit}
-                    activeOpacity={1}
-                    style={[
-                      styles.uploadContractBtn,
-                      {
-                        backgroundColor: colors.inputBackground,
-                        borderColor: isDark ? "#374151" : "#E5E7EB",
-                      },
-                    ]}
-                  >
-                    {uploadingBusinessPermit ? (
-                      <ActivityIndicator size="small" color={colors.primary} />
-                    ) : (
-                      <>
-                        <Ionicons
-                          name="shield-checkmark-outline"
-                          size={32}
-                          color={colors.textSecondary}
-                        />
-                        <Text
-                          style={[styles.uploadText, { color: colors.text }]}
-                        >
-                          Upload Business Permit
-                        </Text>
-                        <Text
-                          style={[
-                            styles.uploadSubText,
-                            { color: colors.textSecondary },
-                          ]}
-                        >
-                          PDF or Image format
                         </Text>
                       </>
                     )}

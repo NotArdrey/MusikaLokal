@@ -91,7 +91,7 @@ const readErrorContextMessage = async (context: unknown): Promise<string | null>
   }
 };
 
-type Tab = 'dashboard' | 'permits' | 'users' | 'reports' | 'audit' | 'deals' | 'posts' | 'products' | 'projects';
+type Tab = 'dashboard' | 'users' | 'reports' | 'audit' | 'deals' | 'posts' | 'products' | 'projects';
 
 type ReportsSection = 'reports_list' | 'booking_incidents';
 
@@ -118,7 +118,6 @@ type BookingIncidentResolution = 'resolved_refund' | 'resolved_no_refund' | 'dis
 
 const adminTabRoutes: Record<Tab, string> = {
   dashboard: '/admin',
-  permits: '/admin/permits',
   users: '/admin/users',
   reports: '/admin/reports',
   audit: '/admin/audit',
@@ -633,7 +632,6 @@ const styles = StyleSheet.create({
 
 const tabItems: { key: Tab; label: string; icon: string }[] = [
   { key: 'dashboard', label: 'Dashboard', icon: 'stats-chart-outline' },
-  { key: 'permits', label: 'Permits', icon: 'document-text-outline' },
   { key: 'users', label: 'Users', icon: 'people-outline' },
   { key: 'reports', label: 'Reports', icon: 'shield-checkmark-outline' },
   { key: 'audit', label: 'Audit', icon: 'time-outline' },

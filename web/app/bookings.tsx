@@ -3374,7 +3374,7 @@ export default function BookingsScreen() {
                                 ? hasReapplyRemaining
                                   ? "One reapply attempt available"
                                   : "Reapply attempt already used"
-                                : "Awaiting admin permit review"}
+                                : "Pending review"}
                             </Text>
                           </View>
 
