@@ -907,7 +907,7 @@ async function handleInReview(supabaseAdmin: any, userReference: string, session
                 user_id: userReference,
                 type: 'info',
                 title: 'Manual Review in Progress',
-                message: 'Your verification requires manual review. Please wait - this usually takes 1-2 business days.',
+                message: 'Your verification requires manual review. Please wait - this usually takes 5-7 business days.',
             });
     }
 
@@ -1108,7 +1108,7 @@ async function handleAddressVerification(
         notificationType = 'success';
     } else if (verificationStatus === 'MANUAL_REVIEW') {
         notificationTitle = 'Address Under Review';
-        notificationMessage = `Your ${entityType === 'studio' ? 'studio' : 'venue'} address verification requires manual review. We'll notify you within 1-2 business days.`;
+        notificationMessage = `Your ${entityType === 'studio' ? 'studio' : 'venue'} address verification requires manual review. We'll notify you within 5-7 business days.`;
         notificationType = 'info';
     } else if (verificationStatus === 'DECLINED') {
         notificationTitle = 'Address Verification Failed';

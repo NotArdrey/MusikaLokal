@@ -38,9 +38,9 @@ type BookingIncidentFilter =
   | 'resolved_no_refund'
   | 'dismissed';
 type BookingIncidentResolution = 'resolved_refund' | 'resolved_no_refund' | 'dismissed';
-type UserRole = 'musician' | 'studio-owner' | 'venue-owner' | 'admin';
-type SubscriptionStatusOption = 'none' | 'active' | 'cancelled' | 'expired' | 'past_due';
-type UserFilter = 'all' | 'musicians' | 'studio-owner' | 'venue-owner';
+type UserRole = 'musician' | 'studio-owner' | 'venue-owner' | 'producer' | 'admin';
+type SubscriptionStatusOption = 'none' | 'active' | 'cancelled' | 'expired';
+type UserFilter = 'all' | 'musicians' | 'studio-owner' | 'venue-owner' | 'producer';
 type AuditEntityFilter = 'all' | 'studio' | 'gig';
 type AuditActionFilter = 'all' | 'approved' | 'rejected' | 'submitted' | 'resubmitted';
 
@@ -447,13 +447,14 @@ const manageBookingsActionFallbacks: Record<string, string> = {
   admin_fetch_booking_incidents: 'fetch_booking_incidents',
   admin_resolve_booking_incident: 'resolve_booking_incident',
 };
-const userRoleOptions: UserRole[] = ['musician', 'studio-owner', 'venue-owner', 'admin'];
-const subscriptionStatusOptions: SubscriptionStatusOption[] = ['none', 'active', 'cancelled', 'expired', 'past_due'];
+const userRoleOptions: UserRole[] = ['musician', 'studio-owner', 'venue-owner', 'producer', 'admin'];
+const subscriptionStatusOptions: SubscriptionStatusOption[] = ['none', 'active', 'cancelled', 'expired'];
 const userFilters: { value: UserFilter; label: string }[] = [
   { value: 'all', label: 'all' },
   { value: 'musicians', label: 'musicians' },
   { value: 'studio-owner', label: 'studio owner' },
   { value: 'venue-owner', label: 'venue owner' },
+  { value: 'producer', label: 'producer' },
 ];
 const auditEntityTypes: AuditEntityFilter[] = ['all', 'studio', 'gig'];
 const auditActions: AuditActionFilter[] = ['all', 'approved', 'rejected', 'submitted', 'resubmitted'];

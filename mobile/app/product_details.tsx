@@ -17,6 +17,7 @@ import Navbar from "../src/components/navbar";
 import ReportModal from "../src/components/ReportModal";
 import Skeleton from "../src/components/Skeleton";
 import CustomAlert, { AlertType } from "../src/components/CustomAlert";
+import { useBottomBarClearance } from "../src/hooks/useBottomBarClearance";
 import { useAuth } from "../src/context/AuthContext";
 import { showTopToast } from "../src/context/TopToastContext";
 import { useTheme } from "../src/context/ThemeContext";
@@ -29,6 +30,7 @@ const moderateScale = (size: number, factor = 0.3) => {
 
 export default function ProductDetailsScreen() {
   const { colors, isDark } = useTheme();
+  const { contentBottomPadding } = useBottomBarClearance(24);
   const { isGuest, userId } = useAuth();
   const { product_id } = useLocalSearchParams();
 
@@ -242,7 +244,7 @@ export default function ProductDetailsScreen() {
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <Header title={product.title} onBackPress={() => router.back()} rightComponent={reportHeaderAction} />
 
-      <ScrollView style={styles.content}>
+      <ScrollView style={styles.content} contentContainerStyle={{ paddingBottom: contentBottomPadding }}>
         {/* Image gallery */}
         {mediaUrls.length > 0 ? (
           <ScrollView horizontal pagingEnabled showsHorizontalScrollIndicator={false} style={styles.gallery}>
@@ -397,8 +399,6 @@ export default function ProductDetailsScreen() {
             </View>
           </View>
         )}
-
-        <View style={{ height: 120 }} />
       </ScrollView>
 
       {/* Message seller button (not shown for seller) */}

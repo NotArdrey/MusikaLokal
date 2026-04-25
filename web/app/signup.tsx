@@ -2,21 +2,55 @@
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useCameraPermissions } from 'expo-camera';
+import * as ImagePicker from 'expo-image-picker';
 import * as Linking from 'expo-linking';
 import { router, useLocalSearchParams } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
-import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import React, { useEffect, useMemo, useState } from 'react';
+import { ActivityIndicator, Image, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { WebView } from 'react-native-webview';
 import { supabase } from '../lib/supabase';
 import CustomAlert, { AlertType } from '../src/components/CustomAlert';
 import { showTopToast } from '../src/context/TopToastContext';
 import { useTheme } from '../src/context/ThemeContext';
 
-type OnboardingStep = 'role' | 'details' | 'verification' | 'email_verification';
-type SignupRole = 'musician' | 'venue-owner' | 'producer';
+type OnboardingStep = 'details' | 'verification' | 'email_verification';
+type SignupRole = 'musician';
+type VerificationMode = 'didit' | 'manual';
 
-const ALLOWED_SIGNUP_ROLES: SignupRole[] = ['musician', 'venue-owner', 'producer'];
+type DocumentOption = {
+    key: string;
+    label: string;
+    diditSupported: boolean;
+    diditDocumentType?: 'passport' | 'id_card' | 'drivers_license' | 'residence_permit' | 'health_insurance';
+};
+
+type ManualUploadAsset = {
+    base64: string;
+    uri: string;
+    mimeType: string;
+    extension: string;
+    fileName: string;
+};
+
+const ALLOWED_SIGNUP_ROLES: SignupRole[] = ['musician'];
+
+const PH_DOCUMENT_OPTIONS: DocumentOption[] = [
+    { key: 'passport', label: 'Philippine Passport', diditSupported: true, diditDocumentType: 'passport' },
+    { key: 'national_id', label: 'PhilSys National ID', diditSupported: true, diditDocumentType: 'id_card' },
+    { key: 'drivers_license', label: 'Driver\'s License', diditSupported: true, diditDocumentType: 'drivers_license' },
+    { key: 'residence_permit', label: 'Residence Permit', diditSupported: true, diditDocumentType: 'residence_permit' },
+    { key: 'health_insurance', label: 'Health Insurance Card', diditSupported: true, diditDocumentType: 'health_insurance' },
+    { key: 'umid', label: 'UMID', diditSupported: false },
+    { key: 'postal_id', label: 'Postal ID', diditSupported: false },
+    { key: 'voters_id', label: 'Voter\'s ID', diditSupported: false },
+    { key: 'prc_id', label: 'PRC ID', diditSupported: false },
+    { key: 'other', label: 'Other government ID', diditSupported: false },
+];
+
+const getDocumentOptionByKey = (key: string) => {
+    return PH_DOCUMENT_OPTIONS.find((option) => option.key === key) ?? PH_DOCUMENT_OPTIONS[0];
+};
 
 const isAllowedSignupRole = (role: unknown): role is SignupRole => {
     return typeof role === 'string' && ALLOWED_SIGNUP_ROLES.includes(role as SignupRole);
@@ -31,17 +65,22 @@ export default function SignupScreen() {
 
     // State
     // State
-    const [step, setStep] = useState<OnboardingStep>('role');
+    const [step, setStep] = useState<OnboardingStep>('details');
     const [userId, setUserId] = useState<string | null>(null);
     const [loading, setLoading] = useState(false);
     const [verificationUrl, setVerificationUrl] = useState('');
     const [tempSessionRef, setTempSessionRef] = useState('');
     const [sessionId, setSessionId] = useState<string>('');
+    const [verificationMode, setVerificationMode] = useState<VerificationMode>('didit');
+    const [selectedDocumentKey, setSelectedDocumentKey] = useState<string>(PH_DOCUMENT_OPTIONS[0].key);
+    const [manualFrontImage, setManualFrontImage] = useState<ManualUploadAsset | null>(null);
+    const [manualBackImage, setManualBackImage] = useState<ManualUploadAsset | null>(null);
+    const [manualSelfieImage, setManualSelfieImage] = useState<ManualUploadAsset | null>(null);
 
     const { verified, session_id, check_verification } = useLocalSearchParams<{ verified: string; session_id: string; check_verification: string }>();
 
     // Form Fields
-    const [selectedRole, setSelectedRole] = useState<SignupRole | null>(null);
+    const [selectedRole, setSelectedRole] = useState<SignupRole>('musician');
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [confirmPassword, setConfirmPassword] = useState('');
@@ -114,7 +153,8 @@ export default function SignupScreen() {
 
     const Alert = { alert: showAlertNative };
 
-    const [errors, setErrors] = useState<{ email?: string; password?: string; confirmPassword?: string; role?: string }>({});
+    const [errors, setErrors] = useState<{ email?: string; password?: string; confirmPassword?: string; role?: string; document?: string }>({});
+    const selectedDocumentOption = useMemo(() => getDocumentOptionByKey(selectedDocumentKey), [selectedDocumentKey]);
 
     // Reset session when email changes
     React.useEffect(() => {
@@ -128,11 +168,25 @@ export default function SignupScreen() {
                 try {
                     const savedState = await AsyncStorage.getItem('signup_current_session');
                     if (savedState) {
-                        const { email: sEmail, password: sPassword, selectedRole: sRole, tempRef, sSessionId } = JSON.parse(savedState);
+                        const {
+                            email: sEmail,
+                            password: sPassword,
+                            selectedRole: sRole,
+                            tempRef,
+                            sSessionId,
+                            verificationMode: sVerificationMode,
+                            selectedDocumentKey: sSelectedDocumentKey,
+                        } = JSON.parse(savedState);
                         if (sEmail) setEmail(sEmail);
                         if (sPassword) setPassword(sPassword);
                         if (isAllowedSignupRole(sRole)) {
                             setSelectedRole(sRole);
+                        }
+                        if (sVerificationMode === 'didit' || sVerificationMode === 'manual') {
+                            setVerificationMode(sVerificationMode);
+                        }
+                        if (sSelectedDocumentKey) {
+                            setSelectedDocumentKey(getDocumentOptionByKey(String(sSelectedDocumentKey)).key);
                         }
                         if (tempRef) setTempSessionRef(tempRef);
                         if (sSessionId) setSessionId(sSessionId);
@@ -148,13 +202,19 @@ export default function SignupScreen() {
             };
             restoreState();
         }
-    }, [verified, check_verification]);
+    }, [verified, check_verification, session_id]);
 
     // Polling System: Automatically check for verification completion
     // This bypasses any redirect issues by detecting status changes in the background
     useEffect(() => {
         let timer: any;
-        if (step === 'verification' && verificationUrl && verified !== 'true' && check_verification !== 'true') {
+        if (
+            verificationMode === 'didit' &&
+            step === 'verification' &&
+            verificationUrl &&
+            verified !== 'true' &&
+            check_verification !== 'true'
+        ) {
             const poll = async () => {
                 const ref = sessionId || tempSessionRef;
                 if (!ref) return;
@@ -178,13 +238,20 @@ export default function SignupScreen() {
             timer = setInterval(poll, 500);
         }
         return () => { if (timer) clearInterval(timer); };
-    }, [step, verificationUrl, verified, sessionId, tempSessionRef, check_verification]);
+    }, [step, verificationUrl, verified, sessionId, tempSessionRef, check_verification, verificationMode]);
 
     // Auto-submit verification when data is ready and we are in the verification step
     useEffect(() => {
         let mounted = true;
         // Only run if we are in verification step, have all data, and came back from verification
-        if (step === 'verification' && email && password && selectedRole && (verified === 'true' || check_verification === 'true')) {
+        if (
+            verificationMode === 'didit' &&
+            step === 'verification' &&
+            email &&
+            password &&
+            selectedRole &&
+            (verified === 'true' || check_verification === 'true')
+        ) {
             console.log('Returning from verification. Checking status...');
 
             const checkAndFinish = async (retries = 0) => {
@@ -212,8 +279,15 @@ export default function SignupScreen() {
                         return;
                     }
 
+                    if (status === 'In Review' || status === 'PENDING_REVIEW') {
+                        if (mounted) {
+                            await finishAccountCreationPendingReview(refToCheck);
+                        }
+                        return;
+                    }
+
                     // 2. FAILURE (Final) - Show alert and go back to signup form
-                    if (['DECLINED', 'Declined', 'ABANDONED', 'Abandoned', 'In Review', 'PENDING_REVIEW'].includes(status)) {
+                    if (['DECLINED', 'Declined', 'ABANDONED', 'Abandoned'].includes(status)) {
                         setLoading(false);
 
                         // Clear all verification state
@@ -233,9 +307,6 @@ export default function SignupScreen() {
                         } else if (status === 'ABANDONED' || status === 'Abandoned') {
                             title = 'Verification Incomplete';
                             message = 'You did not complete the verification process. Please try again.';
-                        } else if (status === 'In Review' || status === 'PENDING_REVIEW') {
-                            title = 'Verification Pending';
-                            message = 'Your verification requires manual review. Please try again later or contact support.';
                         }
 
                         // Go back to signup form
@@ -247,7 +318,6 @@ export default function SignupScreen() {
                     }
 
                     // 3. PENDING / RETRY (Created, Submitted, Processing)
-                    // Note: We now handle 'In Review' and 'PENDING_REVIEW' in failure case above
                     const maxRetries = 10;
                     if (retries < maxRetries) {
                         console.log('Status not final, retrying...');
@@ -304,7 +374,12 @@ export default function SignupScreen() {
                     console.log('Status check error (attempt', retries + 1, '):', errorMessage);
 
                     // If we got a status from error, handle it
-                    if (errorStatus && ['DECLINED', 'Declined', 'ABANDONED', 'Abandoned', 'In Review', 'PENDING_REVIEW'].includes(errorStatus)) {
+                    if (errorStatus && ['In Review', 'PENDING_REVIEW'].includes(errorStatus)) {
+                        await finishAccountCreationPendingReview(refToCheck);
+                        return;
+                    }
+
+                    if (errorStatus && ['DECLINED', 'Declined', 'ABANDONED', 'Abandoned'].includes(errorStatus)) {
                         setLoading(false);
                         setVerificationUrl('');
                         setSessionId('');
@@ -344,14 +419,20 @@ export default function SignupScreen() {
 
             return () => { mounted = false; };
         }
-    }, [step, email, password, selectedRole, verified]);
+    }, [step, email, password, selectedRole, verified, check_verification, verificationMode]);
 
     const [permission, requestPermission] = useCameraPermissions();
 
     // Auto-start verification session for Mobile when entering verification step
     useEffect(() => {
         let mounted = true;
-        if (Platform.OS !== 'web' && step === 'verification' && !verificationUrl && verified !== 'true') {
+        if (
+            verificationMode === 'didit' &&
+            Platform.OS !== 'web' &&
+            step === 'verification' &&
+            !verificationUrl &&
+            verified !== 'true'
+        ) {
             // Check permissions first
             if (!permission?.granted) {
                 requestPermission().then(response => {
@@ -377,15 +458,8 @@ export default function SignupScreen() {
             }
         }
         return () => { mounted = false; };
-    }, [step, verificationUrl, verified, permission]);
+    }, [step, verificationUrl, verified, permission, verificationMode]);
 
-
-    // Role options
-    const roleOptions: { value: SignupRole; label: string; icon: 'musical-notes-outline' | 'business-outline' | 'people-outline'; description: string }[] = [
-        { value: 'musician' as const, label: 'Musical Artist', icon: 'musical-notes-outline' as const, description: 'Join bands, find gigs' },
-        { value: 'venue-owner' as const, label: 'Venue Owner', icon: 'business-outline' as const, description: 'Host events, hire artists' },
-        { value: 'producer' as const, label: 'Producer', icon: 'people-outline' as const, description: 'Manage productions, negotiate deals' },
-    ];
 
     // Theme Styles
     const themeStyles = {
@@ -417,7 +491,12 @@ export default function SignupScreen() {
         // Persist state before redirecting
         try {
             await AsyncStorage.setItem('signup_current_session', JSON.stringify({
-                email, password, selectedRole, tempRef
+                email,
+                password,
+                selectedRole,
+                tempRef,
+                verificationMode,
+                selectedDocumentKey,
             }));
         } catch (e) {
             console.error('Failed to save session state', e);
@@ -442,6 +521,7 @@ export default function SignupScreen() {
                 body: {
                     userId: tempRef,
                     email: email || undefined, // Optional
+                    document_type: selectedDocumentOption?.diditDocumentType || 'id_card',
                     redirect_url: redirectUrl // Tells the edge function where to eventually send the user
                 }
             });
@@ -455,7 +535,13 @@ export default function SignupScreen() {
                 // Update storage with the real ID
                 try {
                     await AsyncStorage.setItem('signup_current_session', JSON.stringify({
-                        email, password, selectedRole, tempRef, sSessionId: data.id
+                        email,
+                        password,
+                        selectedRole,
+                        tempRef,
+                        verificationMode,
+                        selectedDocumentKey,
+                        sSessionId: data.id,
                     }));
                 } catch (e) {
                     console.error('Failed to update session state with ID', e);
@@ -496,14 +582,321 @@ export default function SignupScreen() {
         }
     };
 
+    const pickManualImage = async (target: 'front' | 'back' | 'selfie') => {
+        try {
+            if (Platform.OS !== 'web') {
+                const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
+                if (permissionResult.status !== 'granted') {
+                    Alert.alert('Permission Required', 'Please allow photo access to upload your ID images.');
+                    return;
+                }
+            }
+
+            const result = await ImagePicker.launchImageLibraryAsync({
+                mediaTypes: ['images'],
+                allowsEditing: false,
+                quality: 0.7,
+                base64: true,
+            });
+
+            if (result.canceled || !result.assets?.[0]) {
+                return;
+            }
+
+            const asset = result.assets[0];
+            if (!asset.base64) {
+                Alert.alert('Upload Failed', 'Could not read the selected image. Please try another file.');
+                return;
+            }
+
+            const uri = asset.uri || '';
+            const inferredExtension = uri.split('.').pop()?.toLowerCase() || 'jpg';
+            const extension = inferredExtension === 'jpeg' ? 'jpg' : inferredExtension;
+            const mimeType = asset.mimeType || `image/${extension === 'jpg' ? 'jpeg' : extension}`;
+
+            const normalized: ManualUploadAsset = {
+                base64: asset.base64,
+                uri,
+                mimeType,
+                extension,
+                fileName: (asset as any)?.fileName || `${target}.${extension}`,
+            };
+
+            if (target === 'front') {
+                setManualFrontImage(normalized);
+                return;
+            }
+
+            if (target === 'back') {
+                setManualBackImage(normalized);
+                return;
+            }
+
+            setManualSelfieImage(normalized);
+        } catch (err: any) {
+            console.error('Manual image picker error:', err);
+            Alert.alert('Upload Failed', err?.message || 'Unable to select image.');
+        }
+    };
+
+    const finishAccountCreationPendingReview = async (refToLink?: string) => {
+        if (!email || !password || !selectedRole) {
+            Alert.alert('Session Reset', 'Please re-enter your details to continue signup.');
+            setStep('details');
+            return;
+        }
+
+        if (!isAllowedSignupRole(selectedRole) || isAdminRole(selectedRole)) {
+            Alert.alert('Unsupported Account Type', 'Only musician accounts can be registered right now.');
+            setStep('details');
+            return;
+        }
+
+        setLoading(true);
+
+        const fallbackName = email.split('@')[0] || 'Musician';
+
+        try {
+            const { data: authData, error: authError } = await supabase.auth.signUp({
+                email: email.trim(),
+                password,
+                options: {
+                    emailRedirectTo: Linking.createURL('/'),
+                    data: {
+                        role: selectedRole,
+                        verification_status: 'PENDING_REVIEW',
+                        is_verified: false,
+                        didit_session_id: refToLink || null,
+                        full_name: fallbackName,
+                        display_name: fallbackName,
+                        name: fallbackName,
+                        selected_document_type: selectedDocumentOption.label,
+                        verification_mode: verificationMode,
+                    },
+                },
+            });
+
+            if (authError) throw authError;
+
+            if (authData.user) {
+                const createProfileWithRetry = async (retries = 0): Promise<boolean> => {
+                    try {
+                        const { error: profileError } = await supabase.functions.invoke('manage-profile', {
+                            body: {
+                                action: 'create',
+                                userId: authData.user!.id,
+                                email: email.trim(),
+                                full_name: fallbackName,
+                                display_name: fallbackName,
+                                role: selectedRole,
+                                is_verified: false,
+                                verification_status: 'PENDING_REVIEW',
+                                didit_session_id: refToLink || null,
+                            },
+                        });
+
+                        if (profileError) {
+                            throw profileError;
+                        }
+
+                        return true;
+                    } catch {
+                        if (retries < 3) {
+                            await new Promise((resolve) => setTimeout(resolve, 1000));
+                            return createProfileWithRetry(retries + 1);
+                        }
+
+                        return false;
+                    }
+                };
+
+                await createProfileWithRetry();
+
+                try {
+                    await AsyncStorage.removeItem('signup_current_session');
+                } catch (storageError) {
+                    console.log('Error clearing signup session:', storageError);
+                }
+
+                setVerificationUrl('');
+                setSessionId('');
+                setTempSessionRef('');
+                router.setParams({ verified: '', check_verification: '' });
+
+                router.replace({
+                    pathname: '/',
+                    params: {
+                        accountCreated: 'true',
+                        email,
+                        verificationPendingReview: 'true',
+                    },
+                } as any);
+            }
+        } catch (authErr: any) {
+            if (authErr?.message?.includes('already registered') || authErr?.status === 422) {
+                const { error: resendError } = await supabase.auth.resend({
+                    type: 'signup',
+                    email: email.trim(),
+                    options: { emailRedirectTo: Linking.createURL('/') },
+                });
+
+                if (resendError) {
+                    Alert.alert('Account Exists', 'This email is already registered. Please log in to continue.');
+                } else {
+                    Alert.alert('Account Exists', 'This email already exists. We sent a new verification email.');
+                    setStep('email_verification');
+                }
+
+                return;
+            }
+
+            Alert.alert('Creation Failed', authErr?.message || 'Unable to create your account right now.');
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const submitManualReviewSignup = async () => {
+        if (selectedDocumentOption.diditSupported) {
+            Alert.alert('Supported ID', 'This document is supported by Didit. Please continue with automatic verification.');
+            return;
+        }
+
+        if (!manualFrontImage) {
+            Alert.alert('Upload Required', 'Please upload the front photo of your ID to continue.');
+            return;
+        }
+
+        if (!email || !password || !selectedRole) {
+            Alert.alert('Session Reset', 'Please go back and complete your signup details first.');
+            setStep('details');
+            return;
+        }
+
+        setLoading(true);
+
+        const fallbackName = email.split('@')[0] || 'Musician';
+
+        try {
+            const { data: authData, error: authError } = await supabase.auth.signUp({
+                email: email.trim(),
+                password,
+                options: {
+                    emailRedirectTo: Linking.createURL('/'),
+                    data: {
+                        role: selectedRole,
+                        verification_status: 'PENDING_REVIEW',
+                        is_verified: false,
+                        full_name: fallbackName,
+                        display_name: fallbackName,
+                        name: fallbackName,
+                        selected_document_type: selectedDocumentOption.label,
+                        verification_mode: 'manual_upload',
+                    },
+                },
+            });
+
+            if (authError) throw authError;
+
+            if (authData.user) {
+                const createProfileWithRetry = async (retries = 0): Promise<boolean> => {
+                    try {
+                        const { error: profileError } = await supabase.functions.invoke('manage-profile', {
+                            body: {
+                                action: 'create',
+                                userId: authData.user!.id,
+                                email: email.trim(),
+                                full_name: fallbackName,
+                                display_name: fallbackName,
+                                role: selectedRole,
+                                is_verified: false,
+                                verification_status: 'PENDING_REVIEW',
+                                didit_session_id: null,
+                            },
+                        });
+
+                        if (profileError) {
+                            throw profileError;
+                        }
+
+                        return true;
+                    } catch {
+                        if (retries < 3) {
+                            await new Promise((resolve) => setTimeout(resolve, 1000));
+                            return createProfileWithRetry(retries + 1);
+                        }
+
+                        return false;
+                    }
+                };
+
+                await createProfileWithRetry();
+
+                const { error: manualSubmitError } = await supabase.functions.invoke('manual-identity-review', {
+                    body: {
+                        action: 'submit_manual_review_signup',
+                        userId: authData.user.id,
+                        email: email.trim(),
+                        documentType: selectedDocumentOption.label,
+                        documentTypeKey: selectedDocumentOption.key,
+                        documentCountry: 'PHL',
+                        frontImage: manualFrontImage,
+                        backImage: manualBackImage,
+                        selfieImage: manualSelfieImage,
+                    },
+                });
+
+                if (manualSubmitError) {
+                    throw manualSubmitError;
+                }
+
+                try {
+                    await AsyncStorage.removeItem('signup_current_session');
+                } catch (storageError) {
+                    console.log('Error clearing signup session:', storageError);
+                }
+
+                router.replace({
+                    pathname: '/',
+                    params: {
+                        accountCreated: 'true',
+                        email,
+                        verificationPendingReview: 'true',
+                    },
+                } as any);
+            }
+        } catch (authErr: any) {
+            if (authErr?.message?.includes('already registered') || authErr?.status === 422) {
+                const { error: resendError } = await supabase.auth.resend({
+                    type: 'signup',
+                    email: email.trim(),
+                    options: { emailRedirectTo: Linking.createURL('/') },
+                });
+
+                if (resendError) {
+                    Alert.alert('Account Exists', 'This email is already registered. Please log in to continue.');
+                } else {
+                    Alert.alert('Account Exists', 'This email already exists. We sent a new verification email.');
+                    setStep('email_verification');
+                }
+
+                return;
+            }
+
+            Alert.alert('Manual Review Failed', authErr?.message || 'Unable to submit your manual review request.');
+        } finally {
+            setLoading(false);
+        }
+    };
+
     const handleNext = async () => {
         setErrors({});
         const newErrors: any = {};
 
         if (!isAllowedSignupRole(selectedRole)) {
             setErrors({ role: 'Please select a valid account type.' });
-            Alert.alert('Unsupported Account Type', 'Admin accounts are not allowed in the mobile app.');
-            setStep('role');
+            Alert.alert('Unsupported Account Type', 'Only musician accounts can be registered right now.');
+            setStep('details');
             return;
         }
 
@@ -520,6 +913,10 @@ export default function SignupScreen() {
             if (!passwordRegex.test(password)) {
                 newErrors.password = 'Min 8 chars: 1 upper, 1 lower, 1 number, 1 special char';
             }
+        }
+
+        if (!selectedDocumentOption?.key) {
+            newErrors.document = 'Please select an ID type';
         }
 
         if (password !== confirmPassword) newErrors.confirmPassword = 'Passwords do not match';
@@ -553,6 +950,18 @@ export default function SignupScreen() {
                 return;
             }
 
+            if (selectedDocumentOption.diditSupported) {
+                setVerificationMode('didit');
+                setManualFrontImage(null);
+                setManualBackImage(null);
+                setManualSelfieImage(null);
+            } else {
+                setVerificationMode('manual');
+                setVerificationUrl('');
+                setSessionId('');
+                setTempSessionRef('');
+            }
+
             // Proceed to Verification Step WITHOUT creating account
             setStep('verification');
 
@@ -577,8 +986,8 @@ export default function SignupScreen() {
         }
 
         if (!isAllowedSignupRole(selectedRole) || isAdminRole(selectedRole)) {
-            Alert.alert('Unsupported Account Type', 'Admin accounts cannot be registered in the mobile app.');
-            setStep('role');
+            Alert.alert('Unsupported Account Type', 'Only musician accounts can be registered right now.');
+            setStep('details');
             return;
         }
 
@@ -639,6 +1048,8 @@ export default function SignupScreen() {
                         verification_status: 'APPROVED',
                         is_verified: true,
                         didit_session_id: refToLink,
+                        selected_document_type: selectedDocumentOption.label,
+                        verification_mode: verificationMode,
                         full_name: verifiedName,
                         display_name: verifiedName,
                         name: verifiedName
@@ -756,58 +1167,11 @@ export default function SignupScreen() {
     };
 
     /**
-     * Render Step 1: Role Selection
-     */
-    const renderRoleStep = () => (
-        <View style={styles.stepContainer}>
-            <TouchableOpacity activeOpacity={1} onPress={() => router.back()} style={styles.backLink}>
-                <Ionicons name="arrow-back" size={20} color={colors.textSecondary} />
-                <Text style={themeStyles.textSecondary}>Back</Text>
-            </TouchableOpacity>
-
-            <Text style={[styles.stepTitle, themeStyles.text]}>Choose your role</Text>
-            <Text style={[styles.stepSubtitle, themeStyles.textSecondary]}>How will you use MusikaLokal?</Text>
-
-            <View style={styles.roleGrid}>
-                {roleOptions.map((option) => (
-                    <TouchableOpacity activeOpacity={1}
-                        key={option.value}
-                        onPress={() => setSelectedRole(option.value)}
-                        style={[
-                            styles.roleCardBig,
-                            themeStyles.card,
-                            selectedRole === option.value && {
-                                borderColor: colors.primary,
-                                borderWidth: 2,
-                                backgroundColor: isDark ? 'rgba(99, 102, 241, 0.1)' : 'rgba(99, 102, 241, 0.05)',
-                            }
-                        ]}
-                    >
-                        <Ionicons name={option.icon} size={32} color={selectedRole === option.value ? colors.primary : colors.textSecondary} />
-                        <Text style={[styles.roleLabelBig, themeStyles.text, selectedRole === option.value && { color: colors.primary }]}>{option.label}</Text>
-                        <Text style={[styles.roleDescBig, themeStyles.textSecondary]}>{option.description}</Text>
-                    </TouchableOpacity>
-                ))}
-            </View>
-
-            <TouchableOpacity
-                disabled={!selectedRole}
-                onPress={() => setStep('details')}
-                activeOpacity={1}
-                style={[styles.nextButton, themeStyles.primaryButton, !selectedRole && { opacity: 0.5 }]}
-            >
-                <Text style={styles.nextButtonText}>Continue</Text>
-                <Ionicons name="arrow-forward" size={20} color="white" />
-            </TouchableOpacity>
-        </View>
-    );
-
-    /**
      * Render Step 2: Details
      */
     const renderDetailsStep = () => (
         <View style={styles.stepContainer}>
-            <TouchableOpacity activeOpacity={1} onPress={() => setStep('role')} style={styles.backLink}>
+            <TouchableOpacity activeOpacity={1} onPress={() => router.back()} style={styles.backLink}>
                 <Ionicons name="arrow-back" size={20} color={colors.textSecondary} />
                 <Text style={themeStyles.textSecondary}>Back</Text>
             </TouchableOpacity>
@@ -863,6 +1227,57 @@ export default function SignupScreen() {
                     </TouchableOpacity>
                 </View>
                 {errors.confirmPassword && <Text style={{ color: 'red', fontSize: 12 }}>{errors.confirmPassword}</Text>}
+
+                <View style={styles.documentSectionContainer}>
+                    <Text style={[styles.documentSectionTitle, themeStyles.text]}>Select your ID type (Philippines)</Text>
+                    <Text style={[styles.documentSectionSubtitle, themeStyles.textSecondary]}>
+                        Supported IDs continue with Didit. Unsupported IDs can be uploaded manually for admin review (5-7 business days).
+                    </Text>
+
+                    <View style={styles.documentOptionsList}>
+                        {PH_DOCUMENT_OPTIONS.map((option) => {
+                            const selected = selectedDocumentKey === option.key;
+                            return (
+                                <TouchableOpacity
+                                    key={option.key}
+                                    activeOpacity={1}
+                                    onPress={() => {
+                                        setSelectedDocumentKey(option.key);
+                                        if (errors.document) {
+                                            setErrors((prev) => ({ ...prev, document: undefined }));
+                                        }
+                                    }}
+                                    style={[
+                                        styles.documentOptionCard,
+                                        {
+                                            borderColor: selected ? colors.primary : colors.border,
+                                            backgroundColor: selected
+                                                ? (isDark ? 'rgba(59, 130, 246, 0.16)' : 'rgba(59, 130, 246, 0.08)')
+                                                : themeStyles.inputContainer.backgroundColor,
+                                        },
+                                    ]}
+                                >
+                                    <View style={styles.documentOptionCopy}>
+                                        <Text style={[styles.documentOptionTitle, themeStyles.text]}>{option.label}</Text>
+                                        <Text style={[styles.documentOptionMeta, themeStyles.textSecondary]}>
+                                            {option.diditSupported ? 'Didit supported' : 'Manual upload + admin review'}
+                                        </Text>
+                                    </View>
+                                    <View
+                                        style={[
+                                            styles.documentBadge,
+                                            { backgroundColor: option.diditSupported ? '#16A34A' : '#D97706' },
+                                        ]}
+                                    >
+                                        <Text style={styles.documentBadgeText}>{option.diditSupported ? 'AUTO' : 'MANUAL'}</Text>
+                                    </View>
+                                </TouchableOpacity>
+                            );
+                        })}
+                    </View>
+
+                    {errors.document ? <Text style={{ color: 'red', fontSize: 12 }}>{errors.document}</Text> : null}
+                </View>
             </View>
 
             <TouchableOpacity
@@ -903,7 +1318,10 @@ export default function SignupScreen() {
 
                 if (status === 'Approved' || status === 'APPROVED') {
                     finishAccountCreation();
-                } else if (['DECLINED', 'Declined', 'ABANDONED', 'Abandoned', 'In Review', 'PENDING_REVIEW'].includes(status)) {
+                } else if (status === 'In Review' || status === 'PENDING_REVIEW') {
+                    await finishAccountCreationPendingReview(refToCheck);
+                    return;
+                } else if (['DECLINED', 'Declined', 'ABANDONED', 'Abandoned'].includes(status)) {
                     // Failed - show alert and go back to form
                     setLoading(false);
                     setVerificationUrl('');
@@ -917,9 +1335,6 @@ export default function SignupScreen() {
                     if (status === 'ABANDONED' || status === 'Abandoned') {
                         title = 'Verification Incomplete';
                         message = 'You did not complete the verification. Please try again.';
-                    } else if (status === 'In Review' || status === 'PENDING_REVIEW') {
-                        title = 'Verification Pending';
-                        message = 'Your ID is under review. Please try again later.';
                     }
 
                     setStep('details');
@@ -943,6 +1358,70 @@ export default function SignupScreen() {
                 );
             }
         };
+
+        if (verificationMode === 'manual') {
+            const renderManualAsset = (label: string, asset: ManualUploadAsset | null, target: 'front' | 'back' | 'selfie', required = false) => (
+                <View style={[styles.manualUploadCard, { borderColor: colors.border, backgroundColor: themeStyles.card.backgroundColor }]}>
+                    <View style={styles.manualUploadHeader}>
+                        <View style={{ flex: 1 }}>
+                            <Text style={[styles.manualUploadTitle, themeStyles.text]}>{label}</Text>
+                            <Text style={[styles.manualUploadSubtitle, themeStyles.textSecondary]}>
+                                {required ? 'Required' : 'Optional'}
+                            </Text>
+                        </View>
+                        <TouchableOpacity
+                            activeOpacity={1}
+                            onPress={() => void pickManualImage(target)}
+                            style={[styles.manualUploadButton, { backgroundColor: colors.primary }]}
+                        >
+                            <Text style={styles.manualUploadButtonText}>{asset ? 'Replace' : 'Upload'}</Text>
+                        </TouchableOpacity>
+                    </View>
+
+                    {asset ? (
+                        <View style={styles.manualPreviewRow}>
+                            <Image source={{ uri: asset.uri }} style={styles.manualPreviewImage} resizeMode="cover" />
+                            <Text numberOfLines={2} style={[styles.manualUploadFileName, themeStyles.textSecondary]}>{asset.fileName}</Text>
+                        </View>
+                    ) : (
+                        <Text style={[styles.manualUploadPlaceholder, themeStyles.textSecondary]}>No file selected.</Text>
+                    )}
+                </View>
+            );
+
+            return (
+                <View style={styles.stepContainer}>
+                    <ScrollView contentContainerStyle={styles.manualFlowContainer} showsVerticalScrollIndicator={false}>
+                        <TouchableOpacity activeOpacity={1} onPress={() => setStep('details')} style={styles.backLink}>
+                            <Ionicons name="arrow-back" size={20} color={colors.textSecondary} />
+                            <Text style={themeStyles.textSecondary}>Back</Text>
+                        </TouchableOpacity>
+
+                        <Text style={[styles.stepTitle, themeStyles.text]}>Manual ID review</Text>
+                        <Text style={[styles.stepSubtitle, themeStyles.textSecondary, { marginBottom: 16 }]}>
+                            {selectedDocumentOption.label} is not currently supported by Didit in the Philippines. Upload your ID below and our team will review within 5-7 business days.
+                        </Text>
+
+                        {renderManualAsset('Front of ID', manualFrontImage, 'front', true)}
+                        {renderManualAsset('Back of ID', manualBackImage, 'back')}
+                        {renderManualAsset('Selfie holding ID', manualSelfieImage, 'selfie')}
+
+                        <Text style={[styles.manualFlowHint, themeStyles.textSecondary]}>
+                            Admin will approve or reject your submission, and we will automatically email you once the decision is made.
+                        </Text>
+
+                        <TouchableOpacity
+                            activeOpacity={1}
+                            onPress={() => void submitManualReviewSignup()}
+                            disabled={loading}
+                            style={[styles.nextButton, themeStyles.primaryButton, { marginTop: 8 }]}
+                        >
+                            {loading ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.nextButtonText}>Submit for Manual Review</Text>}
+                        </TouchableOpacity>
+                    </ScrollView>
+                </View>
+            );
+        }
 
         // 1. Processing State (Returning from Didit)
         if (verified === 'true' || check_verification === 'true') {
@@ -1112,15 +1591,6 @@ export default function SignupScreen() {
             <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={[styles.flex1, themeStyles.container]}>
                 <ScrollView contentContainerStyle={styles.scrollContent}>
                     <View style={styles.contentContainer}>
-                        {/* Progress Indicator */}
-                        <View style={styles.progressContainer}>
-                            <View style={[styles.dot, step === 'role' ? { backgroundColor: colors.primary } : { backgroundColor: colors.textSecondary, opacity: 0.3 }]} />
-                            <View style={[styles.dot, step === 'details' ? { backgroundColor: colors.primary } : { backgroundColor: colors.textSecondary, opacity: 0.3 }]} />
-                            <View style={[styles.dot, { backgroundColor: colors.textSecondary, opacity: 0.3 }]} />
-                            <View style={[styles.dot, { backgroundColor: colors.textSecondary, opacity: 0.3 }]} />
-                        </View>
-
-                        {step === 'role' && renderRoleStep()}
                         {step === 'details' && renderDetailsStep()}
                     </View>
                 </ScrollView>
@@ -1158,11 +1628,49 @@ const styles = StyleSheet.create({
     inputContainer: {
         flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, height: 56, borderRadius: 16, borderWidth: 1
     },
-    input: { flex: 1, marginLeft: 12, height: '100%', fontFamily: 'Poppins_400Regular' },
+    input: { flex: 1, marginLeft: 12, height: '100%', fontFamily: 'Poppins_400Regular', textAlignVertical: 'center' },
     formGap: { gap: 16 },
     backLink: { flexDirection: 'row', alignItems: 'center', marginBottom: 24, gap: 4 },
-    progressContainer: { flexDirection: 'row', gap: 8, marginBottom: 24, justifyContent: 'center' },
-    dot: { width: 8, height: 8, borderRadius: 4 }
+    documentSectionContainer: { gap: 10, marginTop: 4 },
+    documentSectionTitle: { fontSize: 14, fontFamily: 'Poppins_600SemiBold' },
+    documentSectionSubtitle: { fontSize: 12, lineHeight: 18, fontFamily: 'Poppins_400Regular' },
+    documentOptionsList: { gap: 8 },
+    documentOptionCard: {
+        borderWidth: 1,
+        borderRadius: 12,
+        paddingHorizontal: 12,
+        paddingVertical: 10,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 10,
+    },
+    documentOptionCopy: { flex: 1, gap: 2 },
+    documentOptionTitle: { fontSize: 13, fontFamily: 'Poppins_600SemiBold' },
+    documentOptionMeta: { fontSize: 11, fontFamily: 'Poppins_400Regular' },
+    documentBadge: { borderRadius: 999, paddingHorizontal: 8, paddingVertical: 4 },
+    documentBadgeText: { color: '#FFFFFF', fontSize: 10, fontFamily: 'Poppins_700Bold' },
+    manualFlowContainer: { paddingBottom: 28, gap: 12 },
+    manualUploadCard: {
+        borderWidth: 1,
+        borderRadius: 12,
+        paddingHorizontal: 12,
+        paddingVertical: 12,
+        gap: 10,
+    },
+    manualUploadHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 10,
+    },
+    manualUploadTitle: { fontSize: 14, fontFamily: 'Poppins_600SemiBold' },
+    manualUploadSubtitle: { fontSize: 11, fontFamily: 'Poppins_400Regular' },
+    manualUploadButton: { borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8 },
+    manualUploadButtonText: { color: '#FFFFFF', fontSize: 12, fontFamily: 'Poppins_600SemiBold' },
+    manualPreviewRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+    manualPreviewImage: { width: 58, height: 58, borderRadius: 8, backgroundColor: '#D1D5DB' },
+    manualUploadFileName: { flex: 1, fontSize: 11, lineHeight: 16, fontFamily: 'Poppins_400Regular' },
+    manualUploadPlaceholder: { fontSize: 11, fontFamily: 'Poppins_400Regular' },
+    manualFlowHint: { marginTop: 6, fontSize: 12, lineHeight: 18, fontFamily: 'Poppins_400Regular' },
 });
 
 

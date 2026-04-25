@@ -1,12 +1,10 @@
 import { useState } from "react";
 import {
-    IoBusinessOutline,
     IoCheckmarkCircle,
     IoChevronBack,
     IoChevronForward,
     IoEyeOffOutline,
     IoEyeOutline,
-    IoHomeOutline,
     IoLockClosedOutline,
     IoMailOutline,
     IoMusicalNotesOutline,
@@ -18,7 +16,7 @@ import CustomAlert, { AlertType } from "../components/CustomAlert";
 import { useTheme } from "../context/ThemeContext";
 import { supabase } from "../lib/supabase";
 
-type Role = "musician" | "studio-owner" | "venue-owner";
+type Role = "musician";
 
 const roles: {
   id: Role;
@@ -31,18 +29,6 @@ const roles: {
     label: "Musician",
     desc: "Find gigs, collaborate, and grow your career",
     Icon: IoMusicalNotesOutline,
-  },
-  {
-    id: "studio-owner",
-    label: "Studio Owner",
-    desc: "List your studio and manage bookings",
-    Icon: IoBusinessOutline,
-  },
-  {
-    id: "venue-owner",
-    label: "Venue Owner",
-    desc: "Post gig listings and find performers",
-    Icon: IoHomeOutline,
   },
 ];
 
@@ -57,7 +43,7 @@ export default function SignupPage() {
   const { colors, isDark } = useTheme();
   const navigate = useNavigate();
 
-  const [step, setStep] = useState(1);
+  const [step, setStep] = useState(2);
   const [selectedRole, setSelectedRole] = useState<Role>("musician");
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
@@ -216,7 +202,7 @@ export default function SignupPage() {
           {/* Header */}
           <div className="mb-8">
             <div className="flex items-center gap-3 mb-2">
-              {step > 1 && (
+              {step > 2 && (
                 <button
                   onClick={() => setStep(step - 1)}
                   className="rounded-full p-1.5 transition-colors hover:bg-gray-100 dark:hover:bg-slate-700"
@@ -228,20 +214,18 @@ export default function SignupPage() {
                 className="text-2xl lg:text-3xl font-bold"
                 style={{ color: colors.text }}
               >
-                {step === 1 ? "Create your account" : "Complete your profile"}
+                Create your account
               </h1>
             </div>
             <p className="text-sm" style={{ color: colors.textSecondary }}>
-              {step === 1
-                ? "Select your role to get started"
-                : "Fill in your details to finish signing up"}
+              Musician registration is currently available
             </p>
           </div>
 
           {/* Progress Steps */}
           <div className="mb-8 flex items-center gap-3">
             {[
-              { num: 1, label: "Role" },
+              { num: 1, label: "Musician" },
               { num: 2, label: "Details" },
             ].map((s, i) => (
               <div key={s.num} className="flex items-center gap-3 flex-1">

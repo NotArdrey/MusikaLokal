@@ -1,7 +1,7 @@
 ﻿import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect } from "@react-navigation/native";
 import { router } from "expo-router";
-import React, { useCallback, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Dimensions,
@@ -58,10 +58,18 @@ const getProductImage = (product: any) => product?.cover_image_url || product?.p
 export default function MarketplaceScreen() {
   const { colors, isDark } = useTheme();
   const { contentBottomPadding } = useBottomBarClearance(24);
-  const { session, isGuest, userId } = useAuth();
-  const canSell = Boolean(session);
+  const { session, isGuest, userId, userRole, roleResolved } = useAuth();
+  const normalizedUserRole = (userRole || "").toLowerCase();
+  const isMusician = normalizedUserRole === "musician";
+  const canSell = Boolean(session) && roleResolved && !isMusician;
 
   const [tab, setTab] = useState<MarketTab>("browse");
+
+  useEffect(() => {
+    if (!canSell && tab === "sell") {
+      setTab("browse");
+    }
+  }, [canSell, tab]);
 
   // Browse state
   const [products, setProducts] = useState<any[]>([]);
@@ -240,6 +248,15 @@ export default function MarketplaceScreen() {
   };
 
   const handleSubmitProduct = async () => {
+    if (!canSell) {
+      setAlert({
+        type: "warning",
+        title: "Selling Unavailable",
+        message: "Only non-musician accounts can create marketplace listings.",
+      });
+      return;
+    }
+
     if (!newTitle.trim()) {
       setAlert({ type: "warning", title: "Missing Title", message: "Enter a listing title." });
       return;
@@ -383,11 +400,7 @@ export default function MarketplaceScreen() {
             <Ionicons name="add" size={16} color="#fff" />
             <Text style={styles.introActionText}>Create listing</Text>
           </TouchableOpacity>
-        ) : (
-          <View style={[styles.introIconWrap, { backgroundColor: colors.primary + "14" }]}>
-            <Ionicons name="chatbubbles-outline" size={22} color={colors.primary} />
-          </View>
-        )}
+        ) : null}
       </View>
 
       {/* Search */}
@@ -587,25 +600,27 @@ export default function MarketplaceScreen() {
       <Header title="Marketplace" />
 
       {/* Main Tabs */}
-      <View style={[styles.tabRow, { borderBottomColor: isDark ? "#334155" : "#E2E8F0" }]}>
-        {tabs.map((t) => (
-          <TouchableOpacity activeOpacity={1}
-            key={t.key}
-            style={[styles.mainTab, tab === t.key && { borderBottomColor: colors.primary, borderBottomWidth: 2 }]}
-            onPress={() => setTab(t.key)}
-          >
-            <Ionicons
-              name={t.icon as any}
-              size={moderateScale(16)}
-              color={tab === t.key ? colors.primary : colors.textSecondary}
-              style={{ marginRight: 6 }}
-            />
-            <Text style={[styles.mainTabText, { color: tab === t.key ? colors.primary : colors.textSecondary }]}>
-              {t.label}
-            </Text>
-          </TouchableOpacity>
-        ))}
-      </View>
+      {tabs.length > 1 && (
+        <View style={[styles.tabRow, { borderBottomColor: isDark ? "#334155" : "#E2E8F0" }]}>
+          {tabs.map((t) => (
+            <TouchableOpacity activeOpacity={1}
+              key={t.key}
+              style={[styles.mainTab, tab === t.key && { borderBottomColor: colors.primary, borderBottomWidth: 2 }]}
+              onPress={() => setTab(t.key)}
+            >
+              <Ionicons
+                name={t.icon as any}
+                size={moderateScale(16)}
+                color={tab === t.key ? colors.primary : colors.textSecondary}
+                style={{ marginRight: 6 }}
+              />
+              <Text style={[styles.mainTabText, { color: tab === t.key ? colors.primary : colors.textSecondary }]}>
+                {t.label}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      )}
 
       <ScrollView
         style={styles.content}
@@ -752,7 +767,6 @@ const styles = StyleSheet.create({
     includeFontPadding: false,
     textAlignVertical: "center",
   },
-  introIconWrap: { width: 44, height: 44, borderRadius: 22, alignItems: "center", justifyContent: "center", alignSelf: "flex-start" },
   searchBar: { flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingVertical: 12, borderRadius: 16, borderWidth: 1, marginBottom: 8 },
   searchInput: { flex: 1, marginLeft: 8, fontSize: moderateScale(14) },
   categoryRow: { marginBottom: 12, maxHeight: 44 },
