@@ -536,7 +536,7 @@ const ListingDetailsSheet = forwardRef<
         }
       }
     },
-    [activeUserId, bookings, currentUserRole, fetchProductionTeams, group, listingId, userRole],
+    [activeUserId, bookings, currentUserRole, group, listingId, userRole],
   );
 
   useEffect(() => {
@@ -1084,7 +1084,7 @@ const ListingDetailsSheet = forwardRef<
     }
 
     try {
-      const { data, error } = await supabase.functions.invoke("manage-deals", {
+      const { data, error } = await supabase.functions.invoke("manage-production", {
         body: { action: "list_team_roster", teamId },
       });
 
@@ -1188,7 +1188,7 @@ const ListingDetailsSheet = forwardRef<
     setHasLoadedProductionTeams(false);
     setLoadingProductionTeams(true);
     try {
-      const { data, error } = await supabase.functions.invoke("manage-deals", {
+      const { data, error } = await supabase.functions.invoke("manage-production", {
         body: { action: "list_my_teams" },
       });
 
@@ -1583,7 +1583,7 @@ const ListingDetailsSheet = forwardRef<
       } = await supabase.auth.getUser();
       debugLog("User:", user?.id);
 
-      let data = null;
+      let data: any = null;
       let type = "Group";
       let ownerId = null;
 
@@ -4002,7 +4002,7 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontFamily: "Poppins_600SemiBold",
   },
-  dealCard: {
+  offerCard: {
     padding: 16,
     borderRadius: 16,
     borderWidth: 1,
@@ -4656,5 +4656,7 @@ const styles = StyleSheet.create({
 });
 
 export default ListingDetailsSheet;
+
+
 
 

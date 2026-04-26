@@ -32,7 +32,6 @@ serve(async (req) => {
             const DIDIT_CLIENT_ID = 'fe4e28a0-fa8e-48c0-b499-d776834c425e' // App ID
             const DIDIT_VERIFICATION_URL = 'https://verify.didit.me/verify/kxYhKHgC1LESNW-TQEmPcw' // Workflow URL
 
-            console.log('Creating Didit session for user:', userId, 'App ID:', DIDIT_CLIENT_ID)
 
             // Didit "No-Code" Flow: Redirect user to the workflow URL with reference
             const verificationUrl = `${DIDIT_VERIFICATION_URL}?reference=${userId}`

@@ -52,15 +52,12 @@ export default function ManageScreen() {
     }, [authLoading, isAuthenticated, roleResolved, userRole, userId]);
 
     const fetchRoleAndRedirect = async () => {
-        console.log('🎯 Manage - User ID from context:', userId);
         if (!userId) {
-            console.log('❌ Manage - No userId available');
             setLoading(false);
             return;
         }
 
         try {
-            console.log('🔍 Manage - Fetching role for user:', userId);
             const { data, error } = await supabase
                 .from('profiles')
                 .select('role')
@@ -68,20 +65,16 @@ export default function ManageScreen() {
                 .single();
 
             if (error) {
-                console.log('❌ Manage - Error fetching role:', error.message);
                 throw error;
             }
 
             if (data?.role) {
-                console.log('✅ Manage - Role fetched:', data.role);
                 setFetchedRole(data.role);
                 handleRedirect(data.role);
             } else {
-                console.log('⚠️ Manage - No role data found');
                 setLoading(false);
             }
         } catch (error) {
-            console.log('❌ Manage - Exception:', error);
             setLoading(false);
         }
     };

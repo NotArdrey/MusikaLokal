@@ -52,7 +52,6 @@ export default function ForgetPasswordScreen() {
   const getRedirectUrl = () => {
     // This creates exp://192.168.x.x:8082/--/change_password
     const url = Linking.createURL("change_password");
-    console.log("Generated Expo redirect URL:", url);
     return url;
   };
 
@@ -73,7 +72,6 @@ export default function ForgetPasswordScreen() {
     setLoading(true);
     try {
       const redirectUrl = getRedirectUrl();
-      console.log("Password reset redirect URL:", redirectUrl);
 
       const { error } = await supabase.auth.resetPasswordForEmail(
         email.trim(),

@@ -1,4 +1,4 @@
-import { Ionicons } from "@expo/vector-icons";
+﻿import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import React, { useEffect, useState } from "react";
 import {
@@ -116,7 +116,6 @@ export default function GigDetailsScreen() {
         label: gig?.location || gig?.name || "Gig location",
       });
     } catch (error) {
-      console.log("[manage_gig] Navigation error:", error);
       showAlert(
         "warning",
         "Navigation Unavailable",
@@ -175,7 +174,6 @@ export default function GigDetailsScreen() {
         return;
       }
 
-      console.log(`[manage_gig] Fetching data for gigId: ${gigId}, userId: ${userId}`);
 
       // Load 3NF sources first so newly created gigs are visible immediately.
       const [
@@ -209,9 +207,8 @@ export default function GigDetailsScreen() {
       ]);
 
       if (gigError) {
-        console.log('[manage_gig] Failed to fetch gig details:', gigError.message);
         // if (gigError.message?.includes("non-2xx")) {
-        //   console.log('[manage_gig] Full error object:', JSON.stringify(gigError));
+        //   undefined;
         // }
         throw gigError;
       }
@@ -220,7 +217,6 @@ export default function GigDetailsScreen() {
 
       // Legacy projection is fallback-only; do not fail page load if this read errors.
       if (legacyGigError) {
-        console.log('[manage_gig] Legacy projection unavailable, using direct 3NF rows only.');
       }
 
       const requirementsFromRows = (requirementRows || []).reduce((acc: Record<string, any>, row: any) => {
@@ -256,14 +252,12 @@ export default function GigDetailsScreen() {
             },
           });
         if (appError) {
-          console.log('[manage_gig] Edge function failed for applications, trying direct query fallback.');
           const fallbackApps = await fetchApplicationsFallback(gigId);
           setApplications(fallbackApps);
         } else {
           setApplications(appData || []);
         }
       } catch (appErr) {
-        console.log('[manage_gig] Exception fetching applications; using empty list fallback:', appErr);
         setApplications([]);
       }
 
@@ -275,16 +269,13 @@ export default function GigDetailsScreen() {
           .eq('gig_id', gigId)
           .order('created_at', { ascending: false });
         if (reviewError) {
-          console.log('[manage_gig] Failed to fetch reviews:', reviewError);
         } else {
           setReviews(reviewData || []);
         }
       } catch (reviewErr) {
-        console.log('[manage_gig] Exception fetching reviews:', reviewErr);
       }
 
     } catch (e: any) {
-      console.log("[manage_gig] Critical error fetching data (masked):", e.message || "Unknown error");
       let errorMsg = "Failed to load gig data";
       if (e.message?.includes("non-2xx")) {
         errorMsg += `\n\nServer Error (500). Please check edge function logs.`;
@@ -334,7 +325,6 @@ export default function GigDetailsScreen() {
         );
         setModalVisible(false);
       } catch (e) {
-        console.log("Error updating application:", e);
         Alert.alert("Error", "Failed to update application status");
       }
     });
@@ -651,29 +641,27 @@ export default function GigDetailsScreen() {
                   </View>
                 </View>
 
-                {/* The "Deal" Card */}
+                {/* The Offer Card */}
                 <View
                   style={[
-                    styles.dealCard,
+                    styles.offerCard,
                     {
                       backgroundColor: colors.surface,
                       borderColor: colors.primary,
                     },
                   ]}
                 >
-                  <View style={styles.dealHeader}>
+                  <View style={styles.offerHeader}>
                     <Ionicons
                       name="cash-outline"
                       size={24}
                       color={colors.primary}
                     />
-                    <Text style={[styles.dealTitle, { color: colors.text }]}>
-                      The Deal
-                    </Text>
+                    <Text style={[styles.offerTitle, { color: colors.text }]}>The Offer</Text>
                   </View>
                   <View
                     style={[
-                      styles.dealInfo,
+                      styles.offerInfo,
                       { borderColor: colors.border, borderBottomWidth: 0 },
                     ]}
                   >
@@ -700,7 +688,7 @@ export default function GigDetailsScreen() {
                       <Text
                         style={[styles.payoutAmount, { color: colors.primary }]}
                       >
-                        ₱{(gig?.budget || 0).toLocaleString()}
+                        â‚±{(gig?.budget || 0).toLocaleString()}
                       </Text>
                     </View>
                   </View>
@@ -1002,7 +990,7 @@ export default function GigDetailsScreen() {
                             }}
                           >
                             {displayGenres}
-                            {displayLocation && ` • ${displayLocation}`}
+                            {displayLocation && ` â€¢ ${displayLocation}`}
                           </Text>
                           {app.production_team?.name && (
                             <Text
@@ -1765,22 +1753,22 @@ const styles = StyleSheet.create({
     lineHeight: 24,
     fontFamily: "Poppins_400Regular",
   },
-  dealCard: {
+  offerCard: {
     padding: 20,
     borderRadius: 24,
     borderWidth: 1,
   },
-  dealHeader: {
+  offerHeader: {
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
     marginBottom: 8,
   },
-  dealTitle: {
+  offerTitle: {
     fontSize: 18,
     fontFamily: "Poppins_700Bold",
   },
-  dealInfo: {
+  offerInfo: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "flex-end",
@@ -2065,3 +2053,4 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(0,0,0,0.3)",
   },
 });
+

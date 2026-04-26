@@ -1,4 +1,4 @@
-import { Ionicons } from '@expo/vector-icons';
+﻿import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import {
@@ -21,7 +21,7 @@ import Header from '../../src/components/header';
 import { useAuth } from '../../src/context/AuthContext';
 import { useTheme } from '../../src/context/ThemeContext';
 
-export type Tab = 'dashboard' | 'users' | 'reports' | 'audit' | 'deals';
+export type Tab = 'dashboard' | 'permits' | 'users' | 'reports' | 'audit';
 type PermitFilter = 'all' | 'pending_review' | 'approved' | 'rejected' | 'resubmitted';
 type EntityFilter = 'all' | 'studio' | 'gig';
 type ReportStatus = 'pending' | 'resolved' | 'dismissed';
@@ -46,10 +46,10 @@ type AuditActionFilter = 'all' | 'approved' | 'rejected' | 'submitted' | 'resubm
 
 const adminTabRoutes: Record<Tab, string> = {
   dashboard: '/admin',
+  permits: '/admin/permits',
   users: '/admin/users',
   reports: '/admin/reports',
   audit: '/admin/audit',
-  deals: '/admin/deals',
 };
 
 interface DashboardMetrics {
@@ -410,7 +410,7 @@ const formatDateTime = (value?: string | null) => {
 
 const formatCurrency = (value?: number | null) => {
   const safeValue = Number(value || 0);
-  return `₱${safeValue.toLocaleString('en-PH', {
+  return `â‚±${safeValue.toLocaleString('en-PH', {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   })}`;
@@ -1964,10 +1964,10 @@ export default function AdminPanel({ initialTab, children }: AdminPanelProps) {
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tabsRow}>
             {[
               { key: 'dashboard', label: 'Dashboard', icon: 'stats-chart-outline' },
+              { key: 'permits', label: 'Permits', icon: 'document-text-outline' },
               { key: 'users', label: 'Users', icon: 'people-outline' },
               { key: 'reports', label: 'Reports', icon: 'shield-checkmark-outline' },
               { key: 'audit', label: 'Audit', icon: 'time-outline' },
-              { key: 'deals', label: 'Deals', icon: 'briefcase-outline' },
             ].map((item) => {
               const active = tab === item.key;
               return (
@@ -2073,7 +2073,7 @@ export default function AdminPanel({ initialTab, children }: AdminPanelProps) {
 
               <View style={[styles.pulseCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
                 <View style={styles.pulseHeader}>
-                  <Text style={[styles.pulseTitle, { color: colors.textSecondary }]}>Subscriptions Health</Text>
+                  <Text style={[styles.pulseTitle, { color: colors.textSecondary }]}>Plan Health</Text>
                   <Ionicons name="star-outline" size={20} color={colors.primary} />
                 </View>
                 <View style={styles.pulseRow}>
@@ -2177,11 +2177,11 @@ export default function AdminPanel({ initialTab, children }: AdminPanelProps) {
               </View>
 
               <View style={[styles.dataEnginePanel, styles.dataEnginePanelRight, { backgroundColor: colors.card, borderColor: colors.border, flex: Platform.OS === 'web' ? 3 : 1 }]}>
-                <Text style={[styles.panelTitle, { color: colors.text }]}>Subscription Tier Split</Text>
-                <Text style={[styles.panelSubtitle, { color: colors.textSecondary, marginBottom: -10 }]}>Active subscriptions by plan ({dashboardDateRangeLabel})</Text>
+                <Text style={[styles.panelTitle, { color: colors.text }]}>Plan Tier Split</Text>
+                <Text style={[styles.panelSubtitle, { color: colors.textSecondary, marginBottom: -10 }]}>Tracked plans by tier ({dashboardDateRangeLabel})</Text>
                 <View style={styles.subscriptionStackWrapper}>
                   {subscriptionTierTotal === 0 ? (
-                    <Text style={[styles.emptyText, { color: colors.textSecondary, textAlign: 'left', paddingVertical: 8 }]}>No active subscriptions in this date range.</Text>
+                    <Text style={[styles.emptyText, { color: colors.textSecondary, textAlign: 'left', paddingVertical: 8 }]}>No plan data in this date range.</Text>
                   ) : (
                     <View style={[styles.subscriptionStackBar, { backgroundColor: isDark ? '#1E293B' : '#E2E8F0' }]}>
                       {metrics.subscriptionTierBasic > 0 && (
@@ -2500,10 +2500,6 @@ export default function AdminPanel({ initialTab, children }: AdminPanelProps) {
                     <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>{user.email}</Text>
                     <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Role: {user.role}</Text>
                     <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Verified: {user.is_verified ? 'Yes' : 'No'}</Text>
-                    <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Subscription: {String(user.subscription_status || 'none').replace(/_/g, ' ')}</Text>
-                    {user.subscription_expires_at ? (
-                      <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Subscription Expires: {formatDateTime(user.subscription_expires_at)}</Text>
-                    ) : null}
                     <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Joined: {formatDateTime(user.created_at)}</Text>
 
                     <View style={styles.cardActionsRow}>
@@ -3168,67 +3164,6 @@ export default function AdminPanel({ initialTab, children }: AdminPanelProps) {
                 );
               })}
             </ScrollView>
-
-            {userModalMode === 'edit' && (
-              <>
-                <Text style={[styles.formLabel, { color: colors.textSecondary }]}>Subscription Status</Text>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterRow}>
-                  {subscriptionStatusOptions.map((status) => {
-                    const active = userFormSubscriptionStatus === status;
-                    return (
-                      <TouchableOpacity
-                        key={status}
-                        activeOpacity={1}
-                        onPress={() => setUserFormSubscriptionStatus(status)}
-                        style={[
-                          styles.filterChip,
-                          {
-                            backgroundColor: active ? colors.primary : (isDark ? '#1E293B' : '#FFFFFF'),
-                            borderColor: active ? colors.primary : colors.border,
-                          },
-                        ]}
-                      >
-                        <Text style={[styles.filterChipText, { color: active ? '#FFFFFF' : colors.textSecondary }]}>
-                          {status.replace(/_/g, ' ')}
-                        </Text>
-                      </TouchableOpacity>
-                    );
-                  })}
-                </ScrollView>
-
-                <TextInput
-                  value={userFormSubscriptionExpiresAt}
-                  onChangeText={setUserFormSubscriptionExpiresAt}
-                  placeholder="Subscription expires (optional, e.g. 2026-12-31T23:59)"
-                  autoCapitalize="none"
-                  placeholderTextColor={colors.textSecondary}
-                  style={[
-                    styles.modalInputCompact,
-                    {
-                      color: colors.text,
-                      backgroundColor: colors.inputBackground,
-                      borderColor: colors.inputBorder,
-                    },
-                  ]}
-                />
-
-                <TextInput
-                  value={userFormSubscriptionPlanId}
-                  onChangeText={setUserFormSubscriptionPlanId}
-                  placeholder="Subscription plan ID (optional)"
-                  autoCapitalize="none"
-                  placeholderTextColor={colors.textSecondary}
-                  style={[
-                    styles.modalInputCompact,
-                    {
-                      color: colors.text,
-                      backgroundColor: colors.inputBackground,
-                      borderColor: colors.inputBorder,
-                    },
-                  ]}
-                />
-              </>
-            )}
 
             {userModalMode === 'create' && (
               <TextInput
@@ -4311,3 +4246,4 @@ const styles = StyleSheet.create({
     padding: 24,
   },
 });
+

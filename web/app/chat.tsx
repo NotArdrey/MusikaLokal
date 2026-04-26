@@ -1,4 +1,4 @@
-import { router, useLocalSearchParams } from 'expo-router';
+﻿import { router, useLocalSearchParams } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, View } from 'react-native';
 import { supabase } from '../lib/supabase';
@@ -22,7 +22,6 @@ export default function ChatPage() {
         studioId?: string;
         studioBookingId?: string;
         gigApplicationId?: string;
-        dealId?: string;
         producerProjectId?: string;
         // Group chat params
         isGroupChat?: string;
@@ -65,7 +64,6 @@ export default function ChatPage() {
                     studioId: params.studioId,
                     studioBookingId: params.studioBookingId,
                     gigApplicationId: params.gigApplicationId,
-                    dealId: params.dealId,
                     producerProjectId: params.producerProjectId,
                 });
 
@@ -224,3 +222,4 @@ export default function ChatPage() {
 
     return null;
 }
+

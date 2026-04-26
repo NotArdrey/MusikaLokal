@@ -61,10 +61,6 @@ const TEMP_LOGIN_OPTIONS: TempLoginOption[] = [
   },
 ] as const;
 
-const isOwnerTempRole = (role: string | null | undefined) => {
-  return role === 'studio-owner' || role === 'venue-owner';
-};
-
 const formatTempRoleLabel = (role: string | null | undefined) => {
   if (role === 'studio-owner') return 'Studio Owner';
   if (role === 'venue-owner') return 'Venue Owner';
@@ -74,40 +70,30 @@ const formatTempRoleLabel = (role: string | null | undefined) => {
   return role;
 };
 
-const hasActiveOwnerSubscription = (status: unknown, expiresAt: unknown) => {
-  const normalizedStatus = typeof status === 'string' ? status.trim().toLowerCase() : '';
-  if (normalizedStatus !== 'active') return false;
-  if (typeof expiresAt !== 'string' || expiresAt.trim().length === 0) return true;
-
-  const parsedExpiry = new Date(expiresAt);
-  if (Number.isNaN(parsedExpiry.getTime())) return false;
-
-  return parsedExpiry > new Date();
-};
-
-const describeOwnerSubscription = (role: string | null | undefined, status: unknown, expiresAt: unknown) => {
-  if (!isOwnerTempRole(role)) return 'Not required';
-  if (!hasActiveOwnerSubscription(status, expiresAt)) return 'Inactive or expired';
-  if (typeof expiresAt !== 'string' || expiresAt.trim().length === 0) return 'Active';
-
-  const parsedExpiry = new Date(expiresAt);
-  if (Number.isNaN(parsedExpiry.getTime())) return 'Active';
-
-  return `Active until ${parsedExpiry.toLocaleDateString()}`;
-};
-
 export default function LoginScreen() {
   const { colors, isDark } = useTheme();
-  const { session, loading: authLoading, setGuestMode } = useAuth();
+  const { session, loading: authLoading, roleResolved, setGuestMode, userRole } = useAuth();
   const { verified, accountCreated, email: createdEmail, verification_error } = useLocalSearchParams();
   const { width } = Dimensions.get('window');
   const isWebDesktop = Platform.OS === 'web' && width >= 768;
 
+  const resolvePostLoginRoute = (role: unknown) => {
+    const normalizedRole = typeof role === 'string' ? role.trim().toLowerCase() : '';
+    return normalizedRole === 'admin' ? '/admin' : '/home';
+  };
+
   useEffect(() => {
     if (!authLoading && session) {
-      router.replace('/home' as any);
+      if (!roleResolved) return;
+
+      const route = resolvePostLoginRoute(
+        userRole ||
+        session.user?.user_metadata?.role ||
+        session.user?.app_metadata?.role,
+      );
+      router.replace(route as any);
     }
-  }, [authLoading, session]);
+  }, [authLoading, roleResolved, session, userRole]);
 
   const isSchemaQueryError = (errorLike: unknown) => {
     const error = errorLike as { message?: string; details?: string; hint?: string; code?: string } | null;
@@ -215,7 +201,7 @@ export default function LoginScreen() {
     try {
       const { data: profile, error } = await supabase
         .from('profiles')
-        .select('role, is_verified, subscription_status, subscription_expires_at')
+        .select('role, is_verified')
         .eq('email', option.email)
         .maybeSingle();
 
@@ -245,15 +231,10 @@ export default function LoginScreen() {
       }
 
       const identityVerified = profile.is_verified === true;
-      const subscriptionReady = !isOwnerTempRole(actualRole) || hasActiveOwnerSubscription(profile.subscription_status, profile.subscription_expires_at);
       const issues: string[] = [];
 
       if (!identityVerified) {
         issues.push('Identity verification is incomplete.');
-      }
-
-      if (isOwnerTempRole(actualRole) && !subscriptionReady) {
-        issues.push('Owner subscription is inactive or expired.');
       }
 
       const summary = [
@@ -262,7 +243,6 @@ export default function LoginScreen() {
         '',
         `Role: ${formatTempRoleLabel(actualRole)}`,
         `Identity: ${identityVerified ? 'Verified' : 'Needs verification'}`,
-        `Subscription: ${describeOwnerSubscription(actualRole, profile.subscription_status, profile.subscription_expires_at)}`,
         `Expected destination: ${option.destinationLabel}`,
       ].join('\n');
 
@@ -459,8 +439,13 @@ export default function LoginScreen() {
             router.replace('/identity_verification' as any);
             return;
           } else {
-            console.log('Verification passed. Redirecting to: /home');
-            router.replace('/home' as any);
+            const route = resolvePostLoginRoute(
+              profile?.role ||
+              user.user_metadata?.role ||
+              user.app_metadata?.role,
+            );
+            console.log('Verification passed. Redirecting to:', route);
+            router.replace(route as any);
           }
         }
       }

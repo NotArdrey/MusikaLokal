@@ -116,6 +116,12 @@ const logFeedInvokeError = (
 
 const FEED_PAGE_SIZE = 20;
 const AI_CARD_LIMIT = 20;
+const FEED_FOCUS_REFRESH_COOLDOWN_MS = 30000;
+const feedScreenCache = createFeedCache(getGeminiFlashLiteInfo().modelLabel);
+const feedLastFetchAt: Record<FeedTab, number> = {
+  for_you: 0,
+  following: 0,
+};
 const KNOWN_FEED_MEDIA_BUCKETS = [
   "post-media",
   "posts",
@@ -523,7 +529,7 @@ export default function FeedScreen() {
   const productionTeamSheetRef = React.useRef<import("@gorhom/bottom-sheet").BottomSheetModal>(null);
   const activeStationIdRef = React.useRef<string | null>(activeStation?.id || null);
   const activeTabRef = React.useRef<FeedTab>(tab);
-  const feedCacheRef = React.useRef<Record<FeedTab, FeedCacheEntry>>(createFeedCache(geminiModelLabel));
+  const feedCacheRef = React.useRef<Record<FeedTab, FeedCacheEntry>>(feedScreenCache);
   const feedRequestIdRef = React.useRef<Record<FeedTab, number>>({ for_you: 0, following: 0 });
   const hasFocusedFeedRef = React.useRef(false);
   const [selectedListingId, setSelectedListingId] = useState<string | null>(null);
@@ -773,14 +779,6 @@ export default function FeedScreen() {
           .limit(24),
       ]);
 
-      console.log("ðŸ“Š Feed AI - Strict query results:",
-        "groups:", (groupsResult.data || []).length, groupsResult.error?.message || "",
-        "studios:", (studiosResult.data || []).length, studiosResult.error?.message || "",
-        "gigs:", (gigsResult.data || []).length, gigsResult.error?.message || "",
-        "artists:", (artistsResult.data || []).length, artistsResult.error?.message || "",
-        "projects:", (projectsResult.data || []).length, projectsResult.error?.message || "",
-        "teams:", (teamsResult.data || []).length, teamsResult.error?.message || "",
-      );
 
       // If strict queries all return empty, try relaxed queries (drop permit_status)
       const strictTotal = (groupsResult.data || []).length + (studiosResult.data || []).length +
@@ -791,7 +789,6 @@ export default function FeedScreen() {
       let relaxedProfiles: any[] = [];
 
       if (strictTotal === 0) {
-        console.log("ðŸ“Š Feed AI - Strict queries empty, trying relaxed queries...");
         const [relaxedStudiosResult, relaxedGigsResult, relaxedProfilesResult] = await Promise.all([
           supabase
             .from("studios_with_stats")
@@ -815,11 +812,6 @@ export default function FeedScreen() {
         relaxedGigs = relaxedGigsResult.data || [];
         relaxedProfiles = relaxedProfilesResult.data || [];
 
-        console.log("ðŸ“Š Feed AI - Relaxed query results:",
-          "studios:", relaxedStudios.length,
-          "gigs:", relaxedGigs.length,
-          "profiles:", relaxedProfiles.length,
-        );
       }
 
       // Use strict results if available, else relaxed fallback
@@ -1253,6 +1245,7 @@ export default function FeedScreen() {
       };
 
       feedCacheRef.current[feedTab] = nextSnapshot;
+      feedLastFetchAt[feedTab] = Date.now();
 
       if (activeTabRef.current === feedTab) {
         applyFeedSnapshot(nextSnapshot);
@@ -1490,11 +1483,22 @@ export default function FeedScreen() {
     hasFocusedFeedRef.current = true;
     clearBottomOverlays();
     const currentTab = activeTabRef.current;
-    if (!hydrateCachedFeed(currentTab)) {
+    const hydrated = hydrateCachedFeed(currentTab);
+    const shouldRefreshFeed =
+      !hydrated ||
+      Date.now() - feedLastFetchAt[currentTab] >= FEED_FOCUS_REFRESH_COOLDOWN_MS;
+
+    if (!hydrated) {
       setLoading(true);
     }
 
-    void fetchFeed(currentTab);
+    if (shouldRefreshFeed) {
+      void fetchFeed(currentTab);
+    } else {
+      setLoading(false);
+      setRefreshing(false);
+    }
+
     void fetchLiveStations();
 
     const restorePendingReopen = async () => {
@@ -1998,7 +2002,7 @@ export default function FeedScreen() {
           <View style={{ paddingVertical: 10, backgroundColor: cardBg }}>
             <View style={{ flexDirection: "row", alignItems: "center", paddingHorizontal: 14, marginBottom: 10, flexWrap: "wrap", gap: 6 }}>
               <Ionicons name="radio" size={18} color="#ef4444" />
-              <Text style={{ color: colors.text, fontSize: moderateScale(14), fontWeight: "700" }}>Live Radio</Text>
+              <Text style={{ color: colors.text, fontSize: moderateScale(14), fontWeight: "700" }}>Radio Station Playlists</Text>
               <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: "#22c55e" }} />
               <View
                 style={{
@@ -2080,7 +2084,7 @@ export default function FeedScreen() {
                         {creatorLabel}
                       </Text>
                       <Text style={{ color: colors.textSecondary, fontSize: moderateScale(10), marginTop: 2, marginBottom: 8 }} numberOfLines={1}>
-                        {st.slot_count || 0} tracks
+                        {st.slot_count || 0} playlist{st.slot_count === 1 ? "" : "s"}
                       </Text>
 
                       {creatorCtaLabel ? (

@@ -1,4 +1,4 @@
-import { Ionicons } from '@expo/vector-icons';
+﻿import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import React, { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
@@ -38,11 +38,11 @@ export default function AddProductionScreen() {
     }
   }, [authLoading, isAuthenticated, userRole]);
 
-  const invokeDeals = useCallback(async (body: Record<string, unknown>) => {
-    const { data, error } = await supabase.functions.invoke('manage-deals', { body });
+  const invokeProduction = useCallback(async (body: Record<string, unknown>) => {
+    const { data, error } = await supabase.functions.invoke('manage-production', { body });
     if (error) {
       const status = Number((error as any)?.status || (error as any)?.context?.status || 0);
-      console.warn('manage-deals failed', {
+      console.warn('manage-production failed', {
         message: error.message,
         status,
         code: (error as any).code,
@@ -82,7 +82,7 @@ export default function AddProductionScreen() {
     setSaving(true);
     try {
       const primaryLogo = logoImages[thumbnailIndex] || logoImages[0] || null;
-      const data = await invokeDeals({
+      const data = await invokeProduction({
         action: 'create_production_team',
         name: teamName.trim(),
         description: description.trim() || null,
@@ -137,7 +137,7 @@ export default function AddProductionScreen() {
             <Ionicons name="people-outline" size={24} color={colors.primary} />
           </View>
           <Text style={[styles.heroTitle, { color: colors.text }]}>Create your production team</Text>
-          <Text style={[styles.heroText, { color: colors.textSecondary }]}>Set up the team profile you will use for venue deals, member management, and production coordination.</Text>
+          <Text style={[styles.heroText, { color: colors.textSecondary }]}>Set up the team profile you will use for venue partnerships, member management, and production coordination.</Text>
         </View>
 
         <View style={[styles.formCard, { backgroundColor: colors.surface, borderColor: isDark ? '#334155' : '#E2E8F0' }]}>
@@ -220,3 +220,4 @@ const styles = StyleSheet.create({
   submitBtn: { marginTop: 24, borderRadius: 14, paddingVertical: 14, alignItems: 'center', justifyContent: 'center' },
   submitBtnText: { color: '#fff', fontSize: 15, fontFamily: 'Poppins_700Bold' },
 });
+

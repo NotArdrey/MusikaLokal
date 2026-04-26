@@ -75,7 +75,7 @@ export default function SettingsPage() {
           route: "/account-details",
         },
         {
-          label: isOwner ? "Wallet & Subscription" : "Wallet",
+          label: "Wallet",
           Icon: IoWalletOutline,
           route: "/wallet",
         },

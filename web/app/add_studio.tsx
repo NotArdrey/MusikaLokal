@@ -1,4 +1,4 @@
-import { Ionicons } from "@expo/vector-icons";
+﻿import { Ionicons } from "@expo/vector-icons";
 import * as FileSystem from "expo-file-system/legacy";
 import * as ImagePicker from "expo-image-picker";
 import * as Linking from "expo-linking";
@@ -1008,7 +1008,7 @@ export default function AddStudioScreen() {
         : [
           {
             id: `autofill-permanent-${studioType.toLowerCase()}`,
-            name: "Weekday Creator Deal",
+            name: "Weekday Creator Offer",
             description: "Test promo for daytime bookings and promo UI coverage.",
             criteria: "Book at least one weekday slot before 5 PM.",
             minimum_booking_hours: "2",
@@ -1193,29 +1193,29 @@ export default function AddStudioScreen() {
         },
       };
 
-      console.log("📦 PAX being sent:", payload.pax);
+      console.log("ðŸ“¦ PAX being sent:", payload.pax);
       console.log(
-        "🎸 EQUIPMENT payload:",
+        "ðŸŽ¸ EQUIPMENT payload:",
         JSON.stringify(instrumentsPayload, null, 2),
       );
       console.log(
-        "⚙️ BOOKING SETTINGS payload:",
+        "âš™ï¸ BOOKING SETTINGS payload:",
         JSON.stringify(payload.booking_settings, null, 2),
       );
       console.log(
-        "📅 RAW availability state:",
+        "ðŸ“… RAW availability state:",
         JSON.stringify(availability, null, 2),
       );
       console.log(
-        "📅 FILTERED availability (days with slots):",
+        "ðŸ“… FILTERED availability (days with slots):",
         payload.availability,
       );
       console.log(
-        "📅 Number of days with availability:",
+        "ðŸ“… Number of days with availability:",
         payload.availability.length,
       );
       console.log(
-        "🔵 Creating studio with payload:",
+        "ðŸ”µ Creating studio with payload:",
         JSON.stringify(
           {
             action: "create",
@@ -1249,11 +1249,11 @@ export default function AddStudioScreen() {
         .select()
         .single();
 
-      console.log("🔵 Response data:", JSON.stringify(data, null, 2));
-      console.log("🔵 Response error:", error);
+      console.log("ðŸ”µ Response data:", JSON.stringify(data, null, 2));
+      console.log("ðŸ”µ Response error:", error);
 
       if (error) {
-        console.error("❌ Error details:", JSON.stringify(error, null, 2));
+        console.error("âŒ Error details:", JSON.stringify(error, null, 2));
 
         let alertMessage = `Failed to create studio: ${error.message}`;
         if (error.hint) alertMessage += `\n\nHint: ${error.hint}`;
@@ -1435,15 +1435,15 @@ export default function AddStudioScreen() {
         }
       }
 
-      console.log("✅ Studio Created successfully:", data);
+      console.log("âœ… Studio Created successfully:", data);
       setNewStudioId(data.id);
       setModalVisible(true);
     } catch (e: any) {
-      console.error("❌ Error creating studio:", e);
-      console.error("❌ Error message:", e?.message);
-      console.error("❌ Error stack:", e?.stack);
+      console.error("âŒ Error creating studio:", e);
+      console.error("âŒ Error message:", e?.message);
+      console.error("âŒ Error stack:", e?.stack);
       console.error(
-        "❌ Full error object:",
+        "âŒ Full error object:",
         JSON.stringify(e, Object.getOwnPropertyNames(e), 2),
       );
       showAlert(
@@ -2500,7 +2500,7 @@ export default function AddStudioScreen() {
                           Please verify your identity first before you can verify your address
                         </Text>
                         <Text style={{ color: '#F59E0B', fontFamily: "Poppins_500Medium", fontSize: 12, marginTop: 8 }}>
-                          Tap here to verify →
+                          Tap here to verify â†’
                         </Text>
                       </View>
                     </View>
@@ -2613,7 +2613,7 @@ export default function AddStudioScreen() {
                           marginRight: 4,
                         }}
                       >
-                        ₱
+                        â‚±
                       </Text>
                       <TextInput
                         value={rehearsalRate}
@@ -2687,7 +2687,7 @@ export default function AddStudioScreen() {
                           marginRight: 4,
                         }}
                       >
-                        ₱
+                        â‚±
                       </Text>
                       <TextInput
                         value={recordingRate}
@@ -2924,20 +2924,20 @@ export default function AddStudioScreen() {
                           </Text>
                         </View>
                         <Text style={{ fontFamily: "Poppins_400Regular", color: colors.textSecondary, fontSize: 12, marginTop: 2 }}>
-                          {promo.discount_type === "percentage" ? `${promo.discount_value}% off` : `₱${promo.discount_value}/hr off`}
+                          {promo.discount_type === "percentage" ? `${promo.discount_value}% off` : `â‚±${promo.discount_value}/hr off`}
                           {" "}on {promo.applies_to === "both" ? "all" : promo.applies_to} bookings
                         </Text>
                         {(promo.criteria || promo.minimum_booking_hours || promo.minimum_spend) ? (
                           <Text style={{ fontFamily: "Poppins_400Regular", color: colors.textSecondary, fontSize: 11, marginTop: 2 }}>
                             {promo.criteria ? `${promo.criteria}. ` : ""}
                             {promo.minimum_booking_hours ? `Min ${promo.minimum_booking_hours} hr. ` : ""}
-                            {promo.minimum_spend ? `Min ₱${promo.minimum_spend}.` : ""}
+                            {promo.minimum_spend ? `Min â‚±${promo.minimum_spend}.` : ""}
                           </Text>
                         ) : null}
                         <Text style={{ fontFamily: "Poppins_400Regular", color: colors.textSecondary, fontSize: 11, marginTop: 2 }}>
                           {promo.is_permanent
                             ? "Always available"
-                            : `${new Date(promo.start_date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })} – ${new Date(promo.end_date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}`}
+                            : `${new Date(promo.start_date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })} â€“ ${new Date(promo.end_date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}`}
                         </Text>
                       </View>
                       <View style={{ flexDirection: "row", gap: 8 , flexWrap: "wrap", minWidth: "100%" }}>
@@ -3117,7 +3117,7 @@ export default function AddStudioScreen() {
                               color: promotionForm.discount_type === dt ? colors.primary : colors.textSecondary,
                             }}
                           >
-                            {dt === "percentage" ? "Percentage (%)" : "Fixed Amount (₱)"}
+                            {dt === "percentage" ? "Percentage (%)" : "Fixed Amount (â‚±)"}
                           </Text>
                         </TouchableOpacity>
                       ))}
@@ -3140,7 +3140,7 @@ export default function AddStudioScreen() {
                       }}
                     >
                       {promotionForm.discount_type === "fixed_amount" && (
-                        <Text style={{ fontFamily: "Poppins_600SemiBold", color: colors.text, marginRight: 4 }}>₱</Text>
+                        <Text style={{ fontFamily: "Poppins_600SemiBold", color: colors.text, marginRight: 4 }}>â‚±</Text>
                       )}
                       <TextInput
                         value={promotionForm.discount_value}
@@ -4473,7 +4473,7 @@ export default function AddStudioScreen() {
                                     marginTop: 8,
                                   }}
                                 >
-                                  ⚠️ This overrides weekly {dayName} schedule (
+                                  âš ï¸ This overrides weekly {dayName} schedule (
                                   {weeklySchedule.slots[0]?.start} -{" "}
                                   {weeklySchedule.slots[0]?.end})
                                 </Text>
@@ -4932,7 +4932,7 @@ export default function AddStudioScreen() {
                           fontFamily: "Poppins_500Medium",
                         }}
                       >
-                        Rehearsal: ₱{rehearsalRate || "0"}/hr
+                        Rehearsal: â‚±{rehearsalRate || "0"}/hr
                       </Text>
                     </View>
                   )}
@@ -4952,7 +4952,7 @@ export default function AddStudioScreen() {
                           fontFamily: "Poppins_500Medium",
                         }}
                       >
-                        Recording: ₱{recordingRate || "0"}/song
+                        Recording: â‚±{recordingRate || "0"}/song
                       </Text>
                     </View>
                   )}
@@ -4997,12 +4997,12 @@ export default function AddStudioScreen() {
                         <View key={promo.id} style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 6, marginTop: 4 }}>
                           <Ionicons name="pricetag-outline" size={12} color={colors.primary} />
                           <Text style={{ color: colors.text, fontFamily: "Poppins_500Medium", fontSize: 12 }}>
-                            "{promo.name}": {promo.discount_type === "percentage" ? `${promo.discount_value}% off` : `₱${promo.discount_value}/hr off`}
+                            "{promo.name}": {promo.discount_type === "percentage" ? `${promo.discount_value}% off` : `â‚±${promo.discount_value}/hr off`}
                             {" "}({promo.applies_to === "both" ? "All" : promo.applies_to})
-                            {promo.criteria ? ` • ${promo.criteria}` : ""}
-                            {promo.minimum_booking_hours ? ` • Min ${promo.minimum_booking_hours} hr` : ""}
-                            {promo.minimum_spend ? ` • Min ₱${promo.minimum_spend}` : ""}
-                            {" "}• {promo.is_permanent ? "Regular" : `${promo.start_date} – ${promo.end_date}`}
+                            {promo.criteria ? ` â€¢ ${promo.criteria}` : ""}
+                            {promo.minimum_booking_hours ? ` â€¢ Min ${promo.minimum_booking_hours} hr` : ""}
+                            {promo.minimum_spend ? ` â€¢ Min â‚±${promo.minimum_spend}` : ""}
+                            {" "}â€¢ {promo.is_permanent ? "Regular" : `${promo.start_date} â€“ ${promo.end_date}`}
                           </Text>
                         </View>
                       ))}
@@ -6155,3 +6155,4 @@ const styles = StyleSheet.create({
     fontFamily: 'Poppins_600SemiBold',
   },
 });
+

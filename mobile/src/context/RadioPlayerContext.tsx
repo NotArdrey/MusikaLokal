@@ -14,7 +14,7 @@ import React, {
 import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { supabase } from "../../lib/supabase";
-import TrackPlayer, { Event, State, isTrackPlayerAvailable } from "../audio/safeTrackPlayer";
+import TrackPlayer, { Event, RepeatMode, State, isTrackPlayerAvailable } from "../audio/safeTrackPlayer";
 import {
   buildStationQueue,
   ensureRadioPlayerSetup,
@@ -37,7 +37,6 @@ const RADIO_MINI_PLAYER_DEBUG_LOGS = __DEV__;
 
 const logRadioMiniPlayerDebug = (event: string, payload: Record<string, unknown>) => {
   if (RADIO_MINI_PLAYER_DEBUG_LOGS) {
-    console.log("[RadioMiniPlayer]", event, payload);
   }
 };
 
@@ -281,8 +280,8 @@ export function RadioPlayerProvider({ children }: { children: ReactNode }) {
     fullQueue: RadioQueueTrack[],
     queueIndex: number,
   ) => {
-    const hasPrevious = queueIndex > 0;
-    const hasNext = isAutoplayEnabledRef.current && queueIndex < fullQueue.length - 1;
+    const hasPrevious = fullQueue.length > 1 || queueIndex > 0;
+    const hasNext = isAutoplayEnabledRef.current ? fullQueue.length > 1 : queueIndex < fullQueue.length - 1;
 
     try {
       await updateRadioPlayerCapabilities(hasPrevious, hasNext);
@@ -320,10 +319,8 @@ export function RadioPlayerProvider({ children }: { children: ReactNode }) {
 
     const queue = fullQueueRef.current;
     const currentIndex = currentQueueIndexRef.current;
-    const hasNext = currentIndex < queue.length - 1;
-
-    if (isAutoplayEnabledRef.current && hasNext) {
-      void playQueueIndexRef.current(currentIndex + 1, true);
+    if (isAutoplayEnabledRef.current && queue.length > 0) {
+      void playQueueIndexRef.current(normalizeQueueIndex(queue.length, currentIndex + 1), true);
       return;
     }
 
@@ -476,6 +473,11 @@ export function RadioPlayerProvider({ children }: { children: ReactNode }) {
 
       playerQueueLengthRef.current = playerQueue.length;
       await TrackPlayer.setVolume(isMutedRef.current ? 0 : 1);
+      if (!isCurrentRequest()) {
+        return;
+      }
+
+      await TrackPlayer.setRepeatMode(isAutoplayEnabledRef.current ? RepeatMode.Queue : RepeatMode.Off);
       if (!isCurrentRequest()) {
         return;
       }

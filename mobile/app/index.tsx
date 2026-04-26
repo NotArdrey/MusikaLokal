@@ -7,7 +7,6 @@ import CustomAlert, { AlertType } from '../src/components/CustomAlert';
 import VerificationModal from '../src/components/VerificationModal';
 import { useAuth } from '../src/context/AuthContext';
 import { useTheme } from '../src/context/ThemeContext';
-import { formatFriendlyDateTime } from '../src/utils/friendlyDateTime';
 
 
 
@@ -62,10 +61,6 @@ const TEMP_LOGIN_OPTIONS: TempLoginOption[] = [
   },
 ] as const;
 
-const isOwnerTempRole = (role: string | null | undefined) => {
-  return role === 'studio-owner' || role === 'venue-owner';
-};
-
 const formatTempRoleLabel = (role: string | null | undefined) => {
   if (role === 'studio-owner') return 'Studio Owner';
   if (role === 'venue-owner') return 'Venue Owner';
@@ -73,28 +68,6 @@ const formatTempRoleLabel = (role: string | null | undefined) => {
   if (role === 'musician') return 'Musician';
   if (!role) return 'Unknown';
   return role;
-};
-
-const hasActiveOwnerSubscription = (status: unknown, expiresAt: unknown) => {
-  const normalizedStatus = typeof status === 'string' ? status.trim().toLowerCase() : '';
-  if (normalizedStatus !== 'active') return false;
-  if (typeof expiresAt !== 'string' || expiresAt.trim().length === 0) return true;
-
-  const parsedExpiry = new Date(expiresAt);
-  if (Number.isNaN(parsedExpiry.getTime())) return false;
-
-  return parsedExpiry > new Date();
-};
-
-const describeOwnerSubscription = (role: string | null | undefined, status: unknown, expiresAt: unknown) => {
-  if (!isOwnerTempRole(role)) return 'Not required';
-  if (!hasActiveOwnerSubscription(status, expiresAt)) return 'Inactive or expired';
-  if (typeof expiresAt !== 'string' || expiresAt.trim().length === 0) return 'Active';
-
-  const parsedExpiry = new Date(expiresAt);
-  if (Number.isNaN(parsedExpiry.getTime())) return 'Active';
-
-  return `Active until ${formatFriendlyDateTime(expiresAt, { fallback: 'Active' })}`;
 };
 
 const isAdminRole = (role: unknown): boolean => {
@@ -121,12 +94,10 @@ export default function LoginScreen() {
         try {
           const savedState = await import('@react-native-async-storage/async-storage').then(m => m.default.getItem('signup_current_session'));
           if (savedState) {
-            console.log('Pending signup detected, redirecting to signup flow...');
             router.replace({ pathname: '/signup', params: { verified: 'true' } } as any);
             return;
           }
         } catch (e) {
-          console.log('Error checking pending signup:', e);
         }
       };
       checkPendingSignup();
@@ -261,7 +232,7 @@ export default function LoginScreen() {
     try {
       const { data: profile, error } = await supabase
         .from('profiles')
-        .select('role, is_verified, subscription_status, subscription_expires_at')
+        .select('role, is_verified')
         .eq('email', option.email)
         .maybeSingle();
 
@@ -291,15 +262,10 @@ export default function LoginScreen() {
       }
 
       const identityVerified = profile.is_verified === true;
-      const subscriptionReady = !isOwnerTempRole(actualRole) || hasActiveOwnerSubscription(profile.subscription_status, profile.subscription_expires_at);
       const issues: string[] = [];
 
       if (!identityVerified) {
         issues.push('Identity verification is incomplete.');
-      }
-
-      if (isOwnerTempRole(actualRole) && !subscriptionReady) {
-        issues.push('Owner subscription is inactive or expired.');
       }
 
       const summary = [
@@ -308,7 +274,6 @@ export default function LoginScreen() {
         '',
         `Role: ${formatTempRoleLabel(actualRole)}`,
         `Identity: ${identityVerified ? 'Verified' : 'Needs verification'}`,
-        `Subscription: ${describeOwnerSubscription(actualRole, profile.subscription_status, profile.subscription_expires_at)}`,
         `Expected destination: ${option.destinationLabel}`,
       ].join('\n');
 
@@ -332,7 +297,6 @@ export default function LoginScreen() {
         ],
       );
     } catch (error) {
-      console.log('Temporary login validation failed:', error);
       showAlert(
         'error',
         'Validation Error',
@@ -365,17 +329,14 @@ export default function LoginScreen() {
     setLoading(true);
     try {
       // Clear any stale session first to prevent refresh token errors
-      console.log('Clearing any existing session...');
       await supabase.auth.signOut({ scope: 'local' });
 
-      console.log('Attempting login for:', loginEmail);
       const { error } = await supabase.auth.signInWithPassword({
         email: loginEmail,
         password: loginPassword,
       });
 
       if (error) {
-        console.log('Login error:', error.message);
         // Handle specific error cases
         if (error.message.includes('Invalid login credentials')) {
           setLoginMessage({ type: 'error', text: 'Invalid email or password.' });
@@ -385,7 +346,6 @@ export default function LoginScreen() {
           setLoginMessage({ type: 'error', text: 'Too many attempts. Please wait.' });
         } else if (error.message.includes('refresh') || error.message.includes('token')) {
           // Clear storage and retry once
-          console.log('Token error detected, clearing storage and retrying...');
           await supabase.auth.signOut({ scope: 'local' });
           setLoginMessage({ type: 'error', text: 'Session expired. Please try again.' });
         } else {
@@ -393,7 +353,6 @@ export default function LoginScreen() {
         }
       } else {
         // Login succeeded - VALIDATE VERIFICATION STATUS
-        console.log('Auth success. Validating verification status...');
         const { data: { user }, error: getUserError } = await supabase.auth.getUser();
 
         if (!user) {
@@ -412,17 +371,14 @@ export default function LoginScreen() {
           };
 
           if (isAdminRole(user.user_metadata?.role)) {
-            console.log('Blocked admin login from metadata role.');
             await blockAdminAccess();
             return;
           }
 
           // 1. Check Metadata (Fastest)
           const metaVerified = user.user_metadata?.is_verified;
-          console.log('Metadata check:', { metaVerified });
 
           if (metaVerified === false) {
-            console.log('Blocked by metadata check.');
             await supabase.auth.signOut();
             setLoginMessage({ type: 'error', text: 'Account not verified. Please complete verification.' });
             showAlert(
@@ -444,17 +400,14 @@ export default function LoginScreen() {
             .eq('id', user.id)
             .maybeSingle();
 
-          console.log('Profile check:', { profile, profileError });
 
           if (isAdminRole(profile?.role)) {
-            console.log('Blocked admin login from profile role.');
             await blockAdminAccess();
             return;
           }
 
           // SELF-HEALING: If profile is missing but Auth Metadata says verified, recreate the profile
           if (!profile && metaVerified) {
-            console.log('Profile missing but Metadata Verified. Attempting to repair profile...');
             const { error: upsertError } = await supabase
               .from('profiles')
               .upsert({
@@ -470,7 +423,6 @@ export default function LoginScreen() {
             if (upsertError) {
               console.error('Failed to repair profile:', upsertError);
             } else {
-              console.log('Profile repaired successfully. Re-fetching...');
               const { data: newProfile } = await supabase
                 .from('profiles')
                 .select('is_verified, id_document_expiry, role')
@@ -481,14 +433,12 @@ export default function LoginScreen() {
           }
 
           if (isAdminRole(profile?.role)) {
-            console.log('Blocked admin login from repaired profile role.');
             await blockAdminAccess();
             return;
           }
 
           // If profile is STILL missing OR unverified -> BLOCK
           if (!profile || !profile.is_verified) {
-            console.log('Blocked by profile check. Profile Missing:', !profile, 'Verified:', profile?.is_verified);
             await supabase.auth.signOut();
 
             setLoginMessage({ type: 'error', text: !profile ? 'Account setup incomplete. Verify identity.' : 'Identity verification required.' });
@@ -515,7 +465,6 @@ export default function LoginScreen() {
             router.replace('/identity_verification' as any);
             return;
           } else {
-            console.log('Verification passed. Redirecting to: /feed');
             router.replace('/feed' as any);
           }
         }
@@ -527,7 +476,6 @@ export default function LoginScreen() {
         'Unable to connect to the server. Please check your internet connection and try again.',
         [{ text: 'OK', style: 'default' }]
       );
-      console.log(e);
     } finally {
       setLoading(false);
     }
@@ -582,7 +530,6 @@ export default function LoginScreen() {
 
       // Success alert handled by Modal onSuccess
     } catch (e) {
-      console.log('Verification error:', e);
       showAlert('error', 'Error', 'Failed to start verification.');
     }
   };

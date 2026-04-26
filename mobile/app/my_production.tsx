@@ -1,4 +1,4 @@
-import { Ionicons } from '@expo/vector-icons';
+﻿import { Ionicons } from '@expo/vector-icons';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import React, { useCallback, useState } from 'react';
 import { RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
@@ -52,11 +52,11 @@ export default function MyProductionScreen() {
     setAlertVisible(true);
   };
 
-  const invokeDeals = useCallback(async (body: Record<string, unknown>) => {
-    const { data, error } = await supabase.functions.invoke('manage-deals', { body });
+  const invokeProduction = useCallback(async (body: Record<string, unknown>) => {
+    const { data, error } = await supabase.functions.invoke('manage-production', { body });
     if (error) {
       const status = Number((error as any)?.status || (error as any)?.context?.status || 0);
-      console.warn('manage-deals failed', {
+      console.warn('manage-production failed', {
         message: error.message,
         status,
         code: (error as any).code,
@@ -81,7 +81,7 @@ export default function MyProductionScreen() {
     if (!userId) return;
 
     try {
-      const data = await invokeDeals({ action: 'list_my_teams' });
+      const data = await invokeProduction({ action: 'list_my_teams' });
       setTeams((data?.teams || []) as TeamRecord[]);
     } catch (error: any) {
       showAlert('error', 'Error', error?.message || 'Failed to fetch production teams.');
@@ -89,7 +89,7 @@ export default function MyProductionScreen() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [invokeDeals, userId]);
+  }, [invokeProduction, userId]);
 
   useFocusEffect(
     useCallback(() => {
@@ -124,7 +124,7 @@ export default function MyProductionScreen() {
 
     setDeleting(true);
     try {
-      const data = await invokeDeals({ action: 'delete_production_team', team_id: selectedTeamId });
+      const data = await invokeProduction({ action: 'delete_production_team', team_id: selectedTeamId });
       if (!data?.success) {
         throw new Error(data?.error || 'Failed to delete production team.');
       }
@@ -202,7 +202,7 @@ export default function MyProductionScreen() {
             <View style={styles.emptyState}>
               <Ionicons name="people-outline" size={48} color={colors.textSecondary} />
               <Text style={[styles.emptyTitle, { color: colors.text }]}>No production teams yet</Text>
-              <Text style={[styles.emptyText, { color: colors.textSecondary }]}>Create your first production team to manage members and venue deals.</Text>
+              <Text style={[styles.emptyText, { color: colors.textSecondary }]}>Create your first production team to manage members and venue partnerships.</Text>
             </View>
           ) : (
             teams.map((team) => {
@@ -368,3 +368,4 @@ const styles = StyleSheet.create({
   editBtn: { padding: 8, borderRadius: 12, borderWidth: 1 },
   deleteBtn: { padding: 8 },
 });
+

@@ -99,7 +99,6 @@ export const useApplicationSubmissionAction = ({
 
   const uploadDocument = useCallback(async (file: any) => {
     try {
-      console.log("📤 Uploading CV:", file.name);
 
       const response = await fetch(file.uri);
       const arrayBuffer = await response.arrayBuffer();
@@ -129,7 +128,6 @@ export const useApplicationSubmissionAction = ({
 
   const processApplicationSubmission = useCallback(async () => {
     setIsSubmittingApplication(true);
-    console.log("Inserting application into database...");
 
     try {
       const isGroupListing = group?.type === "Group";
@@ -151,7 +149,6 @@ export const useApplicationSubmissionAction = ({
       if (cvFile) {
         try {
           uploadedCvUrl = await uploadDocument(cvFile);
-          console.log("✅ CV Uploaded:", uploadedCvUrl);
         } catch (e) {
           console.error("Failed to upload CV", e);
           setAlertConfig({
@@ -167,7 +164,6 @@ export const useApplicationSubmissionAction = ({
         uploadedCvUrl = cvUrl;
       }
 
-      console.log("[AppSubmit] isGroupListing:", isGroupListing, "group.type:", group?.type);
 
       if (isGroupListing) {
         if (!group?.owner_id) {
@@ -180,7 +176,6 @@ export const useApplicationSubmissionAction = ({
           return;
         }
 
-        console.log("[AppSubmit] Sending notification to group owner:", group.owner_id);
 
         const applicationMeta = {
           application_scope: "group_member",
@@ -213,10 +208,6 @@ export const useApplicationSubmissionAction = ({
           },
         );
 
-        console.log("[AppSubmit] invokeListingsCrudAction returned.", {
-          hasError: !!ownerNotificationError,
-          errorMessage: ownerNotificationError?.message,
-        });
 
         if (ownerNotificationError) {
           console.error("Failed to notify group owner:", ownerNotificationError);
@@ -231,7 +222,6 @@ export const useApplicationSubmissionAction = ({
           return;
         }
 
-        console.log("[AppSubmit] Owner notification sent OK. Inserting self-notification (non-blocking)...");
 
         // Non-blocking: self-notification should not stall the success flow.
         void (async () => {
@@ -249,7 +239,6 @@ export const useApplicationSubmissionAction = ({
             if (selfNotificationError) {
               console.error("Failed to persist group application receipt:", selfNotificationError);
             } else {
-              console.log("[AppSubmit] Self-notification inserted OK.");
             }
           } catch (err: unknown) {
             console.error("[AppSubmit] Self-notification insert crashed:", err);
@@ -263,13 +252,10 @@ export const useApplicationSubmissionAction = ({
               p_item_vector: group.embedding,
               p_weight: 0.4,
             });
-            console.log("🤖 AI learned from group application:", group.name);
           } catch (e) {
-            console.log("Error updating AI interest from group application:", e);
           }
         }
 
-        console.log("[AppSubmit] Showing success alert for group application.");
 
         setHasExistingApplication(true);
         setExistingApplicationStatus("pending");
@@ -332,9 +318,7 @@ export const useApplicationSubmissionAction = ({
               p_item_vector: group.embedding,
               p_weight: 0.4,
             });
-            console.log("🤖 AI learned from production application:", group.name);
           } catch (e) {
-            console.log("Error updating AI interest from production application:", e);
           }
         }
 
@@ -419,7 +403,6 @@ export const useApplicationSubmissionAction = ({
         return;
       }
 
-      console.log("✅ Application submitted successfully!", data);
 
       if (group?.organizer_id && data && !needsLeaderApproval) {
         try {
@@ -475,7 +458,6 @@ export const useApplicationSubmissionAction = ({
               action: "create_notifications",
               notifications,
             });
-            console.log("📬 Notified group members:", members.length);
           }
         } catch (notifyErr) {
           console.error("Failed to notify group members:", notifyErr);
@@ -489,9 +471,7 @@ export const useApplicationSubmissionAction = ({
             p_item_vector: group.embedding,
             p_weight: 0.4,
           });
-          console.log("🤖 AI learned from gig application:", group.name);
         } catch (e) {
-          console.log("Error updating AI interest from application:", e);
         }
       }
 
@@ -557,7 +537,6 @@ export const useApplicationSubmissionAction = ({
   ]);
 
   const handleSubmitApplication = useCallback(async () => {
-    console.log("=== handleSubmitApplication CALLED ===");
 
     if (!userId || !listingId || !group) {
       console.error("Missing required data for application:", {

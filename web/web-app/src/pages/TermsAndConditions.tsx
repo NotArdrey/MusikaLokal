@@ -20,23 +20,19 @@ const sections = [
     body: "Bookings are generally non-refundable once confirmed. Studio owners and gig organizers may set their own cancellation windows. MusikaLokal is not responsible for disputes between users and service providers.",
   },
   {
-    title: "5. Subscriptions",
-    body: "Studio owners and venue managers require an active subscription to list their services. Subscription fees are billed according to the selected plan. Subscriptions auto-renew unless cancelled before the renewal date.",
-  },
-  {
-    title: "6. Prohibited Conduct",
+    title: "5. Prohibited Conduct",
     body: "Users must not: post misleading information, harass other users, exploit system vulnerabilities, create multiple accounts for abuse, or use the platform for illegal activities.",
   },
   {
-    title: "7. Intellectual Property",
+    title: "6. Intellectual Property",
     body: "All content uploaded by users remains their property. By posting content, users grant MusikaLokal a non-exclusive license to display and distribute the content on the platform.",
   },
   {
-    title: "8. Limitation of Liability",
+    title: "7. Limitation of Liability",
     body: 'MusikaLokal is provided "as is" without warranties. We are not liable for indirect, incidental, or consequential damages arising from your use of the platform.',
   },
   {
-    title: "9. Changes to Terms",
+    title: "8. Changes to Terms",
     body: "We reserve the right to modify these terms at any time. Continued use of the platform after changes constitutes acceptance of the updated terms.",
   },
 ];

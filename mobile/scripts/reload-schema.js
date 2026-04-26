@@ -21,7 +21,6 @@ if (!supabaseUrl || !supabaseKey) {
 const supabase = createClient(supabaseUrl, supabaseKey);
 
 async function reloadSchema() {
-  console.log('🔄 Forcing Supabase to reload schema cache...');
   
   try {
     // Make a simple query to force schema reload
@@ -33,16 +32,10 @@ async function reloadSchema() {
     if (error) {
       // If we get PGRST204, the schema cache is still stale
       if (error.code === 'PGRST204') {
-        console.log('⚠️  Schema cache is still stale. Please manually reload schema in Supabase Dashboard:');
-        console.log('   1. Go to https://supabase.com/dashboard/project/[YOUR_PROJECT]/settings/api');
-        console.log('   2. Or restart the PostgREST service');
-        console.log('\n   Alternatively, wait 5-10 minutes for automatic cache refresh.');
       } else {
         console.error('❌ Error:', error);
       }
     } else {
-      console.log('✅ Schema cache refreshed successfully!');
-      console.log('📊 Sample data:', data);
     }
   } catch (err) {
     console.error('❌ Failed to reload schema:', err.message);

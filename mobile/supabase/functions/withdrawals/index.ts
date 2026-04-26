@@ -74,7 +74,6 @@ async function createPayMongoRefund(
       return { success: false, error: 'Payment service is not configured' };
     }
 
-    console.log('💸 Creating PayMongo refund:', { paymentId, amount, reason });
 
     // PayMongo Refund API: POST /v1/refunds
     // Docs: https://developers.paymongo.com/reference/create-a-refund
@@ -104,7 +103,6 @@ async function createPayMongoRefund(
       return { success: false, error: errorMessage };
     }
 
-    console.log('✅ PayMongo Refund Success:', data.data.id);
     return { 
       success: true, 
       refund_id: data.data.id 
@@ -249,7 +247,6 @@ async function createPayMongoDisbursement(
       return { success: false, error: errorMessage };
     }
 
-    console.log('✅ PayMongo Disbursement Success:', data.data.id);
     return { 
       success: true, 
       reference: data.data.id 
@@ -501,11 +498,7 @@ serve(async (req: Request) => {
       if (SHOULD_USE_MOCK_CASHOUT) {
         mockCashout = true;
         disbursementReference = createMockReference();
-        console.log('🧪 Mock cashout mode enabled. Skipping PayMongo disbursement call.');
-        console.log(`Amount: ₱${netAmount}, Type: ${payoutMethod.type}, Account: ${payoutMethod.account_number}`);
       } else {
-        console.log('📤 Initiating PayMongo disbursement...');
-        console.log(`Amount: ₱${netAmount}, Type: ${payoutMethod.type}, Account: ${payoutMethod.account_number}`);
 
         const disbursementResult = await createPayMongoDisbursement(
           netAmount,
@@ -529,7 +522,6 @@ serve(async (req: Request) => {
         }
 
         disbursementReference = disbursementResult.reference;
-        console.log('✅ PayMongo disbursement successful! Reference:', disbursementReference);
       }
 
       // ========================================
@@ -615,7 +607,6 @@ serve(async (req: Request) => {
           .eq('id', transaction.id);
       }
 
-      console.log('✅ Withdrawal completed successfully:', withdrawal?.id || 'recovery mode');
 
       return new Response(JSON.stringify({ 
         success: true, 
@@ -768,7 +759,6 @@ serve(async (req: Request) => {
               paymentId = paymentInfo.payment_id;
               paymentSource = 'subscription';
               refundableAmount = paymentInfo.amount;
-              console.log('✅ Found eligible subscription payment:', paymentId);
               break;
             }
           }
@@ -794,7 +784,6 @@ serve(async (req: Request) => {
                 paymentId = paymentInfo.payment_id;
                 paymentSource = 'booking';
                 refundableAmount = paymentInfo.amount;
-                console.log('✅ Found eligible booking payment:', paymentId);
                 break;
               }
             }
@@ -813,8 +802,6 @@ serve(async (req: Request) => {
       }
 
       // Create the refund via PayMongo
-      console.log(`📤 Initiating refund-based withdrawal...`);
-      console.log(`Amount: ₱${netAmount}, Payment ID: ${paymentId}, Source: ${paymentSource}`);
 
       const refundResult = await createPayMongoRefund(
         paymentId,
@@ -832,7 +819,6 @@ serve(async (req: Request) => {
         });
       }
 
-      console.log('✅ PayMongo refund successful! Refund ID:', refundResult.refund_id);
 
       // ========================================
       // REFUND SUCCESS - UPDATE DATABASE
@@ -909,7 +895,6 @@ serve(async (req: Request) => {
         }),
       });
 
-      console.log('✅ Refund-based withdrawal completed successfully:', withdrawal?.id);
 
       return new Response(JSON.stringify({ 
         success: true, 

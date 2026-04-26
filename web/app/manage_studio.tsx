@@ -1,4 +1,4 @@
-import { Ionicons } from "@expo/vector-icons";
+﻿import { Ionicons } from "@expo/vector-icons";
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import React, { useState } from "react";
 import {
@@ -74,21 +74,6 @@ export default function StudioDetailsScreen() {
   const [bookings, setBookings] = useState<any[]>([]);
   const [reviews, setReviews] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-
-  // Deals & Policies tab state
-  const [cancellationPolicy, setCancellationPolicy] = useState<any>(null);
-  const [recordingDeals, setRecordingDeals] = useState<any[]>([]);
-  const [loadingDeals, setLoadingDeals] = useState(false);
-  const [policyModalVisible, setPolicyModalVisible] = useState(false);
-  const [policyForm, setPolicyForm] = useState({
-    name: "Standard Policy",
-    full_refund_hours_before: "48",
-    partial_refund_hours_before: "24",
-    partial_refund_pct: "50",
-    no_show_penalty_pct: "100",
-    late_cancel_penalty_pct: "50",
-  });
-  const [savingPolicy, setSavingPolicy] = useState(false);
   const [alertVisible, setAlertVisible] = useState(false);
   const [alertConfig, setAlertConfig] = useState<{
     type: AlertType;
@@ -212,13 +197,6 @@ export default function StudioDetailsScreen() {
     if (error) throw error;
     if (data?.error) throw new Error(data.error);
   };
-
-  // Fetch deals when Deals tab is first activated
-  React.useEffect(() => {
-    if (activeTab === "Deals" && authorized && id && recordingDeals.length === 0 && !cancellationPolicy) {
-      fetchDealsAndPolicy();
-    }
-  }, [activeTab, authorized, id]);
 
   // Role-based access control + refresh on screen focus (after edits)
   useFocusEffect(
@@ -600,60 +578,7 @@ export default function StudioDetailsScreen() {
     }
   };
 
-  const tabs = ["About", "Setup", "Bookings", "Deals", "Review"];
-
-  const fetchDealsAndPolicy = async () => {
-    if (!id) return;
-    setLoadingDeals(true);
-    try {
-      // Fetch cancellation policy
-      const { data: policyResp } = await supabase.functions.invoke("manage-deals", {
-        body: { action: "get_cancellation_policy", studio_id: id },
-      });
-      if (policyResp?.policy) setCancellationPolicy(policyResp.policy);
-
-      // Fetch recording deals for this studio
-      const { data: dealsResp } = await supabase.functions.invoke("manage-deals", {
-        body: { action: "list_my_deals", deal_type: "recording" },
-      });
-      const studioDeals = (dealsResp?.deals?.recording_deals || []).filter(
-        (d: any) => d.studio_id === id || d.studios?.id === id
-      );
-      setRecordingDeals(studioDeals);
-    } catch (e: any) {
-      console.log("Error fetching deals/policy:", e);
-    } finally {
-      setLoadingDeals(false);
-    }
-  };
-
-  const handleSavePolicy = async () => {
-    if (!id) return;
-    setSavingPolicy(true);
-    try {
-      const { data, error } = await supabase.functions.invoke("manage-deals", {
-        body: {
-          action: "create_cancellation_policy",
-          studio_id: id,
-          name: policyForm.name,
-          full_refund_hours_before: Number(policyForm.full_refund_hours_before),
-          partial_refund_hours_before: Number(policyForm.partial_refund_hours_before),
-          partial_refund_pct: Number(policyForm.partial_refund_pct),
-          no_show_penalty_pct: Number(policyForm.no_show_penalty_pct),
-          late_cancel_penalty_pct: Number(policyForm.late_cancel_penalty_pct),
-        },
-      });
-      if (error) throw error;
-      if (data?.error) throw new Error(data.error);
-      setCancellationPolicy(data?.policy);
-      setPolicyModalVisible(false);
-      showAlert("success", "Success", "Cancellation policy saved!");
-    } catch (e: any) {
-      showAlert("error", "Error", e.message || "Failed to save policy");
-    } finally {
-      setSavingPolicy(false);
-    }
-  };
+  const tabs = ["About", "Setup", "Bookings", "Review"];
   const isRecordingOnlyStudio = studio?.type === "Recording";
   const isRehearsalOnlyStudio = studio?.type === "Rehearsal";
   const rehearsalRateValue = Number(studio?.rehearsal_rate || 0);
@@ -675,13 +600,13 @@ export default function StudioDetailsScreen() {
             : "Rate";
   const studioRateDisplay =
     hasRehearsalRate && hasRecordingRate
-      ? `₱${rehearsalRateValue.toLocaleString()}/hr | ₱${recordingRateValue.toLocaleString()}/song`
+      ? `â‚±${rehearsalRateValue.toLocaleString()}/hr | â‚±${recordingRateValue.toLocaleString()}/song`
       : hasRecordingRate
-        ? `₱${recordingRateValue.toLocaleString()}/song`
+        ? `â‚±${recordingRateValue.toLocaleString()}/song`
         : hasRehearsalRate
-          ? `₱${rehearsalRateValue.toLocaleString()}/hr`
+          ? `â‚±${rehearsalRateValue.toLocaleString()}/hr`
           : hourlyRateValue > 0
-            ? `₱${hourlyRateValue.toLocaleString()}/hr`
+            ? `â‚±${hourlyRateValue.toLocaleString()}/hr`
             : "N/A";
 
   // Show loading while checking authorization
@@ -1092,7 +1017,7 @@ export default function StudioDetailsScreen() {
                       studio.instruments.map((item: any, i: number) => {
                         const name = item?.name || item;
                         const quantity = item?.quantity
-                          ? ` ×${item.quantity}`
+                          ? ` Ã—${item.quantity}`
                           : "";
                         return (
                           <View
@@ -1668,7 +1593,7 @@ export default function StudioDetailsScreen() {
                                 { color: colors.primary },
                               ]}
                             >
-                              ₱
+                              â‚±
                               {(
                                 booking.total_price ||
                                 booking.final_price ||
@@ -1869,103 +1794,6 @@ export default function StudioDetailsScreen() {
                   )}
               </View>
             )}
-
-            {activeTab === "Deals" && (
-              <View>
-                {/* Cancellation Policy Section */}
-                <View style={{ marginBottom: 20 }}>
-                  <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-                    <Text style={{ fontFamily: "Poppins_600SemiBold", fontSize: 16, color: colors.text }}>
-                      Cancellation Policy
-                    </Text>
-                    <TouchableOpacity
-                      onPress={() => {
-                        if (cancellationPolicy) {
-                          setPolicyForm({
-                            name: cancellationPolicy.name || "Standard Policy",
-                            full_refund_hours_before: String(cancellationPolicy.full_refund_hours_before || 48),
-                            partial_refund_hours_before: String(cancellationPolicy.partial_refund_hours_before || 24),
-                            partial_refund_pct: String(cancellationPolicy.partial_refund_pct || 50),
-                            no_show_penalty_pct: String(cancellationPolicy.no_show_penalty_pct || 100),
-                            late_cancel_penalty_pct: String(cancellationPolicy.late_cancel_penalty_pct || 50),
-                          });
-                        }
-                        setPolicyModalVisible(true);
-                      }}
-                      style={{ backgroundColor: colors.primary, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8 }}
-                    >
-                      <Text style={{ color: "#fff", fontFamily: "Poppins_500Medium", fontSize: 13 }}>
-                        {cancellationPolicy ? "Edit" : "Create"}
-                      </Text>
-                    </TouchableOpacity>
-                  </View>
-
-                  {cancellationPolicy ? (
-                    <View style={[styles.reviewCard, { backgroundColor: colors.surface }]}>
-                      <Text style={{ fontFamily: "Poppins_600SemiBold", color: colors.text, marginBottom: 8 }}>
-                        {cancellationPolicy.name}
-                      </Text>
-                      <Text style={{ fontFamily: "Poppins_400Regular", color: colors.textSecondary, fontSize: 13 }}>
-                        Full refund: {cancellationPolicy.full_refund_hours_before}h+ before{"\n"}
-                        Partial refund ({cancellationPolicy.partial_refund_pct}%): {cancellationPolicy.partial_refund_hours_before}h+ before{"\n"}
-                        Late cancel penalty: {cancellationPolicy.late_cancel_penalty_pct}%{"\n"}
-                        No-show penalty: {cancellationPolicy.no_show_penalty_pct}%
-                      </Text>
-                    </View>
-                  ) : (
-                    <Text style={{ fontFamily: "Poppins_400Regular", color: colors.textSecondary, fontSize: 13 }}>
-                      No cancellation policy set. Create one to automatically handle booking cancellations and penalties.
-                    </Text>
-                  )}
-                </View>
-
-                {/* Recording Deals Section */}
-                <View>
-                  <Text style={{ fontFamily: "Poppins_600SemiBold", fontSize: 16, color: colors.text, marginBottom: 12 }}>
-                    Recording Deals
-                  </Text>
-
-                  {loadingDeals ? (
-                    <ActivityIndicator size="small" color={colors.primary} />
-                  ) : recordingDeals.length === 0 ? (
-                    <Text style={{ fontFamily: "Poppins_400Regular", color: colors.textSecondary, fontSize: 13 }}>
-                      No recording deals for this studio yet. Recording deals can be created from the Bookings → Deals tab.
-                    </Text>
-                  ) : (
-                    recordingDeals.map((deal: any) => (
-                      <TouchableOpacity
-                        key={deal.id}
-                        onPress={() => router.push({ pathname: "/deal_details" as any, params: { id: deal.id, type: "recording" } })}
-                        style={[styles.reviewCard, { backgroundColor: colors.surface, marginBottom: 10 }]}
-                      >
-                        <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
-                          <Text style={{ fontFamily: "Poppins_600SemiBold", color: colors.text, fontSize: 14, flex: 1 }}>
-                            {deal.title}
-                          </Text>
-                          <View style={{
-                            paddingHorizontal: 8, paddingVertical: 2, borderRadius: 8,
-                            backgroundColor: deal.status === "accepted" ? "#10B98122" : deal.status === "proposed" ? "#F59E0B22" : "#6B728022",
-                          }}>
-                            <Text style={{
-                              fontFamily: "Poppins_500Medium", fontSize: 11,
-                              color: deal.status === "accepted" ? "#10B981" : deal.status === "proposed" ? "#F59E0B" : "#6B7280",
-                            }}>
-                              {deal.status}
-                            </Text>
-                          </View>
-                        </View>
-                        {deal.recording_deal_packages?.length > 0 && (
-                          <Text style={{ fontFamily: "Poppins_400Regular", color: colors.textSecondary, fontSize: 12, marginTop: 4 }}>
-                            {deal.recording_deal_packages.length} package(s)
-                          </Text>
-                        )}
-                      </TouchableOpacity>
-                    ))
-                  )}
-                </View>
-              </View>
-            )}
-
             {activeTab === "Review" && (
               <View>
                 <View style={styles.reviewHeader}>
@@ -2074,64 +1902,6 @@ export default function StudioDetailsScreen() {
         showInput={showReasonInput}
         onInputChange={setCancellationReason}
       />
-
-      {/* Cancellation Policy Modal */}
-      <RNModal
-        visible={policyModalVisible}
-        transparent={true}
-        animationType="slide"
-        onRequestClose={() => setPolicyModalVisible(false)}
-      >
-        <View style={styles.partialModalOverlay}>
-          <View style={[styles.partialModalContainer, { backgroundColor: colors.surface }]}>
-            <Text style={{ fontFamily: "Poppins_600SemiBold", fontSize: 18, color: colors.text, marginBottom: 16 }}>
-              Cancellation Policy
-            </Text>
-            {[
-              { label: "Policy Name", key: "name", keyboard: "default" as const },
-              { label: "Full Refund (hours before)", key: "full_refund_hours_before", keyboard: "numeric" as const },
-              { label: "Partial Refund (hours before)", key: "partial_refund_hours_before", keyboard: "numeric" as const },
-              { label: "Partial Refund %", key: "partial_refund_pct", keyboard: "numeric" as const },
-              { label: "Late Cancel Penalty %", key: "late_cancel_penalty_pct", keyboard: "numeric" as const },
-              { label: "No-Show Penalty %", key: "no_show_penalty_pct", keyboard: "numeric" as const },
-            ].map((field) => (
-              <View key={field.key} style={{ marginBottom: 10 }}>
-                <Text style={{ fontFamily: "Poppins_500Medium", fontSize: 13, color: colors.text, marginBottom: 4 }}>
-                  {field.label}
-                </Text>
-                <View style={{ borderWidth: 1, borderColor: colors.border, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8, backgroundColor: colors.inputBackground }}>
-                  <Text
-                    style={{ fontFamily: "Poppins_400Regular", fontSize: 14, color: colors.text }}
-                    onPress={() => {}}
-                  >
-                    {(policyForm as any)[field.key]}
-                  </Text>
-                </View>
-              </View>
-            ))}
-            <View style={{ flexDirection: "row", gap: 10, marginTop: 12 }}>
-              <TouchableOpacity
-                onPress={() => setPolicyModalVisible(false)}
-                style={{ flex: 1, paddingVertical: 12, borderRadius: 10, borderWidth: 1, borderColor: colors.border, alignItems: "center" }}
-              >
-                <Text style={{ fontFamily: "Poppins_500Medium", color: colors.text }}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                onPress={handleSavePolicy}
-                disabled={savingPolicy}
-                style={{ flex: 1, paddingVertical: 12, borderRadius: 10, backgroundColor: colors.primary, alignItems: "center", opacity: savingPolicy ? 0.6 : 1 }}
-              >
-                {savingPolicy ? (
-                  <ActivityIndicator size="small" color="#fff" />
-                ) : (
-                  <Text style={{ fontFamily: "Poppins_600SemiBold", color: "#fff" }}>Save</Text>
-                )}
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </RNModal>
-
       <CustomAlert
         visible={alertVisible}
         type={alertConfig.type}
@@ -2782,3 +2552,5 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
 });
+
+

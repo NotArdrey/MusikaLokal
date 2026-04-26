@@ -73,10 +73,7 @@ async function verifyWebhookSignature(
 
     if (!isValid) {
       console.error("❌ Webhook signature mismatch");
-      console.log("Expected:", signature);
-      console.log("Computed:", computedSignature);
     } else {
-      console.log("✅ Webhook signature verified");
     }
 
     return isValid;
@@ -145,12 +142,6 @@ async function creditOwnerWallet(
   paymentAmount: number,
 ) {
   try {
-    console.log(
-      "💰 Crediting owner wallet for booking:",
-      bookingId,
-      "Amount:",
-      paymentAmount,
-    );
 
     // IDEMPOTENCY: Skip if a wallet earning for this booking already exists.
     const { data: existingTx } = await supabaseAdmin
@@ -161,7 +152,6 @@ async function creditOwnerWallet(
       .maybeSingle();
 
     if (existingTx) {
-      console.log("⏭️ Owner wallet already credited for booking:", bookingId);
       return;
     }
 
@@ -250,12 +240,6 @@ async function creditOwnerWallet(
       return;
     }
 
-    console.log(
-      "✅ Successfully credited ₱" +
-      creditAmount +
-      " to owner wallet. New balance: ₱" +
-      newBalance,
-    );
   } catch (e) {
     console.error("❌ Error in creditOwnerWallet:", e);
   }
@@ -285,10 +269,6 @@ async function createSubscriptionActivatedNotificationIfNeeded(
     }
 
     if (existingNotification) {
-      console.log("⏭️ Skipping duplicate subscription activation notification", {
-        userId,
-        planId,
-      });
       return;
     }
 
@@ -467,7 +447,6 @@ async function activateSubscriptionFromVerifiedPayment(
 }
 
 serve(async (req: Request) => {
-  console.log("🔵 PayMongo function called:", req.method, req.url);
 
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -506,7 +485,6 @@ serve(async (req: Request) => {
     }
 
     const authHeader = req.headers.get("Authorization");
-    console.log("🔵 Auth header present:", !!authHeader);
 
     const supabaseClient = createClient(supabaseUrl, supabaseAnonKey, {
       global: { headers: { Authorization: authHeader || "" } },
@@ -608,13 +586,6 @@ serve(async (req: Request) => {
         });
       }
 
-      console.log("📤 Creating PayMongo checkout session:", {
-        booking_id,
-        amount,
-        description,
-        payment_type,
-        redirect_url,
-      });
 
       if (!booking_id || !amount) {
         return new Response(
@@ -731,7 +702,6 @@ serve(async (req: Request) => {
         },
       });
 
-      console.log("✅ Checkout session created:", checkoutData.data.id);
 
       // Update booking with checkout session ID
       // For balance payments, don't change the payment_type, just update the remaining_balance
@@ -795,12 +765,6 @@ serve(async (req: Request) => {
         });
       }
 
-      console.log("📤 Creating subscription checkout:", {
-        user_id,
-        plan_id,
-        amount,
-        plan_name,
-      });
 
       // Check for PayMongo API key
       if (!PAYMONGO_SECRET_KEY) {
@@ -829,7 +793,6 @@ serve(async (req: Request) => {
       }
 
       // Get user profile for billing
-      console.log("🔵 Fetching profile for user:", user_id);
       const { data: profile, error: profileError } = await supabaseAdmin
         .from("profiles")
         .select("email, full_name, role")
@@ -849,10 +812,6 @@ serve(async (req: Request) => {
         );
       }
 
-      console.log("🔵 Profile found:", {
-        role: profile?.role,
-        email: profile?.email,
-      });
 
       // Only studio-owner and venue-owner can subscribe
       if (
@@ -872,7 +831,6 @@ serve(async (req: Request) => {
       }
 
       // Get plan details
-      console.log("🔵 Fetching plan:", plan_id);
       const { data: plan, error: planError } = await supabaseAdmin
         .from("subscription_plans")
         .select("*")
@@ -903,7 +861,6 @@ serve(async (req: Request) => {
         );
       }
 
-      console.log("🔵 Plan found:", { name: plan.name, price: plan.price });
 
       // Amount in centavos
       const planPrice = Number(plan.price || 0);
@@ -1000,10 +957,6 @@ serve(async (req: Request) => {
         );
       }
 
-      console.log(
-        "✅ Subscription checkout session created:",
-        checkoutData.data.id,
-      );
 
       return new Response(
         JSON.stringify({
@@ -1101,11 +1054,6 @@ serve(async (req: Request) => {
         sessionData.data.attributes.payment_intent?.attributes?.status;
       const payments = sessionData.data.attributes.payments || [];
 
-      console.log("📊 Payment status check:", {
-        sessionId,
-        paymentStatus,
-        paymentsCount: payments.length,
-      });
 
       // If payment is successful, update booking
       if (paymentStatus === "succeeded" || payments.length > 0) {
@@ -1133,7 +1081,6 @@ serve(async (req: Request) => {
         resolvedBookingId = resolvedBookingId || currentBooking?.id || null;
 
         if (currentBooking?.payment_status === "paid") {
-          console.log("⏭️ check_status: Booking already paid by webhook, skipping duplicate notification");
           return new Response(
             JSON.stringify({
               success: true,
@@ -1251,12 +1198,6 @@ serve(async (req: Request) => {
       // Get client-provided redirect URL (supports Expo Go exp:// and production musikalokal://)
       const clientRedirectUrl = url.searchParams.get("redirect_url");
 
-      console.log(
-        "✅ Payment success callback for booking:",
-        bookingId,
-        "redirect_url:",
-        clientRedirectUrl,
-      );
 
       if (bookingId) {
         // Get booking details
@@ -1270,7 +1211,6 @@ serve(async (req: Request) => {
         // DEDUPLICATION: Skip if already paid (webhook may have processed it)
         // ========================================
         if (booking?.payment_status === "paid") {
-          console.log("⏭️ payment_success: Booking already paid, redirecting without duplicate notification");
         } else if (booking?.checkout_session_id) {
           // Verify payment with PayMongo
           try {
@@ -1299,7 +1239,6 @@ serve(async (req: Request) => {
                 .single();
 
               if (recheckBooking?.payment_status === "paid" || recheckBooking?.payment_status === "partial") {
-                console.log("⏭️ payment_success: Booking already processed by webhook, skipping");
               } else {
                 // Get payment type from checkout session metadata
                 const metadata = sessionData.data.attributes.metadata || {};
@@ -1307,7 +1246,6 @@ serve(async (req: Request) => {
                 const remainingBalance = parseFloat(String(metadata?.remaining_balance || 0));
                 const isDownpayment = paymentType === "downpayment";
 
-                console.log("💰 payment_success: Processing payment", { paymentType, remainingBalance, isDownpayment });
 
                 // Update booking - handle downpayment vs full payment
                 const updateData: any = {
@@ -1393,7 +1331,6 @@ serve(async (req: Request) => {
         clientRedirectUrl ||
         `musikalokal://payment-result?status=success&booking_id=${bookingId}`;
 
-      console.log("🔀 Redirecting directly to:", appDeepLink);
 
       // Use HTTP 302 redirect directly to the app deep link
       return new Response(null, {
@@ -1414,12 +1351,6 @@ serve(async (req: Request) => {
       // Get client-provided redirect URL (supports Expo Go exp:// and production musikalokal://)
       const clientRedirectUrl = url.searchParams.get("redirect_url");
 
-      console.log(
-        "❌ Payment cancelled for booking:",
-        bookingId,
-        "redirect_url:",
-        clientRedirectUrl,
-      );
 
       // Reset payment status back to unpaid so user can try again
       // (Do NOT set to 'failed' as that hides the Pay Now button)
@@ -1438,7 +1369,6 @@ serve(async (req: Request) => {
         clientRedirectUrl ||
         `musikalokal://payment-result?status=cancelled&booking_id=${bookingId}`;
 
-      console.log("🔀 Redirecting directly to:", appDeepLink);
 
       // Use HTTP 302 redirect directly to the app deep link
       return new Response(null, {
@@ -1467,10 +1397,6 @@ serve(async (req: Request) => {
       const clientRedirectUrl = url.searchParams.get("redirect_url");
       let redirectStatus = "processing";
 
-      console.log("✅ Subscription payment success callback:", {
-        checkoutSessionId,
-        resolvedPlanId,
-      });
 
       if (checkoutSessionId) {
         try {
@@ -1577,7 +1503,6 @@ serve(async (req: Request) => {
       const url = new URL(req.url);
       const clientRedirectUrl = url.searchParams.get("redirect_url");
 
-      console.log("❌ Subscription checkout cancelled");
 
       const appDeepLink =
         clientRedirectUrl ||
@@ -1599,8 +1524,6 @@ serve(async (req: Request) => {
       // PayMongo sends webhook data in params or as root object with 'data' key
       const event = params.data ? params.data.attributes : params;
 
-      console.log("🔔 PayMongo webhook received:", event.type);
-      console.log("📦 Webhook payload:", JSON.stringify(event, null, 2));
 
       // Helper function to process successful payment
       async function processSuccessfulPayment(
@@ -1622,7 +1545,6 @@ serve(async (req: Request) => {
           .single();
 
         if (existingBooking?.payment_status === "paid") {
-          console.log("⏭️ Webhook: Booking already paid, skipping duplicate notification");
           return;
         }
 
@@ -1632,7 +1554,6 @@ serve(async (req: Request) => {
         const isDownpayment = paymentType === "downpayment";
         const isBalancePayment = paymentType === "balance";
 
-        console.log("💰 Processing payment:", { bookingId, paymentType, remainingBalance, isDownpayment });
 
         // -----------------------------------------------------------------------
         // CANCELLATION RACE-CONDITION GUARD
@@ -1641,7 +1562,6 @@ serve(async (req: Request) => {
         // Keep it cancelled, record payment fields for audit, and credit owner.
         // -----------------------------------------------------------------------
         if (existingBooking?.status === "cancelled") {
-          console.log("ℹ️ Webhook: Booking was cancelled before webhook completion. Crediting owner wallet without resurrecting booking.");
           const paymentStatusValue = isDownpayment && remainingBalance > 0 ? "partial" : "paid";
           await supabaseAdmin
             .from("studio_bookings")
@@ -1685,7 +1605,6 @@ serve(async (req: Request) => {
           return;
         }
 
-        console.log("✅ Webhook: Booking updated successfully");
 
         // Credit the owner's wallet with the payment amount
         await creditOwnerWallet(supabaseAdmin, bookingId, paymentAmount || 0);
@@ -1750,11 +1669,6 @@ serve(async (req: Request) => {
         if (metadata?.type === "subscription") {
           const userId = metadata?.user_id;
           const planId = metadata?.plan_id;
-          console.log("💰 Subscription payment via webhook:", {
-            userId,
-            planId,
-            paymentMethod,
-          });
 
           // Process subscription payment using verified webhook payload
           if (userId && planId) {
@@ -1779,12 +1693,6 @@ serve(async (req: Request) => {
           }
         } else {
           // Regular booking payment
-          console.log("💰 Checkout session payment paid:", {
-            sessionId,
-            bookingId,
-            paymentMethod,
-            metadata,
-          });
 
           await processSuccessfulPayment(bookingId, paymentMethod, paymentAmount, metadata);
         }
@@ -1802,12 +1710,6 @@ serve(async (req: Request) => {
         const paymentAmountCentavos = event.data?.attributes?.payments?.[0]?.attributes?.amount;
         const paymentAmount = paymentAmountCentavos ? paymentAmountCentavos / 100 : 0;
 
-        console.log("💰 Link payment paid:", {
-          linkId,
-          bookingId,
-          paymentMethod,
-          metadata,
-        });
         await processSuccessfulPayment(bookingId, paymentMethod, paymentAmount, metadata);
       }
 
@@ -1817,11 +1719,6 @@ serve(async (req: Request) => {
         const bookingId = event.data?.attributes?.metadata?.booking_id;
         const paymentMethod = event.data?.attributes?.source?.type;
 
-        console.log("💰 Payment paid:", {
-          paymentId,
-          bookingId,
-          paymentMethod,
-        });
 
         // For payment.paid, we might need to look up by payment_intent_id
         if (bookingId) {
@@ -1850,11 +1747,6 @@ serve(async (req: Request) => {
         const failureMessage =
           event.data?.attributes?.failed_message || "Payment failed";
 
-        console.log("❌ Payment failed:", {
-          paymentId,
-          bookingId,
-          failureMessage,
-        });
 
         if (bookingId) {
           await supabaseAdmin
@@ -1888,10 +1780,6 @@ serve(async (req: Request) => {
         const bookingId = refundData?.metadata?.booking_id;
         const refundAmount = refundData?.amount ? refundData.amount / 100 : 0; // Convert from centavos
 
-        console.log("💸 Payment refunded webhook:", {
-          bookingId,
-          refundAmount,
-        });
 
         if (bookingId) {
           // Update booking status to refunded
@@ -1931,7 +1819,6 @@ serve(async (req: Request) => {
         const refundStatus = refundData?.status;
         const bookingId = refundData?.metadata?.booking_id;
 
-        console.log("🔄 Refund status updated:", { bookingId, refundStatus });
 
         if (bookingId && refundStatus === "failed") {
           // Notify user that refund failed
@@ -1985,7 +1872,6 @@ serve(async (req: Request) => {
         console.error("Error expiring bookings:", error);
       }
 
-      console.log(`⏰ Expired ${expiredBookings?.length || 0} unpaid bookings`);
 
       return new Response(
         JSON.stringify({
@@ -2012,7 +1898,6 @@ serve(async (req: Request) => {
         });
       }
 
-      console.log("💸 Refund requested for booking:", booking_id);
 
       if (!booking_id || !user_id) {
         return new Response(
@@ -2119,12 +2004,6 @@ serve(async (req: Request) => {
       );
       const refundAmountCentavos = refundAmount * 100;
 
-      console.log("💰 Refund calculation:", {
-        diffDays,
-        refundPercentage,
-        originalAmount: booking.payment_amount,
-        refundAmount,
-      });
 
       // If no refund due
       if (refundPercentage === 0) {
@@ -2223,7 +2102,6 @@ serve(async (req: Request) => {
           },
         });
 
-        console.log("✅ Refund created:", refundData.data.id);
 
         // Update booking
         await supabaseAdmin

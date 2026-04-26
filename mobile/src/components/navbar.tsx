@@ -1,4 +1,4 @@
-import { Ionicons } from '@expo/vector-icons';
+﻿import { Ionicons } from '@expo/vector-icons';
 import { BlurView } from 'expo-blur';
 import { router, usePathname } from 'expo-router';
 import { memo, useEffect, useMemo, useState } from 'react';
@@ -15,7 +15,7 @@ export const NAVBAR_CLEARANCE = NAVBAR_BOTTOM_OFFSET + NAVBAR_HEIGHT + 16;
 export const NAVBAR_WIDTH = '90%' as const;
 export const NAVBAR_MAX_WIDTH = 400;
 
-const NAVBAR_DEBUG_LOGS = __DEV__;
+const NAVBAR_DEBUG_LOGS = false;
 const GLOBAL_NAVBAR_ROUTES = new Set([
     '/account_details',
     '/add_gig',
@@ -26,7 +26,6 @@ const GLOBAL_NAVBAR_ROUTES = new Set([
     '/bookings',
     '/create_playlist',
     '/create_station',
-    '/deal_details',
     '/edit_gig',
     '/edit_group',
     '/edit_profile',
@@ -64,7 +63,6 @@ const GLOBAL_NAVBAR_ROUTES = new Set([
 
 const logNavbarDebug = (event: string, payload: Record<string, unknown>) => {
     if (NAVBAR_DEBUG_LOGS) {
-        console.log('[NavbarDebug]', event, payload);
     }
 };
 
@@ -100,7 +98,7 @@ function Navbar({ global = false, forceVisible = false }: NavbarProps) {
         if (pathname.includes('feed') || pathname.includes('home')) return 'home';
         if (pathname.includes('marketplace') || pathname.includes('shop') || pathname.includes('seller_hub') || pathname.includes('orders') || pathname.includes('product_details')) return 'marketplace';
         if (pathname.includes('ai_suggestions')) return 'ai';
-        if (pathname.includes('bookings') || pathname.includes('chat') || pathname.includes('notification') || pathname.includes('deal_details') || pathname.includes('submit_review') || pathname.includes('to_review')) return 'activity';
+        if (pathname.includes('bookings') || pathname.includes('chat') || pathname.includes('notification') || pathname.includes('submit_review') || pathname.includes('to_review')) return 'activity';
         if (
             pathname.includes('profile') ||
             pathname.includes('settings') ||
@@ -200,8 +198,8 @@ function Navbar({ global = false, forceVisible = false }: NavbarProps) {
                                     isActive && { backgroundColor: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.05)' }
                                 ]}
                                 onPress={() => {
-                                    if (item.route) {
-                                        router.replace(item.route as any);
+                                    if (item.route && pathname !== item.route) {
+                                        router.navigate(item.route as any);
                                     }
                                 }}
                             >
@@ -282,3 +280,4 @@ const styles = StyleSheet.create({
         fontFamily: 'Poppins_500Medium',
     }
 });
+

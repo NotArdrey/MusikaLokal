@@ -345,6 +345,32 @@ const hasAuthorizationHeader = (options?: InvokeOptions): boolean => {
     return Object.keys(options.headers).some((header) => header.toLowerCase() === 'authorization');
 };
 
+const getInvokeBodySummary = (options?: InvokeOptions) => {
+    const body = options?.body;
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+        return undefined;
+    }
+
+    const action = typeof body.action === 'string' ? body.action : undefined;
+    const summary: Record<string, unknown> = {};
+
+    if (action) {
+        summary.action = action;
+    }
+
+    for (const [key, value] of Object.entries(body)) {
+        if (key === 'action' || value === null || value === undefined) {
+            continue;
+        }
+
+        if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+            summary[key] = value;
+        }
+    }
+
+    return Object.keys(summary).length > 0 ? summary : undefined;
+};
+
 const withSessionAuthorization = async (
     options?: InvokeOptions,
 ): Promise<InvokeOptions | undefined> => {
@@ -361,21 +387,12 @@ const withSessionAuthorization = async (
             const token = await getFreshAccessToken();
             if (token) {
                 mergedHeaders.Authorization = `Bearer ${token}`;
-                if (__DEV__ && FUNCTIONS_INVOKE_DEBUG_LOGS) {
-                    console.log('[supabase.functions.invoke] Attached access token', {
-                        tokenLength: token.length,
-                        tokenPrefix: token.slice(0, 16),
-                        isJwtLike: isJwtLike(token),
-                    });
-                }
             } else if (__DEV__ && FUNCTIONS_INVOKE_DEBUG_LOGS) {
                 console.warn('[supabase.functions.invoke] No access token available; invoke will continue without user Authorization header');
             }
         } catch {
             // ignore auth header hydration failures and let invoke proceed
         }
-    } else if (__DEV__ && FUNCTIONS_INVOKE_DEBUG_LOGS) {
-        console.log('[supabase.functions.invoke] Using caller-supplied Authorization header');
     }
 
     return {
@@ -463,6 +480,7 @@ const unregisterCurrentPushDevice = async () => {
                     functionName,
                     status,
                     message: result.error?.message,
+                    body: getInvokeBodySummary(invokeOptions || options),
                 });
             }
 
@@ -475,6 +493,19 @@ const unregisterCurrentPushDevice = async () => {
         }
 
         if (result.error) {
+            if (__DEV__) {
+                console.warn('[supabase.functions.invoke] Function invoke failed after retries', {
+                    functionName,
+                    status: getFunctionsErrorStatus(result.error),
+                    message: result.error?.message,
+                    code: result.error?.code,
+                    details: result.error?.details,
+                    hint: result.error?.hint,
+                    context: result.error?.context,
+                    body: getInvokeBodySummary(invokeOptions || options),
+                });
+            }
+
             // Convert FunctionsError to plain Error for Hermes compatibility
             return {
                 data: null,

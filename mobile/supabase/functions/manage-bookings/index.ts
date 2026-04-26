@@ -1,4 +1,4 @@
-// @ts-ignore
+﻿// @ts-ignore
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 // @ts-ignore
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
@@ -516,7 +516,6 @@ serve(async (req: Request) => {
 
           if (incidentError) {
             if (!isMissingTableError(incidentError, "booking_incidents")) {
-              console.log("Error fetching open booking incidents:", incidentError);
             }
           } else {
             (openIncidents || []).forEach((incident: any) => {
@@ -535,7 +534,7 @@ serve(async (req: Request) => {
           const isVenue = false;
 
           // DEBUG: Log date parsing for first few items
-          // console.log(`[DEBUG] Booking ${b.id}: Status=${b.status}, End=${endDate.toISOString()}, Now=${now.toISOString()}`)
+          // undefined
 
           // Determine status text - for pending bookings, check if payment is needed
           const isUnpaid = b.status === "pending" && (!b.payment_status || b.payment_status === "unpaid" || b.payment_status === "pending" || b.payment_status === "failed");
@@ -549,7 +548,7 @@ serve(async (req: Request) => {
             start_time: b.start_time,
             end_time: b.end_time,
             name: b.studio?.name || "Unknown Studio",
-            date: `${b.booking_date} • ${b.start_time} - ${b.end_time}`,
+            date: `${b.booking_date} â€¢ ${b.start_time} - ${b.end_time}`,
             image:
               b.studio?.studio_media
                 ?.sort((a: any, b: any) => (a.sort_order || 0) - (b.sort_order || 0))[0]
@@ -611,7 +610,7 @@ serve(async (req: Request) => {
             // @ts-ignore
             categorized.Pending.push(item);
           } else if (b.status === "confirmed" && b.payment_status === "partial" && (b.remaining_balance || 0) > 0) {
-            // Downpayment paid but balance still owed — keep in Pending so musician can pay the rest
+            // Downpayment paid but balance still owed â€” keep in Pending so musician can pay the rest
             // @ts-ignore
             categorized.Pending.push({ ...item, status: "Downpayment Paid - Balance Due" });
           } else if (b.status === "confirmed") {
@@ -684,7 +683,6 @@ serve(async (req: Request) => {
               .order("created_at", { ascending: false });
 
             if (lateEventsError) {
-              console.log("Error fetching late attendance events:", lateEventsError);
             } else {
               (lateEvents || []).forEach((event: any) => {
                 const existing = lateReportByBooking.get(event.booking_id);
@@ -710,7 +708,6 @@ serve(async (req: Request) => {
 
             if (incidentError) {
               if (!isMissingTableError(incidentError, "booking_incidents")) {
-                console.log("Error fetching open booking incidents for studio owner:", incidentError);
               }
             } else {
               (openIncidents || []).forEach((incident: any) => {
@@ -748,7 +745,7 @@ serve(async (req: Request) => {
               start_time: b.start_time,
               end_time: b.end_time,
               name: `${b.studio?.name} - ${customerName}`,
-              date: `${b.booking_date} • ${b.start_time} - ${b.end_time}`,
+              date: `${b.booking_date} â€¢ ${b.start_time} - ${b.end_time}`,
               image:
                 b.studio?.studio_media
                   ?.sort((a: any, b: any) => (a.sort_order || 0) - (b.sort_order || 0))[0]
@@ -812,7 +809,7 @@ serve(async (req: Request) => {
               // @ts-ignore
               categorized.Pending.push(item);
             } else if (b.status === "confirmed" && b.payment_status === "partial" && (b.remaining_balance || 0) > 0) {
-              // Downpayment paid but balance still owed — show in Pending so owner sees it awaiting full payment
+              // Downpayment paid but balance still owed â€” show in Pending so owner sees it awaiting full payment
               // @ts-ignore
               categorized.Pending.push({ ...item, status: "Downpayment Paid - Balance Due" });
             } else if (b.status === "confirmed") {
@@ -862,7 +859,6 @@ serve(async (req: Request) => {
           .order("created_at", { ascending: false });
 
         if (gigError) {
-          console.log("Error fetching gig apps:", gigError);
         }
 
         // Process Gig Applications
@@ -973,7 +969,6 @@ serve(async (req: Request) => {
           .order("created_at", { ascending: false });
 
         if (leaderPendingError) {
-          console.log("Error fetching leader pending apps:", leaderPendingError);
         }
 
         // @ts-ignore
@@ -1026,7 +1021,6 @@ serve(async (req: Request) => {
           .eq("user_id", userId);
 
         if (teamMembershipError) {
-          console.log("Error fetching producer teams:", teamMembershipError);
         }
 
         const teamIds = Array.from(
@@ -1053,7 +1047,6 @@ serve(async (req: Request) => {
             .order("created_at", { ascending: false });
 
           if (productionAppsError) {
-            console.log("Error fetching production gig apps:", productionAppsError);
           }
 
           productionApps?.forEach((app: any) => {
@@ -1191,7 +1184,6 @@ serve(async (req: Request) => {
             .order("created_at", { ascending: false });
 
           if (appError) {
-            console.log("Error fetching accepted applications:", appError);
           }
 
           // Process accepted applications
@@ -1358,22 +1350,9 @@ serve(async (req: Request) => {
       if (time_slots && Array.isArray(time_slots) && time_slots.length > 0) {
         // New multi-slot format
         slots = time_slots;
-        console.log("📥 Creating multi-slot booking:", {
-          studio_id,
-          user_id,
-          date,
-          time_slots,
-        });
       } else if (start_time && end_time) {
         // Backwards compatibility: single slot format
         slots = [{ start: start_time, end: end_time }];
-        console.log("📥 Creating single-slot booking:", {
-          studio_id,
-          user_id,
-          date,
-          start_time,
-          end_time,
-        });
       } else {
         return new Response(
           JSON.stringify({
@@ -1428,7 +1407,7 @@ serve(async (req: Request) => {
           .maybeSingle();
 
       if (dateOverrideError) {
-        console.error("❌ Failed to load studio date override:", dateOverrideError);
+        console.error("âŒ Failed to load studio date override:", dateOverrideError);
         return new Response(
           JSON.stringify({
             error: "Failed to validate date availability. Please try again.",
@@ -1492,7 +1471,7 @@ serve(async (req: Request) => {
 
         if (weeklyHoursError) {
           console.error(
-            "❌ Failed to load weekly studio operating hours:",
+            "âŒ Failed to load weekly studio operating hours:",
             weeklyHoursError,
           );
           return new Response(
@@ -1593,7 +1572,7 @@ serve(async (req: Request) => {
         studioSettingsResult;
 
       if (studioSettingsError) {
-        console.warn("⚠️ Could not load studio settings, using defaults:", studioSettingsError);
+        console.warn("âš ï¸ Could not load studio settings, using defaults:", studioSettingsError);
       }
 
       const leadTimeHours = Math.max(0, Number(studioSettingsData?.lead_time_hours ?? 24));
@@ -1753,7 +1732,6 @@ serve(async (req: Request) => {
       }
 
       // Use multi-slot availability check
-      console.log("🔍 Checking multi-slot availability...");
       const { data: isAvailable, error: availError } = await supabaseClient.rpc(
         "are_slots_available",
         {
@@ -1765,13 +1743,12 @@ serve(async (req: Request) => {
       );
 
       if (availError) {
-        console.error("❌ Availability check error:", availError);
+        console.error("âŒ Availability check error:", availError);
         // Fallback to single-slot check if new function doesn't exist
         if (
           availError.message?.includes("function") ||
           availError.code === "42883"
         ) {
-          console.log("⚠️ Falling back to single-slot availability check...");
           // Check each slot individually using old function
           for (const slot of slots) {
             const { data: slotAvailable, error: slotError } =
@@ -1837,7 +1814,6 @@ serve(async (req: Request) => {
         );
       }
 
-      console.log("✅ All slots available");
 
       // First, verify studio has valid rates for the requested session type
       const { data: studioData, error: studioError } = await supabaseClient
@@ -1847,7 +1823,7 @@ serve(async (req: Request) => {
         .single();
 
       if (studioError || !studioData) {
-        console.error("❌ Studio not found:", studioError);
+        console.error("âŒ Studio not found:", studioError);
         return new Response(
           JSON.stringify({
             error: "Studio not found.",
@@ -1859,12 +1835,11 @@ serve(async (req: Request) => {
         );
       }
 
-      console.log("📊 Studio data:", studioData);
 
       if (isRecordingSession) {
         if (!studioData.recording_rate || studioData.recording_rate <= 0) {
           console.error(
-            "❌ Studio has no valid recording rate:",
+            "âŒ Studio has no valid recording rate:",
             studioData.recording_rate,
           );
           return new Response(
@@ -1881,7 +1856,7 @@ serve(async (req: Request) => {
         }
       } else if (!studioData.hourly_rate || studioData.hourly_rate <= 0) {
         console.error(
-          "❌ Studio has no valid hourly rate:",
+          "âŒ Studio has no valid hourly rate:",
           studioData.hourly_rate,
         );
         return new Response(
@@ -1898,7 +1873,6 @@ serve(async (req: Request) => {
       }
 
       // Calculate pricing for all slots combined
-      console.log("💰 Calculating multi-slot booking price...");
       let pricingData: any = null;
 
       if (isRecordingSession) {
@@ -1931,13 +1905,12 @@ serve(async (req: Request) => {
         );
 
       if (!isRecordingSession && pricingError) {
-        console.error("❌ Multi-slot pricing error:", pricingError);
+        console.error("âŒ Multi-slot pricing error:", pricingError);
         // Fallback to calculating each slot and summing
         if (
           pricingError.message?.includes("function") ||
           pricingError.code === "42883"
         ) {
-          console.log("⚠️ Falling back to individual slot pricing...");
           let totalHours = 0;
           let totalPrice = 0;
           let baseRate = 0;
@@ -1984,7 +1957,7 @@ serve(async (req: Request) => {
 
       if (!pricingData) {
         console.error(
-          "❌ No pricing data returned, falling back to manual calculation",
+          "âŒ No pricing data returned, falling back to manual calculation",
         );
         if (isRecordingSession) {
           const recordingRate = Number(studioData.recording_rate || 0);
@@ -2010,7 +1983,6 @@ serve(async (req: Request) => {
             final_price: studioData.hourly_rate * totalSelectedHours,
           };
         }
-        console.log("📊 Manual pricing fallback:", pricingData);
       }
 
       // Apply active promotions server-side to keep saved booking totals aligned with listing pricing.
@@ -2033,7 +2005,7 @@ serve(async (req: Request) => {
           );
 
           if (promoError) {
-            console.warn("⚠️ Promotion apply error, proceeding without promo:", promoError);
+            console.warn("âš ï¸ Promotion apply error, proceeding without promo:", promoError);
           } else if (
             promoResult &&
             Number.isFinite(Number(promoResult.final_price_after_promo))
@@ -2049,10 +2021,9 @@ serve(async (req: Request) => {
           }
         }
       } catch (promoCatchError) {
-        console.warn("⚠️ Promotion RPC unavailable, proceeding without promo:", promoCatchError);
+        console.warn("âš ï¸ Promotion RPC unavailable, proceeding without promo:", promoCatchError);
       }
 
-      console.log("✅ Pricing calculated:", pricingData);
 
       // Get overall start and end times (for backwards compatibility)
       const allStartTimes = slots.map((s) => s.start).sort();
@@ -2066,7 +2037,7 @@ serve(async (req: Request) => {
       const finalHours = pricingData.total_hours || pricingData.hours;
 
       if (!finalBaseRate || finalBaseRate <= 0) {
-        console.error("❌ Invalid base rate:", { pricingData, studioData });
+        console.error("âŒ Invalid base rate:", { pricingData, studioData });
         return new Response(
           JSON.stringify({
             error:
@@ -2086,7 +2057,7 @@ serve(async (req: Request) => {
       }
 
       if (!finalHours || finalHours <= 0) {
-        console.error("❌ Invalid hours calculated:", { pricingData, slots });
+        console.error("âŒ Invalid hours calculated:", { pricingData, slots });
         return new Response(
           JSON.stringify({
             error: "Invalid booking duration. Please select valid time slots.",
@@ -2099,20 +2070,6 @@ serve(async (req: Request) => {
         );
       }
 
-      console.log("📤 Inserting multi-slot booking...", {
-        studio_id,
-        user_id,
-        date,
-        session_type: normalizedSessionType,
-        song_count: isRecordingSession ? requestedSongCount : null,
-        overallStart,
-        overallEnd,
-        slots,
-        base_rate: finalBaseRate,
-        hours: finalHours,
-        subtotal: pricingData.subtotal || finalBaseRate * finalHours,
-        final_price: pricingData.final_price || finalBaseRate * finalHours,
-      });
 
       const finalModifiers = {
         ...(pricingData.modifiers || {}),
@@ -2170,22 +2127,6 @@ serve(async (req: Request) => {
         console.error("Non-critical: failed to attach cancellation policy:", policyErr);
       }
 
-      // Attach recording deal package if applicable
-      try {
-        if (normalizedSessionType === "recording") {
-          const { data: activePkg } = await supabaseAdmin.rpc(
-            "resolve_active_recording_package",
-            { p_studio_id: studio_id, p_counterparty_id: user_id, p_hours: Number(finalHours || 0) },
-          );
-          if (activePkg && !activePkg.error && activePkg.deal_id) {
-            bookingInsertPayload.recording_deal_id = activePkg.deal_id;
-            bookingInsertPayload.recording_deal_package_id = activePkg.package_id;
-          }
-        }
-      } catch (dealPkgErr) {
-        console.error("Non-critical: failed to resolve recording package:", dealPkgErr);
-      }
-
       const { data: insertData, error: insertError } = await supabaseClient
         .from("studio_bookings")
         .insert(bookingInsertPayload)
@@ -2193,7 +2134,7 @@ serve(async (req: Request) => {
         .single();
 
       if (insertError) {
-        console.error("❌ Insert error:", insertError);
+        console.error("âŒ Insert error:", insertError);
         throw insertError;
       }
 
@@ -2211,7 +2152,7 @@ serve(async (req: Request) => {
         .insert(slotRows);
 
       if (slotInsertError) {
-        console.error("❌ Slot insert error:", slotInsertError);
+        console.error("âŒ Slot insert error:", slotInsertError);
         await supabaseAdmin.from("studio_bookings").delete().eq("id", data.id);
         throw slotInsertError;
       }
@@ -2256,17 +2197,10 @@ serve(async (req: Request) => {
     if (action === "update_status") {
       const { booking_id, new_status, type_id, cancellation_reason } = params; // type_id: 'studio_booking' or 'gig_application'
 
-      console.log("📝 update_status called with:", {
-        booking_id,
-        new_status,
-        type_id,
-        cancellation_reason,
-      });
 
       let table = "studio_bookings";
       if (type_id === "gig_application") table = "gig_applications";
 
-      console.log("📝 Updating table:", table);
 
       const attendanceIssueStatuses = ["late", "not_attending", "no_show"];
       const isAttendanceIssue =
@@ -2376,7 +2310,6 @@ serve(async (req: Request) => {
         updateData.cancellation_reason = cancellation_reason;
       }
 
-      console.log("📝 Update data:", updateData);
 
       const updateClient = table === "gig_applications" ? supabaseAdmin : supabaseClient;
 
@@ -2387,7 +2320,6 @@ serve(async (req: Request) => {
         .select()
         .maybeSingle();
 
-      console.log("📝 Update result:", { data, error });
 
       if (error) throw error;
 
@@ -2405,7 +2337,6 @@ serve(async (req: Request) => {
             "calculate_booking_cancellation_penalty",
             { p_booking_id: booking_id },
           );
-          console.log("🧮 Penalty calculation:", { penaltyResult, penaltyCalcErr });
 
           if (!penaltyCalcErr && penaltyResult && penaltyResult.penalty_amount > 0) {
             const { data: penaltyApplied, error: penaltyApplyErr } = await supabaseAdmin.rpc(
@@ -2417,7 +2348,6 @@ serve(async (req: Request) => {
                 p_cancelled_by: authUser.id,
               },
             );
-            console.log("💰 Penalty applied:", { penaltyApplied, penaltyApplyErr });
 
             if (penaltyApplyErr) {
               console.error("Failed to apply penalty:", penaltyApplyErr);
@@ -2547,9 +2477,6 @@ serve(async (req: Request) => {
                 cancelled_by_role: cancellationActorRole,
               },
             });
-            console.log(
-              `🔔 Notification sent to ${targetUserId}: ${notificationTitle}`,
-            );
           }
         } catch (notifyError) {
           console.error("Error sending notification:", notifyError);
@@ -3220,7 +3147,6 @@ serve(async (req: Request) => {
     if (action === "scan_qr") {
       const { qr_code, scanner_id } = params;
 
-      console.log("📷 Scan QR request:", { qr_code, scanner_id });
 
       // 1. Verify the booking exists and is confirmed
       const { data: booking, error: fetchError } = await supabaseClient
@@ -3229,10 +3155,9 @@ serve(async (req: Request) => {
         .eq("id", qr_code)
         .single();
 
-      console.log("📷 Booking fetch result:", { booking, fetchError });
 
       if (fetchError) {
-        console.error("📷 Fetch error details:", fetchError);
+        console.error("ðŸ“· Fetch error details:", fetchError);
         return new Response(
           JSON.stringify({
             error: "Invalid booking code.",
@@ -3253,10 +3178,6 @@ serve(async (req: Request) => {
       }
 
       // 2. Verify scanner is the studio owner
-      console.log("📷 Verifying owner:", {
-        studio_owner: booking.studio?.owner_id,
-        scanner_id,
-      });
       if (!booking.studio || booking.studio.owner_id !== scanner_id) {
         return new Response(
           JSON.stringify({
@@ -3271,7 +3192,6 @@ serve(async (req: Request) => {
       }
 
       // 3. Verify status
-      console.log("📷 Current booking status:", booking.status);
       if (booking.status === "checked_in") {
         return new Response(
           JSON.stringify({ message: "Already checked in!", booking }),
@@ -3295,7 +3215,6 @@ serve(async (req: Request) => {
       }
 
       // 4. Update status to checked_in
-      console.log("📷 Attempting to update booking to checked_in...");
       const { data: updated, error: updateError } = await supabaseClient
         .from("studio_bookings")
         .update({
@@ -3307,7 +3226,7 @@ serve(async (req: Request) => {
         .single();
 
       if (updateError) {
-        console.error("📷 Check-in update error:", updateError);
+        console.error("ðŸ“· Check-in update error:", updateError);
         return new Response(
           JSON.stringify({
             error: "Failed to update check-in status.",
@@ -3321,7 +3240,6 @@ serve(async (req: Request) => {
         );
       }
 
-      console.log("📷 Check-in successful:", updated);
       return new Response(JSON.stringify({ success: true, booking: updated }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
         status: 200,
@@ -3332,12 +3250,6 @@ serve(async (req: Request) => {
     if (action === "renew_contract") {
       const { application_id, gig_id, applicant_id, organizer_id } = params;
 
-      console.log("🔄 Renew contract request:", {
-        application_id,
-        gig_id,
-        applicant_id,
-        organizer_id,
-      });
 
       // 1. Verify the original application exists
       const { data: originalApp, error: fetchError } = await supabaseClient
@@ -3386,7 +3298,7 @@ serve(async (req: Request) => {
         .insert({
           user_id: applicant_id,
           type: "success",
-          title: "Contract Renewal Offer! 🎉",
+          title: "Contract Renewal Offer! ðŸŽ‰",
           message: `Great news! The venue wants to work with you again for "${gigName}". Check the gig listing to apply!`,
           read: false,
           meta: buildNotificationRouteMeta("/bookings", undefined, {
@@ -3402,9 +3314,6 @@ serve(async (req: Request) => {
       }
 
       // 5. Log the renewal for tracking (could be used for analytics later)
-      console.log(
-        `🔄 Contract renewal sent from ${organizer_id} to ${applicant_id} for gig ${gig_id}`,
-      );
 
       return new Response(
         JSON.stringify({
@@ -3424,7 +3333,6 @@ serve(async (req: Request) => {
     if (action === "confirm_payment") {
       const { booking_id, payment_intent_id, payment_method_id, amount } = params;
 
-      console.log("💳 Confirm payment requested:", { booking_id, amount });
 
       if (!booking_id) {
         return new Response(JSON.stringify({ error: "Booking ID is required" }), {
@@ -3456,7 +3364,7 @@ serve(async (req: Request) => {
 
       // Handle remaining balance logic
       if (booking.payment_type === 'downpayment' && booking.remaining_balance > 0) {
-        // Downpayment paid, but balance remains — mark as partial
+        // Downpayment paid, but balance remains â€” mark as partial
         updateData.payment_status = 'partial';
       } else {
         // Full payment or Balance payment -> clear balance
@@ -3464,7 +3372,6 @@ serve(async (req: Request) => {
         updateData.remaining_balance = 0;
       }
 
-      console.log("💳 Updating booking with:", updateData);
 
       // 3. Update using Admin client to bypass RLS if necessary (though service role is used here)
       const { data: updatedBooking, error: updateError } = await supabaseAdmin
@@ -3475,7 +3382,7 @@ serve(async (req: Request) => {
         .single();
 
       if (updateError) {
-        console.error("❌ Notification error:", updateError);
+        console.error("âŒ Notification error:", updateError);
         return new Response(JSON.stringify({ error: "Failed to update booking status", details: updateError }), {
           headers: { ...corsHeaders, "Content-Type": "application/json" },
           status: 500,
@@ -3487,7 +3394,7 @@ serve(async (req: Request) => {
         await supabaseAdmin.from("notifications").insert({
           user_id: booking.user_id,
           type: "success",
-          title: "Payment Successful! 🎉",
+          title: "Payment Successful! ðŸŽ‰",
           message: `Your booking at ${booking.studio?.name} has been confirmed.`,
           read: false,
           meta: buildNotificationRouteMeta("/bookings", undefined, {
@@ -3496,7 +3403,7 @@ serve(async (req: Request) => {
           })
         });
       } catch (notifyError) {
-        console.error("❌ Notification error:", notifyError);
+        console.error("âŒ Notification error:", notifyError);
         // Don't fail the request just because notification failed
       }
 
@@ -3632,8 +3539,8 @@ serve(async (req: Request) => {
         .insert({
           user_id: booking.user_id,
           type: "success",
-          title: "Balance Cleared! ✅",
-          message: `Your remaining balance of ₱${balanceAmount.toLocaleString()} for ${booking.studio?.name || "your booking"} has been marked as paid.`,
+          title: "Balance Cleared! âœ…",
+          message: `Your remaining balance of â‚±${balanceAmount.toLocaleString()} for ${booking.studio?.name || "your booking"} has been marked as paid.`,
           read: false,
           meta: buildNotificationRouteMeta("/bookings", undefined, {
             type: "balance_cleared",
@@ -3646,14 +3553,11 @@ serve(async (req: Request) => {
         console.error("Notification error:", notifyError);
       }
 
-      console.log(
-        `💵 Balance cleared: ₱${balanceAmount} for booking ${booking_id} by owner ${owner_id}`,
-      );
 
       return new Response(
         JSON.stringify({
           success: true,
-          message: `Balance of ₱${balanceAmount.toLocaleString()} cleared successfully`,
+          message: `Balance of â‚±${balanceAmount.toLocaleString()} cleared successfully`,
           amount: balanceAmount,
           booking_id,
         }),
@@ -4039,3 +3943,4 @@ serve(async (req: Request) => {
     });
   }
 });
+

@@ -1,4 +1,4 @@
-import { Ionicons } from "@expo/vector-icons";
+﻿import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect } from "@react-navigation/native";
 import { router } from "expo-router";
 import React, { useCallback, useState } from "react";
@@ -66,8 +66,8 @@ export default function OrdersScreen() {
   const onRefresh = () => { setRefreshing(true); fetchOrders(); };
 
   const formatPrice = (price: number | null) => {
-    if (!price) return "₱0";
-    return `₱${price.toLocaleString()}`;
+    if (!price) return "â‚±0";
+    return `â‚±${price.toLocaleString()}`;
   };
 
   const getStatusColor = (status: string) => {
@@ -85,7 +85,6 @@ export default function OrdersScreen() {
     <TouchableOpacity activeOpacity={1}
       key={order.id}
       style={[styles.orderCard, { backgroundColor: colors.surface, borderColor: isDark ? "#334155" : "#E2E8F0" }]}
-      onPress={() => router.push({ pathname: "/deal_details", params: { order_id: order.id } })}
     >
       <View style={styles.orderHeader}>
         <Text style={[styles.orderNumber, { color: colors.text }]}>#{order.order_number || "..."}</Text>
@@ -197,3 +196,4 @@ const styles = StyleSheet.create({
   orderTotal: { fontSize: moderateScale(16), fontFamily: "Poppins_700Bold" },
   emptyText: { textAlign: "center", marginTop: 12, fontSize: moderateScale(15), fontFamily: "Poppins_500Medium" },
 });
+

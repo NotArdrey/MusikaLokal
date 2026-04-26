@@ -1,4 +1,4 @@
-import { Ionicons } from "@expo/vector-icons";
+﻿import { Ionicons } from "@expo/vector-icons";
 import * as FileSystem from "expo-file-system/legacy";
 import * as Linking from "expo-linking";
 import { router, useLocalSearchParams } from "expo-router";
@@ -581,7 +581,7 @@ export default function AddGigScreen() {
       };
 
       console.log(
-        "🔵 Creating gig with payload:",
+        "ðŸ”µ Creating gig with payload:",
         JSON.stringify(
           { action: "create", type: "gig", userId: session.user.id, payload },
           null,
@@ -610,11 +610,11 @@ export default function AddGigScreen() {
         .select()
         .single();
 
-      console.log("🔵 Response data:", JSON.stringify(data, null, 2));
-      console.log("🔵 Response error:", error);
+      console.log("ðŸ”µ Response data:", JSON.stringify(data, null, 2));
+      console.log("ðŸ”µ Response error:", error);
 
       if (error) {
-        console.error("❌ Error details:", JSON.stringify(error, null, 2));
+        console.error("âŒ Error details:", JSON.stringify(error, null, 2));
         let alertMessage = `Failed to create gig: ${error.message}`;
         if (error.hint) alertMessage += `\n\nHint: ${error.hint}`;
         if (error.details) alertMessage += `\n\nDetails: ${error.details}`;
@@ -657,13 +657,13 @@ export default function AddGigScreen() {
 
       setNewGigId(data.id);
       setModalVisible(true);
-      console.log("✅ Gig Created successfully");
+      console.log("âœ… Gig Created successfully");
     } catch (e: any) {
-      console.error("❌ Error creating gig:", e);
-      console.error("❌ Error message:", e?.message);
-      console.error("❌ Error stack:", e?.stack);
+      console.error("âŒ Error creating gig:", e);
+      console.error("âŒ Error message:", e?.message);
+      console.error("âŒ Error stack:", e?.stack);
       console.error(
-        "❌ Full error object:",
+        "âŒ Full error object:",
         JSON.stringify(e, Object.getOwnPropertyNames(e), 2),
       );
       showAlert(
@@ -2920,7 +2920,7 @@ export default function AddGigScreen() {
                       marginTop: 4,
                     }}
                   >
-                    Payout: ₱{cost}
+                    Payout: â‚±{cost}
                   </Text>
                 </View>
 
@@ -3025,7 +3025,7 @@ export default function AddGigScreen() {
                         {soloSlotsNeeded > 0 && (soloPreferredGenres.length > 0 || soloPreferredInstruments.length > 0) && (
                           <Text style={{ color: colors.textSecondary, fontSize: 12, marginLeft: 24 }}>
                             {soloPreferredGenres.length > 0 ? `Genres: ${soloPreferredGenres.join(", ")}` : ""}
-                            {soloPreferredGenres.length > 0 && soloPreferredInstruments.length > 0 ? " • " : ""}
+                            {soloPreferredGenres.length > 0 && soloPreferredInstruments.length > 0 ? " â€¢ " : ""}
                             {soloPreferredInstruments.length > 0 ? `Instruments: ${soloPreferredInstruments.join(", ")}` : ""}
                           </Text>
                         )}
@@ -3041,7 +3041,7 @@ export default function AddGigScreen() {
                         {duoSlotsNeeded > 0 && (duoPreferredGenres.length > 0 || duoPreferredInstruments.length > 0) && (
                           <Text style={{ color: colors.textSecondary, fontSize: 12, marginLeft: 24 }}>
                             {duoPreferredGenres.length > 0 ? `Genres: ${duoPreferredGenres.join(", ")}` : ""}
-                            {duoPreferredGenres.length > 0 && duoPreferredInstruments.length > 0 ? " • " : ""}
+                            {duoPreferredGenres.length > 0 && duoPreferredInstruments.length > 0 ? " â€¢ " : ""}
                             {duoPreferredInstruments.length > 0 ? `Instruments: ${duoPreferredInstruments.join(", ")}` : ""}
                           </Text>
                         )}
@@ -3057,7 +3057,7 @@ export default function AddGigScreen() {
                         {bandSlotsNeeded > 0 && (bandPreferredGenres.length > 0 || bandPreferredInstruments.length > 0) && (
                           <Text style={{ color: colors.textSecondary, fontSize: 12, marginLeft: 24 }}>
                             {bandPreferredGenres.length > 0 ? `Genres: ${bandPreferredGenres.join(", ")}` : ""}
-                            {bandPreferredGenres.length > 0 && bandPreferredInstruments.length > 0 ? " • " : ""}
+                            {bandPreferredGenres.length > 0 && bandPreferredInstruments.length > 0 ? " â€¢ " : ""}
                             {bandPreferredInstruments.length > 0 ? `Instruments: ${bandPreferredInstruments.join(", ")}` : ""}
                           </Text>
                         )}
@@ -3076,7 +3076,7 @@ export default function AddGigScreen() {
                   </Text>
                 </View>
                 <Text style={{ fontFamily: "Poppins_400Regular", fontSize: 12, color: colors.textSecondary, marginBottom: 10 }}>
-                  After creating this gig, you can propose a venue partnership deal with a production team to negotiate revenue splits and event terms.
+                  After creating this gig, you can coordinate venue partnerships with a production team from your production workspace.
                 </Text>
                 <TouchableOpacity
                   onPress={() => router.push("/production_team" as any)}
@@ -3736,3 +3736,4 @@ const styles = StyleSheet.create({
     fontFamily: "Poppins_600SemiBold",
   },
 });
+

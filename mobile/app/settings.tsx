@@ -120,7 +120,7 @@ export default function SettingsScreen() {
         { label: 'Notification Preferences', icon: 'notifications-outline', route: '/notification_settings' },
         { label: 'Identity Verification', icon: 'card-outline', route: '/identity_verification' },
         ...(isOwner
-          ? [{ label: 'Wallet & Subscription', icon: 'wallet-outline', route: '/wallet' }]
+          ? [{ label: 'Wallet', icon: 'wallet-outline', route: '/wallet' }]
           : [{ label: 'Wallet', icon: 'wallet-outline', route: '/wallet' }]),
       ],
     });

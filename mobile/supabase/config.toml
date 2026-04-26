@@ -23,7 +23,7 @@ verify_jwt = false
 verify_jwt = false
 [functions.manage-bookings]
 verify_jwt = false
-[functions.manage-deals]
+[functions.manage-production]
 verify_jwt = false
 [functions.manage-notifications]
 verify_jwt = false
@@ -45,3 +45,4 @@ verify_jwt = false
 verify_jwt = false
 [functions.upload-safety-screen]
 verify_jwt = false
+

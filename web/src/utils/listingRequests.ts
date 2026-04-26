@@ -1,4 +1,4 @@
-import { supabase } from "../../lib/supabase";
+﻿import { supabase } from "../../lib/supabase";
 
 type EntityType = "musician" | "group" | "venue" | "production_team";
 
@@ -308,7 +308,7 @@ export const submitListingRequest = async ({
     extraMeta: extraMeta || null,
   };
 
-  const { data, error } = await supabase.functions.invoke("manage-deals", {
+  const { data, error } = await supabase.functions.invoke("manage-production", {
     body,
   });
 
@@ -320,7 +320,7 @@ export const submitListingRequest = async ({
         status: (error as any).status || (error as any).context?.status,
         message: getFunctionsErrorMessage(error as FunctionsInvokeError, contextBody),
       });
-      return fallbackRequest || { id: fallbackRequest?.id || null };
+      return fallbackRequest || { id: null };
     } catch (fallbackError) {
       console.error("create_listing_request fallback failed", fallbackError);
     }

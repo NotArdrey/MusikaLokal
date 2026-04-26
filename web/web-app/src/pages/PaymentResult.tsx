@@ -1,8 +1,6 @@
-import { useEffect, useState } from "react";
 import { IoCheckmarkCircle, IoCloseCircle } from "react-icons/io5";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useTheme } from "../context/ThemeContext";
-import { supabase } from "../lib/supabase";
 
 export default function PaymentResultPage() {
   const { colors } = useTheme();
@@ -10,31 +8,6 @@ export default function PaymentResultPage() {
   const navigate = useNavigate();
   const status = params.get("status") || "failed";
   const bookingId = params.get("booking_id");
-  const planId = params.get("plan_id");
-  const [subscriptionReady, setSubscriptionReady] = useState(false);
-  const [checking, setChecking] = useState(!!planId && status === "success");
-
-  useEffect(() => {
-    if (planId && status === "success") {
-      let attempts = 0;
-      const poll = setInterval(async () => {
-        attempts++;
-        const { data } = await supabase
-          .from("subscriptions")
-          .select("id")
-          .eq("plan_id", planId)
-          .eq("status", "active")
-          .maybeSingle();
-        if (data || attempts >= 10) {
-          clearInterval(poll);
-          setSubscriptionReady(!!data);
-          setChecking(false);
-        }
-      }, 2000);
-      return () => clearInterval(poll);
-    }
-  }, [planId, status]);
-
   const isSuccess = status === "success";
 
   return (
@@ -53,18 +26,11 @@ export default function PaymentResultPage() {
         </h1>
         <p className="mt-2 text-sm" style={{ color: colors.textSecondary }}>
           {isSuccess
-            ? planId
-              ? checking
-                ? "Activating your subscription…"
-                : subscriptionReady
-                  ? "Your subscription is now active."
-                  : "Subscription activation pending. Please check back shortly."
-              : bookingId
-                ? "Your booking has been confirmed."
-                : "Your payment was processed successfully."
+            ? bookingId
+              ? "Your booking has been confirmed."
+              : "Your payment was processed successfully."
             : "Something went wrong with your payment. Please try again."}
         </p>
-        {checking && <span className="spinner mx-auto mt-4" />}
         <div className="mt-8 flex justify-center gap-3">
           <button className="btn-primary" onClick={() => navigate("/home")}>
             Go Home

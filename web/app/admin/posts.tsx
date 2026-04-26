@@ -1,4 +1,4 @@
-import { Ionicons } from '@expo/vector-icons';
+﻿import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import React, { useCallback, useEffect, useState } from 'react';
 import {
@@ -18,14 +18,13 @@ import { useAuth } from '../../src/context/AuthContext';
 import { useTheme } from '../../src/context/ThemeContext';
 import { supabase } from '../../lib/supabase';
 
-type Tab = 'dashboard' | 'users' | 'reports' | 'audit' | 'deals' | 'posts' | 'products' | 'projects';
+type Tab = 'dashboard' | 'users' | 'reports' | 'audit' | 'posts' | 'products' | 'projects';
 
 const adminTabRoutes: Record<Tab, string> = {
   dashboard: '/admin',
   users: '/admin/users',
   reports: '/admin/reports',
   audit: '/admin/audit',
-  deals: '/admin/deals',
   posts: '/admin/posts',
   products: '/admin/products',
   projects: '/admin/projects',
@@ -36,7 +35,6 @@ const tabItems: { key: Tab; label: string; icon: string }[] = [
   { key: 'users', label: 'Users', icon: 'people-outline' },
   { key: 'reports', label: 'Reports', icon: 'shield-checkmark-outline' },
   { key: 'audit', label: 'Audit', icon: 'time-outline' },
-  { key: 'deals', label: 'Deals', icon: 'briefcase-outline' },
   { key: 'posts', label: 'Posts', icon: 'newspaper-outline' },
   { key: 'products', label: 'Products', icon: 'bag-handle-outline' },
   { key: 'projects', label: 'Projects', icon: 'people-circle-outline' },
@@ -161,3 +159,4 @@ const styles = StyleSheet.create({
   actionRow: { flexDirection: 'row', gap: 10, marginTop: 10 },
   actionBtn: { paddingHorizontal: 14, paddingVertical: 6, borderRadius: 6 },
 });
+

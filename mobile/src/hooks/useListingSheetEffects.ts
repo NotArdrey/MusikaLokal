@@ -72,10 +72,8 @@ export const useListingSheetEffects = ({
               p_item_vector: group.embedding,
               p_weight: 0.05,
             });
-            console.log("🤖 AI learned from view:", group.name);
           }
         } catch (e) {
-          console.log("Error tracking view:", e);
         }
       }
     };
@@ -153,7 +151,6 @@ export const useListingSheetEffects = ({
 
         setReviews(normalizeReviews(rData));
       } catch (e) {
-        console.log("Error reviews:", e);
         setReviews([]);
       }
 
@@ -185,7 +182,6 @@ export const useListingSheetEffects = ({
             }
           }
         } catch (e) {
-          console.log("Error fetching related:", e);
         }
       }
     };

@@ -1,0 +1,1001 @@
+﻿// @ts-ignore
+import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+// @ts-ignore
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { withNotificationRouteMeta } from "../_shared/notificationRoutes.ts";
+
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers":
+    "authorization, x-client-info, apikey, content-type, x-supabase-client-platform",
+};
+
+function jsonResponse(body: Record<string, unknown>, status = 200) {
+  return new Response(JSON.stringify(body), {
+    headers: { ...corsHeaders, "Content-Type": "application/json" },
+    status,
+  });
+}
+
+async function getProfileRole(supabaseAdmin: any, userId: string) {
+  const { data } = await supabaseAdmin
+    .from("profiles")
+    .select("role")
+    .eq("id", userId)
+    .maybeSingle();
+
+  return typeof data?.role === "string" ? data.role.trim().toLowerCase() : null;
+}
+
+async function getTeamManagerMembership(supabaseAdmin: any, teamId: string, userId: string) {
+  const { data } = await supabaseAdmin
+    .from("production_team_members")
+    .select("role")
+    .eq("team_id", teamId)
+    .eq("user_id", userId)
+    .in("role", ["owner", "manager"])
+    .maybeSingle();
+
+  return data || null;
+}
+
+async function getTeamRosterEntries(supabaseAdmin: any, teamId: string) {
+  const { data, error } = await supabaseAdmin
+    .from("production_team_roster")
+    .select(`
+      id,
+      team_id,
+      entity_kind,
+      profile_id,
+      group_id,
+      created_at,
+      profile:profile_id(id, full_name, avatar_url, role, email),
+      group:group_id(id, name, images, group_type, genre, owner_id)
+    `)
+    .eq("team_id", teamId)
+    .order("created_at", { ascending: true });
+
+  if (error) {
+    throw error;
+  }
+
+  return (data || []).map((entry: any) => ({
+    id: entry.id,
+    team_id: entry.team_id,
+    entity_kind: entry.entity_kind,
+    profile_id: entry.profile_id,
+    group_id: entry.group_id,
+    created_at: entry.created_at,
+    profile: entry.profile || null,
+    group: entry.group || null,
+    display_name:
+      entry.profile?.full_name || entry.group?.name || "Unknown performer",
+    avatar_url:
+      entry.profile?.avatar_url || entry.group?.images?.[0] || null,
+    group_type: entry.group?.group_type || null,
+  }));
+}
+
+async function ensureAccessibleGroupForRoster(
+  supabaseAdmin: any,
+  groupId: string,
+  userId: string,
+) {
+  const { data: group, error: groupError } = await supabaseAdmin
+    .from("groups")
+    .select("id, name, owner_id, group_type")
+    .eq("id", groupId)
+    .maybeSingle();
+
+  if (groupError) {
+    throw groupError;
+  }
+
+  if (!group) {
+    return { error: "Selected group was not found", status: 404 };
+  }
+
+  if (!["duo", "band"].includes(group.group_type || "")) {
+    return { error: "Only duo or group profiles can be added to the production roster", status: 400 };
+  }
+
+  const { data: membership, error: membershipError } = await supabaseAdmin
+    .from("group_members")
+    .select("id")
+    .eq("group_id", groupId)
+    .eq("user_id", userId)
+    .maybeSingle();
+
+  if (membershipError) {
+    throw membershipError;
+  }
+
+  if (group.owner_id !== userId && !membership) {
+    return {
+      error: "You can only add groups or duos that you own or are already a member of",
+      status: 403,
+    };
+  }
+
+  return { group };
+}
+
+async function insertNotification(
+  supabaseAdmin: any,
+  payload: {
+    user_id: string;
+    type: string;
+    title: string;
+    message: string;
+    image?: string | null;
+    meta?: Record<string, any>;
+  },
+) {
+  await supabaseAdmin.from("notifications").insert({
+    ...payload,
+    meta: withNotificationRouteMeta(payload.meta),
+    read: false,
+  });
+}
+
+function toNonEmptyString(value: unknown) {
+  const normalized = String(value ?? "").trim();
+  return normalized.length > 0 ? normalized : null;
+}
+
+function normalizeRouteParams(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+
+  const entries = Object.entries(value as Record<string, unknown>)
+    .filter(([, entryValue]) => entryValue !== null && entryValue !== undefined)
+    .map(([key, entryValue]) => [key, String(entryValue)]);
+
+  if (entries.length === 0) {
+    return undefined;
+  }
+
+  return Object.fromEntries(entries) as Record<string, string>;
+}
+
+function buildListingRequestEventDetails(params: Record<string, unknown>) {
+  const senderEntityType =
+    toNonEmptyString(params.senderEntityType ?? params.sender_entity_type) ||
+    "musician";
+  const senderEntityName =
+    toNonEmptyString(params.senderEntityName ?? params.sender_entity_name) ||
+    "User";
+  const receiverEntityType =
+    toNonEmptyString(params.receiverEntityType ?? params.receiver_entity_type) ||
+    "musician";
+  const receiverEntityName =
+    toNonEmptyString(params.receiverEntityName ?? params.receiver_entity_name) ||
+    "User";
+  const routePath = toNonEmptyString(params.routePath ?? params.route_path) || undefined;
+  const routeParams = normalizeRouteParams(params.routeParams ?? params.route_params);
+  const extraMeta =
+    params.extraMeta && typeof params.extraMeta === "object" && !Array.isArray(params.extraMeta)
+      ? params.extraMeta
+      : params.extra_meta && typeof params.extra_meta === "object" && !Array.isArray(params.extra_meta)
+        ? params.extra_meta
+        : {};
+
+  return {
+    type: "listing_connection_request",
+    sender_entity_type: senderEntityType,
+    sender_entity_id: toNonEmptyString(params.senderEntityId ?? params.sender_entity_id),
+    sender_entity_name: senderEntityName,
+    receiver_entity_type: receiverEntityType,
+    receiver_entity_id: toNonEmptyString(params.receiverEntityId ?? params.receiver_entity_id),
+    receiver_entity_name: receiverEntityName,
+    production_team_id: toNonEmptyString(params.productionTeamId ?? params.production_team_id),
+    route: routePath,
+    route_params: routeParams,
+    ...(extraMeta as Record<string, unknown>),
+  };
+}
+
+async function getGroupOwnerContext(
+  supabaseAdmin: any,
+  groupId: string | null,
+) {
+  if (!groupId) {
+    return null;
+  }
+
+  const { data: groupData, error: groupError } = await supabaseAdmin
+    .from("groups")
+    .select("id, owner_id, name, group_type")
+    .eq("id", groupId)
+    .maybeSingle();
+
+  if (groupError) {
+    throw groupError;
+  }
+
+  return groupData || null;
+}
+
+function getListingRequestKind(eventDetails: any) {
+  const requestDetails =
+    eventDetails?.request_details && typeof eventDetails.request_details === "object"
+      ? eventDetails.request_details
+      : {};
+
+  return String(
+    requestDetails?.request_kind || eventDetails?.request_kind || "",
+  )
+    .trim()
+    .toLowerCase();
+}
+
+function isProductionTeamInviteRequest(request: any) {
+  const eventDetails =
+    request?.event_details && typeof request.event_details === "object"
+      ? request.event_details
+      : {};
+
+  const senderEntityType = String(eventDetails?.sender_entity_type || "")
+    .trim()
+    .toLowerCase();
+
+  return (
+    senderEntityType === "production_team" &&
+    getListingRequestKind(eventDetails) === "invite"
+  );
+}
+
+
+serve(async (req: Request) => {
+  if (req.method === "OPTIONS") {
+    return new Response("ok", { headers: corsHeaders });
+  }
+
+  let actionForLog = "unknown";
+
+  try {
+    const authHeader = req.headers.get("Authorization") || "";
+    if (!authHeader) {
+      return jsonResponse({ code: 401, message: "Missing Authorization header" }, 401);
+    }
+
+    const supabaseClient = createClient(
+      // @ts-ignore
+      Deno.env.get("SUPABASE_URL") ?? "",
+      // @ts-ignore
+      Deno.env.get("SUPABASE_ANON_KEY") ?? "",
+      { global: { headers: { Authorization: authHeader } } },
+    );
+
+    const supabaseAdmin = createClient(
+      // @ts-ignore
+      Deno.env.get("SUPABASE_URL") ?? "",
+      // @ts-ignore
+      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "",
+    );
+
+    const {
+      data: { user: authUser },
+      error: authUserError,
+    } = await supabaseClient.auth.getUser(authHeader.replace(/^Bearer\s+/i, ""));
+
+    if (authUserError || !authUser) {
+      return jsonResponse({ code: 401, message: "Invalid JWT" }, 401);
+    }
+
+    const { action, ...params } = await req.json();
+    actionForLog = typeof action === "string" && action.trim() ? action.trim() : "unknown";
+
+    if (action === "create_listing_request") {
+      const receiverUserId =
+        toNonEmptyString(params.receiverUserId ?? params.receiver_user_id);
+      const message = toNonEmptyString(params.message);
+      const notificationTitle =
+        toNonEmptyString(params.notificationTitle ?? params.notification_title) ||
+        "New request";
+      const notificationMessage =
+        toNonEmptyString(params.notificationMessage ?? params.notification_message) ||
+        message ||
+        "You received a new request.";
+      const notificationImage =
+        toNonEmptyString(params.notificationImage ?? params.notification_image);
+      const groupId = toNonEmptyString(params.groupId ?? params.group_id);
+      const studioId = toNonEmptyString(params.studioId ?? params.studio_id);
+
+      if (!receiverUserId || !message) {
+        return jsonResponse({ error: "receiverUserId and message are required" }, 400);
+      }
+
+      const eventDetails = buildListingRequestEventDetails(params);
+
+      const { data: requestRow, error: requestError } = await supabaseAdmin
+        .from("booking_requests")
+        .insert({
+          sender_id: authUser.id,
+          receiver_id: receiverUserId,
+          group_id: groupId,
+          studio_id: studioId,
+          message,
+          status: "pending",
+          attachment_url: toNonEmptyString(params.attachmentUrl ?? params.attachment_url),
+          event_details: eventDetails,
+        })
+        .select("id, created_at, sender_id, receiver_id, group_id, studio_id, status, event_details, attachment_url")
+        .single();
+
+      if (requestError) {
+        return jsonResponse({ error: requestError.message }, 500);
+      }
+
+      try {
+        await insertNotification(supabaseAdmin, {
+          user_id: receiverUserId,
+          type: "info",
+          title: notificationTitle,
+          message: notificationMessage,
+          image: notificationImage,
+          meta: {
+            type: "listing_connection_request",
+            request_id: requestRow?.id || null,
+            sender_entity_type: eventDetails.sender_entity_type || null,
+            sender_entity_id: eventDetails.sender_entity_id || null,
+            sender_entity_name: eventDetails.sender_entity_name || null,
+            receiver_entity_type: eventDetails.receiver_entity_type || null,
+            receiver_entity_id: eventDetails.receiver_entity_id || null,
+            receiver_entity_name: eventDetails.receiver_entity_name || null,
+            group_id: groupId,
+            studio_id: studioId,
+            production_team_id: eventDetails.production_team_id || null,
+            route: eventDetails.route || null,
+            route_params: eventDetails.route_params || null,
+          },
+        });
+      } catch (notificationError) {
+        console.error("Failed to send listing request notification:", notificationError);
+      }
+
+      return jsonResponse({ success: true, request: requestRow });
+    }
+
+    if (action === "respond_to_listing_request") {
+      const requestId = toNonEmptyString(params.request_id ?? params.requestId);
+      const decision = String(params.decision || "").trim().toLowerCase();
+
+      if (!requestId) {
+        return jsonResponse({ error: "request_id is required" }, 400);
+      }
+
+      if (!["accepted", "declined"].includes(decision)) {
+        return jsonResponse({ error: "decision must be accepted or declined" }, 400);
+      }
+
+      const { data: requestRow, error: requestError } = await supabaseAdmin
+        .from("booking_requests")
+        .select("id, sender_id, receiver_id, group_id, status, event_details")
+        .eq("id", requestId)
+        .maybeSingle();
+
+      if (requestError) {
+        return jsonResponse({ error: requestError.message }, 500);
+      }
+
+      if (!requestRow) {
+        return jsonResponse({ error: "Request not found" }, 404);
+      }
+
+      if (isProductionTeamInviteRequest(requestRow)) {
+        return jsonResponse(
+          { error: "Use respond_to_production_team_invite for production team invites" },
+          400,
+        );
+      }
+
+      if (requestRow.status !== "pending") {
+        return jsonResponse({ error: "This request is no longer pending" }, 409);
+      }
+
+      const groupRecord = await getGroupOwnerContext(
+        supabaseAdmin,
+        toNonEmptyString(requestRow.group_id),
+      );
+
+      const canRespond =
+        requestRow.receiver_id === authUser.id ||
+        (groupRecord?.owner_id && groupRecord.owner_id === authUser.id);
+
+      if (!canRespond) {
+        return jsonResponse({ error: "Only the request recipient can respond" }, 403);
+      }
+
+      const { data: updatedRequest, error: updateError } = await supabaseAdmin
+        .from("booking_requests")
+        .update({ status: decision })
+        .eq("id", requestId)
+        .eq("status", "pending")
+        .select("id, status")
+        .maybeSingle();
+
+      if (updateError) {
+        return jsonResponse({ error: updateError.message }, 500);
+      }
+
+      if (!updatedRequest) {
+        return jsonResponse({ error: "This request is no longer pending" }, 409);
+      }
+
+      const eventDetails =
+        requestRow.event_details && typeof requestRow.event_details === "object"
+          ? requestRow.event_details
+          : {};
+      const responderName =
+        toNonEmptyString(eventDetails.receiver_entity_name) ||
+        groupRecord?.name ||
+        "The recipient";
+      const requestTypeLabel = String(
+        eventDetails.sender_entity_type && eventDetails.receiver_entity_type
+          ? `${eventDetails.sender_entity_type} request`
+          : "connection request",
+      ).toLowerCase();
+
+      try {
+        await insertNotification(supabaseAdmin, {
+          user_id: requestRow.sender_id,
+          type: "info",
+          title: `${responderName} ${decision === "accepted" ? "accepted" : "declined"} your request`,
+          message: `Your ${requestTypeLabel} was ${decision === "accepted" ? "accepted" : "declined"} by ${responderName}.`,
+          meta: {
+            type: "listing_connection_request_status",
+            request_id: requestId,
+            request_status: decision,
+            sender_entity_type: eventDetails.sender_entity_type || null,
+            sender_entity_name: eventDetails.sender_entity_name || null,
+            receiver_entity_type: eventDetails.receiver_entity_type || null,
+            receiver_entity_name: responderName,
+            listing_id: eventDetails.listing_id || null,
+            listing_type: eventDetails.listing_type || null,
+            production_team_id: eventDetails.production_team_id || null,
+            route: eventDetails.route || null,
+            route_params: eventDetails.route_params || null,
+          },
+        });
+      } catch (notificationError) {
+        console.error(
+          "Failed to send listing request status notification:",
+          notificationError,
+        );
+      }
+
+      return jsonResponse({ success: true, request: updatedRequest });
+    }
+
+    // ================================================================
+    // PRODUCTION TEAM ACTIONS
+    // ================================================================
+
+    if (action === "create_production_team") {
+      const { name, description, logo_url } = params;
+      if (!name?.trim()) return jsonResponse({ error: "Team name is required" }, 400);
+
+      const callerRole = await getProfileRole(supabaseAdmin, authUser.id);
+      if (callerRole !== "producer") {
+        return jsonResponse({ error: "Only production users can create a production team" }, 403);
+      }
+
+      const { data: team, error: teamErr } = await supabaseAdmin
+        .from("production_teams")
+        .insert({ owner_id: authUser.id, name: name.trim(), description, logo_url })
+        .select()
+        .single();
+
+      if (teamErr) return jsonResponse({ error: teamErr.message }, 500);
+
+      // Auto-add owner as member
+      await supabaseAdmin.from("production_team_members").insert({
+        team_id: team.id,
+        user_id: authUser.id,
+        role: "owner",
+      });
+
+      return jsonResponse({ success: true, team });
+    }
+
+    if (action === "update_production_team") {
+      const { team_id, name, description, logo_url } = params;
+      if (!team_id) return jsonResponse({ error: "team_id is required" }, 400);
+      if (!name?.trim()) return jsonResponse({ error: "Team name is required" }, 400);
+
+      const { data: membership } = await supabaseAdmin
+        .from("production_team_members")
+        .select("role")
+        .eq("team_id", team_id)
+        .eq("user_id", authUser.id)
+        .in("role", ["owner", "manager"])
+        .maybeSingle();
+
+      if (!membership) {
+        return jsonResponse({ error: "Only team owners or managers can update this team" }, 403);
+      }
+
+      const { data: team, error: teamErr } = await supabaseAdmin
+        .from("production_teams")
+        .update({
+          name: name.trim(),
+          description: description?.trim() || null,
+          logo_url: logo_url || null,
+        })
+        .eq("id", team_id)
+        .select()
+        .single();
+
+      if (teamErr) return jsonResponse({ error: teamErr.message }, 500);
+
+      return jsonResponse({ success: true, team });
+    }
+
+    if (action === "delete_production_team") {
+      const { team_id } = params;
+      if (!team_id) return jsonResponse({ error: "team_id is required" }, 400);
+
+      const { data: team } = await supabaseAdmin
+        .from("production_teams")
+        .select("id, owner_id, name")
+        .eq("id", team_id)
+        .maybeSingle();
+
+      if (!team) return jsonResponse({ error: "Production team not found" }, 404);
+      if (team.owner_id !== authUser.id) {
+        return jsonResponse({ error: "Only the team owner can delete this team" }, 403);
+      }
+
+
+      const { error: memberDeleteError } = await supabaseAdmin
+        .from("production_team_members")
+        .delete()
+        .eq("team_id", team_id);
+
+      if (memberDeleteError) return jsonResponse({ error: memberDeleteError.message }, 500);
+
+      const { error: teamDeleteError } = await supabaseAdmin
+        .from("production_teams")
+        .delete()
+        .eq("id", team_id)
+        .eq("owner_id", authUser.id);
+
+      if (teamDeleteError) return jsonResponse({ error: teamDeleteError.message }, 500);
+
+      return jsonResponse({ success: true, team: { id: team.id, name: team.name } });
+    }
+
+    if (action === "add_team_member") {
+      const { team_id, user_id, role } = params;
+      if (!team_id || !user_id) return jsonResponse({ error: "team_id and user_id are required" }, 400);
+
+      // Verify caller is owner/manager
+      const { data: callerMember } = await supabaseAdmin
+        .from("production_team_members")
+        .select("role")
+        .eq("team_id", team_id)
+        .eq("user_id", authUser.id)
+        .in("role", ["owner", "manager"])
+        .maybeSingle();
+
+      if (!callerMember) return jsonResponse({ error: "Only team owners or managers can add members" }, 403);
+
+      const memberRole = role || "member";
+      if (!["owner", "manager", "member"].includes(memberRole)) {
+        return jsonResponse({ error: "Invalid role" }, 400);
+      }
+
+      const { data: member, error: memberErr } = await supabaseAdmin
+        .from("production_team_members")
+        .insert({ team_id, user_id, role: memberRole })
+        .select()
+        .single();
+
+      if (memberErr) {
+        if (memberErr.code === "23505") return jsonResponse({ error: "User is already a team member" }, 409);
+        return jsonResponse({ error: memberErr.message }, 500);
+      }
+
+      return jsonResponse({ success: true, member });
+    }
+
+    if (action === "remove_team_member") {
+      const { team_id, user_id } = params;
+      if (!team_id || !user_id) return jsonResponse({ error: "team_id and user_id are required" }, 400);
+
+      // Verify caller is owner/manager
+      const { data: callerMember } = await supabaseAdmin
+        .from("production_team_members")
+        .select("role")
+        .eq("team_id", team_id)
+        .eq("user_id", authUser.id)
+        .in("role", ["owner", "manager"])
+        .maybeSingle();
+
+      if (!callerMember) return jsonResponse({ error: "Only team owners or managers can remove members" }, 403);
+
+      // Cannot remove the team owner
+      const { data: targetMember } = await supabaseAdmin
+        .from("production_team_members")
+        .select("role")
+        .eq("team_id", team_id)
+        .eq("user_id", user_id)
+        .maybeSingle();
+
+      if (targetMember?.role === "owner") return jsonResponse({ error: "Cannot remove the team owner" }, 403);
+
+      await supabaseAdmin
+        .from("production_team_members")
+        .delete()
+        .eq("team_id", team_id)
+        .eq("user_id", user_id);
+
+      return jsonResponse({ success: true });
+    }
+
+    if (action === "list_team_roster") {
+      const team_id = params.team_id || params.teamId;
+      if (!team_id) return jsonResponse({ error: "team_id is required" }, 400);
+
+      const { data: membership } = await supabaseAdmin
+        .from("production_team_members")
+        .select("role")
+        .eq("team_id", team_id)
+        .eq("user_id", authUser.id)
+        .maybeSingle();
+
+      if (!membership) {
+        return jsonResponse({ error: "Only team members can view this roster" }, 403);
+      }
+
+      try {
+        const roster = await getTeamRosterEntries(supabaseAdmin, team_id);
+        return jsonResponse({ success: true, roster });
+      } catch (error: any) {
+        return jsonResponse({ error: error.message || "Failed to load roster" }, 500);
+      }
+    }
+
+    if (action === "add_team_roster_profile") {
+      const team_id = params.team_id || params.teamId;
+      const profile_id = params.profile_id || params.profileId;
+      if (!team_id || !profile_id) {
+        return jsonResponse({ error: "team_id and profile_id are required" }, 400);
+      }
+
+      const membership = await getTeamManagerMembership(supabaseAdmin, team_id, authUser.id);
+      if (!membership) {
+        return jsonResponse({ error: "Only team owners or managers can update the roster" }, 403);
+      }
+
+      const { data: profile, error: profileError } = await supabaseAdmin
+        .from("profiles")
+        .select("id, full_name, role")
+        .eq("id", profile_id)
+        .maybeSingle();
+
+      if (profileError) {
+        return jsonResponse({ error: profileError.message }, 500);
+      }
+
+      if (!profile) {
+        return jsonResponse({ error: "Selected musician was not found" }, 404);
+      }
+
+      if ((profile.role || "").toLowerCase() !== "musician") {
+        return jsonResponse({ error: "Only registered musician profiles can be added to the roster" }, 400);
+      }
+
+      const { error: insertError } = await supabaseAdmin
+        .from("production_team_roster")
+        .insert({
+          team_id,
+          entity_kind: "musician",
+          profile_id,
+          added_by_user_id: authUser.id,
+        });
+
+      if (insertError) {
+        if (insertError.code === "23505") {
+          return jsonResponse({ error: "This musician is already in the production roster" }, 409);
+        }
+        return jsonResponse({ error: insertError.message }, 500);
+      }
+
+      const roster = await getTeamRosterEntries(supabaseAdmin, team_id);
+      return jsonResponse({ success: true, roster });
+    }
+
+    if (action === "add_team_roster_group") {
+      const team_id = params.team_id || params.teamId;
+      const group_id = params.group_id || params.groupId;
+      if (!team_id || !group_id) {
+        return jsonResponse({ error: "team_id and group_id are required" }, 400);
+      }
+
+      const membership = await getTeamManagerMembership(supabaseAdmin, team_id, authUser.id);
+      if (!membership) {
+        return jsonResponse({ error: "Only team owners or managers can update the roster" }, 403);
+      }
+
+      let groupResult: any;
+      try {
+        groupResult = await ensureAccessibleGroupForRoster(supabaseAdmin, group_id, authUser.id);
+      } catch (error: any) {
+        return jsonResponse({ error: error.message || "Failed to validate group access" }, 500);
+      }
+
+      if (groupResult?.error) {
+        return jsonResponse({ error: groupResult.error }, groupResult.status || 400);
+      }
+
+      const rosterKind = groupResult.group.group_type === "duo" ? "duo" : "group";
+
+      const { error: insertError } = await supabaseAdmin
+        .from("production_team_roster")
+        .insert({
+          team_id,
+          entity_kind: rosterKind,
+          group_id,
+          added_by_user_id: authUser.id,
+        });
+
+      if (insertError) {
+        if (insertError.code === "23505") {
+          return jsonResponse({ error: "This group or duo is already in the production roster" }, 409);
+        }
+        return jsonResponse({ error: insertError.message }, 500);
+      }
+
+      const roster = await getTeamRosterEntries(supabaseAdmin, team_id);
+      return jsonResponse({ success: true, roster });
+    }
+
+    if (action === "remove_team_roster_entry") {
+      const team_id = params.team_id || params.teamId;
+      const roster_id = params.roster_id || params.rosterId;
+      if (!team_id || !roster_id) {
+        return jsonResponse({ error: "team_id and roster_id are required" }, 400);
+      }
+
+      const membership = await getTeamManagerMembership(supabaseAdmin, team_id, authUser.id);
+      if (!membership) {
+        return jsonResponse({ error: "Only team owners or managers can update the roster" }, 403);
+      }
+
+      const { error: deleteError } = await supabaseAdmin
+        .from("production_team_roster")
+        .delete()
+        .eq("id", roster_id)
+        .eq("team_id", team_id);
+
+      if (deleteError) {
+        return jsonResponse({ error: deleteError.message }, 500);
+      }
+
+      const roster = await getTeamRosterEntries(supabaseAdmin, team_id);
+      return jsonResponse({ success: true, roster });
+    }
+
+    if (action === "respond_to_production_team_invite") {
+      const request_id = params.request_id || params.requestId;
+      const decision = String(params.decision || "").trim().toLowerCase();
+
+      if (!request_id) {
+        return jsonResponse({ error: "request_id is required" }, 400);
+      }
+
+      if (!["accepted", "declined"].includes(decision)) {
+        return jsonResponse({ error: "decision must be accepted or declined" }, 400);
+      }
+
+      const { data: requestRow, error: requestError } = await supabaseAdmin
+        .from("booking_requests")
+        .select("id, sender_id, receiver_id, group_id, status, event_details")
+        .eq("id", request_id)
+        .maybeSingle();
+
+      if (requestError) {
+        return jsonResponse({ error: requestError.message }, 500);
+      }
+
+      if (!requestRow) {
+        return jsonResponse({ error: "Invite request not found" }, 404);
+      }
+
+      if (!isProductionTeamInviteRequest(requestRow)) {
+        return jsonResponse({ error: "Request is not a production team invite" }, 400);
+      }
+
+      if (requestRow.status !== "pending") {
+        return jsonResponse({ error: "This invite is no longer pending" }, 409);
+      }
+
+      const eventDetails =
+        requestRow.event_details && typeof requestRow.event_details === "object"
+          ? requestRow.event_details
+          : {};
+
+      const productionTeamId =
+        typeof eventDetails.production_team_id === "string" && eventDetails.production_team_id.length > 0
+          ? eventDetails.production_team_id
+          : typeof eventDetails.sender_entity_id === "string" && eventDetails.sender_entity_id.length > 0
+            ? eventDetails.sender_entity_id
+            : null;
+
+      if (!productionTeamId) {
+        return jsonResponse({ error: "Invite is missing a production team reference" }, 400);
+      }
+
+      let groupRecord: any = null;
+      if (requestRow.group_id) {
+        const { data: groupData, error: groupError } = await supabaseAdmin
+          .from("groups")
+          .select("id, owner_id, name, group_type")
+          .eq("id", requestRow.group_id)
+          .maybeSingle();
+
+        if (groupError) {
+          return jsonResponse({ error: groupError.message }, 500);
+        }
+
+        if (!groupData) {
+          return jsonResponse({ error: "Invite group not found" }, 404);
+        }
+
+        groupRecord = groupData;
+      }
+
+      const canRespond =
+        requestRow.receiver_id === authUser.id ||
+        (groupRecord?.owner_id && groupRecord.owner_id === authUser.id);
+
+      if (!canRespond) {
+        return jsonResponse({ error: "Only the invite recipient can respond" }, 403);
+      }
+
+      let receiverProfile: any = null;
+      let rosterAdded = false;
+      let alreadyOnRoster = false;
+
+      if (decision === "accepted") {
+        if (requestRow.group_id) {
+          const rosterKind = groupRecord?.group_type === "duo" ? "duo" : "group";
+
+          const { error: rosterInsertError } = await supabaseAdmin
+            .from("production_team_roster")
+            .insert({
+              team_id: productionTeamId,
+              entity_kind: rosterKind,
+              group_id: requestRow.group_id,
+              added_by_user_id: authUser.id,
+            });
+
+          if (rosterInsertError) {
+            if (rosterInsertError.code === "23505") {
+              alreadyOnRoster = true;
+            } else {
+              return jsonResponse({ error: rosterInsertError.message }, 500);
+            }
+          } else {
+            rosterAdded = true;
+          }
+        } else {
+          const { data: profileData, error: profileError } = await supabaseAdmin
+            .from("profiles")
+            .select("id, full_name, role")
+            .eq("id", requestRow.receiver_id)
+            .maybeSingle();
+
+          if (profileError) {
+            return jsonResponse({ error: profileError.message }, 500);
+          }
+
+          if (!profileData) {
+            return jsonResponse({ error: "Invitee profile not found" }, 404);
+          }
+
+          if ((profileData.role || "").toLowerCase() !== "musician") {
+            return jsonResponse({ error: "Only musician profiles can accept solo invites" }, 400);
+          }
+
+          receiverProfile = profileData;
+
+          const { error: rosterInsertError } = await supabaseAdmin
+            .from("production_team_roster")
+            .insert({
+              team_id: productionTeamId,
+              entity_kind: "musician",
+              profile_id: requestRow.receiver_id,
+              added_by_user_id: authUser.id,
+            });
+
+          if (rosterInsertError) {
+            if (rosterInsertError.code === "23505") {
+              alreadyOnRoster = true;
+            } else {
+              return jsonResponse({ error: rosterInsertError.message }, 500);
+            }
+          } else {
+            rosterAdded = true;
+          }
+        }
+      }
+
+      const { data: updatedRequest, error: updateError } = await supabaseAdmin
+        .from("booking_requests")
+        .update({ status: decision })
+        .eq("id", request_id)
+        .eq("status", "pending")
+        .select("id, status")
+        .maybeSingle();
+
+      if (updateError) {
+        return jsonResponse({ error: updateError.message }, 500);
+      }
+
+      if (!updatedRequest) {
+        return jsonResponse({ error: "This invite is no longer pending" }, 409);
+      }
+
+      const responderName =
+        String(eventDetails.receiver_entity_name || "").trim() ||
+        groupRecord?.name ||
+        receiverProfile?.full_name ||
+        "The recipient";
+
+      await insertNotification(supabaseAdmin, {
+        user_id: requestRow.sender_id,
+        type: "info",
+        title: `${responderName} ${decision === "accepted" ? "accepted" : "declined"} your request`,
+        message: `Your production team invite was ${decision === "accepted" ? "accepted" : "declined"} by ${responderName}.`,
+        meta: {
+          type: "listing_connection_request_status",
+          request_id,
+          request_status: decision,
+          sender_entity_type: eventDetails.sender_entity_type || null,
+          sender_entity_name: eventDetails.sender_entity_name || null,
+          receiver_entity_type: eventDetails.receiver_entity_type || null,
+          receiver_entity_name: responderName,
+          production_team_id: productionTeamId,
+          route: "/production_team",
+          route_params: { teamId: productionTeamId },
+        },
+      });
+
+      return jsonResponse({
+        success: true,
+        request: updatedRequest,
+        roster_added: rosterAdded,
+        already_on_roster: alreadyOnRoster,
+      });
+    }
+
+    if (action === "list_my_teams") {
+      const { data: teams, error } = await supabaseAdmin
+        .from("production_team_members")
+        .select(`
+          team_id,
+          role,
+          production_teams (
+            id, name, description, logo_url, owner_id, created_at
+          )
+        `)
+        .eq("user_id", authUser.id);
+
+      if (error) return jsonResponse({ error: error.message }, 500);
+      return jsonResponse({ teams: teams?.map((t: any) => ({ ...t.production_teams, member_role: t.role })) || [] });
+    }
+
+
+    return jsonResponse({ error: "Unknown action" }, 400);
+  } catch (error: any) {
+    console.error("[manage-production] Unhandled action error", {
+      message: error?.message,
+      stack: error?.stack,
+    });
+    return jsonResponse({ error: error?.message || "Internal server error" }, 500);
+  }
+});

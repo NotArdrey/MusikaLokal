@@ -1,4 +1,4 @@
-import { Ionicons } from "@expo/vector-icons";
+﻿import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect } from "@react-navigation/native";
 import { router } from "expo-router";
 import React, { useCallback, useState } from "react";
@@ -174,7 +174,7 @@ export default function SellerHubScreen() {
 
   const statGrid = [
     { label: "Total Orders", value: stats?.total_orders || 0, icon: "receipt-outline" as const, color: "#3b82f6" },
-    { label: "Revenue", value: `₱${Number(stats?.total_revenue || 0).toLocaleString()}`, icon: "cash-outline" as const, color: "#22c55e" },
+    { label: "Revenue", value: `â‚±${Number(stats?.total_revenue || 0).toLocaleString()}`, icon: "cash-outline" as const, color: "#22c55e" },
     { label: "Active Products", value: stats?.active_products || 0, icon: "cube-outline" as const, color: "#8b5cf6" },
     { label: "Pending Orders", value: stats?.pending_orders || 0, icon: "time-outline" as const, color: "#eab308" },
   ];
@@ -232,7 +232,7 @@ export default function SellerHubScreen() {
             )}
             <View style={{ flex: 1, marginLeft: 12 }}>
               <Text style={{ color: colors.text, fontSize: 14, fontWeight: "600" }} numberOfLines={1}>{item.title}</Text>
-              <Text style={{ color: colors.primary, fontSize: 13, fontWeight: "700", marginTop: 2 }}>₱{Number(item.price || 0).toLocaleString()}</Text>
+              <Text style={{ color: colors.primary, fontSize: 13, fontWeight: "700", marginTop: 2 }}>â‚±{Number(item.price || 0).toLocaleString()}</Text>
             </View>
             <View style={{ alignItems: "flex-end" }}>
               <View style={[styles.statusBadge, { backgroundColor: item.status === "active" ? "#22c55e20" : "#f59e0b20" }]}> 
@@ -268,7 +268,6 @@ export default function SellerHubScreen() {
       renderItem={({ item }) => (
         <TouchableOpacity
           style={[styles.orderCard, { backgroundColor: cardBg, borderColor: borderCol }]}
-          onPress={() => router.push({ pathname: "/deal_details", params: { order_id: item.id } })}
         >
           <View style={styles.orderHeader}>
             <Text style={{ color: colors.text, fontSize: 14, fontWeight: "700" }}>#{item.order_number || item.id?.slice(0, 8)}</Text>
@@ -277,9 +276,9 @@ export default function SellerHubScreen() {
             </View>
           </View>
           <Text style={{ color: colors.textSecondary, fontSize: 12, marginTop: 4 }}>
-            {(item.buyer_name || "Buyer") + " • " + new Date(item.created_at).toLocaleDateString()}
+            {(item.buyer_name || "Buyer") + " â€¢ " + new Date(item.created_at).toLocaleDateString()}
           </Text>
-          <Text style={{ color: colors.text, fontSize: 14, fontWeight: "700", marginTop: 6 }}>₱{Number(item.total_amount || item.total || 0).toLocaleString()}</Text>
+          <Text style={{ color: colors.text, fontSize: 14, fontWeight: "700", marginTop: 6 }}>â‚±{Number(item.total_amount || item.total || 0).toLocaleString()}</Text>
         </TouchableOpacity>
       )}
       ListEmptyComponent={
@@ -412,3 +411,4 @@ const styles = StyleSheet.create({
   emptyWrap: { minHeight: 360, alignItems: "center", justifyContent: "center" },
   emptyText: { textAlign: "center", marginTop: 10, fontSize: moderateScale(15), fontFamily: "Poppins_500Medium" },
 });
+

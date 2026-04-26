@@ -1,4 +1,4 @@
-import { Ionicons } from "@expo/vector-icons";
+﻿import { Ionicons } from "@expo/vector-icons";
 import * as FileSystem from "expo-file-system/legacy";
 import * as ImagePicker from "expo-image-picker";
 import * as Linking from "expo-linking";
@@ -1008,7 +1008,7 @@ export default function AddStudioScreen() {
         : [
           {
             id: `autofill-permanent-${studioType.toLowerCase()}`,
-            name: "Weekday Creator Deal",
+            name: "Weekday Creator Offer",
             description: "Test promo for daytime bookings and promo UI coverage.",
             criteria: "Book at least one weekday slot before 5 PM.",
             minimum_booking_hours: "2",
@@ -1193,40 +1193,6 @@ export default function AddStudioScreen() {
         },
       };
 
-      console.log("ðŸ“¦ PAX being sent:", payload.pax);
-      console.log(
-        "ðŸŽ¸ EQUIPMENT payload:",
-        JSON.stringify(instrumentsPayload, null, 2),
-      );
-      console.log(
-        "âš™ï¸ BOOKING SETTINGS payload:",
-        JSON.stringify(payload.booking_settings, null, 2),
-      );
-      console.log(
-        "ðŸ“… RAW availability state:",
-        JSON.stringify(availability, null, 2),
-      );
-      console.log(
-        "ðŸ“… FILTERED availability (days with slots):",
-        payload.availability,
-      );
-      console.log(
-        "ðŸ“… Number of days with availability:",
-        payload.availability.length,
-      );
-      console.log(
-        "ðŸ”µ Creating studio with payload:",
-        JSON.stringify(
-          {
-            action: "create",
-            type: "studio",
-            userId: session.user.id,
-            payload,
-          },
-          null,
-          2,
-        ),
-      );
 
       // Insert base studio row (3NF-safe)
       const { data, error } = await supabase
@@ -1249,11 +1215,9 @@ export default function AddStudioScreen() {
         .select()
         .single();
 
-      console.log("ðŸ”µ Response data:", JSON.stringify(data, null, 2));
-      console.log("ðŸ”µ Response error:", error);
 
       if (error) {
-        console.error("âŒ Error details:", JSON.stringify(error, null, 2));
+        console.error("Ã¢ÂÅ’ Error details:", JSON.stringify(error, null, 2));
 
         let alertMessage = `Failed to create studio: ${error.message}`;
         if (error.hint) alertMessage += `\n\nHint: ${error.hint}`;
@@ -1435,15 +1399,14 @@ export default function AddStudioScreen() {
         }
       }
 
-      console.log("âœ… Studio Created successfully:", data);
       setNewStudioId(data.id);
       setModalVisible(true);
     } catch (e: any) {
-      console.error("âŒ Error creating studio:", e);
-      console.error("âŒ Error message:", e?.message);
-      console.error("âŒ Error stack:", e?.stack);
+      console.error("Ã¢ÂÅ’ Error creating studio:", e);
+      console.error("Ã¢ÂÅ’ Error message:", e?.message);
+      console.error("Ã¢ÂÅ’ Error stack:", e?.stack);
       console.error(
-        "âŒ Full error object:",
+        "Ã¢ÂÅ’ Full error object:",
         JSON.stringify(e, Object.getOwnPropertyNames(e), 2),
       );
       showAlert(
@@ -1507,7 +1470,6 @@ export default function AddStudioScreen() {
         }
       });
 
-      console.log('Address verification response:', { data, error });
 
       // Handle errors from Supabase functions
       if (error || (data && data.error)) {
@@ -1519,11 +1481,7 @@ export default function AddStudioScreen() {
           if (data.message) {
             errorMessage = data.message; // Use message as it's more user-friendly
           }
-          console.log('Error from data:', errorMessage);
         } else if (error) {
-          console.log('Error object:', JSON.stringify(error, null, 2));
-          console.log('Error name:', error.name);
-          console.log('Error message:', error.message);
 
           // For FunctionsHttpError, try multiple ways to get the error body
           try {
@@ -1544,7 +1502,6 @@ export default function AddStudioScreen() {
             // Method 3: Try to read from context.json()
             else if (error.context && typeof error.context.json === 'function') {
               const errorBody = await error.context.json();
-              console.log('Error body from context.json():', errorBody);
               if (errorBody?.error) {
                 errorMessage = errorBody.message || errorBody.error;
               }
@@ -2613,7 +2570,7 @@ export default function AddStudioScreen() {
                           marginRight: 4,
                         }}
                       >
-                        ₱
+                        â‚±
                       </Text>
                       <TextInput
                         value={rehearsalRate}
@@ -2687,7 +2644,7 @@ export default function AddStudioScreen() {
                           marginRight: 4,
                         }}
                       >
-                        ₱
+                        â‚±
                       </Text>
                       <TextInput
                         value={recordingRate}
@@ -2924,14 +2881,14 @@ export default function AddStudioScreen() {
                           </Text>
                         </View>
                         <Text style={{ fontFamily: "Poppins_400Regular", color: colors.textSecondary, fontSize: 12, marginTop: 2 }}>
-                          {promo.discount_type === "percentage" ? `${promo.discount_value}% off` : `₱${promo.discount_value}/hr off`}
+                          {promo.discount_type === "percentage" ? `${promo.discount_value}% off` : `â‚±${promo.discount_value}/hr off`}
                           {" "}on {promo.applies_to === "both" ? "all" : promo.applies_to} bookings
                         </Text>
                         {(promo.criteria || promo.minimum_booking_hours || promo.minimum_spend) ? (
                           <Text style={{ fontFamily: "Poppins_400Regular", color: colors.textSecondary, fontSize: 11, marginTop: 2 }}>
                             {promo.criteria ? `${promo.criteria}. ` : ""}
                             {promo.minimum_booking_hours ? `Min ${promo.minimum_booking_hours} hr. ` : ""}
-                            {promo.minimum_spend ? `Min ₱${promo.minimum_spend}.` : ""}
+                            {promo.minimum_spend ? `Min â‚±${promo.minimum_spend}.` : ""}
                           </Text>
                         ) : null}
                         <Text style={{ fontFamily: "Poppins_400Regular", color: colors.textSecondary, fontSize: 11, marginTop: 2 }}>
@@ -3117,7 +3074,7 @@ export default function AddStudioScreen() {
                               color: promotionForm.discount_type === dt ? colors.primary : colors.textSecondary,
                             }}
                           >
-                            {dt === "percentage" ? "Percentage (%)" : "Fixed Amount (₱)"}
+                            {dt === "percentage" ? "Percentage (%)" : "Fixed Amount (â‚±)"}
                           </Text>
                         </TouchableOpacity>
                       ))}
@@ -3140,7 +3097,7 @@ export default function AddStudioScreen() {
                       }}
                     >
                       {promotionForm.discount_type === "fixed_amount" && (
-                        <Text style={{ fontFamily: "Poppins_600SemiBold", color: colors.text, marginRight: 4 }}>₱</Text>
+                        <Text style={{ fontFamily: "Poppins_600SemiBold", color: colors.text, marginRight: 4 }}>â‚±</Text>
                       )}
                       <TextInput
                         value={promotionForm.discount_value}
@@ -4932,7 +4889,7 @@ export default function AddStudioScreen() {
                           fontFamily: "Poppins_500Medium",
                         }}
                       >
-                        Rehearsal: ₱{rehearsalRate || "0"}/hr
+                        Rehearsal: â‚±{rehearsalRate || "0"}/hr
                       </Text>
                     </View>
                   )}
@@ -4952,7 +4909,7 @@ export default function AddStudioScreen() {
                           fontFamily: "Poppins_500Medium",
                         }}
                       >
-                        Recording: ₱{recordingRate || "0"}/song
+                        Recording: â‚±{recordingRate || "0"}/song
                       </Text>
                     </View>
                   )}
@@ -4997,11 +4954,11 @@ export default function AddStudioScreen() {
                         <View key={promo.id} style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 6, marginTop: 4 }}>
                           <Ionicons name="pricetag-outline" size={12} color={colors.primary} />
                           <Text style={{ color: colors.text, fontFamily: "Poppins_500Medium", fontSize: 12 }}>
-                            "{promo.name}": {promo.discount_type === "percentage" ? `${promo.discount_value}% off` : `₱${promo.discount_value}/hr off`}
+                            "{promo.name}": {promo.discount_type === "percentage" ? `${promo.discount_value}% off` : `â‚±${promo.discount_value}/hr off`}
                             {" "}({promo.applies_to === "both" ? "All" : promo.applies_to})
                             {promo.criteria ? ` | ${promo.criteria}` : ""}
                             {promo.minimum_booking_hours ? ` | Min ${promo.minimum_booking_hours} hr` : ""}
-                            {promo.minimum_spend ? ` | Min ₱${promo.minimum_spend}` : ""}
+                            {promo.minimum_spend ? ` | Min â‚±${promo.minimum_spend}` : ""}
                             {" | "}{promo.is_permanent ? "Regular" : `${promo.start_date} - ${promo.end_date}`}
                           </Text>
                         </View>
@@ -5337,7 +5294,6 @@ export default function AddStudioScreen() {
                     onMessage={(event) => {
                       try {
                         const data = JSON.parse(event.nativeEvent.data);
-                        console.log('Smile Wink Widget message:', data);
                         if (data.eventName === 'UPLOADS_CREATED' || 
                             data.eventName === 'LINK_CLOSED' ||
                             data.type === 'close' ||
@@ -6159,3 +6115,4 @@ const styles = StyleSheet.create({
     fontFamily: 'Poppins_600SemiBold',
   },
 });
+

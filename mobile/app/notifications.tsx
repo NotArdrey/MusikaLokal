@@ -76,7 +76,6 @@ export default function NotificationsScreen() {
             if (error) throw error;
             setNotifications(data || []);
         } catch (e) {
-            console.log('Error fetching notifications:', e);
         } finally {
             setLoading(false);
             setRefreshing(false);
@@ -199,7 +198,6 @@ export default function NotificationsScreen() {
                 body: { action: 'mark_read', userId: user.id, notificationId: id }
             });
         } catch (e) {
-            console.log('Error marking as read:', e);
         }
     };
 
@@ -215,7 +213,6 @@ export default function NotificationsScreen() {
                 body: { action: 'mark_read', userId: user.id, all: true }
             });
         } catch (e) {
-            console.log('Error marking all as read:', e);
         }
     };
 

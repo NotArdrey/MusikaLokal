@@ -1,4 +1,4 @@
-
+﻿
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -92,7 +92,7 @@ const readErrorContextMessage = async (context: unknown): Promise<string | null>
   }
 };
 
-type Tab = 'dashboard' | 'users' | 'reports' | 'audit' | 'deals' | 'posts' | 'products' | 'projects';
+type Tab = 'dashboard' | 'users' | 'reports' | 'audit' | 'posts' | 'products' | 'projects';
 
 type UserRole = 'musician' | 'studio-owner' | 'venue-owner' | 'producer' | 'admin';
 
@@ -105,7 +105,6 @@ const adminTabRoutes: Record<Tab, string> = {
   users: '/admin/users',
   reports: '/admin/reports',
   audit: '/admin/audit',
-  deals: '/admin/deals',
   posts: '/admin/posts',
   products: '/admin/products',
   projects: '/admin/projects',
@@ -510,7 +509,6 @@ const tabItems: Array<{ key: Tab; label: string; icon: string }> = [
   { key: 'users', label: 'Users', icon: 'people-outline' },
   { key: 'reports', label: 'Reports', icon: 'shield-checkmark-outline' },
   { key: 'audit', label: 'Audit', icon: 'time-outline' },
-  { key: 'deals', label: 'Deals', icon: 'briefcase-outline' },
   { key: 'posts', label: 'Posts', icon: 'newspaper-outline' },
   { key: 'products', label: 'Products', icon: 'bag-handle-outline' },
   { key: 'projects', label: 'Projects', icon: 'people-circle-outline' },
@@ -1309,10 +1307,6 @@ export default function AdminUsersPage() {
                     <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Role: {user.role}</Text>
                     <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Verified: {user.is_verified ? 'Yes' : 'No'}</Text>
                     <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Verification Status: {String(user.verification_status || 'PENDING').replace(/_/g, ' ')}</Text>
-                    <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Subscription: {String(user.subscription_status || 'none').replace(/_/g, ' ')}</Text>
-                    {user.subscription_expires_at ? (
-                      <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Subscription Expires: {formatDateTime(user.subscription_expires_at)}</Text>
-                    ) : null}
                     <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Joined: {formatDateTime(user.created_at)}</Text>
 
                     <View style={styles.cardActionsRow}>
@@ -1433,67 +1427,6 @@ export default function AdminUsersPage() {
                 );
               })}
             </ScrollView>
-
-            {userModalMode === 'edit' && (
-              <>
-                <Text style={[styles.formLabel, { color: colors.textSecondary }]}>Subscription Status</Text>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterRow}>
-                  {subscriptionStatusOptions.map((status) => {
-                    const active = userFormSubscriptionStatus === status;
-                    return (
-                      <TouchableOpacity
-                        key={status}
-                        activeOpacity={1}
-                        onPress={() => setUserFormSubscriptionStatus(status)}
-                        style={[
-                          styles.filterChip,
-                          {
-                            backgroundColor: active ? colors.primary : (isDark ? '#1E293B' : '#FFFFFF'),
-                            borderColor: active ? colors.primary : colors.border,
-                          },
-                        ]}
-                      >
-                        <Text style={[styles.filterChipText, { color: active ? '#FFFFFF' : colors.textSecondary }]}>
-                          {status.replace(/_/g, ' ')}
-                        </Text>
-                      </TouchableOpacity>
-                    );
-                  })}
-                </ScrollView>
-
-                <TextInput
-                  value={userFormSubscriptionExpiresAt}
-                  onChangeText={setUserFormSubscriptionExpiresAt}
-                  placeholder="Subscription expires (optional, e.g. 2026-12-31T23:59)"
-                  autoCapitalize="none"
-                  placeholderTextColor={colors.textSecondary}
-                  style={[
-                    styles.modalInputCompact,
-                    {
-                      color: colors.text,
-                      backgroundColor: colors.inputBackground,
-                      borderColor: colors.inputBorder,
-                    },
-                  ]}
-                />
-
-                <TextInput
-                  value={userFormSubscriptionPlanId}
-                  onChangeText={setUserFormSubscriptionPlanId}
-                  placeholder="Subscription plan ID (optional)"
-                  autoCapitalize="none"
-                  placeholderTextColor={colors.textSecondary}
-                  style={[
-                    styles.modalInputCompact,
-                    {
-                      color: colors.text,
-                      backgroundColor: colors.inputBackground,
-                      borderColor: colors.inputBorder,
-                    },
-                  ]}
-                />
-              </>
-            )}
 
             {userModalMode === 'create' && (
               <TextInput
@@ -1710,3 +1643,4 @@ export default function AdminUsersPage() {
     </View>
   );
 }
+

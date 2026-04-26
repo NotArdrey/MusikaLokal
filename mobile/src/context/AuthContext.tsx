@@ -172,115 +172,18 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         await AsyncStorage.removeItem("auth_guest_mode");
       }
     } catch (e) {
-      console.log("Failed to persist guest mode:", e);
     }
   }, []);
 
-  // Check subscription status for owners
+  // Subscriptions are no longer required for any role.
   const checkSubscription = useCallback(async () => {
-    if (!session?.user?.id) {
-      setSubscriptionStatus(null);
-      setSubscriptionRequired(false);
-      setSubscriptionExpiresAt(null);
-      setSubscriptionChecked(true);
-      return;
-    }
-
-    // Reset subscription required to false at start - only set true when confirmed
+    setSubscriptionStatus(null);
     setSubscriptionRequired(false);
+    setSubscriptionExpiresAt(null);
+    setSubscriptionChecked(true);
+    return;
+  }, []);
 
-    try {
-      const { data: profile, error } = await supabase
-        .from("profiles")
-        .select("role, subscription_status, subscription_expires_at")
-        .eq("id", session.user.id)
-        .single();
-
-      if (error) {
-        console.log("Error checking subscription:", error);
-        // Only check metadata if profile doesn't exist (PGRST116 = row not found)
-        // For other errors (network, auth, etc), don't lock out the user
-        if (error.code === "PGRST116") {
-          // Profile not found - check auth metadata for role (first login scenario)
-          const metadataRole = session.user?.user_metadata?.role;
-          if (metadataRole === "studio-owner" || metadataRole === "venue-owner") {
-            console.log("📋 Profile not found, metadata role requires subscription:", metadataRole);
-            setSubscriptionStatus(null);
-            setSubscriptionRequired(true);
-            setSubscriptionExpiresAt(null);
-          } else {
-            setSubscriptionStatus(null);
-            setSubscriptionRequired(false);
-            setSubscriptionExpiresAt(null);
-          }
-        } else {
-          // Other errors (network, etc) - don't lock out user, keep subscriptionRequired false
-          console.log("📋 Non-critical error, not locking user:", error.code);
-        }
-        if (error.code !== "PGRST116") {
-          setSubscriptionExpiresAt(null);
-        }
-        setSubscriptionChecked(true);
-        return;
-      }
-
-      // Only studio-owner and venue-owner need subscription
-      const needsSubscription =
-        profile?.role === "studio-owner" || profile?.role === "venue-owner";
-
-      if (needsSubscription) {
-        const status = profile?.subscription_status;
-        const expiresAt = profile?.subscription_expires_at;
-
-        // Check if subscription is active and not expired
-        let isActive = status === "active";
-        if (isActive && expiresAt) {
-          const expiryDate = new Date(expiresAt);
-          isActive = expiryDate > new Date();
-        }
-
-        setSubscriptionStatus(isActive ? "active" : status);
-        setSubscriptionRequired(!isActive);
-        setSubscriptionExpiresAt(expiresAt || null);
-
-        console.log("📋 Subscription check:", {
-          role: profile?.role,
-          status,
-          expiresAt,
-          isActive,
-          required: !isActive,
-        });
-        setSubscriptionChecked(true);
-      } else {
-        // Musicians don't need subscription
-        setSubscriptionStatus(null);
-        setSubscriptionRequired(false);
-        setSubscriptionExpiresAt(null);
-        setSubscriptionChecked(true);
-      }
-    } catch (e: any) {
-      console.log("Error in checkSubscription:", e);
-      // Only lock out for profile not found, not for general exceptions
-      if (e?.code === "PGRST116") {
-        const metadataRole = session.user?.user_metadata?.role;
-        if (metadataRole === "studio-owner" || metadataRole === "venue-owner") {
-          console.log("📋 Exception (profile not found), metadata role requires subscription:", metadataRole);
-          setSubscriptionStatus(null);
-          setSubscriptionRequired(true);
-          setSubscriptionExpiresAt(null);
-        } else {
-          setSubscriptionStatus(null);
-          setSubscriptionRequired(false);
-          setSubscriptionExpiresAt(null);
-        }
-      } else {
-        // General error - don't lock out user
-        console.log("📋 General exception, not locking user");
-        setSubscriptionExpiresAt(null);
-      }
-      setSubscriptionChecked(true);
-    }
-  }, [session?.user?.id]);
 
   const checkIdentityStatus = useCallback(async () => {
     if (!session?.user?.id) {
@@ -301,7 +204,6 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         .maybeSingle();
 
       if (error) {
-        console.log("Error checking identity status:", error);
 
         if (error.code === "PGRST116") {
           const metadataVerified = session.user?.user_metadata?.is_verified;
@@ -343,15 +245,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       setIdentityExpiresAt(expiryIso);
       setIdentityChecked(true);
 
-      console.log("🪪 Identity check:", {
-        verified,
-        status: normalizedStatus,
-        expiryIso,
-        isExpired,
-        required: needsVerification,
-      });
     } catch (e) {
-      console.log("Error in checkIdentityStatus:", e);
       setIdentityStatus(null);
       setIdentityRequired(false);
       setIdentityExpiresAt(null);
@@ -377,7 +271,6 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         .in("status", ["pending", "confirmed"]);
 
       if (error) {
-        console.log("Error checking system lock:", error);
         return;
       }
 
@@ -402,7 +295,6 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         setUnpaidBookings([]);
       }
     } catch (e) {
-      console.log("Error in checkSystemLock:", e);
     }
   }, [session?.user?.id]);
 
@@ -437,7 +329,6 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         }
       })
       .catch((e) => {
-        console.log("Failed to load guest mode:", e);
       });
 
     // Helper to filter/block unverified sessions (prevents auto-login during signup)
@@ -463,7 +354,6 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       );
 
       if (!isInvalidRefreshToken) {
-        console.log("Auth error detected, clearing local session:", message);
       }
 
       try {
@@ -543,7 +433,6 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     } = supabase.auth.onAuthStateChange(async (event, session) => {
       const isNoisyStartupSignedOut = event === "SIGNED_OUT" && !session;
       if (__DEV__ && AUTH_DEBUG_LOGS && event !== "INITIAL_SESSION" && !isNoisyStartupSignedOut) {
-        console.log("Auth state change:", event);
       }
 
       // Handle sign out event
@@ -571,7 +460,6 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
       // Handle token refresh errors (session will be null if refresh failed)
       if (event === "TOKEN_REFRESHED" && !session) {
-        console.log("Token refresh failed, clearing session");
         await handleAuthError(new Error("Token refresh failed"));
         return;
       }
@@ -854,7 +742,6 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     const run = (async () => {
       try {
         if (__DEV__ && AUTH_DEBUG_LOGS) {
-          console.log("🔍 Fetching role for user ID:", nextUserId);
         }
 
         const { data, error } = await supabase
@@ -872,7 +759,6 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
         if (data && data.length > 0) {
           if (__DEV__ && AUTH_DEBUG_LOGS) {
-            console.log("✅ User role fetched:", data[0].role);
           }
 
           setUserRole(data[0].role);
@@ -882,7 +768,6 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         }
 
         if (__DEV__ && AUTH_DEBUG_LOGS) {
-          console.log("⚠️ No profile data found for user");
         }
 
         setUserRole(null);

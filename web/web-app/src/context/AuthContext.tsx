@@ -93,58 +93,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const checkSubscription = useCallback(async () => {
-    if (!session?.user?.id) {
-      setSubscriptionStatus(null);
-      setSubscriptionRequired(false);
-      setSubscriptionChecked(true);
-      return;
-    }
-
+    setSubscriptionStatus(null);
     setSubscriptionRequired(false);
+    setSubscriptionChecked(true);
+    return;
+  }, []);
 
-    try {
-      const { data: profile, error } = await supabase
-        .from("profiles")
-        .select("role, subscription_status, subscription_expires_at")
-        .eq("id", session.user.id)
-        .single();
-
-      if (error) {
-        if (error.code === "PGRST116") {
-          const metadataRole = session.user?.user_metadata?.role;
-          if (
-            metadataRole === "studio-owner" ||
-            metadataRole === "venue-owner"
-          ) {
-            setSubscriptionStatus(null);
-            setSubscriptionRequired(true);
-          }
-        }
-        setSubscriptionChecked(true);
-        return;
-      }
-
-      const needsSubscription =
-        profile?.role === "studio-owner" || profile?.role === "venue-owner";
-
-      if (needsSubscription) {
-        const status = profile?.subscription_status;
-        const expiresAt = profile?.subscription_expires_at;
-        let isActive = status === "active";
-        if (isActive && expiresAt) {
-          isActive = new Date(expiresAt) > new Date();
-        }
-        setSubscriptionStatus(isActive ? "active" : status);
-        setSubscriptionRequired(!isActive);
-      } else {
-        setSubscriptionStatus(null);
-        setSubscriptionRequired(false);
-      }
-      setSubscriptionChecked(true);
-    } catch {
-      setSubscriptionChecked(true);
-    }
-  }, [session?.user?.id]);
 
   const checkSystemLock = useCallback(async () => {
     if (!session?.user?.id) {

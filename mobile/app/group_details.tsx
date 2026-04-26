@@ -81,7 +81,6 @@ export default function GroupDetailsScreen() {
       })
       .catch((playlistError) => {
         if (!isActive) return;
-        console.log('[group_details] Failed to fetch linked playlists:', playlistError);
         setGroupPlaylists([]);
       })
       .finally(() => {
@@ -112,7 +111,6 @@ export default function GroupDetailsScreen() {
       setIsFavorited(Boolean(data?.is_favorited));
       setFavoriteCount(Number(data?.favorites_count || 0));
     } catch (e) {
-      console.log('Error fetching group:', e);
     } finally {
       setLoading(false);
     }
@@ -240,7 +238,6 @@ export default function GroupDetailsScreen() {
         label: group?.location || group?.name || 'Group location',
       });
     } catch (error) {
-      console.log('[group_details] Navigation error:', error);
       showAlert(
         'warning',
         'Navigation Unavailable',

@@ -31,10 +31,6 @@ const WEBHOOK_SECRET_KEY = Deno.env.get('DIDIT_WEBHOOK_SECRET') || 'NI3SI6-68go4
  */
 async function verifySignature(payload: string, signature: string): Promise<boolean> {
     try {
-        console.log('=== SIGNATURE VERIFICATION DEBUG ===');
-        console.log('Signature received:', signature);
-        console.log('Payload length:', payload.length);
-        console.log('Secret key length:', WEBHOOK_SECRET_KEY.length);
 
         // The signature is base64 encoded HMAC-SHA256
         const encoder = new TextEncoder();
@@ -54,9 +50,7 @@ async function verifySignature(payload: string, signature: string): Promise<bool
         let signatureBytes: Uint8Array;
         try {
             signatureBytes = base64Decode(signature);
-            console.log('Signature decoded (base64), length:', signatureBytes.length);
         } catch (decodeError) {
-            console.log('Base64 decode failed, trying hex decode');
             // Maybe it's hex encoded instead
             signatureBytes = new Uint8Array(signature.match(/.{1,2}/g)?.map(byte => parseInt(byte, 16)) || []);
         }
@@ -68,7 +62,6 @@ async function verifySignature(payload: string, signature: string): Promise<bool
             payloadData
         );
 
-        console.log('Signature valid:', isValid);
         return isValid;
     } catch (error) {
         console.error('Signature verification error:', error);
@@ -77,7 +70,6 @@ async function verifySignature(payload: string, signature: string): Promise<bool
 }
 
 serve(async (req) => {
-    console.log('=== DIDIT WEBHOOK v41 TRIGGERED ===');
 
     if (req.method === 'OPTIONS') {
         return new Response('ok', { headers: corsHeaders })
@@ -86,7 +78,6 @@ serve(async (req) => {
     try {
         // Get raw body for signature verification
         const rawBody = await req.text();
-        console.log('Raw body received, length:', rawBody.length);
         const signature = req.headers.get('x-signature') || '';
 
         // Verify signature but log and continue if it fails (for debugging)
@@ -101,7 +92,6 @@ serve(async (req) => {
                 //     status: 401,
                 // });
             } else {
-                console.log('Webhook signature verified successfully');
             }
         } else {
             console.warn('No signature provided - proceeding without verification');
@@ -110,9 +100,6 @@ serve(async (req) => {
         const payload = JSON.parse(rawBody);
 
         // Log ALL top-level keys in the payload to understand the structure
-        console.log('=== DIDIT WEBHOOK PAYLOAD KEYS ===');
-        console.log('Top-level keys:', Object.keys(payload));
-        console.log('Full payload:', JSON.stringify(payload, null, 2));
 
         const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
         const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
@@ -134,13 +121,11 @@ serve(async (req) => {
         // Format: ADDRESS_<entityType>_<entityId>_<userId>_<timestamp>
         // ============================================
         if (userReference && typeof userReference === 'string' && userReference.startsWith('ADDRESS_')) {
-            console.log('=== ADDRESS VERIFICATION WEBHOOK ===');
             const parts = userReference.split('_');
             const entityType = parts[1]; // 'studio' or 'gig'
             const entityId = parts[2];
             const userId = parts[3];
 
-            console.log('Address verification details:', { entityType, entityId, userId, status });
 
             // Handle address verification
             await handleAddressVerification(supabaseAdmin, sessionId, entityType, entityId, userId, status, decision, payload);
@@ -158,27 +143,11 @@ serve(async (req) => {
             // Check if first part is a UUID
             const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
             if (uuidRegex.test(parts[0])) {
-                console.log(`Extracted real User ID from composite reference: ${parts[0]} (Original: ${userReference})`);
                 userReference = parts[0];
             }
         }
 
-        console.log('=== USER REFERENCE DEBUG ===');
-        console.log('vendor_data:', payload.vendor_data);
-        console.log('reference:', payload.reference);
-        console.log('external_id:', payload.external_id);
-        console.log('metadata:', JSON.stringify(payload.metadata));
-        console.log('session_id:', sessionId);
-        console.log('Final userReference:', userReference);
-        console.log('Is valid UUID:', /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(userReference || ''));
 
-        console.log('Webhook details:', {
-            webhookType,
-            status,
-            sessionId,
-            userReference,
-            hasDecision: !!decision
-        });
 
         // Handle different webhook types and statuses
 
@@ -193,7 +162,6 @@ serve(async (req) => {
                     })
                     .eq('id', userReference);
 
-                console.log(`Verification started for user ${userReference}, session ${sessionId}`);
             }
 
             return new Response(JSON.stringify({ received: true }), {
@@ -209,16 +177,7 @@ serve(async (req) => {
             const faceMatchStatus = faceMatch?.status; // 'Approved', 'Declined', 'Abandoned', 'In Review'
 
             // Log FULL idVerification object to debug field structure
-            console.log('=== FULL ID VERIFICATION OBJECT ===');
-            console.log(JSON.stringify(idVerification, null, 2));
-            console.log('=== END ID VERIFICATION ===');
 
-            console.log('Decision details:', {
-                faceMatchStatus,
-                idVerificationStatus: idVerification?.status,
-                hasOcrData: !!idVerification?.ocr_data,
-                idVerificationKeys: idVerification ? Object.keys(idVerification) : [],
-            });
 
             // Check if userReference is a valid UUID
             const isValidUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(userReference || '');
@@ -228,7 +187,6 @@ serve(async (req) => {
             let finalUserReference: string | null = (isValidUUID || isTempRef) ? userReference : null;
 
             if (!isValidUUID && !isTempRef && sessionId) {
-                console.log('vendor_data is not a UUID or TEMP ref, looking up user by session ID:', sessionId);
                 const { data: profileData, error: profileError } = await supabaseAdmin
                     .from('profiles')
                     .select('id')
@@ -237,7 +195,6 @@ serve(async (req) => {
 
                 if (profileData?.id) {
                     finalUserReference = profileData.id;
-                    console.log('Found user by session ID:', finalUserReference);
                 } else {
                     console.error('Could not find user by session ID:', profileError?.message || 'No matching profile');
                 }
@@ -261,10 +218,8 @@ serve(async (req) => {
                 authError = result.error;
 
                 if (authError) {
-                    console.log('Failed to get auth user:', authError.message);
                 }
             } else {
-                console.log('Skipping auth lookup for TEMP session:', finalUserReference);
             }
 
             // ROBUST EMAIL FALLBACK STRATEGY
@@ -273,7 +228,6 @@ serve(async (req) => {
 
             // 2. If missing, look up in Profiles table (where we store it during signup)
             if (!userEmail) {
-                console.log('Email not found in Auth User. Checking profiles table...');
                 const { data: profileWithEmail } = await supabaseAdmin
                     .from('profiles')
                     .select('email')
@@ -282,12 +236,10 @@ serve(async (req) => {
 
                 if (profileWithEmail?.email) {
                     userEmail = profileWithEmail.email;
-                    console.log('Recovered email from profiles table:', userEmail);
                 } else {
                     console.error('CRITICAL: Email not found in Auth OR Profiles. Verification email cannot be sent.');
                 }
             } else {
-                console.log('Email found in Auth User:', userEmail);
             }
 
             // Extract warnings for duplicate detection
@@ -325,23 +277,13 @@ serve(async (req) => {
                 return duplicateWarningCodes.some(dw => warningCode?.toUpperCase?.().includes(dw));
             });
 
-            console.log('Duplicate detection:', {
-                topLevelWarnings,
-                idVerificationWarnings,
-                faceSearchWarnings,
-                faceMatchWarnings,
-                allWarnings,
-                isDuplicateOfApprovedAccount
-            });
 
             const idStatus = idVerification?.status;
             const faceStatus = faceMatch?.status || (idStatus === 'Approved' ? 'Approved' : undefined); // Fallback for face if ID is good (for doc-only flows)
 
-            console.log('Consolidated Verification Status:', { idStatus, faceStatus, faceMatchRaw: faceMatch?.status });
 
             // 1. DECLINED: If EITHER is declined, the whole verification is declined.
             if (faceStatus === 'Declined' || idStatus === 'Declined') {
-                console.log('Status is DECLINED (ID or Face)');
                 if (isDuplicateOfApprovedAccount) {
                     await handleDuplicateDetected(supabaseAdmin, finalUserReference, userEmail, allWarnings);
                 } else {
@@ -351,17 +293,14 @@ serve(async (req) => {
             }
             // 2. ABANDONED: If either is abandoned (and not declined)
             else if (faceStatus === 'Abandoned' || idStatus === 'Abandoned') {
-                console.log('Status is ABANDONED');
                 await handleAbandoned(supabaseAdmin, finalUserReference, sessionId);
             }
             // 3. IN REVIEW: If manual review is required
             else if (faceStatus === 'In Review' || idStatus === 'In Review' || faceStatus === 'Pending Review' || idStatus === 'Pending Review') {
-                console.log('Status is IN REVIEW');
                 await handleInReview(supabaseAdmin, finalUserReference, sessionId);
             }
             // 4. APPROVED: Both must be effectively approved
             else if (idStatus === 'Approved' && (faceStatus === 'Approved' || !faceMatch)) {
-                console.log('Status is APPROVED');
                 await handleApproved(supabaseAdmin, finalUserReference, userEmail, idVerification, authUser, sessionId, 'APPROVED');
             }
             // 5. UNKNOWN / FALLBACK
@@ -371,10 +310,8 @@ serve(async (req) => {
                 // But if ID is approved and Face is missing (and not required/declined?), maybe approve?
                 // The priority logic above handles the specific 'Declined' cases, so this is just safety.
                 if (idStatus === 'Approved') {
-                    console.log('ID Approved but Face execution unclear - Approving with caution.');
                     await handleApproved(supabaseAdmin, finalUserReference, userEmail, idVerification, authUser, sessionId, 'APPROVED');
                 } else {
-                    console.log('Unknown status - Treating as abandoned/retryable');
                     await handleAbandoned(supabaseAdmin, finalUserReference);
                 }
             }
@@ -404,10 +341,6 @@ async function sendVerificationEmail(
     firstName: string,
     fullName: string
 ): Promise<boolean> {
-    console.log('=== Email Send Attempt via Supabase GoTrue ===');
-    console.log('Recipient:', userEmail);
-    console.log('First Name:', firstName || '(empty)');
-    console.log('Full Name:', fullName || '(empty)');
 
     if (!userEmail) {
         console.error('No email address provided, cannot send email');
@@ -470,8 +403,6 @@ async function sendVerificationEmail(
         const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 
         if (supabaseUrl && serviceRoleKey) {
-            console.log('Sending verification confirmation email via Supabase Auth...');
-            console.log('Using configured SMTP and custom email template');
 
             // Use magic link endpoint - customize the "Magic Link" template in 
             // Supabase Dashboard > Authentication > Email Templates
@@ -498,14 +429,11 @@ async function sendVerificationEmail(
             });
 
             if (response.ok) {
-                console.log(`✅ Verification email sent via Supabase Auth to ${userEmail}`);
                 return true;
             } else {
                 const errorText = await response.text();
-                console.log('Supabase Auth magiclink email failed:', response.status, errorText);
 
                 // Fallback: Try invite endpoint
-                console.log('Trying invite endpoint as fallback...');
                 const inviteResponse = await fetch(`${supabaseUrl}/auth/v1/invite`, {
                     method: 'POST',
                     headers: {
@@ -526,26 +454,21 @@ async function sendVerificationEmail(
                 });
 
                 if (inviteResponse.ok) {
-                    console.log(`✅ Invite email sent via Supabase Auth to ${userEmail}`);
                     return true;
                 } else {
                     const inviteError = await inviteResponse.text();
-                    console.log('Invite endpoint also failed:', inviteResponse.status, inviteError);
                 }
             }
         }
     } catch (error) {
-        console.log('Supabase Auth email method failed:', error);
     }
 
     // Method 2: Try Resend API as fallback
     const resendApiKey = Deno.env.get('RESEND_API_KEY');
-    console.log('RESEND_API_KEY configured:', !!resendApiKey);
 
     if (resendApiKey) {
         try {
             const resendFrom = Deno.env.get('RESEND_FROM') || 'MusikaLokal <noreply@musikalokal.com>';
-            console.log('Attempting to send via Resend from:', resendFrom);
 
             const response = await fetch('https://api.resend.com/emails', {
                 method: 'POST',
@@ -563,7 +486,6 @@ async function sendVerificationEmail(
 
             if (response.ok) {
                 const result = await response.json();
-                console.log(`Verification email sent via Resend to ${userEmail}`, result);
                 return true;
             } else {
                 const error = await response.text();
@@ -577,7 +499,6 @@ async function sendVerificationEmail(
     // Method 3: Use Supabase's built-in email by storing notification in database
     // This allows a database trigger/webhook to handle the actual email sending
     try {
-        console.log('Storing email notification in database for processing...');
         const { error: notifyError } = await supabaseAdmin
             .from('email_notifications')
             .insert({
@@ -591,13 +512,10 @@ async function sendVerificationEmail(
             });
 
         if (!notifyError) {
-            console.log('Email notification queued in database');
             return true;
         } else {
-            console.log('email_notifications table not available:', notifyError.message);
         }
     } catch (error) {
-        console.log('Database notification storage failed:', error);
     }
 
     console.error('=== EMAIL SEND INFO ===');
@@ -646,19 +564,11 @@ async function handleApproved(
 
     const documentExpiry = idVerification?.expiration_date || null;
 
-    console.log('Approving user - extracted data:', {
-        userReference,
-        fullName,
-        firstName,
-        lastName,
-        documentExpiry
-    });
 
     // ALWAYS Store verification result in verification_sessions table
     // This provides a persistent record for both TEMP and Registered users.
     // create-didit-session checks this table using the Didit Session ID.
     if (sessionId) {
-        console.log('Storing verification session details:', { sessionId, userReference });
 
         const { error: sessionError } = await supabaseAdmin
             .from('verification_sessions')
@@ -681,7 +591,6 @@ async function handleApproved(
         if (sessionError) {
             console.error('Failed to store verification_sessions record:', sessionError.message);
         } else {
-            console.log('Verification session recorded successfully.');
         }
     } else {
         console.warn('No sessionId available, skipping verification_sessions storage');
@@ -689,7 +598,6 @@ async function handleApproved(
 
     // CHECK IF THIS IS A TEMPORARY SESSION (User doesn't exist yet)
     if (userReference.startsWith('TEMP_')) {
-        console.log('TEMP session processed. Stopping here since no profile exists to update.');
         return;
     }
 
@@ -710,27 +618,18 @@ async function handleApproved(
             });
 
             if (confirmError) {
-                console.log('Failed to confirm email and update metadata:', confirmError.message);
             } else {
-                console.log(`Email confirmed and display name set for verified user ${userReference} (${userEmail}) - Name: ${fullName}`);
             }
 
             // Send verification confirmation email using Supabase GoTrue
             await sendVerificationEmail(supabaseAdmin, userEmail, firstName, fullName);
 
         } catch (emailError) {
-            console.log('Email confirmation error:', emailError);
         }
     }
 
 
     // NOW store the full profile with verified ID details
-    console.log('Updating profile with verified data:', {
-        userReference,
-        fullName,
-        documentExpiry,
-        verificationStatus: 'APPROVED'
-    });
 
     const { error: updateError, data: updateData } = await supabaseAdmin
         .from('profiles')
@@ -751,7 +650,6 @@ async function handleApproved(
         if (updateError) {
             console.error('Failed to update profile:', updateError.message);
         } else {
-            console.log('No profile found to update, creating new profile via upsert...');
         }
 
         // Profile doesn't exist - create it with upsert
@@ -773,10 +671,8 @@ async function handleApproved(
         if (upsertError) {
             console.error('Upsert failed:', upsertError.message);
         } else {
-            console.log('Profile upserted successfully:', upsertData);
         }
     } else {
-        console.log('Profile updated successfully:', updateData);
     }
 
     // Send success notification
@@ -789,7 +685,6 @@ async function handleApproved(
             message: 'Your identity has been successfully verified. You now have full access to all features.',
         });
 
-    console.log(`Profile verified for user ${userReference}`);
 }
 
 /**
@@ -797,7 +692,6 @@ async function handleApproved(
  * Don't store any profile details, just mark as declined
  */
 async function handleDeclined(supabaseAdmin: any, userReference: string, sessionId: string | null) {
-    console.log('Verification declined for user:', userReference);
 
     // ALWAYS store status in verification_sessions for frontend polling
     if (sessionId) {
@@ -811,7 +705,6 @@ async function handleDeclined(supabaseAdmin: any, userReference: string, session
                     declined_at: new Date().toISOString()
                 }
             });
-        console.log('Stored DECLINED status in verification_sessions');
     }
 
     // Only update profiles if it's a real user (not TEMP_)
@@ -827,7 +720,6 @@ async function handleDeclined(supabaseAdmin: any, userReference: string, session
             .eq('id', userReference);
     }
 
-    console.log('Declined - no email sent, user will retry from app');
 }
 
 /**
@@ -835,7 +727,6 @@ async function handleDeclined(supabaseAdmin: any, userReference: string, session
  * Don't store any profile details, just mark as abandoned
  */
 async function handleAbandoned(supabaseAdmin: any, userReference: string, sessionId: string | null) {
-    console.log('Verification abandoned for user:', userReference);
 
     // ALWAYS store status in verification_sessions for frontend polling
     if (sessionId) {
@@ -849,7 +740,6 @@ async function handleAbandoned(supabaseAdmin: any, userReference: string, sessio
                     abandoned_at: new Date().toISOString()
                 }
             });
-        console.log('Stored ABANDONED status in verification_sessions');
     }
 
     // Only update profiles if it's a real user (not TEMP_)
@@ -865,7 +755,6 @@ async function handleAbandoned(supabaseAdmin: any, userReference: string, sessio
             .eq('id', userReference);
     }
 
-    console.log('Abandoned - no email sent, user will retry from app');
 }
 
 /**
@@ -873,7 +762,6 @@ async function handleAbandoned(supabaseAdmin: any, userReference: string, sessio
  * Don't store profile details yet - wait for manual review result
  */
 async function handleInReview(supabaseAdmin: any, userReference: string, sessionId: string | null) {
-    console.log('Verification in review for user:', userReference);
 
     // ALWAYS store status in verification_sessions for frontend polling
     if (sessionId) {
@@ -887,7 +775,6 @@ async function handleInReview(supabaseAdmin: any, userReference: string, session
                     review_started_at: new Date().toISOString()
                 }
             });
-        console.log('Stored PENDING_REVIEW status in verification_sessions');
     }
 
     // Only update profiles if it's a real user (not TEMP_)
@@ -911,7 +798,6 @@ async function handleInReview(supabaseAdmin: any, userReference: string, session
             });
     }
 
-    console.log('In Review - no email sent, user will be notified of review result');
 }
 
 /**
@@ -925,8 +811,6 @@ async function handleDuplicateDetected(
     userEmail: string | undefined,
     warnings: any[]
 ) {
-    console.log('DUPLICATE DETECTED for user:', userReference);
-    console.log('Warnings received:', warnings);
 
     try {
         // First, delete the profile record to avoid foreign key issues
@@ -936,9 +820,7 @@ async function handleDuplicateDetected(
             .eq('id', userReference);
 
         if (profileDeleteError) {
-            console.log('Failed to delete profile:', profileDeleteError.message);
         } else {
-            console.log(`Profile deleted for orphan user ${userReference}`);
         }
 
         // Delete any notifications that might have been created
@@ -948,24 +830,19 @@ async function handleDuplicateDetected(
             .eq('user_id', userReference);
 
         if (notificationDeleteError) {
-            console.log('Failed to delete notifications:', notificationDeleteError.message);
         }
 
         // Finally, delete the auth.users record
         const { error: authDeleteError } = await supabaseAdmin.auth.admin.deleteUser(userReference);
 
         if (authDeleteError) {
-            console.log('Failed to delete auth user:', authDeleteError.message);
             // If we can't delete, at least mark the account as disabled
             await supabaseAdmin.auth.admin.updateUserById(userReference, {
                 ban_duration: 'none', // Permanently ban if we can't delete
             });
         } else {
-            console.log(`Auth user deleted for orphan account ${userReference}`);
         }
 
-        console.log(`Orphan account ${userReference} (${userEmail}) cleaned up due to duplicate detection`);
-        console.log('The person should use their original verified account instead');
 
     } catch (error: any) {
         console.error('Error cleaning up duplicate account:', error.message);
@@ -995,10 +872,6 @@ async function handleAddressVerification(
     decision: any,
     payload: any
 ) {
-    console.log('=== PROCESSING ADDRESS VERIFICATION ===');
-    console.log('Entity:', entityType, entityId);
-    console.log('User:', userId);
-    console.log('Status:', status);
 
     // Get the stored session data with expected values
     const { data: sessionData } = await supabaseAdmin
@@ -1022,14 +895,6 @@ async function handleAddressVerification(
     const issuer = extractedData?.issuer || extractedData?.company || '';
     const issueDate = extractedData?.issue_date || extractedData?.date || '';
 
-    console.log('Extracted POA data:', {
-        extractedAddress,
-        extractedName,
-        issuer,
-        issueDate,
-        expectedAddress,
-        expectedName
-    });
 
     // Determine entity table
     const entityTable = entityType === 'studio' ? 'studios' : 'gigs';
@@ -1040,7 +905,6 @@ async function handleAddressVerification(
     const isRecent = issueDate ? isWithinDays(issueDate, 90) : true; // Within 90 days
     const isValidIssuer = isValidUtilityIssuer(issuer);
 
-    console.log('Validation results:', { nameMatches, addressMatches, isRecent, isValidIssuer });
 
     // Determine final verification status
     let verificationStatus = 'PENDING';
@@ -1127,7 +991,6 @@ async function handleAddressVerification(
             });
     }
 
-    console.log(`Address verification completed: ${verificationStatus} for ${entityType} ${entityId}`);
 }
 
 /**

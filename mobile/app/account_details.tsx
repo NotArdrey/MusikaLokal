@@ -37,7 +37,6 @@ export default function AccountDetailsScreen() {
       if (error) throw error;
       setProfile(data);
     } catch (e) {
-      console.log('Error fetching account details:', e);
     } finally {
       setLoading(false);
     }

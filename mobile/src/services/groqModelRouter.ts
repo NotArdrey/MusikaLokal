@@ -616,12 +616,6 @@ const performGroqJsonRequest = async (input: {
     const timeoutHandle = setTimeout(() => controller.abort(), input.timeoutMs);
 
     try {
-      console.log("[GROQ_ROUTER] Request start", {
-        modelId,
-        modelSource: resolvedConfig.model.source,
-        apiKeySource: resolvedConfig.apiKey.source,
-        apiKeySignature: formatApiKeySignature(apiKey),
-      });
 
       const response = await fetch(GROQ_CHAT_COMPLETIONS_URL, {
         method: "POST",
@@ -671,12 +665,6 @@ const performGroqJsonRequest = async (input: {
         throw new Error("groq_empty_response");
       }
 
-      console.log("[GROQ_ROUTER] Request success", {
-        modelId,
-        modelSource: resolvedConfig.model.source,
-        apiKeySource: resolvedConfig.apiKey.source,
-        apiKeySignature: formatApiKeySignature(apiKey),
-      });
 
       return { text, modelId };
     } catch (error: unknown) {

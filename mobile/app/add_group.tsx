@@ -359,7 +359,6 @@ export default function AddGroupScreen() {
       const playlistRows = await fetchUserOwnedPlaylists(ownerId);
       setOwnedPlaylists(playlistRows);
     } catch (playlistError) {
-      console.log("[add_group] Failed to fetch playlists:", playlistError);
       setOwnedPlaylists([]);
     } finally {
       setLoadingPlaylists(false);
@@ -668,8 +667,8 @@ export default function AddGroupScreen() {
         .select()
         .single();
 
-      // console.log("🔵 Response data:", JSON.stringify(data, null, 2));
-      // console.log("🔵 Response error:", error);
+      // undefined;
+      // undefined;
 
       if (error) {
         try {
@@ -750,7 +749,6 @@ export default function AddGroupScreen() {
           .upsert(membershipRows, { onConflict: 'group_id,user_id' });
 
         if (membershipError) {
-          console.log('Failed to sync group_members during create:', membershipError);
         }
       }
 
@@ -759,7 +757,6 @@ export default function AddGroupScreen() {
         try {
           await syncGroupLinkedPlaylists(data.id, selectedPlaylistIds);
         } catch (playlistError: any) {
-          console.log("[add_group] Failed to link playlists:", playlistError);
           playlistLinkWarning =
             "The group was created, but the selected playlists could not be linked yet.";
         }
@@ -770,9 +767,7 @@ export default function AddGroupScreen() {
         playlistLinkWarning || `"${groupName}" has been successfully created.`,
       );
       setModalVisible(true);
-      console.log("Group Created");
     } catch (e: any) {
-      console.log("Error creating group:", e);
       showAlert("warning", "Couldn't Create Group", "Failed to create group. Please try again.");
     } finally {
       setCreating(false);

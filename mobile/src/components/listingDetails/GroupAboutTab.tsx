@@ -126,7 +126,6 @@ const GroupAboutTab = ({
         destinationText,
       });
     } catch (error) {
-      console.log("[GroupAboutTab] Navigation error:", error);
     }
   };
 
@@ -150,7 +149,6 @@ const GroupAboutTab = ({
       })
       .catch((playlistError) => {
         if (!isActive) return;
-        console.log("[GroupAboutTab] Failed to fetch linked playlists:", playlistError);
         setGroupPlaylists([]);
       })
       .finally(() => {

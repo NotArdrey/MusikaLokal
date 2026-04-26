@@ -105,10 +105,8 @@ const policies = [
 ];
 
 async function applyPolicies() {
-  console.log('🔐 Applying storage policies...\n');
 
   for (const policy of policies) {
-    console.log(`Applying: ${policy.name}`);
     
     // Drop policy if exists
     const dropQuery = `DROP POLICY IF EXISTS "${policy.name}" ON ${policy.table};`;
@@ -118,16 +116,10 @@ async function applyPolicies() {
     const { error } = await supabase.rpc('exec_sql', { sql: policy.definition }).catch(() => ({ error: null }));
     
     if (error) {
-      console.log(`  ⚠️  Could not apply via RPC:`, error.message);
     } else {
-      console.log(`  ✓ Applied`);
     }
   }
 
-  console.log('\n📝 Note: If policies could not be applied via API, you need to:');
-  console.log('   1. Go to Supabase Dashboard > SQL Editor');
-  console.log('   2. Run the storage policy SQL from schema.sql (lines 880-920)');
-  console.log('   3. Or go to Storage > Policies to add them manually\n');
 }
 
 applyPolicies().catch(console.error);

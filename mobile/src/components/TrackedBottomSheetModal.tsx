@@ -21,7 +21,6 @@ const logTrackedBottomSheetDebug = (
   payload: Record<string, unknown>,
 ) => {
   if (TRACKED_BOTTOM_SHEET_DEBUG_LOGS) {
-    console.log(`[TrackedBottomSheetModal:${sheetId}]`, event, payload);
   }
 };
 

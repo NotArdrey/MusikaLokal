@@ -32,7 +32,6 @@ const createOverlayId = () => {
 
 const logBottomOverlayDebug = (event: string, payload: Record<string, unknown>) => {
   if (BOTTOM_OVERLAY_DEBUG_LOGS) {
-    console.log("[BottomOverlay]", event, payload);
   }
 };
 

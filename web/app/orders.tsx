@@ -1,4 +1,4 @@
-import { Ionicons } from "@expo/vector-icons";
+﻿import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect } from "@react-navigation/native";
 import { router } from "expo-router";
 import React, { useCallback, useState } from "react";
@@ -117,14 +117,13 @@ export default function OrdersScreen() {
     if (order?.currency && order.currency !== "PHP") {
       return `${order.currency} ${amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}`;
     }
-    return `₱${amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}`;
+    return `â‚±${amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}`;
   };
 
   const renderOrder = (item: any, isSelling = false) => (
     <TouchableOpacity
       key={item.id}
       style={[styles.orderCard, { backgroundColor: cardBg, borderColor: borderCol }]}
-      onPress={() => router.push({ pathname: "/deal_details", params: { order_id: item.id } })}
     >
       <View style={styles.orderHeader}>
         <Text style={[styles.orderTitle, { color: colors.text }]}>#{item.order_number || item.id?.slice(0, 8) || "..."}</Text>
@@ -231,3 +230,4 @@ const styles = StyleSheet.create({
   emptyWrap: { minHeight: 360, alignItems: "center", justifyContent: "center" },
   emptyText: { marginTop: 10, fontSize: moderateScale(15), fontFamily: "Poppins_500Medium" },
 });
+

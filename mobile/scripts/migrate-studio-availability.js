@@ -12,11 +12,9 @@ if (!supabaseUrl || !supabaseServiceKey) {
 const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
 async function migrateStudioAvailability() {
-    console.log('🔄 Starting studio availability migration...\n');
 
     try {
         // Step 1: Check if slot_order column exists
-        console.log('1️⃣ Checking if slot_order column exists...');
         const { data: columns, error: columnsError } = await supabase
             .from('studio_operating_hours')
             .select('*')
@@ -28,7 +26,6 @@ async function migrateStudioAvailability() {
         }
 
         // Step 2: Add slot_order column if it doesn't exist
-        console.log('2️⃣ Adding slot_order column...');
         const { error: alterError } = await supabase.rpc('exec_sql', {
             sql: `
                 -- Add slot_order column if it doesn't exist
@@ -49,32 +46,12 @@ async function migrateStudioAvailability() {
         });
 
         if (alterError) {
-            console.log('⚠️ Using direct SQL execution (rpc might not exist)...');
             // If rpc doesn't work, we need to execute via raw query
             // This will require using the postgres connection directly
-            console.log('📝 Please run the following SQL manually in Supabase SQL Editor:');
-            console.log(`
--- Add slot_order column if it doesn't exist
-ALTER TABLE studio_operating_hours 
-ADD COLUMN IF NOT EXISTS slot_order INTEGER DEFAULT 0;
-
--- Drop the unique constraint if it exists
-ALTER TABLE studio_operating_hours 
-DROP CONSTRAINT IF EXISTS studio_operating_hours_studio_id_day_of_week_key;
-
--- Create index for faster lookups
-CREATE INDEX IF NOT EXISTS idx_studio_operating_hours_lookup 
-ON studio_operating_hours(studio_id, day_of_week, slot_order);
-
--- Update existing rows to have slot_order = 0
-UPDATE studio_operating_hours SET slot_order = 0 WHERE slot_order IS NULL;
-            `);
         } else {
-            console.log('✅ Schema updated successfully!');
         }
 
         // Step 3: Verify the changes
-        console.log('3️⃣ Verifying changes...');
         const { data: studios, error: studiosError } = await supabase
             .from('studio_operating_hours')
             .select('*')
@@ -85,13 +62,6 @@ UPDATE studio_operating_hours SET slot_order = 0 WHERE slot_order IS NULL;
             throw studiosError;
         }
 
-        console.log('✅ Sample data:', studios);
-        console.log('\n✅ Migration completed successfully!');
-        console.log('\n📋 Summary:');
-        console.log('  - Added slot_order column to studio_operating_hours');
-        console.log('  - Removed UNIQUE constraint to allow multiple slots per day');
-        console.log('  - Created index for efficient lookups');
-        console.log('\n🎉 Studios can now have multiple time slots per day!');
 
     } catch (error) {
         console.error('❌ Migration failed:', error);

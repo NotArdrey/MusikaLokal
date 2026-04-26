@@ -87,6 +87,19 @@ const normalizeBookmarkBuckets = (value: any) => ({
   productions: Array.isArray(value?.productions) ? value.productions : [],
 });
 
+type ProfileScreenCachePayload = {
+  profile: any;
+  isOwner: boolean;
+  gigStats: { active: number; upcoming: number; done: number };
+  gigTimeline: { active: any[]; upcoming: any[]; done: any[] };
+  supportsGigVisibilityPreference: boolean;
+  profileFollowerCount: number;
+  fetchedAt: number;
+};
+
+const PROFILE_FOCUS_REFRESH_COOLDOWN_MS = 30000;
+const profileScreenCache = new Map<string, ProfileScreenCachePayload>();
+
 const sanitizeAvatarUrl = (value: unknown): string | null => {
   if (typeof value !== "string") return null;
 
@@ -207,85 +220,21 @@ export default function ProfileScreen() {
   const profileFetchInFlightRef = useRef(false);
   const canManageStations = !isGuest && userRole === "admin";
 
-  useEffect(() => {
-    if (loading) return;
-
-    console.log("[ProfileMenu][mobile] Header action eligibility", {
-      timestamp: new Date().toISOString(),
-      authLoading,
-      loading,
-      isOwner,
-      isGuest,
-      menuButtonVisible: isOwner || isGuest,
-      reportButtonVisible: !isOwner && !isGuest,
-      activeTab,
-      profileId: profile?.id ?? null,
-      currentUserId: currentUserId ?? null,
-    });
-  }, [activeTab, authLoading, currentUserId, isGuest, isOwner, loading, profile?.id]);
-
-  useEffect(() => {
-    console.log("[ProfileMenu][mobile] Menu visibility changed", {
-      timestamp: new Date().toISOString(),
-      isMenuOpen,
-      activeTab,
-      profileId: profile?.id ?? null,
-    });
-  }, [activeTab, isMenuOpen, profile?.id]);
-
-  const openDrawer = useCallback((source: string = "unknown") => {
+  const openDrawer = useCallback((_source: string = "unknown") => {
     if (isMenuOpen) {
-      console.log("[ProfileMenu][mobile] Open ignored because drawer is already open", {
-        timestamp: new Date().toISOString(),
-        source,
-        isMenuOpen,
-      });
       return;
     }
-
-    console.log("[ProfileMenu][mobile] Open requested", {
-      timestamp: new Date().toISOString(),
-      source,
-      isOwner,
-      isGuest,
-      isMenuOpen,
-      activeTab,
-      profileId: profile?.id ?? null,
-      currentUserId: currentUserId ?? null,
-    });
-
-    console.log("[ProfileMenu][mobile] Opening drawer", {
-      source,
-      nextIsMenuOpen: true,
-    });
 
     setIsMenuOpen(true);
-  }, [activeTab, currentUserId, isGuest, isMenuOpen, isOwner, profile?.id]);
+  }, [isMenuOpen]);
 
-  const closeDrawer = useCallback((source: string = "unknown") => {
+  const closeDrawer = useCallback((_source: string = "unknown") => {
     if (!isMenuOpen) {
-      console.log("[ProfileMenu][mobile] Close ignored because drawer is already closed", {
-        timestamp: new Date().toISOString(),
-        source,
-      });
       return;
     }
 
-    console.log("[ProfileMenu][mobile] Close requested", {
-      timestamp: new Date().toISOString(),
-      source,
-      isMenuOpen,
-      activeTab,
-      profileId: profile?.id ?? null,
-    });
-
-    console.log("[ProfileMenu][mobile] Closing drawer", {
-      source,
-      nextIsMenuOpen: false,
-    });
-
     setIsMenuOpen(false);
-  }, [activeTab, isMenuOpen, profile?.id]);
+  }, [isMenuOpen]);
 
   const isMissingShowGigStatusesColumnError = (error: any) => {
     const message = String(error?.message || "").toLowerCase();
@@ -499,7 +448,6 @@ export default function ProfileScreen() {
         productions: productions.slice(0, 8),
       }));
     } catch (bookmarkError) {
-      console.log("Error fetching bookmarks:", bookmarkError);
       setBookmarkedListings(createEmptyBookmarks());
     } finally {
       setLoadingBookmarks(false);
@@ -603,14 +551,18 @@ export default function ProfileScreen() {
   }, [currentUserId, profile?.full_name, profile?.id]);
 
   // Refresh profile data every time the screen comes into focus
-  const fetchProfile = useCallback(async () => {
+  const fetchProfile = useCallback(async (
+    options: { showLoading?: boolean } = {},
+  ) => {
     if (profileFetchInFlightRef.current) {
       return;
     }
 
     profileFetchInFlightRef.current = true;
     try {
-      setLoading(true);
+      if (options.showLoading !== false) {
+        setLoading(true);
+      }
       // Determine target ID: param OR current user
       let resolvedCurrentUserId = currentUserId;
 
@@ -621,7 +573,6 @@ export default function ProfileScreen() {
           error,
         } = await supabase.auth.getUser();
         if (error) {
-          console.log("âŒ Profile - Auth error while resolving current user:", error.message);
         }
         if (user?.id) {
           resolvedCurrentUserId = user.id;
@@ -629,22 +580,16 @@ export default function ProfileScreen() {
       }
 
       let targetId = normalizedParamUserId || resolvedCurrentUserId;
-      console.log("ðŸ‘¤ Profile - Param userId:", normalizedParamUserId);
-      console.log("ðŸ‘¤ Profile - Context userId:", currentUserId);
-      console.log("ðŸ‘¤ Profile - Resolved userId:", resolvedCurrentUserId);
 
       // If still no targetId, try to get from auth directly
       if (!targetId) {
-        console.log("âš ï¸ Profile - No userId, fetching from auth...");
         const {
           data: { user },
           error,
         } = await supabase.auth.getUser();
         if (error) {
-          console.log("âŒ Profile - Auth error:", error.message);
         }
         if (user) {
-          console.log("âœ… Profile - Got user from auth:", user.id);
           targetId = user.id;
         }
       }
@@ -668,13 +613,11 @@ export default function ProfileScreen() {
           return;
         }
 
-        console.log("âŒ Profile - No user ID available, redirecting to login");
         // No user logged in and no userId param - redirect to login
         router.replace("/");
         return;
       }
 
-      console.log("ðŸŽ¯ Profile - Fetching profile for:", targetId);
 
       // Check ownership
       const ownership = resolvedCurrentUserId && targetId === resolvedCurrentUserId;
@@ -727,6 +670,12 @@ export default function ProfileScreen() {
         "show_gig_statuses",
       );
       setSupportsGigVisibilityPreference(hasGigVisibilityPreference);
+      let nextGigStats = { active: 0, upcoming: 0, done: 0 };
+      let nextGigTimeline: { active: any[]; upcoming: any[]; done: any[] } = {
+        active: [],
+        upcoming: [],
+        done: [],
+      };
 
       if (profileData.role === "musician") {
         const { data: ownedGroups } = await supabase
@@ -788,11 +737,13 @@ export default function ProfileScreen() {
         timelineBuckets.upcoming.sort(byDateDesc);
         timelineBuckets.done.sort(byDateDesc);
 
-        setGigStats(stats);
-        setGigTimeline(timelineBuckets);
+        nextGigStats = stats;
+        nextGigTimeline = timelineBuckets;
+        setGigStats(nextGigStats);
+        setGigTimeline(nextGigTimeline);
       } else {
-        setGigStats({ active: 0, upcoming: 0, done: 0 });
-        setGigTimeline({ active: [], upcoming: [], done: [] });
+        setGigStats(nextGigStats);
+        setGigTimeline(nextGigTimeline);
       }
 
       const [skillsResult, genresResult, portfolioResult] = await Promise.all([
@@ -815,7 +766,7 @@ export default function ProfileScreen() {
         sanitizeAvatarUrl(profileData?.avatar_url) ||
         sanitizeAvatarUrl(profileStatsData?.avatar_url);
 
-      setProfile({
+      const nextProfile = {
         ...(profileStatsData || {}),
         ...profileData,
         avatar_url: normalizedAvatarUrl,
@@ -824,7 +775,8 @@ export default function ProfileScreen() {
         portfolio_urls: (portfolioResult.data || [])
           .map((row: any) => row.portfolio_url)
           .filter(Boolean),
-      });
+      };
+      setProfile(nextProfile);
 
       const fallbackFollowerCount = Number(
         profileStatsData?.followers_count ??
@@ -833,11 +785,10 @@ export default function ProfileScreen() {
           profileData?.follower_count ??
           0,
       );
-      setProfileFollowerCount(
-        Number.isFinite(fallbackFollowerCount)
-          ? Math.max(0, Math.floor(fallbackFollowerCount))
-          : 0,
-      );
+      let nextProfileFollowerCount = Number.isFinite(fallbackFollowerCount)
+        ? Math.max(0, Math.floor(fallbackFollowerCount))
+        : 0;
+      setProfileFollowerCount(nextProfileFollowerCount);
 
       try {
         const { count: followerCount, error: followerCountError } = await supabase
@@ -847,17 +798,27 @@ export default function ProfileScreen() {
           .eq("followed_type", "profile");
 
         if (!followerCountError && typeof followerCount === "number") {
-          setProfileFollowerCount(Math.max(0, followerCount));
+          nextProfileFollowerCount = Math.max(0, followerCount);
+          setProfileFollowerCount(nextProfileFollowerCount);
         }
       } catch {
         // Keep the fallback count if follows query is unavailable.
       }
 
+      profileScreenCache.set(targetId, {
+        profile: nextProfile,
+        isOwner: !!ownership,
+        gigStats: nextGigStats,
+        gigTimeline: nextGigTimeline,
+        supportsGigVisibilityPreference: hasGigVisibilityPreference,
+        profileFollowerCount: nextProfileFollowerCount,
+        fetchedAt: Date.now(),
+      });
+
       await fetchBookmarkedListings(targetId, !!ownership && !isGuest);
       fetchPlaylists(targetId);
       fetchStation(targetId);
     } catch (e) {
-      console.log("Error fetching profile:", e);
     } finally {
       profileFetchInFlightRef.current = false;
       setLoading(false);
@@ -867,9 +828,27 @@ export default function ProfileScreen() {
   useFocusEffect(
     useCallback(() => {
       if (!authLoading) {
-        fetchProfile();
+        const cacheTargetId = normalizedParamUserId || currentUserId;
+        const cached = cacheTargetId ? profileScreenCache.get(cacheTargetId) : null;
+        const cacheIsFresh =
+          cached &&
+          Date.now() - cached.fetchedAt < PROFILE_FOCUS_REFRESH_COOLDOWN_MS;
+
+        if (cached) {
+          setProfile(cached.profile);
+          setIsOwner(cached.isOwner);
+          setGigStats(cached.gigStats);
+          setGigTimeline(cached.gigTimeline);
+          setSupportsGigVisibilityPreference(cached.supportsGigVisibilityPreference);
+          setProfileFollowerCount(cached.profileFollowerCount);
+          setLoading(false);
+        }
+
+        if (!cacheIsFresh) {
+          fetchProfile({ showLoading: !cached });
+        }
       }
-    }, [authLoading, fetchProfile]),
+    }, [authLoading, currentUserId, fetchProfile, normalizedParamUserId]),
   );
 
   const MENU_ITEMS = [
@@ -1062,9 +1041,6 @@ export default function ProfileScreen() {
           ? "video/mp4"
           : `image/${fileExt === "jpg" ? "jpeg" : fileExt}`);
 
-      console.log("ðŸ“¤ Uploading portfolio media...");
-      console.log("ðŸ“ File URI:", file.uri);
-      console.log("ðŸ“ File name:", fileName);
 
       const base64 = await FileSystem.readAsStringAsync(file.uri, { encoding: 'base64' });
       const bytes = base64ToUint8Array(base64);
@@ -1086,7 +1062,6 @@ export default function ProfileScreen() {
         .from("portfolio")
         .getPublicUrl(fileName);
 
-      console.log("âœ… Uploaded:", urlData.publicUrl);
 
       const { data: lastPortfolioRow, error: portfolioFetchError } = await supabase
         .from("profile_portfolio_urls")
@@ -1124,7 +1099,6 @@ export default function ProfileScreen() {
       fetchProfile();
       showAlert("success", "Success", "Media added to portfolio!");
     } catch (e: any) {
-      console.log("Upload error:", e);
       showAlert("warning", "Upload Failed", e.message || "Failed to upload media");
     } finally {
       setUploading(false);
@@ -1435,7 +1409,6 @@ export default function ProfileScreen() {
 
       await tuneIn(userStation);
     } catch (stationError) {
-      console.log("[profile] Failed to start station playback:", stationError);
       openStationScreen();
     }
   };
@@ -2481,12 +2454,6 @@ export default function ProfileScreen() {
         statusBarTranslucent
         onRequestClose={() => closeDrawer("modal-request-close")}
         onShow={() => {
-          console.log("[ProfileMenu][mobile] Drawer modal onShow fired", {
-            timestamp: new Date().toISOString(),
-            isMenuOpen,
-            activeTab,
-            profileId: profile?.id ?? null,
-          });
         }}
       >
         <View style={styles.drawerOverlay}>
@@ -2534,12 +2501,6 @@ export default function ProfileScreen() {
                       activeOpacity={1}
                       key={item.label}
                       onPress={() => {
-                        console.log("[ProfileMenu][mobile] Drawer menu item selected", {
-                          timestamp: new Date().toISOString(),
-                          label: item.label,
-                          route: item.route,
-                          isMenuOpen,
-                        });
                         closeDrawer(`menu-item:${item.route}`);
                         setTimeout(() => router.push(item.route as any), 250);
                       }}
@@ -2556,11 +2517,6 @@ export default function ProfileScreen() {
                   <TouchableOpacity
                     activeOpacity={1}
                     onPress={() => {
-                      console.log("[ProfileMenu][mobile] Guest drawer settings selected", {
-                        timestamp: new Date().toISOString(),
-                        route: "/settings",
-                        isMenuOpen,
-                      });
                       closeDrawer("guest-settings");
                       setTimeout(() => router.push("/settings"), 250);
                     }}

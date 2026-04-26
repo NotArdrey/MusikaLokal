@@ -42,10 +42,8 @@ function processFile(filePath) {
 
     if (content !== originalContent) {
         fs.writeFileSync(filePath, content, 'utf8');
-        console.log(`Updated ${filePath}`);
     }
 }
 
 walkDir(path.join(__dirname, 'app'), processFile);
 walkDir(path.join(__dirname, 'src', 'components'), processFile);
-console.log('Done.');

@@ -13,6 +13,7 @@ const MIN_STATION_ROTATION_INTERVAL_MINUTES = 5;
 const MAX_STATION_ROTATION_INTERVAL_MINUTES = 120;
 const DEFAULT_STATION_CONCURRENT_SLOT_LIMIT = 4;
 const MAX_STATION_CONCURRENT_SLOT_LIMIT = 4;
+const ADMIN_STATION_SOURCE_PLAYLIST_LIMIT = 500;
 
 function jsonResponse(body: any, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -214,10 +215,37 @@ async function getPrimaryManagedStation(supabaseAdmin: any, managedProfileId: st
     .from("stations")
     .select("id, creator_id, managed_profile_id")
     .eq("managed_profile_id", managedProfileId)
+    .is("managed_group_id", null)
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();
 
+  if (error) {
+    throw error;
+  }
+
+  return data;
+}
+
+async function getPrimaryManagedSourceStation(
+  supabaseAdmin: any,
+  sourceKind: "profile" | "group",
+  sourceId: string,
+  managedProfileId?: string | null,
+) {
+  let query = supabaseAdmin
+    .from("stations")
+    .select("id, creator_id, managed_profile_id, managed_group_id, is_active, is_featured")
+    .order("created_at", { ascending: false })
+    .limit(1);
+
+  if (sourceKind === "group") {
+    query = query.eq("managed_group_id", sourceId);
+  } else {
+    query = query.eq("managed_profile_id", managedProfileId || sourceId).is("managed_group_id", null);
+  }
+
+  const { data, error } = await query.maybeSingle();
   if (error) {
     throw error;
   }
@@ -245,6 +273,507 @@ async function transferStationToAdminIfNeeded(
   if (error) {
     throw error;
   }
+}
+
+function getProfileDisplayName(profile: any) {
+  const fullName = typeof profile?.full_name === "string" ? profile.full_name.trim() : "";
+  return fullName || "Unknown artist";
+}
+
+function getGroupDisplayName(group: any) {
+  const name = typeof group?.name === "string" ? group.name.trim() : "";
+  return name || "Untitled group";
+}
+
+function getGroupTypeLabel(groupType: unknown) {
+  const normalized = typeof groupType === "string" ? groupType.toLowerCase() : "";
+  if (normalized === "duo") return "Duo";
+  if (normalized === "solo") return "Solo";
+  return "Group";
+}
+
+function getFirstImage(value: unknown) {
+  if (!Array.isArray(value)) {
+    return null;
+  }
+
+  const first = value.find((item) => typeof item === "string" && item.trim().length > 0);
+  return typeof first === "string" ? first.trim() : null;
+}
+
+function getSourceStationSummary(stationsBySourceKey: Map<string, any>, sourceKey: string) {
+  const station = stationsBySourceKey.get(sourceKey);
+  if (!station) {
+    return null;
+  }
+
+  return {
+    id: station.id,
+    name: station.name,
+    description: station.description,
+    genre: station.genre,
+    cover_image_url: station.cover_image_url,
+    is_active: station.is_active,
+    is_featured: station.is_featured,
+    rotation_interval_minutes: station.rotation_interval_minutes,
+    slot_count: station.slot_count || 0,
+    slot_playlist_ids: station.slot_playlist_ids || [],
+  };
+}
+
+async function getStationPlaylistIdsByStationId(supabaseAdmin: any, stationIds: string[]) {
+  const result = new Map<string, string[]>();
+
+  if (stationIds.length === 0) {
+    return result;
+  }
+
+  const { data, error } = await supabaseAdmin
+    .from("station_playlist_slots")
+    .select("station_id, playlist_id, position")
+    .in("station_id", stationIds)
+    .order("position");
+
+  if (error) {
+    throw error;
+  }
+
+  for (const row of data || []) {
+    const stationId = typeof row?.station_id === "string" ? row.station_id : "";
+    const playlistId = typeof row?.playlist_id === "string" ? row.playlist_id : "";
+    if (!stationId || !playlistId) {
+      continue;
+    }
+
+    const next = result.get(stationId) || [];
+    next.push(playlistId);
+    result.set(stationId, next);
+  }
+
+  return result;
+}
+
+async function listAdminStationSources(supabaseAdmin: any) {
+  const { data: playlists, error: playlistError } = await supabaseAdmin
+    .from("playlists")
+    .select("id, creator_id, title, description, genre, cover_image_url, track_count, created_at, creator:profiles!creator_id(id, full_name, avatar_url, role)")
+    .eq("visibility", "public")
+    .eq("is_hidden", false)
+    .order("created_at", { ascending: false })
+    .limit(ADMIN_STATION_SOURCE_PLAYLIST_LIMIT);
+
+  if (playlistError) {
+    throw playlistError;
+  }
+
+  const playlistRows = playlists || [];
+  const playlistIds = playlistRows
+    .map((playlist: any) => (typeof playlist?.id === "string" ? playlist.id : ""))
+    .filter((playlistId: string) => playlistId.length > 0);
+
+  const [{ data: groupLinks, error: groupLinksError }, { data: stations, error: stationsError }] = await Promise.all([
+    playlistIds.length > 0
+      ? supabaseAdmin
+          .from("group_playlists")
+          .select("group_id, playlist_id, position")
+          .in("playlist_id", playlistIds)
+      : Promise.resolve({ data: [], error: null }),
+    supabaseAdmin
+      .from("stations")
+      .select("id, name, description, genre, cover_image_url, is_active, is_featured, rotation_interval_minutes, managed_profile_id, managed_group_id"),
+  ]);
+
+  if (groupLinksError) {
+    throw groupLinksError;
+  }
+
+  if (stationsError) {
+    throw stationsError;
+  }
+
+  const stationIds = (stations || [])
+    .map((station: any) => (typeof station?.id === "string" ? station.id : ""))
+    .filter((stationId: string) => stationId.length > 0);
+  const stationPlaylistIds = await getStationPlaylistIdsByStationId(supabaseAdmin, stationIds);
+
+  const stationsBySourceKey = new Map<string, any>();
+  for (const station of stations || []) {
+    if (typeof station?.id !== "string") {
+      continue;
+    }
+
+    station.slot_playlist_ids = stationPlaylistIds.get(station.id) || [];
+    station.slot_count = station.slot_playlist_ids.length;
+
+    if (typeof station?.managed_group_id === "string" && station.managed_group_id) {
+      stationsBySourceKey.set(`group:${station.managed_group_id}`, station);
+      continue;
+    }
+
+    if (typeof station?.managed_profile_id === "string" && station.managed_profile_id) {
+      stationsBySourceKey.set(`profile:${station.managed_profile_id}`, station);
+    }
+  }
+
+  const groupIds = Array.from(new Set(
+    (groupLinks || [])
+      .map((row: any) => (typeof row?.group_id === "string" ? row.group_id : ""))
+      .filter((groupId: string) => groupId.length > 0),
+  ));
+  const groupLinkedPlaylistIds = new Set(
+    (groupLinks || [])
+      .map((row: any) => (typeof row?.playlist_id === "string" ? row.playlist_id : ""))
+      .filter((playlistId: string) => playlistId.length > 0),
+  );
+
+  let groupsById = new Map<string, any>();
+  if (groupIds.length > 0) {
+    const { data: groups, error: groupsError } = await supabaseAdmin
+      .from("groups_with_stats")
+      .select("id, owner_id, name, group_type, genre, images")
+      .in("id", groupIds);
+
+    if (groupsError) {
+      throw groupsError;
+    }
+
+    groupsById = new Map(
+      (groups || [])
+        .filter((group: any) => typeof group?.id === "string")
+        .map((group: any) => [group.id, group]),
+    );
+  }
+
+  const playlistsByProfileId = new Map<string, any[]>();
+  const playlistsByGroupId = new Map<string, any[]>();
+  const playlistById = new Map<string, any>(
+    playlistRows
+      .filter((playlist: any) => typeof playlist?.id === "string")
+      .map((playlist: any) => [playlist.id, playlist]),
+  );
+
+  for (const playlist of playlistRows) {
+    const profileId = typeof playlist?.creator_id === "string" ? playlist.creator_id : "";
+    if (!profileId || groupLinkedPlaylistIds.has(playlist.id)) {
+      continue;
+    }
+
+    const next = playlistsByProfileId.get(profileId) || [];
+    next.push(playlist);
+    playlistsByProfileId.set(profileId, next);
+  }
+
+  for (const link of groupLinks || []) {
+    const groupId = typeof link?.group_id === "string" ? link.group_id : "";
+    const playlistId = typeof link?.playlist_id === "string" ? link.playlist_id : "";
+    const playlist = playlistById.get(playlistId);
+    if (!groupId || !playlist || !groupsById.has(groupId)) {
+      continue;
+    }
+
+    const next = playlistsByGroupId.get(groupId) || [];
+    next.push(playlist);
+    playlistsByGroupId.set(groupId, next);
+  }
+
+  const profileSources = Array.from(playlistsByProfileId.entries())
+    .map(([profileId, sourcePlaylists]) => {
+      const firstPlaylist = sourcePlaylists[0] || {};
+      const profile = firstPlaylist.creator || {};
+      const profileRole = typeof profile?.role === "string" ? profile.role.toLowerCase() : "";
+      if (profileRole && profileRole !== "musician") {
+        return null;
+      }
+
+      const stationKey = `profile:${profileId}`;
+      return {
+        key: stationKey,
+        kind: "profile",
+        id: profileId,
+        owner_profile_id: profileId,
+        name: getProfileDisplayName(profile),
+        subtitle: "Artist",
+        genre: firstPlaylist.genre || null,
+        cover_image_url: profile?.avatar_url || firstPlaylist.cover_image_url || null,
+        playlist_count: sourcePlaylists.length,
+        track_count: sourcePlaylists.reduce((sum, playlist) => sum + Number(playlist?.track_count || 0), 0),
+        playlists: sourcePlaylists,
+        station: getSourceStationSummary(stationsBySourceKey, stationKey),
+      };
+    })
+    .filter(Boolean);
+
+  const groupSources = Array.from(playlistsByGroupId.entries())
+    .map(([groupId, sourcePlaylists]) => {
+      const group = groupsById.get(groupId);
+      if (!group?.owner_id) {
+        return null;
+      }
+
+      const stationKey = `group:${groupId}`;
+      const groupTypeLabel = getGroupTypeLabel(group.group_type);
+      return {
+        key: stationKey,
+        kind: "group",
+        id: groupId,
+        owner_profile_id: group.owner_id,
+        name: getGroupDisplayName(group),
+        subtitle: groupTypeLabel,
+        genre: group.genre || sourcePlaylists[0]?.genre || null,
+        cover_image_url: getFirstImage(group.images) || sourcePlaylists[0]?.cover_image_url || null,
+        playlist_count: sourcePlaylists.length,
+        track_count: sourcePlaylists.reduce((sum, playlist) => sum + Number(playlist?.track_count || 0), 0),
+        playlists: sourcePlaylists,
+        station: getSourceStationSummary(stationsBySourceKey, stationKey),
+      };
+    })
+    .filter(Boolean);
+
+  return [...groupSources, ...profileSources].sort((left: any, right: any) => {
+    const leftHasStation = left.station ? 1 : 0;
+    const rightHasStation = right.station ? 1 : 0;
+    if (leftHasStation !== rightHasStation) {
+      return leftHasStation - rightHasStation;
+    }
+
+    return String(left.name || "").localeCompare(String(right.name || ""));
+  });
+}
+
+async function getEligibleStationSource(
+  supabaseAdmin: any,
+  sourceKind: "profile" | "group",
+  sourceId: string,
+) {
+  if (sourceKind === "profile") {
+    const { data: profile, error: profileError } = await supabaseAdmin
+      .from("profiles")
+      .select("id, full_name, avatar_url, role")
+      .eq("id", sourceId)
+      .maybeSingle();
+
+    if (profileError) {
+      throw profileError;
+    }
+
+    if (!profile) {
+      throw new Error("Artist not found");
+    }
+
+    const { data: playlists, error: playlistError } = await supabaseAdmin
+      .from("playlists")
+      .select("id, title, description, genre, cover_image_url, track_count, creator_id")
+      .eq("creator_id", sourceId)
+      .eq("visibility", "public")
+      .eq("is_hidden", false)
+      .order("created_at", { ascending: false });
+
+    if (playlistError) {
+      throw playlistError;
+    }
+
+    const playlistIds = (playlists || [])
+      .map((playlist: any) => (typeof playlist?.id === "string" ? playlist.id : ""))
+      .filter((playlistId: string) => playlistId.length > 0);
+    let groupLinkedPlaylistIds = new Set<string>();
+    if (playlistIds.length > 0) {
+      const { data: groupLinks, error: groupLinksError } = await supabaseAdmin
+        .from("group_playlists")
+        .select("playlist_id")
+        .in("playlist_id", playlistIds);
+
+      if (groupLinksError) {
+        throw groupLinksError;
+      }
+
+      groupLinkedPlaylistIds = new Set(
+        (groupLinks || [])
+          .map((row: any) => (typeof row?.playlist_id === "string" ? row.playlist_id : ""))
+          .filter((playlistId: string) => playlistId.length > 0),
+      );
+    }
+
+    const soloPlaylists = (playlists || []).filter((playlist: any) => !groupLinkedPlaylistIds.has(playlist.id));
+
+    return {
+      source: profile,
+      managedProfileId: profile.id,
+      managedGroupId: null,
+      defaultName: `${getProfileDisplayName(profile)} Radio`,
+      defaultGenre: soloPlaylists?.[0]?.genre || null,
+      defaultCoverImageUrl: profile.avatar_url || soloPlaylists?.[0]?.cover_image_url || null,
+      playlists: soloPlaylists,
+    };
+  }
+
+  const { data: group, error: groupError } = await supabaseAdmin
+    .from("groups_with_stats")
+    .select("id, owner_id, name, group_type, genre, images")
+    .eq("id", sourceId)
+    .maybeSingle();
+
+  if (groupError) {
+    throw groupError;
+  }
+
+  if (!group?.owner_id) {
+    throw new Error("Group not found");
+  }
+
+  const { data: links, error: linksError } = await supabaseAdmin
+    .from("group_playlists")
+    .select("playlist_id, position")
+    .eq("group_id", sourceId)
+    .order("position");
+
+  if (linksError) {
+    throw linksError;
+  }
+
+  const playlistIds = (links || [])
+    .map((link: any) => (typeof link?.playlist_id === "string" ? link.playlist_id : ""))
+    .filter((playlistId: string) => playlistId.length > 0);
+
+  let playlists: any[] = [];
+  if (playlistIds.length > 0) {
+    const { data, error } = await supabaseAdmin
+      .from("playlists")
+      .select("id, title, description, genre, cover_image_url, track_count, creator_id")
+      .in("id", playlistIds)
+      .eq("visibility", "public")
+      .eq("is_hidden", false);
+
+    if (error) {
+      throw error;
+    }
+
+    const positionByPlaylistId = new Map(
+      (links || []).map((link: any) => [link.playlist_id, Number(link.position || 0)]),
+    );
+    playlists = (data || []).sort((left: any, right: any) => {
+      return (positionByPlaylistId.get(left.id) || 0) - (positionByPlaylistId.get(right.id) || 0);
+    });
+  }
+
+  return {
+    source: group,
+    managedProfileId: group.owner_id,
+    managedGroupId: group.id,
+    defaultName: `${getGroupDisplayName(group)} Radio`,
+    defaultGenre: group.genre || playlists?.[0]?.genre || null,
+    defaultCoverImageUrl: getFirstImage(group.images) || playlists?.[0]?.cover_image_url || null,
+    playlists,
+  };
+}
+
+async function upsertStationFromSource(
+  supabaseAdmin: any,
+  adminUserId: string,
+  sourceKind: "profile" | "group",
+  sourceId: string,
+  params: Record<string, any>,
+) {
+  const sourceInfo = await getEligibleStationSource(supabaseAdmin, sourceKind, sourceId);
+  const eligiblePlaylists = sourceInfo.playlists || [];
+  const eligiblePlaylistIds = new Set(
+    eligiblePlaylists
+      .map((playlist: any) => (typeof playlist?.id === "string" ? playlist.id : ""))
+      .filter((playlistId: string) => playlistId.length > 0),
+  );
+
+  const requestedPlaylistIds = Array.isArray(params.playlist_ids)
+    ? params.playlist_ids
+        .map((playlistId: unknown) => (typeof playlistId === "string" ? playlistId.trim() : ""))
+        .filter((playlistId: string) => playlistId.length > 0)
+    : [];
+  const selectedPlaylistIds = (requestedPlaylistIds.length > 0
+    ? requestedPlaylistIds
+    : Array.from(eligiblePlaylistIds)
+  ).filter((playlistId: string, index: number, list: string[]) => {
+    return list.indexOf(playlistId) === index && eligiblePlaylistIds.has(playlistId);
+  });
+
+  if (selectedPlaylistIds.length === 0) {
+    throw new Error("Select at least one eligible public playlist for this station.");
+  }
+
+  const existingStation = await getPrimaryManagedSourceStation(
+    supabaseAdmin,
+    sourceKind,
+    sourceId,
+    sourceInfo.managedProfileId,
+  );
+
+  const stationPatch = {
+    creator_id: adminUserId,
+    managed_profile_id: sourceInfo.managedProfileId,
+    managed_group_id: sourceInfo.managedGroupId,
+    name: params.name || sourceInfo.defaultName,
+    description: params.description || null,
+    genre: params.genre || sourceInfo.defaultGenre || null,
+    cover_image_url: params.cover_image_url || sourceInfo.defaultCoverImageUrl || null,
+    is_active: "is_active" in params ? params.is_active !== false : existingStation?.is_active ?? true,
+    is_featured: "is_featured" in params ? params.is_featured === true : existingStation?.is_featured ?? false,
+    rotation_interval_minutes: normalizeStationRotationIntervalMinutes(params.rotation_interval_minutes),
+  };
+
+  let station: any;
+  if (existingStation?.id) {
+    const { data, error } = await supabaseAdmin
+      .from("stations")
+      .update(stationPatch)
+      .eq("id", existingStation.id)
+      .select()
+      .single();
+
+    if (error) {
+      throw error;
+    }
+
+    station = data;
+  } else {
+    const { data, error } = await supabaseAdmin
+      .from("stations")
+      .insert(stationPatch)
+      .select()
+      .single();
+
+    if (error) {
+      throw error;
+    }
+
+    station = data;
+  }
+
+  const { error: deleteSlotsError } = await supabaseAdmin
+    .from("station_playlist_slots")
+    .delete()
+    .eq("station_id", station.id);
+
+  if (deleteSlotsError) {
+    throw deleteSlotsError;
+  }
+
+  const slotRows = selectedPlaylistIds.map((playlistId: string, index: number) => ({
+    station_id: station.id,
+    playlist_id: playlistId,
+    position: index,
+    is_active: true,
+  }));
+
+  const { error: insertSlotsError } = await supabaseAdmin
+    .from("station_playlist_slots")
+    .insert(slotRows);
+
+  if (insertSlotsError) {
+    throw insertSlotsError;
+  }
+
+  return {
+    ...station,
+    slot_count: selectedPlaylistIds.length,
+    slot_playlist_ids: selectedPlaylistIds,
+  };
 }
 
 function isSlotScheduledForNow(slot: any, nowMs: number) {
@@ -422,7 +951,12 @@ Deno.serve(async (req: Request) => {
       ? await getRequesterRole(supabaseAdmin, authUser, uid)
       : null;
     const stationAdminActions = new Set([
+      "admin_list_stations",
+      "admin_list_station_sources",
+      "admin_upsert_station_from_source",
+      "admin_auto_create_stations",
       "create_station",
+      "delete_station",
       "update_station",
       "add_station_slot",
       "remove_station_slot",
@@ -866,6 +1400,7 @@ Deno.serve(async (req: Request) => {
         .insert({
           creator_id: uid,
           managed_profile_id: managedProfileId,
+          managed_group_id: null,
           name,
           description: description || null,
           genre: genre || null,
@@ -879,6 +1414,91 @@ Deno.serve(async (req: Request) => {
       return jsonResponse({ success: true, data });
     }
 
+    if (action === "admin_list_station_sources") {
+      const sources = await listAdminStationSources(supabaseAdmin);
+      return jsonResponse({ success: true, data: sources });
+    }
+
+    if (action === "admin_upsert_station_from_source") {
+      const { source_kind, source_id } = params;
+      const sourceKind = source_kind === "group" ? "group" : "profile";
+      const sourceId = typeof source_id === "string" ? source_id.trim() : "";
+      if (!sourceId) return jsonResponse({ error: "source_id is required" }, 400);
+
+      try {
+        const station = await upsertStationFromSource(
+          supabaseAdmin,
+          uid,
+          sourceKind,
+          sourceId,
+          params,
+        );
+
+        return jsonResponse({ success: true, data: station });
+      } catch (error: any) {
+        return jsonResponse({ error: error.message || "Unable to save station" }, 400);
+      }
+    }
+
+    if (action === "admin_auto_create_stations") {
+      const sources = await listAdminStationSources(supabaseAdmin);
+      const created: any[] = [];
+      const skipped: any[] = [];
+
+      for (const source of sources) {
+        if (source?.station?.id) {
+          skipped.push({ key: source.key, reason: "station_exists" });
+          continue;
+        }
+
+        const playlistIds = Array.isArray(source?.playlists)
+          ? source.playlists
+              .map((playlist: any) => (typeof playlist?.id === "string" ? playlist.id : ""))
+              .filter((playlistId: string) => playlistId.length > 0)
+          : [];
+
+        if (playlistIds.length === 0) {
+          skipped.push({ key: source.key, reason: "no_playlists" });
+          continue;
+        }
+
+        try {
+          const station = await upsertStationFromSource(
+            supabaseAdmin,
+            uid,
+            source.kind === "group" ? "group" : "profile",
+            source.id,
+            {
+              playlist_ids: playlistIds,
+              name: `${source.name || "Artist"} Radio`,
+              description: `Auto-created from ${source.playlist_count || playlistIds.length} public playlist${playlistIds.length === 1 ? "" : "s"}.`,
+              genre: source.genre || null,
+              cover_image_url: source.cover_image_url || null,
+              rotation_interval_minutes: DEFAULT_STATION_ROTATION_INTERVAL_MINUTES,
+              is_active: true,
+              is_featured: false,
+            },
+          );
+          created.push(station);
+        } catch (error: any) {
+          skipped.push({
+            key: source.key,
+            reason: error.message || "create_failed",
+          });
+        }
+      }
+
+      return jsonResponse({
+        success: true,
+        data: {
+          created,
+          skipped,
+          created_count: created.length,
+          skipped_count: skipped.length,
+        },
+      });
+    }
+
     // ── update_station ──────────────────────────────────────────────
     if (action === "update_station") {
       const { station_id, ...updates } = params;
@@ -886,7 +1506,7 @@ Deno.serve(async (req: Request) => {
 
       const { data: existing } = await supabaseAdmin
         .from("stations")
-        .select("id, creator_id, managed_profile_id")
+        .select("id, creator_id, managed_profile_id, managed_group_id")
         .eq("id", station_id)
         .single();
 
@@ -894,7 +1514,7 @@ Deno.serve(async (req: Request) => {
 
       await transferStationToAdminIfNeeded(supabaseAdmin, existing, uid);
 
-      const allowed = ["name", "description", "genre", "cover_image_url", "is_active", "rotation_interval_minutes"];
+      const allowed = ["name", "description", "genre", "cover_image_url", "is_active", "is_featured", "rotation_interval_minutes"];
       const patch: Record<string, any> = {};
       for (const key of allowed) {
         if (key in updates) patch[key] = updates[key];
@@ -902,6 +1522,7 @@ Deno.serve(async (req: Request) => {
 
       patch.creator_id = uid;
       patch.managed_profile_id = existing.managed_profile_id || existing.creator_id;
+      patch.managed_group_id = existing.managed_group_id || null;
 
       if ("rotation_interval_minutes" in patch) {
         patch.rotation_interval_minutes = normalizeStationRotationIntervalMinutes(
@@ -920,6 +1541,19 @@ Deno.serve(async (req: Request) => {
       return jsonResponse({ success: true, data });
     }
 
+    if (action === "delete_station") {
+      const { station_id } = params;
+      if (!station_id) return jsonResponse({ error: "station_id is required" }, 400);
+
+      const { error } = await supabaseAdmin
+        .from("stations")
+        .delete()
+        .eq("id", station_id);
+
+      if (error) return jsonResponse({ error: error.message }, 500);
+      return jsonResponse({ success: true });
+    }
+
     // ── get_station_details ─────────────────────────────────────────
     if (action === "get_station_details") {
       const { station_id } = params;
@@ -927,7 +1561,7 @@ Deno.serve(async (req: Request) => {
 
       const { data: station, error: stErr } = await supabaseAdmin
         .from("stations")
-        .select("*, creator:profiles!creator_id(id, full_name, avatar_url), managed_profile:profiles!managed_profile_id(id, full_name, avatar_url)")
+        .select("*, creator:profiles!creator_id(id, full_name, avatar_url), managed_profile:profiles!managed_profile_id(id, full_name, avatar_url), managed_group:groups!managed_group_id(id, name, group_type, genre)")
         .eq("id", station_id)
         .single();
 
@@ -960,6 +1594,35 @@ Deno.serve(async (req: Request) => {
     }
 
     // ── list_user_stations ───────────────────────────────────────────
+    if (action === "admin_list_stations") {
+      const { data: stations, error } = await supabaseAdmin
+        .from("stations")
+        .select("*, creator:profiles!creator_id(id, full_name, avatar_url), managed_profile:profiles!managed_profile_id(id, full_name, avatar_url), managed_group:groups!managed_group_id(id, name, group_type, genre)")
+        .order("created_at", { ascending: false });
+
+      if (error) return jsonResponse({ error: error.message }, 500);
+
+      for (const st of (stations || [])) {
+        const { data: slots, count, error: slotsError } = await supabaseAdmin
+          .from("station_playlist_slots")
+          .select("id, playlist_id, is_active, position, starts_at, ends_at, created_at", { count: "exact" })
+          .eq("station_id", st.id);
+
+        if (slotsError) return jsonResponse({ error: slotsError.message }, 500);
+
+        const liveSlotState = getStationLiveSlotState(st, slots || []);
+        st.slot_count = count || 0;
+        st.slot_playlist_ids = (slots || []).map((slot: any) => slot.playlist_id);
+        st.live_slot_count = liveSlotState.liveSlots.length;
+        st.live_slot_playlist_ids = liveSlotState.liveSlots.map((slot: any) => slot.playlist_id);
+        st.rotation_interval_minutes = liveSlotState.rotationIntervalMinutes;
+        st.concurrent_slot_limit = liveSlotState.concurrentSlotLimit;
+        st.live_anchor_at = liveSlotState.liveAnchorAt;
+      }
+
+      return jsonResponse({ success: true, data: stations || [] });
+    }
+
     if (action === "list_user_stations") {
       const { user_id } = params;
       if (!user_id) return jsonResponse({ error: "user_id is required" }, 400);
@@ -967,7 +1630,7 @@ Deno.serve(async (req: Request) => {
       const isOwnProfile = user_id === uid || requesterRole === "admin";
       let query = supabaseAdmin
         .from("stations")
-        .select("*, creator:profiles!creator_id(id, full_name, avatar_url), managed_profile:profiles!managed_profile_id(id, full_name, avatar_url)")
+        .select("*, creator:profiles!creator_id(id, full_name, avatar_url), managed_profile:profiles!managed_profile_id(id, full_name, avatar_url), managed_group:groups!managed_group_id(id, name, group_type, genre)")
         .eq("managed_profile_id", user_id)
         .order("created_at", { ascending: false });
 
@@ -1006,7 +1669,7 @@ Deno.serve(async (req: Request) => {
       const { genre, featured_only, limit: lim } = params;
       let query = supabaseAdmin
         .from("stations")
-        .select("*, creator:profiles!creator_id(id, full_name, avatar_url)")
+        .select("*, creator:profiles!creator_id(id, full_name, avatar_url), managed_profile:profiles!managed_profile_id(id, full_name, avatar_url), managed_group:groups!managed_group_id(id, name, group_type, genre)")
         .eq("is_active", true)
         .order("created_at", { ascending: false });
 
@@ -1040,7 +1703,7 @@ Deno.serve(async (req: Request) => {
 
       const { data: st } = await supabaseAdmin
         .from("stations")
-        .select("id, creator_id, managed_profile_id")
+        .select("id, creator_id, managed_profile_id, managed_group_id")
         .eq("id", station_id)
         .single();
       if (!st) return jsonResponse({ error: "Station not found" }, 404);
@@ -1055,7 +1718,18 @@ Deno.serve(async (req: Request) => {
         .single();
 
       if (!playlist) return jsonResponse({ error: "Playlist not found" }, 404);
-      if (playlist.creator_id !== stationProfileId) {
+      let playlistAllowed = playlist.creator_id === stationProfileId;
+      if (!playlistAllowed && st.managed_group_id) {
+        const { data: groupLink } = await supabaseAdmin
+          .from("group_playlists")
+          .select("id")
+          .eq("group_id", st.managed_group_id)
+          .eq("playlist_id", playlist_id)
+          .maybeSingle();
+        playlistAllowed = !!groupLink;
+      }
+
+      if (!playlistAllowed) {
         return jsonResponse({ error: "Playlist must belong to the profile this station represents." }, 403);
       }
 
@@ -1101,7 +1775,7 @@ Deno.serve(async (req: Request) => {
 
       const { data: st } = await supabaseAdmin
         .from("stations")
-        .select("id, creator_id, managed_profile_id")
+        .select("id, creator_id, managed_profile_id, managed_group_id")
         .eq("id", slot.station_id)
         .single();
       if (!st) return jsonResponse({ error: "Station not found" }, 404);
@@ -1151,6 +1825,7 @@ Deno.serve(async (req: Request) => {
           .insert({
             creator_id: uid,
             managed_profile_id: managedProfileId,
+            managed_group_id: null,
             name: stationName,
             is_active: true,
           })

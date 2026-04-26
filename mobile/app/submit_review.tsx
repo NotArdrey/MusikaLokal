@@ -189,7 +189,6 @@ export default function SubmitReviewScreen() {
         }
       ]);
     } catch (e: any) {
-      console.log('Review submission error:', e);
       const errorMessage = await extractFunctionErrorMessage(
         e,
         'Failed to submit review. Please try again.'

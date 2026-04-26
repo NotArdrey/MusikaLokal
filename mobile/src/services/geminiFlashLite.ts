@@ -415,12 +415,6 @@ const requestGeminiJson = async (input: {
     const timeoutHandle = setTimeout(() => controller.abort(), input.timeoutMs);
 
     try {
-      console.log("[GEMINI_FLASH_LITE] Request start", {
-        modelId,
-        modelSource: resolvedConfig.model.source,
-        apiKeySource: resolvedConfig.apiKey.source,
-        apiKeySignature: formatApiKeySignature(apiKey),
-      });
 
       const response = await fetch(
         `${GEMINI_API_MODEL_BASE_URL}/${modelId}:generateContent?key=${encodeURIComponent(apiKey)}`,
@@ -473,12 +467,6 @@ const requestGeminiJson = async (input: {
         throw new Error("gemini_empty_response");
       }
 
-      console.log("[GEMINI_FLASH_LITE] Request success", {
-        modelId,
-        modelSource: resolvedConfig.model.source,
-        apiKeySource: resolvedConfig.apiKey.source,
-        apiKeySignature: formatApiKeySignature(apiKey),
-      });
 
       return { text, modelId };
     } catch (error: unknown) {

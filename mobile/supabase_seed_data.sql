@@ -1,4 +1,4 @@
--- Seed Data for MusikaLokal
+﻿-- Seed Data for MusikaLokal
 -- Using a DO block to dynamically fetch existing users
 
 -- 0. Create Test Users (if they don't exist)
@@ -1750,51 +1750,7 @@ BEGIN
     production_team_id = EXCLUDED.production_team_id,
     production_roster_id = EXCLUDED.production_roster_id;
 
-  INSERT INTO public.venue_partnership_deals (
-    id,
-    venue_owner_id,
-    production_team_id,
-    gig_id,
-    title,
-    status,
-    proposed_by_user_id,
-    accepted_term_version_id,
-    settled_at
-  )
-  VALUES
-    (
-      '11111111-1111-4111-8111-111111111701',
-      v_venue_owner_id,
-      v_team_id,
-      '11111111-1111-4111-8111-111111111207',
-      'Ayala Courtyard Summer Series Settlement',
-      'completed',
-      v_producer_id,
-      NULL,
-      now() - interval '2 days'
-    ),
-    (
-      '11111111-1111-4111-8111-111111111702',
-      v_venue_owner_id,
-      v_team_id,
-      '11111111-1111-4111-8111-111111111208',
-      'Riverside Launch Closing Settlement',
-      'settled',
-      v_producer_id,
-      NULL,
-      now() - interval '5 days'
-    )
-  ON CONFLICT (id) DO UPDATE
-  SET
-    venue_owner_id = EXCLUDED.venue_owner_id,
-    production_team_id = EXCLUDED.production_team_id,
-    gig_id = EXCLUDED.gig_id,
-    title = EXCLUDED.title,
-    status = EXCLUDED.status,
-    proposed_by_user_id = EXCLUDED.proposed_by_user_id,
-    accepted_term_version_id = EXCLUDED.accepted_term_version_id,
-    settled_at = EXCLUDED.settled_at;
-
   RAISE NOTICE 'Activity tab coverage seed refreshed for musician, studio-owner, venue-owner, and producer demo accounts.';
 END
 $seed$;
+

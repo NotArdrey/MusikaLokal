@@ -131,7 +131,6 @@ export default function MyGroupScreen() {
                     .eq('user_id', userId);
 
                 if (memberError) {
-                    console.log('Error fetching group memberships, falling back to owned groups:', memberError);
                     groupRows = await fetchOwnedGroups();
                     groupRows.forEach((row: any) => {
                         if (row?.id) {
@@ -175,7 +174,6 @@ export default function MyGroupScreen() {
                     .order('created_at', { ascending: true });
 
                 if (mediaError) {
-                    console.log('Error fetching group_media, using groups_with_stats images fallback:', mediaError);
                 }
 
                 for (const row of mediaRows || []) {
@@ -203,7 +201,6 @@ export default function MyGroupScreen() {
                 };
             }));
         } catch (e) {
-            console.log('Error fetching groups:', e);
         } finally {
             setLoading(false);
             setRefreshing(false);
@@ -319,7 +316,6 @@ export default function MyGroupScreen() {
             closeDeleteModal();
             showAlert('success', 'Group Deleted', 'Group deleted successfully.');
         } catch (e) {
-            console.log('Error deleting group:', e);
             showAlert('error', 'Error', 'Failed to delete group');
         } finally {
             setDeleting(false);

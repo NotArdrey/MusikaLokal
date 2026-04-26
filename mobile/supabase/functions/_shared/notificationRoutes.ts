@@ -1,4 +1,4 @@
-type NotificationMeta = Record<string, unknown> | null | undefined;
+﻿type NotificationMeta = Record<string, unknown> | null | undefined;
 
 type NotificationRouteOptions = {
   pathname?: string | null;
@@ -65,13 +65,6 @@ const normalizeRouteParams = (value: unknown) => {
   return Object.keys(normalized).length > 0 ? normalized : null;
 };
 
-const inferDealType = (eventType: string | null) => {
-  if (eventType?.toLowerCase().includes("recording")) {
-    return "recording";
-  }
-
-  return "partnership";
-};
 
 const inferNotificationRoute = (
   meta: Record<string, unknown>,
@@ -93,18 +86,6 @@ const inferNotificationRoute = (
       routeParams: { project_id: projectId },
     };
   }
-
-  const dealId = readString(meta.deal_id, meta.dealId);
-  if (dealId) {
-    return {
-      pathname: "/deal_details",
-      routeParams: {
-        deal_id: dealId,
-        deal_type: readString(meta.deal_type, meta.dealType) || inferDealType(eventType),
-      },
-    };
-  }
-
   const bookingId = readString(meta.booking_id, meta.bookingId);
   if (bookingId) {
     return { pathname: "/bookings" };

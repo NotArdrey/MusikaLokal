@@ -1,4 +1,4 @@
-import { Ionicons } from '@expo/vector-icons';
+﻿import { Ionicons } from '@expo/vector-icons';
 import * as ExpoLinking from 'expo-linking';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useCallback, useMemo, useState } from 'react';
@@ -338,46 +338,16 @@ export default function WalletScreen() {
       if (!bookingsError && bookings) {
         setUnpaidBookings(bookings);
       }
+      setSubscriptionPlans([]);
+      setSubscription(null);
 
-      // 4. Get Subscription Plans (for studio/venue owners)
-      if (profile?.role === 'studio-owner' || profile?.role === 'venue-owner') {
-        const { data: plans, error: plansError } = await supabase
-          .from('subscription_plans')
-          .select('*')
-          .eq('is_active', true)
-          .order('price', { ascending: true });
-
-        if (plansError) throw plansError;
-
-        if (plans) {
-          setSubscriptionPlans(plans);
-        }
-
-        // 5. Get User's latest subscription record
-        const { data: sub, error: subError } = await supabase
-          .from('subscriptions')
-          .select('*, plan:subscription_plans(*)')
-          .eq('user_id', user.id)
-          .order('created_at', { ascending: false })
-          .limit(1)
-          .maybeSingle();
-
-        if (subError) throw subError;
-
-        setSubscription(sub || null);
-      } else {
-        setSubscriptionPlans([]);
-        setSubscription(null);
-      }
-
-      // 6. Fetch Payout Methods
+      // 4. Fetch Payout Methods
       await fetchPayoutMethods();
 
       // 7. Fetch Withdrawal History
       await fetchWithdrawals();
 
     } catch (e) {
-      console.log('Error fetching wallet:', e);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -403,7 +373,6 @@ export default function WalletScreen() {
         if (defaultMethod) setSelectedPayoutMethod(defaultMethod);
       }
     } catch (e) {
-      console.log('Error fetching payout methods:', e);
     } finally {
       setLoadingPayoutMethods(false);
     }
@@ -424,7 +393,6 @@ export default function WalletScreen() {
         setWithdrawals(data.withdrawals);
       }
     } catch (e) {
-      console.log('Error fetching withdrawals:', e);
     }
   };
 
@@ -485,7 +453,7 @@ export default function WalletScreen() {
   const handleTopUp = async () => {
     const amount = parseFloat(topUpAmount);
     if (!amount || amount < 50) {
-      Alert.alert('Invalid Amount', 'Minimum top-up amount is ₱50.');
+      Alert.alert('Invalid Amount', 'Minimum top-up amount is â‚±50.');
       return;
     }
     try {
@@ -587,7 +555,6 @@ export default function WalletScreen() {
         setMaxRefundableAmount(data.max_refundable_amount || 0);
       }
     } catch (e) {
-      console.log('Failed to check refund eligibility:', e);
     } finally {
       setCheckingRefundEligibility(false);
     }
@@ -608,7 +575,7 @@ export default function WalletScreen() {
     const amount = parseFloat(withdrawAmount);
 
     if (!amount || amount < 100) {
-      Alert.alert('Invalid Amount', 'Minimum withdrawal amount is ₱100');
+      Alert.alert('Invalid Amount', 'Minimum withdrawal amount is â‚±100');
       return;
     }
 
@@ -620,7 +587,7 @@ export default function WalletScreen() {
     // For refund-based withdrawal
     if (withdrawalMethod === 'refund') {
       if (amount > maxRefundableAmount) {
-        Alert.alert('Amount Too High', `Maximum refundable amount is ₱${maxRefundableAmount.toLocaleString()}`);
+        Alert.alert('Amount Too High', `Maximum refundable amount is â‚±${maxRefundableAmount.toLocaleString()}`);
         return;
       }
 
@@ -645,7 +612,7 @@ export default function WalletScreen() {
         }
 
         Alert.alert(
-          'Withdrawal Successful! ðŸ’¸',
+          'Withdrawal Successful! Ã°Å¸â€™Â¸',
           data?.message || 'The amount will be refunded to your original payment method.',
           [{
             text: 'OK', onPress: () => {
@@ -859,88 +826,11 @@ export default function WalletScreen() {
     }
   };
 
-  // Subscribe to a plan
-  const handleSubscribe = async (plan: SubscriptionPlan) => {
-    if (subscribing) return;
-    try {
-      setSubscribing(true);
-      setSelectedPlan(plan);
-
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
-
-      // Generate redirect URLs
-      const redirectUrl = ExpoLinking.createURL('payment-result', {
-        queryParams: { status: 'success', type: 'subscription', plan_id: plan.id }
-      });
-      const cancelRedirectUrl = ExpoLinking.createURL('payment-result', {
-        queryParams: { status: 'cancelled', type: 'subscription' }
-      });
-
-      const { data: paymentData, error: paymentError } = await supabase.functions.invoke('paymongo', {
-        body: {
-          action: 'create_subscription_checkout',
-          user_id: user.id,
-          plan_id: plan.id,
-          amount: plan.price,
-          plan_name: plan.name,
-          description: `${plan.name} Plan - Monthly Subscription`,
-          redirect_url: redirectUrl,
-          cancel_redirect_url: cancelRedirectUrl
-        }
-      });
-
-      if (paymentError || !paymentData?.success) {
-        Alert.alert('Error', paymentData?.error || paymentError?.message || 'Failed to create subscription. Please try again.');
-        return;
-      }
-
-      if (!paymentData?.checkout_url) {
-        Alert.alert('Error', 'No checkout URL returned. Please try again.');
-        return;
-      }
-
-      const canOpen = await Linking.canOpenURL(paymentData.checkout_url);
-      if (canOpen) {
-        await Linking.openURL(paymentData.checkout_url);
-      } else {
-        Alert.alert('Error', 'Unable to open payment page.');
-      }
-    } catch (e: any) {
-      Alert.alert('Error', e?.message || 'Failed to initiate subscription.');
-    } finally {
-      setSubscribing(false);
-      setSubscriptionModalVisible(false);
-    }
-  };
+  // Subscriptions are no longer sold from the wallet.
+  const handleSubscribe = async (_plan: SubscriptionPlan) => {};
 
   // Cancel subscription
-  const handleCancelSubscription = async () => {
-    try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user || !subscription) return;
-
-      const { error } = await supabase
-        .from('subscriptions')
-        .update({
-          cancel_at_period_end: true,
-          cancelled_at: new Date().toISOString()
-        })
-        .eq('id', subscription.id);
-
-      if (error) throw error;
-
-      Alert.alert(
-        'Subscription Cancelled',
-        `Your subscription will remain active until ${formatFriendlyDateTime(subscription.current_period_end)}.`
-      );
-
-      setCancelSubscriptionModalVisible(false);
-      fetchWallet(); // Refresh data
-    } catch (e: any) {
-      Alert.alert('Error', e?.message || 'Failed to cancel subscription.');
-    }
-  };
+  const handleCancelSubscription = async () => {};
 
   // Get subscription status badge color
   const getSubscriptionStatusColor = (status: string) => {
@@ -974,8 +864,6 @@ export default function WalletScreen() {
   const txFilterOptions = [
     { key: "all", label: "All" },
     { key: "booking", label: "Booking" },
-    { key: "deal_deposit", label: "Deposit" },
-    { key: "deal_settlement", label: "Settlement" },
     { key: "penalty", label: "Penalty" },
     { key: "refund", label: "Refund" },
   ];
@@ -983,7 +871,7 @@ export default function WalletScreen() {
   return (
     <>
       <View style={[styles.container, { backgroundColor: colors.background }]}>
-        <Header title="Wallet & Subscription" />
+        <Header title="Wallet" />
 
         <ScrollView
           showsVerticalScrollIndicator={false}
@@ -1004,17 +892,17 @@ export default function WalletScreen() {
               <View style={styles.decoBottomLeft} />
 
               <Text style={styles.balanceLabel}>Current Balance</Text>
-              <Text style={styles.balanceValue}>₱ {balance?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Text>
+              <Text style={styles.balanceValue}>â‚± {balance?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Text>
 
               <View style={styles.balanceRow}>
                 <View>
                   <Text style={styles.balanceSubLabel}>Pending</Text>
-                  <Text style={styles.balanceSubValue}>₱ {pendingBalance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Text>
+                  <Text style={styles.balanceSubValue}>â‚± {pendingBalance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Text>
                 </View>
                 <View style={[styles.balanceDivider, { backgroundColor: 'rgba(255,255,255,0.2)' }]} />
                 <View>
                   <Text style={styles.balanceSubLabel}>Available</Text>
-                  <Text style={styles.balanceSubValue}>₱ {balance?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Text>
+                  <Text style={styles.balanceSubValue}>â‚± {balance?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Text>
                 </View>
               </View>
             </View>
@@ -1059,7 +947,7 @@ export default function WalletScreen() {
                     </View>
                   </View>
                   <Text style={styles.unpaidTotal}>
-                    ₱{unpaidBookings.reduce((sum, b) => sum + (b.remaining_balance || 0), 0).toLocaleString()}
+                    â‚±{unpaidBookings.reduce((sum, b) => sum + (b.remaining_balance || 0), 0).toLocaleString()}
                   </Text>
                 </View>
 
@@ -1082,7 +970,7 @@ export default function WalletScreen() {
                         {formatFriendlyDateTime(booking.booking_date, { forceDateOnly: true })} at {booking.start_time?.slice(0, 5) || 'Time TBA'}
                       </Text>
                       <Text style={styles.unpaidAmount}>
-                        Balance: ₱{booking.remaining_balance?.toLocaleString()}
+                        Balance: â‚±{booking.remaining_balance?.toLocaleString()}
                       </Text>
                     </View>
                     <TouchableOpacity activeOpacity={1}
@@ -1106,80 +994,6 @@ export default function WalletScreen() {
                   Warning: Please settle your outstanding balance to continue using the app
                 </Text>
               </View>
-            </View>
-          )}
-
-          {/* Subscription Card */}
-          {isOwner && (
-            <View style={styles.cardWrapper}>
-              {subscription ? (
-                // Active Subscription Display
-                <View style={[styles.subscriptionCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
-                  <View style={styles.subscriptionHeader}>
-                    <View>
-                      <Text style={[styles.subscriptionTitle, { color: colors.text }]}>{subscription.plan?.name || 'Subscription'} Plan</Text>
-                      <Text style={[styles.subscriptionDate, { color: colors.textSecondary }]}>
-                        {subscription.cancel_at_period_end
-                          ? `Expires on ${formatFriendlyDateTime(subscription.current_period_end)}`
-                          : `Renews on ${formatFriendlyDateTime(subscription.current_period_end)}`
-                        }
-                      </Text>
-                    </View>
-                    <View style={[styles.activeBadge, { backgroundColor: getSubscriptionStatusColor(subscription.status).bg }]}>
-                      <Text style={[styles.activeBadgeText, { color: getSubscriptionStatusColor(subscription.status).text }]}>
-                        {subscription.cancel_at_period_end ? 'Cancelling' : subscription.status.charAt(0).toUpperCase() + subscription.status.slice(1)}
-                      </Text>
-                    </View>
-                  </View>
-
-                  {/* Plan Features */}
-                  <View style={styles.featuresContainer}>
-                    {(subscription.plan?.features || []).slice(0, 3).map((feature: string, idx: number) => (
-                      <View key={idx} style={styles.featureRow}>
-                        <Ionicons name="checkmark-circle" size={16} color="#10B981" />
-                        <Text style={[styles.featureText, { color: colors.textSecondary }]}>{feature}</Text>
-                      </View>
-                    ))}
-                  </View>
-
-                  <View style={styles.subscriptionActions}>
-                    {!subscription.cancel_at_period_end && (
-                      <TouchableOpacity activeOpacity={1}
-                        onPress={() => setCancelSubscriptionModalVisible(true)}
-                        style={styles.cancelSubBtn}
-                      >
-                        <Text style={styles.cancelSubText}>Cancel Subscription</Text>
-                      </TouchableOpacity>
-                    )}
-                    <TouchableOpacity activeOpacity={1}
-                      onPress={() => setSubscriptionModalVisible(true)}
-                      style={styles.manageSubBtn}
-                    >
-                      <Text style={[styles.manageSubText, { color: colors.primary }]}>View Plan</Text>
-                    </TouchableOpacity>
-                  </View>
-                </View>
-              ) : (
-                // No Subscription - Show Subscribe CTA
-                <View style={[styles.subscriptionCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
-                  <View style={styles.noSubContainer}>
-                    <View style={[styles.noSubIcon, { backgroundColor: isDark ? colors.primaryLight : '#EEF2FF' }]}>
-                      <Ionicons name="diamond-outline" size={32} color={colors.primary} />
-                    </View>
-                    <Text style={[styles.noSubTitle, { color: colors.text }]}>Unlock Premium Features</Text>
-                    <Text style={[styles.noSubDesc, { color: colors.textSecondary }]}>
-                      Subscribe to list your {userRole === 'studio-owner' ? 'studios' : 'venues'} and access powerful tools
-                    </Text>
-                    <TouchableOpacity activeOpacity={1}
-                      onPress={() => setSubscriptionModalVisible(true)}
-                      style={[styles.subscribeBtn, { backgroundColor: colors.primary }]}
-                    >
-                      <Ionicons name="star" size={18} color="white" />
-                      <Text style={styles.subscribeBtnText}>Subscribe</Text>
-                    </TouchableOpacity>
-                  </View>
-                </View>
-              )}
             </View>
           )}
 
@@ -1218,7 +1032,7 @@ export default function WalletScreen() {
                     </View>
                     <View style={styles.withdrawalRight}>
                       <Text style={[styles.transactionAmount, { color: '#D97706' }]}>
-                        -₱{withdrawal.amount.toLocaleString()}
+                        -â‚±{withdrawal.amount.toLocaleString()}
                       </Text>
                       {withdrawal.status === 'pending' && (
                         <TouchableOpacity activeOpacity={1} onPress={() => handleCancelWithdrawal(withdrawal.id)}>
@@ -1302,7 +1116,7 @@ export default function WalletScreen() {
                       </View>
                     </View>
                     <Text style={[styles.transactionAmount, { color: tx.is_credit ? '#10B981' : '#EF4444' }]}>
-                      {tx.is_credit ? '+' : '-'}₱ {tx.amount.toFixed(2)}
+                      {tx.is_credit ? '+' : '-'}â‚± {tx.amount.toFixed(2)}
                     </Text>
                   </View>
                 ))
@@ -1346,7 +1160,7 @@ export default function WalletScreen() {
             <View style={styles.inputSection}>
               <Text style={[styles.inputLabel, { color: colors.text }]}>Amount to Add</Text>
               <View style={[styles.amountInputContainer, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-                <Text style={[styles.currencyPrefix, { color: colors.textSecondary }]}>₱</Text>
+                <Text style={[styles.currencyPrefix, { color: colors.textSecondary }]}>â‚±</Text>
                 <TextInput
                   style={[styles.amountInput, { color: colors.text }]}
                   placeholder="0.00"
@@ -1357,7 +1171,7 @@ export default function WalletScreen() {
                 />
               </View>
               <Text style={[styles.inputHint, { color: colors.textSecondary }]}>
-                Minimum top-up: ₱50
+                Minimum top-up: â‚±50
               </Text>
             </View>
 
@@ -1378,7 +1192,7 @@ export default function WalletScreen() {
                     styles.quickAmountText,
                     { color: parseFloat(topUpAmount) === preset ? 'white' : colors.text }
                   ]}>
-                    ₱{preset}
+                    â‚±{preset}
                   </Text>
                 </TouchableOpacity>
               ))}
@@ -1421,7 +1235,7 @@ export default function WalletScreen() {
               <View>
                 <Text style={[styles.withdrawModalTitle, { color: colors.text }]}>Withdraw Funds</Text>
                 <Text style={[styles.withdrawModalSubtitle, { color: colors.textSecondary }]}>
-                  Available: ₱{balance?.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                  Available: â‚±{balance?.toLocaleString(undefined, { minimumFractionDigits: 2 })}
                 </Text>
               </View>
               <TouchableOpacity activeOpacity={1}
@@ -1437,7 +1251,7 @@ export default function WalletScreen() {
               <View style={styles.inputSection}>
                 <Text style={[styles.inputLabel, { color: colors.text }]}>Amount to Withdraw</Text>
                 <View style={[styles.amountInputContainer, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-                  <Text style={[styles.currencyPrefix, { color: colors.textSecondary }]}>₱</Text>
+                  <Text style={[styles.currencyPrefix, { color: colors.textSecondary }]}>â‚±</Text>
                   <TextInput
                     style={[styles.amountInput, { color: colors.text }]}
                     placeholder="0.00"
@@ -1448,7 +1262,7 @@ export default function WalletScreen() {
                   />
                 </View>
                 <Text style={[styles.inputHint, { color: colors.textSecondary }]}>
-                  Minimum withdrawal: ₱100
+                  Minimum withdrawal: â‚±100
                 </Text>
               </View>
 
@@ -1470,7 +1284,7 @@ export default function WalletScreen() {
                       styles.quickAmountText,
                       { color: parseFloat(withdrawAmount) === amount ? 'white' : colors.text }
                     ]}>
-                      {idx === 3 ? 'Max' : `₱${amount}`}
+                      {idx === 3 ? 'Max' : `â‚±${amount}`}
                     </Text>
                   </TouchableOpacity>
                 ))}
@@ -1552,7 +1366,7 @@ export default function WalletScreen() {
                 </View>
                 {hasRefundEligiblePayments && maxRefundableAmount > 0 && (
                   <Text style={[styles.inputHint, { color: colors.primary, marginTop: 8 }]}>
-                    ðŸ’¡ Refund available up to ₱{maxRefundableAmount.toLocaleString()} - goes back to your original payment method
+                    Ã°Å¸â€™Â¡ Refund available up to â‚±{maxRefundableAmount.toLocaleString()} - goes back to your original payment method
                   </Text>
                 )}
               </View>
@@ -1631,16 +1445,16 @@ export default function WalletScreen() {
                 <View style={[styles.summaryCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
                   <View style={styles.summaryRow}>
                     <Text style={[styles.summaryLabel, { color: colors.textSecondary }]}>Withdrawal Amount</Text>
-                    <Text style={[styles.summaryValue, { color: colors.text }]}>₱{parseFloat(withdrawAmount).toLocaleString()}</Text>
+                    <Text style={[styles.summaryValue, { color: colors.text }]}>â‚±{parseFloat(withdrawAmount).toLocaleString()}</Text>
                   </View>
                   <View style={styles.summaryRow}>
                     <Text style={[styles.summaryLabel, { color: colors.textSecondary }]}>Processing Fee</Text>
-                    <Text style={[styles.summaryValue, { color: colors.text }]}>₱0.00</Text>
+                    <Text style={[styles.summaryValue, { color: colors.text }]}>â‚±0.00</Text>
                   </View>
                   <View style={[styles.summaryDivider, { backgroundColor: colors.border }]} />
                   <View style={styles.summaryRow}>
                     <Text style={[styles.summaryLabelBold, { color: colors.text }]}>You'll Receive</Text>
-                    <Text style={[styles.summaryValueBold, { color: colors.primary }]}>₱{parseFloat(withdrawAmount).toLocaleString()}</Text>
+                    <Text style={[styles.summaryValueBold, { color: colors.primary }]}>â‚±{parseFloat(withdrawAmount).toLocaleString()}</Text>
                   </View>
                 </View>
               )}
@@ -1817,118 +1631,6 @@ export default function WalletScreen() {
         </KeyboardAvoidingView>
       </RNModal>
 
-      {/* Cancel Subscription Modal */}
-      <CustomModal
-        visible={cancelSubscriptionModalVisible}
-        onClose={() => setCancelSubscriptionModalVisible(false)}
-        title="Cancel Subscription"
-        message={`Your subscription will remain active until ${subscription ? formatFriendlyDateTime(subscription.current_period_end) : ''}. After that, you won't be charged again.`}
-        buttonText="Cancel Subscription"
-        danger={true}
-        onConfirm={handleCancelSubscription}
-      />
-
-      {/* Subscription Plans Modal */}
-      <RNModal
-        visible={subscriptionModalVisible}
-        animationType="slide"
-        transparent={true}
-        onRequestClose={() => setSubscriptionModalVisible(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={[styles.plansModal, { backgroundColor: colors.background, paddingBottom: Platform.OS === 'ios' ? 40 : 20 }]}>
-            <View style={styles.plansModalHeader}>
-              <View>
-                <Text style={[styles.plansModalTitle, { color: colors.text }]}>Subscribe</Text>
-                <Text style={[styles.plansModalSubtitle, { color: colors.textSecondary }]}>Get full access to MusikaLokal</Text>
-              </View>
-              <TouchableOpacity activeOpacity={1}
-                onPress={() => setSubscriptionModalVisible(false)}
-                style={[styles.closeModalButton, { backgroundColor: colors.surface }]}
-              >
-                <Ionicons name="close" size={24} color={colors.text} />
-              </TouchableOpacity>
-            </View>
-
-            <ScrollView
-              style={styles.plansScrollView}
-              showsVerticalScrollIndicator={false}
-              contentContainerStyle={{ paddingBottom: 20 }}
-            >
-              {subscriptionPlans.length > 0 && (() => {
-                const plan = subscriptionPlans[0];
-                const isCurrentPlan = subscription?.plan_id === plan.id;
-                const planColor = colors.primary;
-
-                return (
-                  <View
-                    key={plan.id}
-                    style={[
-                      styles.planCard,
-                      {
-                        backgroundColor: colors.card,
-                        borderColor: planColor,
-                        borderWidth: 2,
-                      }
-                    ]}
-                  >
-                    <View style={styles.planCardHeader}>
-                      <View style={[styles.planIcon, { backgroundColor: `${planColor}20` }]}>
-                        <Ionicons
-                          name="diamond-outline"
-                          size={24}
-                          color={planColor}
-                        />
-                      </View>
-                      <View style={{ flex: 1 }}>
-                        <Text style={[styles.planName, { color: colors.text }]}>{plan.name}</Text>
-                        <Text style={[styles.planDescription, { color: colors.textSecondary }]}>{plan.description}</Text>
-                      </View>
-                    </View>
-
-                    <View style={styles.planPriceInfo}>
-                      <Text style={[styles.planPrice, { color: colors.text }]}>₱{plan.price.toLocaleString()}</Text>
-                      <Text style={[styles.planPeriod, { color: colors.textSecondary }]}> /month</Text>
-                    </View>
-
-                    <View style={styles.separator} />
-
-                    <View style={styles.planFeatures}>
-                      {(plan.features || []).map((feature: string, idx: number) => (
-                        <View key={idx} style={styles.planFeatureRow}>
-                          <Ionicons name="checkmark-circle" size={18} color={planColor} />
-                          <Text style={[styles.planFeatureText, { color: colors.textSecondary }]}>{feature}</Text>
-                        </View>
-                      ))}
-                    </View>
-
-                    <TouchableOpacity activeOpacity={1}
-                      onPress={() => handleSubscribe(plan)}
-                      disabled={subscribing || isCurrentPlan}
-                      style={[
-                        styles.selectPlanBtn,
-                        {
-                          backgroundColor: isCurrentPlan ? colors.border : planColor,
-                          shadowColor: isCurrentPlan ? "transparent" : planColor,
-                        }
-                      ]}
-                    >
-                      {subscribing && selectedPlan?.id === plan.id ? (
-                        <ActivityIndicator size="small" color="white" />
-                      ) : (
-                        <Text style={[styles.selectPlanBtnText, { color: isCurrentPlan ? colors.textSecondary : 'white' }]}>
-                          {isCurrentPlan ? 'Current Plan' : 'Subscribe Now'}
-                        </Text>
-                      )}
-                    </TouchableOpacity>
-                  </View>
-                );
-              })()}
-            </ScrollView>
-          </View>
-        </View>
-      </RNModal>
-
       <CustomModal
         visible={withdrawing}
         loading
@@ -1940,13 +1642,6 @@ export default function WalletScreen() {
         visible={addingPayoutMethod}
         loading
         loadingMessage="Adding payout method..."
-        onClose={() => { }}
-      />
-
-      <CustomModal
-        visible={subscribing}
-        loading
-        loadingMessage="Setting up subscription..."
         onClose={() => { }}
       />
 
@@ -2704,3 +2399,4 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
 });
+

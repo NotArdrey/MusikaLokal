@@ -1,4 +1,4 @@
-import { RealtimeChannel } from '@supabase/supabase-js';
+﻿import { RealtimeChannel } from '@supabase/supabase-js';
 import { useCallback, useEffect, useState } from 'react';
 import { supabase } from '../../lib/supabase';
 
@@ -37,7 +37,42 @@ export interface Message {
         avatar_url: string | null;
     };
     reactions?: MessageReaction[];
+    local_status?: 'sending' | 'sent' | 'failed';
+    local_error?: string | null;
 }
+
+const toTimestamp = (value: string | null | undefined) => {
+    if (!value) return 0;
+    const timestamp = new Date(value).getTime();
+    return Number.isFinite(timestamp) ? timestamp : 0;
+};
+
+const sortMessagesChronologically = (messages: Message[]) => {
+    return [...messages].sort((left, right) => {
+        return toTimestamp(left.created_at) - toTimestamp(right.created_at);
+    });
+};
+
+const upsertMessage = (messages: Message[], nextMessage: Message) => {
+    const existingIndex = messages.findIndex((message) => message.id === nextMessage.id);
+
+    if (existingIndex < 0) {
+        return sortMessagesChronologically([...messages, nextMessage]);
+    }
+
+    const nextMessages = [...messages];
+    const existingMessage = nextMessages[existingIndex];
+    nextMessages[existingIndex] = {
+        ...existingMessage,
+        ...nextMessage,
+        sender: nextMessage.sender || existingMessage.sender,
+        reactions: nextMessage.reactions || existingMessage.reactions,
+        local_status: nextMessage.local_status || existingMessage.local_status,
+        local_error: nextMessage.local_error ?? existingMessage.local_error,
+    };
+
+    return sortMessagesChronologically(nextMessages);
+};
 
 export interface ConversationParticipant {
     id: string;
@@ -62,7 +97,6 @@ export interface Conversation {
     gig_id: string | null;
     group_id: string | null;
     studio_id: string | null;
-    deal_id: string | null;
     producer_project_id: string | null;
     // Group chat fields
     is_group: boolean;
@@ -94,7 +128,6 @@ export function useConversation(otherUserId: string | null, currentUserId: strin
             gigId?: string;
             groupId?: string;
             studioId?: string;
-            dealId?: string;
             producerProjectId?: string;
         }
     ) => {
@@ -142,10 +175,6 @@ export function useConversation(otherUserId: string | null, currentUserId: strin
                         .select('*')
                         .eq('is_group', false)
                         .in('id', matchedConversationIds);
-
-                    if (options?.dealId) {
-                        existingQuery = existingQuery.eq('deal_id', options.dealId);
-                    }
                     if (options?.producerProjectId) {
                         existingQuery = existingQuery.eq('producer_project_id', options.producerProjectId);
                     }
@@ -176,7 +205,6 @@ export function useConversation(otherUserId: string | null, currentUserId: strin
                     gig_id: options?.gigId || null,
                     group_id: options?.groupId || null,
                     studio_id: options?.studioId || null,
-                    deal_id: options?.dealId || null,
                     producer_project_id: options?.producerProjectId || null,
                 })
                 ;
@@ -590,8 +618,9 @@ export function useConversations(currentUserId: string | null) {
 export function useChat(conversationId: string | null, currentUserId: string | null) {
     const [messages, setMessages] = useState<Message[]>([]);
     const [loading, setLoading] = useState(true);
-    const [sending, setSending] = useState(false);
+    const [pendingSendCount, setPendingSendCount] = useState(0);
     const [error, setError] = useState<string | null>(null);
+    const sending = pendingSendCount > 0;
 
     // Fetch initial messages
     useEffect(() => {
@@ -620,7 +649,7 @@ export function useChat(conversationId: string | null, currentUserId: string | n
                     .order('created_at', { ascending: true });
 
                 if (fetchError) throw fetchError;
-                setMessages(data || []);
+                setMessages(sortMessagesChronologically(data || []));
             } catch (err: any) {
                 console.error('Error fetching messages:', err);
                 setError(err.message);
@@ -657,14 +686,11 @@ export function useChat(conversationId: string | null, currentUserId: string | n
                     const newMessage: Message = {
                         ...payload.new as Message,
                         sender: sender || undefined,
+                        local_status: 'sent',
+                        local_error: null,
                     };
 
-                    setMessages((prev) => {
-                        if (prev.some((message) => message.id === newMessage.id)) {
-                            return prev;
-                        }
-                        return [...prev, newMessage];
-                    });
+                    setMessages((prev) => upsertMessage(prev, newMessage));
 
                     // Mark as read if not sent by current user
                     if (payload.new.sender_id !== currentUserId) {
@@ -687,18 +713,7 @@ export function useChat(conversationId: string | null, currentUserId: string | n
                 (payload) => {
                     const updatedMessage = payload.new as Message;
 
-                    setMessages((prev) =>
-                        prev.map((message) =>
-                            message.id === updatedMessage.id
-                                ? {
-                                    ...message,
-                                    ...updatedMessage,
-                                    sender: message.sender,
-                                    reactions: message.reactions,
-                                }
-                                : message
-                        )
-                    );
+                    setMessages((prev) => upsertMessage(prev, updatedMessage));
                 }
             )
             .subscribe();
@@ -718,35 +733,72 @@ export function useChat(conversationId: string | null, currentUserId: string | n
             return { error: 'Missing required data' };
         }
 
+        const messageId = createUuidV4();
+        const trimmedContent = content.trim();
+
         try {
-            setSending(true);
-            const { error: sendError } = await supabase.from('messages').insert({
+            const optimisticMessage: Message = {
+                id: messageId,
                 conversation_id: conversationId,
                 sender_id: currentUserId,
-                content: content.trim(),
+                content: trimmedContent,
+                message_type: messageType,
+                attachment_url: attachmentUrl || null,
+                read_at: null,
+                created_at: new Date().toISOString(),
+                reactions: [],
+                local_status: 'sending',
+                local_error: null,
+            };
+
+            setPendingSendCount((count) => count + 1);
+            setMessages((prev) => upsertMessage(prev, optimisticMessage));
+
+            const { error: sendError } = await supabase.from('messages').insert({
+                id: messageId,
+                conversation_id: conversationId,
+                sender_id: currentUserId,
+                content: trimmedContent,
                 message_type: messageType,
                 attachment_url: attachmentUrl || null,
             });
 
             if (sendError) throw sendError;
 
-            // Touch the conversation updated_at for sorting
-            const { error: updateError } = await supabase
+            setMessages((prev) => upsertMessage(prev, {
+                ...optimisticMessage,
+                local_status: 'sent',
+                local_error: null,
+            }));
+
+            void supabase
                 .from('conversations')
                 .update({ updated_at: new Date().toISOString() })
-                .eq('id', conversationId);
-
-            if (updateError) {
-                console.warn('Failed to update conversation timestamp:', updateError);
-                // Non-fatal, proceed
-            }
+                .eq('id', conversationId)
+                .then(({ error: updateError }) => {
+                    if (updateError) {
+                        console.warn('Failed to update conversation timestamp:', updateError);
+                    }
+                });
 
             return { error: null };
         } catch (err: any) {
             console.error('Error sending message:', err);
-            return { error: err.message };
+            const messageError = err?.message || 'Message failed to send';
+            setMessages((prev) => prev.map((message) => {
+                if (message.id !== messageId || message.local_status !== 'sending') {
+                    return message;
+                }
+
+                return {
+                    ...message,
+                    local_status: 'failed' as const,
+                    local_error: messageError,
+                };
+            }));
+            return { error: messageError };
         } finally {
-            setSending(false);
+            setPendingSendCount((count) => Math.max(0, count - 1));
         }
     }, [conversationId, currentUserId]);
 
@@ -913,3 +965,4 @@ export function useGroupParticipants(conversationId: string | null) {
 
     return { participants, loading, error };
 }
+

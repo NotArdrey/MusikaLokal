@@ -1,4 +1,4 @@
-import { RealtimeChannel } from '@supabase/supabase-js';
+﻿import { RealtimeChannel } from '@supabase/supabase-js';
 import { useCallback, useEffect, useState } from 'react';
 import { supabase } from '../../lib/supabase';
 import { getScreenCacheKey, readScreenCache, writeScreenCache } from '../utils/screenCache';
@@ -38,6 +38,8 @@ export interface Message {
         avatar_url: string | null;
     };
     reactions?: MessageReaction[];
+    local_status?: 'sending' | 'sent' | 'failed';
+    local_error?: string | null;
 }
 
 export interface ConversationParticipant {
@@ -63,7 +65,6 @@ export interface Conversation {
     gig_id: string | null;
     group_id: string | null;
     studio_id: string | null;
-    deal_id: string | null;
     producer_project_id: string | null;
     // Group chat fields
     is_group: boolean;
@@ -127,6 +128,8 @@ const upsertMessage = (messages: Message[], nextMessage: Message) => {
         ...nextMessage,
         sender: nextMessage.sender || existingMessage.sender,
         reactions: nextMessage.reactions || existingMessage.reactions,
+        local_status: nextMessage.local_status || existingMessage.local_status,
+        local_error: nextMessage.local_error ?? existingMessage.local_error,
     };
 
     return sortMessagesChronologically(nextMessages);
@@ -153,7 +156,6 @@ export function useConversation(otherUserId: string | null, currentUserId: strin
             gigId?: string;
             groupId?: string;
             studioId?: string;
-            dealId?: string;
             producerProjectId?: string;
         }
     ) => {
@@ -201,11 +203,6 @@ export function useConversation(otherUserId: string | null, currentUserId: strin
                         .select('*')
                         .eq('is_group', false)
                         .in('id', matchedConversationIds);
-
-                    // Context-aware lookup: match on deal or project if provided
-                    if (options?.dealId) {
-                        existingQuery = existingQuery.eq('deal_id', options.dealId);
-                    }
                     if (options?.producerProjectId) {
                         existingQuery = existingQuery.eq('producer_project_id', options.producerProjectId);
                     }
@@ -236,7 +233,6 @@ export function useConversation(otherUserId: string | null, currentUserId: strin
                     gig_id: options?.gigId || null,
                     group_id: options?.groupId || null,
                     studio_id: options?.studioId || null,
-                    deal_id: options?.dealId || null,
                     producer_project_id: options?.producerProjectId || null,
                 })
                 ;
@@ -629,7 +625,6 @@ export function useConversations(currentUserId: string | null) {
     useEffect(() => {
         if (!currentUserId) return;
 
-        console.log('Setting up realtime subscription for conversation list...');
 
         const channel = supabase
             .channel('conversation_list_updates')
@@ -752,8 +747,9 @@ export function useConversations(currentUserId: string | null) {
 export function useChat(conversationId: string | null, currentUserId: string | null) {
     const [messages, setMessages] = useState<Message[]>([]);
     const [loading, setLoading] = useState(true);
-    const [sending, setSending] = useState(false);
+    const [pendingSendCount, setPendingSendCount] = useState(0);
     const [error, setError] = useState<string | null>(null);
+    const sending = pendingSendCount > 0;
     const messageCacheKey = conversationId
         ? buildConversationMessagesCacheKey(conversationId)
         : null;
@@ -864,6 +860,8 @@ export function useChat(conversationId: string | null, currentUserId: string | n
                     const newMessage: Message = {
                         ...payload.new as Message,
                         sender: sender || undefined,
+                        local_status: 'sent',
+                        local_error: null,
                     };
 
                     setMessages((prev) => {
@@ -916,37 +914,103 @@ export function useChat(conversationId: string | null, currentUserId: string | n
             return { error: 'Missing required data' };
         }
 
+        const messageId = createUuidV4();
+        const trimmedContent = content.trim();
+
         try {
-            setSending(true);
-            const { error: sendError } = await supabase.from('messages').insert({
+            const createdAt = new Date().toISOString();
+            const optimisticMessage: Message = {
+                id: messageId,
                 conversation_id: conversationId,
                 sender_id: currentUserId,
-                content: content.trim(),
+                content: trimmedContent,
+                message_type: messageType,
+                attachment_url: attachmentUrl || null,
+                read_at: null,
+                created_at: createdAt,
+                sender: senderProfileCache.get(currentUserId),
+                reactions: [],
+                local_status: 'sending',
+                local_error: null,
+            };
+
+            setPendingSendCount((count) => count + 1);
+            setMessages((prev) => {
+                const nextMessages = upsertMessage(prev, optimisticMessage);
+
+                if (messageCacheKey) {
+                    void writeScreenCache(messageCacheKey, nextMessages);
+                }
+
+                return nextMessages;
+            });
+
+            const { error: sendError } = await supabase.from('messages').insert({
+                id: messageId,
+                conversation_id: conversationId,
+                sender_id: currentUserId,
+                content: trimmedContent,
                 message_type: messageType,
                 attachment_url: attachmentUrl || null,
             });
 
             if (sendError) throw sendError;
 
-            // Touch the conversation updated_at for sorting
-            const { error: updateError } = await supabase
+            setMessages((prev) => {
+                const nextMessages = upsertMessage(prev, {
+                    ...optimisticMessage,
+                    local_status: 'sent',
+                    local_error: null,
+                });
+
+                if (messageCacheKey) {
+                    void writeScreenCache(messageCacheKey, nextMessages);
+                }
+
+                return nextMessages;
+            });
+
+            void supabase
                 .from('conversations')
                 .update({ updated_at: new Date().toISOString() })
-                .eq('id', conversationId);
-
-            if (updateError) {
-                console.warn('Failed to update conversation timestamp:', updateError);
-                // Non-fatal, proceed
-            }
+                .eq('id', conversationId)
+                .then(({ error: updateError }) => {
+                    if (updateError) {
+                        console.warn('Failed to update conversation timestamp:', updateError);
+                    }
+                });
 
             return { error: null };
         } catch (err: any) {
             console.error('Error sending message:', err);
-            return { error: err.message };
+            const messageError = err?.message || 'Message failed to send';
+            setMessages((prev) => {
+                const failedMessages = prev.map((message) => {
+                    if (
+                        message.id === messageId &&
+                        message.local_status === 'sending'
+                    ) {
+                        return {
+                            ...message,
+                            local_status: 'failed' as const,
+                            local_error: messageError,
+                        };
+                    }
+
+                    return message;
+                });
+
+                if (messageCacheKey) {
+                    void writeScreenCache(messageCacheKey, failedMessages);
+                }
+
+                return failedMessages;
+            });
+            return { error: messageError };
         } finally {
-            setSending(false);
+            setPendingSendCount((count) => Math.max(0, count - 1));
         }
-    }, [conversationId, currentUserId]);
+    }, [conversationId, currentUserId, messageCacheKey]);
 
     // Mark messages as read
     const markAsRead = useCallback(async () => {
@@ -1144,3 +1208,4 @@ export function useGroupParticipants(conversationId: string | null) {
 
     return { participants, loading, error };
 }
+

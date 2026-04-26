@@ -204,7 +204,6 @@ const StudioGigVenueAboutTab = ({
         destinationText,
       });
     } catch (error) {
-      console.log("[StudioGigVenueAboutTab] Navigation error:", error);
     }
   };
 

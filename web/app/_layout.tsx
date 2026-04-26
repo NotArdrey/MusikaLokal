@@ -10,13 +10,12 @@ import { BottomSheetModalProvider } from "@gorhom/bottom-sheet";
 import * as Linking from "expo-linking";
 import { router, Stack, useSegments } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import { Platform, View, useWindowDimensions } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import "../global.css";
 import SidebarNav from "../src/components/SidebarNav";
 import { AuthProvider, useAuth } from "../src/context/AuthContext";
-import SubscriptionRequiredScreen from "./subscription_required";
 import { ThemeProvider, useTheme } from "../src/context/ThemeContext";
 
 SplashScreen.preventAutoHideAsync();
@@ -58,8 +57,6 @@ function RootContent() {
   const {
     session,
     loading,
-    subscriptionRequired,
-    subscriptionChecked,
     identityRequired,
     identityChecked,
     userRole,
@@ -68,11 +65,11 @@ function RootContent() {
   const segments = useSegments();
   const processedDeepLinksRef = useRef<Set<string>>(new Set());
 
-  // Handle global identity/subscription gates
+  // Handle global identity gate
   useEffect(() => {
     if (loading) return;
 
-    if (session && (!subscriptionChecked || !identityChecked)) return;
+    if (session && !identityChecked) return;
 
     const segmentStrings = segments.map((segment) => String(segment));
     const currentScreen =
@@ -93,7 +90,6 @@ function RootContent() {
         "account_details",
         "settings",
         "wallet",
-        "subscription_required",
         "payment-result",
         "help_support",
         "privacy_policy",
@@ -106,39 +102,8 @@ function RootContent() {
       }
       return;
     }
-
-    // If user is logged in and subscription is required
-    if (session && subscriptionRequired) {
-      // Allow access to certain screens even without subscription
-      const allowedScreens = [
-        "subscription_required",
-        "identity_verification",
-        "account_details",
-        "payment-result",
-        "settings",
-        "wallet",
-        "help_support",
-        "privacy_policy",
-        "terms_and_conditions",
-      ];
-
-      console.log(`🔒 Layout Check: Screen=${currentScreen}, Segments=${JSON.stringify(segments)}, SubRequired=${subscriptionRequired}`);
-
-      const isAllowed = isScreenAllowed(allowedScreens);
-
-      if (!isAllowed) {
-        console.log(
-          "🔒 Subscription required, showing subscription modal",
-        );
-        // Instead of redirecting, show a modal. We'll toggle state below to render it.
-        // Use a custom event by setting a global state via router params (not needed) —
-        // we'll manage modal state in component state so rendering occurs below.
-      }
-    }
   }, [
     session,
-    subscriptionRequired,
-    subscriptionChecked,
     identityRequired,
     identityChecked,
     loading,
@@ -234,53 +199,12 @@ function RootContent() {
     "signup",
     "forget_password",
     "change_password",
-    "subscription_required",
     "payment-result",
   ];
   const segmentStrings = segments.map((segment) => String(segment));
   const currentScreen = segmentStrings.length > 0 ? segmentStrings[segmentStrings.length - 1] : "index";
   const isAuthScreen = authScreens.includes(currentScreen);
   const { width } = useWindowDimensions();
-  const [showSubscriptionModal, setShowSubscriptionModal] = useState(false);
-  const { subscriptionRequired: subReq, session: authSession } = useAuth();
-  useEffect(() => {
-    // Show modal when subscription is required and user is not on allowed screens
-    if (!authSession) {
-      setShowSubscriptionModal(false);
-      return;
-    }
-
-    const allowedScreens = [
-      "subscription_required",
-      "identity_verification",
-      "account_details",
-      "payment-result",
-      "settings",
-      "wallet",
-      "help_support",
-      "privacy_policy",
-      "terms_and_conditions",
-    ];
-
-    const segmentStringsLocal = segments.map((s) => String(s));
-    const currentLocal =
-      segmentStringsLocal.length > 0
-        ? segmentStringsLocal[segmentStringsLocal.length - 1]
-        : "index";
-
-    const isScreenAllowedLocal = (allowed: string[]) => {
-      return (
-        allowed.some((screen) => segmentStringsLocal.includes(screen)) ||
-        allowed.includes(currentLocal)
-      );
-    };
-
-    if (subReq && !isScreenAllowedLocal(allowedScreens)) {
-      setShowSubscriptionModal(true);
-    } else {
-      setShowSubscriptionModal(false);
-    }
-  }, [subReq, authSession, segments]);
   const showSidebar = Platform.OS === 'web' && width >= 768 && !isAuthScreen;
   const isAdminContext = userRole === 'admin' || segmentStrings.includes('admin');
   const useSidebarLayout = showSidebar && isAdminContext;
@@ -298,13 +222,6 @@ function RootContent() {
             }}
           />
         </View>
-        {showSubscriptionModal && (
-          <View style={{ position: 'absolute', zIndex: 9999, top: 0, left: 0, right: 0, bottom: 0 }}>
-            <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.45)' }} pointerEvents="auto">
-              <SubscriptionRequiredScreen />
-            </View>
-          </View>
-        )}
       </View>
     </View>
   );

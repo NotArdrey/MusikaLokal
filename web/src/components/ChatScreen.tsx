@@ -58,7 +58,7 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
     const { colors, isDark } = useTheme();
     const { isGuest } = useAuth();
     const insets = useSafeAreaInsets();
-    const { messages, loading, sending, sendMessage, markAsRead, addReaction, removeReaction } = useChat(conversationId, currentUserId);
+    const { messages, loading, sendMessage, markAsRead, addReaction, removeReaction } = useChat(conversationId, currentUserId);
     const { participants } = useGroupParticipants(isGroupChat ? conversationId : null);
     const [text, setText] = useState('');
     const flatListRef = useRef<FlatList>(null);
@@ -202,11 +202,23 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
         }
     }, [messages.length]);
 
-    const handleSend = async () => {
-        if (!text.trim() || sending) return;
+    const scrollToLatestMessage = () => {
+        setTimeout(() => {
+            flatListRef.current?.scrollToEnd({ animated: true });
+        }, 40);
+    };
+
+    const handleSend = () => {
+        if (!text.trim()) return;
         const messageText = text.trim();
         setText('');
-        await sendMessage(messageText);
+        void sendMessage(messageText);
+        scrollToLatestMessage();
+    };
+
+    const handleQuickLike = () => {
+        void sendMessage('👍');
+        scrollToLatestMessage();
     };
 
     const handleLongPress = (messageId: string) => {
@@ -389,6 +401,8 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
                                     ? [styles.myMessage, { backgroundColor: colors.primary }, !isLastInRun && { borderBottomRightRadius: 18 }]
                                     : [styles.theirMessage, { backgroundColor: isDark ? '#374151' : '#E5E7EB' }, !isLastInRun && { borderBottomLeftRadius: 18 }],
                                 item.message_type === 'image' && styles.imageBubble,
+                                item.local_status === 'sending' && styles.pendingMessage,
+                                item.local_status === 'failed' && styles.failedMessage,
                             ]}>
                                 {/* Image message */}
                                 {item.message_type === 'image' && item.attachment_url && (
@@ -437,14 +451,26 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
                                     </Text>
                                     {isMe && (
                                         <Ionicons
-                                            name={index === lastSeenMessageIndex ? 'checkmark-done' : 'checkmark'}
+                                            name={
+                                                item.local_status === 'failed'
+                                                    ? 'alert-circle'
+                                                    : item.local_status === 'sending'
+                                                        ? 'time-outline'
+                                                        : index === lastSeenMessageIndex
+                                                            ? 'checkmark-done'
+                                                            : 'checkmark'
+                                            }
                                             size={14}
                                             color={
-                                                item.message_type === 'image'
-                                                    ? '#FFF'
-                                                    : index === lastSeenMessageIndex
-                                                        ? '#93C5FD'
-                                                        : 'rgba(255,255,255,0.55)'
+                                                item.local_status === 'failed'
+                                                    ? '#FCA5A5'
+                                                    : item.local_status === 'sending'
+                                                        ? 'rgba(255,255,255,0.55)'
+                                                        : item.message_type === 'image'
+                                                            ? '#FFF'
+                                                            : index === lastSeenMessageIndex
+                                                                ? '#93C5FD'
+                                                                : 'rgba(255,255,255,0.55)'
                                             }
                                             style={{ marginLeft: 4 }}
                                         />
@@ -734,18 +760,14 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
                     {text.trim().length > 0 ? (
                         <TouchableOpacity
                             onPress={handleSend}
-                            disabled={!text.trim() || sending}
-                            style={[styles.sendButton, { backgroundColor: colors.primary, opacity: sending ? 0.7 : 1 }]}
+                            disabled={!text.trim()}
+                            style={[styles.sendButton, { backgroundColor: colors.primary }]}
                             activeOpacity={0.8}
                         >
-                            {sending ? (
-                                <ActivityIndicator size="small" color="#FFF" />
-                            ) : (
-                                <Ionicons name="send" size={19} color="#FFF" style={{ marginLeft: 2 }} />
-                            )}
+                            <Ionicons name="send" size={19} color="#FFF" style={{ marginLeft: 2 }} />
                         </TouchableOpacity>
                     ) : (
-                        <TouchableOpacity style={styles.thumbsUpButton} onPress={() => sendMessage('👍')} activeOpacity={0.7}>
+                        <TouchableOpacity style={styles.thumbsUpButton} onPress={handleQuickLike} activeOpacity={0.7}>
                             <Ionicons name="thumbs-up" size={28} color={colors.primary} />
                         </TouchableOpacity>
                     )}
@@ -991,6 +1013,12 @@ const styles = StyleSheet.create({
         paddingVertical: 8,
         borderRadius: 18,
         maxWidth: '100%',
+    },
+    pendingMessage: {
+        opacity: 0.72,
+    },
+    failedMessage: {
+        backgroundColor: '#DC2626',
     },
     myMessage: {
         backgroundColor: '#0084FF',

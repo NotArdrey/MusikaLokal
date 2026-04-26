@@ -25,7 +25,6 @@ const buckets = [
 ];
 
 async function setupBuckets() {
-  console.log('🚀 Setting up storage buckets...\n');
 
   // List existing buckets
   const { data: existingBuckets, error: listError } = await supabase.storage.listBuckets();
@@ -35,19 +34,15 @@ async function setupBuckets() {
     process.exit(1);
   }
 
-  console.log('📦 Existing buckets:', existingBuckets.map(b => b.name).join(', ') || 'None');
-  console.log('');
 
   // Create each bucket
   for (const bucket of buckets) {
     const exists = existingBuckets.some(b => b.name === bucket.name);
     
     if (exists) {
-      console.log(`✓ Bucket "${bucket.name}" already exists`);
       continue;
     }
 
-    console.log(`Creating bucket "${bucket.name}"...`);
     const { data, error } = await supabase.storage.createBucket(bucket.id, {
       public: bucket.public,
       fileSizeLimit: 52428800, // 50MB
@@ -59,11 +54,9 @@ async function setupBuckets() {
     if (error) {
       console.error(`❌ Error creating bucket "${bucket.name}":`, error.message);
     } else {
-      console.log(`✓ Created bucket "${bucket.name}" (${bucket.public ? 'public' : 'private'})`);
     }
   }
 
-  console.log('\n✅ Storage setup complete!');
 }
 
 setupBuckets().catch(console.error);

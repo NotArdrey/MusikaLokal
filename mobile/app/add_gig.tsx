@@ -1,4 +1,4 @@
-import { Ionicons } from "@expo/vector-icons";
+﻿import { Ionicons } from "@expo/vector-icons";
 import * as FileSystem from "expo-file-system/legacy";
 import * as Linking from "expo-linking";
 import { router, useLocalSearchParams } from "expo-router";
@@ -580,14 +580,6 @@ export default function AddGigScreen() {
         },
       };
 
-      console.log(
-        "ðŸ”µ Creating gig with payload:",
-        JSON.stringify(
-          { action: "create", type: "gig", userId: session.user.id, payload },
-          null,
-          2,
-        ),
-      );
 
       // Insert base gig row (3NF-safe)
       const { data, error } = await supabase
@@ -610,11 +602,9 @@ export default function AddGigScreen() {
         .select()
         .single();
 
-      console.log("ðŸ”µ Response data:", JSON.stringify(data, null, 2));
-      console.log("ðŸ”µ Response error:", error);
 
       if (error) {
-        console.error("âŒ Error details:", JSON.stringify(error, null, 2));
+        console.error("Ã¢ÂÅ’ Error details:", JSON.stringify(error, null, 2));
         let alertMessage = `Failed to create gig: ${error.message}`;
         if (error.hint) alertMessage += `\n\nHint: ${error.hint}`;
         if (error.details) alertMessage += `\n\nDetails: ${error.details}`;
@@ -657,13 +647,12 @@ export default function AddGigScreen() {
 
       setNewGigId(data.id);
       setModalVisible(true);
-      console.log("âœ… Gig Created successfully");
     } catch (e: any) {
-      console.error("âŒ Error creating gig:", e);
-      console.error("âŒ Error message:", e?.message);
-      console.error("âŒ Error stack:", e?.stack);
+      console.error("Ã¢ÂÅ’ Error creating gig:", e);
+      console.error("Ã¢ÂÅ’ Error message:", e?.message);
+      console.error("Ã¢ÂÅ’ Error stack:", e?.stack);
       console.error(
-        "âŒ Full error object:",
+        "Ã¢ÂÅ’ Full error object:",
         JSON.stringify(e, Object.getOwnPropertyNames(e), 2),
       );
       showAlert(
@@ -710,7 +699,6 @@ export default function AddGigScreen() {
         }
       });
 
-      console.log('Address verification response:', { data, error });
 
       // For Supabase functions, the error body is sometimes returned in data even when there's an error
       if (error || (data && data.error)) {
@@ -722,18 +710,13 @@ export default function AddGigScreen() {
           if (data.message) {
             errorMessage += `: ${data.message}`;
           }
-          console.log('Error from data:', errorMessage);
         } else if (error) {
-          console.log('Error object:', error);
-          console.log('Error name:', error.name);
-          console.log('Error message:', error.message);
 
           // Try to get the response body from FunctionsHttpError
           try {
             // FunctionsHttpError has a context with the Response object
             if (error.context && typeof error.context.json === 'function') {
               const errorBody = await error.context.json();
-              console.log('Error body from context.json():', errorBody);
               if (errorBody?.error) {
                 errorMessage = errorBody.error;
                 if (errorBody.message) {
@@ -2920,7 +2903,7 @@ export default function AddGigScreen() {
                       marginTop: 4,
                     }}
                   >
-                    Payout: ₱{cost}
+                    Payout: â‚±{cost}
                   </Text>
                 </View>
 
@@ -3076,7 +3059,7 @@ export default function AddGigScreen() {
                   </Text>
                 </View>
                 <Text style={{ fontFamily: "Poppins_400Regular", fontSize: 12, color: colors.textSecondary, marginBottom: 10 }}>
-                  After creating this gig, you can propose a venue partnership deal with a production team to negotiate revenue splits and event terms.
+                  After creating this gig, you can coordinate venue partnerships with a production team from your production workspace.
                 </Text>
                 <TouchableOpacity activeOpacity={1}
                   onPress={() => router.push("/production_team" as any)}
@@ -3200,7 +3183,6 @@ export default function AddGigScreen() {
                     onMessage={(event) => {
                       try {
                         const data = JSON.parse(event.nativeEvent.data);
-                        console.log('Smile Wink Widget message:', data);
                         if (data.eventName === 'UPLOADS_CREATED' || 
                             data.eventName === 'LINK_CLOSED' ||
                             data.type === 'close' ||
@@ -3742,3 +3724,4 @@ const styles = StyleSheet.create({
     fontFamily: "Poppins_600SemiBold",
   },
 });
+

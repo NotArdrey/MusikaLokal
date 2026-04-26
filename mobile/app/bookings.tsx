@@ -1,4 +1,4 @@
-import { Ionicons } from "@expo/vector-icons";
+﻿import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect } from "@react-navigation/native";
 import { BlurView } from "expo-blur";
 import { CameraView, useCameraPermissions } from "expo-camera";
@@ -248,6 +248,51 @@ type ApplicationTab = "Applied" | "Accepted" | "Completed";
 // View mode for musicians to switch between bookings and applications
 type ViewMode = "bookings" | "applications";
 
+type BookingsTabData = {
+  Applicants: any[];
+  ActiveMusicians: any[];
+  Pending: any[];
+  Upcoming: any[];
+  Ongoing: any[];
+  Review: any[];
+  History: any[];
+};
+
+type ApplicationTabData = {
+  Applied: any[];
+  Accepted: any[];
+  Completed: any[];
+};
+
+type BookingsScreenCachePayload = {
+  data: BookingsTabData;
+  applicationData: ApplicationTabData;
+  pendingPermitStudios: any[];
+  projectApps: any[];
+  projectInvites: any[];
+  userRole: string;
+  fetchedAt: number;
+};
+
+const BOOKINGS_FOCUS_REFRESH_COOLDOWN_MS = 30000;
+const bookingsScreenCache = new Map<string, BookingsScreenCachePayload>();
+
+const createEmptyBookingsData = (): BookingsTabData => ({
+  Applicants: [],
+  ActiveMusicians: [],
+  Pending: [],
+  Upcoming: [],
+  Ongoing: [],
+  Review: [],
+  History: [],
+});
+
+const createEmptyApplicationData = (): ApplicationTabData => ({
+  Applied: [],
+  Accepted: [],
+  Completed: [],
+});
+
 export default function BookingsScreen() {
   const { colors, isDark } = useTheme();
   const { session, loading: authLoading, userId, isGuest } = useAuth();
@@ -287,36 +332,12 @@ export default function BookingsScreen() {
   const [scanned, setScanned] = useState(false);
 
   // State for fetched data
-  const [data, setData] = useState<{
-    Applicants: any[];
-    ActiveMusicians: any[];
-    Pending: any[];
-    Upcoming: any[];
-    Ongoing: any[];
-    Review: any[];
-    History: any[];
-  }>({
-    Applicants: [],
-    ActiveMusicians: [],
-    Pending: [],
-    Upcoming: [],
-    Ongoing: [],
-    Review: [],
-    History: [],
-  });
+  const [data, setData] = useState<BookingsTabData>(() => createEmptyBookingsData());
   const [pendingPermitStudios, setPendingPermitStudios] = useState<any[]>([]);
   const [permitDeleting, setPermitDeleting] = useState<string | null>(null);
 
   // Application data separated by status for musicians
-  const [applicationData, setApplicationData] = useState<{
-    Applied: any[];
-    Accepted: any[];
-    Completed: any[];
-  }>({
-    Applied: [],
-    Accepted: [],
-    Completed: [],
-  });
+  const [applicationData, setApplicationData] = useState<ApplicationTabData>(() => createEmptyApplicationData());
 
   // Producer project matches (applications & invites)
   const [projectApps, setProjectApps] = useState<any[]>([]);
@@ -438,7 +459,6 @@ export default function BookingsScreen() {
   // Handle route params (from payment result screen)
   useEffect(() => {
     if (params.tab) {
-      const requestedTab = params.tab === "Deals" ? "Pending" : params.tab;
       const validTabs: Tab[] = [
         "Applicants",
         "Active Musicians",
@@ -448,8 +468,8 @@ export default function BookingsScreen() {
         "Review",
         "History",
       ];
-      if (validTabs.includes(requestedTab as Tab)) {
-        setActiveTab(requestedTab as Tab);
+      if (validTabs.includes(params.tab as Tab)) {
+        setActiveTab(params.tab as Tab);
       }
     }
 
@@ -481,11 +501,11 @@ export default function BookingsScreen() {
           appState.current.match(/inactive|background/) &&
           nextAppState === "active"
         ) {
-          debugLog("ðŸ“± App returned to foreground");
+          debugLog("Ã°Å¸â€œÂ± App returned to foreground");
 
           // If we were in payment flow, check status and refresh
           if (paymentInProgressRef.current && userId) {
-            debugLog("ðŸ’³ Checking payment status after return...");
+            debugLog("Ã°Å¸â€™Â³ Checking payment status after return...");
             const bookingId = pendingPaymentBookingId.current;
             paymentInProgressRef.current = false;
             pendingPaymentBookingId.current = null;
@@ -493,7 +513,7 @@ export default function BookingsScreen() {
             // Poll for payment status with retries (webhook might be processing)
             let paymentConfirmed = false;
             for (let attempt = 1; attempt <= 3; attempt++) {
-              debugLog(`ðŸ’³ Payment status check attempt ${attempt}/3...`);
+              debugLog(`Ã°Å¸â€™Â³ Payment status check attempt ${attempt}/3...`);
               await new Promise((resolve) =>
                 setTimeout(resolve, 1500 * attempt),
               ); // Increasing delay
@@ -511,7 +531,7 @@ export default function BookingsScreen() {
                   // For partial payment (downpayment), stay on Pending; for full payment, go to Upcoming
                   const isPartial = booking.payment_status === "partial" && (booking.remaining_balance || 0) > 0;
                   pendingPaymentBookingId.current = isPartial ? "partial" : null;
-                  debugLog("âœ… Payment confirmed for booking:", bookingId, isPartial ? "(partial)" : "(full)");
+                  debugLog("Ã¢Å“â€¦ Payment confirmed for booking:", bookingId, isPartial ? "(partial)" : "(full)");
                   break;
                 }
               } else {
@@ -528,7 +548,7 @@ export default function BookingsScreen() {
                   paymentConfirmed = true;
                   const isPartial = recentPaid[0].payment_status === "partial" && (recentPaid[0].remaining_balance || 0) > 0;
                   pendingPaymentBookingId.current = isPartial ? "partial" : null;
-                  debugLog("âœ… Found recently paid booking");
+                  debugLog("Ã¢Å“â€¦ Found recently paid booking");
                   break;
                 }
               }
@@ -541,7 +561,7 @@ export default function BookingsScreen() {
             await fetchBookings(userId);
 
             if (paymentConfirmed) {
-              // Downpayment â†’ stay on Pending (balance still due); full payment â†’ go to Upcoming
+              // Downpayment Ã¢â€ â€™ stay on Pending (balance still due); full payment Ã¢â€ â€™ go to Upcoming
               setActiveTab(wasPartialPayment ? "Pending" : "Upcoming");
             }
           } else if (userId) {
@@ -767,7 +787,7 @@ export default function BookingsScreen() {
       }
 
       channel = liveChannel.subscribe((status: string) => {
-        debugLog("ðŸ“¡ Realtime status:", status);
+        debugLog("Ã°Å¸â€œÂ¡ Realtime status:", status);
       });
     };
 
@@ -786,7 +806,10 @@ export default function BookingsScreen() {
 
   useEffect(() => {
     if (isAuthenticated && userId) {
-      fetchBookings(userId);
+      const cached = bookingsScreenCache.get(userId);
+      if (!cached) {
+        fetchBookings(userId);
+      }
     }
   }, [isAuthenticated, userId]);
 
@@ -796,7 +819,24 @@ export default function BookingsScreen() {
       let intervalId: ReturnType<typeof setInterval> | null = null;
 
       if (isAuthenticated && userId) {
-        fetchBookings(userId);
+        const cached = bookingsScreenCache.get(userId);
+        const cacheIsFresh =
+          cached &&
+          Date.now() - cached.fetchedAt < BOOKINGS_FOCUS_REFRESH_COOLDOWN_MS;
+
+        if (cached) {
+          setData(cached.data);
+          setApplicationData(cached.applicationData);
+          setPendingPermitStudios(cached.pendingPermitStudios);
+          setProjectApps(cached.projectApps);
+          setProjectInvites(cached.projectInvites);
+          setUserRole(cached.userRole);
+          setLoading(false);
+        }
+
+        if (!cacheIsFresh) {
+          fetchBookings(userId, { showLoading: !cached });
+        }
 
         // Auto-refresh so bookings move between tabs based on real time/date
         intervalId = setInterval(async () => {
@@ -804,7 +844,7 @@ export default function BookingsScreen() {
 
           autoRefreshInFlightRef.current = true;
           try {
-            await fetchBookings(userId);
+            await fetchBookings(userId, { showLoading: false });
           } finally {
             autoRefreshInFlightRef.current = false;
           }
@@ -1008,7 +1048,7 @@ export default function BookingsScreen() {
       if (b.status === "pending" || b.status === "pending_relocation") {
         fallback.Pending.push(item);
       } else if (b.status === "confirmed" && b.payment_status === "partial" && (b.remaining_balance || 0) > 0) {
-        // Downpayment paid but balance still owed â€” keep in Pending
+        // Downpayment paid but balance still owed Ã¢â‚¬â€ keep in Pending
         fallback.Pending.push({ ...item, status: "Downpayment Paid - Balance Due" });
       } else if (b.status === "confirmed") {
         if (now > endDate) {
@@ -1038,9 +1078,15 @@ export default function BookingsScreen() {
     return fallback;
   }
 
-  async function fetchBookings(targetUserId: string) {
+  async function fetchBookings(
+    targetUserId: string,
+    options: { showLoading?: boolean } = {},
+  ) {
     try {
-      setLoading(true);
+      if (options.showLoading !== false) {
+        setLoading(true);
+      }
+      let nextPendingPermitStudios: any[] = [];
 
       // Fetch user role first
       const { data: profile } = await supabase
@@ -1076,12 +1122,11 @@ export default function BookingsScreen() {
           debugLog("Error fetching pending permit listings:", permitError);
           setPendingPermitStudios([]);
         } else {
-          setPendingPermitStudios(
-            (permitRows || []).map((row: any) => ({
+          nextPendingPermitStudios = (permitRows || []).map((row: any) => ({
               ...row,
               entity_type: role === "studio-owner" ? "studio" : "gig",
-            })),
-          );
+          }));
+          setPendingPermitStudios(nextPendingPermitStudios);
         }
       } else {
         setPendingPermitStudios([]);
@@ -1342,28 +1387,15 @@ export default function BookingsScreen() {
 
       const normalizeStatus = (status?: string | null) =>
         String(status || "").trim().toLowerCase();
-
-      const isClosedDealStatus = (status?: string | null) =>
-        ["rejected", "cancelled", "settled", "expired", "completed"].includes(
-          normalizeStatus(status),
-        );
-
-      const isDealActivity = (item: any) =>
-        item?.type_id === "venue_partnership_deal" || item?.type_id === "recording_deal";
-
       const getPendingSortTime = (item: any) => {
         const candidates = [
-          ...(isDealActivity(item)
-            ? [item?.updated_at, item?.created_at]
-            : [
-              item?.created_at,
+          item?.created_at,
               item?.raw_date && item?.start_time
                 ? `${item.raw_date}T${item.start_time}`
                 : null,
               item?.raw_date,
               item?.date,
               item?.updated_at,
-            ]),
         ];
 
         for (const candidate of candidates) {
@@ -1377,17 +1409,13 @@ export default function BookingsScreen() {
 
       const getHistorySortTime = (item: any) => {
         const candidates = [
-          ...(isDealActivity(item)
-            ? [item?.updated_at, item?.created_at]
-            : [
-              item?.raw_date && item?.start_time
+          item?.raw_date && item?.start_time
                 ? `${item.raw_date}T${item.start_time}`
                 : null,
               item?.raw_date,
               item?.date,
               item?.updated_at,
               item?.created_at,
-            ]),
         ];
 
         for (const candidate of candidates) {
@@ -1588,63 +1616,20 @@ export default function BookingsScreen() {
           new Date(b.created_at || b.raw_date).getTime() -
           new Date(a.created_at || a.raw_date).getTime(),
       );
-
-      // 6. Fetch commercial deals and fold them into Pending/History.
-      let dealsItems: any[] = [];
-      try {
-        const { data: dealsResp } = await supabase.functions.invoke(
-          "manage-deals",
-          { body: { action: "list_my_deals" } },
-        );
-        if (dealsResp?.deals) {
-          const vpDeals = (dealsResp.deals.venue_partnerships || []).map((d: any) => ({
-            ...d,
-            type_id: "venue_partnership_deal",
-            display_name: d.title,
-            display_status: d.status,
-          }));
-          const recDeals = (dealsResp.deals.recording_deals || []).map((d: any) => ({
-            ...d,
-            type_id: "recording_deal",
-            display_name: d.title,
-            display_status: d.status,
-          }));
-          dealsItems = [...vpDeals, ...recDeals].sort(
-            (a: any, b: any) =>
-              new Date(b.updated_at || b.created_at).getTime() -
-              new Date(a.updated_at || a.created_at).getTime(),
-          );
-        }
-      } catch (_) {
-        // Deals fetch is non-critical; ignore errors
-      }
-
-      const openDeals = dealsItems.filter(
-        (item: any) => !isClosedDealStatus(item.display_status),
-      );
-      const closedDeals = dealsItems.filter((item: any) =>
-        isClosedDealStatus(item.display_status),
-      );
-
-      const pendingItemsWithDeals = [...activePendingItems, ...openDeals].sort(
-        (a: any, b: any) => getPendingSortTime(b) - getPendingSortTime(a),
-      );
-
-      const historyItemsWithDeals = [...historyItems, ...closedDeals].sort(
-        (a: any, b: any) => getHistorySortTime(b) - getHistorySortTime(a),
-      );
-
       const processedData = {
         Applicants: applicants,
         ActiveMusicians: activeGigMusicians,
-        Pending: pendingItemsWithDeals,
+        Pending: activePendingItems,
         Upcoming: allUpcoming,
         Ongoing: allOngoing,
         Review: unreviewedItems,
-        History: historyItemsWithDeals,
+        History: historyItems,
       };
 
       setData(processedData);
+      let nextApplicationData = createEmptyApplicationData();
+      let nextProjectApps: any[] = [];
+      let nextProjectInvites: any[] = [];
 
       // For musicians: Separate gig applications by status for the Applications view
       if (role === "musician") {
@@ -1693,11 +1678,14 @@ export default function BookingsScreen() {
             new Date(a.raw_date || a.date).getTime(),
         );
 
-        setApplicationData({
+        nextApplicationData = {
           Applied: appliedApps,
           Accepted: acceptedApps,
           Completed: completedApps,
-        });
+        };
+        setApplicationData(nextApplicationData);
+      } else {
+        setApplicationData(nextApplicationData);
       }
 
       // Fetch producer project matches for producers only.
@@ -1708,8 +1696,10 @@ export default function BookingsScreen() {
             { body: { action: "list_matches", role: "producer" } },
           );
           const matches = matchData?.data || matchData?.matches || [];
-          setProjectApps(matches.filter((m: any) => m.match_type === "application"));
-          setProjectInvites(matches.filter((m: any) => m.match_type === "invite"));
+          nextProjectApps = matches.filter((m: any) => m.match_type === "application");
+          nextProjectInvites = matches.filter((m: any) => m.match_type === "invite");
+          setProjectApps(nextProjectApps);
+          setProjectInvites(nextProjectInvites);
         } catch (_) {
           // Non-critical; ignore errors
         }
@@ -1717,6 +1707,16 @@ export default function BookingsScreen() {
         setProjectApps([]);
         setProjectInvites([]);
       }
+
+      bookingsScreenCache.set(targetUserId, {
+        data: processedData,
+        applicationData: nextApplicationData,
+        pendingPermitStudios: nextPendingPermitStudios,
+        projectApps: nextProjectApps,
+        projectInvites: nextProjectInvites,
+        userRole: role,
+        fetchedAt: Date.now(),
+      });
     } catch (e) {
       debugLog("Error fetching bookings:", e);
     } finally {
@@ -1731,7 +1731,7 @@ export default function BookingsScreen() {
     reason?: string,
   ): Promise<boolean> {
     try {
-      debugLog("ðŸ“¤ handleStatusUpdate called with:", {
+      debugLog("Ã°Å¸â€œÂ¤ handleStatusUpdate called with:", {
         bookingId,
         newStatus,
         typeId,
@@ -1754,7 +1754,7 @@ export default function BookingsScreen() {
         error = rpcResult.error;
 
         if (error) {
-          debugLog("âš ï¸ record_booking_attendance failed, falling back to manage-bookings:", error);
+          debugLog("Ã¢Å¡Â Ã¯Â¸Â record_booking_attendance failed, falling back to manage-bookings:", error);
 
           const invokeFallback = await supabase.functions.invoke("manage-bookings", {
             body: {
@@ -1786,7 +1786,7 @@ export default function BookingsScreen() {
         error = invokeResult.error;
       }
 
-      debugLog("ðŸ“¥ handleStatusUpdate response:", { data, error });
+      debugLog("Ã°Å¸â€œÂ¥ handleStatusUpdate response:", { data, error });
 
       if (error) {
         const errorContext = (error as any)?.context;
@@ -1798,18 +1798,6 @@ export default function BookingsScreen() {
           contextBody = null;
         }
 
-        console.log("[Bookings][handleStatusUpdate][Edge Function error]", {
-          bookingId,
-          newStatus,
-          typeId,
-          errorMessage: (error as any)?.message,
-          errorStatus: (error as any)?.status,
-          errorCode: (error as any)?.code,
-          errorDetails: (error as any)?.details,
-          contextStatus: errorContext?.status,
-          contextStatusText: errorContext?.statusText,
-          contextBody,
-        });
 
         const contextMessage =
           (contextBody && typeof contextBody === "object" && (contextBody.error || contextBody.message)) ||
@@ -1966,7 +1954,7 @@ export default function BookingsScreen() {
       const counterpartyName = item.counterparty_name || item.name || "this user";
 
       if (isProductionInvite) {
-        const { data, error } = await supabase.functions.invoke("manage-deals", {
+        const { data, error } = await supabase.functions.invoke("manage-production", {
           body: {
             action: "respond_to_production_team_invite",
             request_id: item.id,
@@ -2026,7 +2014,7 @@ export default function BookingsScreen() {
         decision: nextStatus,
       };
 
-      const { data, error } = await supabase.functions.invoke("manage-deals", {
+      const { data, error } = await supabase.functions.invoke("manage-production", {
         body: responseBody,
       });
 
@@ -2136,7 +2124,7 @@ export default function BookingsScreen() {
                       needsRpcFallback = true;
                     } else {
                       result = data;
-                      // Edge function caught an internal error â€” fall through to RPC
+                      // Edge function caught an internal error Ã¢â‚¬â€ fall through to RPC
                       if (result?.code === "DELETE_STUDIO_WITH_STORAGE_FAILED") {
                         needsRpcFallback = true;
                         result = null;
@@ -2806,7 +2794,7 @@ export default function BookingsScreen() {
         paymentType === "downpayment" ? Math.round(totalAmount / 2) : 0;
 
       debugLog(
-        "ðŸ’³ Initiating payment for booking:",
+        "Ã°Å¸â€™Â³ Initiating payment for booking:",
         item.id,
         "Type:",
         paymentType,
@@ -2846,7 +2834,7 @@ export default function BookingsScreen() {
       }
 
       if (result.checkout_url) {
-        debugLog("âœ… Opening checkout URL:", result.checkout_url);
+        debugLog("Ã¢Å“â€¦ Opening checkout URL:", result.checkout_url);
         const canOpen = await Linking.canOpenURL(result.checkout_url);
         if (canOpen) {
           paymentInProgressRef.current = true;
@@ -2879,7 +2867,7 @@ export default function BookingsScreen() {
     try {
       setLoading(true);
       debugLog(
-        "ðŸ’³ Paying remaining balance for booking:",
+        "Ã°Å¸â€™Â³ Paying remaining balance for booking:",
         item.id,
         "Amount:",
         item.remaining_balance,
@@ -2914,7 +2902,7 @@ export default function BookingsScreen() {
       }
 
       if (result.checkout_url) {
-        debugLog("âœ… Opening checkout URL:", result.checkout_url);
+        debugLog("Ã¢Å“â€¦ Opening checkout URL:", result.checkout_url);
         const canOpen = await Linking.canOpenURL(result.checkout_url);
         if (canOpen) {
           paymentInProgressRef.current = true;
@@ -2957,7 +2945,7 @@ export default function BookingsScreen() {
       const balanceAmount = selectedItem.remaining_balance;
 
       debugLog(
-        "ðŸ’µ Clearing remaining balance for booking:",
+        "Ã°Å¸â€™Âµ Clearing remaining balance for booking:",
         bookingId,
         "Amount:",
         balanceAmount,
@@ -3030,7 +3018,7 @@ export default function BookingsScreen() {
         user_id: booking.user_id,
         type: "success",
         title: "Balance Cleared!",
-        message: `Your remaining balance of ₱${balanceAmount.toLocaleString()} for ${booking.studio?.name || "your booking"} has been marked as paid.`,
+        message: `Your remaining balance of â‚±${balanceAmount.toLocaleString()} for ${booking.studio?.name || "your booking"} has been marked as paid.`,
         read: false,
         meta: buildNotificationRouteMeta("/bookings", undefined, {
           type: "balance_cleared",
@@ -3039,11 +3027,11 @@ export default function BookingsScreen() {
         }),
       });
 
-      debugLog(`ðŸ’µ Balance cleared: ₱${balanceAmount} for booking ${bookingId}`);
+      debugLog(`Ã°Å¸â€™Âµ Balance cleared: â‚±${balanceAmount} for booking ${bookingId}`);
 
       Alert.alert(
         "Balance Cleared",
-        `₱${balanceAmount?.toLocaleString()} has been marked as paid and credited to your wallet.`,
+        `â‚±${balanceAmount?.toLocaleString()} has been marked as paid and credited to your wallet.`,
       );
       setModalVisible(false);
       if (userId) fetchBookings(userId);
@@ -3112,7 +3100,7 @@ export default function BookingsScreen() {
     // Call backend to verify check-in
     try {
       setLoading(true);
-      debugLog("ðŸ“· Scanning QR code:", {
+      debugLog("Ã°Å¸â€œÂ· Scanning QR code:", {
         qr_code: data,
         scanner_id: userId,
       });
@@ -3128,8 +3116,8 @@ export default function BookingsScreen() {
 
       setLoading(false);
 
-      debugLog("ðŸ“· Check-in response:", response);
-      debugLog("ðŸ“· Check-in error:", error);
+      debugLog("Ã°Å¸â€œÂ· Check-in response:", response);
+      debugLog("Ã°Å¸â€œÂ· Check-in error:", error);
 
       if (error) {
         console.error("Check-in error:", error);
@@ -3184,12 +3172,6 @@ export default function BookingsScreen() {
     if (item?.type_id === "booking_request") return "Requests";
     if (item?.type_id === "gig_application") return "Applications";
     if (item?.type_id === "studio_booking") return "Bookings";
-    if (
-      item?.type_id === "venue_partnership_deal" ||
-      item?.type_id === "recording_deal"
-    ) {
-      return "Deals";
-    }
     return "Other";
   };
 
@@ -3947,196 +3929,6 @@ export default function BookingsScreen() {
           ) : (
             filteredItems.map((item: any) => {
               // ==========================================
-              // 0. DEAL CARD (Venue Partnership or Recording)
-              // ==========================================
-              if (item.type_id === "venue_partnership_deal" || item.type_id === "recording_deal") {
-                const isDeal = true;
-                const dealType = item.type_id === "venue_partnership_deal" ? "Partnership" : "Recording";
-                const statusColors: Record<string, string> = {
-                  proposed: "#F59E0B",
-                  countered: "#3B82F6",
-                  accepted: "#10B981",
-                  rejected: "#EF4444",
-                  cancelled: "#6B7280",
-                  settled: "#8B5CF6",
-                  disputed: "#EF4444",
-                  expired: "#6B7280",
-                  completed: "#10B981",
-                };
-                const statusColor = statusColors[item.display_status] || colors.textSecondary;
-
-                return (
-                  <TouchableOpacity
-                    activeOpacity={1}
-                    key={item.id}
-                    onPress={() => {
-                      router.push({
-                        pathname: "/deal_details" as any,
-                        params: {
-                          deal_id: item.id,
-                          deal_type: item.type_id === "venue_partnership_deal" ? "venue_partnership" : "recording",
-                        },
-                      });
-                    }}
-                    style={[
-                      styles.cardContainer,
-                      {
-                        backgroundColor: colors.card,
-                        borderColor: colors.border,
-                      },
-                    ]}
-                  >
-                    <View style={{ padding: scale(16) }}>
-                      <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: moderateScale(8) }}>
-                        <View style={{ flexDirection: "row", alignItems: "center", gap: scale(8), flex: 1 }}>
-                          <Ionicons name={item.type_id === "venue_partnership_deal" ? "business-outline" : "musical-notes-outline"} size={moderateScale(20)} color={colors.primary} />
-                          <Text style={{ fontSize: moderateScale(16), fontWeight: "700", color: colors.text }} numberOfLines={1}>
-                            {item.display_name}
-                          </Text>
-                        </View>
-                        <View style={{ backgroundColor: statusColor + "20", paddingHorizontal: scale(10), paddingVertical: scale(4), borderRadius: moderateScale(12) }}>
-                          <Text style={{ fontSize: moderateScale(12), fontWeight: "600", color: statusColor, textTransform: "capitalize" }}>
-                            {item.display_status}
-                          </Text>
-                        </View>
-                      </View>
-                      <Text style={{ fontSize: moderateScale(13), color: colors.textSecondary, marginBottom: moderateScale(4) }}>
-                        {dealType} Deal
-                      </Text>
-                      {item.production_teams?.name && (
-                        <Text style={{ fontSize: moderateScale(12), color: colors.textSecondary }}>
-                          Team: {item.production_teams.name}
-                        </Text>
-                      )}
-                      {item.studios?.name && (
-                        <Text style={{ fontSize: moderateScale(12), color: colors.textSecondary }}>
-                          Studio: {item.studios.name}
-                        </Text>
-                      )}
-                      <Text style={{ fontSize: moderateScale(11), color: colors.textSecondary, marginTop: moderateScale(6) }}>
-                        {formatFriendlyDateTime(item.updated_at || item.created_at)}
-                      </Text>
-                    </View>
-                  </TouchableOpacity>
-                );
-              }
-
-              // ==========================================
-              // 0.5. PROJECT MATCH CARD (Applications & Invites)
-              // ==========================================
-              if (item.match_type === "application" || item.match_type === "invite") {
-                const matchStatusColors: Record<string, string> = {
-                  pending: "#F59E0B",
-                  accepted: "#10B981",
-                  rejected: "#EF4444",
-                  withdrawn: "#6B7280",
-                  expired: "#6B7280",
-                };
-                const mStatusColor = matchStatusColors[item.status] || colors.textSecondary;
-                const isInvite = item.match_type === "invite";
-                const isPending = item.status === "pending";
-                const isProducerView = userRole === "producer";
-
-                return (
-                  <TouchableOpacity
-                    activeOpacity={0.8}
-                    key={item.match_id || item.id}
-                    style={[
-                      styles.cardContainer,
-                      { backgroundColor: colors.card, borderColor: colors.border },
-                    ]}
-                    onPress={() => router.push({ pathname: "/producer_project_details", params: { project_id: item.project_id } })}
-                  >
-                    <View style={{ padding: scale(16) }}>
-                      <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: moderateScale(8) }}>
-                        <View style={{ flexDirection: "row", alignItems: "center", gap: scale(8), flex: 1 }}>
-                          <Ionicons name={isInvite ? "mail-outline" : "document-text-outline"} size={moderateScale(20)} color={colors.primary} />
-                          <Text style={{ fontSize: moderateScale(15), fontWeight: "700", color: colors.text }} numberOfLines={1}>
-                            {item.project_title || "Project"}
-                          </Text>
-                        </View>
-                        <View style={{ backgroundColor: mStatusColor + "20", paddingHorizontal: scale(10), paddingVertical: scale(4), borderRadius: moderateScale(12) }}>
-                          <Text style={{ fontSize: moderateScale(12), fontWeight: "600", color: mStatusColor, textTransform: "capitalize" }}>
-                            {item.status}
-                          </Text>
-                        </View>
-                      </View>
-                      {item.role_title && (
-                        <Text style={{ fontSize: moderateScale(13), color: colors.textSecondary, marginBottom: moderateScale(4) }}>
-                          Role: {item.role_title}
-                        </Text>
-                      )}
-                      <View style={{ flexDirection: "row", alignItems: "center", gap: scale(6), marginBottom: moderateScale(4) }}>
-                        <Ionicons name="person-circle-outline" size={moderateScale(16)} color={colors.textSecondary} />
-                        <Text style={{ fontSize: moderateScale(12), color: colors.textSecondary }}>
-                          {item.musician_name || "Unknown"}
-                        </Text>
-                      </View>
-                      {item.message && (
-                        <Text style={{ fontSize: moderateScale(12), color: colors.textSecondary, fontStyle: "italic" }} numberOfLines={2}>
-                          {item.message}
-                        </Text>
-                      )}
-                      <Text style={{ fontSize: moderateScale(11), color: colors.textSecondary, marginTop: moderateScale(6) }}>
-                        {formatFriendlyDateTime(item.created_at)}
-                      </Text>
-
-                      {/* Action buttons for pending items */}
-                      {isPending && (
-                        <View style={{ flexDirection: "row", gap: scale(8), marginTop: moderateScale(10) }}>
-                          {isProducerView && !isInvite && (
-                            <>
-                              <TouchableOpacity activeOpacity={1}
-                                style={{ flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 4, backgroundColor: "#10B981", paddingVertical: scale(8), borderRadius: scale(8) }}
-                                onPress={(e) => { e.stopPropagation(); handleMatchAction(item.match_id, "accept", item.match_type); }}
-                              >
-                                <Ionicons name="checkmark" size={16} color="#fff" />
-                                <Text style={{ color: "#fff", fontSize: moderateScale(12), fontWeight: "600" }}>Accept</Text>
-                              </TouchableOpacity>
-                              <TouchableOpacity activeOpacity={1}
-                                style={{ flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 4, backgroundColor: "#EF4444", paddingVertical: scale(8), borderRadius: scale(8) }}
-                                onPress={(e) => { e.stopPropagation(); handleMatchAction(item.match_id, "reject", item.match_type); }}
-                              >
-                                <Ionicons name="close" size={16} color="#fff" />
-                                <Text style={{ color: "#fff", fontSize: moderateScale(12), fontWeight: "600" }}>Reject</Text>
-                              </TouchableOpacity>
-                            </>
-                          )}
-                          {!isProducerView && !isInvite && (
-                            <TouchableOpacity activeOpacity={1}
-                              style={{ flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 4, borderWidth: 1, borderColor: "#EF4444", paddingVertical: scale(8), borderRadius: scale(8) }}
-                              onPress={(e) => { e.stopPropagation(); handleMatchAction(item.match_id, "withdraw", item.match_type); }}
-                            >
-                              <Ionicons name="arrow-undo" size={16} color="#EF4444" />
-                              <Text style={{ color: "#EF4444", fontSize: moderateScale(12), fontWeight: "600" }}>Withdraw</Text>
-                            </TouchableOpacity>
-                          )}
-                          {!isProducerView && isInvite && (
-                            <>
-                              <TouchableOpacity activeOpacity={1}
-                                style={{ flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 4, backgroundColor: "#10B981", paddingVertical: scale(8), borderRadius: scale(8) }}
-                                onPress={(e) => { e.stopPropagation(); handleMatchAction(item.match_id, "accept", item.match_type); }}
-                              >
-                                <Ionicons name="checkmark" size={16} color="#fff" />
-                                <Text style={{ color: "#fff", fontSize: moderateScale(12), fontWeight: "600" }}>Accept</Text>
-                              </TouchableOpacity>
-                              <TouchableOpacity activeOpacity={1}
-                                style={{ flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 4, backgroundColor: "#EF4444", paddingVertical: scale(8), borderRadius: scale(8) }}
-                                onPress={(e) => { e.stopPropagation(); handleMatchAction(item.match_id, "reject", item.match_type); }}
-                              >
-                                <Ionicons name="close" size={16} color="#fff" />
-                                <Text style={{ color: "#fff", fontSize: moderateScale(12), fontWeight: "600" }}>Decline</Text>
-                              </TouchableOpacity>
-                            </>
-                          )}
-                        </View>
-                      )}
-                    </View>
-                  </TouchableOpacity>
-                );
-              }
-
-              // ==========================================
               // 0.75. CONNECTION REQUEST CARD
               // ==========================================
               if (item.type_id === "booking_request") {
@@ -4151,7 +3943,7 @@ export default function BookingsScreen() {
                     : null,
                 ]
                   .filter(Boolean)
-                  .join(" • ");
+                  .join(" â€¢ ");
 
                 return (
                   <TouchableOpacity
@@ -5008,29 +4800,6 @@ export default function BookingsScreen() {
 
                               <TouchableOpacity activeOpacity={1}
                                 onPress={() => {
-                                  console.log("[Bookings][Active Musicians][COMPLETE pressed]", {
-                                    timestamp: new Date().toISOString(),
-                                    activeTab,
-                                    userRole,
-                                    modalModeBeforeOpen: modalMode,
-                                    booking: {
-                                      id: item?.id,
-                                      type_id: item?.type_id,
-                                      status: item?.status,
-                                      booking_status: item?.booking_status,
-                                      applicant_name: item?.applicant_name,
-                                      user_id: item?.user_id,
-                                      applicant_id: item?.applicant_id,
-                                      organizer_id: item?.organizer_id,
-                                      gig_id: item?.gig_id,
-                                      title: item?.title,
-                                      gig_title: item?.gig_title,
-                                      venue_name: item?.venue_name,
-                                      raw_date: item?.raw_date,
-                                      start_time: item?.start_time,
-                                      end_time: item?.end_time,
-                                    },
-                                  });
                                   setSelectedItem(item);
                                   setModalMode("complete");
                                   setModalVisible(true);
@@ -5732,7 +5501,7 @@ export default function BookingsScreen() {
                                     { color: "#F59E0B" },
                                   ]}
                                 >
-                                  Balance: ₱
+                                  Balance: â‚±
                                   {item.remaining_balance?.toLocaleString()}
                                 </Text>
                               </View>
@@ -5943,7 +5712,7 @@ export default function BookingsScreen() {
                               flex: 1,
                             }}
                           >
-                            {/* Row 1 â€” Details + Pay Now (hidden when fully paid & awaiting confirmation) */}
+                            {/* Row 1 Ã¢â‚¬â€ Details + Pay Now (hidden when fully paid & awaiting confirmation) */}
                             <View style={{ flexDirection: "row", gap: scale(8) }}>
                               {/* Details Button */}
                               <TouchableOpacity activeOpacity={1}
@@ -5968,7 +5737,7 @@ export default function BookingsScreen() {
                                 </Text>
                               </TouchableOpacity>
 
-                              {/* Pay Now / Pay Balance â€” only when payment is not fully settled */}
+                              {/* Pay Now / Pay Balance Ã¢â‚¬â€ only when payment is not fully settled */}
                               {item.payment_status !== "paid" && (
                                 <TouchableOpacity activeOpacity={1}
                                   onPress={() => showPaymentOptions(item)}
@@ -5992,7 +5761,7 @@ export default function BookingsScreen() {
                                     ]}
                                   >
                                     {item.payment_type === "downpayment" && item.remaining_balance > 0
-                                      ? `Pay Balance ₱${item.remaining_balance?.toLocaleString()}`
+                                      ? `Pay Balance â‚±${item.remaining_balance?.toLocaleString()}`
                                       : "Pay Now"}
                                   </Text>
                                 </TouchableOpacity>
@@ -6271,7 +6040,7 @@ export default function BookingsScreen() {
                                           },
                                         ]}
                                       >
-                                        Pay Remaining ₱{item.remaining_balance?.toLocaleString()}
+                                        Pay Remaining â‚±{item.remaining_balance?.toLocaleString()}
                                       </Text>
                                     </TouchableOpacity>
                                   ) : null}
@@ -6306,7 +6075,7 @@ export default function BookingsScreen() {
                                           },
                                         ]}
                                       >
-                                        Clear Balance ₱{item.remaining_balance?.toLocaleString()} (F2F)
+                                        Clear Balance â‚±{item.remaining_balance?.toLocaleString()} (F2F)
                                       </Text>
                                     </TouchableOpacity>
                                   ) : null}
@@ -6461,7 +6230,7 @@ export default function BookingsScreen() {
                   : modalMode === "renew"
                     ? `Would you like to send a contract renewal offer to ${selectedItem?.customer_name || "this musician"}? They will receive a notification and can accept or decline the offer.`
                     : modalMode === "clear_balance"
-                      ? `Mark ₱${selectedItem?.remaining_balance?.toLocaleString() || 0} as paid via face-to-face payment? This amount will be credited to your wallet.`
+                      ? `Mark â‚±${selectedItem?.remaining_balance?.toLocaleString() || 0} as paid via face-to-face payment? This amount will be credited to your wallet.`
                       : modalMode === "report_access"
                         ? "Please describe the issue so we can notify the studio owner and review this booking case."
                       : modalMode === "late_confirm"
@@ -6500,14 +6269,14 @@ export default function BookingsScreen() {
 
                             if (isFullyPaid) {
                               const paidAmount = selectedItem?.payment_amount || selectedItem?.total_cost || 0;
-                              return `Cancellation Policy: Booking cancellations are non-refundable. Your paid amount of ₱${paidAmount.toLocaleString()} will be forfeited.`;
+                              return `Cancellation Policy: Booking cancellations are non-refundable. Your paid amount of â‚±${paidAmount.toLocaleString()} will be forfeited.`;
                             }
 
                             if (isPartialPaid) {
                               const paidPortion =
                                 (selectedItem?.payment_amount || selectedItem?.total_cost || 0) -
                                 (selectedItem?.remaining_balance || 0);
-                              return `Cancellation Policy: Booking cancellations are non-refundable. Your downpayment of ₱${Math.max(0, paidPortion).toLocaleString()} will be forfeited.`;
+                              return `Cancellation Policy: Booking cancellations are non-refundable. Your downpayment of â‚±${Math.max(0, paidPortion).toLocaleString()} will be forfeited.`;
                             }
 
                             return "Cancellation Policy: Booking cancellations are non-refundable. Any amount already paid will be forfeited.";
@@ -6534,7 +6303,7 @@ export default function BookingsScreen() {
                   : modalMode === "renew"
                     ? "Send Renewal Offer"
                     : modalMode === "clear_balance"
-                        ? `Mark ₱${selectedItem?.remaining_balance?.toLocaleString() || 0} as Paid`
+                        ? `Mark â‚±${selectedItem?.remaining_balance?.toLocaleString() || 0} as Paid`
                         : modalMode === "report_access"
                           ? "Submit Report"
                         : modalMode === "late_confirm"
@@ -6579,10 +6348,10 @@ export default function BookingsScreen() {
           }
 
           if (selectedItem) {
-            debugLog("ðŸ” Modal onConfirm - selectedItem:", selectedItem);
-            debugLog("ðŸ” Modal onConfirm - modalMode:", modalMode);
+            debugLog("Ã°Å¸â€Â Modal onConfirm - selectedItem:", selectedItem);
+            debugLog("Ã°Å¸â€Â Modal onConfirm - modalMode:", modalMode);
             debugLog(
-              "ðŸ” Modal onConfirm - selectedItem.type_id:",
+              "Ã°Å¸â€Â Modal onConfirm - selectedItem.type_id:",
               selectedItem.type_id,
             );
 
@@ -6647,36 +6416,11 @@ export default function BookingsScreen() {
             }
 
             if (modalMode === "complete") {
-              console.log("[Bookings][Complete Review Modal][CONFIRM pressed]", {
-                timestamp: new Date().toISOString(),
-                activeTab,
-                userRole,
-                modalMode,
-                computedStatus: status,
-                cancellationReason,
-                selectedItem: {
-                  id: selectedItem?.id,
-                  type_id: selectedItem?.type_id,
-                  status: selectedItem?.status,
-                  booking_status: selectedItem?.booking_status,
-                  applicant_name: selectedItem?.applicant_name,
-                  user_id: selectedItem?.user_id,
-                  applicant_id: selectedItem?.applicant_id,
-                  organizer_id: selectedItem?.organizer_id,
-                  gig_id: selectedItem?.gig_id,
-                  title: selectedItem?.title,
-                  gig_title: selectedItem?.gig_title,
-                  venue_name: selectedItem?.venue_name,
-                  raw_date: selectedItem?.raw_date,
-                  start_time: selectedItem?.start_time,
-                  end_time: selectedItem?.end_time,
-                },
-              });
             }
 
-            debugLog("ðŸ” Modal onConfirm - Final status:", status);
+            debugLog("Ã°Å¸â€Â Modal onConfirm - Final status:", status);
             debugLog(
-              "ðŸ” Modal onConfirm - Calling handleStatusUpdate with:",
+              "Ã°Å¸â€Â Modal onConfirm - Calling handleStatusUpdate with:",
               {
                 id: selectedItem.id,
                 status,
@@ -6764,7 +6508,7 @@ export default function BookingsScreen() {
                 { color: colors.textSecondary },
               ]}
             >
-              Total Amount: ₱
+              Total Amount: â‚±
               {(
                 paymentItem?.payment_amount ||
                 paymentItem?.total_cost ||
@@ -6801,7 +6545,7 @@ export default function BookingsScreen() {
                       { color: colors.primary },
                     ]}
                   >
-                    ₱
+                    â‚±
                     {(
                       paymentItem?.payment_amount ||
                       paymentItem?.total_cost ||
@@ -6849,7 +6593,7 @@ export default function BookingsScreen() {
                       { color: colors.primary },
                     ]}
                   >
-                    ₱
+                    â‚±
                     {Math.round(
                       (paymentItem?.payment_amount ||
                         paymentItem?.total_cost ||
@@ -6864,7 +6608,7 @@ export default function BookingsScreen() {
                   { color: colors.textSecondary },
                 ]}
               >
-                Pay half now, remaining ₱
+                Pay half now, remaining â‚±
                 {Math.round(
                   (paymentItem?.payment_amount ||
                     paymentItem?.total_cost ||
@@ -7499,4 +7243,8 @@ const styles = StyleSheet.create({
     flex: 1,
   },
 });
+
+
+
+
 

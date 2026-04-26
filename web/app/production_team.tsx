@@ -1,4 +1,4 @@
-import { Ionicons } from "@expo/vector-icons";
+﻿import { Ionicons } from "@expo/vector-icons";
 import { router, useFocusEffect } from "expo-router";
 import React, { useCallback, useState } from "react";
 import {
@@ -63,17 +63,6 @@ export default function ProductionTeamScreen() {
   const [memberRole, setMemberRole] = useState<"member" | "manager">("member");
   const [addingMember, setAddingMember] = useState(false);
 
-  // Propose deal modal
-  const [proposeDealVisible, setProposeDealVisible] = useState(false);
-  const [dealTitle, setDealTitle] = useState("");
-  const [dealVenuePct, setDealVenuePct] = useState("60");
-  const [dealProductionPct, setDealProductionPct] = useState("40");
-  const [dealFixedFee, setDealFixedFee] = useState("");
-  const [dealDeposit, setDealDeposit] = useState("");
-  const [dealVenueEmail, setDealVenueEmail] = useState("");
-  const [dealNotes, setDealNotes] = useState("");
-  const [proposingDeal, setProposingDeal] = useState(false);
-
   // Alert
   const [alertVisible, setAlertVisible] = useState(false);
   const [alertConfig, setAlertConfig] = useState<{
@@ -90,7 +79,7 @@ export default function ProductionTeamScreen() {
   const fetchTeams = useCallback(async () => {
     if (!userId) return;
     try {
-      const { data, error } = await supabase.functions.invoke("manage-deals", {
+      const { data, error } = await supabase.functions.invoke("manage-production", {
         body: { action: "list_my_teams" },
       });
       if (error) throw error;
@@ -143,7 +132,7 @@ export default function ProductionTeamScreen() {
     }
     setCreating(true);
     try {
-      const { data, error } = await supabase.functions.invoke("manage-deals", {
+      const { data, error } = await supabase.functions.invoke("manage-production", {
         body: {
           action: "create_production_team",
           name: newTeamName.trim(),
@@ -186,7 +175,7 @@ export default function ProductionTeamScreen() {
         return;
       }
 
-      const { data, error } = await supabase.functions.invoke("manage-deals", {
+      const { data, error } = await supabase.functions.invoke("manage-production", {
         body: {
           action: "add_team_member",
           team_id: selectedTeam.id,
@@ -212,7 +201,7 @@ export default function ProductionTeamScreen() {
   const handleRemoveMember = async (memberUserId: string) => {
     if (!selectedTeam) return;
     try {
-      const { data, error } = await supabase.functions.invoke("manage-deals", {
+      const { data, error } = await supabase.functions.invoke("manage-production", {
         body: {
           action: "remove_team_member",
           team_id: selectedTeam.id,
@@ -227,67 +216,6 @@ export default function ProductionTeamScreen() {
       showAlert("error", "Error", e.message || "Failed to remove member");
     }
   };
-
-  const handleProposeDeal = async () => {
-    if (!dealTitle.trim()) {
-      showAlert("warning", "Required", "Deal title is required");
-      return;
-    }
-    if (!dealVenueEmail.trim()) {
-      showAlert("warning", "Required", "Venue owner email is required");
-      return;
-    }
-    if (Number(dealVenuePct) + Number(dealProductionPct) !== 100) {
-      showAlert("error", "Error", "Revenue split must total 100%");
-      return;
-    }
-    if (!selectedTeam) return;
-
-    setProposingDeal(true);
-    try {
-      const { data: venueProfile, error: profileErr } = await supabase
-        .from("profiles")
-        .select("id")
-        .eq("email", dealVenueEmail.trim().toLowerCase())
-        .maybeSingle();
-
-      if (profileErr) throw profileErr;
-      if (!venueProfile) {
-        showAlert("warning", "Not Found", "No venue owner found with that email");
-        setProposingDeal(false);
-        return;
-      }
-
-      const { data, error } = await supabase.functions.invoke("manage-deals", {
-        body: {
-          action: "create_venue_partnership_deal",
-          title: dealTitle.trim(),
-          production_team_id: selectedTeam.id,
-          venue_owner_id: venueProfile.id,
-          revenue_split_venue_pct: Number(dealVenuePct),
-          revenue_split_production_pct: Number(dealProductionPct),
-          fixed_fee: Number(dealFixedFee || 0),
-          deposit_amount: Number(dealDeposit || 0),
-          notes: dealNotes.trim() || null,
-        },
-      });
-      if (error) throw error;
-      if (data?.error) throw new Error(data.error);
-
-      setProposeDealVisible(false);
-      setDealTitle("");
-      setDealVenueEmail("");
-      setDealNotes("");
-      setDealFixedFee("");
-      setDealDeposit("");
-      showAlert("success", "Proposed!", "Venue partnership deal proposed successfully.");
-    } catch (e: any) {
-      showAlert("error", "Error", e.message || "Failed to propose deal");
-    } finally {
-      setProposingDeal(false);
-    }
-  };
-
   const openTeamDetail = (team: Team) => {
     setSelectedTeam(team);
     fetchTeamMembers(team.id);
@@ -309,7 +237,7 @@ export default function ProductionTeamScreen() {
     }
   };
 
-  // ── Team Detail View ──
+  // â”€â”€ Team Detail View â”€â”€
   if (selectedTeam) {
     const canManage =
       selectedTeam.member_role === "owner" ||
@@ -406,26 +334,6 @@ export default function ProductionTeamScreen() {
             ))
           )}
 
-          {/* Propose a venue partnership deal */}
-          {canManage && (
-            <TouchableOpacity activeOpacity={1}
-              style={[styles.dealsBtn, { backgroundColor: "#8B5CF6", marginTop: 20 }]}
-              onPress={() => setProposeDealVisible(true)}
-            >
-              <Ionicons name="handshake-outline" size={18} color="#fff" />
-              <Text style={styles.dealsBtnText}>Propose Venue Deal</Text>
-            </TouchableOpacity>
-          )}
-
-          {/* Navigate to deals */}
-          <TouchableOpacity
-            style={[styles.dealsBtn, { backgroundColor: colors.primary, marginTop: canManage ? 10 : 20 }]}
-            onPress={() => router.push("/bookings")}
-          >
-            <Ionicons name="briefcase-outline" size={18} color="#fff" />
-            <Text style={styles.dealsBtnText}>View Deals</Text>
-          </TouchableOpacity>
-
           {/* Back button */}
           <TouchableOpacity
             style={[styles.backBtn, { borderColor: colors.border }]}
@@ -501,118 +409,6 @@ export default function ProductionTeamScreen() {
             </View>
           </View>
         </RNModal>
-
-        {/* Propose Deal Modal */}
-        <RNModal
-          visible={proposeDealVisible}
-          transparent
-          animationType="fade"
-          onRequestClose={() => setProposeDealVisible(false)}
-        >
-          <View style={{ flex: 1, justifyContent: "center", alignItems: "center", backgroundColor: "rgba(0,0,0,0.5)" }}>
-            <View style={{ backgroundColor: colors.card, borderRadius: 16, padding: 20, width: "88%", maxWidth: 420 }}>
-              <Text style={{ fontFamily: "Poppins_600SemiBold", fontSize: 17, color: colors.text, marginBottom: 14 }}>Propose Venue Partnership</Text>
-              <ScrollView style={{ maxHeight: 400 }}>
-                <View style={styles.modalContent}>
-                  <Text style={[styles.inputLabel, { color: colors.text }]}>Deal Title *</Text>
-                  <TextInput
-                    style={[styles.input, { color: colors.text, borderColor: colors.border, backgroundColor: colors.card }]}
-                    value={dealTitle}
-                    onChangeText={setDealTitle}
-                    placeholder="e.g. Summer Concert Series"
-                    placeholderTextColor={colors.textSecondary}
-                  />
-
-                  <Text style={[styles.inputLabel, { color: colors.text, marginTop: 12 }]}>Venue Owner Email *</Text>
-                  <TextInput
-                    style={[styles.input, { color: colors.text, borderColor: colors.border, backgroundColor: colors.card }]}
-                    value={dealVenueEmail}
-                    onChangeText={setDealVenueEmail}
-                    placeholder="venue@example.com"
-                    placeholderTextColor={colors.textSecondary}
-                    autoCapitalize="none"
-                    keyboardType="email-address"
-                  />
-
-                  <Text style={[styles.inputLabel, { color: colors.text, marginTop: 12 }]}>Venue Split %</Text>
-                  <TextInput
-                    value={dealVenuePct}
-                    onChangeText={(v) => {
-                      setDealVenuePct(v);
-                      const num = Number(v);
-                      if (!isNaN(num)) setDealProductionPct(String(100 - num));
-                    }}
-                    keyboardType="numeric"
-                    style={[styles.input, { color: colors.text, borderColor: colors.border, backgroundColor: colors.card }]}
-                    placeholder="60"
-                    placeholderTextColor={colors.textSecondary}
-                  />
-
-                  <Text style={[styles.inputLabel, { color: colors.text, marginTop: 12 }]}>Production Split %</Text>
-                  <TextInput
-                    value={dealProductionPct}
-                    onChangeText={(v) => {
-                      setDealProductionPct(v);
-                      const num = Number(v);
-                      if (!isNaN(num)) setDealVenuePct(String(100 - num));
-                    }}
-                    keyboardType="numeric"
-                    style={[styles.input, { color: colors.text, borderColor: colors.border, backgroundColor: colors.card }]}
-                    placeholder="40"
-                    placeholderTextColor={colors.textSecondary}
-                  />
-
-                  <Text style={[styles.inputLabel, { color: colors.text, marginTop: 12 }]}>Fixed Fee (₱)</Text>
-                  <TextInput
-                    value={dealFixedFee}
-                    onChangeText={setDealFixedFee}
-                    keyboardType="numeric"
-                    style={[styles.input, { color: colors.text, borderColor: colors.border, backgroundColor: colors.card }]}
-                    placeholder="0"
-                    placeholderTextColor={colors.textSecondary}
-                  />
-
-                  <Text style={[styles.inputLabel, { color: colors.text, marginTop: 12 }]}>Deposit Amount (₱)</Text>
-                  <TextInput
-                    value={dealDeposit}
-                    onChangeText={setDealDeposit}
-                    keyboardType="numeric"
-                    style={[styles.input, { color: colors.text, borderColor: colors.border, backgroundColor: colors.card }]}
-                    placeholder="0"
-                    placeholderTextColor={colors.textSecondary}
-                  />
-
-                  <Text style={[styles.inputLabel, { color: colors.text, marginTop: 12 }]}>Notes</Text>
-                  <TextInput
-                    style={[styles.input, styles.textArea, { color: colors.text, borderColor: colors.border, backgroundColor: colors.card }]}
-                    value={dealNotes}
-                    onChangeText={setDealNotes}
-                    placeholder="Optional deal notes..."
-                    placeholderTextColor={colors.textSecondary}
-                    multiline
-                    numberOfLines={3}
-                  />
-
-                  <TouchableOpacity activeOpacity={1}
-                    onPress={handleProposeDeal}
-                    disabled={proposingDeal}
-                    style={[styles.submitBtn, { backgroundColor: "#8B5CF6", opacity: proposingDeal ? 0.6 : 1 }]}
-                  >
-                    {proposingDeal ? (
-                      <ActivityIndicator size="small" color="#fff" />
-                    ) : (
-                      <Text style={styles.submitBtnText}>Propose Deal</Text>
-                    )}
-                  </TouchableOpacity>
-                </View>
-              </ScrollView>
-              <TouchableOpacity activeOpacity={1} onPress={() => setProposeDealVisible(false)} style={{ marginTop: 8, alignItems: "center" }}>
-                <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_500Medium" }}>Close</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </RNModal>
-
         <CustomAlert
           visible={alertVisible}
           type={alertConfig.type}
@@ -625,7 +421,7 @@ export default function ProductionTeamScreen() {
     );
   }
 
-  // ── Teams List View ──
+  // â”€â”€ Teams List View â”€â”€
   return (
     <View style={[styles.flex1, { backgroundColor: colors.background }]}>
       <Header title="My Production" />
@@ -651,7 +447,7 @@ export default function ProductionTeamScreen() {
             <Ionicons name="people-outline" size={56} color={colors.textSecondary} />
             <Text style={[styles.emptyTitle, { color: colors.text }]}>No production teams yet</Text>
             <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
-              Create a team to start proposing venue partnership deals.
+              Create a production team to manage members and rosters.
             </Text>
           </View>
         ) : (
@@ -800,8 +596,8 @@ const styles = StyleSheet.create({
   removeBtn: { padding: 4 },
 
   // Buttons
-  dealsBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", padding: 14, borderRadius: 12, marginTop: 20, gap: 8 },
-  dealsBtnText: { color: "#fff", fontFamily: "Poppins_600SemiBold", fontSize: 15 },
+  teamActionBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", padding: 14, borderRadius: 12, marginTop: 20, gap: 8 },
+  teamActionBtnText: { color: "#fff", fontFamily: "Poppins_600SemiBold", fontSize: 15 },
   backBtn: { alignItems: "center", padding: 14, borderRadius: 12, borderWidth: 1, marginTop: 10 },
   backBtnText: { fontFamily: "Poppins_500Medium", fontSize: 14 },
 
@@ -819,3 +615,6 @@ const styles = StyleSheet.create({
   submitBtn: { marginTop: 20, paddingVertical: 14, borderRadius: 12, alignItems: "center" },
   submitBtnText: { color: "#fff", fontFamily: "Poppins_600SemiBold", fontSize: 15 },
 });
+
+
+

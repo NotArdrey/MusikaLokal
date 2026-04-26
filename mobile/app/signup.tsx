@@ -232,7 +232,6 @@ export default function SignupScreen() {
                 } catch (e: any) {
                     // Silent catch - FunctionsHttpError or network errors are expected during polling
                     // The Didit session may not have a decision yet, which causes 404/500 errors
-                    console.log('Poll error (expected during verification):', e?.message || 'unknown');
                 }
             };
             timer = setInterval(poll, 500);
@@ -252,7 +251,6 @@ export default function SignupScreen() {
             selectedRole &&
             (verified === 'true' || check_verification === 'true')
         ) {
-            console.log('Returning from verification. Checking status...');
 
             const checkAndFinish = async (retries = 0) => {
                 const refToCheck = sessionId || tempSessionRef;
@@ -271,7 +269,6 @@ export default function SignupScreen() {
 
                     // Check status - supports robust checking of nested data
                     const status = sessionData?.status || sessionData?.verification_data?.status;
-                    console.log(`Session Status Check (Attempt ${retries + 1}):`, status);
 
                     // 1. SUCCESS
                     if (status === 'Approved' || status === 'APPROVED') {
@@ -320,7 +317,6 @@ export default function SignupScreen() {
                     // 3. PENDING / RETRY (Created, Submitted, Processing)
                     const maxRetries = 10;
                     if (retries < maxRetries) {
-                        console.log('Status not final, retrying...');
                         setTimeout(() => {
                             if (mounted) checkAndFinish(retries + 1);
                         }, 1000); // Wait 1 second between checks
@@ -371,7 +367,6 @@ export default function SignupScreen() {
                         }
                     } catch { /* ignore parse errors */ }
 
-                    console.log('Status check error (attempt', retries + 1, '):', errorMessage);
 
                     // If we got a status from error, handle it
                     if (errorStatus && ['In Review', 'PENDING_REVIEW'].includes(errorStatus)) {
@@ -401,7 +396,6 @@ export default function SignupScreen() {
 
                     // Retry on network/function error (FunctionsHttpError is common during initial polling)
                     if (retries < 8) {
-                        console.log('Retrying status check in 2 seconds...');
                         setTimeout(() => { if (mounted) checkAndFinish(retries + 1); }, 2000);
                     } else {
                         setLoading(false);
@@ -440,7 +434,7 @@ export default function SignupScreen() {
                         // Permissions granted, start session
                         const timer = setTimeout(() => {
                             if (mounted) {
-                                startNewVerificationSession().catch(e => console.log('Auto-start error', e));
+                                startNewVerificationSession().catch(e => undefined);
                             }
                         }, 100);
                     } else if (mounted) {
@@ -451,7 +445,7 @@ export default function SignupScreen() {
                 // Already granted
                 const timer = setTimeout(() => {
                     if (mounted) {
-                        startNewVerificationSession().catch(e => console.log('Auto-start error', e));
+                        startNewVerificationSession().catch(e => undefined);
                     }
                 }, 100);
                 return () => { clearTimeout(timer); mounted = false; };
@@ -715,7 +709,6 @@ export default function SignupScreen() {
                 try {
                     await AsyncStorage.removeItem('signup_current_session');
                 } catch (storageError) {
-                    console.log('Error clearing signup session:', storageError);
                 }
 
                 setVerificationUrl('');
@@ -853,7 +846,6 @@ export default function SignupScreen() {
                 try {
                     await AsyncStorage.removeItem('signup_current_session');
                 } catch (storageError) {
-                    console.log('Error clearing signup session:', storageError);
                 }
 
                 router.replace({
@@ -993,7 +985,6 @@ export default function SignupScreen() {
 
         // 2. Security Check: Validate the verification result on the server
         const refToLink = sessionId || tempSessionRef || verificationUrl.split('reference=')[1]?.split('&')[0];
-        console.log('Finishing Account Creation. Using Session ID:', refToLink);
 
         if (!refToLink) {
             Alert.alert('Verification Error', 'No verification session found. Please try confirming your identity again.');
@@ -1001,13 +992,11 @@ export default function SignupScreen() {
         }
 
         setLoading(true);
-        console.log('Starting account creation...');
 
         // Fetch Didit Data via Edge Function
         let diditData = null;
         let verifiedName = '';
         try {
-            console.log('Fetching Didit session for Ref:', refToLink);
             const { data: sessionData, error: invokeError } = await supabase.functions.invoke('create-didit-session', {
                 body: { action: 'get_session', session_id: refToLink }
             });
@@ -1018,15 +1007,12 @@ export default function SignupScreen() {
 
             if (sessionData) {
                 diditData = sessionData;
-                console.log('Didit Data Fetched (Keys):', Object.keys(sessionData));
-                console.log('Derived Data:', JSON.stringify(sessionData.derived));
 
                 if (sessionData?.derived?.fullName) {
                     verifiedName = sessionData.derived.fullName;
                 }
             }
         } catch (e) {
-            console.log('Could not fetch specific Didit data, proceeding with reference only.', e);
         }
 
         // Fallback for name if Didit fails
@@ -1034,7 +1020,6 @@ export default function SignupScreen() {
             verifiedName = email.split('@')[0] || 'Musician';
         }
 
-        console.log('Proceeding to Supabase SignUp with Name:', verifiedName);
 
         try {
             // 3. Create Account
@@ -1057,7 +1042,6 @@ export default function SignupScreen() {
                 }
             });
 
-            console.log('SignUp Result:', { user: authData?.user?.id, error: authError });
 
             if (authError) throw authError;
 
@@ -1083,7 +1067,6 @@ export default function SignupScreen() {
                         if (profileError) {
                             throw profileError;
                         }
-                        console.log('Profile created successfully');
                         return true;
                     } catch (profErr: any) {
                         // Silently retry up to 3 times with 1 second delay
@@ -1106,7 +1089,6 @@ export default function SignupScreen() {
                 try {
                     await AsyncStorage.removeItem('signup_current_session');
                 } catch (e) {
-                    console.log('Error clearing signup session:', e);
                 }
 
                 // SUCCESS: Alert and Redirect to Login
@@ -1314,7 +1296,6 @@ export default function SignupScreen() {
                 });
 
                 const status = sessionData?.status || sessionData?.verification_data?.status;
-                console.log('Manual status check result:', status);
 
                 if (status === 'Approved' || status === 'APPROVED') {
                     finishAccountCreation();

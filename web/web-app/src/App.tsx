@@ -42,7 +42,6 @@ import Profile from "./pages/Profile";
 import Settings from "./pages/Settings";
 import Signup from "./pages/Signup";
 import SubmitReview from "./pages/SubmitReview";
-import SubscriptionRequired from "./pages/SubscriptionRequired";
 import TermsAndConditions from "./pages/TermsAndConditions";
 import ToReview from "./pages/ToReview";
 import Wallet from "./pages/Wallet";
@@ -84,10 +83,6 @@ function AuthenticatedLayout() {
           <Route path="/change-password" element={<ChangePassword />} />
           <Route path="/change-email" element={<ChangeEmail />} />
           <Route path="/wallet" element={<Wallet />} />
-          <Route
-            path="/subscription-required"
-            element={<SubscriptionRequired />}
-          />
           <Route path="/help-support" element={<HelpSupport />} />
           <Route
             path="/terms-and-conditions"

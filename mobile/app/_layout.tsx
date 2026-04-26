@@ -11,7 +11,7 @@ import { PortalProvider } from "@gorhom/portal";
 import * as Linking from "expo-linking";
 import { router, Stack, useSegments } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { AppState, LogBox, View } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import "../global.css";
@@ -30,7 +30,6 @@ import {
   type TopToastType,
 } from "../src/context/TopToastContext";
 import { ThemeProvider, useTheme } from "../src/context/ThemeContext";
-import SubscriptionRequiredScreen from "./subscription_required";
 
 SplashScreen.preventAutoHideAsync();
 
@@ -59,7 +58,6 @@ type IncomingNotificationToastRecord = {
 
 const logNotificationToastDebug = (...args: unknown[]) => {
   if (__DEV__ && NOTIFICATION_TOAST_DEBUG_LOGS) {
-    console.log("[notification-toast]", ...args);
   }
 };
 
@@ -108,8 +106,6 @@ function RootContent() {
   const {
     session,
     loading,
-    subscriptionRequired,
-    subscriptionChecked,
     identityRequired,
     identityChecked,
   } =
@@ -120,8 +116,6 @@ function RootContent() {
   const shownNotificationToastIdsRef = useRef<Set<string>>(new Set());
   const notificationAppStateRef = useRef(AppState.currentState);
   const notificationBackgroundedAtRef = useRef<number | null>(null);
-
-  const [showSubscriptionModal, setShowSubscriptionModal] = useState(false);
 
   const rememberShownNotificationToast = useCallback((notificationId: string) => {
     if (shownNotificationToastIdsRef.current.has(notificationId)) {
@@ -440,11 +434,11 @@ function RootContent() {
     showNotificationToastFromRecord,
   ]);
 
-  // Handle global identity/subscription gates
+  // Handle global identity gate
   useEffect(() => {
     if (loading) return;
 
-    if (session && (!subscriptionChecked || !identityChecked)) return;
+    if (session && !identityChecked) return;
 
     const segmentStrings = segments.map((segment) => String(segment));
     const currentScreen =
@@ -465,7 +459,6 @@ function RootContent() {
         "account_details",
         "settings",
         "wallet",
-        "subscription_required",
         "payment-result",
         "help_support",
         "privacy_policy",
@@ -473,42 +466,12 @@ function RootContent() {
       ];
 
       if (!isScreenAllowed(identityAllowedScreens)) {
-        console.log("🪪 Identity verification required, redirecting to verification screen");
         router.replace("/identity_verification");
       }
       return;
     }
-
-    // If user is logged in and subscription is required
-    if (session && subscriptionRequired) {
-      // Allow access to certain screens even without subscription
-      const allowedScreens = [
-        "subscription_required",
-        "identity_verification",
-        "account_details",
-        "payment-result",
-        "settings",
-        "wallet",
-        "help_support",
-        "privacy_policy",
-        "terms_and_conditions",
-      ];
-
-      console.log(`🔒 Layout Check: Screen=${currentScreen}, Segments=${JSON.stringify(segments)}, SubRequired=${subscriptionRequired}`);
-
-      const isAllowed = isScreenAllowed(allowedScreens);
-
-      if (!isAllowed) {
-        console.log("🔒 Subscription required, showing subscription modal");
-        setShowSubscriptionModal(true);
-      } else {
-        setShowSubscriptionModal(false);
-      }
-    }
   }, [
     session,
-    subscriptionRequired,
-    subscriptionChecked,
     identityRequired,
     identityChecked,
     loading,
@@ -538,16 +501,13 @@ function RootContent() {
   }, []);
 
   const handleDeepLink = (url: string) => {
-    console.log("📱 Deep link received:", url);
 
     try {
       const { hostname, path, queryParams } = Linking.parse(url);
-      console.log("📱 Parsed deep link:", { hostname, path, queryParams });
 
       // Create a unique key for this deep link to prevent double processing
       const linkKey = `${path}-${queryParams?.booking_id}-${queryParams?.status}-${queryParams?.type}`;
       if (processedDeepLinksRef.current.has(linkKey)) {
-        console.log("📱 Deep link already processed, skipping");
         return;
       }
       processedDeepLinksRef.current.add(linkKey);
@@ -559,7 +519,6 @@ function RootContent() {
 
       // Handle password recovery deep links (from Supabase email)
       if (queryParams?.type === "recovery" || path === "change_password") {
-        console.log("🔑 Password recovery deep link detected");
         router.replace({
           pathname: "/change_password",
           params: {
@@ -599,7 +558,6 @@ function RootContent() {
           });
         }
 
-        console.log("💳 Payment result deep link:", { status, bookingId, type, planId });
 
         // Navigate to payment result screen
         router.replace({
@@ -626,26 +584,13 @@ function RootContent() {
         screenOptions={{
           headerShown: false,
           contentStyle: { backgroundColor: colors.background }, // Also ensure stack content has background
-          animation: "fade", // Smooth fade transition for tab switching
+          animation: "fade",
+          freezeOnBlur: true,
         }}
       />
 
       <Navbar global />
       <GlobalRadioMiniPlayer />
-
-      {showSubscriptionModal && (
-        <View style={{
-          position: 'absolute',
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          backgroundColor: 'rgba(0,0,0,0.45)',
-          zIndex: 9999,
-        }}>
-          <SubscriptionRequiredScreen />
-        </View>
-      )}
     </View>
   );
 }

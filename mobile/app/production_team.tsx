@@ -1,4 +1,4 @@
-import { Ionicons } from "@expo/vector-icons";
+﻿import { Ionicons } from "@expo/vector-icons";
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import React, { useCallback, useState } from "react";
 import {
@@ -157,7 +157,7 @@ export default function ProductionTeamScreen() {
   const fetchTeams = useCallback(async () => {
     if (!userId) return;
     try {
-      const { data, error } = await supabase.functions.invoke("manage-deals", {
+      const { data, error } = await supabase.functions.invoke("manage-production", {
         body: { action: "list_my_teams" },
       });
       if (error) throw error;
@@ -262,7 +262,7 @@ export default function ProductionTeamScreen() {
 
     setCreating(true);
     try {
-      const { data, error } = await supabase.functions.invoke("manage-deals", {
+      const { data, error } = await supabase.functions.invoke("manage-production", {
         body: {
           action: "create_production_team",
           name: newTeamName.trim(),
@@ -287,7 +287,7 @@ export default function ProductionTeamScreen() {
   const handleRemoveMember = async (memberUserId: string) => {
     if (!selectedTeam) return;
     try {
-      const { data, error } = await supabase.functions.invoke("manage-deals", {
+      const { data, error } = await supabase.functions.invoke("manage-production", {
         body: {
           action: "remove_team_member",
           team_id: selectedTeam.id,
@@ -501,7 +501,7 @@ export default function ProductionTeamScreen() {
     );
   }
 
-  // â”€â”€ Teams List View â”€â”€
+  // Ã¢â€â‚¬Ã¢â€â‚¬ Teams List View Ã¢â€â‚¬Ã¢â€â‚¬
   return (
     <View style={[styles.flex1, { backgroundColor: colors.background }]}>
       <Header title={routeTeamId ? "Manage Production" : "Production Teams"} onBackPress={routeTeamId ? () => router.back() : undefined} />
@@ -528,8 +528,8 @@ export default function ProductionTeamScreen() {
             <Text style={[styles.emptyTitle, { color: colors.text }]}>{isProducer ? "No Production Teams" : "No Teams Yet"}</Text>
             <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
               {isProducer
-                ? "Create a team to start proposing venue partnership deals."
-                : "Only production users can create a production team, but you can still open shared team links and deal details."}
+                ? "Create a production team to manage members and rosters."
+                : "Only production users can create a production team, but you can still open shared team links."}
             </Text>
           </View>
         ) : (
@@ -855,3 +855,6 @@ const styles = StyleSheet.create({
   submitBtn: { marginTop: 20, paddingVertical: 14, borderRadius: 12, alignItems: "center" },
   submitBtnText: { color: "#fff", fontFamily: "Poppins_600SemiBold", fontSize: 15 },
 });
+
+
+

@@ -30,17 +30,13 @@ const limit = 3;
       const text = await response.text();
 
       if (!response.ok) {
-        console.log(`${table}: error ${response.status}`);
         continue;
       }
 
       const data = JSON.parse(text);
-      console.log(`${table}: ${data.length} rows`);
       if (data[0]) {
-        console.log(JSON.stringify(data[0]));
       }
     } catch (error) {
-      console.log(`${table}: error`);
     }
   }
 })();

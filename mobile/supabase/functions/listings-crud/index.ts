@@ -62,7 +62,6 @@ serve(async (req: Request) => {
         const sbUrl = Deno.env.get('SUPABASE_URL');
         const sbKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 
-        console.log(`[listings-crud] Req received. Action: ${(await req.clone().json()).action}, User: ${(await req.clone().json()).userId}`);
 
         if (!sbUrl || !sbKey) {
             console.error('[listings-crud] Missing Supabase env vars');
@@ -78,7 +77,6 @@ serve(async (req: Request) => {
         const { action, ...params } = body
         const { userId } = params
 
-        console.log(`[listings-crud] Processing action: ${action}`);
 
         if (userId && userId !== authenticatedUserId) {
             console.error(`[listings-crud] Forbidden: userId mismatch. Req: ${userId}, Auth: ${authenticatedUserId}`);

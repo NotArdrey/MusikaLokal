@@ -20,7 +20,6 @@ import { isRecordingStudioMode } from "./availability";
 
 const debugLog = (...args: unknown[]) => {
   if (__DEV__) {
-    console.log("[StudioBookTab]", ...args);
   }
 };
 

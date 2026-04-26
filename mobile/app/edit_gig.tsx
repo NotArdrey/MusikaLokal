@@ -416,11 +416,6 @@ export default function EditGigScreen() {
           .order('created_at', { ascending: true }),
       ]);
 
-      console.log('ðŸ“¥ ===== DATABASE QUERY RESPONSE =====');
-      console.log('ðŸ“¥ Error object:', baseError);
-      console.log('ðŸ“¥ Data object:', baseData);
-      console.log('ðŸ“¥ Data type:', typeof baseData);
-      console.log('ðŸ“¥ Data stringified:', JSON.stringify(baseData, null, 2));
 
       if (baseError) throw baseError;
       if (requirementsError) throw requirementsError;
@@ -473,34 +468,13 @@ export default function EditGigScreen() {
         return;
       }
 
-      console.log('ðŸ“¦ ===== GIG DATA ANALYSIS =====');
-      console.log('ðŸ“¦ name:', data.name);
-      console.log('ðŸ“¦ description:', data.description?.substring(0, 50));
-      console.log('ðŸ“¦ location:', data.location);
-      console.log('ðŸ“¦ budget:', data.budget, '(type:', typeof data.budget, ')');
-      console.log('ðŸ“¦ event_date:', data.event_date);
-      console.log('ðŸ“¦ requirements:', data.requirements);
-      console.log('ðŸ“¦ requirements type:', typeof data.requirements);
-      console.log('ðŸ“¦ requirements stringified:', JSON.stringify(data.requirements, null, 2));
-      console.log('ðŸ“¦ requirements?.genres:', data.requirements?.genres);
-      console.log('ðŸ“¦ requirements?.instruments:', data.requirements?.instruments);
-      console.log('ðŸ“¦ requirements?.experience_level:', data.requirements?.experience_level);
-      console.log('ðŸ“¦ requirements?.event_start_time:', data.requirements?.event_start_time);
-      console.log('ðŸ“¦ requirements?.event_end_time:', data.requirements?.event_end_time);
-      console.log('ðŸ“¦ requirements?.musician_type:', data.requirements?.musician_type);
-      console.log('ðŸ“¦ contract_url:', data.contract_url);
-      console.log('ðŸ“¦ images:', data.images);
 
-      console.log('ðŸ”§ ===== SETTING STATE VALUES =====');
 
       setGigName(data.name);
-      console.log('ðŸ”§ setGigName:', data.name);
 
       setDescription(data.description);
-      console.log('ðŸ”§ setDescription:', data.description?.substring(0, 50));
 
       setAddress(data.location);
-      console.log('ðŸ”§ setAddress:', data.location);
 
       setLatitude(data.latitude || null);
       setLongitude(data.longitude || null);
@@ -577,7 +551,6 @@ export default function EditGigScreen() {
       if (data.contract_url) {
         const fileName = data.contract_url.split("/").pop() || "Contract.pdf";
         setContractFileName(decodeURIComponent(fileName));
-        console.log('ðŸ”§ setContractFileName:', fileName);
       }
       setBusinessPermitUrl(data.business_permit_url || "");
       setInitialBusinessPermitUrl(data.business_permit_url || "");
@@ -587,18 +560,14 @@ export default function EditGigScreen() {
       if (data.business_permit_url) {
         const fileName = data.business_permit_url.split("/").pop() || "BusinessPermit.pdf";
         setBusinessPermitFileName(decodeURIComponent(fileName));
-        console.log('ðŸ”§ setBusinessPermitFileName:', fileName);
       }
       setImages(data.images || []);
-      console.log('ðŸ”§ setImages:', data.images || []);
 
       if (data.images && data.images.length > 0) {
         setThumbnailIndex(0);
       }
 
-      console.log('âœ… ===== FETCH GIG DETAILS COMPLETED =====');
     } catch (e) {
-      console.log("Error fetching gig details:", e);
       showAlert("warning", "Couldn't Load Details", "Failed to load gig details.");
       router.replace("/home");
     } finally {
@@ -726,20 +695,6 @@ export default function EditGigScreen() {
         },
       };
 
-      console.log(
-        "ðŸ”µ Updating gig with payload:",
-        JSON.stringify(
-          {
-            action: "update",
-            type: "gig",
-            id: gigId,
-            userId: user.id,
-            payload,
-          },
-          null,
-          2,
-        ),
-      );
 
       const { data: responseData, error: updateError } = await supabase.rpc(
         'update_gig_safely',
@@ -763,8 +718,6 @@ export default function EditGigScreen() {
         },
       );
 
-      console.log('ðŸ“¥ Update response data:', JSON.stringify(responseData, null, 2));
-      console.log('ðŸ“¥ Update response error:', updateError);
 
       if (updateError) {
         console.error('âŒ Update failed with error:', updateError);
@@ -876,7 +829,6 @@ export default function EditGigScreen() {
         successMessage += `\n\n${updateNotes.join('\n')}`;
       }
 
-      console.log("âœ… Gig Updated successfully");
       showAlert("success", "Success", successMessage, [
         {
           text: "OK",

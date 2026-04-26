@@ -706,17 +706,6 @@ export default function HomeScreen() {
     const providerText = aiFeedProvider || geminiModelLabel;
     const aiFeedActive = aiRecommendations.length > 0;
 
-    console.log("[HOME_AI_STATUS]", {
-      provider: providerText,
-      picks: aiRecommendations.length,
-      aiActive: aiFeedActive,
-      aiFeedPending: isHomeLlmRerankPending,
-      configured: geminiConfigured,
-      modelSource: geminiModelSource,
-      apiKeySource: geminiApiKeySource,
-      apiKeySignature: geminiApiKeySignature,
-      message: aiFeedMessage || "",
-    });
   }, [
     aiFeedProvider,
     aiFeedMessage,

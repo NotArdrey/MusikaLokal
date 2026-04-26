@@ -97,7 +97,6 @@ export default function GroupDetailsScreen() {
         label: group?.location || group?.name || "Group location",
       });
     } catch (error) {
-      console.log("[manage_group] Navigation error:", error);
       showAlert(
         "warning",
         "Navigation Unavailable",
@@ -150,7 +149,6 @@ export default function GroupDetailsScreen() {
       })
       .catch((playlistError) => {
         if (!isActive) return;
-        console.log("[manage_group] Failed to fetch group playlists:", playlistError);
         setGroupPlaylists([]);
       })
       .finally(() => {
@@ -179,7 +177,6 @@ export default function GroupDetailsScreen() {
         setShowGigStatuses(true);
         return;
       }
-      console.log("[manage_group] Failed to fetch visibility preference:", e);
     }
   };
 
@@ -243,7 +240,6 @@ export default function GroupDetailsScreen() {
         return;
       }
 
-      console.log(`[manage_group] Fetching data for groupId: ${groupId}, userId: ${userId}`);
 
       // Base query + legacy projection merge
       const { data: groupData, error: groupError } = await supabase
@@ -271,9 +267,8 @@ export default function GroupDetailsScreen() {
         .order('created_at', { ascending: true });
 
       if (groupError) {
-        console.log('[manage_group] Failed to fetch group details:', groupError.message);
         // if (groupError.message?.includes("non-2xx")) {
-        //   console.log('[manage_group] Full error object:', JSON.stringify(groupError));
+        //   undefined;
         // }
         throw groupError;
       }
@@ -323,7 +318,6 @@ export default function GroupDetailsScreen() {
       }
 
       if (groupMediaError) {
-        console.log('[manage_group] Failed to fetch group_media, using legacy images fallback:', groupMediaError);
       }
 
       const mediaImages = (groupMediaRows || [])
@@ -347,7 +341,6 @@ export default function GroupDetailsScreen() {
           .eq("group_id", groupId);
 
         if (memberError) {
-          console.log("[manage_group] Failed to fetch group_members:", memberError);
           setGroupMembers([]);
         } else {
           const legacyMembers = Array.isArray(legacyGroup?.members)
@@ -371,7 +364,6 @@ export default function GroupDetailsScreen() {
           setGroupMembers(mappedMembers);
         }
       } catch (memberErr) {
-        console.log("[manage_group] Exception fetching group_members:", memberErr);
         setGroupMembers([]);
       }
 
@@ -380,7 +372,6 @@ export default function GroupDetailsScreen() {
         const apps = await fetchApplicationsFallback(groupId);
         setApplications(apps);
       } catch (appErr) {
-        console.log('[manage_group] Failed to fetch applications:', appErr);
         setApplications([]);
       }
 
@@ -392,16 +383,13 @@ export default function GroupDetailsScreen() {
           .eq('group_id', groupId)
           .order('created_at', { ascending: false });
         if (reviewError) {
-          console.log('[manage_group] Failed to fetch reviews:', reviewError);
         } else {
           setReviews(reviewData || []);
         }
       } catch (reviewErr) {
-        console.log('[manage_group] Exception fetching reviews:', reviewErr);
       }
 
     } catch (e: any) {
-      console.log("[manage_group] Critical error fetching data (masked):", e.message || "Unknown error");
       let errorMsg = "Failed to load group data";
       if (e.message?.includes("non-2xx")) {
         errorMsg += `\n\nServer Error (500). Please check edge function logs.`;

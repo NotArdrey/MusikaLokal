@@ -72,7 +72,6 @@ export default function MyVenueScreen() {
                     .eq('user_id', userId);
 
                 if (membershipError) {
-                    console.log('Error fetching group memberships for joined gigs:', membershipError);
                 }
 
                 const joinedGroupIds = Array.from(
@@ -210,7 +209,6 @@ export default function MyVenueScreen() {
                 };
             }));
         } catch (e) {
-            console.log('Error fetching gigs:', e);
         } finally {
             setLoading(false);
             setRefreshing(false);
@@ -320,7 +318,6 @@ export default function MyVenueScreen() {
                 : 'Gig deleted successfully.';
             showAlert('success', 'Gig Deleted', successMessage);
         } catch (e) {
-            console.log('Error deleting gig:', e);
             showAlert('error', 'Error', 'Failed to delete gig');
         } finally {
             setDeleting(false);

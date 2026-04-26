@@ -253,7 +253,6 @@ export default function EditGroupScreen() {
         linkedPlaylists.map((playlist) => playlist.playlist_id),
       );
     } catch (playlistError) {
-      console.log("[edit_group] Failed to fetch linked playlists:", playlistError);
       setOwnedPlaylists([]);
       setSelectedPlaylistIds([]);
     } finally {
@@ -344,7 +343,6 @@ export default function EditGroupScreen() {
         });
       }
     } catch (impactError) {
-      console.log("Unable to fetch impact summary:", impactError);
     }
   };
 
@@ -580,7 +578,6 @@ export default function EditGroupScreen() {
 
       fetchGroupImpactSummary(groupId);
     } catch (e) {
-      console.log("Error fetching group details:", e);
       showAlert("warning", "Couldn't Load Details", "Failed to load group details.");
       router.replace("/home");
     } finally {
@@ -839,7 +836,6 @@ export default function EditGroupScreen() {
         return;
       }
 
-      console.log("✅ Group Updated");
       showAlert("success", "Success", "Group updated successfully!", [
         {
           text: "OK",
@@ -853,7 +849,6 @@ export default function EditGroupScreen() {
         },
       ]);
     } catch (e: any) {
-      console.log("❌ Error updating group:", e);
       showAlert(
         "warning",
         "Couldn't Save Group",
@@ -1255,7 +1250,6 @@ export default function EditGroupScreen() {
         .eq("group_id", groupId);
 
       if (error) {
-        console.log("Error fetching group members:", error);
         return;
       }
 
@@ -1289,7 +1283,6 @@ export default function EditGroupScreen() {
         .maybeSingle();
 
       if (error) {
-        console.log("Error fetching pending transfer:", error);
         return;
       }
 

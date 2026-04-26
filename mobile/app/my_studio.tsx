@@ -126,7 +126,6 @@ export default function MyStudioScreen() {
                 };
             }));
         } catch (e) {
-            console.log('Error fetching studios:', e);
         } finally {
             setLoading(false);
             setRefreshing(false);
@@ -258,7 +257,6 @@ export default function MyStudioScreen() {
             closeDeleteModal();
             showAlert('success', 'Studio Deleted', 'Studio deleted successfully.');
         } catch (e) {
-            console.log('Error deleting studio:', e);
             showAlert('error', 'Error', 'Failed to delete studio');
         } finally {
             setDeleting(false);

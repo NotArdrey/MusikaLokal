@@ -1,4 +1,4 @@
-
+﻿
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -90,14 +90,13 @@ const readErrorContextMessage = async (context: unknown): Promise<string | null>
   }
 };
 
-type Tab = 'dashboard' | 'users' | 'reports' | 'audit' | 'deals' | 'posts' | 'products' | 'projects';
+type Tab = 'dashboard' | 'users' | 'reports' | 'audit' | 'posts' | 'products' | 'projects';
 
 const adminTabRoutes: Record<Tab, string> = {
   dashboard: '/admin',
   users: '/admin/users',
   reports: '/admin/reports',
   audit: '/admin/audit',
-  deals: '/admin/deals',
   posts: '/admin/posts',
   products: '/admin/products',
   projects: '/admin/projects',
@@ -209,7 +208,7 @@ const defaultMetrics: DashboardMetrics = {
 
 const formatCurrency = (value?: number | null) => {
   const safeValue = Number(value || 0);
-  return `₱${safeValue.toLocaleString('en-PH', {
+  return `â‚±${safeValue.toLocaleString('en-PH', {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   })}`;
@@ -548,7 +547,6 @@ const tabItems: Array<{ key: Tab; label: string; icon: string }> = [
   { key: 'users', label: 'Users', icon: 'people-outline' },
   { key: 'reports', label: 'Reports', icon: 'shield-checkmark-outline' },
   { key: 'audit', label: 'Audit', icon: 'time-outline' },
-  { key: 'deals', label: 'Deals', icon: 'briefcase-outline' },
   { key: 'posts', label: 'Posts', icon: 'newspaper-outline' },
   { key: 'products', label: 'Products', icon: 'bag-handle-outline' },
   { key: 'projects', label: 'Projects', icon: 'people-circle-outline' },
@@ -926,7 +924,7 @@ export default function AdminDashboardPage() {
 
             <View style={[styles.pulseCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
               <View style={styles.pulseHeader}>
-                <Text style={[styles.pulseTitle, { color: colors.textSecondary }]}>Subscriptions Health</Text>
+                <Text style={[styles.pulseTitle, { color: colors.textSecondary }]}>Plan Health</Text>
                 <Ionicons name="star-outline" size={20} color={colors.primary} />
               </View>
               <View style={styles.pulseRow}>
@@ -1030,11 +1028,11 @@ export default function AdminDashboardPage() {
             </View>
 
             <View style={[styles.dataEnginePanel, styles.dataEnginePanelRight, { backgroundColor: colors.card, borderColor: colors.border, flex: Platform.OS === 'web' ? 3 : 1 }]}>
-              <Text style={[styles.panelTitle, { color: colors.text }]}>Subscription Tier Split</Text>
-              <Text style={[styles.panelSubtitle, { color: colors.textSecondary, marginBottom: -10 }]}>Active subscriptions by plan ({dashboardDateRangeLabel})</Text>
+              <Text style={[styles.panelTitle, { color: colors.text }]}>Plan Tier Split</Text>
+              <Text style={[styles.panelSubtitle, { color: colors.textSecondary, marginBottom: -10 }]}>Tracked plans by tier ({dashboardDateRangeLabel})</Text>
               <View style={styles.subscriptionStackWrapper}>
                 {subscriptionTierTotal === 0 ? (
-                  <Text style={[styles.emptyText, { color: colors.textSecondary, textAlign: 'left', paddingVertical: 8 }]}>No active subscriptions in this date range.</Text>
+                  <Text style={[styles.emptyText, { color: colors.textSecondary, textAlign: 'left', paddingVertical: 8 }]}>No plan data in this date range.</Text>
                 ) : (
                   <View style={[styles.subscriptionStackBar, { backgroundColor: isDark ? '#1E293B' : '#E2E8F0' }]}>
                     {metrics.subscriptionTierBasic > 0 && (
@@ -1159,3 +1157,4 @@ export default function AdminDashboardPage() {
     </View>
   );
 }
+

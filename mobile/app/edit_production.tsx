@@ -1,4 +1,4 @@
-import { Ionicons } from '@expo/vector-icons';
+﻿import { Ionicons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
@@ -46,11 +46,11 @@ export default function EditProductionScreen() {
 
   const hasIncompleteRequiredFields = !logoImages.length || !teamName.trim() || !description.trim();
 
-  const invokeDeals = useCallback(async (body: Record<string, unknown>) => {
-    const { data, error } = await supabase.functions.invoke('manage-deals', { body });
+  const invokeProduction = useCallback(async (body: Record<string, unknown>) => {
+    const { data, error } = await supabase.functions.invoke('manage-production', { body });
     if (error) {
       const status = Number((error as any)?.status || (error as any)?.context?.status || 0);
-      console.warn('manage-deals failed', {
+      console.warn('manage-production failed', {
         message: error.message,
         status,
         code: (error as any).code,
@@ -79,7 +79,7 @@ export default function EditProductionScreen() {
     }
 
     try {
-      const data = await invokeDeals({ action: 'list_my_teams' });
+      const data = await invokeProduction({ action: 'list_my_teams' });
       const existingTeam = ((data?.teams || []) as TeamRecord[]).find((item) => item.id === teamId);
       if (!existingTeam) {
         throw new Error('Production team not found.');
@@ -103,7 +103,7 @@ export default function EditProductionScreen() {
     } finally {
       setLoading(false);
     }
-  }, [invokeDeals, teamId]);
+  }, [invokeProduction, teamId]);
 
   useEffect(() => {
     if (userRole && userRole !== 'producer') {
@@ -136,7 +136,7 @@ export default function EditProductionScreen() {
     setSaving(true);
     try {
       const primaryLogo = logoImages[thumbnailIndex] || logoImages[0] || null;
-      const data = await invokeDeals({
+      const data = await invokeProduction({
         action: 'update_production_team',
         team_id: team.id,
         name: teamName.trim(),
@@ -199,7 +199,7 @@ export default function EditProductionScreen() {
                 <Ionicons name="color-wand-outline" size={24} color={colors.primary} />
               </View>
               <Text style={[styles.heroTitle, { color: colors.text }]}>Update your production team</Text>
-              <Text style={[styles.heroText, { color: colors.textSecondary }]}>Keep your team profile aligned with your current production brand, members, and deal work.</Text>
+              <Text style={[styles.heroText, { color: colors.textSecondary }]}>Keep your team profile aligned with your current production brand, members, and production work.</Text>
             </View>
 
             <View style={[styles.formCard, { backgroundColor: colors.surface, borderColor: isDark ? '#334155' : '#E2E8F0' }]}>
@@ -285,3 +285,4 @@ const styles = StyleSheet.create({
   submitBtn: { marginTop: 24, borderRadius: 14, paddingVertical: 14, alignItems: 'center', justifyContent: 'center' },
   submitBtnText: { color: '#fff', fontSize: 15, fontFamily: 'Poppins_700Bold' },
 });
+

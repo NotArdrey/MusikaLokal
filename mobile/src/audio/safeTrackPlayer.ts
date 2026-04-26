@@ -5,6 +5,7 @@ type TrackPlayerModuleLike = {
   Capability?: Record<string, any>;
   IOSCategory?: Record<string, string>;
   AppKilledPlaybackBehavior?: Record<string, string>;
+  RepeatMode?: Record<string, string | number>;
   registerPlaybackService?: (...args: any[]) => any;
   setupPlayer?: (...args: any[]) => any;
   updateOptions?: (...args: any[]) => any;
@@ -20,6 +21,7 @@ type TrackPlayerModuleLike = {
   addEventListener?: (...args: any[]) => any;
   skipToNext?: (...args: any[]) => any;
   skipToPrevious?: (...args: any[]) => any;
+  setRepeatMode?: (...args: any[]) => any;
 };
 
 const FALLBACK_EVENT = {
@@ -64,6 +66,12 @@ const FALLBACK_APP_KILLED_BEHAVIOR = {
   StopPlaybackAndRemoveNotification: "stop-playback-and-remove-notification",
 } as const;
 
+const FALLBACK_REPEAT_MODE = {
+  Off: "off",
+  Track: "track",
+  Queue: "queue",
+} as const;
+
 let nativeModule: TrackPlayerModuleLike | null = null;
 
 try {
@@ -88,6 +96,7 @@ export const IOSCategory = (nativeModule?.IOSCategory ?? FALLBACK_IOS_CATEGORY) 
 export const AppKilledPlaybackBehavior = (
   nativeModule?.AppKilledPlaybackBehavior ?? FALLBACK_APP_KILLED_BEHAVIOR
 ) as typeof FALLBACK_APP_KILLED_BEHAVIOR;
+export const RepeatMode = (nativeModule?.RepeatMode ?? FALLBACK_REPEAT_MODE) as typeof FALLBACK_REPEAT_MODE;
 
 const createAsyncNoOp = <T,>(value: T) => async () => value;
 
@@ -111,6 +120,7 @@ const TrackPlayer = {
   addEventListener: (...args: any[]) => nativeTrackPlayer?.addEventListener?.(...args) ?? noOpSubscription,
   skipToNext: (...args: any[]) => nativeTrackPlayer?.skipToNext?.(...args) ?? Promise.resolve(),
   skipToPrevious: (...args: any[]) => nativeTrackPlayer?.skipToPrevious?.(...args) ?? Promise.resolve(),
+  setRepeatMode: (...args: any[]) => nativeTrackPlayer?.setRepeatMode?.(...args) ?? Promise.resolve(),
 };
 
 export default TrackPlayer;

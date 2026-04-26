@@ -1,4 +1,4 @@
-
+﻿
 import { Ionicons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -91,7 +91,7 @@ const readErrorContextMessage = async (context: unknown): Promise<string | null>
   }
 };
 
-type Tab = 'dashboard' | 'users' | 'reports' | 'audit' | 'deals' | 'posts' | 'products' | 'projects';
+type Tab = 'dashboard' | 'users' | 'reports' | 'audit' | 'posts' | 'products' | 'projects';
 
 type ReportsSection = 'reports_list' | 'booking_incidents';
 
@@ -121,7 +121,6 @@ const adminTabRoutes: Record<Tab, string> = {
   users: '/admin/users',
   reports: '/admin/reports',
   audit: '/admin/audit',
-  deals: '/admin/deals',
   posts: '/admin/posts',
   products: '/admin/products',
   projects: '/admin/projects',
@@ -635,7 +634,6 @@ const tabItems: { key: Tab; label: string; icon: string }[] = [
   { key: 'users', label: 'Users', icon: 'people-outline' },
   { key: 'reports', label: 'Reports', icon: 'shield-checkmark-outline' },
   { key: 'audit', label: 'Audit', icon: 'time-outline' },
-  { key: 'deals', label: 'Deals', icon: 'briefcase-outline' },
   { key: 'posts', label: 'Posts', icon: 'newspaper-outline' },
   { key: 'products', label: 'Products', icon: 'bag-handle-outline' },
   { key: 'projects', label: 'Projects', icon: 'people-circle-outline' },
@@ -2216,3 +2214,4 @@ export default function AdminReportsPage() {
     </View>
   );
 }
+

@@ -1,4 +1,4 @@
-import { Dimensions, StyleSheet } from "react-native";
+﻿import { Dimensions, StyleSheet } from "react-native";
 
 export const { width, height } = Dimensions.get("window");
 export const IMG_HEIGHT = height < 700 ? height * 0.3 : height * 0.35;
@@ -147,7 +147,7 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontFamily: "Poppins_600SemiBold",
   },
-  dealCard: {
+  offerCard: {
     padding: 16,
     borderRadius: 16,
     borderWidth: 1,
@@ -777,3 +777,4 @@ const styles = StyleSheet.create({
 });
 
 export default styles;
+

@@ -59,7 +59,6 @@ const GroupTimelineTab = ({
 
         setGigs(Array.from(gigMap.values()));
       } catch (e) {
-        console.log("Error fetching group timeline gigs:", e);
         setGigs([]);
       } finally {
         setLoading(false);

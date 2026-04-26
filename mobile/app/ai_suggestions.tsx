@@ -4,8 +4,8 @@ import { useLocalSearchParams } from 'expo-router';
 import React, { useCallback, useEffect, useState } from 'react';
 import {
     ActivityIndicator,
-    Dimensions,
     Image,
+    InteractionManager,
     ScrollView,
     StyleSheet,
     Text,
@@ -13,7 +13,6 @@ import {
     TouchableOpacity,
     View,
 } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { supabase } from '../lib/supabase';
 import GuestSignInGate from '../src/components/GuestSignInGate';
 import Header from '../src/components/header';
@@ -36,7 +35,6 @@ import {
     SuggestionPurpose,
 } from '../src/types/instruments';
 
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const OFFLINE_PROFILE_CACHE_KEY = 'offline_instrument_profile_v1';
 
 interface CachedOfflineProfile {
@@ -57,7 +55,6 @@ const FOLLOWUP_SCOPE_NOTICE = 'I can only help with your suggested instruments a
 export default function AiSuggestionsScreen() {
     const { colors, isDark } = useTheme();
     const { isGuest } = useAuth();
-    const insets = useSafeAreaInsets();
     const { bottomBarClearance, contentBottomPadding } = useBottomBarClearance(24);
     const params = useLocalSearchParams<{ refresh?: string }>();
     const refreshKey = Array.isArray(params.refresh) ? params.refresh[0] : params.refresh;
@@ -80,14 +77,10 @@ export default function AiSuggestionsScreen() {
     const [followupQuestion, setFollowupQuestion] = useState('');
     const [followupMessages, setFollowupMessages] = useState<FollowupChatMessage[]>([]);
     const [followupLoading, setFollowupLoading] = useState(false);
+    const suggestionRequestIdRef = React.useRef(0);
     const geminiInfo = getGeminiFlashLiteInfo();
     const geminiModelLabel = geminiInfo.modelLabel;
-    const geminiTransportLabel = geminiInfo.transportLabel;
     const geminiConfigured = geminiInfo.configured;
-    const geminiStatusMessage = geminiInfo.statusMessage;
-    const geminiModelSource = geminiInfo.modelSource;
-    const geminiApiKeySource = geminiInfo.apiKeySource;
-    const geminiApiKeySignature = geminiInfo.apiKeySignature;
 
     // User profile data
     const [userRoles, setUserRoles] = useState<string[]>([]);
@@ -208,7 +201,38 @@ export default function AiSuggestionsScreen() {
 
     // Load user profile on mount
     useEffect(() => {
-        loadUserProfile();
+        let cancelled = false;
+
+        const loadCachedProfile = async () => {
+            try {
+                const cachedRaw = await AsyncStorage.getItem(OFFLINE_PROFILE_CACHE_KEY);
+                if (cancelled || !cachedRaw) {
+                    return false;
+                }
+
+                const cached = JSON.parse(cachedRaw) as CachedOfflineProfile;
+                applyProfileSignals(cached);
+                setLoadingProfile(false);
+                return true;
+            } catch {
+                return false;
+            }
+        };
+
+        void loadCachedProfile();
+
+        const task = InteractionManager.runAfterInteractions(() => {
+            if (!cancelled) {
+                void loadUserProfile();
+            }
+        });
+
+        return () => {
+            cancelled = true;
+            task.cancel();
+        };
+        // loadUserProfile is intentionally scheduled after interactions; refreshKey is the trigger.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [refreshKey]);
 
     useEffect(() => {
@@ -219,28 +243,7 @@ export default function AiSuggestionsScreen() {
             return;
         }
 
-        console.log('[AI_SUGGESTIONS] Groq provider', {
-            platform: 'mobile',
-            aiPowered: isAIPowered,
-            provider: aiProvider || null,
-            configured: geminiConfigured,
-            model: geminiModelLabel,
-            modelSource: geminiModelSource,
-            apiKeySource: geminiApiKeySource,
-            apiKeySignature: geminiApiKeySignature,
-            transport: geminiTransportLabel,
-            status: geminiStatusMessage,
-        });
     }, [
-        aiProvider,
-        geminiApiKeySignature,
-        geminiApiKeySource,
-        geminiConfigured,
-        geminiModelLabel,
-        geminiModelSource,
-        geminiStatusMessage,
-        geminiTransportLabel,
-        isAIPowered,
         step,
     ]);
 
@@ -349,18 +352,10 @@ export default function AiSuggestionsScreen() {
     // Fetch Groq-backed suggestions with local ranking fallback.
     const fetchSuggestions = async () => {
         const requestId = `ai-suggest-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+        const activeRequestId = suggestionRequestIdRef.current + 1;
+        suggestionRequestIdRef.current = activeRequestId;
         const startedAt = Date.now();
 
-        console.log('[AI_SUGGESTIONS_FLOW] Request start', {
-            requestId,
-            selectedGenresCount: selectedGenres.length,
-            selectedGenresPreview: selectedGenres.slice(0, 4),
-            currentInstrumentsCount: currentInstruments.length,
-            currentInstrumentsPreview: currentInstruments.slice(0, 4),
-            userRolesCount: userRoles.length,
-            experienceLevel,
-            purpose,
-        });
 
         setLoading(true);
         setError(null);
@@ -375,34 +370,39 @@ export default function AiSuggestionsScreen() {
             limit: 10,
         };
 
+        const localSuggestions = getOfflineInstrumentSuggestions(requestInput);
+        if (localSuggestions.length > 0) {
+            setSuggestions(localSuggestions);
+            setIsAIPowered(false);
+            setAIProvider('Local Ranker');
+            setSuggestionMessage(geminiConfigured ? 'Showing smart local suggestions while AI refreshes.' : null);
+            setStep('results');
+        }
+
         try {
             const generated = await generateInstrumentSuggestionsWithGeminiFlashLite(requestInput);
-
-            if (!generated.aiPowered && isGroqQuotaExhausted(generated.message || '')) {
-                setSuggestions([]);
-                setIsAIPowered(false);
-                setAIProvider(generated.aiProvider || geminiModelLabel);
-                setSuggestionMessage(null);
-                setStep('preferences');
-                setError('AI free-tier limit is exhausted. Suggestions are temporarily unavailable.');
+            if (suggestionRequestIdRef.current !== activeRequestId) {
                 return;
             }
 
-            console.log('[AI_SUGGESTIONS_STATUS]', {
-                requestId,
-                aiPowered: generated.aiPowered,
-                provider: generated.aiProvider,
-                count: generated.suggestions.length,
-                message: generated.message || '',
-                elapsedMs: Date.now() - startedAt,
-            });
+            if (!generated.aiPowered && isGroqQuotaExhausted(generated.message || '')) {
+                setIsAIPowered(false);
+                setAIProvider(generated.aiProvider || geminiModelLabel);
+                setSuggestionMessage(
+                    localSuggestions.length > 0
+                        ? 'AI free-tier limit is exhausted. Showing smart local suggestions.'
+                        : null,
+                );
+                if (localSuggestions.length === 0) {
+                    setSuggestions([]);
+                    setStep('preferences');
+                    setError('AI free-tier limit is exhausted. Suggestions are temporarily unavailable.');
+                }
+                return;
+            }
+
 
             if (generated.suggestions.length > 0) {
-                console.log('[AI_SUGGESTIONS_FLOW] Service returned suggestions', {
-                    requestId,
-                    aiPowered: generated.aiPowered,
-                    suggestionsCount: generated.suggestions.length,
-                });
 
                 setSuggestions(generated.suggestions);
                 setIsAIPowered(generated.aiPowered);
@@ -415,16 +415,8 @@ export default function AiSuggestionsScreen() {
                 return;
             }
 
-            const fallbackSuggestions = getOfflineInstrumentSuggestions(requestInput);
-            console.log('[AI_SUGGESTIONS_FLOW] Manual fallback computed', {
-                requestId,
-                fallbackCount: fallbackSuggestions.length,
-                generatedProvider: generated.aiProvider,
-                generatedMessage: generated.message || '',
-            });
-
-            if (fallbackSuggestions.length > 0) {
-                setSuggestions(fallbackSuggestions);
+            if (localSuggestions.length > 0) {
+                setSuggestions(localSuggestions);
                 setIsAIPowered(false);
                 setAIProvider('Local Ranker');
                 setSuggestionMessage(generated.message || null);
@@ -456,14 +448,12 @@ export default function AiSuggestionsScreen() {
                 return;
             }
 
-            const fallbackSuggestions = getOfflineInstrumentSuggestions(requestInput);
-            console.log('[AI_SUGGESTIONS_FLOW] Error fallback computed', {
-                requestId,
-                fallbackCount: fallbackSuggestions.length,
-            });
+            if (suggestionRequestIdRef.current !== activeRequestId) {
+                return;
+            }
 
-            if (fallbackSuggestions.length > 0) {
-                setSuggestions(fallbackSuggestions);
+            if (localSuggestions.length > 0) {
+                setSuggestions(localSuggestions);
                 setIsAIPowered(false);
                 setAIProvider('Local Ranker');
                 setSuggestionMessage('We could not refresh right now. Showing local suggestions.');
@@ -473,11 +463,9 @@ export default function AiSuggestionsScreen() {
                 setSuggestionMessage(null);
             }
         } finally {
-            console.log('[AI_SUGGESTIONS_FLOW] Request end', {
-                requestId,
-                elapsedMs: Date.now() - startedAt,
-            });
-            setLoading(false);
+            if (suggestionRequestIdRef.current === activeRequestId) {
+                setLoading(false);
+            }
         }
     };
 
@@ -513,7 +501,7 @@ export default function AiSuggestionsScreen() {
                 {userRoles.length > 0 ? (
                     <>
                         <Text style={[styles.profileSubtitle, { color: colors.textSecondary }]}>
-                            You're a <Text style={{ color: '#8B5CF6', fontFamily: 'Poppins_600SemiBold' }}>{userRoles.join(', ')}</Text>
+                            You&apos;re a <Text style={{ color: '#8B5CF6', fontFamily: 'Poppins_600SemiBold' }}>{userRoles.join(', ')}</Text>
                         </Text>
                         <Text style={[styles.profileHint, { color: colors.textSecondary }]}>
                             These suggestions complement your role
@@ -619,7 +607,7 @@ export default function AiSuggestionsScreen() {
             <View style={styles.chipGrid}>
                 {filteredGenres.length === 0 ? (
                     <Text style={[styles.noResultsText, { color: colors.textSecondary }]}>
-                        No genres found for "{genreSearch}"
+                        No genres found for &quot;{genreSearch}&quot;
                     </Text>
                 ) : filteredGenres.map(genre => {
                     const isSelected = selectedGenres.includes(genre);
@@ -773,7 +761,7 @@ export default function AiSuggestionsScreen() {
                         {/* AI Headline */}
                         {suggestion.headline && (
                             <Text style={[styles.headline, { color: '#8B5CF6' }]}>
-                                "{suggestion.headline}"
+                                &quot;{suggestion.headline}&quot;
                             </Text>
                         )}
 
@@ -892,7 +880,7 @@ export default function AiSuggestionsScreen() {
             {/* Get Suggestions Button */}
             <TouchableOpacity activeOpacity={1}
                 onPress={fetchSuggestions}
-                disabled={loading || loadingProfile || selectedGenres.length === 0}
+                disabled={loading || selectedGenres.length === 0}
                 style={[
                     styles.primaryButton,
                     {
@@ -924,6 +912,7 @@ export default function AiSuggestionsScreen() {
     // Render results step
     const renderResultsStep = () => {
         const badgeColor = isAIPowered ? '#8B5CF6' : '#2563EB';
+        const providerLabel = aiProvider || (isAIPowered ? geminiModelLabel : 'Local Ranker');
 
         return (
             <ScrollView
@@ -1002,6 +991,24 @@ export default function AiSuggestionsScreen() {
                     ? `Instruments that complement your role as a ${userRoles[0]}`
                     : 'Curated just for you based on your musical profile'}
             </Text>
+            <Text style={[styles.resultsSubtitle, { color: colors.textSecondary, marginTop: -10 }]}>
+                {loading ? `${providerLabel} refresh in progress` : providerLabel}
+            </Text>
+
+            {suggestionMessage && (
+                <View
+                    style={[
+                        styles.fallbackInfoContainer,
+                        {
+                            backgroundColor: badgeColor + '12',
+                            borderColor: badgeColor + '44',
+                        },
+                    ]}
+                >
+                    <Ionicons name={loading ? 'time-outline' : 'information-circle-outline'} size={16} color={badgeColor} />
+                    <Text style={[styles.fallbackInfoText, { color: badgeColor }]}>{suggestionMessage}</Text>
+                </View>
+            )}
 
             {/* Suggestion Cards */}
             {suggestions.map((suggestion, index) => renderSuggestionCard(suggestion, index))}

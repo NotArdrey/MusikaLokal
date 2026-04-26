@@ -33,6 +33,7 @@ const moderateScale = (size: number, factor = 0.3) => {
   return size + (scaled - size) * factor;
 };
 const CARD_WIDTH = (SCREEN_WIDTH - 48) / 2;
+const MARKETPLACE_FOCUS_REFRESH_COOLDOWN_MS = 30000;
 const MARKETPLACE_CATEGORIES = [
   { value: "apparel", label: "Apparel" },
   { value: "accessories", label: "Accessories" },
@@ -46,6 +47,14 @@ const MARKETPLACE_CATEGORIES = [
 ];
 
 type MarketTab = "browse" | "sell";
+
+type MarketplaceCachePayload = {
+  products: any[];
+  sellerProducts: any[];
+  fetchedAt: number;
+};
+
+const marketplaceScreenCache = new Map<string, MarketplaceCachePayload>();
 
 const getCategoryLabel = (category: string | null | undefined) => {
   if (!category) return null;
@@ -76,6 +85,7 @@ export default function MarketplaceScreen() {
   const [sellerProducts, setSellerProducts] = useState<any[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [category, setCategory] = useState<string | null>(null);
+  const marketplaceCacheKey = `${userId || "guest"}:${category || "all"}:${canSell ? "seller" : "buyer"}`;
 
   // Add product modal
   const [showAddProduct, setShowAddProduct] = useState(false);
@@ -113,13 +123,17 @@ export default function MarketplaceScreen() {
     return data;
   }, []);
 
-  const fetchAll = useCallback(async () => {
+  const fetchAll = useCallback(async (options: { showLoading?: boolean } = {}) => {
     if (!session) {
       setProducts([]);
       setSellerProducts([]);
       setLoading(false);
       setRefreshing(false);
       return;
+    }
+
+    if (options.showLoading) {
+      setLoading(true);
     }
 
     try {
@@ -133,20 +147,43 @@ export default function MarketplaceScreen() {
       }
 
       const results = await Promise.all(promises);
-      setProducts(results[0]?.data || []);
-      setSellerProducts(canSell ? results[1]?.data || [] : []);
+      const nextProducts = results[0]?.data || [];
+      const nextSellerProducts = canSell ? results[1]?.data || [] : [];
+
+      setProducts(nextProducts);
+      setSellerProducts(nextSellerProducts);
+      marketplaceScreenCache.set(marketplaceCacheKey, {
+        products: nextProducts,
+        sellerProducts: nextSellerProducts,
+        fetchedAt: Date.now(),
+      });
     } catch (e: any) {
       console.warn("Marketplace fetch failed", e);
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [session, category, invokeMarketplace, canSell]);
+  }, [session, category, invokeMarketplace, canSell, marketplaceCacheKey]);
 
   useFocusEffect(useCallback(() => {
-    setLoading(true);
-    fetchAll();
-  }, [fetchAll]));
+    const cached = marketplaceScreenCache.get(marketplaceCacheKey);
+    const cacheIsFresh =
+      cached &&
+      Date.now() - cached.fetchedAt < MARKETPLACE_FOCUS_REFRESH_COOLDOWN_MS;
+
+    if (cached) {
+      setProducts(cached.products);
+      setSellerProducts(cached.sellerProducts);
+      setLoading(false);
+      setRefreshing(false);
+    } else {
+      setLoading(true);
+    }
+
+    if (!cacheIsFresh) {
+      fetchAll({ showLoading: !cached });
+    }
+  }, [fetchAll, marketplaceCacheKey]));
 
   const onRefresh = () => { setRefreshing(true); fetchAll(); };
 
