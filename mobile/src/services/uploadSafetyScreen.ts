@@ -1,13 +1,14 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { supabase } from "../../lib/supabase";
 
-export type UploadSafetyKind = "photo" | "document";
+export type UploadSafetyKind = "photo" | "document" | "video" | "audio";
 
 export interface UploadSafetyFileInput {
   name: string;
   mimeType?: string;
   size?: number;
   uri?: string;
+  contentDataUrl?: string;
   kind: UploadSafetyKind;
 }
 
@@ -15,6 +16,12 @@ export interface UploadSafetyScreeningSummary {
   allowed: boolean;
   reason?: string;
   blockedCount: number;
+}
+
+export interface UploadSafetyFileDecision {
+  input: UploadSafetyFileInput;
+  allowed: boolean;
+  reason?: string;
 }
 
 interface CachedUploadSafetyDecision {
@@ -31,39 +38,33 @@ interface RemoteUploadSafetyResult {
   reason?: string;
 }
 
-const SAFETY_CACHE_PREFIX = "upload_safety_screen:v1:";
+const SAFETY_CACHE_PREFIX = "upload_safety_screen:v6:";
 const SAFETY_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const SAFETY_UNAVAILABLE_CACHE_TTL_MS = 5 * 60 * 1000;
 const SCREENING_FUNCTION_NAME = "upload-safety-screen";
 const MAX_CANDIDATES_PER_REQUEST = 10;
 const SCREENING_UNAVAILABLE_BLOCK_MESSAGE =
-  "Upload safety screening is currently unavailable. Uploads are blocked until screening is restored.";
+  "Safety check is temporarily unavailable. Please try again in a moment.";
+const SAFETY_RATE_LIMIT_MESSAGE =
+  "Safety check is busy. Please try again in a few seconds.";
+const SAFETY_TIMEOUT_MESSAGE =
+  "Safety check took too long. Please try again.";
+const SAFETY_GENERIC_BLOCK_MESSAGE =
+  "This media did not pass safety screening. Please choose another file.";
+const AUDIO_COPYRIGHT_FALLBACK_MESSAGE =
+  "This track appears to be copyrighted. Please upload original music or a track you have permission to share.";
+const PROVIDER_ERROR_PATTERN =
+  /\b(groq|openai|gemini|api error|visual review error|image safety screening failed|rate_limit|rate limit|429|tokens per minute|tpm|organization|service tier|billing|console\.groq\.com|internal server error)\b/i;
+const TEMPORARY_BLOCK_REASON_PATTERN =
+  /\b(temporarily unavailable|unavailable|busy|too long|timed out|timeout|try again|could not verify|failed|not configured|incomplete|did not return)\b/i;
+const AUDIO_COPYRIGHT_REASON_PATTERN =
+  /this audio appears to match\s+(.+?)(?:;\s*(?:match score|rights owner|ISRC)|\. Please upload|$)/i;
 
 const memoryDecisionCache = new Map<string, CachedUploadSafetyDecision>();
 const inFlightDecisionCache = new Map<string, Promise<CachedUploadSafetyDecision>>();
 
 const normalizeText = (value: unknown): string =>
   typeof value === "string" ? value.trim().toLowerCase() : "";
-
-const parseBooleanFlag = (value: unknown): boolean | null => {
-  const normalized = normalizeText(value);
-  if (["1", "true", "yes", "on"].includes(normalized)) {
-    return true;
-  }
-  if (["0", "false", "no", "off"].includes(normalized)) {
-    return false;
-  }
-  return null;
-};
-
-const shouldFailOpenWhenScreeningUnavailable = (() => {
-  const explicit = parseBooleanFlag(process.env.EXPO_PUBLIC_UPLOAD_SAFETY_FAIL_OPEN);
-  if (explicit !== null) {
-    return explicit;
-  }
-
-  return normalizeText(process.env.NODE_ENV) !== "production";
-})();
 
 const clampSize = (size: unknown): number => {
   if (typeof size !== "number" || !Number.isFinite(size) || size < 0) {
@@ -94,6 +95,7 @@ const getCacheKey = (input: UploadSafetyFileInput): string => {
     normalizeText(input.mimeType),
     clampSize(input.size),
     sanitizeUriTail(input.uri),
+    input.contentDataUrl ? hashValue(input.contentDataUrl) : "",
   ].join("|");
   return `${SAFETY_CACHE_PREFIX}${hashValue(payload)}`;
 };
@@ -160,6 +162,16 @@ const buildRemoteDecision = (
   expiresAt: Date.now() + ttlMs,
 });
 
+const getDecisionCacheTtlMs = (allowed: boolean, reason?: string): number => {
+  if (allowed) {
+    return SAFETY_CACHE_TTL_MS;
+  }
+
+  return TEMPORARY_BLOCK_REASON_PATTERN.test(reason || "")
+    ? SAFETY_UNAVAILABLE_CACHE_TTL_MS
+    : SAFETY_CACHE_TTL_MS;
+};
+
 const parseRemoteResults = (data: unknown): RemoteUploadSafetyResult[] => {
   if (!data || typeof data !== "object") {
     return [];
@@ -179,12 +191,63 @@ const parseRemoteResults = (data: unknown): RemoteUploadSafetyResult[] => {
   return [];
 };
 
-const resolveDecisionReason = (input: UploadSafetyFileInput, rawReason?: string): string => {
-  const reason = typeof rawReason === "string" && rawReason.trim().length > 0
-    ? rawReason.trim()
-    : "This file does not comply with Musika Lokal safety guidelines.";
+const formatAudioCopyrightReason = (reason: string): string => {
+  const matchDescription = reason.match(AUDIO_COPYRIGHT_REASON_PATTERN)?.[1]?.trim();
+  if (!matchDescription) {
+    return AUDIO_COPYRIGHT_FALLBACK_MESSAGE;
+  }
 
-  if (reason.toLowerCase().includes("guideline")) {
+  return `This track appears to match ${matchDescription}. Please upload original music or a track you have permission to share.`;
+};
+
+const sanitizeUploadSafetyReason = (rawReason?: string): string => {
+  const reason = typeof rawReason === "string" ? rawReason.trim() : "";
+  if (!reason) {
+    return SAFETY_GENERIC_BLOCK_MESSAGE;
+  }
+
+  const lower = reason.toLowerCase();
+  if (
+    lower.includes("rate_limit") ||
+    lower.includes("rate limit") ||
+    lower.includes("tokens per minute") ||
+    lower.includes("tpm") ||
+    lower.includes("try again in")
+  ) {
+    return SAFETY_RATE_LIMIT_MESSAGE;
+  }
+
+  if (lower.includes("timed out") || lower.includes("timeout")) {
+    return SAFETY_TIMEOUT_MESSAGE;
+  }
+
+  if (lower.includes("this audio appears to match")) {
+    return formatAudioCopyrightReason(reason);
+  }
+
+  if (PROVIDER_ERROR_PATTERN.test(reason) || reason.length > 220) {
+    return SCREENING_UNAVAILABLE_BLOCK_MESSAGE;
+  }
+
+  return reason;
+};
+
+const resolveDecisionReason = (input: UploadSafetyFileInput, rawReason?: string): string => {
+  const reason = sanitizeUploadSafetyReason(
+    typeof rawReason === "string" && rawReason.trim().length > 0
+      ? rawReason
+      : "This file does not comply with Musika Lokal safety guidelines.",
+  );
+
+  if (
+    reason.toLowerCase().includes("guideline") ||
+    reason.toLowerCase().includes("this track appears to match") ||
+    reason === AUDIO_COPYRIGHT_FALLBACK_MESSAGE ||
+    reason === SAFETY_RATE_LIMIT_MESSAGE ||
+    reason === SAFETY_TIMEOUT_MESSAGE ||
+    reason === SCREENING_UNAVAILABLE_BLOCK_MESSAGE ||
+    reason === SAFETY_GENERIC_BLOCK_MESSAGE
+  ) {
     return reason;
   }
 
@@ -192,7 +255,7 @@ const resolveDecisionReason = (input: UploadSafetyFileInput, rawReason?: string)
 };
 
 const screenChunkWithRemoteAi = async (
-  chunk: Array<{ cacheKey: string; input: UploadSafetyFileInput }>,
+  chunk: { cacheKey: string; input: UploadSafetyFileInput }[],
   contextTag?: string,
 ): Promise<void> => {
   const { data, error } = await supabase.functions.invoke(SCREENING_FUNCTION_NAME, {
@@ -204,23 +267,21 @@ const screenChunkWithRemoteAi = async (
         mimeType: input.mimeType || null,
         fileSize: clampSize(input.size),
         kind: input.kind,
+        contentDataUrl: input.contentDataUrl || null,
       })),
     },
   });
 
   if (error) {
-    if (shouldFailOpenWhenScreeningUnavailable) {
-      for (const item of chunk) {
-        const fallbackDecision = buildRemoteDecision(
-          true,
-          "Safety screening is temporarily unavailable. Upload allowed for now.",
-          SAFETY_UNAVAILABLE_CACHE_TTL_MS,
-        );
-        await setCachedDecision(item.cacheKey, fallbackDecision);
-      }
-      return;
-    }
-
+    console.error("[UploadSafetyScreen] invoke_failed", {
+      message: error.message,
+      status: (error as any).status,
+      code: (error as any).code,
+      details: (error as any).details,
+      hint: (error as any).hint,
+      context: contextTag || "add_edit_upload",
+      fileNames: chunk.map((item) => item.input.name),
+    });
     throw new Error(SCREENING_UNAVAILABLE_BLOCK_MESSAGE);
   }
 
@@ -244,22 +305,30 @@ const screenChunkWithRemoteAi = async (
     const remote = resultsByKey.get(item.cacheKey);
 
     if (!remote) {
-      const unavailableDecision = shouldFailOpenWhenScreeningUnavailable
-        ? buildRemoteDecision(
-            true,
-            "Safety screening response was incomplete. Upload allowed for now.",
-            SAFETY_UNAVAILABLE_CACHE_TTL_MS,
-          )
-        : buildRemoteDecision(false, "Safety screening response was incomplete. Upload blocked.");
+      const unavailableDecision = buildRemoteDecision(
+        false,
+        "Safety screening response was incomplete. Upload blocked.",
+        SAFETY_UNAVAILABLE_CACHE_TTL_MS,
+      );
       await setCachedDecision(item.cacheKey, unavailableDecision);
       continue;
     }
 
     const allowed = remote.allowed !== false;
+    const reason = allowed ? undefined : resolveDecisionReason(item.input, remote.reason);
     const decision = buildRemoteDecision(
       allowed,
-      allowed ? undefined : resolveDecisionReason(item.input, remote.reason),
+      reason,
+      getDecisionCacheTtlMs(allowed, reason),
     );
+
+    console.log("[UploadSafetyScreen] remote_decision", {
+      context: contextTag || "add_edit_upload",
+      fileName: item.input.name,
+      kind: item.input.kind,
+      allowed,
+      reason: decision.reason || null,
+    });
 
     await setCachedDecision(item.cacheKey, decision);
   }
@@ -285,13 +354,11 @@ const resolveDecisionForKey = async (
     const resolved = await getCachedDecision(cacheKey);
 
     if (!resolved) {
-      const fallbackDecision = shouldFailOpenWhenScreeningUnavailable
-        ? buildRemoteDecision(
-            true,
-            "Safety screening did not return a valid decision. Upload allowed for now.",
-            SAFETY_UNAVAILABLE_CACHE_TTL_MS,
-          )
-        : buildRemoteDecision(false, "Safety screening did not return a valid decision.");
+      const fallbackDecision = buildRemoteDecision(
+        false,
+        "Safety screening did not return a valid decision.",
+        SAFETY_UNAVAILABLE_CACHE_TTL_MS,
+      );
 
       await setCachedDecision(cacheKey, fallbackDecision);
       return fallbackDecision;
@@ -314,76 +381,14 @@ export const screenUploadsWithAi = async (
   inputs: UploadSafetyFileInput[],
   contextTag?: string,
 ): Promise<UploadSafetyScreeningSummary> => {
-  const normalizedInputs = inputs.filter((item) => item && typeof item.name === "string");
-  if (normalizedInputs.length === 0) {
-    return { allowed: true, blockedCount: 0 };
-  }
+  const decisions = await screenUploadsWithAiDecisions(inputs, contextTag);
+  const blockedDecisions = decisions.filter((decision) => !decision.allowed);
 
-  const blockedReasons: string[] = [];
-  const uncachedItems: Array<{ cacheKey: string; input: UploadSafetyFileInput }> = [];
-  const seenKeys = new Set<string>();
-
-  for (const input of normalizedInputs) {
-    const cacheKey = getCacheKey(input);
-    if (seenKeys.has(cacheKey)) {
-      continue;
-    }
-    seenKeys.add(cacheKey);
-
-    const cached = await getCachedDecision(cacheKey);
-    if (cached) {
-      if (!cached.allowed) {
-        blockedReasons.push(cached.reason || "Upload blocked by safety screening.");
-      }
-      continue;
-    }
-
-    uncachedItems.push({ cacheKey, input });
-  }
-
-  if (blockedReasons.length > 0) {
+  if (blockedDecisions.length > 0) {
     return {
       allowed: false,
-      blockedCount: blockedReasons.length,
-      reason: blockedReasons[0],
-    };
-  }
-
-  const chunks: Array<Array<{ cacheKey: string; input: UploadSafetyFileInput }>> = [];
-  for (let i = 0; i < uncachedItems.length; i += MAX_CANDIDATES_PER_REQUEST) {
-    chunks.push(uncachedItems.slice(i, i + MAX_CANDIDATES_PER_REQUEST));
-  }
-
-  for (const chunk of chunks) {
-    // If only one file needs review, route through single-flight cache for efficiency.
-    if (chunk.length === 1) {
-      const [single] = chunk;
-      const decision = await resolveDecisionForKey(single.cacheKey, single.input, contextTag);
-      if (!decision.allowed) {
-        blockedReasons.push(
-          decision.reason || `${single.input.name} was blocked by safety screening.`,
-        );
-      }
-      continue;
-    }
-
-    await screenChunkWithRemoteAi(chunk, contextTag);
-
-    for (const item of chunk) {
-      const decision = await getCachedDecision(item.cacheKey);
-      if (!decision || !decision.allowed) {
-        blockedReasons.push(
-          decision?.reason || `${item.input.name} was blocked by safety screening.`,
-        );
-      }
-    }
-  }
-
-  if (blockedReasons.length > 0) {
-    return {
-      allowed: false,
-      blockedCount: blockedReasons.length,
-      reason: blockedReasons[0],
+      blockedCount: blockedDecisions.length,
+      reason: blockedDecisions[0].reason,
     };
   }
 
@@ -393,11 +398,95 @@ export const screenUploadsWithAi = async (
   };
 };
 
+export const screenUploadsWithAiDecisions = async (
+  inputs: UploadSafetyFileInput[],
+  contextTag?: string,
+): Promise<UploadSafetyFileDecision[]> => {
+  const normalizedInputs = inputs.filter((item) => item && typeof item.name === "string");
+  if (normalizedInputs.length === 0) {
+    return [];
+  }
+
+  const decisionsByKey = new Map<string, CachedUploadSafetyDecision>();
+  const uncachedItems: { cacheKey: string; input: UploadSafetyFileInput }[] = [];
+  const seenKeys = new Set<string>();
+
+  for (const input of normalizedInputs) {
+    const cacheKey = getCacheKey(input);
+    const cached = await getCachedDecision(cacheKey);
+    if (cached) {
+      decisionsByKey.set(cacheKey, cached);
+      continue;
+    }
+
+    if (seenKeys.has(cacheKey)) {
+      continue;
+    }
+    seenKeys.add(cacheKey);
+    uncachedItems.push({ cacheKey, input });
+  }
+
+  const chunkSize = uncachedItems.some((item) => item.input.contentDataUrl)
+    ? 1
+    : MAX_CANDIDATES_PER_REQUEST;
+  const chunks: { cacheKey: string; input: UploadSafetyFileInput }[][] = [];
+  for (let i = 0; i < uncachedItems.length; i += chunkSize) {
+    chunks.push(uncachedItems.slice(i, i + chunkSize));
+  }
+
+  for (const chunk of chunks) {
+    // If only one file needs review, route through single-flight cache for efficiency.
+    if (chunk.length === 1) {
+      const [single] = chunk;
+      const decision = await resolveDecisionForKey(single.cacheKey, single.input, contextTag);
+      decisionsByKey.set(single.cacheKey, decision);
+      continue;
+    }
+
+    await screenChunkWithRemoteAi(chunk, contextTag);
+
+    for (const item of chunk) {
+      const decision = await getCachedDecision(item.cacheKey);
+      decisionsByKey.set(
+        item.cacheKey,
+        decision || buildRemoteDecision(
+          false,
+          `${item.input.name} was blocked by safety screening.`,
+          SAFETY_UNAVAILABLE_CACHE_TTL_MS,
+        ),
+      );
+    }
+  }
+
+  return normalizedInputs.map((input) => {
+    const cacheKey = getCacheKey(input);
+    const decision = decisionsByKey.get(cacheKey);
+
+    return {
+      input,
+      allowed: decision?.allowed === true,
+      reason: decision?.allowed === false
+        ? sanitizeUploadSafetyReason(decision.reason) || `${input.name} was blocked by safety screening.`
+        : decision
+          ? undefined
+          : SCREENING_UNAVAILABLE_BLOCK_MESSAGE,
+    };
+  });
+};
+
 export const ensureUploadPassesSafetyScreening = async (
   input: UploadSafetyFileInput,
   contextTag?: string,
 ): Promise<void> => {
   const summary = await screenUploadsWithAi([input], contextTag);
+  console.log("[UploadSafetyScreen] summary", {
+    context: contextTag || "add_edit_upload",
+    fileName: input.name,
+    kind: input.kind,
+    allowed: summary.allowed,
+    blockedCount: summary.blockedCount,
+    reason: summary.reason || null,
+  });
   if (!summary.allowed) {
     throw new Error(summary.reason || "Upload blocked by safety screening.");
   }

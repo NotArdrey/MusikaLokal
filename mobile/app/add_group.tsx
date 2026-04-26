@@ -1270,6 +1270,7 @@ export default function AddGroupScreen() {
                     bucketName="listings"
                     userId={newGroupId || "temp"}
                     folder="groups"
+                    safetyContext="add_group_images"
                   />
                 </View>
 

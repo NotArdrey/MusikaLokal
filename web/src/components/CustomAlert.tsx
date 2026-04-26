@@ -18,6 +18,7 @@ interface CustomAlertProps {
   title: string;
   message: string;
   buttons?: AlertButton[];
+  forceModal?: boolean;
   onClose: () => void;
 }
 

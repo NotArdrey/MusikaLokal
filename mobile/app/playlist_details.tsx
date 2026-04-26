@@ -28,10 +28,7 @@ import { useAuth } from "../src/context/AuthContext";
 import { showTopToast } from "../src/context/TopToastContext";
 import { useTheme } from "../src/context/ThemeContext";
 import {
-  MAX_PLAYLIST_AUDIO_DURATION_SECONDS,
-  ensurePlaylistAudioDuration,
   pickPlaylistAudioFile,
-  resolvePlaylistAudioUrlDuration,
   uploadPlaylistAudioFile,
   type PlaylistAudioFile,
 } from "../src/utils/playlistAudio";
@@ -44,6 +41,70 @@ const moderateScale = (size: number, factor = 0.3) => {
 
 const PLAYLIST_ASSET_BUCKET = "playlist-assets";
 const PLAYLIST_ASSET_SIGNED_URL_TTL_SECONDS = 24 * 60 * 60;
+
+type PlaylistAlert = {
+  type: AlertType;
+  title: string;
+  message: string;
+  forceModal?: boolean;
+};
+
+const COPYRIGHT_MATCH_PATTERN = /this (?:audio|track) appears to match|appears to be copyrighted|permission to share/i;
+const EXPECTED_UPLOAD_FEEDBACK_PATTERN =
+  /(blocked by safety screening|safety check|copyright check|appears to match|appears to be copyrighted|permission to share|please upload music you own|licensed to share|playlist tracks must be|tracks must be|only mp3)/i;
+
+const isExpectedUploadFeedback = (message: string) =>
+  EXPECTED_UPLOAD_FEEDBACK_PATTERN.test(message);
+
+const formatUploadFeedbackMessage = (message: string) =>
+  message.replace(/^.+? was blocked by safety screening\.\s*/i, "").trim() || message;
+
+const readFunctionErrorBody = async (error: any) => {
+  const response = error?.context;
+  if (!response || typeof response !== "object") {
+    return null;
+  }
+
+  try {
+    const readableResponse = typeof response.clone === "function" ? response.clone() : response;
+    if (typeof readableResponse.json === "function") {
+      return await readableResponse.json();
+    }
+
+    if (typeof readableResponse.text === "function") {
+      const text = await readableResponse.text();
+      if (!text) return null;
+
+      try {
+        return JSON.parse(text);
+      } catch {
+        return text;
+      }
+    }
+  } catch (bodyReadError: any) {
+    return {
+      error: "Unable to read function error response body",
+      message: bodyReadError?.message || String(bodyReadError),
+    };
+  }
+
+  return null;
+};
+
+const getFunctionErrorMessage = (error: any, responseBody: any, fallback: string) => {
+  if (typeof responseBody === "string" && responseBody.trim()) {
+    return responseBody.trim();
+  }
+
+  if (responseBody && typeof responseBody === "object") {
+    const message = responseBody.error || responseBody.message;
+    if (typeof message === "string" && message.trim()) {
+      return message.trim();
+    }
+  }
+
+  return error?.message || fallback;
+};
 
 const coerceSingleRelation = <T,>(value: T | T[] | null | undefined): T | null => {
   if (Array.isArray(value)) {
@@ -124,7 +185,7 @@ export default function PlaylistDetailsScreen() {
 
   const [playlist, setPlaylist] = useState<any>(null);
   const [loading, setLoading] = useState(true);
-  const [alert, setAlert] = useState<{ type: AlertType; title: string; message: string } | null>(null);
+  const [alert, setAlert] = useState<PlaylistAlert | null>(null);
 
   // Add track modal state
   const [addTrackVisible, setAddTrackVisible] = useState(false);
@@ -144,16 +205,35 @@ export default function PlaylistDetailsScreen() {
 
   const isOwner = (playlist?.creator_id || playlist?.owner_id) === userId;
 
-  const logPlaylistInvokeError = useCallback((context: string, error: any, body: Record<string, unknown>) => {
+  const logAddTrackModal = useCallback((event: string, payload?: Record<string, unknown>) => {
+    console.log("[PlaylistDetails][AddTrackModal]", event, {
+      playlistId: playlist?.id || null,
+      editingTrackId,
+      hasPickedAudioFile: Boolean(newTrackAudioFile),
+      pickedAudioName: newTrackAudioFile?.name || null,
+      pickedAudioMimeType: newTrackAudioFile?.mimeType || null,
+      pickedAudioSizeBytes: newTrackAudioFile?.sizeBytes || null,
+      pickedAudioDurationSeconds: newTrackAudioFile?.durationSeconds || null,
+      hasExistingAudioUrl: newTrackAudioUrl.trim().length > 0,
+      ...payload,
+    });
+  }, [editingTrackId, newTrackAudioFile, newTrackAudioUrl, playlist?.id]);
+
+  const logPlaylistInvokeError = useCallback(async (context: string, error: any, body: Record<string, unknown>) => {
+    const responseBody = await readFunctionErrorBody(error);
+
     console.error(`manage-playlists ${context} failed`, {
       message: error?.message,
       status: error?.status,
       code: error?.code,
       details: error?.details,
       hint: error?.hint,
+      responseBody,
       context: error?.context,
       body,
     });
+
+    return responseBody;
   }, []);
 
   const unloadPreviewSound = useCallback(async () => {
@@ -269,7 +349,7 @@ export default function PlaylistDetailsScreen() {
 
     const { error } = await supabase.functions.invoke("manage-playlists", { body: payload });
     if (error) {
-      logPlaylistInvokeError("record_play_event", error, payload);
+      void logPlaylistInvokeError("record_play_event", error, payload);
     }
   }, [logPlaylistInvokeError]);
 
@@ -282,8 +362,8 @@ export default function PlaylistDetailsScreen() {
       });
 
       if (error) {
-        logPlaylistInvokeError("get_playlist_details", error, body);
-        throw error;
+        const responseBody = await logPlaylistInvokeError("get_playlist_details", error, body);
+        throw new Error(getFunctionErrorMessage(error, responseBody, "Failed to load this playlist."));
       }
 
       if (data?.data) {
@@ -440,14 +520,14 @@ export default function PlaylistDetailsScreen() {
 
   const handleRemoveItem = async (itemId: string) => {
     try {
-      const body = { action: "remove_playlist_item", item_id: itemId };
+      const body = { action: "remove_playlist_item", item_id: itemId, playlist_id: playlist?.id };
       const { data, error } = await supabase.functions.invoke("manage-playlists", {
         body,
       });
 
       if (error) {
-        logPlaylistInvokeError("remove_playlist_item", error, body);
-        throw error;
+        const responseBody = await logPlaylistInvokeError("remove_playlist_item", error, body);
+        throw new Error(getFunctionErrorMessage(error, responseBody, "Failed to remove track."));
       }
 
       if (data?.success) {
@@ -470,8 +550,8 @@ export default function PlaylistDetailsScreen() {
       });
 
       if (error) {
-        logPlaylistInvokeError("delete_playlist", error, body);
-        throw error;
+        const responseBody = await logPlaylistInvokeError("delete_playlist", error, body);
+        throw new Error(getFunctionErrorMessage(error, responseBody, "Failed to delete playlist."));
       }
 
       if (data?.success) {
@@ -501,43 +581,79 @@ export default function PlaylistDetailsScreen() {
   }, []);
 
   const handleSaveTrack = async () => {
+    logAddTrackModal("save_pressed", {
+      titleLength: newTrackTitle.trim().length,
+      artistLength: newTrackArtist.trim().length,
+    });
+
     if (!newTrackTitle.trim()) {
+      logAddTrackModal("save_blocked_missing_title");
       setAlert({ type: "warning", title: "Missing Title", message: "Please enter a track title." });
       return;
     }
 
     setAddingTrack(true);
     try {
-      let durationSeconds = newTrackDurationSeconds.trim() ? Number(newTrackDurationSeconds.trim()) : null;
-      if (durationSeconds !== null) {
-        durationSeconds = ensurePlaylistAudioDuration(durationSeconds);
-      }
-
       let sourceUrl = newTrackAudioUrl.trim() || null;
+      let durationSeconds = newTrackDurationSeconds.trim() ? Number(newTrackDurationSeconds.trim()) : null;
       if (newTrackAudioFile) {
+        logAddTrackModal("copyright_check_upload_start", {
+          fileName: newTrackAudioFile.name,
+          mimeType: newTrackAudioFile.mimeType,
+          sizeBytes: newTrackAudioFile.sizeBytes,
+        });
+
         const upload = await uploadPlaylistAudioFile(newTrackAudioFile, playlist.id);
         sourceUrl = upload.publicUrl;
         durationSeconds = upload.durationSeconds;
-      } else if (sourceUrl) {
-        durationSeconds = await resolvePlaylistAudioUrlDuration(sourceUrl, durationSeconds);
+
+        logAddTrackModal("copyright_check_upload_passed", {
+          storagePath: upload.storagePath,
+          uploadedDurationSeconds: upload.durationSeconds,
+          hasPublicUrl: Boolean(upload.publicUrl),
+        });
+      } else {
+        logAddTrackModal("save_without_new_audio_file", {
+          reason: sourceUrl ? "using_existing_audio_url" : "metadata_only_track",
+        });
       }
 
+      const itemBody = {
+        action: editingTrackId ? "update_playlist_item" : "add_playlist_item",
+        ...(editingTrackId ? { item_id: editingTrackId } : { playlist_id: playlist.id }),
+        title: newTrackTitle.trim(),
+        artist_name: newTrackArtist.trim() || null,
+        audio_url: sourceUrl,
+        duration_seconds: durationSeconds,
+      };
+
+      logAddTrackModal("manage_playlists_invoke_start", {
+        action: itemBody.action,
+        hasAudioUrl: Boolean(sourceUrl),
+        durationSeconds,
+      });
+
       const { data, error } = await supabase.functions.invoke("manage-playlists", {
-        body: {
-          action: editingTrackId ? "update_playlist_item" : "add_playlist_item",
-          ...(editingTrackId ? { item_id: editingTrackId } : { playlist_id: playlist.id }),
-          title: newTrackTitle.trim(),
-          artist_name: newTrackArtist.trim() || null,
-          audio_url: sourceUrl,
-          duration_seconds: durationSeconds,
-        },
+        body: itemBody,
       });
 
       if (error) {
+        logAddTrackModal("manage_playlists_invoke_failed", {
+          message: error.message,
+          status: (error as any).status,
+          code: (error as any).code,
+          details: (error as any).details,
+          hint: (error as any).hint,
+          body: itemBody,
+        });
         throw error;
       }
 
       if (data?.success) {
+        logAddTrackModal("save_success", {
+          action: itemBody.action,
+          returnedId: data?.data?.id || null,
+        });
         showTopToast({
           type: "success",
           title: editingTrackId ? "Track Updated" : "Track Added",
@@ -546,6 +662,9 @@ export default function PlaylistDetailsScreen() {
         resetAddTrackForm();
         fetchPlaylist();
       } else {
+        logAddTrackModal("save_rejected_by_manage_playlists", {
+          responseError: data?.error || null,
+        });
         setAlert({
           type: "error",
           title: "Error",
@@ -553,28 +672,102 @@ export default function PlaylistDetailsScreen() {
         });
       }
     } catch (e: any) {
-      setAlert({ type: "error", title: "Error", message: e.message });
+      const saveErrorMessage = e?.message || String(e);
+      const isUploadFeedback = isExpectedUploadFeedback(saveErrorMessage);
+      const displayMessage = isUploadFeedback
+        ? formatUploadFeedbackMessage(saveErrorMessage)
+        : saveErrorMessage;
+
+      if (isUploadFeedback) {
+        logAddTrackModal("upload_feedback", {
+          reason: displayMessage,
+          feedbackKind: COPYRIGHT_MATCH_PATTERN.test(saveErrorMessage) ? "copyright_match" : "upload_rejected",
+        });
+      } else {
+        logAddTrackModal("save_failed", {
+          reason: saveErrorMessage,
+          message: e?.message,
+          name: e?.name,
+          playlistId: playlist?.id || null,
+          editingTrackId,
+          pickedAudioName: newTrackAudioFile?.name || null,
+          unexpected: true,
+        });
+      }
+
+      setAlert({
+        type: isUploadFeedback || newTrackAudioFile ? "warning" : "error",
+        title: COPYRIGHT_MATCH_PATTERN.test(saveErrorMessage)
+          ? "Copyright Match Found"
+          : isUploadFeedback || newTrackAudioFile
+            ? "Upload Feedback"
+            : "Error",
+        message: displayMessage || "We could not save this track.",
+        forceModal: Boolean(newTrackAudioFile),
+      });
     } finally {
+      logAddTrackModal("save_finished");
       setAddingTrack(false);
     }
   };
 
   const handlePickTrackAudio = useCallback(async () => {
     try {
+      console.log("[PlaylistDetails][AddTrackModal] audio_picker_open", {
+        playlistId: playlist?.id || null,
+        editingTrackId,
+      });
+
       const audioFile = await pickPlaylistAudioFile();
-      if (!audioFile) return;
+      if (!audioFile) {
+        console.log("[PlaylistDetails][AddTrackModal] audio_picker_cancelled", {
+          playlistId: playlist?.id || null,
+          editingTrackId,
+        });
+        return;
+      }
+
+      console.log("[PlaylistDetails][AddTrackModal] audio_picker_selected", {
+        playlistId: playlist?.id || null,
+        editingTrackId,
+        name: audioFile.name,
+        mimeType: audioFile.mimeType,
+        sizeBytes: audioFile.sizeBytes,
+        durationSeconds: audioFile.durationSeconds,
+        extension: audioFile.extension,
+      });
 
       setNewTrackAudioFile(audioFile);
       setNewTrackAudioUrl("");
       setNewTrackDurationSeconds(String(audioFile.durationSeconds));
     } catch (error: any) {
+      const pickerErrorMessage = error?.message || String(error);
+      const isUploadFeedback = isExpectedUploadFeedback(pickerErrorMessage);
+      const displayMessage = isUploadFeedback
+        ? formatUploadFeedbackMessage(pickerErrorMessage)
+        : pickerErrorMessage;
+
+      if (isUploadFeedback) {
+        logAddTrackModal("audio_picker_feedback", {
+          reason: displayMessage,
+          feedbackKind: COPYRIGHT_MATCH_PATTERN.test(pickerErrorMessage) ? "copyright_match" : "upload_rejected",
+        });
+      } else {
+        logAddTrackModal("audio_picker_failed", {
+          message: error?.message,
+          name: error?.name,
+          unexpected: true,
+        });
+      }
+
       setAlert({
         type: "warning",
-        title: "Audio Not Allowed",
-        message: error?.message || "Only MP3 or MP4 audio files up to 5 minutes are allowed.",
+        title: "Upload Feedback",
+        message: displayMessage || "Only MP3 audio files up to 5 minutes are allowed.",
+        forceModal: true,
       });
     }
-  }, []);
+  }, [editingTrackId, logAddTrackModal, playlist?.id]);
 
   const openReportModal = () => {
     if (!playlist?.id) {
@@ -741,11 +934,6 @@ export default function PlaylistDetailsScreen() {
                 {item.audio_url ? (
                   <Ionicons name="musical-note" size={14} color={colors.primary} style={{ marginRight: 6 }} />
                 ) : null}
-                {item.duration_seconds && (
-                  <Text style={[styles.trackDuration, { color: colors.textSecondary }]}>
-                    {Math.floor(item.duration_seconds / 60)}:{String(item.duration_seconds % 60).padStart(2, "0")}
-                  </Text>
-                )}
                 {item.external_link?.url ? (
                   <TouchableOpacity
                     activeOpacity={0.8}
@@ -854,7 +1042,16 @@ export default function PlaylistDetailsScreen() {
         reportType="music"
       />
 
-      {alert && <CustomAlert visible type={alert.type} title={alert.title} message={alert.message} onClose={() => setAlert(null)} />}
+      {alert && (
+        <CustomAlert
+          visible
+          type={alert.type}
+          title={alert.title}
+          message={alert.message}
+          forceModal={alert.forceModal}
+          onClose={() => setAlert(null)}
+        />
+      )}
 
       {/* Add Track Modal */}
       <Modal visible={addTrackVisible} transparent animationType="slide" onRequestClose={resetAddTrackForm}>
@@ -880,25 +1077,6 @@ export default function PlaylistDetailsScreen() {
               onChangeText={setNewTrackArtist}
             />
 
-            <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Audio URL</Text>
-            <TextInput
-              style={[styles.modalInput, { color: colors.text, borderColor: colors.border, backgroundColor: colors.background }]}
-              placeholder="Paste a public MP3 or audio URL"
-              placeholderTextColor={colors.textSecondary}
-              value={newTrackAudioUrl}
-              onChangeText={(value) => {
-                setNewTrackAudioUrl(value);
-                if (value.trim().length > 0) {
-                  setNewTrackAudioFile(null);
-                }
-              }}
-              autoCapitalize="none"
-              keyboardType="url"
-            />
-            <Text style={[{ fontSize: moderateScale(11), marginTop: -8, marginBottom: 12, color: colors.textSecondary }]}>
-              Used as the audio source when your track plays on radio stations.
-            </Text>
-
             <TouchableOpacity
               activeOpacity={0.8}
               style={[styles.uploadAudioBtn, { borderColor: colors.border, backgroundColor: colors.background }]}
@@ -906,31 +1084,21 @@ export default function PlaylistDetailsScreen() {
               disabled={addingTrack}
             >
               <Ionicons name="cloud-upload-outline" size={16} color={colors.primary} />
-              <Text style={[styles.uploadAudioBtnText, { color: colors.primary }]}>Upload MP3 / MP4</Text>
+              <Text style={[styles.uploadAudioBtnText, { color: colors.primary }]}>Upload MP3</Text>
             </TouchableOpacity>
-            <Text style={[styles.audioHelperText, { color: colors.textSecondary }]}>MP4 is treated as audio only. URL or uploaded file must be 5 minutes or less.</Text>
+            <Text style={[styles.audioHelperText, { color: colors.textSecondary }]}>Uploaded MP3 files must be 5 minutes or less.</Text>
 
             {newTrackAudioFile ? (
               <View style={[styles.audioFileChip, { backgroundColor: colors.primary + "12", borderColor: colors.primary + "30" }]}>
                 <Ionicons name="musical-note" size={14} color={colors.primary} />
                 <Text style={[styles.audioFileChipText, { color: colors.text }]} numberOfLines={1}>
-                  {newTrackAudioFile.name} • {newTrackAudioFile.durationSeconds}s
+                  {newTrackAudioFile.name}
                 </Text>
                 <TouchableOpacity activeOpacity={0.7} onPress={() => setNewTrackAudioFile(null)}>
                   <Ionicons name="close-circle" size={18} color={colors.textSecondary} />
                 </TouchableOpacity>
               </View>
             ) : null}
-
-            <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Duration in Seconds</Text>
-            <TextInput
-              style={[styles.modalInput, { color: colors.text, borderColor: colors.border, backgroundColor: colors.background }]}
-              placeholder={`Max ${MAX_PLAYLIST_AUDIO_DURATION_SECONDS}`}
-              placeholderTextColor={colors.textSecondary}
-              keyboardType="number-pad"
-              value={newTrackDurationSeconds}
-              onChangeText={setNewTrackDurationSeconds}
-            />
 
             <View style={{ flexDirection: "row", gap: 10 }}>
               <TouchableOpacity

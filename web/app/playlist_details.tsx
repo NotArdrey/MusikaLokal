@@ -70,7 +70,7 @@ export default function PlaylistDetailsScreen() {
   };
 
   const handleRemoveItem = async (itemId: string) => {
-    const { data } = await supabase.functions.invoke("manage-playlists", { body: { action: "remove_playlist_item", item_id: itemId } });
+    const { data } = await supabase.functions.invoke("manage-playlists", { body: { action: "remove_playlist_item", item_id: itemId, playlist_id: playlist?.id } });
     if (data?.success) { setItems((prev) => prev.filter((i) => i.id !== itemId)); showTopToast({ type: "info", title: "Removed", message: "Item removed." }); }
   };
 

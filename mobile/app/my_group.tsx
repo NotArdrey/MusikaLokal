@@ -325,10 +325,7 @@ export default function MyGroupScreen() {
     return (
         <>
             <View style={[styles.flex1, { backgroundColor: colors.background }]}>
-                <Header
-                    title="My Group"
-                    rightComponent={isMusicianView ? <View style={styles.headerSpacer} /> : undefined}
-                />
+                <Header title="My Group" />
 
                 <ScrollView
                     showsVerticalScrollIndicator={false}
@@ -499,10 +496,6 @@ export default function MyGroupScreen() {
 const styles = StyleSheet.create({
     flex1: {
         flex: 1,
-    },
-    headerSpacer: {
-        width: 40,
-        height: 40,
     },
     scrollContent: {
         paddingHorizontal: 24,

@@ -1574,6 +1574,7 @@ export default function EditGroupScreen() {
             bucketName="listings"
             userId={id as string}
             folder="groups"
+            safetyContext="edit_group_images"
           />
 
           {renderSectionHeader(groupMembersLabel, "person")}

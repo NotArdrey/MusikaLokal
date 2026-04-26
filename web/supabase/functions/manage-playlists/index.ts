@@ -1061,8 +1061,53 @@ Deno.serve(async (req: Request) => {
       if (!existing) return jsonResponse({ error: "Playlist not found" }, 404);
       if (existing.creator_id !== uid) return jsonResponse({ error: "Forbidden" }, 403);
 
-      const { error } = await supabaseAdmin.from("playlists").delete().eq("id", playlist_id);
-      if (error) return jsonResponse({ error: error.message }, 500);
+      let { error } = await supabaseAdmin.from("playlists").delete().eq("id", playlist_id);
+      const shouldRetryWithItemCleanup = error && /constraint|foreign key|referenced|trigger|tuple|cascade/i.test(error.message || "");
+
+      if (shouldRetryWithItemCleanup) {
+        console.warn("manage-playlists delete_playlist retrying after item cleanup", {
+          playlist_id,
+          message: error.message,
+          code: error.code,
+          details: error.details,
+          hint: error.hint,
+        });
+
+        const { error: itemDeleteError } = await supabaseAdmin
+          .from("playlist_items")
+          .delete()
+          .eq("playlist_id", playlist_id);
+
+        if (itemDeleteError) {
+          return jsonResponse({
+            error: itemDeleteError.message,
+            original_error: error.message,
+            code: itemDeleteError.code,
+            details: itemDeleteError.details,
+            hint: itemDeleteError.hint,
+          }, 500);
+        }
+
+        ({ error } = await supabaseAdmin.from("playlists").delete().eq("id", playlist_id));
+      }
+
+      if (error) {
+        console.error("manage-playlists delete_playlist failed", {
+          playlist_id,
+          message: error.message,
+          code: error.code,
+          details: error.details,
+          hint: error.hint,
+        });
+
+        return jsonResponse({
+          error: error.message,
+          code: error.code,
+          details: error.details,
+          hint: error.hint,
+        }, 500);
+      }
+
       return jsonResponse({ success: true });
     }
 
@@ -1241,14 +1286,37 @@ Deno.serve(async (req: Request) => {
 
     // ── remove_playlist_item ────────────────────────────────────────
     if (action === "remove_playlist_item") {
-      const { item_id } = params;
+      const { item_id, playlist_id } = params;
       if (!item_id) return jsonResponse({ error: "item_id is required" }, 400);
+
+      if (playlist_id) {
+        const { data: pl, error: playlistError } = await supabaseAdmin
+          .from("playlists")
+          .select("creator_id")
+          .eq("id", playlist_id)
+          .maybeSingle();
+
+        if (playlistError) return jsonResponse({ error: playlistError.message }, 500);
+        if (!pl) return jsonResponse({ error: "Playlist not found" }, 404);
+        if (pl.creator_id !== uid) return jsonResponse({ error: "Forbidden" }, 403);
+
+        const { data: deletedItem, error: deleteError } = await supabaseAdmin
+          .from("playlist_items")
+          .delete()
+          .eq("id", item_id)
+          .eq("playlist_id", playlist_id)
+          .select("id")
+          .maybeSingle();
+
+        if (deleteError) return jsonResponse({ error: deleteError.message }, 500);
+        return jsonResponse({ success: true, already_removed: !deletedItem });
+      }
 
       const { data: item } = await supabaseAdmin
         .from("playlist_items")
         .select("playlist_id")
         .eq("id", item_id)
-        .single();
+        .maybeSingle();
 
       if (!item) return jsonResponse({ error: "Item not found" }, 404);
 

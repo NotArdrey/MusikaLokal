@@ -1,19 +1,16 @@
 import { Audio } from "expo-av";
 import * as FileSystem from "expo-file-system/legacy";
 import { supabase } from "../../lib/supabase";
+import { ensureUploadPassesSafetyScreening } from "../services/uploadSafetyScreen";
 
 export const MAX_PLAYLIST_AUDIO_DURATION_SECONDS = 300;
 
 const PLAYLIST_AUDIO_BUCKET = "documents";
-const ALLOWED_AUDIO_EXTENSIONS = new Set(["mp3", "mp4", "m4a"]);
+const ACR_CLOUD_AUDIO_SAMPLE_BYTES = 4 * 1024 * 1024;
+const ALLOWED_AUDIO_EXTENSIONS = new Set(["mp3"]);
 const ALLOWED_AUDIO_MIME_TYPES = new Set([
   "audio/mpeg",
   "audio/mp3",
-  "audio/mp4",
-  "audio/m4a",
-  "audio/x-m4a",
-  "video/mp4",
-  "application/mp4",
 ]);
 
 export type PlaylistAudioFile = {
@@ -39,13 +36,8 @@ const sanitizeFileName = (fileName: string, fallbackExtension: string) => {
 
 const inferMimeType = (name: string, mimeType?: string | null) => {
   const normalizedMime = typeof mimeType === "string" ? mimeType.trim().toLowerCase() : "";
-  if (normalizedMime) {
+  if (ALLOWED_AUDIO_MIME_TYPES.has(normalizedMime)) {
     return normalizedMime;
-  }
-
-  const extension = getFileExtension(name);
-  if (extension === "mp4" || extension === "m4a") {
-    return "audio/mp4";
   }
 
   return "audio/mpeg";
@@ -80,9 +72,30 @@ const base64ToUint8Array = (base64: string): Uint8Array => {
   return bytes;
 };
 
+const buildAudioSafetyDataUrl = (base64: string, mimeType: string) => {
+  const maxBase64Chars = Math.floor(ACR_CLOUD_AUDIO_SAMPLE_BYTES / 3) * 4;
+  const sampleBase64 = base64.length > maxBase64Chars
+    ? base64.slice(0, maxBase64Chars)
+    : base64;
+
+  return `data:${mimeType};base64,${sampleBase64}`;
+};
+
 export const isSupportedPlaylistAudioFile = (name: string, mimeType?: string | null) => {
   const extension = getFileExtension(name);
   const normalizedMime = typeof mimeType === "string" ? mimeType.trim().toLowerCase() : "";
+
+  if (extension && !ALLOWED_AUDIO_EXTENSIONS.has(extension)) {
+    return false;
+  }
+
+  if (
+    normalizedMime &&
+    !ALLOWED_AUDIO_MIME_TYPES.has(normalizedMime) &&
+    (normalizedMime.startsWith("audio/") || normalizedMime.startsWith("video/") || normalizedMime.includes("mp4"))
+  ) {
+    return false;
+  }
 
   return ALLOWED_AUDIO_EXTENSIONS.has(extension) || ALLOWED_AUDIO_MIME_TYPES.has(normalizedMime);
 };
@@ -104,7 +117,7 @@ export const isValidPlaylistAudioUrl = (value: string) => {
   try {
     const parsed = new URL(value);
     return parsed.protocol === "http:" || parsed.protocol === "https:";
-  } catch (_) {
+  } catch {
     return false;
   }
 };
@@ -130,7 +143,7 @@ export const probePlaylistAudioDuration = async (uri: string) => {
     if (sound) {
       try {
         await sound.unloadAsync();
-      } catch (_) {
+      } catch {
         // Ignore cleanup failures for validation-only probes.
       }
     }
@@ -152,19 +165,19 @@ export const resolvePlaylistAudioUrlDuration = async (
 
   try {
     return await probePlaylistAudioDuration(trimmedUrl);
-  } catch (_) {
+  } catch {
     if (typeof fallbackDurationSeconds === "number" && Number.isFinite(fallbackDurationSeconds) && fallbackDurationSeconds > 0) {
       return ensurePlaylistAudioDuration(fallbackDurationSeconds);
     }
 
-    throw new Error("We could not verify the length of that URL. Use a direct MP3/MP4 link or provide a valid duration up to 5 minutes.");
+    throw new Error("We could not verify the length of that URL. Use a direct MP3 link or provide a valid duration up to 5 minutes.");
   }
 };
 
 export const pickPlaylistAudioFile = async (): Promise<PlaylistAudioFile | null> => {
   const DocumentPicker = await import("expo-document-picker");
   const result = await DocumentPicker.getDocumentAsync({
-    type: ["audio/*", "video/mp4"],
+    type: ["audio/mpeg", "audio/mp3"],
     copyToCacheDirectory: true,
     multiple: false,
   });
@@ -175,12 +188,13 @@ export const pickPlaylistAudioFile = async (): Promise<PlaylistAudioFile | null>
 
   const asset = result.assets[0];
   const fileName = asset.name || `track.${getFileExtension(asset.uri) || "mp3"}`;
-  const mimeType = inferMimeType(fileName, typeof asset.mimeType === "string" ? asset.mimeType : null);
+  const pickerMimeType = typeof asset.mimeType === "string" ? asset.mimeType : null;
 
-  if (!isSupportedPlaylistAudioFile(fileName, mimeType)) {
-    throw new Error("Only MP3 or MP4 audio files are allowed for playlist tracks.");
+  if (!isSupportedPlaylistAudioFile(fileName, pickerMimeType)) {
+    throw new Error("Only MP3 audio files are allowed for playlist tracks.");
   }
 
+  const mimeType = inferMimeType(fileName, pickerMimeType);
   const durationSeconds = await probePlaylistAudioDuration(asset.uri);
 
   return {
@@ -208,6 +222,19 @@ export const uploadPlaylistAudioFile = async (
   const base64 = await FileSystem.readAsStringAsync(audioFile.uri, {
     encoding: FileSystem.EncodingType.Base64,
   });
+
+  await ensureUploadPassesSafetyScreening(
+    {
+      name: audioFile.name,
+      mimeType: audioFile.mimeType,
+      size: audioFile.sizeBytes || undefined,
+      uri: audioFile.uri,
+      kind: "audio",
+      contentDataUrl: buildAudioSafetyDataUrl(base64, audioFile.mimeType),
+    },
+    "playlist_audio_upload",
+  );
+
   const bytes = base64ToUint8Array(base64);
 
   const safeFileName = sanitizeFileName(audioFile.name, audioFile.extension);

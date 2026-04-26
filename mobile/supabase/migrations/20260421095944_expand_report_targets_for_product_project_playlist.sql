@@ -152,7 +152,7 @@ BEGIN
   ) INTO v_has_column;
 
   IF v_has_column THEN
-    v_set_clauses := v_set_clauses || 'reviewed_by = NULL';
+    v_set_clauses := array_append(v_set_clauses, 'reviewed_by = NULL'::text);
   END IF;
 
   SELECT EXISTS (
@@ -164,7 +164,7 @@ BEGIN
   ) INTO v_has_column;
 
   IF v_has_column THEN
-    v_set_clauses := v_set_clauses || 'reviewed_at = timezone(''utc'', now())';
+    v_set_clauses := array_append(v_set_clauses, 'reviewed_at = timezone(''utc'', now())'::text);
   END IF;
 
   SELECT EXISTS (
@@ -176,7 +176,7 @@ BEGIN
   ) INTO v_has_column;
 
   IF v_has_column THEN
-    v_set_clauses := v_set_clauses || 'moderation_action = ''none''';
+    v_set_clauses := array_append(v_set_clauses, 'moderation_action = ''none'''::text);
   END IF;
 
   SELECT EXISTS (
@@ -188,7 +188,10 @@ BEGIN
   ) INTO v_has_column;
 
   IF v_has_column THEN
-    v_set_clauses := v_set_clauses || 'moderation_notes = CASE WHEN moderation_notes IS NULL OR btrim(moderation_notes) = '''' THEN $3 ELSE moderation_notes || E''\n'' || $3 END';
+    v_set_clauses := array_append(
+      v_set_clauses,
+      'moderation_notes = CASE WHEN moderation_notes IS NULL OR btrim(moderation_notes) = '''' THEN $3 ELSE moderation_notes || E''\n'' || $3 END'::text
+    );
   END IF;
 
   SELECT EXISTS (
@@ -200,7 +203,7 @@ BEGIN
   ) INTO v_has_column;
 
   IF v_has_column THEN
-    v_set_clauses := v_set_clauses || 'escalation_status = ''none''';
+    v_set_clauses := array_append(v_set_clauses, 'escalation_status = ''none'''::text);
   END IF;
 
   SELECT EXISTS (
@@ -212,7 +215,7 @@ BEGIN
   ) INTO v_has_column;
 
   IF v_has_column THEN
-    v_set_clauses := v_set_clauses || 'escalated_at = NULL';
+    v_set_clauses := array_append(v_set_clauses, 'escalated_at = NULL'::text);
   END IF;
 
   SELECT EXISTS (
@@ -224,7 +227,7 @@ BEGIN
   ) INTO v_has_column;
 
   IF v_has_column THEN
-    v_set_clauses := v_set_clauses || 'escalation_reason = NULL';
+    v_set_clauses := array_append(v_set_clauses, 'escalation_reason = NULL'::text);
   END IF;
 
   v_sql :=

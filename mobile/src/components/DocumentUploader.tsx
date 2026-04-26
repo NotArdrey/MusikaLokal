@@ -3,7 +3,10 @@ import * as DocumentPicker from 'expo-document-picker';
 import React, { useState } from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useTheme } from '../context/ThemeContext';
+import { ensureUploadPassesSafetyScreening } from '../services/uploadSafetyScreen';
 import CustomAlert, { AlertType } from './CustomAlert';
+
+const SAFETY_CHECK_TIMEOUT_MS = 6000;
 
 interface DocumentUploaderProps {
     onFileSelect: (file: any) => void;
@@ -11,9 +14,26 @@ interface DocumentUploaderProps {
     existingUrl?: string;
 }
 
+const withSafetyTimeout = async <T,>(promise: Promise<T>): Promise<T> => {
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+    const timeout = new Promise<never>((_, reject) => {
+        timeoutId = setTimeout(
+            () => reject(new Error('Safety screening timed out. Upload blocked. Please try again.')),
+            SAFETY_CHECK_TIMEOUT_MS,
+        );
+    });
+
+    try {
+        return await Promise.race([promise, timeout]);
+    } finally {
+        if (timeoutId) clearTimeout(timeoutId);
+    }
+};
+
 const DocumentUploader: React.FC<DocumentUploaderProps> = ({ onFileSelect, label = 'Upload Document', existingUrl }) => {
     const { colors, isDark } = useTheme();
     const [fileName, setFileName] = useState<string | null>(existingUrl ? 'Current document' : null);
+    const [checking, setChecking] = useState(false);
     const [alertVisible, setAlertVisible] = useState(false);
     const [alertConfig, setAlertConfig] = useState<{
         type: AlertType;
@@ -31,8 +51,18 @@ const DocumentUploader: React.FC<DocumentUploaderProps> = ({ onFileSelect, label
         setAlertVisible(true);
     };
 
+    const showUploadBlockedAlert = (message?: string) => {
+        showAlert(
+            'warning',
+            'Upload blocked',
+            message || 'This document did not pass safety screening.',
+            [{ text: 'Choose another', style: 'default' }],
+        );
+    };
+
     const pickDocument = async () => {
         try {
+            setChecking(true);
             const result = await DocumentPicker.getDocumentAsync({
                 type: 'application/pdf', // Limit to PDFs for now, or '*/*'
                 copyToCacheDirectory: true,
@@ -41,11 +71,31 @@ const DocumentUploader: React.FC<DocumentUploaderProps> = ({ onFileSelect, label
             if (result.canceled) return;
 
             const file = result.assets[0];
+            await withSafetyTimeout(
+                ensureUploadPassesSafetyScreening(
+                    {
+                        name: file.name,
+                        mimeType: file.mimeType || 'application/pdf',
+                        size: typeof file.size === 'number' ? file.size : undefined,
+                        uri: file.uri,
+                        kind: 'document',
+                    },
+                    `document_uploader:${label}`,
+                ),
+            );
+
             setFileName(file.name);
             onFileSelect(file);
-        } catch (error) {
+        } catch (error: any) {
             console.error('Error picking document:', error);
-            showAlert('error', 'Error', 'Error picking document');
+            const message = error?.message || 'Error picking document';
+            if (String(message).toLowerCase().includes('safety screen')) {
+                showUploadBlockedAlert(message);
+            } else {
+                showAlert('error', 'Upload failed', message);
+            }
+        } finally {
+            setChecking(false);
         }
     };
 
@@ -62,9 +112,12 @@ const DocumentUploader: React.FC<DocumentUploaderProps> = ({ onFileSelect, label
                 <TouchableOpacity activeOpacity={1}
                     style={[styles.uploadBtn, { borderColor: colors.border, backgroundColor: isDark ? '#374151' : '#F9FAFB' }]}
                     onPress={pickDocument}
+                    disabled={checking}
                 >
                     <Ionicons name="cloud-upload-outline" size={24} color={colors.primary} />
-                    <Text style={[styles.uploadText, { color: colors.text }]}>Select PDF Document</Text>
+                    <Text style={[styles.uploadText, { color: colors.text }]}>
+                        {checking ? 'Checking document...' : 'Select PDF Document'}
+                    </Text>
                 </TouchableOpacity>
             ) : (
                 <View style={[styles.fileContainer, { backgroundColor: isDark ? '#374151' : '#F3F4F6', borderColor: colors.primary }]}>

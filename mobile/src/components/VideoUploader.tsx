@@ -1,12 +1,219 @@
 import { Ionicons } from '@expo/vector-icons';
+import * as FileSystem from 'expo-file-system/legacy';
 import * as ImagePicker from 'expo-image-picker';
+import * as VideoThumbnails from 'expo-video-thumbnails';
 import React, { useState } from 'react';
-import { ActivityIndicator, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Modal, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { supabase } from '../../lib/supabase';
+import { screenUploadsWithAi } from '../services/uploadSafetyScreen';
 import { useTheme } from '../context/ThemeContext';
 import CustomAlert, { AlertType } from './CustomAlert';
 
 const debugLog = (..._args: unknown[]) => {};
+const MAX_INLINE_SCREEN_BYTES = 4 * 1024 * 1024;
+const SAFETY_CHECK_TIMEOUT_MS = 6000;
+const ALLOWED_VIDEO_EXTENSIONS = new Set(['mp4', 'mov', 'avi', 'webm', 'm4v']);
+
+const sanitizeVideoExtension = (rawExt?: string | null): string => {
+  const cleaned = (rawExt || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+  if (cleaned === 'quicktime') return 'mov';
+  return ALLOWED_VIDEO_EXTENSIONS.has(cleaned) ? cleaned : 'mp4';
+};
+
+const getVideoOriginalName = (asset: ImagePicker.ImagePickerAsset): string => {
+  const fallbackName = asset.uri.split('/').pop() || 'video-upload.mp4';
+  return typeof (asset as any)?.fileName === 'string' ? (asset as any).fileName : fallbackName;
+};
+
+const resolveVideoExtension = (asset: ImagePicker.ImagePickerAsset, originalName: string): string => {
+  const uri = asset.uri || '';
+  const nameExt = originalName.includes('.') ? originalName.split('.').pop() : '';
+  const uriExt = !uri.startsWith('blob:') && uri.includes('.') ? uri.split('.').pop() : '';
+  const mimeExt = asset.mimeType?.split('/').pop();
+  return sanitizeVideoExtension(mimeExt || nameExt || uriExt);
+};
+
+const resolveVideoMimeType = (asset: ImagePicker.ImagePickerAsset, ext: string): string => {
+  const maybeMime = asset.mimeType?.trim().toLowerCase();
+  if (maybeMime?.startsWith('video/')) {
+    return maybeMime;
+  }
+
+  const map: Record<string, string> = {
+    mp4: 'video/mp4',
+    mov: 'video/quicktime',
+    avi: 'video/x-msvideo',
+    webm: 'video/webm',
+    m4v: 'video/x-m4v',
+  };
+  return map[ext] || 'video/mp4';
+};
+
+const estimateBase64Bytes = (base64: string): number => {
+  let padding = 0;
+  if (base64.endsWith('==')) padding = 2;
+  else if (base64.endsWith('=')) padding = 1;
+  return Math.max(0, Math.floor((base64.length * 3) / 4) - padding);
+};
+
+const ensureScreenableFrameSize = (dataUrl: string): string => {
+  const base64 = dataUrl.split(',')[1] || '';
+  if (!base64 || estimateBase64Bytes(base64) > MAX_INLINE_SCREEN_BYTES) {
+    throw new Error('Could not create a small enough video preview for safety screening.');
+  }
+  return dataUrl;
+};
+
+const extractWebVideoFrameDataUrl = async (
+  asset: ImagePicker.ImagePickerAsset,
+  mimeType: string,
+  arrayBuffer: ArrayBuffer,
+  targetTimeSeconds: number,
+): Promise<string> => {
+  const webFile = (asset as any)?.file;
+  const sourceBlob =
+    typeof Blob !== 'undefined' && webFile instanceof Blob
+      ? webFile
+      : new Blob([arrayBuffer], { type: mimeType });
+
+  return new Promise((resolve, reject) => {
+    const objectUrl = URL.createObjectURL(sourceBlob);
+    const video = document.createElement('video');
+    let settled = false;
+    const timeoutId = window.setTimeout(
+      () => fail('Video preview generation timed out during safety screening.'),
+      8000,
+    );
+
+    const cleanup = () => {
+      window.clearTimeout(timeoutId);
+      URL.revokeObjectURL(objectUrl);
+      video.removeAttribute('src');
+      video.load();
+    };
+
+    const fail = (message: string) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(new Error(message));
+    };
+
+    const capture = () => {
+      if (settled) return;
+      const sourceWidth = video.videoWidth || 640;
+      const sourceHeight = video.videoHeight || 360;
+      const maxDimension = 960;
+      const scale = Math.min(1, maxDimension / Math.max(sourceWidth, sourceHeight));
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.max(1, Math.round(sourceWidth * scale));
+      canvas.height = Math.max(1, Math.round(sourceHeight * scale));
+      const context = canvas.getContext('2d');
+      if (!context) {
+        fail('Could not read a video preview frame for safety screening.');
+        return;
+      }
+
+      context.drawImage(video, 0, 0, canvas.width, canvas.height);
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.72);
+      settled = true;
+      cleanup();
+      resolve(ensureScreenableFrameSize(dataUrl));
+    };
+
+    video.preload = 'metadata';
+    video.muted = true;
+    video.playsInline = true;
+    video.onloadedmetadata = () => {
+      const duration = Number.isFinite(video.duration) ? video.duration : 0;
+      if (duration <= 0) {
+        capture();
+        return;
+      }
+
+      try {
+        const latestUsefulTime = Math.max(0.05, duration - 0.05);
+        video.currentTime = Math.min(Math.max(0.05, targetTimeSeconds), latestUsefulTime);
+      } catch {
+        capture();
+      }
+    };
+    video.onloadeddata = () => {
+      if (!Number.isFinite(video.duration) || video.duration <= 0) {
+        capture();
+      }
+    };
+    video.onseeked = capture;
+    video.onerror = () => fail('Could not read the selected video for safety screening.');
+    video.src = objectUrl;
+    video.load();
+  });
+};
+
+const extractVideoFrameDataUrl = async (
+  asset: ImagePicker.ImagePickerAsset,
+  mimeType: string,
+  arrayBuffer: ArrayBuffer,
+  targetTimeMs: number,
+): Promise<string> => {
+  if (Platform.OS === 'web') {
+    return extractWebVideoFrameDataUrl(asset, mimeType, arrayBuffer, targetTimeMs / 1000);
+  }
+
+  const thumbnail = await VideoThumbnails.getThumbnailAsync(asset.uri, {
+    time: targetTimeMs,
+    quality: 0.65,
+  });
+  const base64 = await FileSystem.readAsStringAsync(thumbnail.uri, {
+    encoding: 'base64',
+  });
+  return ensureScreenableFrameSize(`data:image/jpeg;base64,${base64}`);
+};
+
+const extractVideoFrameDataUrls = async (
+  asset: ImagePicker.ImagePickerAsset,
+  mimeType: string,
+  arrayBuffer: ArrayBuffer,
+): Promise<string[]> => {
+  const attempts = await Promise.allSettled(
+    [1000, 4000, 8000].map((timeMs) =>
+      extractVideoFrameDataUrl(asset, mimeType, arrayBuffer, timeMs),
+    ),
+  );
+  const frameDataUrls = Array.from(
+    new Set(
+      attempts
+        .filter((result): result is PromiseFulfilledResult<string> => result.status === 'fulfilled')
+        .map((result) => result.value),
+    ),
+  );
+
+  if (frameDataUrls.length === 0) {
+    const firstFailure = attempts.find(
+      (result): result is PromiseRejectedResult => result.status === 'rejected',
+    );
+    throw firstFailure?.reason instanceof Error
+      ? firstFailure.reason
+      : new Error('Could not create a video preview for safety screening.');
+  }
+
+  return frameDataUrls;
+};
+
+const withSafetyTimeout = async <T,>(promise: Promise<T>): Promise<T> => {
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
+  const timeout = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(
+      () => reject(new Error('Safety screening timed out. Upload blocked. Please try again.')),
+      SAFETY_CHECK_TIMEOUT_MS,
+    );
+  });
+  try {
+    return await Promise.race([promise, timeout]);
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId);
+  }
+};
 
 interface VideoUploaderProps {
   videoUrl: string | null;
@@ -27,6 +234,7 @@ export default function VideoUploader({
 }: VideoUploaderProps) {
   const { colors, isDark } = useTheme();
   const [uploading, setUploading] = useState(false);
+  const [uploadMessage, setUploadMessage] = useState('Preparing video...');
   const [uploadProgress, setUploadProgress] = useState(0);
   const [alertVisible, setAlertVisible] = useState(false);
   const [alertConfig, setAlertConfig] = useState<{
@@ -43,6 +251,15 @@ export default function VideoUploader({
   const showAlert = (type: AlertType, title: string, message: string, buttons?: any[]) => {
     setAlertConfig({ type, title, message, buttons });
     setAlertVisible(true);
+  };
+
+  const showUploadBlockedAlert = (message?: string) => {
+    showAlert(
+      'warning',
+      'Upload blocked',
+      message || 'This video did not pass safety screening.',
+      [{ text: 'Choose another', style: 'default' }],
+    );
   };
 
   const pickAndUploadVideo = async () => {
@@ -82,30 +299,37 @@ export default function VideoUploader({
       }
 
       setUploading(true);
+      setUploadMessage('Preparing video...');
       setUploadProgress(0);
 
       try {
-        // Handle file extension - check if it's a blob URL or regular file path
-        let fileExt = 'mp4'; // Default to mp4
-        const uri = asset.uri;
+        const originalName = getVideoOriginalName(asset);
+        const fileExt = resolveVideoExtension(asset, originalName);
+        const mimeType = resolveVideoMimeType(asset, fileExt);
+        setUploadMessage('Checking video...');
 
-        // Check if it's NOT a blob URL and has a valid extension
-        if (!uri.startsWith('blob:') && uri.includes('.')) {
-          const ext = uri.split('.').pop()?.toLowerCase();
-          if (ext && ['mp4', 'mov', 'avi', 'webm', 'm4v'].includes(ext)) {
-            fileExt = ext;
-          }
-        }
+        const screeningResult = await withSafetyTimeout((async () => {
+          const frameDataUrls = await extractVideoFrameDataUrls(asset, mimeType, arrayBuffer);
+          return screenUploadsWithAi(
+            frameDataUrls.map((contentDataUrl, index) => ({
+              name: originalName,
+              mimeType,
+              size: arrayBuffer.byteLength,
+              uri: `${asset.uri}#frame-${index + 1}`,
+              contentDataUrl,
+              kind: 'video',
+            })),
+            `video_uploader:${bucketName}:${folder}`,
+          );
+        })());
 
-        // Also check the asset's mimeType if available
-        if (asset.mimeType) {
-          const mimeExt = asset.mimeType.split('/').pop()?.toLowerCase();
-          if (mimeExt && ['mp4', 'mov', 'avi', 'webm', 'quicktime'].includes(mimeExt)) {
-            fileExt = mimeExt === 'quicktime' ? 'mov' : mimeExt;
-          }
+        if (!screeningResult.allowed) {
+          showUploadBlockedAlert(screeningResult.reason);
+          return;
         }
 
         const fileName = `${userId}/${folder}/${Date.now()}_video.${fileExt}`;
+        setUploadMessage('Uploading video...');
 
         debugLog('📤 Uploading video:', fileName);
         debugLog('📦 File size:', fileSizeMB.toFixed(2), 'MB');
@@ -115,7 +339,7 @@ export default function VideoUploader({
         const { data, error } = await supabase.storage
           .from(bucketName)
           .upload(fileName, arrayBuffer, {
-            contentType: asset.mimeType || `video/${fileExt}`,
+            contentType: mimeType,
             upsert: false
           });
 
@@ -146,14 +370,24 @@ export default function VideoUploader({
         showAlert('success', 'Success', 'Video uploaded successfully!');
       } catch (e: any) {
         console.error('Error uploading video:', e);
-        showAlert('error', 'Error', e.message || 'Failed to upload video');
+        const message = e.message || 'Failed to upload video';
+        if (String(message).toLowerCase().includes('safety screen')) {
+          showUploadBlockedAlert(message);
+        } else {
+          showAlert('error', 'Upload failed', message);
+        }
       } finally {
         setUploading(false);
         setUploadProgress(0);
       }
     } catch (e: any) {
       debugLog('Video picker error:', e);
-      showAlert('error', 'Error', e.message || 'Failed to select video');
+      const message = e.message || 'Failed to select video';
+      if (String(message).toLowerCase().includes('safety screen')) {
+        showUploadBlockedAlert(message);
+      } else {
+        showAlert('error', 'Upload failed', message);
+      }
       setUploading(false);
     }
   };
@@ -176,6 +410,18 @@ export default function VideoUploader({
 
   return (
     <View>
+      <Modal visible={uploading} transparent animationType="fade" statusBarTranslucent>
+        <View style={styles.loadingOverlay}>
+          <View style={[styles.loadingCard, { backgroundColor: colors.surface }]}>
+            <ActivityIndicator size="large" color={colors.primary} />
+            <Text style={[styles.loadingTitle, { color: colors.text }]}>{uploadMessage}</Text>
+            <Text style={[styles.loadingSubtitle, { color: colors.textSecondary }]}>
+              Please wait while your video is checked and uploaded.
+            </Text>
+          </View>
+        </View>
+      </Modal>
+
       {videoUrl ? (
         <View style={[styles.videoContainer, { borderColor: colors.border, backgroundColor: isDark ? '#374151' : '#F9FAFB' }]}>
           <View style={styles.videoInfo}>
@@ -270,6 +516,38 @@ const styles = StyleSheet.create({
   },
   removeButton: {
     padding: 8,
+  },
+  loadingOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(15,23,42,0.48)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 24,
+  },
+  loadingCard: {
+    width: '100%',
+    maxWidth: 320,
+    borderRadius: 18,
+    padding: 24,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOpacity: 0.22,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 10,
+  },
+  loadingTitle: {
+    marginTop: 14,
+    fontSize: 15,
+    fontFamily: 'Poppins_600SemiBold',
+    textAlign: 'center',
+  },
+  loadingSubtitle: {
+    marginTop: 6,
+    fontSize: 12,
+    lineHeight: 18,
+    fontFamily: 'Poppins_400Regular',
+    textAlign: 'center',
   },
 });
 

@@ -1,8 +1,9 @@
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { ResizeMode, Video } from "expo-av";
-import * as FileSystem from "expo-file-system";
+import * as FileSystem from "expo-file-system/legacy";
 import * as ImagePicker from "expo-image-picker";
+import * as VideoThumbnails from "expo-video-thumbnails";
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -18,7 +19,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import { supabase } from "../lib/supabase";
+import { supabase, supabaseAnonKey, supabaseUrl } from "../lib/supabase";
 import CustomAlert, { AlertType } from "../src/components/CustomAlert";
 import ReportModal from "../src/components/ReportModal";
 import { isTrackPlayerAvailable } from "../src/audio/safeTrackPlayer";
@@ -35,6 +36,7 @@ import {
 import CachedImage from "../src/components/CachedImage";
 import { showTopToast } from "../src/context/TopToastContext";
 import { useTheme } from "../src/context/ThemeContext";
+import { screenUploadsWithAi } from "../src/services/uploadSafetyScreen";
 import { buildSocialFollowKey } from "../src/utils/socialFollow";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
@@ -64,6 +66,36 @@ const ITEM_SIZE = Math.floor(
 
 const TIKTOK_GRID_GAP = 2;
 const TIKTOK_NUM_COLUMNS = 3;
+const MAX_INLINE_SCREEN_BYTES = 4 * 1024 * 1024;
+const SAFETY_CHECK_TIMEOUT_MS = 45000;
+const VIDEO_SAFETY_FRAME_INTERVAL_MS = 2000;
+const MAX_VIDEO_SAFETY_FRAMES = 10;
+const VIDEO_MEDIA_EXTENSIONS = new Set(["mp4", "mov", "avi", "mkv", "webm", "m4v"]);
+const PORTFOLIO_EXTENSION_BY_MIME: Record<string, string> = {
+  "image/jpeg": "jpg",
+  "image/jpg": "jpg",
+  "image/png": "png",
+  "image/webp": "webp",
+  "image/gif": "gif",
+  "video/mp4": "mp4",
+  "video/quicktime": "mov",
+  "video/webm": "webm",
+  "video/x-msvideo": "avi",
+  "video/x-m4v": "m4v",
+};
+const PORTFOLIO_MIME_BY_EXTENSION: Record<string, string> = {
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  png: "image/png",
+  webp: "image/webp",
+  gif: "image/gif",
+  mp4: "video/mp4",
+  mov: "video/quicktime",
+  webm: "video/webm",
+  avi: "video/x-msvideo",
+  m4v: "video/x-m4v",
+};
+
 const TIKTOK_ITEM_SIZE = Math.floor(
   (
     SCREEN_WIDTH -
@@ -79,6 +111,13 @@ const createEmptyBookmarks = () => ({
   musicians: [] as any[],
   productions: [] as any[],
 });
+
+const logProfileMedia = (event: string, details?: Record<string, unknown>) => {
+  console.log(`[ProfileMedia] ${event}`, {
+    timestamp: new Date().toISOString(),
+    ...(details || {}),
+  });
+};
 
 const normalizeBookmarkBuckets = (value: any) => ({
   studios: Array.isArray(value?.studios) ? value.studios : [],
@@ -173,6 +212,319 @@ const base64ToUint8Array = (base64: string): Uint8Array => {
     if (p < bufLen) bytes[p++] = ((e3 & 3) << 6) | (e4 & 63);
   }
   return bytes;
+};
+
+const sanitizePortfolioExtension = (value?: string | null): string => {
+  const cleaned = (value || "").trim().toLowerCase().replace(/[^a-z0-9]/g, "");
+  if (!cleaned || cleaned === "quicktime") return cleaned === "quicktime" ? "mov" : "";
+  if (cleaned === "jpeg") return "jpg";
+  return cleaned;
+};
+
+const resolvePortfolioFileExtension = (file: ImagePicker.ImagePickerAsset): string => {
+  const mimeExt =
+    typeof file.mimeType === "string"
+      ? PORTFOLIO_EXTENSION_BY_MIME[file.mimeType.trim().toLowerCase()]
+      : "";
+  const fileName = typeof (file as any)?.fileName === "string" ? (file as any).fileName : "";
+  const nameExt = fileName.includes(".") ? fileName.split(".").pop() : "";
+  const uri = file.uri || "";
+  const uriExt = !uri.startsWith("blob:") && uri.includes(".") ? uri.split("?")[0].split(".").pop() : "";
+
+  return (
+    sanitizePortfolioExtension(nameExt) ||
+    sanitizePortfolioExtension(uriExt) ||
+    sanitizePortfolioExtension(mimeExt) ||
+    "jpg"
+  );
+};
+
+const resolvePortfolioMimeType = (
+  file: ImagePicker.ImagePickerAsset,
+  fileExt: string,
+): string => {
+  const pickedMimeType = typeof file.mimeType === "string" ? file.mimeType.trim().toLowerCase() : "";
+  if (/^(image|video)\/[a-z0-9.+-]+$/.test(pickedMimeType)) {
+    return pickedMimeType;
+  }
+  return PORTFOLIO_MIME_BY_EXTENSION[fileExt] || "image/jpeg";
+};
+
+const estimateBase64Bytes = (base64: string): number => {
+  let padding = 0;
+  if (base64.endsWith("==")) padding = 2;
+  else if (base64.endsWith("=")) padding = 1;
+  return Math.max(0, Math.floor((base64.length * 3) / 4) - padding);
+};
+
+const ensureScreenableDataUrl = (dataUrl: string, message: string): string => {
+  const base64 = dataUrl.split(",")[1] || "";
+  if (!base64 || estimateBase64Bytes(base64) > MAX_INLINE_SCREEN_BYTES) {
+    throw new Error(message);
+  }
+  return dataUrl;
+};
+
+const isPortfolioVideoAsset = (
+  file: ImagePicker.ImagePickerAsset,
+  mimeType: string,
+  fileExt: string,
+): boolean => {
+  const pickerType = String((file as any)?.type || "").toLowerCase();
+  return (
+    pickerType === "video" ||
+    mimeType.toLowerCase().startsWith("video/") ||
+    VIDEO_MEDIA_EXTENSIONS.has(fileExt.toLowerCase())
+  );
+};
+
+const getPortfolioFileSize = async (file: ImagePicker.ImagePickerAsset): Promise<number> => {
+  const pickerSize = Number((file as any)?.fileSize);
+  if (Number.isFinite(pickerSize) && pickerSize > 0) {
+    return Math.floor(pickerSize);
+  }
+
+  try {
+    const info = await FileSystem.getInfoAsync(file.uri);
+    return info.exists && typeof info.size === "number" ? info.size : 0;
+  } catch {
+    return 0;
+  }
+};
+
+const buildVideoSafetyFrameTimes = (duration?: number | null): number[] => {
+  const normalizedDuration = typeof duration === "number" && Number.isFinite(duration)
+    ? Math.max(0, duration)
+    : 0;
+  const effectiveDuration = normalizedDuration > 0
+    ? normalizedDuration
+    : VIDEO_SAFETY_FRAME_INTERVAL_MS * 5;
+  const times: number[] = [];
+
+  for (
+    let time = Math.min(1000, effectiveDuration);
+    time <= effectiveDuration && times.length < MAX_VIDEO_SAFETY_FRAMES;
+    time += VIDEO_SAFETY_FRAME_INTERVAL_MS
+  ) {
+    times.push(Math.max(0, Math.floor(time)));
+  }
+
+  if (times.length === 0) {
+    times.push(0);
+  }
+
+  return times;
+};
+
+const buildPortfolioVideoFrameDataUrls = async (
+  file: ImagePicker.ImagePickerAsset,
+): Promise<string[]> => {
+  const frameTimes = buildVideoSafetyFrameTimes((file as any)?.duration);
+  const attempts = await Promise.allSettled(
+    frameTimes.map(async (time) => {
+      const thumbnail = await VideoThumbnails.getThumbnailAsync(file.uri, {
+        time,
+        quality: 0.55,
+      });
+      const base64 = await FileSystem.readAsStringAsync(thumbnail.uri, {
+        encoding: "base64",
+      });
+      return ensureScreenableDataUrl(
+        `data:image/jpeg;base64,${base64}`,
+        "Could not create a small enough video preview for safety screening.",
+      );
+    }),
+  );
+
+  const frameDataUrls = Array.from(
+    new Set(
+      attempts
+        .filter((result): result is PromiseFulfilledResult<string> => result.status === "fulfilled")
+        .map((result) => result.value),
+    ),
+  );
+
+  if (frameDataUrls.length === 0) {
+    const firstFailure = attempts.find(
+      (result): result is PromiseRejectedResult => result.status === "rejected",
+    );
+    throw firstFailure?.reason instanceof Error
+      ? firstFailure.reason
+      : new Error("Could not create a video preview for safety screening.");
+  }
+
+  return frameDataUrls;
+};
+
+const screenProfilePortfolioMedia = async (
+  file: ImagePicker.ImagePickerAsset,
+  options: {
+    fileExt: string;
+    mimeType: string;
+    size: number;
+    base64?: string;
+  },
+) => {
+  const originalName =
+    typeof (file as any)?.fileName === "string"
+      ? (file as any).fileName
+      : `profile-media.${options.fileExt}`;
+  const isVideoUpload = isPortfolioVideoAsset(file, options.mimeType, options.fileExt);
+  const videoFrameDataUrls = isVideoUpload ? await buildPortfolioVideoFrameDataUrls(file) : [];
+
+  const screeningSummary = await screenUploadsWithAi(
+    isVideoUpload
+      ? videoFrameDataUrls.map((contentDataUrl, index) => ({
+          name: originalName,
+          mimeType: options.mimeType,
+          size: options.size,
+          uri: `${file.uri}#frame-${index + 1}`,
+          contentDataUrl,
+          kind: "video" as const,
+        }))
+      : [
+          {
+            name: originalName,
+            mimeType: options.mimeType,
+            size: options.size,
+            uri: file.uri,
+            contentDataUrl: ensureScreenableDataUrl(
+              `data:${options.mimeType};base64,${options.base64 || ""}`,
+              "This image is too large to safety screen. Please choose an image under 4 MB.",
+            ),
+            kind: "photo" as const,
+          },
+        ],
+    "profile_portfolio_media",
+  );
+
+  if (!screeningSummary.allowed) {
+    throw new Error(
+      screeningSummary.reason || "This media did not pass safety screening.",
+    );
+  }
+};
+
+const uploadPortfolioMediaFile = async (
+  file: ImagePicker.ImagePickerAsset,
+  options: {
+    fileName: string;
+    mimeType: string;
+    bytes?: Uint8Array;
+    isVideoUpload: boolean;
+  },
+) => {
+  if (!options.isVideoUpload && options.bytes) {
+    return supabase.storage
+      .from("portfolio")
+      .upload(options.fileName, options.bytes, {
+        contentType: options.mimeType,
+        upsert: true,
+      });
+  }
+
+  const {
+    data: { session },
+    error: sessionError,
+  } = await supabase.auth.getSession();
+
+  if (sessionError || !session?.access_token) {
+    throw new Error("Your session expired. Please log in again before uploading media.");
+  }
+
+  const baseUrl = supabaseUrl.endsWith("/") ? supabaseUrl.slice(0, -1) : supabaseUrl;
+  const encodedPath = options.fileName
+    .split("/")
+    .map((part) => encodeURIComponent(part))
+    .join("/");
+  const uploadUrl = `${baseUrl}/storage/v1/object/portfolio/${encodedPath}`;
+  const uploadResult = await FileSystem.uploadAsync(uploadUrl, file.uri, {
+    httpMethod: "POST",
+    uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT,
+    headers: {
+      Authorization: `Bearer ${session.access_token}`,
+      apikey: supabaseAnonKey,
+      "Content-Type": options.mimeType,
+      "x-upsert": "true",
+    },
+  });
+
+  if (uploadResult.status < 200 || uploadResult.status >= 300) {
+    let message = `Storage upload failed with status ${uploadResult.status}.`;
+    try {
+      const parsed = JSON.parse(uploadResult.body || "{}");
+      message = parsed?.message || parsed?.error || message;
+    } catch {
+      if (uploadResult.body) {
+        message = uploadResult.body;
+      }
+    }
+    return {
+      data: null,
+      error: new Error(message),
+    };
+  }
+
+  return {
+    data: { path: options.fileName },
+    error: null,
+  };
+};
+
+const withSafetyTimeout = async (promise: Promise<void>): Promise<void> => {
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
+  const timeout = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(
+      () => reject(new Error("Safety screening timed out. Upload blocked. Please try again.")),
+      SAFETY_CHECK_TIMEOUT_MS,
+    );
+  });
+  try {
+    await Promise.race([promise, timeout]);
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId);
+  }
+};
+
+const sanitizeUploadFeedbackMessage = (message: string): string => {
+  const raw = message.trim();
+  if (!raw) {
+    return "Failed to upload media.";
+  }
+
+  const lower = raw.toLowerCase();
+  if (
+    lower.includes("rate_limit") ||
+    lower.includes("rate limit") ||
+    lower.includes("tokens per minute") ||
+    lower.includes("tpm") ||
+    lower.includes("try again in")
+  ) {
+    return "Safety check is busy. Please try again in a few seconds.";
+  }
+
+  if (lower.includes("timed out") || lower.includes("timeout")) {
+    return "Safety check took too long. Please try again.";
+  }
+
+  if (
+    /\b(groq|openai|gemini|api error|visual review error|image safety screening failed|organization|service tier|billing|console\.groq\.com|internal server error)\b/i.test(raw) ||
+    raw.length > 220
+  ) {
+    return "Safety check is temporarily unavailable. Please try again in a moment.";
+  }
+
+  return raw;
+};
+
+const resolveStorageObjectFromPublicUrl = (url: string): { bucket: string; path: string } | null => {
+  const match = url.match(/\/storage\/v1\/object\/public\/([^/]+)\/(.+)$/);
+  if (!match) return null;
+
+  return {
+    bucket: decodeURIComponent(match[1]),
+    path: decodeURIComponent(match[2].split("?")[0]),
+  };
 };
 
 export default function ProfileScreen() {
@@ -859,6 +1211,7 @@ export default function ProfileScreen() {
   ];
 
   const [uploading, setUploading] = useState(false);
+  const [uploadMessage, setUploadMessage] = useState("Preparing media...");
   const [selectedMedia, setSelectedMedia] = useState<string | null>(null);
   const [mediaModalVisible, setMediaModalVisible] = useState(false);
   const [alertVisible, setAlertVisible] = useState(false);
@@ -868,6 +1221,7 @@ export default function ProfileScreen() {
     title: string;
     message: string;
     buttons?: any[];
+    forceModal?: boolean;
   }>({
     type: "info",
     title: "",
@@ -879,9 +1233,38 @@ export default function ProfileScreen() {
     title: string,
     message: string,
     buttons?: any[],
+    forceModal = false,
   ) => {
-    setAlertConfig({ type, title, message, buttons });
+    setAlertConfig({ type, title, message, buttons, forceModal });
     setAlertVisible(true);
+  };
+
+  const showUploadFeedbackAlert = (error: any) => {
+    const rawMessage = String(error?.message || error || "Failed to upload media").trim();
+    const safetyPrefix = " was blocked by safety screening. ";
+    const safetyPrefixIndex = rawMessage.indexOf(safetyPrefix);
+
+    if (safetyPrefixIndex >= 0) {
+      const reason = sanitizeUploadFeedbackMessage(
+        rawMessage.slice(safetyPrefixIndex + safetyPrefix.length).trim(),
+      );
+      showAlert(
+        "warning",
+        "Upload blocked",
+        reason || "This media did not pass safety screening.",
+        [{ text: "Choose another", style: "default" }],
+        true,
+      );
+      return;
+    }
+
+    showAlert(
+      "warning",
+      "Upload failed",
+      sanitizeUploadFeedbackMessage(rawMessage),
+      [{ text: "OK", style: "default" }],
+      true,
+    );
   };
 
   const handleToggleGigVisibility = async (value: boolean) => {
@@ -1005,63 +1388,195 @@ export default function ProfileScreen() {
     setMediaModalVisible(true);
   };
 
+  const removeMediaFromPortfolio = async (url: string) => {
+    if (!currentUserId || !isOwner) {
+      showAlert("warning", "Unable to Remove", "You can only remove media from your own profile.");
+      return;
+    }
+
+    logProfileMedia("remove_requested", { profileId: currentUserId, url });
+
+    try {
+      setUploading(true);
+      setUploadMessage("Removing media...");
+
+      const { error: deleteError } = await supabase
+        .from("profile_portfolio_urls")
+        .delete()
+        .eq("profile_id", currentUserId)
+        .eq("portfolio_url", url);
+
+      if (deleteError) {
+        logProfileMedia("remove_db_failed", {
+          message: deleteError.message,
+          code: deleteError.code,
+          details: deleteError.details,
+        });
+        throw deleteError;
+      }
+
+      logProfileMedia("remove_db_success", { url });
+
+      const storageObject = resolveStorageObjectFromPublicUrl(url);
+      if (storageObject) {
+        const { error: storageError } = await supabase.storage
+          .from(storageObject.bucket)
+          .remove([storageObject.path]);
+
+        if (storageError) {
+          logProfileMedia("remove_storage_failed_non_blocking", {
+            ...storageObject,
+            message: storageError.message,
+          });
+        } else {
+          logProfileMedia("remove_storage_success", storageObject);
+        }
+      } else {
+        logProfileMedia("remove_storage_skipped_unrecognized_url", { url });
+      }
+
+      setProfile((prev: any) => ({
+        ...(prev || {}),
+        portfolio_urls: Array.isArray(prev?.portfolio_urls)
+          ? prev.portfolio_urls.filter((item: string) => item !== url)
+          : [],
+      }));
+      fetchProfile();
+      showAlert("success", "Removed", "Media removed from your profile.");
+    } catch (error: any) {
+      logProfileMedia("remove_failed", { message: error?.message || String(error) });
+      showAlert("warning", "Remove Failed", error?.message || "Failed to remove media.");
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const confirmRemoveMedia = (url: string) => {
+    showAlert(
+      "warning",
+      "Remove Media",
+      "Remove this photo or video from your profile?",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Remove",
+          style: "destructive",
+          onPress: () => removeMediaFromPortfolio(url),
+        },
+      ],
+    );
+  };
+
   const addMediaToPortfolio = async () => {
     try {
+      logProfileMedia("upload_started");
       const {
         data: { user },
       } = await supabase.auth.getUser();
       if (!user) {
+        logProfileMedia("upload_blocked_no_user");
         showAlert("warning", "Not Logged In", "You must be logged in.");
         return;
       }
 
+      logProfileMedia("upload_user_resolved", { userId: user.id });
+
       const permissionResult =
         await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (!permissionResult.granted) {
+        logProfileMedia("upload_permission_denied");
         showAlert("warning", "Permission needed", "Please allow access to your photos.");
         return;
       }
 
+      logProfileMedia("picker_opening");
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ["images", "videos"],
         allowsEditing: true,
         quality: 0.5,
       });
 
-      if (result.canceled || !result.assets[0]) return;
+      if (result.canceled || !result.assets[0]) {
+        logProfileMedia("picker_cancelled");
+        return;
+      }
 
       const file = result.assets[0];
       setUploading(true);
+      setUploadMessage("Preparing media...");
 
-      const fileExt = file.uri.split(".").pop()?.toLowerCase() || "jpg";
+      const fileExt = resolvePortfolioFileExtension(file);
       const fileName = `${user.id}/portfolio/${Date.now()}.${fileExt}`;
-      const mimeType =
-        file.mimeType ||
-        (fileExt === "mp4"
-          ? "video/mp4"
-          : `image/${fileExt === "jpg" ? "jpeg" : fileExt}`);
+      const mimeType = resolvePortfolioMimeType(file, fileExt);
+      const isVideoUpload = isPortfolioVideoAsset(file, mimeType, fileExt);
+      const fileSize = await getPortfolioFileSize(file);
 
+      logProfileMedia("file_selected", {
+        uri: file.uri,
+        fileName,
+        fileExt,
+        mimeType,
+        isVideoUpload,
+        pickerMimeType: file.mimeType,
+        pickerType: (file as any)?.type,
+        fileSize: (file as any)?.fileSize,
+        resolvedFileSize: fileSize,
+      });
 
-      const base64 = await FileSystem.readAsStringAsync(file.uri, { encoding: 'base64' });
-      const bytes = base64ToUint8Array(base64);
+      let base64: string | undefined;
+      let bytes: Uint8Array | undefined;
+      if (!isVideoUpload) {
+        base64 = await FileSystem.readAsStringAsync(file.uri, { encoding: "base64" });
+        bytes = base64ToUint8Array(base64);
+      }
 
-      const { data: uploadData, error: uploadError } = await supabase.storage
-        .from("portfolio")
-        .upload(fileName, bytes, {
-          contentType: mimeType,
-          upsert: true,
-        });
+      logProfileMedia("file_prepared", {
+        byteLength: bytes?.byteLength || fileSize,
+        base64Length: base64?.length || 0,
+        uploadMode: isVideoUpload ? "streamed_file" : "inline_bytes",
+      });
+      setUploadMessage("Checking media...");
+      logProfileMedia("safety_check_started", {
+        fileName,
+        mimeType,
+        byteLength: bytes?.byteLength || fileSize,
+      });
+      await withSafetyTimeout(screenProfilePortfolioMedia(file, {
+        fileExt,
+        mimeType,
+        size: bytes?.byteLength || fileSize,
+        base64,
+      }));
+      logProfileMedia("safety_check_passed", { fileName });
+
+      setUploadMessage("Uploading media...");
+      logProfileMedia("storage_upload_started", {
+        bucket: "portfolio",
+        fileName,
+        contentType: mimeType,
+      });
+      const { data: uploadData, error: uploadError } = await uploadPortfolioMediaFile(file, {
+        fileName,
+        mimeType,
+        bytes,
+        isVideoUpload,
+      });
 
       if (uploadError) {
+        logProfileMedia("storage_upload_failed", { message: uploadError.message });
         console.error("âŒ Upload failed:", uploadError);
         throw new Error(uploadError.message || "Upload failed");
       }
+
+      logProfileMedia("storage_upload_success", { path: uploadData?.path });
 
       // Get public URL
       const { data: urlData } = supabase.storage
         .from("portfolio")
         .getPublicUrl(fileName);
 
+
+      logProfileMedia("public_url_resolved", { publicUrl: urlData.publicUrl });
 
       const { data: lastPortfolioRow, error: portfolioFetchError } = await supabase
         .from("profile_portfolio_urls")
@@ -1072,6 +1587,7 @@ export default function ProfileScreen() {
         .maybeSingle();
 
       if (portfolioFetchError) {
+        logProfileMedia("sort_order_fetch_failed", { message: portfolioFetchError.message });
         throw portfolioFetchError;
       }
 
@@ -1092,15 +1608,27 @@ export default function ProfileScreen() {
         );
 
       if (portfolioInsertError) {
+        logProfileMedia("portfolio_db_insert_failed", {
+          message: portfolioInsertError.message,
+          code: portfolioInsertError.code,
+          details: portfolioInsertError.details,
+        });
         throw portfolioInsertError;
       }
+
+      logProfileMedia("portfolio_db_insert_success", {
+        url: urlData.publicUrl,
+        sortOrder: nextSortOrder,
+      });
 
       // Refresh profile
       fetchProfile();
       showAlert("success", "Success", "Media added to portfolio!");
     } catch (e: any) {
-      showAlert("warning", "Upload Failed", e.message || "Failed to upload media");
+      logProfileMedia("upload_failed", { message: e?.message || String(e) });
+      showUploadFeedbackAlert(e);
     } finally {
+      logProfileMedia("upload_finished");
       setUploading(false);
     }
   };
@@ -1763,7 +2291,6 @@ export default function ProfileScreen() {
                               {" \u2022 "}
                               {gig.location || "Location TBA"}
                             </Text>
-                            <Text style={[styles.gigCardBudget, { color: colors.primary }]}>Budget: {"\u20B1"}{Number(gig.budget || 0).toLocaleString()}</Text>
                           </View>
                         ))}
                       </ScrollView>
@@ -2211,33 +2738,6 @@ export default function ProfileScreen() {
                             <TouchableOpacity
                               activeOpacity={0.85}
                               hitSlop={8}
-                              onPress={() => router.push({
-                                pathname: "/create_playlist" as any,
-                                params: {
-                                  edit_id: pl.id,
-                                  return_to: "profile",
-                                  return_user_id: viewedProfileId || currentUserId || normalizedParamUserId || "",
-                                },
-                              })}
-                              disabled={playlistActionId === pl.id || authLoading}
-                              style={{
-                                flexDirection: "row",
-                                alignItems: "center",
-                                gap: 6,
-                                paddingHorizontal: 12,
-                                paddingVertical: 8,
-                                borderRadius: 999,
-                                backgroundColor: colors.primary,
-                                opacity: playlistActionId === pl.id || authLoading ? 0.6 : 1,
-                              }}
-                            >
-                              <Ionicons name="create-outline" size={14} color="#fff" />
-                              <Text style={{ color: "#fff", fontSize: 11, fontFamily: "Poppins_600SemiBold" }}>Edit Playlist</Text>
-                            </TouchableOpacity>
-
-                            <TouchableOpacity
-                              activeOpacity={0.85}
-                              hitSlop={8}
                               onPress={() => promptDeletePlaylist(pl)}
                               disabled={playlistActionId === pl.id || authLoading}
                               style={{
@@ -2256,7 +2756,16 @@ export default function ProfileScreen() {
                               ) : (
                                 <Ionicons name="trash-outline" size={14} color="#EF4444" />
                               )}
-                              <Text style={{ color: "#EF4444", fontSize: 11, fontFamily: "Poppins_600SemiBold" }}>
+                              <Text
+                                style={{
+                                  color: "#EF4444",
+                                  fontSize: 11,
+                                  lineHeight: 14,
+                                  fontFamily: "Poppins_600SemiBold",
+                                  includeFontPadding: false,
+                                  textAlignVertical: "center",
+                                }}
+                              >
                                 {playlistActionId === pl.id ? "Deleting..." : "Delete Playlist"}
                               </Text>
                             </TouchableOpacity>
@@ -2402,6 +2911,19 @@ export default function ProfileScreen() {
                             </Text>
                           </View>
                         </View>
+
+                        {isOwner && (
+                          <TouchableOpacity
+                            activeOpacity={0.85}
+                            onPress={(event: any) => {
+                              event?.stopPropagation?.();
+                              confirmRemoveMedia(url);
+                            }}
+                            style={styles.mediaRemoveBtn}
+                          >
+                            <Ionicons name="trash-outline" size={14} color="#fff" />
+                          </TouchableOpacity>
+                        )}
                       </TouchableOpacity>
                     ))}
                   </View>
@@ -2442,6 +2964,24 @@ export default function ProfileScreen() {
                     resizeMode="contain"
                   />
                 ))}
+            </View>
+          </Modal>
+          <Modal
+            visible={uploading}
+            transparent={true}
+            animationType="fade"
+            statusBarTranslucent
+          >
+            <View style={styles.uploadLoadingOverlay}>
+              <View style={[styles.uploadLoadingCard, { backgroundColor: colors.surface }]}>
+                <ActivityIndicator size="large" color={colors.primary} />
+                <Text style={[styles.uploadLoadingTitle, { color: colors.text }]}>
+                  {uploadMessage}
+                </Text>
+                <Text style={[styles.uploadLoadingSubtitle, { color: colors.textSecondary }]}>
+                  Please wait while your photo or video is checked and uploaded.
+                </Text>
+              </View>
             </View>
           </Modal>
         </ScrollView>
@@ -2541,6 +3081,7 @@ export default function ProfileScreen() {
         title={alertConfig.title}
         message={alertConfig.message}
         buttons={alertConfig.buttons}
+        forceModal={alertConfig.forceModal}
         onClose={() => setAlertVisible(false)}
       />
       <ReportModal
@@ -2830,11 +3371,6 @@ const styles = StyleSheet.create({
   gigCardMeta: {
     fontFamily: "Poppins_400Regular",
     fontSize: 12,
-  },
-  gigCardBudget: {
-    fontFamily: "Poppins_600SemiBold",
-    fontSize: 12,
-    marginTop: 2,
   },
   gigTimelineEmpty: {
     borderWidth: 1,
@@ -3156,6 +3692,17 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontFamily: "Poppins_600SemiBold",
   },
+  mediaRemoveBtn: {
+    position: "absolute",
+    top: 8,
+    right: 8,
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(239,68,68,0.92)",
+  },
   modalContainer: {
     flex: 1,
     backgroundColor: "rgba(0,0,0,0.95)",
@@ -3172,6 +3719,38 @@ const styles = StyleSheet.create({
   modalMedia: {
     width: "100%",
     height: "100%",
+  },
+  uploadLoadingOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(15,23,42,0.52)",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 24,
+  },
+  uploadLoadingCard: {
+    width: "100%",
+    maxWidth: 320,
+    borderRadius: 18,
+    padding: 24,
+    alignItems: "center",
+    shadowColor: "#000",
+    shadowOpacity: 0.22,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 10,
+  },
+  uploadLoadingTitle: {
+    marginTop: 14,
+    fontSize: 15,
+    fontFamily: "Poppins_600SemiBold",
+    textAlign: "center",
+  },
+  uploadLoadingSubtitle: {
+    marginTop: 6,
+    fontSize: 12,
+    lineHeight: 18,
+    fontFamily: "Poppins_400Regular",
+    textAlign: "center",
   },
   resumeSection: {
     marginTop: 24,

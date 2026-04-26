@@ -20,10 +20,7 @@ import { useAuth } from "../src/context/AuthContext";
 import { showTopToast } from "../src/context/TopToastContext";
 import { useTheme } from "../src/context/ThemeContext";
 import {
-  MAX_PLAYLIST_AUDIO_DURATION_SECONDS,
-  ensurePlaylistAudioDuration,
   pickPlaylistAudioFile,
-  resolvePlaylistAudioUrlDuration,
   uploadPlaylistAudioFile,
   type PlaylistAudioFile,
 } from "../src/utils/playlistAudio";
@@ -38,8 +35,6 @@ type PlaylistDraftTrack = {
   id: string;
   title: string;
   artist_name: string;
-  audio_url: string;
-  duration_seconds: string;
   audio_file: PlaylistAudioFile | null;
 };
 
@@ -47,17 +42,26 @@ const createTrackDraft = (): PlaylistDraftTrack => ({
   id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
   title: "",
   artist_name: "",
-  audio_url: "",
-  duration_seconds: "",
   audio_file: null,
 });
 
 type DraftTrackPayload = {
   title: string;
   artist_name: string | null;
-  audio_url: string | null;
   duration_seconds: number | null;
   audio_file: PlaylistAudioFile | null;
+};
+
+type PlaylistAlert = {
+  type: AlertType;
+  title: string;
+  message: string;
+  forceModal?: boolean;
+  buttons?: {
+    text: string;
+    onPress?: () => void;
+    style?: "default" | "cancel" | "destructive";
+  }[];
 };
 
 export default function CreatePlaylistScreen() {
@@ -86,7 +90,7 @@ export default function CreatePlaylistScreen() {
   const [trackDrafts, setTrackDrafts] = useState<PlaylistDraftTrack[]>([]);
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(isEditing);
-  const [alert, setAlert] = useState<{ type: AlertType; title: string; message: string } | null>(null);
+  const [alert, setAlert] = useState<PlaylistAlert | null>(null);
 
   const logPlaylistInvokeError = useCallback((context: string, error: any, body: Record<string, unknown>) => {
     console.error(`manage-playlists ${context} failed`, {
@@ -164,13 +168,12 @@ export default function CreatePlaylistScreen() {
     setTrackDrafts((current) => [...current, createTrackDraft()]);
   }, []);
 
-  const updateTrackDraft = useCallback((trackId: string, field: keyof Omit<PlaylistDraftTrack, "id">, value: string) => {
+  const updateTrackDraft = useCallback((trackId: string, field: "title" | "artist_name", value: string) => {
     setTrackDrafts((current) => current.map((track) => (
       track.id === trackId
         ? {
             ...track,
             [field]: value,
-            ...(field === "audio_url" && value.trim().length > 0 ? { audio_file: null } : null),
           }
         : track
     )));
@@ -182,8 +185,6 @@ export default function CreatePlaylistScreen() {
         ? {
             ...track,
             audio_file: audioFile,
-            audio_url: audioFile ? "" : track.audio_url,
-            duration_seconds: audioFile ? String(audioFile.durationSeconds) : track.duration_seconds,
           }
         : track
     )));
@@ -202,8 +203,9 @@ export default function CreatePlaylistScreen() {
     } catch (error: any) {
       setAlert({
         type: "warning",
-        title: "Audio Not Allowed",
-        message: error?.message || "Only MP3 or MP4 audio files up to 5 minutes are allowed.",
+        title: "Upload Feedback",
+        message: error?.message || "Only MP3 audio files up to 5 minutes are allowed.",
+        forceModal: true,
       });
     }
   }, [setTrackAudioFile]);
@@ -214,34 +216,19 @@ export default function CreatePlaylistScreen() {
         id: track.id,
         title: track.title.trim(),
         artist_name: track.artist_name.trim() || null,
-        audio_url: track.audio_url.trim() || null,
-        duration_seconds: track.duration_seconds.trim() ? Number(track.duration_seconds.trim()) : null,
         audio_file: track.audio_file,
       }))
-      .filter((track) => track.title || track.artist_name || track.audio_url || track.duration_seconds !== null || track.audio_file);
+      .filter((track) => track.title || track.artist_name || track.audio_file);
 
     if (items.some((track) => !track.title)) {
       throw new Error("Each added music needs a title before you save the playlist.");
     }
 
     return Promise.all(items.map(async (track) => {
-      let durationSeconds = track.duration_seconds;
-
-      if (durationSeconds !== null) {
-        durationSeconds = ensurePlaylistAudioDuration(durationSeconds);
-      }
-
-      if (track.audio_file) {
-        durationSeconds = ensurePlaylistAudioDuration(track.audio_file.durationSeconds);
-      } else if (track.audio_url) {
-        durationSeconds = await resolvePlaylistAudioUrlDuration(track.audio_url, durationSeconds);
-      }
-
       return {
         title: track.title,
         artist_name: track.artist_name,
-        audio_url: track.audio_url,
-        duration_seconds: durationSeconds,
+        duration_seconds: track.audio_file?.durationSeconds || null,
         audio_file: track.audio_file,
       };
     }));
@@ -290,13 +277,13 @@ export default function CreatePlaylistScreen() {
         const playlistId = data.data?.id || editId;
 
         if (!isEditing && playlistId && draftItems.length > 0) {
-          const failedTracks: string[] = [];
+          const failedTracks: { title: string; reason?: string }[] = [];
 
           for (const track of draftItems) {
             try {
               const sourceUrl = track.audio_file
                 ? (await uploadPlaylistAudioFile(track.audio_file, playlistId)).publicUrl
-                : track.audio_url;
+                : null;
 
               const itemBody = {
                 action: "add_playlist_item",
@@ -315,17 +302,31 @@ export default function CreatePlaylistScreen() {
                 logPlaylistInvokeError("add_playlist_item", itemError, itemBody);
                 throw itemError;
               }
-            } catch {
-              failedTracks.push(track.title);
+            } catch (trackError: any) {
+              failedTracks.push({
+                title: track.title,
+                reason: typeof trackError?.message === "string" ? trackError.message : undefined,
+              });
             }
           }
 
           if (failedTracks.length > 0) {
-            showTopToast({
+            const firstReason = failedTracks.find((track) => track.reason)?.reason;
+            setAlert({
               type: "warning",
-              title: "Playlist Created",
-              message: `${failedTracks.length} track${failedTracks.length === 1 ? "" : "s"} could not be uploaded.`,
+              title: "Track Upload Feedback",
+              message: firstReason || `${failedTracks.length} track${failedTracks.length === 1 ? "" : "s"} could not be uploaded.`,
+              forceModal: true,
+              buttons: [
+                {
+                  text: "View Playlist",
+                  onPress: () => {
+                    router.replace({ pathname: "/playlist_details", params: { playlist_id: playlistId } });
+                  },
+                },
+              ],
             });
+            return;
           }
         }
 
@@ -455,7 +456,7 @@ export default function CreatePlaylistScreen() {
               <View style={[styles.trackEmptyCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
                 <Ionicons name="musical-notes-outline" size={20} color={colors.textSecondary} />
                 <Text style={[styles.trackEmptyTitle, { color: colors.text }]}>No musics added yet</Text>
-                <Text style={[styles.trackEmptyText, { color: colors.textSecondary }]}>Tap Add Music to include titles plus a direct URL or MP3/MP4 audio file up to 5 minutes.</Text>
+                <Text style={[styles.trackEmptyText, { color: colors.textSecondary }]}>Tap Add Music to include a title and an MP3 audio file up to 5 minutes.</Text>
               </View>
             ) : (
               trackDrafts.map((track, index) => (
@@ -481,44 +482,28 @@ export default function CreatePlaylistScreen() {
                     value={track.artist_name}
                     onChangeText={(value) => updateTrackDraft(track.id, "artist_name", value)}
                   />
-                  <TextInput
-                    style={[styles.input, styles.trackInput, { color: colors.text, borderColor: colors.border, backgroundColor: colors.background }]}
-                    placeholder="Public audio URL"
-                    placeholderTextColor={colors.textSecondary}
-                    autoCapitalize="none"
-                    value={track.audio_url}
-                    onChangeText={(value) => updateTrackDraft(track.id, "audio_url", value)}
-                  />
                   <TouchableOpacity
                     activeOpacity={0.8}
                     style={[styles.audioPickerBtn, { borderColor: colors.border, backgroundColor: colors.background }]}
                     onPress={() => void handlePickTrackAudio(track.id)}
                   >
                     <Ionicons name="cloud-upload-outline" size={16} color={colors.primary} />
-                    <Text style={[styles.audioPickerBtnText, { color: colors.primary }]}>Upload MP3 / MP4</Text>
+                    <Text style={[styles.audioPickerBtnText, { color: colors.primary }]}>Upload MP3</Text>
                   </TouchableOpacity>
                   <Text style={[styles.audioHelperText, { color: colors.textSecondary }]}>
-                    MP4 is treated as audio only. URL or uploaded file must be 5 minutes or less.
+                    Uploaded MP3 files must be 5 minutes or less.
                   </Text>
                   {track.audio_file ? (
                     <View style={[styles.audioFileChip, { backgroundColor: colors.primary + "12", borderColor: colors.primary + "30" }]}>
                       <Ionicons name="musical-note" size={14} color={colors.primary} />
                       <Text style={[styles.audioFileChipText, { color: colors.text }]} numberOfLines={1}>
-                        {track.audio_file.name} • {track.audio_file.durationSeconds}s
+                        {track.audio_file.name}
                       </Text>
                       <TouchableOpacity activeOpacity={0.7} onPress={() => setTrackAudioFile(track.id, null)}>
                         <Ionicons name="close-circle" size={18} color={colors.textSecondary} />
                       </TouchableOpacity>
                     </View>
                   ) : null}
-                  <TextInput
-                    style={[styles.input, styles.trackInput, { color: colors.text, borderColor: colors.border, backgroundColor: colors.background }]}
-                    placeholder={`Duration in seconds (max ${MAX_PLAYLIST_AUDIO_DURATION_SECONDS})`}
-                    placeholderTextColor={colors.textSecondary}
-                    keyboardType="number-pad"
-                    value={track.duration_seconds}
-                    onChangeText={(value) => updateTrackDraft(track.id, "duration_seconds", value)}
-                  />
                 </View>
               ))
             )}
@@ -545,7 +530,15 @@ export default function CreatePlaylistScreen() {
       </ScrollView>
 
       {alert && (
-        <CustomAlert visible type={alert.type} title={alert.title} message={alert.message} onClose={() => setAlert(null)} />
+        <CustomAlert
+          visible
+          type={alert.type}
+          title={alert.title}
+          message={alert.message}
+          buttons={alert.buttons}
+          forceModal={alert.forceModal}
+          onClose={() => setAlert(null)}
+        />
       )}
 
       <Navbar />

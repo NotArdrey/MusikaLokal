@@ -1,4 +1,6 @@
-BEGIN;
+-- Fix dismiss_reports_for_deleted_target after playlist report-target expansion.
+-- The text[] || unknown form can be resolved as array concatenation and tries to
+-- parse clauses such as "reviewed_by = NULL" as array literals during deletes.
 
 CREATE OR REPLACE FUNCTION public.dismiss_reports_for_deleted_target()
 RETURNS trigger
@@ -18,12 +20,27 @@ BEGIN
     RETURN OLD;
   END IF;
 
-  IF TG_TABLE_NAME = 'gigs' THEN
+  IF TG_TABLE_NAME = 'groups' THEN
+    v_target_types := ARRAY['group'];
+    v_entity_label := 'group';
+  ELSIF TG_TABLE_NAME = 'gigs' THEN
     v_target_types := ARRAY['gig'];
     v_entity_label := 'gig';
   ELSIF TG_TABLE_NAME = 'studios' THEN
     v_target_types := ARRAY['studio', 'venue'];
     v_entity_label := 'studio';
+  ELSIF TG_TABLE_NAME = 'products' THEN
+    v_target_types := ARRAY['product'];
+    v_entity_label := 'marketplace item';
+  ELSIF TG_TABLE_NAME = 'producer_projects' THEN
+    v_target_types := ARRAY['project', 'producer project', 'producer_project'];
+    v_entity_label := 'producer project';
+  ELSIF TG_TABLE_NAME = 'playlists' THEN
+    v_target_types := ARRAY['playlist', 'music'];
+    v_entity_label := 'playlist';
+  ELSIF TG_TABLE_NAME = 'profiles' THEN
+    v_target_types := ARRAY['profile', 'user', 'artist'];
+    v_entity_label := 'profile';
   ELSE
     RETURN OLD;
   END IF;
@@ -132,23 +149,3 @@ BEGIN
   RETURN OLD;
 END;
 $$;
-
-DO $$
-BEGIN
-  IF to_regclass('public.gigs') IS NOT NULL AND to_regclass('public.reports') IS NOT NULL THEN
-    EXECUTE 'DROP TRIGGER IF EXISTS trg_reports_cleanup_on_gig_delete ON public.gigs';
-    EXECUTE 'CREATE TRIGGER trg_reports_cleanup_on_gig_delete AFTER DELETE ON public.gigs FOR EACH ROW EXECUTE FUNCTION public.dismiss_reports_for_deleted_target()';
-  END IF;
-END;
-$$;
-
-DO $$
-BEGIN
-  IF to_regclass('public.studios') IS NOT NULL AND to_regclass('public.reports') IS NOT NULL THEN
-    EXECUTE 'DROP TRIGGER IF EXISTS trg_reports_cleanup_on_studio_delete ON public.studios';
-    EXECUTE 'CREATE TRIGGER trg_reports_cleanup_on_studio_delete AFTER DELETE ON public.studios FOR EACH ROW EXECUTE FUNCTION public.dismiss_reports_for_deleted_target()';
-  END IF;
-END;
-$$;
-
-COMMIT;

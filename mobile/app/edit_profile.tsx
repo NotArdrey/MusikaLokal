@@ -359,12 +359,14 @@ export default function EditProfileScreen() {
       }
 
       const ext = asset.uri.split(".").pop()?.toLowerCase() || "jpg";
+      const mimeType = `image/${ext === "jpg" ? "jpeg" : ext}`;
       await ensureUploadPassesSafetyScreening(
         {
           name: (asset as any)?.fileName || `profile-photo.${ext}`,
-          mimeType: `image/${ext === "jpg" ? "jpeg" : ext}`,
+          mimeType,
           size: Math.floor((asset.base64.length * 3) / 4),
           uri: asset.uri,
+          contentDataUrl: `data:${mimeType};base64,${asset.base64}`,
           kind: "photo",
         },
         "edit_profile_avatar",
