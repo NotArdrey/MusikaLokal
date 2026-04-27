@@ -263,6 +263,10 @@ const ListingDetailsSheet = forwardRef<
     [productionRoster, selectedSlotType],
   );
   const listingCompletionRate = useMemo(() => {
+    if (group?.completion_rate === null || group?.completion_rate === undefined || group?.completion_rate === "") {
+      return null;
+    }
+
     const parsed = Number(group?.completion_rate);
     if (!Number.isFinite(parsed)) {
       return null;
@@ -3503,7 +3507,6 @@ const ListingDetailsSheet = forwardRef<
       displayRate={effectiveDisplayRate}
       labels={labels}
       currentUserId={currentUserId}
-      completionRate={listingCompletionRate}
       handleProfileNavigation={handleProfileNavigation}
       promotions={group?.promotions || []}
     />

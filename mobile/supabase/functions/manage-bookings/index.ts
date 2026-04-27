@@ -1179,7 +1179,7 @@ serve(async (req: Request) => {
                         `,
             )
             .in("gig_id", gigIds)
-            .in("status", ["accepted", "pending", "rejected", "cancelled", "completed"])
+            .in("status", ["accepted", "pending", "rejected", "cancelled", "completed", "fired"])
             .or("leader_approval_status.is.null,leader_approval_status.eq.approved")
             .order("created_at", { ascending: false });
 
@@ -1228,7 +1228,7 @@ serve(async (req: Request) => {
                   ? "Action Required"
                   : app.status === "accepted"
                     ? "Confirmed"
-                    : app.status === "rejected" || app.status === "cancelled"
+                    : app.status === "rejected" || app.status === "cancelled" || app.status === "fired"
                       ? "Fired"
                       : "Completed",
               type: app.production_team?.name
@@ -1240,7 +1240,7 @@ serve(async (req: Request) => {
                 : app.group_id
                   ? "Group Application"
                   : "Solo Application",
-              isCancelled: app.status === "rejected" || app.status === "cancelled",
+              isCancelled: app.status === "rejected" || app.status === "cancelled" || app.status === "fired",
               action: app.status === "pending" ? "Confirm Now" : "View Details",
               location: gig?.location,
               performer: performerName,
@@ -1283,7 +1283,7 @@ serve(async (req: Request) => {
                 // @ts-ignore
                 categorized.Upcoming.push(item);
               }
-            } else if (app.status === "rejected" || app.status === "cancelled") {
+            } else if (app.status === "rejected" || app.status === "cancelled" || app.status === "fired") {
               // Fired musicians go to Review (Completed tab)
               // @ts-ignore
               categorized.Review.push({ ...item, status: "Fired" });
@@ -2288,7 +2288,7 @@ serve(async (req: Request) => {
 
         const isOrganizer = targetGig?.organizer_id === authUser.id;
         const isApplicant = targetApplication.applicant_id === authUser.id;
-        const organizerAllowedStatuses = ["accepted", "rejected", "completed", "cancelled"];
+        const organizerAllowedStatuses = ["accepted", "rejected", "completed", "cancelled", "fired"];
         const applicantAllowedStatuses = ["cancelled"];
 
         if (
@@ -2302,9 +2302,9 @@ serve(async (req: Request) => {
         }
       }
 
-      // Add cancellation_reason if status is cancelled/rejected and reason is provided
+      // Add cancellation_reason if status is a terminal negative outcome and reason is provided
       if (
-        (new_status === "cancelled" || new_status === "rejected") &&
+        (new_status === "cancelled" || new_status === "rejected" || new_status === "fired") &&
         cancellation_reason
       ) {
         updateData.cancellation_reason = cancellation_reason;
@@ -2360,7 +2360,7 @@ serve(async (req: Request) => {
 
       // NOTIFICATION LOGIC
       if (
-        ["cancelled", "rejected", "confirmed", "accepted", "completed"].includes(new_status)
+        ["cancelled", "rejected", "confirmed", "accepted", "completed", "fired"].includes(new_status)
       ) {
         try {
           const notificationEventType = `${table}_${new_status}`;
@@ -2456,6 +2456,11 @@ serve(async (req: Request) => {
                 notificationTitle = "Gig Completed";
                 notificationMessage = `Your contract for ${gigMeta?.name || "this gig"} has been marked as completed.`;
                 notificationType = "success";
+              } else if (new_status === "fired") {
+                targetUserId = applicationInfo.applicant_id;
+                notificationTitle = "Gig Cancelled";
+                notificationMessage = `Your contract for ${gigMeta?.name || "this gig"} has been cancelled by the venue.`;
+                notificationType = "error";
               }
             }
           }
@@ -2473,7 +2478,7 @@ serve(async (req: Request) => {
                 status: new_status,
                 event_type: notificationEventType,
                 cancellation_reason: cancellation_reason || null,
-                cancelled_by_user_id: new_status === "cancelled" ? authUser.id : null,
+                cancelled_by_user_id: new_status === "cancelled" || new_status === "fired" ? authUser.id : null,
                 cancelled_by_role: cancellationActorRole,
               },
             });

@@ -230,13 +230,17 @@ const ListingCard: React.FC<ListingCardProps> = ({
   }, [item.hourly_rate, item.studio_type, item.type, item.group_type]);
 
   const completionRate = useMemo(() => {
+    if (item?.completion_rate === null || item?.completion_rate === undefined || item?.completion_rate === "") {
+      return null;
+    }
+
     const parsed = Number(item?.completion_rate);
     if (!Number.isFinite(parsed)) return null;
     return Math.max(0, Math.min(100, Math.round(parsed)));
   }, [item?.completion_rate]);
   const showCompletionBadge =
     completionRate !== null &&
-    ["Artist", "Group", "Studio", "Venue"].includes(String(item.type || ""));
+    ["Artist", "Group"].includes(String(item.type || ""));
 
   // Shared actions
   const handleShare = async () => {
@@ -702,7 +706,7 @@ const ListingCard: React.FC<ListingCardProps> = ({
                 </View>
                 {showCompletionBadge && (
                   <View style={[styles.tagBadge, { backgroundColor: completionRate === 100 ? "#10B981" : "#2563EB" }]}>
-                    <Text style={styles.tagText}>Complete {completionRate}%</Text>
+                    <Text style={styles.tagText}>Completion {completionRate}%</Text>
                   </View>
                 )}
                 {item.pax && (item.type === "Studio" || item.hourly_rate) && (
@@ -1186,7 +1190,7 @@ const ListingCard: React.FC<ListingCardProps> = ({
                   ]}
                 >
                   <Text style={[styles.tagText, { fontSize: 10 }]}>
-                    Complete {completionRate}%
+                    Completion {completionRate}%
                   </Text>
                 </View>
               )}

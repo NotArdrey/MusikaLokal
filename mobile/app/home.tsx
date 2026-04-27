@@ -1171,7 +1171,10 @@ export default function HomeScreen() {
               {
                 rating: Number(row?.rating || 0),
                 review_count: Number(row?.review_count || 0),
-                completion_rate: Number.isFinite(Number(row?.completion_rate))
+                completion_rate: row?.completion_rate !== null &&
+                  row?.completion_rate !== undefined &&
+                  row?.completion_rate !== "" &&
+                  Number.isFinite(Number(row?.completion_rate))
                   ? Number(row.completion_rate)
                   : null,
               },

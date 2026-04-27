@@ -6403,11 +6403,16 @@ export default function BookingsScreen() {
                 selectedItem.type_id === "gig_application"
                   ? "rejected"
                   : "cancelled";
-            } else if (modalMode === "cancel" || modalMode === "fire") {
-              // Cancel mode (from Upcoming tab) or Fire mode
+            } else if (modalMode === "cancel") {
+              // Cancel mode (from Upcoming tab)
               status =
                 selectedItem.type_id === "gig_application"
-                  ? "rejected"
+                  ? "cancelled"
+                  : "cancelled";
+            } else if (modalMode === "fire") {
+              status =
+                selectedItem.type_id === "gig_application"
+                  ? "fired"
                   : "cancelled";
             } else if (modalMode === "complete") {
               status = "completed";
