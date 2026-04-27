@@ -3,7 +3,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { ResizeMode, Video } from "expo-av";
 import * as ImagePicker from "expo-image-picker";
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
     ActivityIndicator,
     Image,
@@ -365,6 +365,43 @@ const sanitizeUploadFeedbackMessage = (message: string): string => {
   }
 
   return raw;
+};
+
+type ProfileAlertConfig = {
+  type: AlertType;
+  title: string;
+  message: string;
+  buttons?: any[];
+  forceModal?: boolean;
+};
+
+type SkippedProfileMediaFeedback = {
+  name: string;
+  reason: string;
+};
+
+const getPortfolioAssetDisplayName = (
+  asset: ImagePicker.ImagePickerAsset,
+  index: number,
+): string => {
+  const fallbackName = asset.uri.split("/").pop() || `Selected media ${index + 1}`;
+  return typeof (asset as any)?.fileName === "string" ? (asset as any).fileName : fallbackName;
+};
+
+const formatSkippedProfileMediaFeedback = (items: SkippedProfileMediaFeedback[]): string => {
+  if (items.length === 0) {
+    return "";
+  }
+
+  const visibleItems = items
+    .slice(0, 4)
+    .map((item) => `${item.name}: ${item.reason}`)
+    .join("\n");
+  const remainingCount = items.length - Math.min(items.length, 4);
+  const remainingText =
+    remainingCount > 0 ? `\n+ ${remainingCount} more media item(s) skipped.` : "";
+
+  return `\n\nSkipped media:\n${visibleItems}${remainingText}`;
 };
 
 export default function ProfileScreen() {
@@ -917,14 +954,10 @@ export default function ProfileScreen() {
   const [selectedMedia, setSelectedMedia] = useState<string | null>(null);
   const [mediaModalVisible, setMediaModalVisible] = useState(false);
   const [alertVisible, setAlertVisible] = useState(false);
+  const [pendingAlert, setPendingAlert] = useState<ProfileAlertConfig | null>(null);
   const [showReportModal, setShowReportModal] = useState(false);
-  const [alertConfig, setAlertConfig] = useState<{
-    type: AlertType;
-    title: string;
-    message: string;
-    buttons?: any[];
-    forceModal?: boolean;
-  }>({
+  const uploadingRef = useRef(false);
+  const [alertConfig, setAlertConfig] = useState<ProfileAlertConfig>({
     type: "info",
     title: "",
     message: "",
@@ -937,12 +970,44 @@ export default function ProfileScreen() {
     buttons?: any[],
     forceModal = false,
   ) => {
-    setAlertConfig({ type, title, message, buttons, forceModal });
+    const nextAlert = { type, title, message, buttons, forceModal };
+    if (uploadingRef.current) {
+      setPendingAlert(nextAlert);
+      return;
+    }
+
+    setAlertConfig(nextAlert);
     setAlertVisible(true);
   };
 
+  useEffect(() => {
+    if (uploading || !pendingAlert) {
+      return;
+    }
+
+    const nextAlert = pendingAlert;
+    const timeoutId = setTimeout(() => {
+      setAlertConfig(nextAlert);
+      setAlertVisible(true);
+      setPendingAlert(null);
+    }, 50);
+
+    return () => clearTimeout(timeoutId);
+  }, [pendingAlert, uploading]);
+
   const showUploadFeedbackAlert = (error: any) => {
     const rawMessage = String(error?.message || error || "Failed to upload media").trim();
+    if (rawMessage.includes("Skipped media:")) {
+      showAlert(
+        "warning",
+        "Upload failed",
+        rawMessage,
+        [{ text: "OK", style: "default" }],
+        true,
+      );
+      return;
+    }
+
     const safetyPrefix = " was blocked by safety screening. ";
     const safetyPrefixIndex = rawMessage.indexOf(safetyPrefix);
 
@@ -1084,6 +1149,7 @@ export default function ProfileScreen() {
     logProfileMedia("remove_requested", { profileId: currentUserId, url });
 
     try {
+      uploadingRef.current = true;
       setUploading(true);
       setUploadMessage("Removing media...");
 
@@ -1134,6 +1200,7 @@ export default function ProfileScreen() {
       logProfileMedia("remove_failed", { message: error?.message || String(error) });
       showAlert("error", "Remove Failed", error?.message || "Failed to remove media.");
     } finally {
+      uploadingRef.current = false;
       setUploading(false);
     }
   };
@@ -1179,21 +1246,48 @@ export default function ProfileScreen() {
       logProfileMedia("picker_opening");
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ["images", "videos"],
-        allowsEditing: true,
+        allowsMultipleSelection: true,
         quality: 0.5,
       });
 
-      if (result.canceled || !result.assets[0]) {
+      if (result.canceled || !result.assets || result.assets.length === 0) {
         logProfileMedia("picker_cancelled");
         return;
       }
 
-      const file = result.assets[0];
+      const selectedAssets = result.assets;
+      const uploadedUrls: string[] = [];
+      const skippedMedia: SkippedProfileMediaFeedback[] = [];
+      uploadingRef.current = true;
       setUploading(true);
       setUploadMessage("Preparing media...");
 
+      const { data: lastPortfolioRow, error: portfolioFetchError } = await supabase
+        .from("profile_portfolio_urls")
+        .select("sort_order")
+        .eq("profile_id", user.id)
+        .order("sort_order", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (portfolioFetchError) {
+        logProfileMedia("sort_order_fetch_failed", { message: portfolioFetchError.message });
+        throw portfolioFetchError;
+      }
+
+      const nextSortOrder =
+        lastPortfolioRow?.sort_order !== undefined && lastPortfolioRow?.sort_order !== null
+          ? Number(lastPortfolioRow.sort_order) + 1
+          : 0;
+
+      for (const [index, file] of selectedAssets.entries()) {
+        const displayName = getPortfolioAssetDisplayName(file, index);
+
+        try {
+      setUploadMessage(`Preparing media ${index + 1}/${selectedAssets.length}...`);
+
       const fileExt = resolvePortfolioFileExtension(file);
-      const fileName = `${user.id}/portfolio/${Date.now()}.${fileExt}`;
+      const fileName = `${user.id}/portfolio/${Date.now()}_${index}.${fileExt}`;
       const mimeType = resolvePortfolioMimeType(file, fileExt);
 
       logProfileMedia("file_selected", {
@@ -1215,7 +1309,7 @@ export default function ProfileScreen() {
         byteLength: sourceBlob.size,
         blobType: sourceBlob.type,
       });
-      setUploadMessage("Checking media...");
+      setUploadMessage(`Checking media ${index + 1}/${selectedAssets.length}...`);
       logProfileMedia("safety_check_started", {
         fileName,
         mimeType,
@@ -1229,7 +1323,7 @@ export default function ProfileScreen() {
       }));
       logProfileMedia("safety_check_passed", { fileName });
 
-      setUploadMessage("Uploading media...");
+      setUploadMessage(`Uploading media ${index + 1}/${selectedAssets.length}...`);
       logProfileMedia("storage_upload_started", {
         bucket: "avatars",
         fileName,
@@ -1291,31 +1385,14 @@ export default function ProfileScreen() {
 
       logProfileMedia("public_url_resolved", { publicUrl: urlData.publicUrl });
 
-      const { data: lastPortfolioRow, error: portfolioFetchError } = await supabase
-        .from("profile_portfolio_urls")
-        .select("sort_order")
-        .eq("profile_id", user.id)
-        .order("sort_order", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-
-      if (portfolioFetchError) {
-        logProfileMedia("sort_order_fetch_failed", { message: portfolioFetchError.message });
-        throw portfolioFetchError;
-      }
-
-      const nextSortOrder =
-        lastPortfolioRow?.sort_order !== undefined && lastPortfolioRow?.sort_order !== null
-          ? Number(lastPortfolioRow.sort_order) + 1
-          : 0;
-
+      const sortOrder = nextSortOrder + uploadedUrls.length;
       const { error: portfolioInsertError } = await supabase
         .from("profile_portfolio_urls")
         .upsert(
           {
             profile_id: user.id,
             portfolio_url: urlData.publicUrl,
-            sort_order: nextSortOrder,
+            sort_order: sortOrder,
           },
           { onConflict: "profile_id,portfolio_url" },
         );
@@ -1331,18 +1408,54 @@ export default function ProfileScreen() {
 
       logProfileMedia("portfolio_db_insert_success", {
         url: urlData.publicUrl,
-        sortOrder: nextSortOrder,
+        sortOrder,
       });
+      uploadedUrls.push(urlData.publicUrl);
+        } catch (itemError: any) {
+          logProfileMedia("upload_item_failed", {
+            name: displayName,
+            message: itemError?.message || String(itemError),
+          });
+          skippedMedia.push({
+            name: displayName,
+            reason: sanitizeUploadFeedbackMessage(
+              String(itemError?.message || itemError || "Failed to upload media."),
+            ),
+          });
+        }
+      }
+
+      if (uploadedUrls.length === 0) {
+        throw new Error(
+          `No selected media was uploaded.${formatSkippedProfileMediaFeedback(skippedMedia)}`,
+        );
+      }
 
       // Refresh profile
       fetchProfile();
-      showAlert("success", "Success", "Media added to portfolio!");
+      setProfile((prev: any) => ({
+        ...(prev || {}),
+        portfolio_urls: [
+          ...(Array.isArray(prev?.portfolio_urls) ? prev.portfolio_urls : []),
+          ...uploadedUrls,
+        ],
+      }));
+      showAlert(
+        skippedMedia.length > 0 ? "warning" : "success",
+        skippedMedia.length > 0 ? "Some Media Skipped" : "Success",
+        skippedMedia.length > 0
+          ? `${uploadedUrls.length} media item(s) added. ${skippedMedia.length} selected item(s) were skipped.${formatSkippedProfileMediaFeedback(skippedMedia)}`
+          : `${uploadedUrls.length} media item(s) added to your portfolio!`,
+        [{ text: "OK", style: "default" }],
+        skippedMedia.length > 0,
+      );
     } catch (e: any) {
       logProfileMedia("upload_failed", { message: e?.message || String(e) });
       console.log("Upload error:", e);
       showUploadFeedbackAlert(e);
     } finally {
       logProfileMedia("upload_finished");
+      uploadingRef.current = false;
       setUploading(false);
     }
   };

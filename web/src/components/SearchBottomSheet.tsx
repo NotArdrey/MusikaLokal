@@ -333,7 +333,7 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
               query = query.ilike("genre", `%${selectedGenre}%`);
             }
 
-            if (minRating > 0) {
+            if (minRating > 0 && table !== "profiles") {
               query = query.gte("rating", minRating);
             }
 
@@ -388,6 +388,7 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
             if (qData) {
               let profileGenresById = new Map<string, string[]>();
               let profileSkillsById = new Map<string, string[]>();
+              let profileStatsById = new Map<string, { rating: number; review_count: number; completion_rate: number | null }>();
 
               if (table === "profiles" && qData.length > 0) {
                 const profileIds = qData
@@ -395,7 +396,7 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
                   .filter((value: any): value is string => typeof value === "string" && value.length > 0);
 
                 if (profileIds.length > 0) {
-                  const [{ data: profileGenreRows }, { data: profileSkillRows }] = await Promise.all([
+                  const [{ data: profileGenreRows }, { data: profileSkillRows }, { data: profileStatRows }] = await Promise.all([
                     supabase
                       .from("profile_genres")
                       .select("profile_id, genre")
@@ -404,10 +405,28 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
                       .from("profile_skills")
                       .select("profile_id, skill")
                       .in("profile_id", profileIds),
+                    supabase
+                      .from("profiles_with_stats")
+                      .select("id, rating, review_count, completion_rate")
+                      .in("id", profileIds),
                   ]);
 
                   profileGenresById = collectProfileValues(profileGenreRows, "genre");
                   profileSkillsById = collectProfileValues(profileSkillRows, "skill");
+                  profileStatsById = new Map(
+                    (profileStatRows || [])
+                      .filter((row: any) => typeof row?.id === "string")
+                      .map((row: any) => [
+                        row.id,
+                        {
+                          rating: Number(row?.rating || 0),
+                          review_count: Number(row?.review_count || 0),
+                          completion_rate: Number.isFinite(Number(row?.completion_rate))
+                            ? Number(row.completion_rate)
+                            : null,
+                        },
+                      ]),
+                  );
                 }
               }
 
@@ -428,6 +447,18 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
                     : item.studio_type || null,
                 genres: table === "profiles" ? profileGenresById.get(item.id) || [] : item.genres,
                 skills: table === "profiles" ? profileSkillsById.get(item.id) || [] : item.skills,
+                rating:
+                  table === "profiles"
+                    ? profileStatsById.get(item.id)?.rating || 0
+                    : Number(item.rating || 0),
+                review_count:
+                  table === "profiles"
+                    ? profileStatsById.get(item.id)?.review_count || 0
+                    : Number(item.review_count || 0),
+                completion_rate:
+                  table === "profiles"
+                    ? profileStatsById.get(item.id)?.completion_rate ?? null
+                    : item.completion_rate,
                 name: item.name || item.full_name,
                 location: item.location || item.address,
                 image: item.images?.[0] || item.image || item.avatar_url,
@@ -442,7 +473,7 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
                 show_gig_statuses: item.show_gig_statuses,
               }));
 
-              const genreFiltered =
+              let filteredResults =
                 selectedGenre !== "All" && table === "profiles"
                   ? mapped.filter((item: any) =>
                       String(item.genre || "")
@@ -451,7 +482,13 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
                     )
                   : mapped;
 
-              results.push(...genreFiltered);
+              if (minRating > 0 && table === "profiles") {
+                filteredResults = filteredResults.filter(
+                  (item: any) => Number(item.rating || 0) >= minRating,
+                );
+              }
+
+              results.push(...filteredResults);
             }
           }
 

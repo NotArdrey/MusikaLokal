@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as ImagePicker from 'expo-image-picker';
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Image, Modal, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { supabase } from '../../lib/supabase';
 import { screenUploadsWithAiDecisions } from '../services/uploadSafetyScreen';
@@ -205,6 +205,13 @@ interface ImageUploaderProps {
   safetyContext?: string;
 }
 
+type ImageUploadAlertConfig = {
+  type: AlertType;
+  title: string;
+  message: string;
+  buttons?: any[];
+};
+
 export default function ImageUploader({
   images,
   onImagesChange,
@@ -217,24 +224,42 @@ export default function ImageUploader({
   safetyContext,
 }: ImageUploaderProps) {
   const { colors, isDark } = useTheme();
+  const uploadingRef = useRef(false);
   const [uploading, setUploading] = useState(false);
   const [uploadMessage, setUploadMessage] = useState('Preparing photos...');
+  const [pendingAlert, setPendingAlert] = useState<ImageUploadAlertConfig | null>(null);
   const [alertVisible, setAlertVisible] = useState(false);
-  const [alertConfig, setAlertConfig] = useState<{
-    type: AlertType;
-    title: string;
-    message: string;
-    buttons?: any[];
-  }>({
+  const [alertConfig, setAlertConfig] = useState<ImageUploadAlertConfig>({
     type: 'info',
     title: '',
     message: '',
   });
 
   const showAlert = (type: AlertType, title: string, message: string, buttons?: any[]) => {
-    setAlertConfig({ type, title, message, buttons });
+    const nextAlert = { type, title, message, buttons };
+    if (uploadingRef.current) {
+      setPendingAlert(nextAlert);
+      return;
+    }
+
+    setAlertConfig(nextAlert);
     setAlertVisible(true);
   };
+
+  useEffect(() => {
+    if (uploading || !pendingAlert) {
+      return;
+    }
+
+    const nextAlert = pendingAlert;
+    const timeoutId = setTimeout(() => {
+      setAlertConfig(nextAlert);
+      setAlertVisible(true);
+      setPendingAlert(null);
+    }, 50);
+
+    return () => clearTimeout(timeoutId);
+  }, [pendingAlert, uploading]);
 
   const showUploadBlockedAlert = (message?: string) => {
     showAlert(
@@ -275,6 +300,7 @@ export default function ImageUploader({
         return;
       }
 
+      uploadingRef.current = true;
       setUploading(true);
       setUploadMessage('Preparing photos...');
 
@@ -444,6 +470,7 @@ export default function ImageUploader({
         showAlert('error', 'Upload failed', message);
       }
     } finally {
+      uploadingRef.current = false;
       setUploading(false);
     }
   };

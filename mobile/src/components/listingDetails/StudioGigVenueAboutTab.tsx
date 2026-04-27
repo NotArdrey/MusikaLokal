@@ -689,18 +689,7 @@ const StudioGigVenueAboutTab = ({
                 {`${completionRate}% Complete`}
               </Text>
             </View>
-          ) : (
-            <Text
-              style={{
-                marginTop: 12,
-                fontSize: 11,
-                fontFamily: "Poppins_500Medium",
-                color: colors.textSecondary,
-              }}
-            >
-              Completion rate unavailable
-            </Text>
-          )}
+          ) : null}
         </View>
 
         <TouchableOpacity
@@ -799,18 +788,7 @@ const StudioGigVenueAboutTab = ({
                 {`${completionRate}% Complete`}
               </Text>
             </View>
-          ) : (
-            <Text
-              style={{
-                marginTop: 12,
-                fontSize: 11,
-                fontFamily: "Poppins_500Medium",
-                color: colors.textSecondary,
-              }}
-            >
-              Completion rate unavailable
-            </Text>
-          )}
+          ) : null}
         </View>
 
         <TouchableOpacity

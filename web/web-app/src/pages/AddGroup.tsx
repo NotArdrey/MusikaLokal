@@ -47,6 +47,17 @@ const GENRES = [
   "Ska",
 ];
 
+const formatSkippedImageFeedback = (items: string[]) => {
+  if (items.length === 0) return "";
+
+  const visibleItems = items.slice(0, 4).map((item) => `- ${item}`).join("\n");
+  const remainingCount = items.length - Math.min(items.length, 4);
+  const remainingText =
+    remainingCount > 0 ? `\n+ ${remainingCount} more photo(s) skipped.` : "";
+
+  return `\n\nSkipped photos:\n${visibleItems}${remainingText}`;
+};
+
 export default function AddGroupPage() {
   const { colors, isDark } = useTheme();
   const { user } = useAuth();
@@ -105,18 +116,28 @@ export default function AddGroupPage() {
     try {
       // Upload images to storage and collect public URLs
       const imageUrls: string[] = [];
+      const skippedUploads: string[] = [];
       for (const file of images) {
         const ext = file.name.split(".").pop();
         const path = `groups/${crypto.randomUUID()}.${ext}`;
         const { error: upErr } = await supabase.storage
           .from("group-media")
           .upload(path, file);
-        if (!upErr) {
-          const { data: urlData } = supabase.storage
-            .from("group-media")
-            .getPublicUrl(path);
-          imageUrls.push(urlData.publicUrl);
+        if (upErr) {
+          skippedUploads.push(`${file.name}: ${upErr.message || "Upload rejected."}`);
+          continue;
         }
+
+        const { data: urlData } = supabase.storage
+          .from("group-media")
+          .getPublicUrl(path);
+        imageUrls.push(urlData.publicUrl);
+      }
+
+      if (images.length > 0 && imageUrls.length === 0) {
+        throw new Error(
+          `No selected photos were uploaded.${formatSkippedImageFeedback(skippedUploads)}`,
+        );
       }
 
       const { error } = await supabase
@@ -136,17 +157,21 @@ export default function AddGroupPage() {
 
       setAlert({
         visible: true,
-        type: "success",
-        title: isDuo ? "Duo Created" : "Group Created",
-        message: `Your ${isDuo ? "duo" : "group"} has been created.`,
+        type: skippedUploads.length > 0 ? "warning" : "success",
+        title: skippedUploads.length > 0
+          ? "Some Photos Skipped"
+          : isDuo ? "Duo Created" : "Group Created",
+        message: skippedUploads.length > 0
+          ? `Your ${isDuo ? "duo" : "group"} was created, but ${skippedUploads.length} photo(s) could not be uploaded.${formatSkippedImageFeedback(skippedUploads)}`
+          : `Your ${isDuo ? "duo" : "group"} has been created.`,
       });
-      setTimeout(() => navigate("/manage"), 1500);
-    } catch {
+      setTimeout(() => navigate("/manage"), skippedUploads.length > 0 ? 2500 : 1500);
+    } catch (error: any) {
       setAlert({
         visible: true,
         type: "error",
         title: "Error",
-        message: "Failed to create group.",
+        message: error?.message || "Failed to create group.",
       });
     } finally {
       setLoading(false);

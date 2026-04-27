@@ -198,6 +198,15 @@ const ListingCard: React.FC<ListingCardProps> = ({
     return { badgeLabel: nextBadgeLabel, badgeColor: nextBadgeColor };
   }, [item.hourly_rate, item.studio_type, item.type, item.group_type]);
 
+  const completionRate = useMemo(() => {
+    const parsed = Number(item?.completion_rate);
+    if (!Number.isFinite(parsed)) return null;
+    return Math.max(0, Math.min(100, Math.round(parsed)));
+  }, [item?.completion_rate]);
+  const showCompletionBadge =
+    completionRate !== null &&
+    ["Artist", "Group", "Studio", "Venue"].includes(String(item.type || ""));
+
   // Shared actions
   const handleShare = async () => {
     try {
@@ -543,6 +552,11 @@ const ListingCard: React.FC<ListingCardProps> = ({
               <View style={[styles.tagBadge, { backgroundColor: badgeColor }]}>
                 <Text style={styles.tagText}>{badgeLabel}</Text>
               </View>
+              {showCompletionBadge && (
+                <View style={[styles.tagBadge, { backgroundColor: completionRate === 100 ? "#10B981" : "#2563EB" }]}>
+                  <Text style={styles.tagText}>Complete {completionRate}%</Text>
+                </View>
+              )}
               {item.pax && (item.type === "Studio" || item.hourly_rate) && (
                 <View style={[styles.tagBadge, { backgroundColor: "#10B981" }]}>
                   <Text style={styles.tagText}>{item.pax} pax</Text>
@@ -1008,6 +1022,23 @@ const ListingCard: React.FC<ListingCardProps> = ({
                 {badgeLabel}
               </Text>
             </View>
+            {showCompletionBadge && (
+              <View
+                style={[
+                  styles.tagBadge,
+                  {
+                    backgroundColor: completionRate === 100 ? "#10B981" : "#2563EB",
+                    paddingVertical: 3,
+                    paddingHorizontal: 8,
+                    marginBottom: 0,
+                  },
+                ]}
+              >
+                <Text style={[styles.tagText, { fontSize: 10 }]}>
+                  Complete {completionRate}%
+                </Text>
+              </View>
+            )}
             {item.pax && (item.type === "Studio" || item.hourly_rate) && (
               <View
                 style={[

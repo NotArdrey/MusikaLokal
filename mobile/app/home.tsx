@@ -1143,7 +1143,7 @@ export default function HomeScreen() {
 
       let profileGenresById = new Map<string, string[]>();
       let profileSkillsById = new Map<string, string[]>();
-      let profileStatsById = new Map<string, { rating: number; review_count: number }>();
+      let profileStatsById = new Map<string, { rating: number; review_count: number; completion_rate: number | null }>();
 
       if (profileIds.length > 0) {
         const [{ data: profileGenreRows }, { data: profileSkillRows }, { data: profileStatRows }] = await Promise.all([
@@ -1157,7 +1157,7 @@ export default function HomeScreen() {
             .in("profile_id", profileIds),
           supabase
             .from("profiles_with_stats")
-            .select("id, rating, review_count")
+            .select("id, rating, review_count, completion_rate")
             .in("id", profileIds),
         ]);
 
@@ -1171,6 +1171,9 @@ export default function HomeScreen() {
               {
                 rating: Number(row?.rating || 0),
                 review_count: Number(row?.review_count || 0),
+                completion_rate: Number.isFinite(Number(row?.completion_rate))
+                  ? Number(row.completion_rate)
+                  : null,
               },
             ]),
         );
@@ -1182,6 +1185,7 @@ export default function HomeScreen() {
         skills: profileSkillsById.get(artist.id) || [],
         rating: profileStatsById.get(artist.id)?.rating || 0,
         review_count: profileStatsById.get(artist.id)?.review_count || 0,
+        completion_rate: profileStatsById.get(artist.id)?.completion_rate ?? null,
       }));
       debugLog("Solo artists fetched:", soloArtists.length);
 

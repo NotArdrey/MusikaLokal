@@ -453,6 +453,8 @@ serve(async (req: Request) => {
       const role = parseRole(body?.role);
       const emailConfirmed = parseBoolean(body?.emailConfirmed) ?? false;
       const isVerified = parseBoolean(body?.isVerified) ?? false;
+      const verificationStatus = isVerified ? "APPROVED" : "PENDING";
+      const verifiedAt = isVerified ? new Date().toISOString() : null;
 
       if (!email || !password || !role) {
         return jsonResponse({ error: "Missing required fields" }, 400);
@@ -469,6 +471,7 @@ serve(async (req: Request) => {
         user_metadata: {
           role,
           is_verified: isVerified,
+          verification_status: verificationStatus,
           full_name: fullName || null,
         },
       });
@@ -488,6 +491,8 @@ serve(async (req: Request) => {
         full_name: fullName || null,
         role,
         is_verified: isVerified,
+        verification_status: verificationStatus,
+        id_verified_at: verifiedAt,
       };
 
       const { data: profile, error: profileError } = await client
@@ -518,6 +523,21 @@ serve(async (req: Request) => {
         return jsonResponse({ error: "Missing userId" }, 400);
       }
 
+      let existingProfileForUpdate: Record<string, unknown> | null = null;
+      if (maybeIsVerified !== undefined) {
+        const { data: existingProfile, error: existingProfileError } = await client
+          .from("profiles")
+          .select("verification_status")
+          .eq("id", userId)
+          .maybeSingle();
+
+        if (existingProfileError) {
+          return jsonResponse({ error: existingProfileError.message }, 400);
+        }
+
+        existingProfileForUpdate = existingProfile || null;
+      }
+
       const profileUpdates: Record<string, unknown> = {};
 
       if (maybeRole !== undefined) {
@@ -546,6 +566,16 @@ serve(async (req: Request) => {
           return jsonResponse({ error: "Invalid isVerified value" }, 400);
         }
         profileUpdates.is_verified = parsed;
+        if (parsed) {
+          profileUpdates.verification_status = "APPROVED";
+          profileUpdates.id_verified_at = new Date().toISOString();
+        } else {
+          const existingStatus = String(existingProfileForUpdate?.["verification_status"] || "").trim().toUpperCase();
+          profileUpdates.verification_status = ["PENDING_REVIEW", "DECLINED", "ABANDONED"].includes(existingStatus)
+            ? existingStatus
+            : "PENDING";
+          profileUpdates.id_verified_at = null;
+        }
       }
 
       if (maybeSubscriptionStatus !== undefined) {
@@ -608,6 +638,9 @@ serve(async (req: Request) => {
       }
       if (profileUpdates.is_verified !== undefined) {
         nextMetadata.is_verified = profileUpdates.is_verified;
+      }
+      if (profileUpdates.verification_status !== undefined) {
+        nextMetadata.verification_status = profileUpdates.verification_status;
       }
       if (profileUpdates.full_name !== undefined) {
         nextMetadata.full_name = profileUpdates.full_name;

@@ -449,7 +449,7 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
             if (qData) {
               let profileGenresById = new Map<string, string[]>();
               let profileSkillsById = new Map<string, string[]>();
-              let profileStatsById = new Map<string, { rating: number; review_count: number }>();
+              let profileStatsById = new Map<string, { rating: number; review_count: number; completion_rate: number | null }>();
               let ownerAvatarById = new Map<string, string>();
 
               if (table === "profiles" && qData.length > 0) {
@@ -469,7 +469,7 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
                       .in("profile_id", profileIds),
                     supabase
                       .from("profiles_with_stats")
-                      .select("id, rating, review_count")
+                      .select("id, rating, review_count, completion_rate")
                       .in("id", profileIds),
                   ]);
 
@@ -483,6 +483,9 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
                         {
                           rating: Number(row?.rating || 0),
                           review_count: Number(row?.review_count || 0),
+                          completion_rate: Number.isFinite(Number(row?.completion_rate))
+                            ? Number(row.completion_rate)
+                            : null,
                         },
                       ]),
                   );
@@ -556,6 +559,10 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
                   table === "profiles"
                     ? profileStatsById.get(item.id)?.review_count || 0
                     : Number(item.review_count || 0),
+                completion_rate:
+                  table === "profiles"
+                    ? profileStatsById.get(item.id)?.completion_rate ?? null
+                    : item.completion_rate,
                 name: item.name || item.full_name || item.title,
                 location: item.location || item.address || item.description,
                 image: item.images?.[0] || item.image || item.avatar_url || item.logo_url || item.cover_image_url,

@@ -246,6 +246,195 @@ function isProductionTeamInviteRequest(request: any) {
   );
 }
 
+function isProductionTeamApplicationRequest(request: any) {
+  const eventDetails =
+    request?.event_details && typeof request.event_details === "object"
+      ? request.event_details
+      : {};
+
+  const receiverEntityType = String(eventDetails?.receiver_entity_type || "")
+    .trim()
+    .toLowerCase();
+
+  return (
+    receiverEntityType === "production_team" &&
+    getListingRequestKind(eventDetails) === "application"
+  );
+}
+
+function getProductionTeamIdFromRequest(request: any) {
+  const eventDetails =
+    request?.event_details && typeof request.event_details === "object"
+      ? request.event_details
+      : {};
+
+  const directTeamId = toNonEmptyString(eventDetails.production_team_id);
+  if (directTeamId) return directTeamId;
+
+  const senderEntityType = String(eventDetails.sender_entity_type || "")
+    .trim()
+    .toLowerCase();
+  const receiverEntityType = String(eventDetails.receiver_entity_type || "")
+    .trim()
+    .toLowerCase();
+
+  if (senderEntityType === "production_team") {
+    return toNonEmptyString(eventDetails.sender_entity_id);
+  }
+
+  if (receiverEntityType === "production_team") {
+    return toNonEmptyString(eventDetails.receiver_entity_id);
+  }
+
+  return null;
+}
+
+async function addProductionTeamMember(
+  supabaseAdmin: any,
+  teamId: string,
+  userId: string,
+) {
+  const { error } = await supabaseAdmin
+    .from("production_team_members")
+    .insert({
+      team_id: teamId,
+      user_id: userId,
+      role: "member",
+    });
+
+  if (error) {
+    if (error.code === "23505") {
+      return { added: false, alreadyMember: true };
+    }
+    throw error;
+  }
+
+  return { added: true, alreadyMember: false };
+}
+
+async function addAcceptedProductionRosterAndMembership(
+  supabaseAdmin: any,
+  requestRow: any,
+  productionTeamId: string,
+) {
+  let rosterAdded = false;
+  let alreadyOnRoster = false;
+  let memberAdded = false;
+  let alreadyMember = false;
+
+  const eventDetails =
+    requestRow?.event_details && typeof requestRow.event_details === "object"
+      ? requestRow.event_details
+      : {};
+  const senderEntityType = String(eventDetails.sender_entity_type || "")
+    .trim()
+    .toLowerCase();
+
+  if (requestRow.group_id) {
+    const { data: groupData, error: groupError } = await supabaseAdmin
+      .from("groups")
+      .select("id, owner_id, name, group_type")
+      .eq("id", requestRow.group_id)
+      .maybeSingle();
+
+    if (groupError) {
+      throw groupError;
+    }
+
+    if (!groupData) {
+      throw new Error("Invite group not found");
+    }
+
+    const rosterKind = groupData.group_type === "duo" ? "duo" : "group";
+
+    const { error: rosterInsertError } = await supabaseAdmin
+      .from("production_team_roster")
+      .insert({
+        team_id: productionTeamId,
+        entity_kind: rosterKind,
+        group_id: requestRow.group_id,
+        added_by_user_id: requestRow.sender_id,
+      });
+
+    if (rosterInsertError) {
+      if (rosterInsertError.code === "23505") {
+        alreadyOnRoster = true;
+      } else {
+        throw rosterInsertError;
+      }
+    } else {
+      rosterAdded = true;
+    }
+
+    if (groupData.owner_id) {
+      const memberResult = await addProductionTeamMember(
+        supabaseAdmin,
+        productionTeamId,
+        groupData.owner_id,
+      );
+      memberAdded = memberResult.added;
+      alreadyMember = memberResult.alreadyMember;
+    }
+  } else {
+    const profileId =
+      senderEntityType === "production_team"
+        ? requestRow.receiver_id
+        : requestRow.sender_id;
+
+    const { data: profileData, error: profileError } = await supabaseAdmin
+      .from("profiles")
+      .select("id, full_name, role")
+      .eq("id", profileId)
+      .maybeSingle();
+
+    if (profileError) {
+      throw profileError;
+    }
+
+    if (!profileData) {
+      throw new Error("Musician profile not found");
+    }
+
+    if ((profileData.role || "").toLowerCase() !== "musician") {
+      throw new Error("Only musician profiles can join a production team");
+    }
+
+    const { error: rosterInsertError } = await supabaseAdmin
+      .from("production_team_roster")
+      .insert({
+        team_id: productionTeamId,
+        entity_kind: "musician",
+        profile_id: profileId,
+        added_by_user_id: requestRow.sender_id,
+      });
+
+    if (rosterInsertError) {
+      if (rosterInsertError.code === "23505") {
+        alreadyOnRoster = true;
+      } else {
+        throw rosterInsertError;
+      }
+    } else {
+      rosterAdded = true;
+    }
+
+    const memberResult = await addProductionTeamMember(
+      supabaseAdmin,
+      productionTeamId,
+      profileId,
+    );
+    memberAdded = memberResult.added;
+    alreadyMember = memberResult.alreadyMember;
+  }
+
+  return {
+    rosterAdded,
+    alreadyOnRoster,
+    memberAdded,
+    alreadyMember,
+  };
+}
+
 
 serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
@@ -400,12 +589,46 @@ serve(async (req: Request) => {
         toNonEmptyString(requestRow.group_id),
       );
 
-      const canRespond =
-        requestRow.receiver_id === authUser.id ||
-        (groupRecord?.owner_id && groupRecord.owner_id === authUser.id);
+      const isProductionTeamApplication = isProductionTeamApplicationRequest(requestRow);
+      const productionTeamApplicationId = isProductionTeamApplication
+        ? getProductionTeamIdFromRequest(requestRow)
+        : null;
+
+      if (isProductionTeamApplication && !productionTeamApplicationId) {
+        return jsonResponse({ error: "Application is missing a production team reference" }, 400);
+      }
+
+      const productionTeamManager = productionTeamApplicationId
+        ? await getTeamManagerMembership(supabaseAdmin, productionTeamApplicationId, authUser.id)
+        : null;
+      const canRespond = productionTeamApplicationId
+        ? requestRow.receiver_id === authUser.id || !!productionTeamManager
+        : requestRow.receiver_id === authUser.id ||
+          (groupRecord?.owner_id && groupRecord.owner_id === authUser.id);
 
       if (!canRespond) {
         return jsonResponse({ error: "Only the request recipient can respond" }, 403);
+      }
+
+      let productionAcceptanceResult: any = null;
+      if (decision === "accepted" && productionTeamApplicationId) {
+        const productionTeamId = productionTeamApplicationId;
+
+        try {
+          productionAcceptanceResult = await addAcceptedProductionRosterAndMembership(
+            supabaseAdmin,
+            requestRow,
+            productionTeamId,
+          );
+        } catch (acceptanceError: any) {
+          return jsonResponse(
+            { error: acceptanceError.message || "Failed to add applicant to production team" },
+            acceptanceError.message === "Invite group not found" ||
+              acceptanceError.message === "Musician profile not found"
+              ? 404
+              : 500,
+          );
+        }
       }
 
       const { data: updatedRequest, error: updateError } = await supabaseAdmin
@@ -466,7 +689,18 @@ serve(async (req: Request) => {
         );
       }
 
-      return jsonResponse({ success: true, request: updatedRequest });
+      return jsonResponse({
+        success: true,
+        request: updatedRequest,
+        ...(productionAcceptanceResult
+          ? {
+              roster_added: productionAcceptanceResult.rosterAdded,
+              already_on_roster: productionAcceptanceResult.alreadyOnRoster,
+              member_added: productionAcceptanceResult.memberAdded,
+              already_member: productionAcceptanceResult.alreadyMember,
+            }
+          : {}),
+      });
     }
 
     // ================================================================
@@ -859,6 +1093,8 @@ serve(async (req: Request) => {
       let receiverProfile: any = null;
       let rosterAdded = false;
       let alreadyOnRoster = false;
+      let memberAdded = false;
+      let alreadyMember = false;
 
       if (decision === "accepted") {
         if (requestRow.group_id) {
@@ -881,6 +1117,16 @@ serve(async (req: Request) => {
             }
           } else {
             rosterAdded = true;
+          }
+
+          if (groupRecord?.owner_id) {
+            const memberResult = await addProductionTeamMember(
+              supabaseAdmin,
+              productionTeamId,
+              groupRecord.owner_id,
+            );
+            memberAdded = memberResult.added;
+            alreadyMember = memberResult.alreadyMember;
           }
         } else {
           const { data: profileData, error: profileError } = await supabaseAdmin
@@ -921,6 +1167,14 @@ serve(async (req: Request) => {
           } else {
             rosterAdded = true;
           }
+
+          const memberResult = await addProductionTeamMember(
+            supabaseAdmin,
+            productionTeamId,
+            requestRow.receiver_id,
+          );
+          memberAdded = memberResult.added;
+          alreadyMember = memberResult.alreadyMember;
         }
       }
 
@@ -970,6 +1224,8 @@ serve(async (req: Request) => {
         request: updatedRequest,
         roster_added: rosterAdded,
         already_on_roster: alreadyOnRoster,
+        member_added: memberAdded,
+        already_member: alreadyMember,
       });
     }
 

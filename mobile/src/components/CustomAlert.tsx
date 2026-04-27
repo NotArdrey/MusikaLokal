@@ -75,8 +75,8 @@ export default function CustomAlert({
       !firstButton.onPress &&
       (!firstButton.style || firstButton.style === "default");
 
-    return !forceModal && hasSingleButton && isDefaultOkButton;
-  }, [buttons, forceModal]);
+    return !forceModal && !hasStructuredMessage && hasSingleButton && isDefaultOkButton;
+  }, [buttons, forceModal, hasStructuredMessage]);
 
   useEffect(() => {
     if (!visible || !shouldUseTopToast) return;
