@@ -250,6 +250,9 @@ const buildDateOverrideReason = (
   return `${baseReason} [session_type:${sessionType}]`;
 };
 
+const buildWeeklyScheduleReason = (sessionType: WeeklySessionType): string =>
+  `Weekly schedule [session_type:${sessionType}]`;
+
 const getDefaultWeeklySessionType = (
   type: "Rehearsal" | "Recording" | "Both",
 ): WeeklySessionType => getDefaultDateOverrideSessionType(type);
@@ -263,10 +266,6 @@ const parseWeeklySessionType = (
   reason: unknown,
   fallback: WeeklySessionType = "both",
 ): WeeklySessionType => parseDateOverrideSessionType(reason, fallback);
-
-const buildWeeklyScheduleReason = (
-  sessionType: WeeklySessionType,
-): string => `Weekly schedule [session_type:${sessionType}]`;
 
 const inferStudioTypeFromRows = (
   rows: unknown[],
@@ -306,7 +305,6 @@ export default function EditStudioScreen() {
   >("Both");
   const [recordingSongsPerBlock, setRecordingSongsPerBlock] = useState("");
   const [recordingHoursPerBlock, setRecordingHoursPerBlock] = useState("");
-  const [recordingRateNegotiable, setRecordingRateNegotiable] = useState(false);
   const [pax, setPax] = useState("");
 
   // Promotions state
@@ -883,40 +881,40 @@ export default function EditStudioScreen() {
   };
 
   const fetchStudioDetails = async () => {
-    console.log("ðŸ”„ ===== FETCH STUDIO DETAILS STARTED =====");
-    console.log("ðŸ”„ Timestamp:", new Date().toISOString());
-    console.log("ðŸ”„ Studio ID (raw):", id);
-    console.log("ðŸ”„ Studio ID type:", typeof id);
-    console.log("ðŸ”„ Is Array?:", Array.isArray(id));
+    console.log("🔄 ===== FETCH STUDIO DETAILS STARTED =====");
+    console.log("🔄 Timestamp:", new Date().toISOString());
+    console.log("🔄 Studio ID (raw):", id);
+    console.log("🔄 Studio ID type:", typeof id);
+    console.log("🔄 Is Array?:", Array.isArray(id));
 
     try {
       setLoading(true);
-      console.log("ðŸ”„ Loading state set to true");
+      console.log("🔄 Loading state set to true");
 
       const {
         data: { user },
       } = await supabase.auth.getUser();
-      console.log("ðŸ‘¤ User fetched:", user?.id);
+      console.log("👤 User fetched:", user?.id);
 
       if (!user) {
-        console.error("âŒ No user found, redirecting to login");
+        console.error("❌ No user found, redirecting to login");
         router.replace("/");
         return;
       }
 
       // Ensure id is a string, not an array
       const studioId = Array.isArray(id) ? id[0] : id;
-      console.log("ðŸŽ¯ Studio ID (processed):", studioId);
-      console.log("ðŸŽ¯ Studio ID type after processing:", typeof studioId);
+      console.log("🎯 Studio ID (processed):", studioId);
+      console.log("🎯 Studio ID type after processing:", typeof studioId);
 
       if (!studioId) {
-        console.error("âŒ Invalid studio ID after processing");
+        console.error("❌ Invalid studio ID after processing");
         showAlert("warning", "Invalid Studio", "Invalid studio ID. Please try again.");
         router.replace("/home");
         return;
       }
 
-      console.log("ðŸ“¡ Calling edge function with params:", {
+      console.log("📡 Calling edge function with params:", {
         action: "fetch_one",
         type: "studio",
         id: studioId,
@@ -968,7 +966,7 @@ export default function EditStudioScreen() {
           .maybeSingle(),
         supabase
           .from('studio_operating_hours')
-          .select('day_of_week, is_open, open_time, close_time, slot_order')
+          .select('*')
           .eq('studio_id', studioId)
           .eq('is_open', true)
           .order('day_of_week', { ascending: true })
@@ -981,18 +979,18 @@ export default function EditStudioScreen() {
       ]);
 
       console.log("===== EDGE FUNCTION RESPONSE =====");
-      console.log("ðŸ“¥ Response timestamp:", new Date().toISOString());
-      console.log("ðŸ“¥ Error object:", baseError);
-      console.log("ðŸ“¥ Data object:", baseData);
-      console.log("ðŸ“¥ Data type:", typeof baseData);
-      console.log("ðŸ“¥ Data is null?:", baseData === null);
-      console.log("ðŸ“¥ Data is undefined?:", baseData === undefined);
-      console.log("ðŸ“¥ Data is array?:", Array.isArray(baseData));
-      console.log("ðŸ“¥ Data keys:", baseData ? Object.keys(baseData) : "NO DATA");
-      console.log("ðŸ“¥ Data stringified:", JSON.stringify(baseData, null, 2));
+      console.log("📥 Response timestamp:", new Date().toISOString());
+      console.log("📥 Error object:", baseError);
+      console.log("📥 Data object:", baseData);
+      console.log("📥 Data type:", typeof baseData);
+      console.log("📥 Data is null?:", baseData === null);
+      console.log("📥 Data is undefined?:", baseData === undefined);
+      console.log("📥 Data is array?:", Array.isArray(baseData));
+      console.log("📥 Data keys:", baseData ? Object.keys(baseData) : "NO DATA");
+      console.log("📥 Data stringified:", JSON.stringify(baseData, null, 2));
 
       if (baseError) {
-        console.error("âŒ Base studio query returned error:", baseError);
+        console.error("❌ Base studio query returned error:", baseError);
         throw baseError;
       }
 
@@ -1089,7 +1087,7 @@ export default function EditStudioScreen() {
 
       // If no data returned, user doesn't own this studio
       if (!baseData) {
-        console.error("âŒ No data returned from edge function");
+        console.error("❌ No data returned from edge function");
         showAlert(
           "warning",
           "Not Found",
@@ -1123,19 +1121,18 @@ export default function EditStudioScreen() {
           studioSettingsData?.recording_hours_per_block ??
           studioSettingsData?.min_booking_duration_hours ??
           3,
-        recording_rate_negotiable:
-          (studioSettingsData as any)?.recording_rate_negotiable ?? false,
+        recording_rate_negotiable: false,
       } as any;
 
-      console.log("âœ… ===== DATA VALIDATION PASSED =====");
+      console.log("✅ ===== DATA VALIDATION PASSED =====");
       console.log(
-        "ðŸ“¦ Full studio data received:",
+        "📦 Full studio data received:",
         JSON.stringify(data, null, 2),
       );
-      console.log("ðŸ“¦ Data field count:", Object.keys(data).length);
+      console.log("📦 Data field count:", Object.keys(data).length);
 
       // Log each critical field
-      console.log("ðŸ“¦ Field Analysis:");
+      console.log("📦 Field Analysis:");
       console.log("  - name:", data.name, "(type:", typeof data.name, ")");
       console.log(
         "  - description:",
@@ -1245,31 +1242,31 @@ export default function EditStudioScreen() {
       console.log("  - off_peak_multiplier:", data.off_peak_multiplier);
       console.log("  - off_peak_dates:", data.off_peak_dates);
 
-      console.log("ðŸ”§ ===== SETTING STATE VALUES =====");
+      console.log("🔧 ===== SETTING STATE VALUES =====");
 
-      console.log("ðŸ”§ Setting studioName to:", data.name);
+      console.log("🔧 Setting studioName to:", data.name);
       setStudioName(data.name);
 
       console.log(
-        "ðŸ”§ Setting description to:",
+        "🔧 Setting description to:",
         data.description?.substring(0, 50),
       );
       setDescription(data.description);
 
-      console.log("ðŸ”§ Setting address to:", data.address);
+      console.log("🔧 Setting address to:", data.address);
       setAddress(data.address);
 
-      console.log("ðŸ”§ Setting latitude to:", data.latitude || null);
+      console.log("🔧 Setting latitude to:", data.latitude || null);
       setLatitude(data.latitude || null);
 
-      console.log("ðŸ”§ Setting longitude to:", data.longitude || null);
+      console.log("🔧 Setting longitude to:", data.longitude || null);
       setLongitude(data.longitude || null);
 
       // Load dynamic pricing
       const rehearsalValue =
         data.rehearsal_rate?.toString() || data.hourly_rate?.toString() || "";
       console.log(
-        "ðŸ”§ Setting rehearsalRate to:",
+        "🔧 Setting rehearsalRate to:",
         rehearsalValue,
         "(from rehearsal_rate:",
         data.rehearsal_rate,
@@ -1280,11 +1277,11 @@ export default function EditStudioScreen() {
       setRehearsalRate(rehearsalValue);
 
       const recordingValue = data.recording_rate?.toString() || "";
-      console.log("ðŸ”§ Setting recordingRate to:", recordingValue);
+      console.log("🔧 Setting recordingRate to:", recordingValue);
       setRecordingRate(recordingValue);
 
       const typeValue = data.type || "Both";
-      console.log("ðŸ”§ Setting studioType to:", typeValue);
+      console.log("🔧 Setting studioType to:", typeValue);
       setStudioType(typeValue);
 
       const loadedSongsPerBlock = parsePositiveInteger(
@@ -1301,11 +1298,10 @@ export default function EditStudioScreen() {
         loadedHoursPerBlock ? String(loadedHoursPerBlock) : "",
       );
 
-      setRecordingRateNegotiable(Boolean(data.recording_rate_negotiable));
 
       const paxValue = data.pax?.toString() || "";
       console.log(
-        "ðŸ”§ Setting pax to:",
+        "🔧 Setting pax to:",
         paxValue,
         "(original value:",
         data.pax,
@@ -1314,44 +1310,44 @@ export default function EditStudioScreen() {
         ")",
       );
       setPax(paxValue);
-      console.log("âœ… setPax STATE UPDATE completed");
+      console.log("✅ setPax STATE UPDATE completed");
 
-      console.log("ðŸ”§ Setting amenities to:", data.amenities || []);
+      console.log("🔧 Setting amenities to:", data.amenities || []);
       setAmenities(data.amenities || []);
 
-      console.log("ðŸ”§ Setting contractUrl to:", data.contract_url || "");
+      console.log("🔧 Setting contractUrl to:", data.contract_url || "");
       setContractUrl(data.contract_url || "");
       if (data.contract_url) {
         const fileName = data.contract_url.split("/").pop() || "Contract.pdf";
-        console.log("ðŸ”§ Setting contractFileName to:", fileName);
+        console.log("🔧 Setting contractFileName to:", fileName);
         setContractFileName(decodeURIComponent(fileName));
       }
 
-      console.log("ðŸ”§ Setting businessPermitUrl to:", data.business_permit_url || "");
+      console.log("🔧 Setting businessPermitUrl to:", data.business_permit_url || "");
       setBusinessPermitUrl(data.business_permit_url || "");
       setPermitStatus(String(data.permit_status || "approved").toLowerCase());
       setPermitRejectionReason(data.permit_rejection_reason || "");
       if (data.business_permit_url) {
         const fileName = data.business_permit_url.split("/").pop() || "BusinessPermit.pdf";
-        console.log("ðŸ”§ Setting businessPermitFileName to:", fileName);
+        console.log("🔧 Setting businessPermitFileName to:", fileName);
         setBusinessPermitFileName(decodeURIComponent(fileName));
       }
 
       // Load equipment/instruments from instruments JSONB
-      console.log("ðŸŽ¸ ===== PARSING INSTRUMENTS =====");
-      console.log("ðŸŽ¸ Raw data.instruments:", data.instruments);
-      console.log("ðŸŽ¸ Type of data.instruments:", typeof data.instruments);
-      console.log("ðŸŽ¸ Is Array?:", Array.isArray(data.instruments));
+      console.log("🎸 ===== PARSING INSTRUMENTS =====");
+      console.log("🎸 Raw data.instruments:", data.instruments);
+      console.log("🎸 Type of data.instruments:", typeof data.instruments);
+      console.log("🎸 Is Array?:", Array.isArray(data.instruments));
 
       const instrumentsData = Array.isArray(data.instruments)
         ? data.instruments
         : [];
       console.log(
-        "ðŸŽ¸ Processed instrumentsData:",
+        "🎸 Processed instrumentsData:",
         JSON.stringify(instrumentsData, null, 2),
       );
-      console.log("ðŸŽ¸ instrumentsData array length:", instrumentsData.length);
-      console.log("ðŸŽ¸ instrumentsData items:");
+      console.log("🎸 instrumentsData array length:", instrumentsData.length);
+      console.log("🎸 instrumentsData items:");
       instrumentsData.forEach((item: any, index: number) => {
         console.log(`  [${index}]:`, {
           name: item?.name,
@@ -1368,11 +1364,11 @@ export default function EditStudioScreen() {
         INSTRUMENT_OPTIONS.map((item) => [item.name, item.image]),
       );
 
-      console.log("ðŸŽ¸ ===== FILTERING EQUIPMENT ITEMS =====");
+      console.log("🎸 ===== FILTERING EQUIPMENT ITEMS =====");
       const equipmentItems = instrumentsData
         .filter((item: any) => {
           if (!item || typeof item !== "object") {
-            console.log("ðŸŽ¸ Skipping invalid item:", item);
+            console.log("🎸 Skipping invalid item:", item);
             return false;
           }
 
@@ -1388,14 +1384,14 @@ export default function EditStudioScreen() {
 
           if (hasQuantity || hasDescription) {
             console.log(
-              `ðŸŽ¸ Treating "${name}" as equipment (has quantity/description)`
+              `🎸 Treating "${name}" as equipment (has quantity/description)`
             );
             return true;
           }
 
           const presetImage = presetLookup.get(name);
           if (!presetImage) {
-            console.log(`ðŸŽ¸ Treating "${name}" as equipment (not a preset)`);
+            console.log(`🎸 Treating "${name}" as equipment (not a preset)`);
             return true;
           }
 
@@ -1403,7 +1399,7 @@ export default function EditStudioScreen() {
           const isCustomImage = image.length > 0 && image !== presetImage;
           if (isCustomImage) {
             console.log(
-              `ðŸŽ¸ Treating "${name}" as equipment (custom image)`
+              `🎸 Treating "${name}" as equipment (custom image)`
             );
           }
           return isCustomImage;
@@ -1419,28 +1415,28 @@ export default function EditStudioScreen() {
             description: eq.description || "",
             image: eq.image || "",
           };
-          console.log(`ðŸŽ¸ Mapped equipment [${index}]:`, mapped);
+          console.log(`🎸 Mapped equipment [${index}]:`, mapped);
           return mapped;
         });
       console.log(
-        "ðŸŽ¸ Final filtered equipment items count:",
+        "🎸 Final filtered equipment items count:",
         equipmentItems.length,
       );
       console.log(
-        "ðŸŽ¸ Final filtered equipment items:",
+        "🎸 Final filtered equipment items:",
         JSON.stringify(equipmentItems, null, 2),
       );
 
-      console.log("ðŸŽ¸ ===== FILTERING PRESET ITEMS =====");
+      console.log("🎸 ===== FILTERING PRESET ITEMS =====");
       const presetItems = instrumentsData
         .filter((item: any) => {
           if (!item || typeof item !== "object") {
-            console.log("ðŸŽ¸ Preset: Skipping invalid item:", item);
+            console.log("🎸 Preset: Skipping invalid item:", item);
             return false;
           }
           const name = typeof item.name === "string" ? item.name.trim() : "";
           if (!name) {
-            console.log("ðŸŽ¸ Preset: Skipping item without name:", item);
+            console.log("🎸 Preset: Skipping item without name:", item);
             return false;
           }
 
@@ -1448,7 +1444,7 @@ export default function EditStudioScreen() {
           const presetImage = presetLookup.get(name);
           const willInclude = !!presetImage && image === presetImage;
           console.log(
-            `ðŸŽ¸ Preset: Evaluating "${name}": willInclude=${willInclude}`,
+            `🎸 Preset: Evaluating "${name}": willInclude=${willInclude}`,
           );
           return willInclude;
         })
@@ -1457,24 +1453,24 @@ export default function EditStudioScreen() {
             name: item.name,
             image: item.image,
           };
-          console.log("ðŸŽ¸ Preset: Mapped item:", mapped);
+          console.log("🎸 Preset: Mapped item:", mapped);
           return mapped;
         });
-      console.log("ðŸŽ¸ Final filtered preset items count:", presetItems.length);
+      console.log("🎸 Final filtered preset items count:", presetItems.length);
       console.log(
-        "ðŸŽ¸ Final filtered preset items:",
+        "🎸 Final filtered preset items:",
         JSON.stringify(presetItems, null, 2),
       );
 
       // Always set equipment even if length is 0 to clear old data
       console.log(
-        "ðŸ”§ Setting equipment state with",
+        "🔧 Setting equipment state with",
         equipmentItems.length,
         "items",
       );
       setEquipment(equipmentItems);
       console.log(
-        "âœ… setEquipment STATE UPDATE completed with",
+        "✅ setEquipment STATE UPDATE completed with",
         equipmentItems.length,
         "items",
       );
@@ -1521,6 +1517,8 @@ export default function EditStudioScreen() {
         .from("studio_date_overrides")
         .select("*")
         .eq("studio_id", studioId)
+        .order("override_date", { ascending: true })
+        .order("slot_order", { ascending: true })
         .gte("override_date", new Date().toISOString().split("T")[0]); // Only future dates
 
       if (!overridesError && dateOverrides && dateOverrides.length > 0) {
@@ -1546,29 +1544,30 @@ export default function EditStudioScreen() {
         );
         dateOverrides.forEach((override: any) => {
           if (override.override_date) {
-            calendarDates[override.override_date] = {
-              selected: true,
-              slots:
-                override.is_open && override.open_time && override.close_time
-                  ? [
-                    {
-                      start: convertTo12Hour(override.open_time),
-                      end: convertTo12Hour(override.close_time),
-                    },
-                  ]
-                  : [],
-              sessionType: parseDateOverrideSessionType(
-                override.reason,
-                fallbackSessionType,
-              ),
-            };
+            if (!calendarDates[override.override_date]) {
+              calendarDates[override.override_date] = {
+                selected: true,
+                slots: [],
+                sessionType: parseDateOverrideSessionType(
+                  override.reason,
+                  fallbackSessionType,
+                ),
+              };
+            }
+
+            if (override.is_open && override.open_time && override.close_time) {
+              calendarDates[override.override_date].slots.push({
+                start: convertTo12Hour(override.open_time),
+                end: convertTo12Hour(override.close_time),
+              });
+            }
           }
         });
         setSelectedDates(calendarDates);
         originalSelectedDatesRef.current = JSON.parse(
           JSON.stringify(calendarDates),
         );
-        console.log("ðŸ“… Loaded date overrides:", calendarDates);
+        console.log("📅 Loaded date overrides:", calendarDates);
       } else if (
         data.calendar_availability &&
         Array.isArray(data.calendar_availability)
@@ -1609,7 +1608,7 @@ export default function EditStudioScreen() {
       }
 
       // Load availability
-      console.log("ðŸ“… Loading availability from data:", data.availability);
+      console.log("📅 Loading availability from data:", data.availability);
       if (data.availability && Array.isArray(data.availability)) {
         // Helper function to convert 24-hour to 12-hour format
         const convertTo12Hour = (time24: string) => {
@@ -1637,13 +1636,13 @@ export default function EditStudioScreen() {
             ),
           };
         });
-        console.log("ðŸ“… Loaded availability:", loadedAvailability);
+        console.log("📅 Loaded availability:", loadedAvailability);
         setAvailability(loadedAvailability);
         originalAvailabilityRef.current = JSON.parse(
           JSON.stringify(loadedAvailability),
         );
       } else {
-        console.log("ðŸ“… No availability data, using default empty schedule");
+        console.log("📅 No availability data, using default empty schedule");
         // Initialize with empty schedule if no availability data
         const defaultAvailability = daysOfWeek.map((day) => ({
           day,
@@ -1657,50 +1656,50 @@ export default function EditStudioScreen() {
       }
 
       // Load preset instruments
-      console.log("ðŸ”§ Checking preset items for selectedInstruments update");
+      console.log("🔧 Checking preset items for selectedInstruments update");
       if (presetItems.length > 0) {
         console.log(
-          "ðŸ”§ Setting selectedInstruments with",
+          "🔧 Setting selectedInstruments with",
           presetItems.length,
           "items:",
           presetItems,
         );
         setSelectedInstruments(presetItems);
         console.log(
-          "âœ… setSelectedInstruments STATE UPDATE completed with",
+          "✅ setSelectedInstruments STATE UPDATE completed with",
           presetItems.length,
           "items",
         );
       } else {
         console.log(
-          "âš ï¸ No preset items to set, selectedInstruments will remain empty",
+          "⚠️ No preset items to set, selectedInstruments will remain empty",
         );
       }
 
-      console.log("ðŸ”§ Setting images - raw data.images:", data.images);
-      console.log("ðŸ”§ Images array length:", data.images?.length || 0);
+      console.log("🔧 Setting images - raw data.images:", data.images);
+      console.log("🔧 Images array length:", data.images?.length || 0);
       setSelectedImages(data.images || []);
       console.log(
-        "âœ… setSelectedImages STATE UPDATE completed with",
+        "✅ setSelectedImages STATE UPDATE completed with",
         (data.images || []).length,
         "images",
       );
 
       if (data.images && data.images.length > 0) {
-        console.log("ðŸ”§ Setting thumbnailIndex to 0");
+        console.log("🔧 Setting thumbnailIndex to 0");
         setThumbnailIndex(0);
-        console.log("âœ… setThumbnailIndex STATE UPDATE completed");
+        console.log("✅ setThumbnailIndex STATE UPDATE completed");
       } else {
-        console.log("âš ï¸ No images available, thumbnailIndex not updated");
+        console.log("⚠️ No images available, thumbnailIndex not updated");
       }
-      console.log("âœ… ===== FETCH STUDIO DETAILS COMPLETED SUCCESSFULLY =====");
-      console.log("âœ… Timestamp:", new Date().toISOString());
+      console.log("✅ ===== FETCH STUDIO DETAILS COMPLETED SUCCESSFULLY =====");
+      console.log("✅ Timestamp:", new Date().toISOString());
     } catch (e) {
-      console.error("âŒ ===== FETCH STUDIO DETAILS FAILED =====");
-      console.error("âŒ Error timestamp:", new Date().toISOString());
-      console.error("âŒ Error object:", e);
-      console.error("âŒ Error message:", (e as any)?.message);
-      console.error("âŒ Error stack:", (e as any)?.stack);
+      console.error("❌ ===== FETCH STUDIO DETAILS FAILED =====");
+      console.error("❌ Error timestamp:", new Date().toISOString());
+      console.error("❌ Error object:", e);
+      console.error("❌ Error message:", (e as any)?.message);
+      console.error("❌ Error stack:", (e as any)?.stack);
       showAlert("warning", "Couldn't Load Details", "Failed to load studio details.");
       router.replace("/home");
     } finally {
@@ -2227,13 +2226,13 @@ export default function EditStudioScreen() {
       }
 
       // Check for booking conflicts before saving
-      console.log("ðŸ” Checking for booking conflicts...");
+      console.log("🔍 Checking for booking conflicts...");
 
       const { conflicts, conflictingHoldCount } =
         await findScheduleConflictsForEditedState(studioId);
 
       if (conflicts.length > 0) {
-        console.log("âš ï¸ Found conflicts:", conflicts.length);
+        console.log("⚠️ Found conflicts:", conflicts.length);
         setConflictingBookings(conflicts);
         setConflictModalVisible(true);
         setSaving(false);
@@ -2252,7 +2251,7 @@ export default function EditStudioScreen() {
 
       await executeSave();
     } catch (e: any) {
-      console.error("âŒ Error checking bookings:", e);
+      console.error("❌ Error checking bookings:", e);
       showAlert(
         "warning",
         "Couldn't Save Studio",
@@ -2754,7 +2753,7 @@ export default function EditStudioScreen() {
             parsePositiveInteger(recordingSongsPerBlock) || 1,
           recording_hours_per_block:
             parsePositiveDecimal(recordingHoursPerBlock) || 3,
-          recording_rate_negotiable: recordingRateNegotiable,
+          recording_rate_negotiable: false,
         },
       };
 
@@ -2763,15 +2762,15 @@ export default function EditStudioScreen() {
         JSON.stringify(availability, null, 2),
       );
       console.log(
-        "ðŸ“… FILTERED availability (days with slots):",
+        "📅 FILTERED availability (days with slots):",
         payload.availability,
       );
       console.log(
-        "ðŸ“… Number of days with availability:",
+        "📅 Number of days with availability:",
         payload.availability.length,
       );
       console.log(
-        "ðŸ”µ Updating studio with payload:",
+        "🔵 Updating studio with payload:",
         JSON.stringify(
           {
             action: "update",
@@ -2811,11 +2810,11 @@ export default function EditStudioScreen() {
         .select()
         .single();
 
-      console.log("ðŸ”µ Response data:", studioData);
-      console.log("ðŸ”µ Response error:", updateError);
+      console.log("🔵 Response data:", studioData);
+      console.log("🔵 Response error:", updateError);
 
       if (updateError) {
-        console.error("âŒ Error details:", JSON.stringify(updateError, null, 2));
+        console.error("❌ Error details:", JSON.stringify(updateError, null, 2));
         let alertMessage = `Failed to update studio: ${updateError.message}`;
         if (updateError.hint) alertMessage += `\n\nHint: ${updateError.hint}`;
         if (updateError.details) alertMessage += `\n\nDetails: ${updateError.details}`;
@@ -2911,7 +2910,7 @@ export default function EditStudioScreen() {
             parsePositiveDecimal(payload.booking_settings.recording_hours_per_block) ||
             parsePositiveDecimal(payload.booking_settings.min_booking_duration_hours) ||
             3,
-          recording_rate_negotiable: payload.booking_settings.recording_rate_negotiable ?? false,
+          recording_rate_negotiable: false,
         }, { onConflict: 'studio_id' });
 
       // Update promotions (delete-and-re-insert)
@@ -2944,7 +2943,15 @@ export default function EditStudioScreen() {
       }
 
       // Update operating hours
-      await supabase.from('studio_operating_hours').delete().eq('studio_id', studioId);
+      const { error: deleteOperatingHoursError } = await supabase
+        .from('studio_operating_hours')
+        .delete()
+        .eq('studio_id', studioId);
+      if (deleteOperatingHoursError) {
+        throw new Error(
+          `Failed to clear weekly schedule: ${deleteOperatingHoursError.message}`,
+        );
+      }
 
       const dayMap: { [key: string]: number } = {
         'Sunday': 0, 'Monday': 1, 'Tuesday': 2, 'Wednesday': 3, 'Thursday': 4, 'Friday': 5, 'Saturday': 6
@@ -2955,10 +2962,6 @@ export default function EditStudioScreen() {
         for (const daySchedule of payload.availability) {
           const dayIndex = dayMap[daySchedule.day];
           if (dayIndex !== undefined && daySchedule.slots && daySchedule.slots.length > 0) {
-            const weeklySessionType = parseWeeklySessionType(
-              daySchedule.session_type,
-              getDefaultWeeklySessionType(studioType),
-            );
             daySchedule.slots.forEach((slot: any, slotIndex: number) => {
               operatingHours.push({
                 studio_id: studioId,
@@ -2967,6 +2970,12 @@ export default function EditStudioScreen() {
                 open_time: slot.start,
                 close_time: slot.end,
                 slot_order: slotIndex,
+                reason: buildWeeklyScheduleReason(
+                  normalizeWeeklySessionType(
+                    daySchedule.session_type,
+                    getDefaultWeeklySessionType(studioType),
+                  ),
+                ),
               });
             });
           }
@@ -2974,28 +2983,59 @@ export default function EditStudioScreen() {
       }
 
       if (operatingHours.length > 0) {
-        await supabase.from('studio_operating_hours').insert(operatingHours);
+        const { error: operatingHoursError } = await supabase
+          .from('studio_operating_hours')
+          .insert(operatingHours);
+        if (operatingHoursError) {
+          throw new Error(
+            `Failed to save weekly schedule: ${operatingHoursError.message}`,
+          );
+        }
       }
 
       // Update calendar date overrides
-      await supabase.from('studio_date_overrides').delete().eq('studio_id', studioId);
+      const { error: deleteDateOverridesError } = await supabase
+        .from('studio_date_overrides')
+        .delete()
+        .eq('studio_id', studioId);
+      if (deleteDateOverridesError) {
+        throw new Error(
+          `Failed to clear calendar availability: ${deleteDateOverridesError.message}`,
+        );
+      }
 
       if (payload.calendar_availability && Array.isArray(payload.calendar_availability) && payload.calendar_availability.length > 0) {
         const dateOverrides = payload.calendar_availability
           .filter((entry: any) => entry.date)
-          .map((entry: any) => {
+          .flatMap((entry: any) => {
             const hasSlots = Array.isArray(entry.slots) && entry.slots.length > 0;
-            return {
+            const slots = hasSlots ? entry.slots : [null];
+            return slots.map((slot: any, slotIndex: number) => ({
               studio_id: studioId,
               override_date: entry.date,
-              is_open: hasSlots,
-              open_time: hasSlots ? entry.slots[0].start : null,
-              close_time: hasSlots ? entry.slots[0].end : null,
-            };
+              is_open: Boolean(slot),
+              open_time: slot ? slot.start : null,
+              close_time: slot ? slot.end : null,
+              slot_order: slotIndex,
+              reason: buildDateOverrideReason(
+                parseDateOverrideSessionType(
+                  entry.session_type,
+                  getDefaultDateOverrideSessionType(studioType),
+                ),
+                Boolean(slot),
+              ),
+            }));
           });
 
         if (dateOverrides.length > 0) {
-          await supabase.from('studio_date_overrides').insert(dateOverrides);
+          const { error: dateOverridesError } = await supabase
+            .from('studio_date_overrides')
+            .insert(dateOverrides);
+          if (dateOverridesError) {
+            throw new Error(
+              `Failed to save calendar availability: ${dateOverridesError.message}`,
+            );
+          }
         }
       }
 
@@ -3006,27 +3046,23 @@ export default function EditStudioScreen() {
         throw new Error("No data returned from server");
       }
 
-      console.log("âœ… Studio Updated successfully");
+      console.log("✅ Studio Updated successfully");
       const successMessage = "Studio updated successfully!";
 
       showAlert("success", "Success", successMessage, [
         {
           text: "OK",
           onPress: () => {
-            if (router.canGoBack()) {
-              router.back();
-            } else {
-              router.push("/manage_studio");
-            }
+            router.replace({ pathname: "/my_studio", params: { refresh: String(Date.now()) } });
           },
         },
       ]);
     } catch (e: any) {
-      console.error("âŒ Error updating studio:", e);
-      console.error("âŒ Error message:", e?.message);
-      console.error("âŒ Error stack:", e?.stack);
+      console.error("❌ Error updating studio:", e);
+      console.error("❌ Error message:", e?.message);
+      console.error("❌ Error stack:", e?.stack);
       console.error(
-        "âŒ Full error object:",
+        "❌ Full error object:",
         JSON.stringify(e, Object.getOwnPropertyNames(e), 2),
       );
       showAlert(
@@ -3870,9 +3906,6 @@ export default function EditStudioScreen() {
                     >
                       Rehearsal
                     </Text>
-                    <View style={{ backgroundColor: '#16A34A', borderRadius: 4, paddingHorizontal: 6, paddingVertical: 2 }}>
-                      <Text style={{ color: '#fff', fontSize: 10, fontFamily: 'Poppins_600SemiBold' }}>FIXED</Text>
-                    </View>
                   </View>
                   <Text
                     style={{
@@ -3881,7 +3914,7 @@ export default function EditStudioScreen() {
                       marginRight: 4,
                     }}
                   >
-                    â‚±
+                    ₱
                   </Text>
                   <TextInput
                     value={rehearsalRate}
@@ -3944,9 +3977,6 @@ export default function EditStudioScreen() {
                     >
                       Recording
                     </Text>
-                    <View style={{ backgroundColor: recordingRateNegotiable ? '#F59E0B' : '#16A34A', borderRadius: 4, paddingHorizontal: 6, paddingVertical: 2 }}>
-                      <Text style={{ color: '#fff', fontSize: 10, fontFamily: 'Poppins_600SemiBold' }}>{recordingRateNegotiable ? 'NEGOTIABLE' : 'FIXED'}</Text>
-                    </View>
                   </View>
                   <Text
                     style={{
@@ -3955,7 +3985,7 @@ export default function EditStudioScreen() {
                       marginRight: 4,
                     }}
                   >
-                    â‚±
+                    ₱
                   </Text>
                   <TextInput
                     value={recordingRate}
@@ -3982,20 +4012,6 @@ export default function EditStudioScreen() {
                     /song
                   </Text>
                 </View>
-
-                <TouchableOpacity
-                  onPress={() => setRecordingRateNegotiable(!recordingRateNegotiable)}
-                  style={{ flexDirection: 'row', alignItems: 'center', marginTop: 10, marginBottom: 6 }}
-                >
-                  <Ionicons
-                    name={recordingRateNegotiable ? 'checkbox' : 'square-outline'}
-                    size={20}
-                    color={recordingRateNegotiable ? colors.primary : colors.textSecondary}
-                  />
-                  <Text style={{ color: colors.textSecondary, fontFamily: 'Poppins_400Regular', fontSize: 12, marginLeft: 6 }}>
-                    Allow clients to negotiate recording rate
-                  </Text>
-                </TouchableOpacity>
 
                 <View style={{ marginTop: 10 }}>
                   <Text
@@ -4190,7 +4206,7 @@ export default function EditStudioScreen() {
                       </Text>
                     </View>
                     <Text style={{ fontFamily: "Poppins_400Regular", color: colors.textSecondary, fontSize: 12, marginTop: 2 }}>
-                      {promo.discount_type === "percentage" ? `${promo.discount_value}% off` : `â‚±${promo.discount_value}/hr off`}
+                      {promo.discount_type === "percentage" ? `${promo.discount_value}% off` : `₱${promo.discount_value}/hr off`}
                       {" "}on {promo.applies_to === "both" ? "all" : promo.applies_to} bookings
                     </Text>
                     {(promo.criteria || promo.minimum_booking_hours || promo.minimum_spend) && (
@@ -4198,16 +4214,16 @@ export default function EditStudioScreen() {
                         {[
                           promo.criteria ? `How to get promo: ${promo.criteria}` : null,
                           promo.minimum_booking_hours ? `Min ${promo.minimum_booking_hours} hr(s)` : null,
-                          promo.minimum_spend ? `Min spend â‚±${promo.minimum_spend}` : null,
+                          promo.minimum_spend ? `Min spend ₱${promo.minimum_spend}` : null,
                         ]
                           .filter(Boolean)
-                          .join(" â€¢ ")}
+                          .join(" • ")}
                       </Text>
                     )}
                     <Text style={{ fontFamily: "Poppins_400Regular", color: colors.textSecondary, fontSize: 11, marginTop: 2 }}>
                       {promo.is_permanent
                         ? "Always available"
-                        : `${new Date(promo.start_date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })} â€“ ${new Date(promo.end_date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}`}
+                        : `${new Date(promo.start_date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })} – ${new Date(promo.end_date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}`}
                     </Text>
                   </View>
                   <View style={{ flexDirection: "row", gap: 8 , flexWrap: "wrap", minWidth: "100%" }}>
@@ -4396,7 +4412,7 @@ export default function EditStudioScreen() {
                           color: promotionForm.discount_type === dt ? colors.primary : colors.textSecondary,
                         }}
                       >
-                        {dt === "percentage" ? "Percentage (%)" : "Fixed Amount (â‚±)"}
+                        {dt === "percentage" ? "Percentage (%)" : "Fixed Amount (₱)"}
                       </Text>
                     </TouchableOpacity>
                   ))}
@@ -4419,7 +4435,7 @@ export default function EditStudioScreen() {
                   }}
                 >
                   {promotionForm.discount_type === "fixed_amount" && (
-                    <Text style={{ fontFamily: "Poppins_600SemiBold", color: colors.text, marginRight: 4 }}>â‚±</Text>
+                    <Text style={{ fontFamily: "Poppins_600SemiBold", color: colors.text, marginRight: 4 }}>₱</Text>
                   )}
                   <TextInput
                     value={promotionForm.discount_value}
@@ -5645,7 +5661,7 @@ export default function EditStudioScreen() {
                                 marginTop: 8,
                               }}
                             >
-                              âš ï¸ This overrides weekly {dayName} schedule (
+                              ⚠️ This overrides weekly {dayName} schedule (
                               {weeklySchedule.slots[0]?.start} -{" "}
                               {weeklySchedule.slots[0]?.end})
                             </Text>

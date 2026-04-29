@@ -237,7 +237,7 @@ export default function ProductionTeamScreen() {
     }
   };
 
-  // â”€â”€ Team Detail View â”€â”€
+  // ── Team Detail View ──
   if (selectedTeam) {
     const canManage =
       selectedTeam.member_role === "owner" ||
@@ -421,7 +421,7 @@ export default function ProductionTeamScreen() {
     );
   }
 
-  // â”€â”€ Teams List View â”€â”€
+  // ── Teams List View ──
   return (
     <View style={[styles.flex1, { backgroundColor: colors.background }]}>
       <Header title="My Production" />

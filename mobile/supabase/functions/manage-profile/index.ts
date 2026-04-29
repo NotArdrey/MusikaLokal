@@ -196,7 +196,7 @@ serve(async (req: Request) => {
 
         // 4. CREATE PROFILE (Bypass RLS for signup)
         if (action === 'create') {
-            const { userId, email, full_name, role, is_verified, verification_status, didit_session_id, display_name } = params
+            const { userId, email, full_name, role, is_verified, verification_status, didit_session_id } = params
 
             // Validate required parameters
             if (!userId || !email || !role) {
@@ -234,8 +234,7 @@ serve(async (req: Request) => {
                     role,
                     is_verified,
                     verification_status,
-                    didit_session_id,
-                    display_name // Save display_name correctly
+                    didit_session_id
                 })
                 .select()
                 .single()

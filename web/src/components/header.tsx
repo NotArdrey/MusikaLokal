@@ -25,6 +25,10 @@ function Header({ title, transparent, onBackPress, hideBackButton = false, leftC
 
     const pathname = usePathname();
     const [hasUnread, setHasUnread] = useState(false);
+    const isAdminPath = useMemo(
+        () => pathname === "/admin" || pathname.startsWith("/admin/"),
+        [pathname],
+    );
     const isMainNavPath = useMemo(
         () => pathname === "/explore" || pathname === "/home" || pathname === "/manage" || pathname === "/bookings" || pathname === "/ai_suggestions",
         [pathname],
@@ -85,10 +89,14 @@ function Header({ title, transparent, onBackPress, hideBackButton = false, leftC
             if (data) {
                 setHasUnread(data.count > 0);
             }
-        } catch (e) {
+        } catch {
             // Silently ignore errors - user likely not logged in
         }
     };
+
+    if (isAdminPath && isWebDesktop && title.trim().startsWith("Admin")) {
+        return null;
+    }
 
     return (
         <View style={[styles.container, {

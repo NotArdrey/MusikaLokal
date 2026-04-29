@@ -581,7 +581,7 @@ export default function AddGigScreen() {
       };
 
       console.log(
-        "ðŸ”µ Creating gig with payload:",
+        "🔵 Creating gig with payload:",
         JSON.stringify(
           { action: "create", type: "gig", userId: session.user.id, payload },
           null,
@@ -610,11 +610,11 @@ export default function AddGigScreen() {
         .select()
         .single();
 
-      console.log("ðŸ”µ Response data:", JSON.stringify(data, null, 2));
-      console.log("ðŸ”µ Response error:", error);
+      console.log("🔵 Response data:", JSON.stringify(data, null, 2));
+      console.log("🔵 Response error:", error);
 
       if (error) {
-        console.error("âŒ Error details:", JSON.stringify(error, null, 2));
+        console.error("❌ Error details:", JSON.stringify(error, null, 2));
         let alertMessage = `Failed to create gig: ${error.message}`;
         if (error.hint) alertMessage += `\n\nHint: ${error.hint}`;
         if (error.details) alertMessage += `\n\nDetails: ${error.details}`;
@@ -657,13 +657,13 @@ export default function AddGigScreen() {
 
       setNewGigId(data.id);
       setModalVisible(true);
-      console.log("âœ… Gig Created successfully");
+      console.log("✅ Gig Created successfully");
     } catch (e: any) {
-      console.error("âŒ Error creating gig:", e);
-      console.error("âŒ Error message:", e?.message);
-      console.error("âŒ Error stack:", e?.stack);
+      console.error("❌ Error creating gig:", e);
+      console.error("❌ Error message:", e?.message);
+      console.error("❌ Error stack:", e?.stack);
       console.error(
-        "âŒ Full error object:",
+        "❌ Full error object:",
         JSON.stringify(e, Object.getOwnPropertyNames(e), 2),
       );
       showAlert(
@@ -678,7 +678,7 @@ export default function AddGigScreen() {
 
   const handleSuccessRedirect = () => {
     setModalVisible(false);
-    router.push({ pathname: "/bookings", params: { tab: "Pending" } });
+    router.replace({ pathname: "/my_venue", params: { refresh: String(Date.now()) } });
   };
 
   // Start address verification (before gig creation)
@@ -848,11 +848,10 @@ export default function AddGigScreen() {
       showAlert(
         "warning",
         "Verification Error",
-        "Could not start address verification. You can verify your venue address later from settings."
+        "Could not start address verification. You can verify your venue address later from My Venue."
       );
       setAddressVerificationModalVisible(false);
-      // Navigate to manage gig anyway
-      router.replace({ pathname: "/manage_gig", params: { id: newGigId! } });
+      router.replace({ pathname: "/my_venue", params: { refresh: String(Date.now()) } });
     } finally {
       setAddressVerificationLoading(false);
     }
@@ -1551,7 +1550,7 @@ export default function AddGigScreen() {
 
 
               {renderInput(
-                "Payout (PHP)",
+                "Payout (₱)",
                 cost,
                 setCost,
                 "e.g. 5000",
@@ -2920,7 +2919,7 @@ export default function AddGigScreen() {
                       marginTop: 4,
                     }}
                   >
-                    Payout: â‚±{cost}
+                    Payout: ₱{cost}
                   </Text>
                 </View>
 
@@ -3025,7 +3024,7 @@ export default function AddGigScreen() {
                         {soloSlotsNeeded > 0 && (soloPreferredGenres.length > 0 || soloPreferredInstruments.length > 0) && (
                           <Text style={{ color: colors.textSecondary, fontSize: 12, marginLeft: 24 }}>
                             {soloPreferredGenres.length > 0 ? `Genres: ${soloPreferredGenres.join(", ")}` : ""}
-                            {soloPreferredGenres.length > 0 && soloPreferredInstruments.length > 0 ? " â€¢ " : ""}
+                            {soloPreferredGenres.length > 0 && soloPreferredInstruments.length > 0 ? " • " : ""}
                             {soloPreferredInstruments.length > 0 ? `Instruments: ${soloPreferredInstruments.join(", ")}` : ""}
                           </Text>
                         )}
@@ -3041,7 +3040,7 @@ export default function AddGigScreen() {
                         {duoSlotsNeeded > 0 && (duoPreferredGenres.length > 0 || duoPreferredInstruments.length > 0) && (
                           <Text style={{ color: colors.textSecondary, fontSize: 12, marginLeft: 24 }}>
                             {duoPreferredGenres.length > 0 ? `Genres: ${duoPreferredGenres.join(", ")}` : ""}
-                            {duoPreferredGenres.length > 0 && duoPreferredInstruments.length > 0 ? " â€¢ " : ""}
+                            {duoPreferredGenres.length > 0 && duoPreferredInstruments.length > 0 ? " • " : ""}
                             {duoPreferredInstruments.length > 0 ? `Instruments: ${duoPreferredInstruments.join(", ")}` : ""}
                           </Text>
                         )}
@@ -3057,7 +3056,7 @@ export default function AddGigScreen() {
                         {bandSlotsNeeded > 0 && (bandPreferredGenres.length > 0 || bandPreferredInstruments.length > 0) && (
                           <Text style={{ color: colors.textSecondary, fontSize: 12, marginLeft: 24 }}>
                             {bandPreferredGenres.length > 0 ? `Genres: ${bandPreferredGenres.join(", ")}` : ""}
-                            {bandPreferredGenres.length > 0 && bandPreferredInstruments.length > 0 ? " â€¢ " : ""}
+                            {bandPreferredGenres.length > 0 && bandPreferredInstruments.length > 0 ? " • " : ""}
                             {bandPreferredInstruments.length > 0 ? `Instruments: ${bandPreferredInstruments.join(", ")}` : ""}
                           </Text>
                         )}

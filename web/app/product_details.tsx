@@ -65,7 +65,6 @@ export default function ProductDetailsScreen() {
   useEffect(() => { fetchProduct(); }, [fetchProduct]);
 
   const currentPrice = selectedVariant?.price ?? product?.price ?? 0;
-  const currency = product?.currency || "PHP";
 
   const handleBuyNow = async () => {
     if (!product) return;
@@ -161,7 +160,7 @@ export default function ProductDetailsScreen() {
 
           <Text style={{ color: colors.text, fontSize: moderateScale(20), fontWeight: "800", marginTop: 16 }}>{product.title}</Text>
           <Text style={{ color: colors.primary, fontSize: moderateScale(22), fontWeight: "800", marginTop: 8 }}>
-            {currency} {Number(currentPrice).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+            ₱{Number(currentPrice).toLocaleString(undefined, { minimumFractionDigits: 2 })}
           </Text>
           {product.description && <Text style={{ color: colors.textSecondary, fontSize: moderateScale(14), lineHeight: 22, marginTop: 10 }}>{product.description}</Text>}
 
@@ -197,7 +196,7 @@ export default function ProductDetailsScreen() {
       <View style={[styles.buyBar, { backgroundColor: cardBg, borderTopColor: borderCol }]}>
         <View style={{ flex: 1 }}>
           <Text style={{ color: colors.textSecondary, fontSize: 12 }}>Total</Text>
-          <Text style={{ color: colors.primary, fontSize: moderateScale(18), fontWeight: "800" }}>{currency} {Number(currentPrice).toLocaleString(undefined, { minimumFractionDigits: 2 })}</Text>
+          <Text style={{ color: colors.primary, fontSize: moderateScale(18), fontWeight: "800" }}>₱{Number(currentPrice).toLocaleString(undefined, { minimumFractionDigits: 2 })}</Text>
         </View>
         <TouchableOpacity style={[styles.buyBtn, { backgroundColor: colors.primary, opacity: ordering ? 0.6 : 1 }]} onPress={handleBuyNow} disabled={ordering}>
           {ordering ? <ActivityIndicator size="small" color="#fff" /> : <Text style={{ color: "#fff", fontWeight: "700", fontSize: moderateScale(15) }}>Buy Now</Text>}

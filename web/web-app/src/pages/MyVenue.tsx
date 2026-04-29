@@ -12,6 +12,19 @@ import { useAuth } from "../context/AuthContext";
 import { useTheme } from "../context/ThemeContext";
 import { supabase } from "../lib/supabase";
 
+const formatPermitStatus = (status: string | null | undefined) => {
+  const normalized = String(status || "pending_review").toLowerCase();
+  if (["approved", "approved_by_admin", "verified"].includes(normalized)) return "Approved";
+  if (normalized === "rejected") return "Rejected";
+  if (normalized === "resubmitted") return "Resubmitted";
+  if (["pending", "pending_review", "in_review", "under_review"].includes(normalized)) return "Pending Review";
+  return normalized
+    .split("_")
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+};
+
 export default function MyVenuePage() {
   const { colors, isDark } = useTheme();
   const { user } = useAuth();
@@ -136,12 +149,12 @@ export default function MyVenuePage() {
                   {/* Permit status badge */}
                   <div className="mt-1.5">
                     <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
-                      g.permit_status === "approved" ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400" :
+                      ["approved", "approved_by_admin", "verified"].includes(normalizedPermitStatus) ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400" :
                       g.permit_status === "rejected" ? "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400" :
                       g.permit_status === "resubmitted" ? "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400" :
                       "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400"
                     }`}>
-                      Permit: {(g.permit_status || "pending_review").replace("_", " ")}
+                      Permit: {formatPermitStatus(g.permit_status)}
                     </span>
                   </div>
                   {isRejected && g.permit_rejection_reason && (
@@ -151,7 +164,7 @@ export default function MyVenuePage() {
                   )}
                   {isPendingLike && (
                     <p className="mt-2 text-xs" style={{ color: colors.textSecondary }}>
-                      Hidden from Home until admin permit approval is completed.
+                      Hidden from Home until permit review is completed.
                     </p>
                   )}
                   <div

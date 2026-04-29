@@ -1150,7 +1150,7 @@ export default function FeedScreen() {
     return { keys, entities };
   }, [session]);
 
-  /* â”€â”€ Data fetching â”€â”€ */
+  /* ── Data fetching ── */
   const fetchFeed = useCallback(async (feedTab: FeedTab, append = false, currentLength = 0) => {
     if (authLoading) {
       return;
@@ -1551,7 +1551,7 @@ export default function FeedScreen() {
     void fetchFeed(tab, true, posts.length);
   };
 
-  /* â”€â”€ Actions â”€â”€ */
+  /* ── Actions ── */
   const handleCreatePost = async () => {
     if (!postBody.trim()) {
       setAlert({ type: "warning", title: "Empty Post", message: "Please write something." });
@@ -1676,7 +1676,7 @@ export default function FeedScreen() {
     }
   };
 
-  /* â”€â”€ Renderers â”€â”€ */
+  /* ── Renderers ── */
 
   const timeAgo = (dateStr: string) => {
     const diff = Date.now() - new Date(dateStr).getTime();
@@ -1954,7 +1954,7 @@ export default function FeedScreen() {
           </View>
         )}
 
-        {/* Action bar (Like Â· Comment Â· Share) */}
+        {/* Action bar (Like · Comment · Share) */}
         <View style={[styles.actionBar, { borderTopColor: divider }]}>
           <TouchableOpacity activeOpacity={1} style={styles.actionBtn} onPress={() => handleReaction(post.id, post.my_reaction)}>
             <Ionicons name={post.my_reaction ? "heart" : "heart-outline"} size={20} color={post.my_reaction ? "#ef4444" : colors.textSecondary} />
@@ -1977,7 +1977,7 @@ export default function FeedScreen() {
     const cardBg = isDark ? "#1E293B" : "#FFFFFF";
     return (
       <>
-        {/* â”€â”€ Search bar trigger â”€â”€ */}
+        {/* ── Search bar trigger ── */}
         <View style={[styles.composerRow, { backgroundColor: cardBg }]}>
           <TouchableOpacity
             style={[
@@ -2114,7 +2114,7 @@ export default function FeedScreen() {
           </View>
         )}
 
-        {/* â”€â”€ Feed tabs â”€â”€ */}
+        {/* ── Feed tabs ── */}
         <View style={[styles.tabRow, { backgroundColor: cardBg, borderBottomColor: isDark ? "#334155" : "#E2E8F0" }]}>
           {(["for_you", "following"] as FeedTab[]).map((t) => (
             <TouchableOpacity activeOpacity={1} key={t} style={[styles.tab, tab === t && { borderBottomColor: colors.primary, borderBottomWidth: 2 }]} onPress={() => setTab(t)}>

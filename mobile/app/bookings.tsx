@@ -222,6 +222,119 @@ const buildConnectionRequestDetailLines = (item: any) =>
     `Status: ${item?.status || "Pending"}`,
   ].filter(Boolean);
 
+const toPaymentAmount = (value: unknown) => {
+  const amount = Number(value);
+  return Number.isFinite(amount) ? amount : 0;
+};
+
+const getBookingIdsForPaymentItem = (item: any): string[] => {
+  const rawIds = Array.isArray(item?.booking_ids)
+    ? item.booking_ids
+    : Array.isArray(item?.bookingIds)
+      ? item.bookingIds
+      : [item?.id];
+
+  const ids = rawIds.filter(Boolean).map((id: any) => String(id));
+  return Array.from(new Set<string>(ids));
+};
+
+const getPaymentItemTotalAmount = (item: any) =>
+  toPaymentAmount(item?.batch_total_cost ?? item?.total_cost ?? item?.payment_amount);
+
+const getPaymentItemDueAmount = (item: any) => {
+  const remainingBalance = toPaymentAmount(item?.remaining_balance);
+  const status = String(item?.payment_status || "").toLowerCase();
+
+  if (remainingBalance > 0) return remainingBalance;
+  if (status === "paid") return 0;
+
+  return getPaymentItemTotalAmount(item);
+};
+
+const getPendingStudioBatchKey = (item: any) => {
+  if (item?.type_id !== "studio_booking") return null;
+  if (item?.raw_status === "pending_relocation" || item?.status === "Relocation Request") return null;
+  if (!item?.studio_id || !item?.user_id || !item?.raw_date) return null;
+
+  const createdAt = Date.parse(String(item?.created_at || ""));
+  if (Number.isNaN(createdAt)) {
+    return item?.checkout_session_id
+      ? `checkout:${item.checkout_session_id}`
+      : `studio:${item.user_id}:${item.studio_id}:${item.raw_date}:no-created`;
+  }
+
+  const createdBucket = Math.floor(createdAt / (2 * 60 * 1000));
+  return `studio:${item.user_id}:${item.studio_id}:${item.raw_date}:${createdBucket}`;
+};
+
+const mergePendingStudioBookingBatch = (items: any[]) => {
+  const sorted = [...items].sort((a, b) =>
+    String(a?.start_time || "").localeCompare(String(b?.start_time || "")),
+  );
+  const first = sorted[0];
+  const last = sorted[sorted.length - 1];
+  const bookingIds = sorted.map((item) => item?.id).filter(Boolean);
+  const totalCost = sorted.reduce(
+    (sum, item) => sum + toPaymentAmount(item?.total_cost ?? item?.payment_amount),
+    0,
+  );
+  const dueAmount = sorted.reduce((sum, item) => sum + getPaymentItemDueAmount(item), 0);
+  const paidAmount = Math.max(0, totalCost - dueAmount);
+  const hasBalanceDue = sorted.some(
+    (item) =>
+      toPaymentAmount(item?.remaining_balance) > 0 ||
+      String(item?.payment_status || "").toLowerCase() === "partial",
+  );
+
+  return {
+    ...first,
+    id: first?.id,
+    booking_ids: bookingIds,
+    batch_items: sorted,
+    batch_count: sorted.length,
+    batch_total_cost: totalCost,
+    checkout_session_id: first?.checkout_session_id || sorted.find((item) => item?.checkout_session_id)?.checkout_session_id,
+    start_time: first?.start_time,
+    end_time: last?.end_time || first?.end_time,
+    duration_hours: sorted.reduce((sum, item) => sum + toPaymentAmount(item?.duration_hours), 0) || first?.duration_hours,
+    total_cost: totalCost || first?.total_cost,
+    payment_amount: hasBalanceDue ? paidAmount : totalCost || first?.payment_amount,
+    remaining_balance: dueAmount,
+    payment_status: hasBalanceDue ? "partial" : first?.payment_status,
+    payment_type: hasBalanceDue ? "downpayment" : first?.payment_type,
+    status: hasBalanceDue ? "Balance Due" : first?.status,
+    date:
+      sorted.length > 1 && first?.raw_date
+        ? `${first.raw_date} • ${first?.start_time || "TBA"} - ${last?.end_time || "TBA"}`
+        : first?.date,
+  };
+};
+
+const groupPendingStudioBookingItems = (items: any[]) => {
+  const grouped = new Map<string, any[]>();
+  const passthrough: any[] = [];
+
+  items.forEach((item) => {
+    const key = getPendingStudioBatchKey(item);
+    if (!key) {
+      passthrough.push(item);
+      return;
+    }
+
+    const existing = grouped.get(key) || [];
+    existing.push(item);
+    grouped.set(key, existing);
+  });
+
+  grouped.forEach((batchItems) => {
+    passthrough.push(
+      batchItems.length > 1 ? mergePendingStudioBookingBatch(batchItems) : batchItems[0],
+    );
+  });
+
+  return passthrough;
+};
+
 const isProductionTeamInviteRequest = (item: any) =>
   item?.type_id === "booking_request" &&
   item?.sender_entity_type === "production_team" &&
@@ -501,11 +614,11 @@ export default function BookingsScreen() {
           appState.current.match(/inactive|background/) &&
           nextAppState === "active"
         ) {
-          debugLog("Ã°Å¸â€œÂ± App returned to foreground");
+          debugLog("📱 App returned to foreground");
 
           // If we were in payment flow, check status and refresh
           if (paymentInProgressRef.current && userId) {
-            debugLog("Ã°Å¸â€™Â³ Checking payment status after return...");
+            debugLog("💳 Checking payment status after return...");
             const bookingId = pendingPaymentBookingId.current;
             paymentInProgressRef.current = false;
             pendingPaymentBookingId.current = null;
@@ -513,7 +626,7 @@ export default function BookingsScreen() {
             // Poll for payment status with retries (webhook might be processing)
             let paymentConfirmed = false;
             for (let attempt = 1; attempt <= 3; attempt++) {
-              debugLog(`Ã°Å¸â€™Â³ Payment status check attempt ${attempt}/3...`);
+              debugLog(`💳 Payment status check attempt ${attempt}/3...`);
               await new Promise((resolve) =>
                 setTimeout(resolve, 1500 * attempt),
               ); // Increasing delay
@@ -531,7 +644,7 @@ export default function BookingsScreen() {
                   // For partial payment (downpayment), stay on Pending; for full payment, go to Upcoming
                   const isPartial = booking.payment_status === "partial" && (booking.remaining_balance || 0) > 0;
                   pendingPaymentBookingId.current = isPartial ? "partial" : null;
-                  debugLog("Ã¢Å“â€¦ Payment confirmed for booking:", bookingId, isPartial ? "(partial)" : "(full)");
+                  debugLog("✅ Payment confirmed for booking:", bookingId, isPartial ? "(partial)" : "(full)");
                   break;
                 }
               } else {
@@ -548,7 +661,7 @@ export default function BookingsScreen() {
                   paymentConfirmed = true;
                   const isPartial = recentPaid[0].payment_status === "partial" && (recentPaid[0].remaining_balance || 0) > 0;
                   pendingPaymentBookingId.current = isPartial ? "partial" : null;
-                  debugLog("Ã¢Å“â€¦ Found recently paid booking");
+                  debugLog("✅ Found recently paid booking");
                   break;
                 }
               }
@@ -561,7 +674,7 @@ export default function BookingsScreen() {
             await fetchBookings(userId);
 
             if (paymentConfirmed) {
-              // Downpayment Ã¢â€ â€™ stay on Pending (balance still due); full payment Ã¢â€ â€™ go to Upcoming
+              // Downpayment → stay on Pending (balance still due); full payment → go to Upcoming
               setActiveTab(wasPartialPayment ? "Pending" : "Upcoming");
             }
           } else if (userId) {
@@ -787,7 +900,7 @@ export default function BookingsScreen() {
       }
 
       channel = liveChannel.subscribe((status: string) => {
-        debugLog("Ã°Å¸â€œÂ¡ Realtime status:", status);
+        debugLog("📡 Realtime status:", status);
       });
     };
 
@@ -979,6 +1092,8 @@ export default function BookingsScreen() {
       const item = {
         id: b.id,
         type_id: "studio_booking",
+        created_at: b.created_at || null,
+        checkout_session_id: b.checkout_session_id || null,
         studio_id: b.studio_id,
         user_id: b.user_id,
         raw_date: b.booking_date,
@@ -1048,8 +1163,8 @@ export default function BookingsScreen() {
       if (b.status === "pending" || b.status === "pending_relocation") {
         fallback.Pending.push(item);
       } else if (b.status === "confirmed" && b.payment_status === "partial" && (b.remaining_balance || 0) > 0) {
-        // Downpayment paid but balance still owed Ã¢â‚¬â€ keep in Pending
-        fallback.Pending.push({ ...item, status: "Downpayment Paid - Balance Due" });
+        // Downpayment paid but balance still owed — keep in Pending
+        fallback.Pending.push({ ...item, status: "Balance Due" });
       } else if (b.status === "confirmed") {
         if (now > endDate) {
           fallback.Review.push({ ...item, status: "Completed" });
@@ -1456,13 +1571,17 @@ export default function BookingsScreen() {
         (item: any) =>
           item.type_id !== "gig_application" && item.type_id !== "booking_request",
       );
+      const groupedStudioPending =
+        role === "musician"
+          ? groupPendingStudioBookingItems(studioPending)
+          : studioPending;
 
       const pendingItems =
         role === "venue-owner"
           ? []
           : role === "musician"
-            ? [...pendingGigApplications, ...pendingConnectionRequests, ...studioPending]
-            : [...pendingConnectionRequests, ...studioPending];
+            ? [...pendingGigApplications, ...pendingConnectionRequests, ...groupedStudioPending]
+            : [...pendingConnectionRequests, ...groupedStudioPending];
 
       pendingItems.sort(
         (a: any, b: any) =>
@@ -1731,7 +1850,7 @@ export default function BookingsScreen() {
     reason?: string,
   ): Promise<boolean> {
     try {
-      debugLog("Ã°Å¸â€œÂ¤ handleStatusUpdate called with:", {
+      debugLog("📤 handleStatusUpdate called with:", {
         bookingId,
         newStatus,
         typeId,
@@ -1754,7 +1873,7 @@ export default function BookingsScreen() {
         error = rpcResult.error;
 
         if (error) {
-          debugLog("Ã¢Å¡Â Ã¯Â¸Â record_booking_attendance failed, falling back to manage-bookings:", error);
+          debugLog("⚠️ record_booking_attendance failed, falling back to manage-bookings:", error);
 
           const invokeFallback = await supabase.functions.invoke("manage-bookings", {
             body: {
@@ -1786,7 +1905,7 @@ export default function BookingsScreen() {
         error = invokeResult.error;
       }
 
-      debugLog("Ã°Å¸â€œÂ¥ handleStatusUpdate response:", { data, error });
+      debugLog("📥 handleStatusUpdate response:", { data, error });
 
       if (error) {
         const errorContext = (error as any)?.context;
@@ -2124,7 +2243,7 @@ export default function BookingsScreen() {
                       needsRpcFallback = true;
                     } else {
                       result = data;
-                      // Edge function caught an internal error Ã¢â‚¬â€ fall through to RPC
+                      // Edge function caught an internal error — fall through to RPC
                       if (result?.code === "DELETE_STUDIO_WITH_STORAGE_FAILED") {
                         needsRpcFallback = true;
                         result = null;
@@ -2785,7 +2904,10 @@ export default function BookingsScreen() {
 
     try {
       setLoading(true);
-      const totalAmount = item.payment_amount || item.total_cost;
+      const bookingIds = getBookingIdsForPaymentItem(item);
+      const primaryBookingId = bookingIds[0] || item.id;
+      const bookingCount = bookingIds.length || 1;
+      const totalAmount = getPaymentItemTotalAmount(item);
       const payAmount =
         paymentType === "downpayment"
           ? Math.round(totalAmount / 2)
@@ -2794,7 +2916,7 @@ export default function BookingsScreen() {
         paymentType === "downpayment" ? Math.round(totalAmount / 2) : 0;
 
       debugLog(
-        "Ã°Å¸â€™Â³ Initiating payment for booking:",
+        "💳 Initiating payment for booking:",
         item.id,
         "Type:",
         paymentType,
@@ -2804,15 +2926,16 @@ export default function BookingsScreen() {
 
       // Generate environment-aware redirect URL
       const redirectUrl = ExpoLinking.createURL("payment-result", {
-        queryParams: { status: "success", booking_id: item.id },
+        queryParams: { status: "success", booking_id: primaryBookingId },
       });
       const cancelRedirectUrl = ExpoLinking.createURL("payment-result", {
-        queryParams: { status: "cancelled", booking_id: item.id },
+        queryParams: { status: "cancelled", booking_id: primaryBookingId },
       });
 
       // Use local PayMongo service instead of edge function
       const result = await createBookingCheckout({
-        bookingId: item.id,
+        bookingId: primaryBookingId,
+        bookingIds,
         userId,
         amount: payAmount,
         totalAmount,
@@ -2822,8 +2945,8 @@ export default function BookingsScreen() {
         bookingDate: item.raw_date,
         description:
           paymentType === "downpayment"
-            ? `Downpayment (50%) for studio booking at ${item.name}`
-            : `Studio booking at ${item.name}`,
+            ? `Downpayment (50%) for ${bookingCount > 1 ? `${bookingCount} studio bookings` : `studio booking at ${item.name}`}`
+            : `${bookingCount > 1 ? `${bookingCount} studio bookings` : `Studio booking at ${item.name}`}`,
         redirectUrl,
         cancelRedirectUrl,
       });
@@ -2834,11 +2957,11 @@ export default function BookingsScreen() {
       }
 
       if (result.checkout_url) {
-        debugLog("Ã¢Å“â€¦ Opening checkout URL:", result.checkout_url);
+        debugLog("✅ Opening checkout URL:", result.checkout_url);
         const canOpen = await Linking.canOpenURL(result.checkout_url);
         if (canOpen) {
           paymentInProgressRef.current = true;
-          pendingPaymentBookingId.current = item.id;
+          pendingPaymentBookingId.current = primaryBookingId;
           await Linking.openURL(result.checkout_url);
         } else {
           Alert.alert(
@@ -2866,32 +2989,37 @@ export default function BookingsScreen() {
 
     try {
       setLoading(true);
+      const bookingIds = getBookingIdsForPaymentItem(item);
+      const primaryBookingId = bookingIds[0] || item.id;
+      const bookingCount = bookingIds.length || 1;
+      const dueAmount = getPaymentItemDueAmount(item);
       debugLog(
-        "Ã°Å¸â€™Â³ Paying remaining balance for booking:",
-        item.id,
+        "💳 Paying remaining balance for booking:",
+        primaryBookingId,
         "Amount:",
-        item.remaining_balance,
+        dueAmount,
       );
 
       // Generate environment-aware redirect URL
       const redirectUrl = ExpoLinking.createURL("payment-result", {
-        queryParams: { status: "success", booking_id: item.id },
+        queryParams: { status: "success", booking_id: primaryBookingId },
       });
       const cancelRedirectUrl = ExpoLinking.createURL("payment-result", {
-        queryParams: { status: "cancelled", booking_id: item.id },
+        queryParams: { status: "cancelled", booking_id: primaryBookingId },
       });
 
       // Use local PayMongo service instead of edge function
       const result = await createBookingCheckout({
-        bookingId: item.id,
+        bookingId: primaryBookingId,
+        bookingIds,
         userId,
-        amount: item.remaining_balance,
-        totalAmount: item.total_cost,
+        amount: dueAmount,
+        totalAmount: getPaymentItemTotalAmount(item),
         paymentType: "balance",
         remainingBalance: 0,
         studioName: item.name,
         bookingDate: item.raw_date,
-        description: `Remaining balance payment for studio booking at ${item.name}`,
+        description: `Remaining balance payment for ${bookingCount > 1 ? `${bookingCount} studio bookings` : `studio booking at ${item.name}`}`,
         redirectUrl,
         cancelRedirectUrl,
       });
@@ -2902,11 +3030,11 @@ export default function BookingsScreen() {
       }
 
       if (result.checkout_url) {
-        debugLog("Ã¢Å“â€¦ Opening checkout URL:", result.checkout_url);
+        debugLog("✅ Opening checkout URL:", result.checkout_url);
         const canOpen = await Linking.canOpenURL(result.checkout_url);
         if (canOpen) {
           paymentInProgressRef.current = true;
-          pendingPaymentBookingId.current = item.id;
+          pendingPaymentBookingId.current = primaryBookingId;
           await Linking.openURL(result.checkout_url);
         } else {
           Alert.alert(
@@ -2945,7 +3073,7 @@ export default function BookingsScreen() {
       const balanceAmount = selectedItem.remaining_balance;
 
       debugLog(
-        "Ã°Å¸â€™Âµ Clearing remaining balance for booking:",
+        "💵 Clearing remaining balance for booking:",
         bookingId,
         "Amount:",
         balanceAmount,
@@ -3018,7 +3146,7 @@ export default function BookingsScreen() {
         user_id: booking.user_id,
         type: "success",
         title: "Balance Cleared!",
-        message: `Your remaining balance of â‚±${balanceAmount.toLocaleString()} for ${booking.studio?.name || "your booking"} has been marked as paid.`,
+        message: `Your remaining balance of ₱${balanceAmount.toLocaleString()} for ${booking.studio?.name || "your booking"} has been marked as paid.`,
         read: false,
         meta: buildNotificationRouteMeta("/bookings", undefined, {
           type: "balance_cleared",
@@ -3027,11 +3155,11 @@ export default function BookingsScreen() {
         }),
       });
 
-      debugLog(`Ã°Å¸â€™Âµ Balance cleared: â‚±${balanceAmount} for booking ${bookingId}`);
+      debugLog(`💵 Balance cleared: ₱${balanceAmount} for booking ${bookingId}`);
 
       Alert.alert(
         "Balance Cleared",
-        `â‚±${balanceAmount?.toLocaleString()} has been marked as paid and credited to your wallet.`,
+        `₱${balanceAmount?.toLocaleString()} has been marked as paid and credited to your wallet.`,
       );
       setModalVisible(false);
       if (userId) fetchBookings(userId);
@@ -3056,10 +3184,12 @@ export default function BookingsScreen() {
         },
       });
 
-      if (data?.payment_status === "paid") {
+      if (data?.payment_status === "paid" || data?.payment_status === "partial") {
         Alert.alert(
           "Success",
-          "Payment confirmed! Your booking is now in Upcoming.",
+          data?.payment_status === "partial"
+            ? "Downpayment confirmed. The remaining balance is in Pending."
+            : "Payment confirmed! Your booking is now in Upcoming.",
         );
         if (userId) fetchBookings(userId);
       }
@@ -3100,7 +3230,7 @@ export default function BookingsScreen() {
     // Call backend to verify check-in
     try {
       setLoading(true);
-      debugLog("Ã°Å¸â€œÂ· Scanning QR code:", {
+      debugLog("📷 Scanning QR code:", {
         qr_code: data,
         scanner_id: userId,
       });
@@ -3116,8 +3246,8 @@ export default function BookingsScreen() {
 
       setLoading(false);
 
-      debugLog("Ã°Å¸â€œÂ· Check-in response:", response);
-      debugLog("Ã°Å¸â€œÂ· Check-in error:", error);
+      debugLog("📷 Check-in response:", response);
+      debugLog("📷 Check-in error:", error);
 
       if (error) {
         console.error("Check-in error:", error);
@@ -3943,7 +4073,7 @@ export default function BookingsScreen() {
                     : null,
                 ]
                   .filter(Boolean)
-                  .join(" â€¢ ");
+                  .join(" • ");
 
                 return (
                   <TouchableOpacity
@@ -5335,6 +5465,14 @@ export default function BookingsScreen() {
                                     </Text>
                                   </View>
                                 ) : null}
+                                {item.batch_count > 1 ? (
+                                  <View style={styles.cardDetailRow}>
+                                    <Ionicons name="albums-outline" size={14} color={colors.textSecondary} />
+                                    <Text style={[styles.cardDetailText, { color: colors.textSecondary }]}>
+                                      {item.batch_count} sessions in this payment
+                                    </Text>
+                                  </View>
+                                ) : null}
                                 {showRecordingMeta ? (
                                   <>
                                     {recordingSongCount ? (
@@ -5427,7 +5565,10 @@ export default function BookingsScreen() {
                         }}
                       >
                         <View
-                          style={[styles.statusContainer, { marginBottom: 0 }]}
+                          style={[
+                            styles.statusContainer,
+                            { marginBottom: 0, flex: 1, flexWrap: "wrap" },
+                          ]}
                         >
                           {item.isCancelled ? (
                             <Ionicons
@@ -5476,6 +5617,7 @@ export default function BookingsScreen() {
                                         : "#10B981",
                               },
                             ]}
+                            numberOfLines={2}
                           >
                             {item.status}
                           </Text>
@@ -5501,7 +5643,7 @@ export default function BookingsScreen() {
                                     { color: "#F59E0B" },
                                   ]}
                                 >
-                                  Balance: â‚±
+                                  Downpayment paid · Balance ₱
                                   {item.remaining_balance?.toLocaleString()}
                                 </Text>
                               </View>
@@ -5712,7 +5854,7 @@ export default function BookingsScreen() {
                               flex: 1,
                             }}
                           >
-                            {/* Row 1 Ã¢â‚¬â€ Details + Pay Now (hidden when fully paid & awaiting confirmation) */}
+                            {/* Row 1 — Details + Pay Now (hidden when fully paid & awaiting confirmation) */}
                             <View style={{ flexDirection: "row", gap: scale(8) }}>
                               {/* Details Button */}
                               <TouchableOpacity activeOpacity={1}
@@ -5737,7 +5879,7 @@ export default function BookingsScreen() {
                                 </Text>
                               </TouchableOpacity>
 
-                              {/* Pay Now / Pay Balance Ã¢â‚¬â€ only when payment is not fully settled */}
+                              {/* Pay Now / Pay Balance — only when payment is not fully settled */}
                               {item.payment_status !== "paid" && (
                                 <TouchableOpacity activeOpacity={1}
                                   onPress={() => showPaymentOptions(item)}
@@ -5761,7 +5903,7 @@ export default function BookingsScreen() {
                                     ]}
                                   >
                                     {item.payment_type === "downpayment" && item.remaining_balance > 0
-                                      ? `Pay Balance â‚±${item.remaining_balance?.toLocaleString()}`
+                                      ? "Pay Balance"
                                       : "Pay Now"}
                                   </Text>
                                 </TouchableOpacity>
@@ -6105,7 +6247,7 @@ export default function BookingsScreen() {
                                           },
                                         ]}
                                       >
-                                        Pay Remaining â‚±{item.remaining_balance?.toLocaleString()}
+                                        Pay Remaining ₱{item.remaining_balance?.toLocaleString()}
                                       </Text>
                                     </TouchableOpacity>
                                   ) : null}
@@ -6140,7 +6282,7 @@ export default function BookingsScreen() {
                                           },
                                         ]}
                                       >
-                                        Clear Balance â‚±{item.remaining_balance?.toLocaleString()} (F2F)
+                                        Clear Balance ₱{item.remaining_balance?.toLocaleString()} (F2F)
                                       </Text>
                                     </TouchableOpacity>
                                   ) : null}
@@ -6297,7 +6439,7 @@ export default function BookingsScreen() {
                   : modalMode === "renew"
                     ? `Would you like to send a contract renewal offer to ${selectedItem?.customer_name || "this musician"}? They will receive a notification and can accept or decline the offer.`
                     : modalMode === "clear_balance"
-                      ? `Mark â‚±${selectedItem?.remaining_balance?.toLocaleString() || 0} as paid via face-to-face payment? This amount will be credited to your wallet.`
+                      ? `Mark ₱${selectedItem?.remaining_balance?.toLocaleString() || 0} as paid via face-to-face payment? This amount will be credited to your wallet.`
                       : modalMode === "report_access"
                         ? "Please describe the issue so we can notify the studio owner and review this booking case."
                       : modalMode === "late_confirm"
@@ -6319,14 +6461,14 @@ export default function BookingsScreen() {
 
                             if (isFullyPaid) {
                               const paidAmount = selectedItem?.payment_amount || selectedItem?.total_cost || 0;
-                              return `Cancellation Policy: Booking cancellations are non-refundable. Your paid amount of â‚±${paidAmount.toLocaleString()} will be forfeited.`;
+                              return `Cancellation Policy: Booking cancellations are non-refundable. Your paid amount of ₱${paidAmount.toLocaleString()} will be forfeited.`;
                             }
 
                             if (isPartialPaid) {
                               const paidPortion =
                                 (selectedItem?.payment_amount || selectedItem?.total_cost || 0) -
                                 (selectedItem?.remaining_balance || 0);
-                              return `Cancellation Policy: Booking cancellations are non-refundable. Your downpayment of â‚±${Math.max(0, paidPortion).toLocaleString()} will be forfeited.`;
+                              return `Cancellation Policy: Booking cancellations are non-refundable. Your downpayment of ₱${Math.max(0, paidPortion).toLocaleString()} will be forfeited.`;
                             }
 
                             return "Cancellation Policy: Booking cancellations are non-refundable. Any amount already paid will be forfeited.";
@@ -6353,7 +6495,7 @@ export default function BookingsScreen() {
                   : modalMode === "renew"
                     ? "Send Renewal Offer"
                     : modalMode === "clear_balance"
-                        ? `Mark â‚±${selectedItem?.remaining_balance?.toLocaleString() || 0} as Paid`
+                        ? `Mark ₱${selectedItem?.remaining_balance?.toLocaleString() || 0} as Paid`
                         : modalMode === "report_access"
                           ? "Submit Report"
                         : modalMode === "late_confirm"
@@ -6400,10 +6542,10 @@ export default function BookingsScreen() {
           }
 
           if (selectedItem) {
-            debugLog("Ã°Å¸â€Â Modal onConfirm - selectedItem:", selectedItem);
-            debugLog("Ã°Å¸â€Â Modal onConfirm - modalMode:", modalMode);
+            debugLog("🔍 Modal onConfirm - selectedItem:", selectedItem);
+            debugLog("🔍 Modal onConfirm - modalMode:", modalMode);
             debugLog(
-              "Ã°Å¸â€Â Modal onConfirm - selectedItem.type_id:",
+              "🔍 Modal onConfirm - selectedItem.type_id:",
               selectedItem.type_id,
             );
 
@@ -6477,9 +6619,9 @@ export default function BookingsScreen() {
             if (modalMode === "complete") {
             }
 
-            debugLog("Ã°Å¸â€Â Modal onConfirm - Final status:", status);
+            debugLog("🔍 Modal onConfirm - Final status:", status);
             debugLog(
-              "Ã°Å¸â€Â Modal onConfirm - Calling handleStatusUpdate with:",
+              "🔍 Modal onConfirm - Calling handleStatusUpdate with:",
               {
                 id: selectedItem.id,
                 status,
@@ -6559,7 +6701,9 @@ export default function BookingsScreen() {
             </TouchableOpacity>
 
             <Text style={[styles.paymentOptionTitle, { color: colors.text }]}>
-              Payment Option
+              {getBookingIdsForPaymentItem(paymentItem).length > 1
+                ? `Pay ${getBookingIdsForPaymentItem(paymentItem).length} bookings`
+                : "Payment Option"}
             </Text>
             <Text
               style={[
@@ -6567,12 +6711,11 @@ export default function BookingsScreen() {
                 { color: colors.textSecondary },
               ]}
             >
-              Total Amount: â‚±
-              {(
-                paymentItem?.payment_amount ||
-                paymentItem?.total_cost ||
-                0
-              ).toLocaleString()}
+              Total booking amount: ₱
+              {getPaymentItemTotalAmount(paymentItem).toLocaleString()}
+            </Text>
+            <Text style={[styles.paymentOptionHint, { color: colors.textSecondary }]}>
+              Choose whether to settle everything now or leave the other half as a Pending balance.
             </Text>
 
             {/* Full Payment Option */}
@@ -6596,7 +6739,7 @@ export default function BookingsScreen() {
                   <Text
                     style={[styles.paymentOptionLabel, { color: colors.text }]}
                   >
-                    Full Payment
+                    Pay in full
                   </Text>
                   <Text
                     style={[
@@ -6604,11 +6747,9 @@ export default function BookingsScreen() {
                       { color: colors.primary },
                     ]}
                   >
-                    â‚±
+                    ₱
                     {(
-                      paymentItem?.payment_amount ||
-                      paymentItem?.total_cost ||
-                      0
+                      getPaymentItemTotalAmount(paymentItem)
                     ).toLocaleString()}
                   </Text>
                 </View>
@@ -6619,7 +6760,7 @@ export default function BookingsScreen() {
                   { color: colors.textSecondary },
                 ]}
               >
-                Pay the full amount now and complete your booking
+                Settles the booking amount in one payment.
               </Text>
             </TouchableOpacity>
 
@@ -6644,7 +6785,7 @@ export default function BookingsScreen() {
                   <Text
                     style={[styles.paymentOptionLabel, { color: colors.text }]}
                   >
-                    Downpayment (50%)
+                    Pay 50% now
                   </Text>
                   <Text
                     style={[
@@ -6652,11 +6793,9 @@ export default function BookingsScreen() {
                       { color: colors.primary },
                     ]}
                   >
-                    â‚±
+                    ₱
                     {Math.round(
-                      (paymentItem?.payment_amount ||
-                        paymentItem?.total_cost ||
-                        0) / 2,
+                      getPaymentItemTotalAmount(paymentItem) / 2,
                     ).toLocaleString()}
                   </Text>
                 </View>
@@ -6667,13 +6806,11 @@ export default function BookingsScreen() {
                   { color: colors.textSecondary },
                 ]}
               >
-                Pay half now, remaining â‚±
+                Pay half today. Remaining balance: ₱
                 {Math.round(
-                  (paymentItem?.payment_amount ||
-                    paymentItem?.total_cost ||
-                    0) / 2,
+                  getPaymentItemTotalAmount(paymentItem) / 2,
                 ).toLocaleString()}{" "}
-                due before session
+                shown in Pending.
               </Text>
             </TouchableOpacity>
 
@@ -6690,7 +6827,11 @@ export default function BookingsScreen() {
                 ]}
               >
                 <Text style={styles.paymentOptionConfirmText}>
-                  Proceed to Payment
+                  Pay ₱
+                  {(selectedPaymentType === "downpayment"
+                    ? Math.round(getPaymentItemTotalAmount(paymentItem) / 2)
+                    : getPaymentItemTotalAmount(paymentItem)
+                  ).toLocaleString()}
                 </Text>
               </TouchableOpacity>
             </View>
@@ -6956,11 +7097,12 @@ const styles = StyleSheet.create({
   statusContainer: {
     flexDirection: "row",
     alignItems: "center",
+    gap: scale(6),
   },
   statusText: {
     fontSize: moderateScale(12),
-    marginLeft: scale(6),
     fontFamily: "Poppins_500Medium",
+    flexShrink: 1,
   },
   permitStatusChip: {
     borderWidth: 1,
@@ -7189,11 +7331,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 6,
-    marginLeft: 8,
+    marginTop: 4,
+    maxWidth: "100%",
   },
   downpaymentText: {
     fontSize: 11,
     fontFamily: "Poppins_600SemiBold",
+    flexShrink: 1,
   },
   // Payment Option Modal Styles
   paymentOptionContainer: {
@@ -7225,7 +7369,13 @@ const styles = StyleSheet.create({
   paymentOptionSubtitle: {
     fontSize: 14,
     fontFamily: "Poppins_400Regular",
-    marginBottom: 20,
+    marginBottom: 6,
+  },
+  paymentOptionHint: {
+    fontSize: 12,
+    fontFamily: "Poppins_400Regular",
+    lineHeight: 18,
+    marginBottom: 18,
   },
   modalCloseIcon: {
     position: 'absolute',

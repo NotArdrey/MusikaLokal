@@ -423,9 +423,9 @@ export default function GigDetailsScreen() {
                 : "Date TBA"}
               {gig?.requirements?.event_start_time &&
                 gig?.requirements?.event_end_time
-                ? ` â€¢ ${gig.requirements.event_start_time} - ${gig.requirements.event_end_time}`
+                ? ` • ${gig.requirements.event_start_time} - ${gig.requirements.event_end_time}`
                 : ""}
-              {" â€¢ "}
+              {" • "}
               {gig?.location || "Location N/A"}
             </Text>
             {hasValidCoordinates(gig?.latitude, gig?.longitude) && (
@@ -692,7 +692,7 @@ export default function GigDetailsScreen() {
                       <Text
                         style={[styles.payoutAmount, { color: colors.primary }]}
                       >
-                        â‚±{(gig?.budget || 0).toLocaleString()}
+                        ₱{(gig?.budget || 0).toLocaleString()}
                       </Text>
                     </View>
                   </View>
@@ -979,7 +979,7 @@ export default function GigDetailsScreen() {
                               app.applicant?.genres?.join(", ") ||
                               "Musician"}
                             {(app.group?.location || app.applicant?.location) &&
-                              ` â€¢ ${app.group?.location || app.applicant?.location}`}
+                              ` • ${app.group?.location || app.applicant?.location}`}
                           </Text>
                         </View>
                       </View>
@@ -1441,14 +1441,14 @@ export default function GigDetailsScreen() {
                       {/* View Full Profile Button */}
                       <TouchableOpacity activeOpacity={1}
                         onPress={() => {
-                          console.log("ðŸ‘¤ View Profile pressed");
-                          console.log("ðŸ‘¤ app.group:", app.group);
-                          console.log("ðŸ‘¤ app.applicant:", app.applicant);
-                          console.log("ðŸ‘¤ app.applicant_id:", app.applicant_id);
+                          console.log("👤 View Profile pressed");
+                          console.log("👤 app.group:", app.group);
+                          console.log("👤 app.applicant:", app.applicant);
+                          console.log("👤 app.applicant_id:", app.applicant_id);
 
                           if (app.group?.id) {
                             console.log(
-                              "ðŸ‘¤ Navigating to group:",
+                              "👤 Navigating to group:",
                               app.group.id,
                             );
                             router.push({
@@ -1457,7 +1457,7 @@ export default function GigDetailsScreen() {
                             });
                           } else if (app.applicant?.id) {
                             console.log(
-                              "ðŸ‘¤ Navigating to profile with applicant.id:",
+                              "👤 Navigating to profile with applicant.id:",
                               app.applicant.id,
                             );
                             router.push({
@@ -1466,7 +1466,7 @@ export default function GigDetailsScreen() {
                             });
                           } else if (app.applicant_id) {
                             console.log(
-                              "ðŸ‘¤ Navigating to profile with applicant_id:",
+                              "👤 Navigating to profile with applicant_id:",
                               app.applicant_id,
                             );
                             router.push({
@@ -1474,7 +1474,7 @@ export default function GigDetailsScreen() {
                               params: { userId: app.applicant_id },
                             });
                           } else {
-                            console.log("âŒ No ID available for navigation");
+                            console.log("❌ No ID available for navigation");
                             Alert.alert("Error", "Unable to view profile");
                           }
                         }}

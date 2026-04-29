@@ -318,7 +318,7 @@ export default function MyStudioScreen() {
 
                                     const permitStatusLabel =
                                         isApproved
-                                            ? 'Approved by Admin'
+                                            ? 'Approved'
                                             : isRejected
                                                 ? 'Rejected'
                                                 : isResubmitted

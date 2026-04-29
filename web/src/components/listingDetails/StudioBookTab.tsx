@@ -347,7 +347,7 @@ const StudioBookTab = ({
     if (discountType === "percentage") {
       return `${discountValue}% off`;
     }
-    return `PHP ${discountValue} off`;
+    return `₱${discountValue} off`;
   };
 
   const formatPromotionWindow = (promo: any) => {
@@ -1842,15 +1842,22 @@ const StudioBookTab = ({
                       debugLog("✅ All bookings created, showing payment options...");
 
                       const firstBooking = results[0];
+                      const successfulBookings = results.filter((booking: any) => booking?.id);
+                      const successfulBookingIds = successfulBookings.map((booking: any) => booking.id);
+                      const batchTotalAmount =
+                        successfulBookings.reduce(
+                          (sum: number, booking: any) =>
+                            sum + Number(booking.final_price || booking.payment_amount || 0),
+                          0,
+                        ) || totalBookingsCost;
 
                       if (firstBooking?.id) {
                         setPaymentBookingData({
                           booking: firstBooking,
+                          bookings: successfulBookings,
+                          bookingIds: successfulBookingIds,
                           studioName: group.name,
-                          totalAmount:
-                            firstBooking.payment_amount ||
-                            firstBooking.final_price ||
-                            totalBookingsCost,
+                          totalAmount: batchTotalAmount,
                         });
                         setSelectedPaymentType("full");
                         setShowPaymentOptionModal(true);

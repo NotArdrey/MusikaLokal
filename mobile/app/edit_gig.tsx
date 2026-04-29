@@ -720,7 +720,7 @@ export default function EditGigScreen() {
 
 
       if (updateError) {
-        console.error('âŒ Update failed with error:', updateError);
+        console.error('❌ Update failed with error:', updateError);
 
         let alertMessage = `Failed to update gig: ${updateError.message}`;
         if (updateError.hint) alertMessage += `\n\nHint: ${updateError.hint}`;
@@ -801,7 +801,7 @@ export default function EditGigScreen() {
 
       let successMessage =
         isReapplyAction
-          ? 'Gig updated and permit resubmitted for admin review.'
+          ? 'Gig updated and permit resubmitted for permit review.'
           : 'Gig updated successfully!';
       const updateNotes: string[] = [];
 
@@ -833,16 +833,12 @@ export default function EditGigScreen() {
         {
           text: "OK",
           onPress: () => {
-            if (router.canGoBack()) {
-              router.back();
-            } else {
-              router.push("/manage_gig");
-            }
+            router.replace({ pathname: "/my_venue", params: { refresh: String(Date.now()) } });
           },
         },
       ]);
     } catch (e: any) {
-      console.error("âŒ Error updating gig:", e);
+      console.error("❌ Error updating gig:", e);
       showAlert(
         "warning",
         "Couldn't Save Gig",
@@ -870,7 +866,7 @@ export default function EditGigScreen() {
       reapplyLimitReached
         ? "Save your updates now? Permit resubmission is no longer available because the one allowed retry was already used."
         : isReapplyAction
-        ? "Save your updates and resubmit this gig permit for admin review?"
+        ? "Save your updates and resubmit this gig permit for permit review?"
         : "Are you sure you want to update this gig profile?",
       [
         { text: "Cancel", style: "cancel" },

@@ -168,6 +168,17 @@ export const invalidateTokenCache = () => {
   refreshInFlight = null;
 };
 
+const isInvalidRefreshTokenError = (rawError: any): boolean => {
+  const message = String(rawError?.message || "").toLowerCase();
+  const errorCode = String(rawError?.code || rawError?.error_code || "").toLowerCase();
+
+  return (
+    message.includes("invalid refresh token") ||
+    message.includes("refresh token not found") ||
+    errorCode === "refresh_token_not_found"
+  );
+};
+
 const refreshAccessToken = async (): Promise<string | null> => {
   if (refreshInFlight) {
     return refreshInFlight;
@@ -197,6 +208,13 @@ const refreshAccessToken = async (): Promise<string | null> => {
       }
 
       const refreshStatus = Number((refreshError as any)?.status || 0);
+
+      if (isInvalidRefreshTokenError(refreshError)) {
+        clearSupabaseAuthStorage();
+        refreshCooldownUntil = Date.now() + REFRESH_FAILURE_COOLDOWN_MS;
+        return null;
+      }
+
       refreshCooldownUntil =
         Date.now() +
         (refreshStatus === 429 ? REFRESH_RATE_LIMIT_COOLDOWN_MS : REFRESH_FAILURE_COOLDOWN_MS);
@@ -206,7 +224,10 @@ const refreshAccessToken = async (): Promise<string | null> => {
       }
 
       return null;
-    } catch {
+    } catch (refreshException) {
+      if (isInvalidRefreshTokenError(refreshException)) {
+        clearSupabaseAuthStorage();
+      }
       refreshCooldownUntil = Date.now() + REFRESH_FAILURE_COOLDOWN_MS;
       return null;
     } finally {
@@ -358,6 +379,16 @@ const hasAuthorizationHeader = (options?: InvokeOptions): boolean => {
   return Object.keys(options.headers).some((header) => header.toLowerCase() === "authorization");
 };
 
+const shouldSkipSessionAuthorization = (functionName: string, options?: InvokeOptions): boolean => {
+  const body = options?.body;
+  const action = body && typeof body === "object" && "action" in body ? String((body as any).action || "") : "";
+
+  return (
+    (functionName === "manage-profile" && action === "create") ||
+    (functionName === "manual-identity-review" && action === "submit_manual_review_signup")
+  );
+};
+
 const withoutAuthorizationHeader = (options?: InvokeOptions): InvokeOptions | undefined => {
   if (!options?.headers) {
     return options;
@@ -448,7 +479,8 @@ const originalInvoke = functionsInstance.invoke.bind(functionsInstance) as any;
   }
 
   try {
-    const invokeOptions = await withSessionAuthorization(options);
+    const skipSessionAuthorization = shouldSkipSessionAuthorization(functionName, options);
+    const invokeOptions = skipSessionAuthorization ? options : await withSessionAuthorization(options);
     const firstAttemptHadAuthorization = hasAuthorizationHeader(invokeOptions);
     let result = (await originalInvoke(functionName, invokeOptions)) as {
       data: T | null;

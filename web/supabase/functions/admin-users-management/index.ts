@@ -119,35 +119,152 @@ function parseBoolean(raw: unknown): boolean | null {
   return null;
 }
 
+function maskEmailForLog(email: string) {
+  const [name, domain] = String(email || "").split("@");
+  if (!name || !domain) return "missing";
+  return `${name.slice(0, 1)}***@${domain}`;
+}
+
+function escapeHtml(raw: unknown) {
+  return String(raw || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
+function buildMusikaLokalEmail({
+  title,
+  subtitle,
+  bodyHtml,
+}: {
+  title: string;
+  subtitle: string;
+  bodyHtml: string;
+}) {
+  return `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${escapeHtml(title)} - MusikaLokal</title>
+</head>
+<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; line-height: 1.6; color: #333333; max-width: 600px; margin: 0 auto; padding: 20px;">
+  <div style="text-align: center; margin-bottom: 30px;">
+    <h1 style="color: #6366f1; margin: 0; font-size: 30px; font-weight: 800;">MusikaLokal</h1>
+  </div>
+
+  <div style="background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%); color: #ffffff; padding: 30px; border-radius: 16px; text-align: center; margin-bottom: 30px;">
+    <div style="font-size: 13px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; opacity: 0.85; margin-bottom: 10px;">Identity Verification</div>
+    <h2 style="margin: 0 0 10px 0; font-size: 24px; line-height: 1.3;">${escapeHtml(title)}</h2>
+    <p style="margin: 0; opacity: 0.9;">${escapeHtml(subtitle)}</p>
+  </div>
+
+  ${bodyHtml}
+
+  <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 30px 0;">
+
+  <p style="color: #64748b; font-size: 12px; text-align: center; margin: 0;">
+    This email was sent by MusikaLokal. If you did not create an account, please ignore this email.<br>
+    &copy; ${new Date().getFullYear()} MusikaLokal. All rights reserved.
+  </p>
+</body>
+</html>`;
+}
+
+async function generateApprovedEmailLink(client: any, userEmail: string) {
+  if (!userEmail) return { link: null, error: "Missing recipient email" };
+
+  // Match the Didit confirmation flow: after Supabase verifies the link,
+  // send the user straight back into the app with the verified flag.
+  const redirectTo = "musikalokal://?verified=true";
+
+  const { data, error } = await client.auth.admin.generateLink({
+    type: "magiclink",
+    email: userEmail,
+    options: {
+      redirectTo,
+      data: {
+        is_verified: true,
+        verification_status: "APPROVED",
+      },
+    },
+  });
+
+  if (error) {
+    console.error("manual_identity_review_confirmation_link_failed", {
+      recipient: maskEmailForLog(userEmail),
+      message: error.message,
+    });
+    return { link: null, error: error.message };
+  }
+
+  const actionLink = String(data?.properties?.action_link || "").trim();
+  console.log("manual_identity_review_confirmation_link_generated", {
+    recipient: maskEmailForLog(userEmail),
+    hasLink: Boolean(actionLink),
+  });
+
+  return { link: actionLink || null, error: actionLink ? null : "Generated link was empty" };
+}
+
 async function sendDecisionEmail(
   client: any,
   userEmail: string,
   decision: "APPROVED" | "DECLINED",
   reviewNotes: string | null,
+  confirmationLink: string | null = null,
+  confirmationLinkError: string | null = null,
 ) {
-  if (!userEmail) return false;
+  if (!userEmail) return { sent: false, queued: false, provider: "none", error: "Missing recipient email" };
 
+  let fallbackReason = "";
   const normalizedDecision = decision === "APPROVED" ? "approved" : "declined";
   const subject = decision === "APPROVED"
-    ? "Identity Verification Approved - MusikaLokal"
+    ? "Identity Verified - Confirm Your Email - MusikaLokal"
     : "Identity Verification Update - MusikaLokal";
 
   const notesHtml = reviewNotes
-    ? `<p style=\"margin:16px 0 0;\"><strong>Admin notes:</strong> ${reviewNotes}</p>`
+    ? `<div style="background: #f8fafc; padding: 16px 18px; border-radius: 8px; border-left: 4px solid #6366f1; margin: 20px 0;"><p style="margin: 0; color: #334155;"><strong>Admin notes:</strong> ${escapeHtml(reviewNotes)}</p></div>`
+    : "";
+  const confirmHtml = confirmationLink
+    ? `<div style="text-align: center; margin: 30px 0;"><a href="${escapeHtml(confirmationLink)}" style="display: inline-block; background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%); color: #ffffff; text-decoration: none; padding: 14px 32px; border-radius: 8px; font-weight: 700;">Confirm Email and Continue</a></div>`
+    : `<p style="margin: 0 0 12px;">If you do not see a confirmation link, open MusikaLokal and use the resend confirmation option on the signup/login screen.</p>`;
+  const confirmErrorHtml = confirmationLinkError
+    ? `<p style="margin: 0 0 12px; color: #6B7280; font-size: 13px;">Confirmation link status: ${escapeHtml(confirmationLinkError)}</p>`
     : "";
 
-  const html = `
-    <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #111827;">
-      <h2 style="margin: 0 0 12px;">Identity Verification ${decision === "APPROVED" ? "Approved" : "Updated"}</h2>
-      <p style="margin: 0 0 12px;">Your manual identity verification has been <strong>${normalizedDecision}</strong>.</p>
-      ${decision === "APPROVED"
-        ? "<p style=\"margin: 0 0 12px;\">You can now continue using verified-only features in MusikaLokal.</p>"
-        : "<p style=\"margin: 0 0 12px;\">You may submit a new valid government ID if you want to retry verification.</p>"
-      }
-      ${notesHtml}
-      <p style="margin: 16px 0 0;">Thank you,<br/>MusikaLokal Team</p>
-    </div>
-  `;
+  const html = buildMusikaLokalEmail({
+    title: decision === "APPROVED" ? "Identity Verification Approved!" : "Identity Verification Updated",
+    subtitle: decision === "APPROVED"
+      ? "Your account is now ready for the final email confirmation step"
+      : "You can submit a new valid government ID to retry verification",
+    bodyHtml: decision === "APPROVED"
+      ? `
+  <p style="margin: 0 0 12px;">Good news: your manual identity review has been <strong>${normalizedDecision}</strong>, and your MusikaLokal identity is now verified.</p>
+  <p style="margin: 0 0 12px;">One step remains before you can sign in: please confirm your email address.</p>
+  ${confirmHtml}
+  ${confirmErrorHtml}
+  <ul style="background: #f8fafc; padding: 20px 20px 20px 40px; border-radius: 8px; border-left: 4px solid #6366f1; margin: 24px 0;">
+    <li>Book musicians and studios</li>
+    <li>List your services and earn</li>
+    <li>Manage gigs and bookings</li>
+    <li>Connect with the music community</li>
+  </ul>
+  ${notesHtml}
+  <p style="margin: 16px 0 0;">Thank you,<br>MusikaLokal Team</p>`
+      : `
+  <p style="margin: 0 0 12px;">We reviewed your manual identity submission, but we could not approve it yet.</p>
+  <ul style="background: #f8fafc; padding: 20px 20px 20px 40px; border-radius: 8px; border-left: 4px solid #6366f1; margin: 24px 0;">
+    <li>Use a clear photo of a valid government ID</li>
+    <li>Make sure the name and document details are readable</li>
+    <li>Submit a new document from the MusikaLokal app</li>
+  </ul>
+  ${notesHtml}
+  <p style="margin: 16px 0 0;">Thank you,<br>MusikaLokal Team</p>`,
+  });
 
   const resendApiKey = Deno.env.get("RESEND_API_KEY") || "";
   if (resendApiKey) {
@@ -168,11 +285,29 @@ async function sendDecisionEmail(
       });
 
       if (response.ok) {
-        return true;
+        console.log("manual_identity_review_decision_email_sent", {
+          decision,
+          provider: "resend",
+          recipient: maskEmailForLog(userEmail),
+        });
+        return { sent: true, queued: false, provider: "resend" };
       }
-    } catch {
+      const errorText = await response.text().catch(() => "");
+      fallbackReason = `Resend returned ${response.status}${errorText ? `: ${errorText.slice(0, 240)}` : ""}`;
+      console.error("manual_identity_review_decision_email_resend_failed", {
+        status: response.status,
+        body: errorText.slice(0, 500),
+      });
+    } catch (error) {
+      fallbackReason = error instanceof Error ? error.message : String(error);
+      console.error("manual_identity_review_decision_email_resend_exception", {
+        message: fallbackReason,
+      });
       // Fallback to DB queue below.
     }
+  } else {
+    fallbackReason = "RESEND_API_KEY is not configured";
+    console.warn("manual_identity_review_decision_email_resend_missing_secret");
   }
 
   const { error } = await client.from("email_notifications").insert({
@@ -185,7 +320,24 @@ async function sendDecisionEmail(
     created_at: new Date().toISOString(),
   });
 
-  return !error;
+  if (error) {
+    console.error("manual_identity_review_decision_email_queue_failed", { message: error.message });
+    return { sent: false, queued: false, provider: resendApiKey ? "resend" : "email_notifications", error: error.message };
+  }
+
+  console.log("manual_identity_review_decision_email_queued", {
+    decision,
+    provider: "email_notifications",
+    recipient: maskEmailForLog(userEmail),
+    reason: fallbackReason || "resend unavailable",
+  });
+
+  return {
+    sent: false,
+    queued: true,
+    provider: "email_notifications",
+    error: fallbackReason ? `${fallbackReason}; queued in email_notifications` : null,
+  };
 }
 
 serve(async (req: Request) => {
@@ -381,13 +533,15 @@ serve(async (req: Request) => {
       }
 
       const existingMetadata = (authUserData.user.user_metadata || {}) as Record<string, unknown>;
-      const { error: authUpdateError } = await client.auth.admin.updateUserById(String(review.user_id), {
+      const authUpdatePayload: Record<string, unknown> = {
         user_metadata: {
           ...existingMetadata,
           is_verified: isVerified,
           verification_status: profileVerificationStatus,
         },
-      });
+      };
+
+      const { error: authUpdateError } = await client.auth.admin.updateUserById(String(review.user_id), authUpdatePayload);
 
       if (authUpdateError) {
         return jsonResponse({ error: authUpdateError.message }, 400);
@@ -409,9 +563,31 @@ serve(async (req: Request) => {
 
       const fallbackEmail = String(review.submitted_by_email || "").trim();
       const targetEmail = String(authUserData.user.email || fallbackEmail).trim().toLowerCase();
-      const emailSent = await sendDecisionEmail(client, targetEmail, decision as "APPROVED" | "DECLINED", reviewNotes);
+      const emailAlreadyConfirmed = Boolean(authUserData.user.email_confirmed_at);
+      const confirmationLinkResult = decision === "APPROVED" && !emailAlreadyConfirmed
+        ? await generateApprovedEmailLink(client, targetEmail)
+        : { link: null, error: emailAlreadyConfirmed ? "Email is already confirmed" : null };
+      const decisionEmail = await sendDecisionEmail(
+        client,
+        targetEmail,
+        decision as "APPROVED" | "DECLINED",
+        reviewNotes,
+        confirmationLinkResult.link,
+        confirmationLinkResult.error,
+      );
+      console.log("manual_identity_review_decision_email_result", {
+        reviewId,
+        decision,
+        recipient: maskEmailForLog(targetEmail),
+        sent: decisionEmail.sent,
+        queued: decisionEmail.queued,
+        provider: decisionEmail.provider,
+        confirmationLinkGenerated: Boolean(confirmationLinkResult.link),
+        emailAlreadyConfirmed,
+        error: decisionEmail.error || null,
+      });
 
-      if (emailSent) {
+      if (decisionEmail.sent) {
         await client
           .from("manual_identity_reviews")
           .update({ decision_email_sent_at: nowIso, updated_at: nowIso })
@@ -421,7 +597,10 @@ serve(async (req: Request) => {
       return jsonResponse({
         item: {
           ...(updatedReview || review),
-          decision_email_sent: emailSent,
+          decision_email_sent: decisionEmail.sent,
+          decision_email_queued: decisionEmail.queued,
+          decision_email_provider: decisionEmail.provider,
+          decision_email_error: decisionEmail.error || null,
         },
       });
     }
@@ -691,13 +870,36 @@ serve(async (req: Request) => {
       }
 
       const { data: existingAuth, error: existingAuthError } = await client.auth.admin.getUserById(userId);
-      if (existingAuthError || !existingAuth?.user) {
+      const { data: existingProfile, error: existingProfileError } = await client
+        .from("profiles")
+        .select("id")
+        .eq("id", userId)
+        .maybeSingle();
+
+      if (existingProfileError) {
+        return jsonResponse({ error: existingProfileError.message }, 400);
+      }
+
+      if ((existingAuthError || !existingAuth?.user) && !existingProfile) {
         return jsonResponse({ error: "User not found" }, 404);
       }
 
-      const { error: deleteError } = await client.auth.admin.deleteUser(userId);
-      if (deleteError) {
-        return jsonResponse({ error: deleteError.message }, 400);
+      if (existingProfile) {
+        const { error: profileDeleteError } = await client
+          .from("profiles")
+          .delete()
+          .eq("id", userId);
+
+        if (profileDeleteError) {
+          return jsonResponse({ error: profileDeleteError.message }, 400);
+        }
+      }
+
+      if (existingAuth?.user) {
+        const { error: deleteError } = await client.auth.admin.deleteUser(userId);
+        if (deleteError) {
+          return jsonResponse({ error: deleteError.message }, 400);
+        }
       }
 
       return jsonResponse({ success: true }, 200);

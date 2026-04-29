@@ -34,6 +34,7 @@ async function paymongoRequest(
 
 interface CreateBookingCheckoutParams {
   bookingId: string;
+  bookingIds?: string[];
   userId: string;
   amount: number;
   totalAmount: number;
@@ -51,6 +52,7 @@ export async function createBookingCheckout(
 ): Promise<CheckoutResponse> {
   const {
     bookingId,
+    bookingIds,
     userId,
     amount,
     totalAmount,
@@ -64,38 +66,50 @@ export async function createBookingCheckout(
   } = params;
 
   try {
+    const targetBookingIds = Array.from(
+      new Set([bookingId, ...(bookingIds || [])].filter(Boolean)),
+    );
+    const primaryBookingId = targetBookingIds[0] || bookingId;
+
     const { data: profile } = await supabase
       .from("profiles")
       .select("email, full_name")
       .eq("id", userId)
       .single();
 
-    const { data: booking, error: bookingError } = await supabase
+    const { data: bookingRows, error: bookingError } = await supabase
       .from("studio_bookings")
-      .select("id, user_id, payment_status")
-      .eq("id", bookingId)
-      .single();
+      .select("id, user_id, payment_status, final_price")
+      .in("id", targetBookingIds);
 
-    if (bookingError || !booking) {
+    const bookingsById = new Map(
+      (bookingRows || []).map((booking: any) => [booking.id, booking]),
+    );
+    const orderedBookings = targetBookingIds
+      .map((id) => bookingsById.get(id))
+      .filter(Boolean);
+
+    if (bookingError || orderedBookings.length !== targetBookingIds.length) {
       return { success: false, error: "Booking not found" };
     }
 
-    if (booking.user_id !== userId) {
+    if (orderedBookings.some((booking: any) => booking.user_id !== userId)) {
       return { success: false, error: "Unauthorized" };
     }
 
-    if (booking.payment_status === "paid") {
-      return { success: false, error: "This booking has already been paid" };
+    if (orderedBookings.some((booking: any) => booking.payment_status === "paid")) {
+      return { success: false, error: "One or more bookings have already been paid" };
     }
 
     const amountInCentavos = 100;
+    const isMultiBooking = targetBookingIds.length > 1;
     const bookingDescription =
       description ||
       (paymentType === "downpayment"
-        ? `Downpayment (50%) for booking at ${studioName} on ${bookingDate}`
+        ? `Downpayment (50%) for ${isMultiBooking ? `${targetBookingIds.length} bookings` : `booking at ${studioName} on ${bookingDate}`}`
         : paymentType === "balance"
-          ? `Remaining balance payment for booking at ${studioName}`
-          : `Studio booking at ${studioName} on ${bookingDate}`);
+          ? `Remaining balance payment for ${isMultiBooking ? `${targetBookingIds.length} bookings` : `booking at ${studioName}`}`
+          : `${isMultiBooking ? `${targetBookingIds.length} studio bookings` : `Studio booking at ${studioName} on ${bookingDate}`}`);
 
     const checkoutData = await paymongoRequest("/checkout_sessions", "POST", {
       data: {
@@ -122,9 +136,11 @@ export async function createBookingCheckout(
           payment_method_types: ["qrph"],
           success_url: redirectUrl,
           cancel_url: cancelRedirectUrl,
-          reference_number: bookingId,
+          reference_number: primaryBookingId,
           metadata: {
-            booking_id: bookingId,
+            booking_id: primaryBookingId,
+            booking_ids: JSON.stringify(targetBookingIds),
+            booking_count: String(targetBookingIds.length),
             user_id: userId,
             studio_name: studioName || "",
             payment_type: paymentType,
@@ -141,13 +157,43 @@ export async function createBookingCheckout(
     };
 
     if (paymentType !== "balance") {
-      updateData.payment_amount = amount;
-      updateData.payment_type = paymentType;
-      updateData.remaining_balance = remainingBalance;
-      updateData.status = "pending";
-    }
+      const finalPrices = orderedBookings.map((booking: any) => Number(booking.final_price || 0));
+      const totalFinalPrice = finalPrices.reduce((sum, price) => sum + price, 0);
+      let amountLeft = paymentType === "downpayment"
+        ? Math.round(amount)
+        : totalFinalPrice;
 
-    await supabase.from("studio_bookings").update(updateData).eq("id", bookingId);
+      for (let index = 0; index < orderedBookings.length; index += 1) {
+        const booking = orderedBookings[index];
+        const finalPrice = finalPrices[index] || 0;
+        const isLast = index === orderedBookings.length - 1;
+        const proportionalAmount = paymentType === "downpayment" && totalFinalPrice > 0
+          ? Math.round(amount * (finalPrice / totalFinalPrice))
+          : finalPrice;
+        const paymentAmount = paymentType === "downpayment"
+          ? Math.max(0, Math.min(finalPrice, isLast ? amountLeft : proportionalAmount))
+          : finalPrice;
+        amountLeft = Math.max(0, amountLeft - paymentAmount);
+
+        await supabase
+          .from("studio_bookings")
+          .update({
+            ...updateData,
+            payment_amount: paymentAmount,
+            payment_type: paymentType,
+            remaining_balance: paymentType === "downpayment"
+              ? Math.max(0, finalPrice - paymentAmount)
+              : 0,
+            status: "pending",
+          })
+          .eq("id", booking.id);
+      }
+    } else {
+      await supabase
+        .from("studio_bookings")
+        .update(updateData)
+        .in("id", targetBookingIds);
+    }
 
     return {
       success: true,

@@ -77,7 +77,7 @@ const isAdminRole = (role: unknown): boolean => {
 export default function LoginScreen() {
   const { colors, isDark } = useTheme();
   const { session, loading: authLoading, setGuestMode } = useAuth();
-  const { verified, accountCreated, email: createdEmail, verification_error } = useLocalSearchParams();
+  const { verified, accountCreated, email: createdEmail, verification_error, verificationPendingReview } = useLocalSearchParams();
 
   useEffect(() => {
     if (!authLoading && session) {
@@ -309,6 +309,15 @@ export default function LoginScreen() {
   // Check for Account Created success (New User)
   useEffect(() => {
     if (accountCreated === 'true') {
+      if (verificationPendingReview === 'true') {
+        showAlert(
+          'success',
+          'Manual Review Submitted',
+          `Your requirements were submitted and your account is under manual review.\n\nWe will email ${createdEmail || 'you'} when the review is complete. If you receive an email confirmation link, confirm your email so you can sign in after approval.`
+        );
+        return;
+      }
+
       showAlert(
         'success',
         'Check Your Inbox',
@@ -319,11 +328,11 @@ export default function LoginScreen() {
       // (which handles its own flow via accountCreated)
       showAlert(
         'success',
-        'Verification Successful! ðŸŽ‰',
+        'Verification Successful! 🎉',
         'Your identity has been verified. You can now log in.'
       );
     }
-  }, [verified, accountCreated, createdEmail]);
+  }, [verified, accountCreated, createdEmail, verificationPendingReview]);
 
   const signInWithCredentials = async (loginEmail: string, loginPassword: string) => {
     setLoading(true);
@@ -810,6 +819,7 @@ const styles = StyleSheet.create({
     marginLeft: 12, // ml-3
     height: '100%',
     fontFamily: 'Poppins_400Regular',
+    includeFontPadding: false,
     textAlignVertical: 'center',
     paddingVertical: 0,
   },

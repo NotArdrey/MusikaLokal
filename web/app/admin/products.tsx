@@ -81,12 +81,12 @@ export default function AdminProductsPage() {
     fetchProducts();
   };
 
-  if (loading || !roleResolved) return <View style={[styles.container, { backgroundColor: colors.background }]}><Header title="Admin - Products" onBackPress={() => router.back()} /><ActivityIndicator size="large" color={colors.primary} style={{ marginTop: 40 }} /></View>;
-  if (!isAdmin) return <View style={[styles.container, { backgroundColor: colors.background }]}><Header title="Admin - Products" onBackPress={() => router.back()} /><View style={styles.centered}><Text style={{ color: colors.textSecondary }}>Access denied</Text></View></View>;
+  if (loading || !roleResolved) return <View style={[styles.container, { backgroundColor: colors.background }]}><Header title="Admin" onBackPress={() => router.back()} /><ActivityIndicator size="large" color={colors.primary} style={{ marginTop: 40 }} /></View>;
+  if (!isAdmin) return <View style={[styles.container, { backgroundColor: colors.background }]}><Header title="Admin" onBackPress={() => router.back()} /><View style={styles.centered}><Text style={{ color: colors.textSecondary }}>Access denied</Text></View></View>;
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
-      <Header title="Admin - Products" onBackPress={() => router.back()} />
+      <Header title="Admin" onBackPress={() => router.back()} />
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tabsRow}>
         {tabItems.map((item) => {
           const active = item.key === 'products';
@@ -118,7 +118,7 @@ export default function AdminProductsPage() {
               <View style={styles.cardRow}>
                 <View style={{ flex: 1 }}>
                   <Text style={{ color: colors.text, fontSize: 14, fontWeight: '600' }} numberOfLines={1}>{item.title}</Text>
-                  <Text style={{ color: colors.primary, fontSize: 13, fontWeight: '700', marginTop: 2 }}>{item.currency || 'PHP'} {Number(item.price || 0).toFixed(2)}</Text>
+                  <Text style={{ color: colors.primary, fontSize: 13, fontWeight: '700', marginTop: 2 }}>₱{Number(item.price || 0).toFixed(2)}</Text>
                   <Text style={{ color: colors.textSecondary, fontSize: 12, marginTop: 2 }}>Seller: {item.seller_name || item.seller_id?.slice(0, 8)}</Text>
                   <Text style={{ color: colors.textSecondary, fontSize: 11, marginTop: 2 }}>Status: {item.status} | Type: {item.product_type}</Text>
                 </View>

@@ -106,6 +106,42 @@ const toLocalDateKey = (value: Date) => {
   return `${year}-${month}-${day}`;
 };
 
+const getDateOverrideSchedule = (
+  dateStr: string,
+  date: Date,
+  dateOverrides?: any[],
+) => {
+  if (!Array.isArray(dateOverrides)) {
+    return undefined;
+  }
+
+  const rows = dateOverrides.filter((override) => override?.override_date === dateStr);
+  if (rows.length === 0) {
+    return undefined;
+  }
+
+  const openRows = rows
+    .filter((override) => override?.is_open && override?.open_time && override?.close_time)
+    .sort((a, b) => {
+      const orderDiff = Number(a?.slot_order ?? 0) - Number(b?.slot_order ?? 0);
+      if (orderDiff !== 0) return orderDiff;
+      return String(a?.open_time || "").localeCompare(String(b?.open_time || ""));
+    });
+
+  if (openRows.length === 0) {
+    return null;
+  }
+
+  return {
+    day: date.toLocaleDateString("en-US", { weekday: "long" }),
+    slots: openRows.map((override) => ({
+      start: override.open_time,
+      end: override.close_time,
+    })),
+    isOverride: true,
+  };
+};
+
 const ListingDetailsSheet = forwardRef<
   any,
   ListingDetailsSheetProps
@@ -363,7 +399,7 @@ const ListingDetailsSheet = forwardRef<
         (group.type === "Studio" || group.type === "Venue")
       ) {
         debugLog(
-          "ðŸ“… Sheet opened - refreshing studio availability and bookings...",
+          "📅 Sheet opened - refreshing studio availability and bookings...",
         );
         try {
           // Fetch fresh operating hours from database
@@ -377,13 +413,15 @@ const ListingDetailsSheet = forwardRef<
           const { data: dateOverrides, error: overridesError } = await supabase
             .from("studio_date_overrides")
             .select("*")
-            .eq("studio_id", listingId);
+            .eq("studio_id", listingId)
+            .order("override_date", { ascending: true })
+            .order("slot_order", { ascending: true });
 
           let freshAvailability = group.availability;
           let freshDateOverrides = group.dateOverrides;
 
           if (!hoursError && operatingHours) {
-            debugLog("ðŸ“… Fresh operating hours fetched:", operatingHours.length);
+            debugLog("📅 Fresh operating hours fetched:", operatingHours.length);
             const dayNames = [
               "Sunday",
               "Monday",
@@ -410,7 +448,7 @@ const ListingDetailsSheet = forwardRef<
           }
 
           if (!overridesError && dateOverrides) {
-            debugLog("ðŸ“… Fresh date overrides fetched:", dateOverrides.length);
+            debugLog("📅 Fresh date overrides fetched:", dateOverrides.length);
             freshDateOverrides = dateOverrides;
             // Update group state with fresh date overrides
             setGroup((prev: any) => prev ? { ...prev, dateOverrides: freshDateOverrides } : prev);
@@ -485,7 +523,7 @@ const ListingDetailsSheet = forwardRef<
     message: string,
     options?: { requireTerms?: boolean; contractUrl?: string | null; contractName?: string },
   ) => {
-    debugLog("ðŸ”µ handleConfirm called");
+    debugLog("🔵 handleConfirm called");
 
     // System Lock Check - Block if user has unpaid balance
     if (isSystemLocked) {
@@ -674,7 +712,7 @@ const ListingDetailsSheet = forwardRef<
         url: shareUrl,
       });
     } catch {
-      // user cancelled or share failed â€” no action needed
+      // user cancelled or share failed — no action needed
     }
   };
 
@@ -685,6 +723,13 @@ const ListingDetailsSheet = forwardRef<
     if (!paymentBookingData) return;
 
     const { booking, studioName, totalAmount } = paymentBookingData;
+    const bookingIds = Array.isArray(paymentBookingData.bookingIds)
+      ? paymentBookingData.bookingIds.filter(Boolean)
+      : Array.isArray(paymentBookingData.bookings)
+        ? paymentBookingData.bookings.map((item: any) => item?.id).filter(Boolean)
+        : [booking?.id].filter(Boolean);
+    const primaryBookingId = bookingIds[0] || booking.id;
+    const bookingCount = bookingIds.length || 1;
     const payAmount =
       paymentType === "downpayment" ? Math.round(totalAmount / 2) : totalAmount;
     const remainingBalance =
@@ -692,7 +737,7 @@ const ListingDetailsSheet = forwardRef<
 
     try {
       setIsProcessingPayment(true);
-      debugLog("ðŸ’³ Creating PayMongo checkout session...", {
+      debugLog("💳 Creating PayMongo checkout session...", {
         paymentType,
         payAmount,
         remainingBalance,
@@ -700,17 +745,18 @@ const ListingDetailsSheet = forwardRef<
 
       // Generate environment-aware redirect URLs
       const redirectUrl = ExpoLinking.createURL("payment-result", {
-        queryParams: { status: "success", booking_id: booking.id },
+        queryParams: { status: "success", booking_id: primaryBookingId },
       });
       const cancelRedirectUrl = ExpoLinking.createURL("payment-result", {
-        queryParams: { status: "cancelled", booking_id: booking.id },
+        queryParams: { status: "cancelled", booking_id: primaryBookingId },
       });
 
       const { data: paymentData, error: paymentError } =
         await supabase.functions.invoke("paymongo", {
           body: {
             action: "create_checkout",
-            booking_id: booking.id,
+            booking_id: primaryBookingId,
+            booking_ids: bookingIds,
             user_id: userId,
             amount: payAmount,
             total_amount: totalAmount,
@@ -720,15 +766,15 @@ const ListingDetailsSheet = forwardRef<
             booking_date: booking.booking_date,
             description:
               paymentType === "downpayment"
-                ? `Downpayment (50%) for studio booking at ${studioName}`
-                : `Studio booking at ${studioName}`,
+                ? `Downpayment (50%) for ${bookingCount > 1 ? `${bookingCount} studio bookings` : `studio booking at ${studioName}`}`
+                : `${bookingCount > 1 ? `${bookingCount} studio bookings` : `Studio booking at ${studioName}`}`,
             redirect_url: redirectUrl,
             cancel_redirect_url: cancelRedirectUrl,
           },
         });
 
       if (paymentError) {
-        console.error("âŒ Payment error:", paymentError);
+        console.error("❌ Payment error:", paymentError);
         setIsProcessingPayment(false);
         setShowPaymentOptionModal(false);
         showSheetAlert(
@@ -751,7 +797,7 @@ const ListingDetailsSheet = forwardRef<
       }
 
       if (paymentData?.checkout_url) {
-        debugLog("âœ… Checkout URL:", paymentData.checkout_url);
+        debugLog("✅ Checkout URL:", paymentData.checkout_url);
 
         // Clear form
         setBookings([]);
@@ -796,7 +842,7 @@ const ListingDetailsSheet = forwardRef<
         }, 100);
       }
     } catch (payErr: any) {
-      console.error("âŒ Payment initiation error:", payErr);
+      console.error("❌ Payment initiation error:", payErr);
       showSheetAlert(
         "warning",
         "Payment Pending",
@@ -839,7 +885,7 @@ const ListingDetailsSheet = forwardRef<
       }
 
       if (data) {
-        debugLog("ðŸ“‹ User has already applied to this gig:", data);
+        debugLog("📋 User has already applied to this gig:", data);
         setHasExistingApplication(true);
         setExistingApplicationStatus(data.status);
         if (data.cv_url) setCvUrl(data.cv_url);
@@ -912,7 +958,7 @@ const ListingDetailsSheet = forwardRef<
         (g, idx, arr) => arr.findIndex((x) => x.id === g.id) === idx,
       );
 
-      debugLog("ðŸ“‹ Fetched groups (owned + member):", uniqueGroups.length);
+      debugLog("📋 Fetched groups (owned + member):", uniqueGroups.length);
       setUserGroups(uniqueGroups);
     } catch (err) {
       console.error("Error fetching groups:", err);
@@ -1012,7 +1058,7 @@ const ListingDetailsSheet = forwardRef<
       }
 
       if (data && data.applicant_id !== userId) {
-        debugLog("âš ï¸ Group already applied by another member:", data);
+        debugLog("⚠️ Group already applied by another member:", data);
         setGroupAlreadyApplied(true);
         setGroupApplicationBy(
           (data.profiles as any)?.full_name || "Another member",
@@ -1058,7 +1104,7 @@ const ListingDetailsSheet = forwardRef<
       }
 
       if (data) {
-        debugLog("ðŸ“‹ User has an unpaid booking for this studio:", data);
+        debugLog("📋 User has an unpaid booking for this studio:", data);
         setHasExistingStudioBooking(true);
         setExistingStudioBookingStatus("unpaid");
       } else {
@@ -1245,7 +1291,7 @@ const ListingDetailsSheet = forwardRef<
 
   // Debug effect to monitor application state changes
   useEffect(() => {
-    debugLog("ðŸ“ Application State Updated:");
+    debugLog("📝 Application State Updated:");
     debugLog("  - pitchMessage:", pitchMessage);
     debugLog("  - videoUrl:", videoUrl);
     debugLog("  - isSubmittingApplication:", isSubmittingApplication);
@@ -1253,7 +1299,7 @@ const ListingDetailsSheet = forwardRef<
 
   // Debug effect to monitor userId changes
   useEffect(() => {
-    debugLog("ðŸ‘¤ userId changed:", userId);
+    debugLog("👤 userId changed:", userId);
   }, [userId]);
 
   const fetchGroupDetails = async () => {
@@ -1385,7 +1431,7 @@ const ListingDetailsSheet = forwardRef<
               resolvedImages = groupMediaImages;
             }
           } else if (mediaError) {
-            debugLog("âš ï¸ group_media fetch failed, using fallback images:", mediaError);
+            debugLog("⚠️ group_media fetch failed, using fallback images:", mediaError);
           }
         }
         // Fetch owner profile separately
@@ -1432,7 +1478,7 @@ const ListingDetailsSheet = forwardRef<
 
         // If studio or venue, fetch availability from operating hours
         if (type === "Studio" || type === "Venue") {
-          debugLog("ðŸ“… Fetching studio availability data...");
+          debugLog("📅 Fetching studio availability data...");
           const [
             operatingHoursResult,
             dateOverridesResult,
@@ -1447,7 +1493,9 @@ const ListingDetailsSheet = forwardRef<
             supabase
               .from("studio_date_overrides")
               .select("*")
-              .eq("studio_id", data.id),
+              .eq("studio_id", data.id)
+              .order("override_date", { ascending: true })
+              .order("slot_order", { ascending: true }),
             supabase
               .from("studio_settings")
               .select("*")
@@ -1470,7 +1518,7 @@ const ListingDetailsSheet = forwardRef<
           normalizedData.promotions = studioPromotionsResult.data || [];
 
           if (!hoursError && operatingHours) {
-            debugLog("ðŸ“… Operating hours fetched:", operatingHours);
+            debugLog("📅 Operating hours fetched:", operatingHours);
             // Convert operating hours to availability format - now supports multiple slots per day
             const dayNames = [
               "Sunday",
@@ -1494,16 +1542,16 @@ const ListingDetailsSheet = forwardRef<
               };
             });
             normalizedData.availability = availability;
-            debugLog("ðŸ“… Converted availability:", availability);
+            debugLog("📅 Converted availability:", availability);
           } else if (!data.availability) {
             debugLog(
-              "âš ï¸ No operating hours found, checking availability column...",
+              "⚠️ No operating hours found, checking availability column...",
             );
             // Fallback: check if availability exists in the data (JSONB column)
             if (data.availability) {
               normalizedData.availability = data.availability;
               debugLog(
-                "ðŸ“… Using availability from JSONB column:",
+                "📅 Using availability from JSONB column:",
                 data.availability,
               );
             }
@@ -1511,15 +1559,15 @@ const ListingDetailsSheet = forwardRef<
 
           // Store date overrides for use in availability processing
           if (!overridesError && dateOverrides && dateOverrides.length > 0) {
-            debugLog("ðŸ“… Date overrides fetched:", dateOverrides);
+            debugLog("📅 Date overrides fetched:", dateOverrides);
             normalizedData.dateOverrides = dateOverrides;
           }
 
           if (!settingsError && studioSettings) {
-            debugLog("âš™ï¸ Studio settings fetched:", studioSettings);
+            debugLog("⚙️ Studio settings fetched:", studioSettings);
             normalizedData.settings = studioSettings;
           } else {
-            debugLog("âš ï¸ No studio settings found, using defaults");
+            debugLog("⚠️ No studio settings found, using defaults");
             normalizedData.settings = {
               lead_time_hours: 24,
               weekend_multiplier: 1.0,
@@ -1553,14 +1601,14 @@ const ListingDetailsSheet = forwardRef<
 
           // Process availability (Availability + Bookings + Date Overrides)
           if (normalizedData.availability) {
-            debugLog("ðŸ“… Processing availability for calendar...");
+            debugLog("📅 Processing availability for calendar...");
             processAvailability(
               normalizedData.availability,
               fetchedBookings,
               normalizedData.dateOverrides,
             );
           } else {
-            debugLog("âš ï¸ No availability data to process");
+            debugLog("⚠️ No availability data to process");
           }
         } else {
           setExistingBookings([]);
@@ -1585,7 +1633,7 @@ const ListingDetailsSheet = forwardRef<
     // Safeguard against undefined or non-array dbBookings
     const safeDbBookings = Array.isArray(dbBookings) ? dbBookings : [];
 
-    debugLog("ðŸ“… processAvailability called with:", {
+    debugLog("📅 processAvailability called with:", {
       availability,
       dbBookingsCount: safeDbBookings.length,
       dateOverridesCount: dateOverrides?.length || 0,
@@ -1615,25 +1663,28 @@ const ListingDetailsSheet = forwardRef<
       if (dayIndex !== -1) {
         availabilityMap[dayIndex] = daySchedule;
         debugLog(
-          `ðŸ“… Mapped ${daySchedule.day} (index ${dayIndex}) with ${daySchedule.slots?.length || 0} slots`,
+          `📅 Mapped ${daySchedule.day} (index ${dayIndex}) with ${daySchedule.slots?.length || 0} slots`,
         );
       }
     });
 
     // Map date overrides for easier lookup (specific dates override weekly schedule)
-    const dateOverrideMap: { [key: string]: any } = {};
+    const dateOverrideMap: { [key: string]: any[] } = {};
     if (dateOverrides && Array.isArray(dateOverrides)) {
       dateOverrides.forEach((override: any) => {
         const dateStr = override.override_date;
-        dateOverrideMap[dateStr] = override;
+        if (!dateOverrideMap[dateStr]) {
+          dateOverrideMap[dateStr] = [];
+        }
+        dateOverrideMap[dateStr].push(override);
         debugLog(
-          `ðŸ“… Mapped date override for ${dateStr}: open=${override.is_open}, ${override.open_time} - ${override.close_time}`,
+          `📅 Mapped date override for ${dateStr}: open=${override.is_open}, ${override.open_time} - ${override.close_time}`,
         );
       });
     }
 
-    debugLog("ðŸ“… Availability map:", availabilityMap);
-    debugLog("ðŸ“… Date override map:", dateOverrideMap);
+    debugLog("📅 Availability map:", availabilityMap);
+    debugLog("📅 Date override map:", dateOverrideMap);
 
     // Loop next 90 days to ensure coverage
     for (let i = 0; i < 90; i++) {
@@ -1644,27 +1695,14 @@ const ListingDetailsSheet = forwardRef<
       const dayIndex = date.getDay();
 
       // Check if there's a specific date override for this date (priority over weekly schedule)
-      const dateOverride = dateOverrideMap[dateStr];
+      const dateOverrideRows = dateOverrideMap[dateStr];
       let daySchedule: any = null;
 
-      if (dateOverride) {
+      if (dateOverrideRows) {
         // Use date override instead of weekly schedule
-        if (
-          dateOverride.is_open &&
-          dateOverride.open_time &&
-          dateOverride.close_time
-        ) {
-          daySchedule = {
-            day: date.toLocaleDateString("en-US", { weekday: "long" }),
-            slots: [
-              { start: dateOverride.open_time, end: dateOverride.close_time },
-            ],
-            isOverride: true,
-          };
-          debugLog(`ðŸ“… Using date override for ${dateStr}:`, daySchedule);
-        } else {
-          // Date is closed via override
-          daySchedule = null;
+        daySchedule = getDateOverrideSchedule(dateStr, date, dateOverrideRows);
+        if (daySchedule) {
+          debugLog(`📅 Using date override for ${dateStr}:`, daySchedule);
         }
       } else {
         // Use weekly schedule
@@ -1716,7 +1754,7 @@ const ListingDetailsSheet = forwardRef<
           const bEnd = new Date(`${b.booking_date}T${b.end_time}`);
 
           if (isNaN(bStart.getTime()) || isNaN(bEnd.getTime())) {
-            debugLog("âš ï¸ Invalid booking times in processAvailability:", b);
+            debugLog("⚠️ Invalid booking times in processAvailability:", b);
             return;
           }
 
@@ -1786,8 +1824,8 @@ const ListingDetailsSheet = forwardRef<
       }
     }
 
-    debugLog("ðŸ“… Marked dates count:", Object.keys(marked).length);
-    debugLog("ðŸ“… Sample marked dates:", Object.keys(marked).slice(0, 5));
+    debugLog("📅 Marked dates count:", Object.keys(marked).length);
+    debugLog("📅 Sample marked dates:", Object.keys(marked).slice(0, 5));
     setMarkedDates(marked);
 
     if (selectedDate && marked[selectedDate]?.disabled) {
@@ -1801,12 +1839,12 @@ const ListingDetailsSheet = forwardRef<
   };
 
   const fetchAvailableSlots = async (dateStr: string): Promise<string[]> => {
-    debugLog("ðŸ• fetchAvailableSlots called for date:", dateStr);
-    debugLog("ðŸ• group.availability:", group?.availability);
-    debugLog("ðŸ• group.dateOverrides:", group?.dateOverrides);
+    debugLog("🕐 fetchAvailableSlots called for date:", dateStr);
+    debugLog("🕐 group.availability:", group?.availability);
+    debugLog("🕐 group.dateOverrides:", group?.dateOverrides);
 
     if (!group?.availability) {
-      debugLog("âš ï¸ No availability data in group");
+      debugLog("⚠️ No availability data in group");
       setAvailableSlots([]);
       return [];
     }
@@ -1821,32 +1859,21 @@ const ListingDetailsSheet = forwardRef<
       "friday",
       "saturday",
     ][selectedDate.getDay()];
-    debugLog("ðŸ• Looking for day:", dayName);
+    debugLog("🕐 Looking for day:", dayName);
 
     // Check if there's a specific date override for this date
     let daySchedule: any = null;
 
     if (group.dateOverrides && Array.isArray(group.dateOverrides)) {
-      const dateOverride = group.dateOverrides.find(
+      const dateOverrideRows = group.dateOverrides.filter(
         (o: any) => o.override_date === dateStr,
       );
-      if (dateOverride) {
-        debugLog("ðŸ• Found date override:", dateOverride);
-        if (
-          dateOverride.is_open &&
-          dateOverride.open_time &&
-          dateOverride.close_time
-        ) {
-          daySchedule = {
-            day: dayName,
-            slots: [
-              { start: dateOverride.open_time, end: dateOverride.close_time },
-            ],
-            isOverride: true,
-          };
-        } else {
+      if (dateOverrideRows.length > 0) {
+        debugLog("🕐 Found date override:", dateOverrideRows);
+        daySchedule = getDateOverrideSchedule(dateStr, selectedDate, dateOverrideRows);
+        if (!daySchedule) {
           // Date is closed
-          debugLog("âš ï¸ Date override marks this date as closed");
+          debugLog("⚠️ Date override marks this date as closed");
           setAvailableSlots([]);
           return [];
         }
@@ -1860,10 +1887,10 @@ const ListingDetailsSheet = forwardRef<
       );
     }
 
-    debugLog("ðŸ• Found day schedule:", daySchedule);
+    debugLog("🕐 Found day schedule:", daySchedule);
 
     if (!daySchedule || !daySchedule.slots) {
-      debugLog("âš ï¸ No slots for this day");
+      debugLog("⚠️ No slots for this day");
       setAvailableSlots([]);
       return [];
     }
@@ -1882,7 +1909,7 @@ const ListingDetailsSheet = forwardRef<
       return bookingDateStr === dateStr;
     });
     debugLog(
-      "ðŸ• Day bookings:",
+      "🕐 Day bookings:",
       dayBookings.length,
       dayBookings.map((b: any) => ({
         date: b.booking_date,
@@ -1906,7 +1933,7 @@ const ListingDetailsSheet = forwardRef<
       const bEnd = new Date(`${b.booking_date}T${b.end_time}`);
 
       if (isNaN(bStart.getTime()) || isNaN(bEnd.getTime())) {
-        debugLog("âš ï¸ Invalid booking times:", b);
+        debugLog("⚠️ Invalid booking times:", b);
         return;
       }
 
@@ -1958,10 +1985,10 @@ const ListingDetailsSheet = forwardRef<
       }
     });
 
-    debugLog("ðŸ• Blocked times (including cart):", Array.from(blockedTimes));
+    debugLog("🕐 Blocked times (including cart):", Array.from(blockedTimes));
 
     daySchedule.slots.forEach((slot: any) => {
-      debugLog("ðŸ• Processing slot:", slot);
+      debugLog("🕐 Processing slot:", slot);
       const start = new Date(`${dateStr}T${slot.start}`);
       const end = new Date(`${dateStr}T${slot.end}`);
 
@@ -1988,7 +2015,7 @@ const ListingDetailsSheet = forwardRef<
     });
 
     const uniqueSlots = Array.from(slotsSet).sort();
-    debugLog("ðŸ• Generated slots:", uniqueSlots);
+    debugLog("🕐 Generated slots:", uniqueSlots);
     setAvailableSlots(uniqueSlots);
     return uniqueSlots;
   };
@@ -2983,6 +3010,15 @@ const ListingDetailsSheet = forwardRef<
     </React.Fragment>
   ) : null;
 
+  const paymentModalBookingCount =
+    Array.isArray(paymentBookingData?.bookingIds)
+      ? paymentBookingData.bookingIds.filter(Boolean).length
+      : Array.isArray(paymentBookingData?.bookings)
+        ? paymentBookingData.bookings.filter((item: any) => item?.id).length
+        : 1;
+  const paymentModalTotalAmount = Number(paymentBookingData?.totalAmount || 0);
+  const paymentModalHalfAmount = Math.round(paymentModalTotalAmount / 2);
+
   return (
     <>
       {isWebDesktop ? (
@@ -3066,14 +3102,14 @@ const ListingDetailsSheet = forwardRef<
       <Modal
         visible={modalVisible}
         onClose={() => {
-          debugLog("ðŸ”´ Modal closed without confirmation");
+          debugLog("🔴 Modal closed without confirmation");
           setConfirmRequireTerms(false);
           setConfirmContractUrl(null);
           setConfirmContractName(undefined);
           setModalVisible(false);
         }}
         onConfirm={() => {
-          debugLog("ðŸŸ¢ Modal CONFIRMED - executing action");
+          debugLog("🟢 Modal CONFIRMED - executing action");
           debugLog("confirmAction:", confirmAction);
           setConfirmRequireTerms(false);
           setConfirmContractUrl(null);
@@ -3081,9 +3117,9 @@ const ListingDetailsSheet = forwardRef<
           setModalVisible(false);
           try {
             confirmAction();
-            debugLog("âœ… confirmAction executed successfully");
+            debugLog("✅ confirmAction executed successfully");
           } catch (error) {
-            console.error("âŒ Error executing confirmAction:", error);
+            console.error("❌ Error executing confirmAction:", error);
           }
         }}
         title={confirmTitle}
@@ -3138,7 +3174,9 @@ const ListingDetailsSheet = forwardRef<
               ]}
             >
               <Text style={[styles.paymentOptionTitle, { color: colors.text }]}>
-                Choose Payment Option
+                {paymentModalBookingCount > 1
+                  ? `Pay ${paymentModalBookingCount} bookings`
+                  : "Choose Payment Option"}
               </Text>
               <Text
                 style={[
@@ -3146,8 +3184,10 @@ const ListingDetailsSheet = forwardRef<
                   { color: colors.textSecondary },
                 ]}
               >
-                Total Amount: â‚±
-                {(paymentBookingData?.totalAmount || 0).toLocaleString()}
+                Total booking amount: ₱{paymentModalTotalAmount.toLocaleString()}
+              </Text>
+              <Text style={[styles.paymentOptionHint, { color: colors.textSecondary }]}>
+                Full payment settles the booking. Downpayment leaves the other half in Pending as Balance Due.
               </Text>
 
               {/* Full Payment Option */}
@@ -3180,7 +3220,7 @@ const ListingDetailsSheet = forwardRef<
                         { color: colors.text },
                       ]}
                     >
-                      Full Payment
+                      Pay in full
                     </Text>
                     <Text
                       style={[
@@ -3188,7 +3228,7 @@ const ListingDetailsSheet = forwardRef<
                         { color: colors.primary },
                       ]}
                     >
-                      â‚±{(paymentBookingData?.totalAmount || 0).toLocaleString()}
+                      ₱{paymentModalTotalAmount.toLocaleString()}
                     </Text>
                   </View>
                 </View>
@@ -3198,7 +3238,7 @@ const ListingDetailsSheet = forwardRef<
                     { color: colors.textSecondary },
                   ]}
                 >
-                  Pay the full amount now and complete your booking
+                  Settles the booking amount in one payment.
                 </Text>
               </TouchableOpacity>
 
@@ -3232,7 +3272,7 @@ const ListingDetailsSheet = forwardRef<
                         { color: colors.text },
                       ]}
                     >
-                      Downpayment (50%)
+                      Pay 50% now
                     </Text>
                     <Text
                       style={[
@@ -3240,10 +3280,8 @@ const ListingDetailsSheet = forwardRef<
                         { color: colors.primary },
                       ]}
                     >
-                      â‚±
-                      {Math.round(
-                        (paymentBookingData?.totalAmount || 0) / 2,
-                      ).toLocaleString()}
+                      ₱
+                      {paymentModalHalfAmount.toLocaleString()}
                     </Text>
                   </View>
                 </View>
@@ -3253,11 +3291,8 @@ const ListingDetailsSheet = forwardRef<
                     { color: colors.textSecondary },
                   ]}
                 >
-                  Pay half now, remaining â‚±
-                  {Math.round(
-                    (paymentBookingData?.totalAmount || 0) / 2,
-                  ).toLocaleString()}{" "}
-                  due before session
+                  Pay half today. Remaining balance: ₱
+                  {paymentModalHalfAmount.toLocaleString()} shown in Pending.
                 </Text>
               </TouchableOpacity>
 
@@ -3271,7 +3306,11 @@ const ListingDetailsSheet = forwardRef<
                   ]}
                 >
                   <Text style={styles.paymentOptionConfirmText}>
-                    Proceed to Payment
+                    Pay ₱
+                    {(selectedPaymentType === "downpayment"
+                      ? paymentModalHalfAmount
+                      : paymentModalTotalAmount
+                    ).toLocaleString()}
                   </Text>
                 </TouchableOpacity>
               </View>
@@ -4083,7 +4122,14 @@ const styles = StyleSheet.create({
   paymentOptionSubtitle: {
     fontFamily: "Poppins_400Regular",
     fontSize: 14,
-    marginBottom: 24,
+    marginBottom: 6,
+    textAlign: "center",
+  },
+  paymentOptionHint: {
+    fontFamily: "Poppins_400Regular",
+    fontSize: 12,
+    lineHeight: 18,
+    marginBottom: 20,
     textAlign: "center",
   },
   paymentOptionCard: {

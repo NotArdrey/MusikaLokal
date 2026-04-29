@@ -106,6 +106,42 @@ const toLocalDateKey = (value: Date) => {
   return `${year}-${month}-${day}`;
 };
 
+const getDateOverrideSchedule = (
+  dateStr: string,
+  date: Date,
+  dateOverrides?: any[],
+) => {
+  if (!Array.isArray(dateOverrides)) {
+    return undefined;
+  }
+
+  const rows = dateOverrides.filter((override) => override?.override_date === dateStr);
+  if (rows.length === 0) {
+    return undefined;
+  }
+
+  const openRows = rows
+    .filter((override) => override?.is_open && override?.open_time && override?.close_time)
+    .sort((a, b) => {
+      const orderDiff = Number(a?.slot_order ?? 0) - Number(b?.slot_order ?? 0);
+      if (orderDiff !== 0) return orderDiff;
+      return String(a?.open_time || "").localeCompare(String(b?.open_time || ""));
+    });
+
+  if (openRows.length === 0) {
+    return null;
+  }
+
+  return {
+    day: date.toLocaleDateString("en-US", { weekday: "long" }),
+    slots: openRows.map((override) => ({
+      start: override.open_time,
+      end: override.close_time,
+    })),
+    isOverride: true,
+  };
+};
+
 const toPositiveNumber = (value: unknown) => {
   const parsed = Number(value);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
@@ -456,7 +492,9 @@ const ListingDetailsSheet = forwardRef<
           const { data: dateOverrides, error: overridesError } = await supabase
             .from("studio_date_overrides")
             .select("*")
-            .eq("studio_id", listingId);
+            .eq("studio_id", listingId)
+            .order("override_date", { ascending: true })
+            .order("slot_order", { ascending: true });
 
           let freshAvailability = group.availability;
           let freshDateOverrides = group.dateOverrides;
@@ -827,6 +865,13 @@ const ListingDetailsSheet = forwardRef<
     if (!paymentBookingData) return;
 
     const { booking, studioName, totalAmount } = paymentBookingData;
+    const bookingIds = Array.isArray(paymentBookingData.bookingIds)
+      ? paymentBookingData.bookingIds.filter(Boolean)
+      : Array.isArray(paymentBookingData.bookings)
+        ? paymentBookingData.bookings.map((item: any) => item?.id).filter(Boolean)
+        : [booking?.id].filter(Boolean);
+    const primaryBookingId = bookingIds[0] || booking.id;
+    const bookingCount = bookingIds.length || 1;
     const payAmount =
       paymentType === "downpayment" ? Math.round(totalAmount / 2) : totalAmount;
     const remainingBalance =
@@ -842,17 +887,18 @@ const ListingDetailsSheet = forwardRef<
 
       // Generate environment-aware redirect URLs
       const redirectUrl = ExpoLinking.createURL("payment-result", {
-        queryParams: { status: "success", booking_id: booking.id },
+        queryParams: { status: "success", booking_id: primaryBookingId },
       });
       const cancelRedirectUrl = ExpoLinking.createURL("payment-result", {
-        queryParams: { status: "cancelled", booking_id: booking.id },
+        queryParams: { status: "cancelled", booking_id: primaryBookingId },
       });
 
       const { data: paymentData, error: paymentError } =
         await supabase.functions.invoke("paymongo", {
           body: {
             action: "create_checkout",
-            booking_id: booking.id,
+            booking_id: primaryBookingId,
+            booking_ids: bookingIds,
             user_id: userId,
             amount: payAmount,
             total_amount: totalAmount,
@@ -862,8 +908,8 @@ const ListingDetailsSheet = forwardRef<
             booking_date: booking.booking_date,
             description:
               paymentType === "downpayment"
-                ? `Downpayment (50%) for studio booking at ${studioName}`
-                : `Studio booking at ${studioName}`,
+                ? `Downpayment (50%) for ${bookingCount > 1 ? `${bookingCount} studio bookings` : `studio booking at ${studioName}`}`
+                : `${bookingCount > 1 ? `${bookingCount} studio bookings` : `Studio booking at ${studioName}`}`,
             redirect_url: redirectUrl,
             cancel_redirect_url: cancelRedirectUrl,
           },
@@ -1827,7 +1873,9 @@ const ListingDetailsSheet = forwardRef<
             supabase
               .from("studio_date_overrides")
               .select("*")
-              .eq("studio_id", data.id),
+              .eq("studio_id", data.id)
+              .order("override_date", { ascending: true })
+              .order("slot_order", { ascending: true }),
             supabase
               .from("studio_settings")
               .select("*")
@@ -2019,11 +2067,14 @@ const ListingDetailsSheet = forwardRef<
     });
 
     // Map date overrides for easier lookup (specific dates override weekly schedule)
-    const dateOverrideMap: { [key: string]: any } = {};
+    const dateOverrideMap: { [key: string]: any[] } = {};
     if (dateOverrides && Array.isArray(dateOverrides)) {
       dateOverrides.forEach((override: any) => {
         const dateStr = override.override_date;
-        dateOverrideMap[dateStr] = override;
+        if (!dateOverrideMap[dateStr]) {
+          dateOverrideMap[dateStr] = [];
+        }
+        dateOverrideMap[dateStr].push(override);
         debugLog(
           `📅 Mapped date override for ${dateStr}: open=${override.is_open}, ${override.open_time} - ${override.close_time}`,
         );
@@ -2042,27 +2093,14 @@ const ListingDetailsSheet = forwardRef<
       const dayIndex = date.getDay();
 
       // Check if there's a specific date override for this date (priority over weekly schedule)
-      const dateOverride = dateOverrideMap[dateStr];
+      const dateOverrideRows = dateOverrideMap[dateStr];
       let daySchedule: any = null;
 
-      if (dateOverride) {
+      if (dateOverrideRows) {
         // Use date override instead of weekly schedule
-        if (
-          dateOverride.is_open &&
-          dateOverride.open_time &&
-          dateOverride.close_time
-        ) {
-          daySchedule = {
-            day: date.toLocaleDateString("en-US", { weekday: "long" }),
-            slots: [
-              { start: dateOverride.open_time, end: dateOverride.close_time },
-            ],
-            isOverride: true,
-          };
+        daySchedule = getDateOverrideSchedule(dateStr, date, dateOverrideRows);
+        if (daySchedule) {
           debugLog(`📅 Using date override for ${dateStr}:`, daySchedule);
-        } else {
-          // Date is closed via override
-          daySchedule = null;
         }
       } else {
         // Use weekly schedule
@@ -2225,24 +2263,13 @@ const ListingDetailsSheet = forwardRef<
     let daySchedule: any = null;
 
     if (group.dateOverrides && Array.isArray(group.dateOverrides)) {
-      const dateOverride = group.dateOverrides.find(
+      const dateOverrideRows = group.dateOverrides.filter(
         (o: any) => o.override_date === dateStr,
       );
-      if (dateOverride) {
-        debugLog("🕐 Found date override:", dateOverride);
-        if (
-          dateOverride.is_open &&
-          dateOverride.open_time &&
-          dateOverride.close_time
-        ) {
-          daySchedule = {
-            day: dayName,
-            slots: [
-              { start: dateOverride.open_time, end: dateOverride.close_time },
-            ],
-            isOverride: true,
-          };
-        } else {
+      if (dateOverrideRows.length > 0) {
+        debugLog("🕐 Found date override:", dateOverrideRows);
+        daySchedule = getDateOverrideSchedule(dateStr, selectedDate, dateOverrideRows);
+        if (!daySchedule) {
           // Date is closed
           debugLog("⚠️ Date override marks this date as closed");
           setAvailableSlots([]);
@@ -3512,6 +3539,15 @@ const ListingDetailsSheet = forwardRef<
     />
   );
 
+  const paymentModalBookingCount =
+    Array.isArray(paymentBookingData?.bookingIds)
+      ? paymentBookingData.bookingIds.filter(Boolean).length
+      : Array.isArray(paymentBookingData?.bookings)
+        ? paymentBookingData.bookings.filter((item: any) => item?.id).length
+        : 1;
+  const paymentModalTotalAmount = Number(paymentBookingData?.totalAmount || 0);
+  const paymentModalHalfAmount = Math.round(paymentModalTotalAmount / 2);
+
   return (
     <>
       <TrackedBottomSheetModal
@@ -3713,7 +3749,9 @@ const ListingDetailsSheet = forwardRef<
               ]}
             >
               <Text style={[styles.paymentOptionTitle, { color: colors.text }]}>
-                Choose Payment Option
+                {paymentModalBookingCount > 1
+                  ? `Pay ${paymentModalBookingCount} bookings`
+                  : "Choose Payment Option"}
               </Text>
               <Text
                 style={[
@@ -3721,8 +3759,10 @@ const ListingDetailsSheet = forwardRef<
                   { color: colors.textSecondary },
                 ]}
               >
-                Total Amount: ₱
-                {(paymentBookingData?.totalAmount || 0).toLocaleString()}
+                Total booking amount: ₱{paymentModalTotalAmount.toLocaleString()}
+              </Text>
+              <Text style={[styles.paymentOptionHint, { color: colors.textSecondary }]}>
+                Full payment settles the booking. Downpayment leaves the other half in Pending as Balance Due.
               </Text>
 
               {/* Full Payment Option */}
@@ -3755,7 +3795,7 @@ const ListingDetailsSheet = forwardRef<
                         { color: colors.text },
                       ]}
                     >
-                      Full Payment
+                      Pay in full
                     </Text>
                     <Text
                       style={[
@@ -3763,7 +3803,7 @@ const ListingDetailsSheet = forwardRef<
                         { color: colors.primary },
                       ]}
                     >
-                      ₱{(paymentBookingData?.totalAmount || 0).toLocaleString()}
+                      ₱{paymentModalTotalAmount.toLocaleString()}
                     </Text>
                   </View>
                 </View>
@@ -3773,7 +3813,7 @@ const ListingDetailsSheet = forwardRef<
                     { color: colors.textSecondary },
                   ]}
                 >
-                  Pay the full amount now and complete your booking
+                  Settles the booking amount in one payment.
                 </Text>
               </TouchableOpacity>
 
@@ -3807,7 +3847,7 @@ const ListingDetailsSheet = forwardRef<
                         { color: colors.text },
                       ]}
                     >
-                      Downpayment (50%)
+                      Pay 50% now
                     </Text>
                     <Text
                       style={[
@@ -3816,9 +3856,7 @@ const ListingDetailsSheet = forwardRef<
                       ]}
                     >
                       ₱
-                      {Math.round(
-                        (paymentBookingData?.totalAmount || 0) / 2,
-                      ).toLocaleString()}
+                      {paymentModalHalfAmount.toLocaleString()}
                     </Text>
                   </View>
                 </View>
@@ -3828,11 +3866,8 @@ const ListingDetailsSheet = forwardRef<
                     { color: colors.textSecondary },
                   ]}
                 >
-                  Pay half now, remaining ₱
-                  {Math.round(
-                    (paymentBookingData?.totalAmount || 0) / 2,
-                  ).toLocaleString()}{" "}
-                  due before session
+                  Pay half today. Remaining balance: ₱
+                  {paymentModalHalfAmount.toLocaleString()} shown in Pending.
                 </Text>
               </TouchableOpacity>
 
@@ -3846,7 +3881,11 @@ const ListingDetailsSheet = forwardRef<
                   ]}
                 >
                   <Text style={styles.paymentOptionConfirmText}>
-                    Proceed to Payment
+                    Pay ₱
+                    {(selectedPaymentType === "downpayment"
+                      ? paymentModalHalfAmount
+                      : paymentModalTotalAmount
+                    ).toLocaleString()}
                   </Text>
                 </TouchableOpacity>
               </View>
@@ -4585,7 +4624,14 @@ const styles = StyleSheet.create({
   paymentOptionSubtitle: {
     fontFamily: "Poppins_400Regular",
     fontSize: 14,
-    marginBottom: 24,
+    marginBottom: 6,
+    textAlign: "center",
+  },
+  paymentOptionHint: {
+    fontFamily: "Poppins_400Regular",
+    fontSize: 12,
+    lineHeight: 18,
+    marginBottom: 20,
     textAlign: "center",
   },
   paymentOptionCard: {

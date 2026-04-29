@@ -355,7 +355,7 @@ const StudioBookTab = ({
     if (discountType === "percentage") {
       return `${discountValue}% off`;
     }
-    return `PHP ${discountValue} / hr off`;
+    return `₱${discountValue} / hr off`;
   };
 
   const formatPromotionWindow = (promo: any) => {
@@ -449,7 +449,7 @@ const StudioBookTab = ({
       );
     }
     if (metadata.minimumSpend !== null) {
-      conditionLabels.push(`Min spend PHP ${metadata.minimumSpend.toLocaleString()}`);
+      conditionLabels.push(`Min spend ₱${metadata.minimumSpend.toLocaleString()}`);
     }
 
     return conditionLabels.length > 0 ? conditionLabels.join(" • ") : null;
@@ -1145,7 +1145,7 @@ const StudioBookTab = ({
                         <Text style={{ color: colors.primary, fontSize: 10 }}>
                           {`${appliedPromotion?.name || "Promo Applied"}${
                             Number(appliedPromotion?.discount_amount || 0) > 0
-                              ? ` • -PHP ${Number(appliedPromotion.discount_amount).toLocaleString()}`
+                              ? ` • -₱${Number(appliedPromotion.discount_amount).toLocaleString()}`
                               : ""
                           }`}
                         </Text>
@@ -1972,15 +1972,22 @@ const StudioBookTab = ({
                       debugLog("✅ All bookings created, showing payment options...");
 
                       const firstBooking = results[0];
+                      const successfulBookings = results.filter((booking: any) => booking?.id);
+                      const successfulBookingIds = successfulBookings.map((booking: any) => booking.id);
+                      const batchTotalAmount =
+                        successfulBookings.reduce(
+                          (sum: number, booking: any) =>
+                            sum + Number(booking.final_price || booking.payment_amount || 0),
+                          0,
+                        ) || totalBookingsCost;
 
                       if (firstBooking?.id) {
                         setPaymentBookingData({
                           booking: firstBooking,
+                          bookings: successfulBookings,
+                          bookingIds: successfulBookingIds,
                           studioName: group.name,
-                          totalAmount:
-                            firstBooking.payment_amount ||
-                            firstBooking.final_price ||
-                            totalBookingsCost,
+                          totalAmount: batchTotalAmount,
                         });
                         setSelectedPaymentType("full");
                         setShowPaymentOptionModal(true);

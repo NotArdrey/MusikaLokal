@@ -2324,7 +2324,7 @@ export default function HomeScreen() {
                       {item.type}
                     </Text>
                   </View>
-                  {/* NEW Dot Badge â€“ hidden once the listing has been viewed */}
+                  {/* NEW Dot Badge – hidden once the listing has been viewed */}
                   {!viewedNewArrivals.has(item.id) && (
                     <View style={styles.newArrivalNewBadge}>
                       <View style={styles.newArrivalNewDot} />

@@ -331,7 +331,7 @@ export default function LoginPage() {
               <IoMailOutline size={20} color={colors.textSecondary} />
               <input
                 type="email"
-                className="flex-1 bg-transparent text-sm outline-none"
+                className="h-full flex-1 bg-transparent py-0 text-sm leading-none outline-none"
                 placeholder="name@email.com"
                 style={{ color: colors.text }}
                 value={email}
@@ -371,7 +371,7 @@ export default function LoginPage() {
               <IoLockClosedOutline size={20} color={colors.textSecondary} />
               <input
                 type={showPassword ? "text" : "password"}
-                className="flex-1 bg-transparent text-sm outline-none"
+                className="h-full flex-1 bg-transparent py-0 text-sm leading-none outline-none"
                 placeholder="Enter your password"
                 style={{ color: colors.text }}
                 value={password}

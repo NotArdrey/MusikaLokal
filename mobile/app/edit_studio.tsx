@@ -251,6 +251,9 @@ const buildDateOverrideReason = (
   return `${baseReason} [session_type:${sessionType}]`;
 };
 
+const buildWeeklyScheduleReason = (sessionType: WeeklySessionType): string =>
+  `Weekly schedule [session_type:${sessionType}]`;
+
 const getDefaultWeeklySessionType = (
   type: "Rehearsal" | "Recording" | "Both",
 ): WeeklySessionType => getDefaultDateOverrideSessionType(type);
@@ -264,10 +267,6 @@ const parseWeeklySessionType = (
   reason: unknown,
   fallback: WeeklySessionType = "both",
 ): WeeklySessionType => parseDateOverrideSessionType(reason, fallback);
-
-const buildWeeklyScheduleReason = (
-  sessionType: WeeklySessionType,
-): string => `Weekly schedule [session_type:${sessionType}]`;
 
 const inferStudioTypeFromRows = (
   rows: unknown[],
@@ -307,7 +306,6 @@ export default function EditStudioScreen() {
   >("Both");
   const [recordingSongsPerBlock, setRecordingSongsPerBlock] = useState("");
   const [recordingHoursPerBlock, setRecordingHoursPerBlock] = useState("");
-  const [recordingRateNegotiable, setRecordingRateNegotiable] = useState(false);
   const [pax, setPax] = useState("");
 
   // Promotions state
@@ -893,7 +891,7 @@ export default function EditStudioScreen() {
       } = await supabase.auth.getUser();
 
       if (!user) {
-        console.error("Ã¢ÂÅ’ No user found, redirecting to login");
+        console.error("❌ No user found, redirecting to login");
         router.replace("/");
         return;
       }
@@ -902,7 +900,7 @@ export default function EditStudioScreen() {
       const studioId = Array.isArray(id) ? id[0] : id;
 
       if (!studioId) {
-        console.error("Ã¢ÂÅ’ Invalid studio ID after processing");
+        console.error("❌ Invalid studio ID after processing");
         showAlert("warning", "Invalid Studio", "Invalid studio ID. Please try again.");
         router.replace("/home");
         return;
@@ -954,7 +952,7 @@ export default function EditStudioScreen() {
           .maybeSingle(),
         supabase
           .from('studio_operating_hours')
-          .select('day_of_week, is_open, open_time, close_time, slot_order')
+          .select('*')
           .eq('studio_id', studioId)
           .eq('is_open', true)
           .order('day_of_week', { ascending: true })
@@ -968,7 +966,7 @@ export default function EditStudioScreen() {
 
 
       if (baseError) {
-        console.error("Ã¢ÂÅ’ Base studio query returned error:", baseError);
+        console.error("❌ Base studio query returned error:", baseError);
         throw baseError;
       }
 
@@ -1065,7 +1063,7 @@ export default function EditStudioScreen() {
 
       // If no data returned, user doesn't own this studio
       if (!baseData) {
-        console.error("Ã¢ÂÅ’ No data returned from edge function");
+        console.error("❌ No data returned from edge function");
         showAlert(
           "warning",
           "Not Found",
@@ -1099,8 +1097,7 @@ export default function EditStudioScreen() {
           studioSettingsData?.recording_hours_per_block ??
           studioSettingsData?.min_booking_duration_hours ??
           3,
-        recording_rate_negotiable:
-          (studioSettingsData as any)?.recording_rate_negotiable ?? false,
+        recording_rate_negotiable: false,
       } as any;
 
 
@@ -1142,7 +1139,6 @@ export default function EditStudioScreen() {
         loadedHoursPerBlock ? String(loadedHoursPerBlock) : "",
       );
 
-      setRecordingRateNegotiable(Boolean(data.recording_rate_negotiable));
 
       const paxValue = data.pax?.toString() || "";
       setPax(paxValue);
@@ -1288,6 +1284,8 @@ export default function EditStudioScreen() {
         .from("studio_date_overrides")
         .select("*")
         .eq("studio_id", studioId)
+        .order("override_date", { ascending: true })
+        .order("slot_order", { ascending: true })
         .gte("override_date", new Date().toISOString().split("T")[0]); // Only future dates
 
       if (!overridesError && dateOverrides && dateOverrides.length > 0) {
@@ -1313,22 +1311,23 @@ export default function EditStudioScreen() {
         );
         dateOverrides.forEach((override: any) => {
           if (override.override_date) {
-            calendarDates[override.override_date] = {
-              selected: true,
-              slots:
-                override.is_open && override.open_time && override.close_time
-                  ? [
-                    {
-                      start: convertTo12Hour(override.open_time),
-                      end: convertTo12Hour(override.close_time),
-                    },
-                  ]
-                  : [],
-              sessionType: parseDateOverrideSessionType(
-                override.reason,
-                fallbackSessionType,
-              ),
-            };
+            if (!calendarDates[override.override_date]) {
+              calendarDates[override.override_date] = {
+                selected: true,
+                slots: [],
+                sessionType: parseDateOverrideSessionType(
+                  override.reason,
+                  fallbackSessionType,
+                ),
+              };
+            }
+
+            if (override.is_open && override.open_time && override.close_time) {
+              calendarDates[override.override_date].slots.push({
+                start: convertTo12Hour(override.open_time),
+                end: convertTo12Hour(override.close_time),
+              });
+            }
           }
         });
         setSelectedDates(calendarDates);
@@ -1432,11 +1431,11 @@ export default function EditStudioScreen() {
       } else {
       }
     } catch (e) {
-      console.error("Ã¢ÂÅ’ ===== FETCH STUDIO DETAILS FAILED =====");
-      console.error("Ã¢ÂÅ’ Error timestamp:", new Date().toISOString());
-      console.error("Ã¢ÂÅ’ Error object:", e);
-      console.error("Ã¢ÂÅ’ Error message:", (e as any)?.message);
-      console.error("Ã¢ÂÅ’ Error stack:", (e as any)?.stack);
+      console.error("❌ ===== FETCH STUDIO DETAILS FAILED =====");
+      console.error("❌ Error timestamp:", new Date().toISOString());
+      console.error("❌ Error object:", e);
+      console.error("❌ Error message:", (e as any)?.message);
+      console.error("❌ Error stack:", (e as any)?.stack);
       showAlert("warning", "Couldn't Load Details", "Failed to load studio details.");
       router.replace("/home");
     } finally {
@@ -1986,7 +1985,7 @@ export default function EditStudioScreen() {
 
       await executeSave();
     } catch (e: any) {
-      console.error("Ã¢ÂÅ’ Error checking bookings:", e);
+      console.error("❌ Error checking bookings:", e);
       showAlert(
         "warning",
         "Couldn't Save Studio",
@@ -2491,7 +2490,7 @@ export default function EditStudioScreen() {
             parsePositiveInteger(recordingSongsPerBlock) || 1,
           recording_hours_per_block:
             parsePositiveDecimal(recordingHoursPerBlock) || 3,
-          recording_rate_negotiable: recordingRateNegotiable,
+          recording_rate_negotiable: false,
         },
       };
 
@@ -2524,7 +2523,7 @@ export default function EditStudioScreen() {
 
 
       if (updateError) {
-        console.error("Ã¢ÂÅ’ Error details:", JSON.stringify(updateError, null, 2));
+        console.error("❌ Error details:", JSON.stringify(updateError, null, 2));
         let alertMessage = `Failed to update studio: ${updateError.message}`;
         if (updateError.hint) alertMessage += `\n\nHint: ${updateError.hint}`;
         if (updateError.details) alertMessage += `\n\nDetails: ${updateError.details}`;
@@ -2620,7 +2619,7 @@ export default function EditStudioScreen() {
             parsePositiveDecimal(payload.booking_settings.recording_hours_per_block) ||
             parsePositiveDecimal(payload.booking_settings.min_booking_duration_hours) ||
             3,
-          recording_rate_negotiable: payload.booking_settings.recording_rate_negotiable ?? false,
+          recording_rate_negotiable: false,
         }, { onConflict: 'studio_id' });
 
       // Update promotions (delete-and-re-insert)
@@ -2653,7 +2652,15 @@ export default function EditStudioScreen() {
       }
 
       // Update operating hours
-      await supabase.from('studio_operating_hours').delete().eq('studio_id', studioId);
+      const { error: deleteOperatingHoursError } = await supabase
+        .from('studio_operating_hours')
+        .delete()
+        .eq('studio_id', studioId);
+      if (deleteOperatingHoursError) {
+        throw new Error(
+          `Failed to clear weekly schedule: ${deleteOperatingHoursError.message}`,
+        );
+      }
 
       const dayMap: { [key: string]: number } = {
         'Sunday': 0, 'Monday': 1, 'Tuesday': 2, 'Wednesday': 3, 'Thursday': 4, 'Friday': 5, 'Saturday': 6
@@ -2664,10 +2671,6 @@ export default function EditStudioScreen() {
         for (const daySchedule of payload.availability) {
           const dayIndex = dayMap[daySchedule.day];
           if (dayIndex !== undefined && daySchedule.slots && daySchedule.slots.length > 0) {
-            const weeklySessionType = parseWeeklySessionType(
-              daySchedule.session_type,
-              getDefaultWeeklySessionType(studioType),
-            );
             daySchedule.slots.forEach((slot: any, slotIndex: number) => {
               operatingHours.push({
                 studio_id: studioId,
@@ -2676,6 +2679,12 @@ export default function EditStudioScreen() {
                 open_time: slot.start,
                 close_time: slot.end,
                 slot_order: slotIndex,
+                reason: buildWeeklyScheduleReason(
+                  normalizeWeeklySessionType(
+                    daySchedule.session_type,
+                    getDefaultWeeklySessionType(studioType),
+                  ),
+                ),
               });
             });
           }
@@ -2683,28 +2692,59 @@ export default function EditStudioScreen() {
       }
 
       if (operatingHours.length > 0) {
-        await supabase.from('studio_operating_hours').insert(operatingHours);
+        const { error: operatingHoursError } = await supabase
+          .from('studio_operating_hours')
+          .insert(operatingHours);
+        if (operatingHoursError) {
+          throw new Error(
+            `Failed to save weekly schedule: ${operatingHoursError.message}`,
+          );
+        }
       }
 
       // Update calendar date overrides
-      await supabase.from('studio_date_overrides').delete().eq('studio_id', studioId);
+      const { error: deleteDateOverridesError } = await supabase
+        .from('studio_date_overrides')
+        .delete()
+        .eq('studio_id', studioId);
+      if (deleteDateOverridesError) {
+        throw new Error(
+          `Failed to clear calendar availability: ${deleteDateOverridesError.message}`,
+        );
+      }
 
       if (payload.calendar_availability && Array.isArray(payload.calendar_availability) && payload.calendar_availability.length > 0) {
         const dateOverrides = payload.calendar_availability
           .filter((entry: any) => entry.date)
-          .map((entry: any) => {
+          .flatMap((entry: any) => {
             const hasSlots = Array.isArray(entry.slots) && entry.slots.length > 0;
-            return {
+            const slots = hasSlots ? entry.slots : [null];
+            return slots.map((slot: any, slotIndex: number) => ({
               studio_id: studioId,
               override_date: entry.date,
-              is_open: hasSlots,
-              open_time: hasSlots ? entry.slots[0].start : null,
-              close_time: hasSlots ? entry.slots[0].end : null,
-            };
+              is_open: Boolean(slot),
+              open_time: slot ? slot.start : null,
+              close_time: slot ? slot.end : null,
+              slot_order: slotIndex,
+              reason: buildDateOverrideReason(
+                parseDateOverrideSessionType(
+                  entry.session_type,
+                  getDefaultDateOverrideSessionType(studioType),
+                ),
+                Boolean(slot),
+              ),
+            }));
           });
 
         if (dateOverrides.length > 0) {
-          await supabase.from('studio_date_overrides').insert(dateOverrides);
+          const { error: dateOverridesError } = await supabase
+            .from('studio_date_overrides')
+            .insert(dateOverrides);
+          if (dateOverridesError) {
+            throw new Error(
+              `Failed to save calendar availability: ${dateOverridesError.message}`,
+            );
+          }
         }
       }
 
@@ -2721,20 +2761,16 @@ export default function EditStudioScreen() {
         {
           text: "OK",
           onPress: () => {
-            if (router.canGoBack()) {
-              router.back();
-            } else {
-              router.push("/manage_studio");
-            }
+            router.replace({ pathname: "/my_studio", params: { refresh: String(Date.now()) } });
           },
         },
       ]);
     } catch (e: any) {
-      console.error("Ã¢ÂÅ’ Error updating studio:", e);
-      console.error("Ã¢ÂÅ’ Error message:", e?.message);
-      console.error("Ã¢ÂÅ’ Error stack:", e?.stack);
+      console.error("❌ Error updating studio:", e);
+      console.error("❌ Error message:", e?.message);
+      console.error("❌ Error stack:", e?.stack);
       console.error(
-        "Ã¢ÂÅ’ Full error object:",
+        "❌ Full error object:",
         JSON.stringify(e, Object.getOwnPropertyNames(e), 2),
       );
       showAlert(
@@ -3578,9 +3614,6 @@ export default function EditStudioScreen() {
                     >
                       Rehearsal
                     </Text>
-                    <View style={{ backgroundColor: '#16A34A', borderRadius: 4, paddingHorizontal: 6, paddingVertical: 2 }}>
-                      <Text style={{ color: '#fff', fontSize: 10, fontFamily: 'Poppins_600SemiBold' }}>FIXED</Text>
-                    </View>
                   </View>
                   <Text
                     style={{
@@ -3589,7 +3622,7 @@ export default function EditStudioScreen() {
                       marginRight: 4,
                     }}
                   >
-                    â‚±
+                    ₱
                   </Text>
                   <TextInput
                     value={rehearsalRate}
@@ -3652,9 +3685,6 @@ export default function EditStudioScreen() {
                     >
                       Recording
                     </Text>
-                    <View style={{ backgroundColor: recordingRateNegotiable ? '#F59E0B' : '#16A34A', borderRadius: 4, paddingHorizontal: 6, paddingVertical: 2 }}>
-                      <Text style={{ color: '#fff', fontSize: 10, fontFamily: 'Poppins_600SemiBold' }}>{recordingRateNegotiable ? 'NEGOTIABLE' : 'FIXED'}</Text>
-                    </View>
                   </View>
                   <Text
                     style={{
@@ -3663,7 +3693,7 @@ export default function EditStudioScreen() {
                       marginRight: 4,
                     }}
                   >
-                    â‚±
+                    ₱
                   </Text>
                   <TextInput
                     value={recordingRate}
@@ -3690,20 +3720,6 @@ export default function EditStudioScreen() {
                     /song
                   </Text>
                 </View>
-
-                <TouchableOpacity activeOpacity={1}
-                  onPress={() => setRecordingRateNegotiable(!recordingRateNegotiable)}
-                  style={{ flexDirection: 'row', alignItems: 'center', marginTop: 10, marginBottom: 6 }}
-                >
-                  <Ionicons
-                    name={recordingRateNegotiable ? 'checkbox' : 'square-outline'}
-                    size={20}
-                    color={recordingRateNegotiable ? colors.primary : colors.textSecondary}
-                  />
-                  <Text style={{ color: colors.textSecondary, fontFamily: 'Poppins_400Regular', fontSize: 12, marginLeft: 6 }}>
-                    Allow clients to negotiate recording rate
-                  </Text>
-                </TouchableOpacity>
 
                 <View style={{ marginTop: 10 }}>
                   <Text
@@ -3898,7 +3914,7 @@ export default function EditStudioScreen() {
                       </Text>
                     </View>
                     <Text style={{ fontFamily: "Poppins_400Regular", color: colors.textSecondary, fontSize: 12, marginTop: 2 }}>
-                      {promo.discount_type === "percentage" ? `${promo.discount_value}% off` : `â‚±${promo.discount_value}/hr off`}
+                      {promo.discount_type === "percentage" ? `${promo.discount_value}% off` : `₱${promo.discount_value}/hr off`}
                       {" "}on {promo.applies_to === "both" ? "all" : promo.applies_to} bookings
                     </Text>
                     {(promo.criteria || promo.minimum_booking_hours || promo.minimum_spend) && (
@@ -3906,7 +3922,7 @@ export default function EditStudioScreen() {
                         {[
                           promo.criteria ? `How to get promo: ${promo.criteria}` : null,
                           promo.minimum_booking_hours ? `Min ${promo.minimum_booking_hours} hr(s)` : null,
-                          promo.minimum_spend ? `Min spend â‚±${promo.minimum_spend}` : null,
+                          promo.minimum_spend ? `Min spend ₱${promo.minimum_spend}` : null,
                         ]
                           .filter(Boolean)
                           .join(" | ")}
@@ -4104,7 +4120,7 @@ export default function EditStudioScreen() {
                           color: promotionForm.discount_type === dt ? colors.primary : colors.textSecondary,
                         }}
                       >
-                        {dt === "percentage" ? "Percentage (%)" : "Fixed Amount (â‚±)"}
+                        {dt === "percentage" ? "Percentage (%)" : "Fixed Amount (₱)"}
                       </Text>
                     </TouchableOpacity>
                   ))}
@@ -4127,7 +4143,7 @@ export default function EditStudioScreen() {
                   }}
                 >
                   {promotionForm.discount_type === "fixed_amount" && (
-                    <Text style={{ fontFamily: "Poppins_600SemiBold", color: colors.text, marginRight: 4 }}>â‚±</Text>
+                    <Text style={{ fontFamily: "Poppins_600SemiBold", color: colors.text, marginRight: 4 }}>₱</Text>
                   )}
                   <TextInput
                     value={promotionForm.discount_value}

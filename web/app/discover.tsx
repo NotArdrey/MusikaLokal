@@ -302,15 +302,15 @@ export default function DiscoverScreen() {
 		}
 
 		if (hourly > 0) {
-			return `PHP ${hourly.toLocaleString()} / hr`;
+			return `₱${hourly.toLocaleString()} / hr`;
 		}
 
 		if (budget > 0) {
-			return `PHP ${budget.toLocaleString()}`;
+			return `₱${budget.toLocaleString()}`;
 		}
 
 		if (rate > 0) {
-			return `PHP ${rate.toLocaleString()}`;
+			return `₱${rate.toLocaleString()}`;
 		}
 
 		return "Inquire for rates";

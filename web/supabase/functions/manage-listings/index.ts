@@ -18,6 +18,17 @@ const syncGig3NF = async (client: any, gigId: string) => {
     if (error) throw error
 }
 
+const normalizeScheduleSessionType = (value: any): string => {
+    const normalized = String(value || '').trim().toLowerCase()
+    return ['rehearsal', 'recording', 'both'].includes(normalized) ? normalized : 'both'
+}
+
+const buildWeeklyScheduleReason = (source: any): string =>
+    `Weekly schedule [session_type:${normalizeScheduleSessionType(source?.session_type ?? source?.sessionType)}]`
+
+const buildDateOverrideReason = (source: any): string =>
+    `Custom schedule [session_type:${normalizeScheduleSessionType(source?.session_type ?? source?.sessionType)}]`
+
 const replaceGigRequirements = async (client: any, gigId: string, requirements: any) => {
     const { error: deleteError } = await client.from('gig_requirements').delete().eq('gig_id', gigId)
     if (deleteError) throw deleteError
@@ -702,7 +713,8 @@ serve(async (req: Request) => {
                                     is_open: true,
                                     open_time: slot.start,
                                     close_time: slot.end,
-                                    slot_order: slotIndex
+                                    slot_order: slotIndex,
+                                    reason: buildWeeklyScheduleReason(daySchedule)
                                 });
                             });
                         }
@@ -717,7 +729,8 @@ serve(async (req: Request) => {
                             day_of_week: day,
                             is_open: true,
                             open_time: '09:00',
-                            close_time: '22:00'
+                            close_time: '22:00',
+                            reason: 'Weekly schedule [session_type:both]'
                         })
                     }
                 }
@@ -732,21 +745,15 @@ serve(async (req: Request) => {
                         if (dateEntry.date && dateEntry.slots && dateEntry.slots.length > 0) {
                             // For each slot in the date, create an override entry
                             // The table supports one slot per date, so we'll use the first slot's times
-                            // For multiple slots, we use the earliest start and latest end
-                            const allStarts = dateEntry.slots.map((s: any) => s.start);
-                            const allEnds = dateEntry.slots.map((s: any) => s.end);
-
-                            // Use first slot for now (can be extended for multiple slots per date)
-                            const firstSlot = dateEntry.slots[0];
-
-                            dateOverrides.push({
+                            dateEntry.slots.forEach((slot: any, slotIndex: number) => dateOverrides.push({
                                 studio_id: studioId,
                                 override_date: dateEntry.date,
                                 is_open: true,
-                                open_time: firstSlot.start,
-                                close_time: firstSlot.end,
-                                reason: 'Custom schedule'
-                            });
+                                open_time: slot.start,
+                                close_time: slot.end,
+                                slot_order: slotIndex,
+                                reason: buildDateOverrideReason(dateEntry)
+                            }));
                         }
                     }
 
@@ -989,7 +996,8 @@ serve(async (req: Request) => {
                                 is_open: true,
                                 open_time: slot.start,
                                 close_time: slot.end,
-                                slot_order: slotIndex
+                                slot_order: slotIndex,
+                                reason: buildWeeklyScheduleReason(daySchedule)
                             });
                         });
                     }
@@ -1015,16 +1023,15 @@ serve(async (req: Request) => {
 
                 for (const dateEntry of calendarAvailability) {
                     if (dateEntry.date && dateEntry.slots && dateEntry.slots.length > 0) {
-                        const firstSlot = dateEntry.slots[0];
-
-                        dateOverrides.push({
+                        dateEntry.slots.forEach((slot: any, slotIndex: number) => dateOverrides.push({
                             studio_id: studioId,
                             override_date: dateEntry.date,
                             is_open: true,
-                            open_time: firstSlot.start,
-                            close_time: firstSlot.end,
-                            reason: 'Custom schedule'
-                        });
+                            open_time: slot.start,
+                            close_time: slot.end,
+                            slot_order: slotIndex,
+                            reason: buildDateOverrideReason(dateEntry)
+                        }));
                     }
                 }
 

@@ -199,6 +199,9 @@ const buildDateOverrideReason = (
   return `${baseReason} [session_type:${sessionType}]`;
 };
 
+const buildWeeklyScheduleReason = (sessionType: WeeklySessionType): string =>
+  `Weekly schedule [session_type:${sessionType}]`;
+
 const getDefaultWeeklySessionType = (
   type: "Rehearsal" | "Recording" | "Both",
 ): WeeklySessionType => getDefaultDateOverrideSessionType(type);
@@ -207,15 +210,6 @@ const normalizeWeeklySessionType = (
   value: unknown,
   fallback: WeeklySessionType = "both",
 ): WeeklySessionType => normalizeDateOverrideSessionType(value, fallback);
-
-const parseWeeklySessionType = (
-  reason: unknown,
-  fallback: WeeklySessionType = "both",
-): WeeklySessionType => parseDateOverrideSessionType(reason, fallback);
-
-const buildWeeklyScheduleReason = (
-  sessionType: WeeklySessionType,
-): string => `Weekly schedule [session_type:${sessionType}]`;
 
 export default function AddStudioScreen() {
   const { colors, isDark } = useTheme();
@@ -237,7 +231,6 @@ export default function AddStudioScreen() {
   >("Both");
   const [recordingSongsPerBlock, setRecordingSongsPerBlock] = useState("");
   const [recordingHoursPerBlock, setRecordingHoursPerBlock] = useState("");
-  const [recordingRateNegotiable, setRecordingRateNegotiable] = useState(false);
   const [pax, setPax] = useState("");
 
   // Promotions state
@@ -1189,7 +1182,7 @@ export default function AddStudioScreen() {
             parsePositiveInteger(recordingSongsPerBlock) || 1,
           recording_hours_per_block:
             parsePositiveDecimal(recordingHoursPerBlock) || 3,
-          recording_rate_negotiable: recordingRateNegotiable,
+          recording_rate_negotiable: false,
         },
       };
 
@@ -1217,7 +1210,7 @@ export default function AddStudioScreen() {
 
 
       if (error) {
-        console.error("Ã¢ÂÅ’ Error details:", JSON.stringify(error, null, 2));
+        console.error("❌ Error details:", JSON.stringify(error, null, 2));
 
         let alertMessage = `Failed to create studio: ${error.message}`;
         if (error.hint) alertMessage += `\n\nHint: ${error.hint}`;
@@ -1311,7 +1304,7 @@ export default function AddStudioScreen() {
         peak_season_dates: bookingSettings.peak_season_dates || [],
         off_peak_multiplier: Number(bookingSettings.off_peak_multiplier) || 1.0,
         off_peak_dates: bookingSettings.off_peak_dates || [],
-        recording_rate_negotiable: bookingSettings.recording_rate_negotiable ?? false,
+        recording_rate_negotiable: false,
       });
 
       // Insert promotions
@@ -1352,10 +1345,6 @@ export default function AddStudioScreen() {
         for (const daySchedule of payload.availability) {
           const dayIndex = dayMap[daySchedule.day];
           if (dayIndex !== undefined && daySchedule.slots && daySchedule.slots.length > 0) {
-            const weeklySessionType = parseWeeklySessionType(
-              daySchedule.session_type,
-              getDefaultWeeklySessionType(studioType),
-            );
             daySchedule.slots.forEach((slot: any, slotIndex: number) => {
               operatingHours.push({
                 studio_id: studioId,
@@ -1364,7 +1353,12 @@ export default function AddStudioScreen() {
                 open_time: slot.start,
                 close_time: slot.end,
                 slot_order: slotIndex,
-                reason: buildWeeklyScheduleReason(weeklySessionType),
+                reason: buildWeeklyScheduleReason(
+                  normalizeWeeklySessionType(
+                    daySchedule.session_type,
+                    getDefaultWeeklySessionType(studioType),
+                  ),
+                ),
               });
             });
           }
@@ -1372,19 +1366,27 @@ export default function AddStudioScreen() {
       }
 
       if (operatingHours.length > 0) {
-        await supabase.from('studio_operating_hours').insert(operatingHours);
+        const { error: operatingHoursError } = await supabase
+          .from('studio_operating_hours')
+          .insert(operatingHours);
+        if (operatingHoursError) {
+          throw new Error(
+            `Failed to save weekly schedule: ${operatingHoursError.message}`,
+          );
+        }
       }
 
       // Insert calendar date overrides if any
       if (payload.calendar_availability && Array.isArray(payload.calendar_availability) && payload.calendar_availability.length > 0) {
         const dateOverrides = payload.calendar_availability
           .filter((entry: any) => entry.date && entry.slots && entry.slots.length > 0)
-          .map((entry: any) => ({
+          .flatMap((entry: any) => entry.slots.map((slot: any, slotIndex: number) => ({
             studio_id: studioId,
             override_date: entry.date,
             is_open: true,
-            open_time: entry.slots[0].start,
-            close_time: entry.slots[0].end,
+            open_time: slot.start,
+            close_time: slot.end,
+            slot_order: slotIndex,
             reason: buildDateOverrideReason(
               parseDateOverrideSessionType(
                 entry.session_type,
@@ -1392,21 +1394,28 @@ export default function AddStudioScreen() {
               ),
               true,
             ),
-          }));
+          })));
 
         if (dateOverrides.length > 0) {
-          await supabase.from('studio_date_overrides').insert(dateOverrides);
+          const { error: dateOverridesError } = await supabase
+            .from('studio_date_overrides')
+            .insert(dateOverrides);
+          if (dateOverridesError) {
+            throw new Error(
+              `Failed to save calendar availability: ${dateOverridesError.message}`,
+            );
+          }
         }
       }
 
       setNewStudioId(data.id);
       setModalVisible(true);
     } catch (e: any) {
-      console.error("Ã¢ÂÅ’ Error creating studio:", e);
-      console.error("Ã¢ÂÅ’ Error message:", e?.message);
-      console.error("Ã¢ÂÅ’ Error stack:", e?.stack);
+      console.error("❌ Error creating studio:", e);
+      console.error("❌ Error message:", e?.message);
+      console.error("❌ Error stack:", e?.stack);
       console.error(
-        "Ã¢ÂÅ’ Full error object:",
+        "❌ Full error object:",
         JSON.stringify(e, Object.getOwnPropertyNames(e), 2),
       );
       showAlert(
@@ -1421,7 +1430,7 @@ export default function AddStudioScreen() {
 
   const handleSuccessRedirect = () => {
     setModalVisible(false);
-    router.push({ pathname: "/bookings", params: { tab: "Pending" } });
+    router.replace({ pathname: "/my_studio", params: { refresh: String(Date.now()) } });
   };
 
   // Start address verification (before studio creation)
@@ -1633,11 +1642,11 @@ export default function AddStudioScreen() {
       showAlert(
         "info",
         "Address Verification",
-        "Studio created! You can verify your address later from the manage page.",
+        "Studio created! You can verify your address later from My Studio.",
         [
           {
             text: "OK",
-            onPress: () => router.push({ pathname: "/manage_studio", params: { id: newStudioId } })
+            onPress: () => router.replace({ pathname: "/my_studio", params: { refresh: String(Date.now()) } })
           }
         ]
       );
@@ -2559,9 +2568,6 @@ export default function AddStudioScreen() {
                         >
                           Rehearsal
                         </Text>
-                        <View style={{ backgroundColor: '#16A34A', borderRadius: 4, paddingHorizontal: 6, paddingVertical: 2 }}>
-                          <Text style={{ color: '#fff', fontSize: 10, fontFamily: 'Poppins_600SemiBold' }}>FIXED</Text>
-                        </View>
                       </View>
                       <Text
                         style={{
@@ -2570,7 +2576,7 @@ export default function AddStudioScreen() {
                           marginRight: 4,
                         }}
                       >
-                        â‚±
+                        ₱
                       </Text>
                       <TextInput
                         value={rehearsalRate}
@@ -2633,9 +2639,6 @@ export default function AddStudioScreen() {
                         >
                           Recording
                         </Text>
-                        <View style={{ backgroundColor: recordingRateNegotiable ? '#F59E0B' : '#16A34A', borderRadius: 4, paddingHorizontal: 6, paddingVertical: 2 }}>
-                          <Text style={{ color: '#fff', fontSize: 10, fontFamily: 'Poppins_600SemiBold' }}>{recordingRateNegotiable ? 'NEGOTIABLE' : 'FIXED'}</Text>
-                        </View>
                       </View>
                       <Text
                         style={{
@@ -2644,7 +2647,7 @@ export default function AddStudioScreen() {
                           marginRight: 4,
                         }}
                       >
-                        â‚±
+                        ₱
                       </Text>
                       <TextInput
                         value={recordingRate}
@@ -2671,20 +2674,6 @@ export default function AddStudioScreen() {
                         /song
                       </Text>
                     </View>
-
-                    <TouchableOpacity activeOpacity={1}
-                      onPress={() => setRecordingRateNegotiable(!recordingRateNegotiable)}
-                      style={{ flexDirection: 'row', alignItems: 'center', marginTop: 10, marginBottom: 6 }}
-                    >
-                      <Ionicons
-                        name={recordingRateNegotiable ? 'checkbox' : 'square-outline'}
-                        size={20}
-                        color={recordingRateNegotiable ? colors.primary : colors.textSecondary}
-                      />
-                      <Text style={{ color: colors.textSecondary, fontFamily: 'Poppins_400Regular', fontSize: 12, marginLeft: 6 }}>
-                        Allow clients to negotiate recording rate
-                      </Text>
-                    </TouchableOpacity>
 
                     <View style={{ marginTop: 10 }}>
                       <Text
@@ -2881,14 +2870,14 @@ export default function AddStudioScreen() {
                           </Text>
                         </View>
                         <Text style={{ fontFamily: "Poppins_400Regular", color: colors.textSecondary, fontSize: 12, marginTop: 2 }}>
-                          {promo.discount_type === "percentage" ? `${promo.discount_value}% off` : `â‚±${promo.discount_value}/hr off`}
+                          {promo.discount_type === "percentage" ? `${promo.discount_value}% off` : `₱${promo.discount_value}/hr off`}
                           {" "}on {promo.applies_to === "both" ? "all" : promo.applies_to} bookings
                         </Text>
                         {(promo.criteria || promo.minimum_booking_hours || promo.minimum_spend) ? (
                           <Text style={{ fontFamily: "Poppins_400Regular", color: colors.textSecondary, fontSize: 11, marginTop: 2 }}>
                             {promo.criteria ? `${promo.criteria}. ` : ""}
                             {promo.minimum_booking_hours ? `Min ${promo.minimum_booking_hours} hr. ` : ""}
-                            {promo.minimum_spend ? `Min â‚±${promo.minimum_spend}.` : ""}
+                            {promo.minimum_spend ? `Min ₱${promo.minimum_spend}.` : ""}
                           </Text>
                         ) : null}
                         <Text style={{ fontFamily: "Poppins_400Regular", color: colors.textSecondary, fontSize: 11, marginTop: 2 }}>
@@ -3074,7 +3063,7 @@ export default function AddStudioScreen() {
                               color: promotionForm.discount_type === dt ? colors.primary : colors.textSecondary,
                             }}
                           >
-                            {dt === "percentage" ? "Percentage (%)" : "Fixed Amount (â‚±)"}
+                            {dt === "percentage" ? "Percentage (%)" : "Fixed Amount (₱)"}
                           </Text>
                         </TouchableOpacity>
                       ))}
@@ -3097,7 +3086,7 @@ export default function AddStudioScreen() {
                       }}
                     >
                       {promotionForm.discount_type === "fixed_amount" && (
-                        <Text style={{ fontFamily: "Poppins_600SemiBold", color: colors.text, marginRight: 4 }}>â‚±</Text>
+                        <Text style={{ fontFamily: "Poppins_600SemiBold", color: colors.text, marginRight: 4 }}>₱</Text>
                       )}
                       <TextInput
                         value={promotionForm.discount_value}
@@ -4889,7 +4878,7 @@ export default function AddStudioScreen() {
                           fontFamily: "Poppins_500Medium",
                         }}
                       >
-                        Rehearsal: â‚±{rehearsalRate || "0"}/hr
+                        Rehearsal: ₱{rehearsalRate || "0"}/hr
                       </Text>
                     </View>
                   )}
@@ -4909,7 +4898,7 @@ export default function AddStudioScreen() {
                           fontFamily: "Poppins_500Medium",
                         }}
                       >
-                        Recording: â‚±{recordingRate || "0"}/song
+                        Recording: ₱{recordingRate || "0"}/song
                       </Text>
                     </View>
                   )}
@@ -4954,11 +4943,11 @@ export default function AddStudioScreen() {
                         <View key={promo.id} style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 6, marginTop: 4 }}>
                           <Ionicons name="pricetag-outline" size={12} color={colors.primary} />
                           <Text style={{ color: colors.text, fontFamily: "Poppins_500Medium", fontSize: 12 }}>
-                            "{promo.name}": {promo.discount_type === "percentage" ? `${promo.discount_value}% off` : `â‚±${promo.discount_value}/hr off`}
+                            "{promo.name}": {promo.discount_type === "percentage" ? `${promo.discount_value}% off` : `₱${promo.discount_value}/hr off`}
                             {" "}({promo.applies_to === "both" ? "All" : promo.applies_to})
                             {promo.criteria ? ` | ${promo.criteria}` : ""}
                             {promo.minimum_booking_hours ? ` | Min ${promo.minimum_booking_hours} hr` : ""}
-                            {promo.minimum_spend ? ` | Min â‚±${promo.minimum_spend}` : ""}
+                            {promo.minimum_spend ? ` | Min ₱${promo.minimum_spend}` : ""}
                             {" | "}{promo.is_permanent ? "Regular" : `${promo.start_date} - ${promo.end_date}`}
                           </Text>
                         </View>

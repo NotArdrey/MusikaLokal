@@ -1658,7 +1658,7 @@ export default function ProfileScreen() {
 
       if (uploadError) {
         logProfileMedia("storage_upload_failed", { message: uploadError.message });
-        console.error("âŒ Upload failed:", uploadError);
+        console.error("❌ Upload failed:", uploadError);
         throw new Error(uploadError.message || "Upload failed");
       }
 
@@ -3117,7 +3117,7 @@ export default function ProfileScreen() {
               { backgroundColor: colors.background, borderLeftColor: colors.border },
             ]}
           >
-            {/* Drawer top â€” avatar + name */}
+            {/* Drawer top — avatar + name */}
             <View style={[styles.drawerTop, { borderBottomColor: colors.border }]}>
               <View style={styles.drawerAvatar}>
                 <Image source={DEFAULT_AVATAR} style={styles.drawerAvatarImage} resizeMode="cover" />

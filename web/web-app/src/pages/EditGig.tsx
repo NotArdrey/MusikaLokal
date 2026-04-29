@@ -169,10 +169,10 @@ export default function EditGigPage() {
         type: "success",
         title: "Saved",
         message: isReapplyRequested && permitStatus === "rejected"
-          ? "Gig updated and permit resubmitted for admin review."
+          ? "Gig updated and permit resubmitted for permit review."
           : "Gig updated.",
       });
-      setTimeout(() => navigate(-1), 1200);
+      setTimeout(() => navigate("/my-venue"), 1200);
     } catch {
       setAlert({
         visible: true,
@@ -402,7 +402,7 @@ export default function EditGigPage() {
                 Permit Rejected
               </p>
               <p className="mt-1 text-xs text-red-500 dark:text-red-300">
-                Upload a corrected permit and save to resubmit for admin review.
+                Upload a corrected permit and save to resubmit for permit review.
               </p>
               {permitRejectionReason && (
                 <p className="mt-1.5 text-xs font-semibold text-red-500 dark:text-red-300">

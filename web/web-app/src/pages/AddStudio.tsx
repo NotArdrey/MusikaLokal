@@ -151,7 +151,7 @@ export default function AddStudioPage() {
         title: "Studio Created",
         message: "Your studio is live and ready to manage.",
       });
-      setTimeout(() => navigate(`/manage-studio?id=${data.id}`), 1500);
+      setTimeout(() => navigate("/my-studio"), 1500);
     } catch {
       setAlert({
         visible: true,

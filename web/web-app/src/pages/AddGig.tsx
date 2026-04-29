@@ -126,9 +126,9 @@ export default function AddGigPage() {
         visible: true,
         type: "success",
         title: "Gig Created",
-        message: "Your gig has been submitted for permit review. It will be listed publicly after admin approval.",
+        message: "Your gig has been submitted for permit review.",
       });
-      setTimeout(() => navigate("/bookings?tab=pending"), 1500);
+      setTimeout(() => navigate("/my-venue"), 1500);
     } catch {
       setAlert({
         visible: true,
@@ -353,7 +353,7 @@ export default function AddGigPage() {
                 className="text-xs mb-4"
                 style={{ color: colors.textSecondary }}
               >
-                Upload your business permit (PDF or image). Required for admin approval.
+                Upload your business permit (PDF or image). Required for permit review.
               </p>
               {permitPreview ? (
                 <div className="flex items-center gap-3 rounded-xl border p-3" style={{ borderColor: borderCol }}>

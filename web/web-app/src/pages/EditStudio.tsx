@@ -180,7 +180,7 @@ export default function EditStudioPage() {
         title: "Saved",
         message: "Studio updated.",
       });
-      setTimeout(() => navigate(-1), 1200);
+      setTimeout(() => navigate("/my-studio"), 1200);
     } catch {
       setAlert({
         visible: true,

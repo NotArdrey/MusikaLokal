@@ -17,6 +17,7 @@ export interface DateOverride {
   is_open: boolean;
   open_time?: string | null;
   close_time?: string | null;
+  slot_order?: number | null;
 }
 
 export interface CartBooking {
@@ -136,14 +137,17 @@ const buildAvailabilityMap = (availability: DaySchedule[]) => {
 };
 
 const buildDateOverrideMap = (dateOverrides?: DateOverride[]) => {
-  const dateOverrideMap: Record<string, DateOverride> = {};
+  const dateOverrideMap: Record<string, DateOverride[]> = {};
 
   if (!Array.isArray(dateOverrides)) {
     return dateOverrideMap;
   }
 
   dateOverrides.forEach((override) => {
-    dateOverrideMap[override.override_date] = override;
+    if (!dateOverrideMap[override.override_date]) {
+      dateOverrideMap[override.override_date] = [];
+    }
+    dateOverrideMap[override.override_date].push(override);
   });
 
   return dateOverrideMap;
@@ -153,15 +157,26 @@ const resolveDaySchedule = (
   dateStr: string,
   date: Date,
   availabilityMap: Record<number, DaySchedule>,
-  dateOverrideMap: Record<string, DateOverride>,
+  dateOverrideMap: Record<string, DateOverride[]>,
 ): DaySchedule | null => {
-  const dateOverride = dateOverrideMap[dateStr];
+  const dateOverrides = dateOverrideMap[dateStr];
 
-  if (dateOverride) {
-    if (dateOverride.is_open && dateOverride.open_time && dateOverride.close_time) {
+  if (dateOverrides) {
+    const openOverrides = dateOverrides
+      .filter((override) => override.is_open && override.open_time && override.close_time)
+      .sort((a: any, b: any) => {
+        const orderDiff = Number(a?.slot_order ?? 0) - Number(b?.slot_order ?? 0);
+        if (orderDiff !== 0) return orderDiff;
+        return String(a?.open_time || "").localeCompare(String(b?.open_time || ""));
+      });
+
+    if (openOverrides.length > 0) {
       return {
         day: date.toLocaleDateString("en-US", { weekday: "long" }),
-        slots: [{ start: dateOverride.open_time, end: dateOverride.close_time }],
+        slots: openOverrides.map((override) => ({
+          start: override.open_time as string,
+          end: override.close_time as string,
+        })),
         isOverride: true,
       };
     }

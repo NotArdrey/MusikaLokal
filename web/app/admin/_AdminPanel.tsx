@@ -220,6 +220,11 @@ interface AlertState {
   type: AlertType;
   title: string;
   message: string;
+  buttons?: {
+    text: string;
+    onPress?: () => void;
+    style?: 'default' | 'cancel' | 'destructive';
+  }[];
 }
 
 interface AdminPanelProps {
@@ -410,7 +415,7 @@ const formatDateTime = (value?: string | null) => {
 
 const formatCurrency = (value?: number | null) => {
   const safeValue = Number(value || 0);
-  return `â‚±${safeValue.toLocaleString('en-PH', {
+  return `₱${safeValue.toLocaleString('en-PH', {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   })}`;
@@ -620,7 +625,7 @@ export default function AdminPanel({ initialTab, children }: AdminPanelProps) {
   const showInlineTabNav = !(Platform.OS === 'web' && width >= 768);
 
   const showAlert = useCallback((type: AlertType, title: string, message: string) => {
-    setAlertState({ visible: true, type, title, message });
+    setAlertState({ visible: true, type, title, message, buttons: undefined });
   }, []);
 
   const handleTabChange = useCallback((nextTab: Tab) => {
@@ -1576,32 +1581,55 @@ export default function AdminPanel({ initialTab, children }: AdminPanelProps) {
         return;
       }
 
+      const message = `Are you sure you want to delete ${targetUser.full_name || targetUser.email}? This cannot be undone.`;
+      const performDelete = async () => {
+        setUserActionLoadingId(targetUser.id);
+        try {
+          await invokeAdminUsersManagement({
+            action: 'delete_user',
+            userId: targetUser.id,
+          });
+
+          showAlert('success', 'User deleted', 'The user account has been removed.');
+          await Promise.all([fetchUsers(), refreshMetrics()]);
+        } catch (error) {
+          const message = await getErrorMessage(error, 'Unable to delete this user.');
+          showAlert('error', 'Failed to delete user', message);
+        } finally {
+          setUserActionLoadingId(null);
+        }
+      };
+
+      if (Platform.OS === 'web') {
+        setAlertState({
+          visible: true,
+          type: 'warning',
+          title: 'Delete user',
+          message,
+          buttons: [
+            { text: 'Cancel', style: 'cancel' },
+            {
+              text: 'Delete',
+              style: 'destructive',
+              onPress: () => {
+                void performDelete();
+              },
+            },
+          ],
+        });
+        return;
+      }
+
       Alert.alert(
         'Delete user',
-        `Are you sure you want to delete ${targetUser.full_name || targetUser.email}? This cannot be undone.`,
+        message,
         [
           { text: 'Cancel', style: 'cancel' },
           {
             text: 'Delete',
             style: 'destructive',
             onPress: () => {
-              void (async () => {
-                setUserActionLoadingId(targetUser.id);
-                try {
-                  await invokeAdminUsersManagement({
-                    action: 'delete_user',
-                    userId: targetUser.id,
-                  });
-
-                  showAlert('success', 'User deleted', 'The user account has been removed.');
-                  await Promise.all([fetchUsers(), refreshMetrics()]);
-                } catch (error) {
-                  const message = await getErrorMessage(error, 'Unable to delete this user.');
-                  showAlert('error', 'Failed to delete user', message);
-                } finally {
-                  setUserActionLoadingId(null);
-                }
-              })();
+              void performDelete();
             },
           },
         ],
@@ -2790,9 +2818,6 @@ export default function AdminPanel({ initialTab, children }: AdminPanelProps) {
                 )})}
               </View>
             )}
-
-            <Text style={[styles.sectionHeading, { color: colors.text }]}>Booking Incident Queue</Text>
-
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterRow}>
               {incidentStatuses.map((status) => {
                 const active = incidentFilter === status;
@@ -3632,6 +3657,7 @@ export default function AdminPanel({ initialTab, children }: AdminPanelProps) {
         type={alertState.type}
         title={alertState.title}
         message={alertState.message}
+        buttons={alertState.buttons}
         onClose={() => setAlertState((prev) => ({ ...prev, visible: false }))}
       />
 

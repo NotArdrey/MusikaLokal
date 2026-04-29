@@ -11,6 +11,19 @@ import { useAuth } from "../context/AuthContext";
 import { useTheme } from "../context/ThemeContext";
 import { supabase } from "../lib/supabase";
 
+const formatPermitStatus = (status: string | null | undefined) => {
+  const normalized = String(status || "pending_review").toLowerCase();
+  if (["approved", "approved_by_admin", "verified"].includes(normalized)) return "Approved";
+  if (normalized === "rejected") return "Rejected";
+  if (normalized === "resubmitted") return "Resubmitted";
+  if (["pending", "pending_review", "in_review", "under_review"].includes(normalized)) return "Pending Review";
+  return normalized
+    .split("_")
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+};
+
 export default function MyStudioPage() {
   const { colors, isDark } = useTheme();
   const { user } = useAuth();
@@ -133,12 +146,12 @@ export default function MyStudioPage() {
                   {/* Permit status badge */}
                   <div className="mt-1.5 flex items-center gap-2">
                     <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
-                      s.permit_status === "approved" ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400" :
+                      ["approved", "approved_by_admin", "verified"].includes(String(s.permit_status || "").toLowerCase()) ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400" :
                       s.permit_status === "rejected" ? "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400" :
                       s.permit_status === "resubmitted" ? "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400" :
                       "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400"
                     }`}>
-                      {(s.permit_status || "pending_review").replace("_", " ")}
+                      {formatPermitStatus(s.permit_status)}
                     </span>
                   </div>
                   {avgRating(s.reviews) && (

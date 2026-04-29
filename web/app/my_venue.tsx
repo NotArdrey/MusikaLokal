@@ -331,7 +331,7 @@ export default function MyVenueScreen() {
 
                                     const permitStatusLabel =
                                         isApproved
-                                            ? 'Approved by Admin'
+                                            ? 'Approved'
                                             : isRejected
                                                 ? 'Rejected'
                                                 : isResubmitted

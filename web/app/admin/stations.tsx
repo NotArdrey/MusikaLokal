@@ -18,7 +18,6 @@ import { useTheme } from '../../src/context/ThemeContext';
 import { supabase } from '../../lib/supabase';
 
 type StationFilter = 'all' | 'live' | 'offline' | 'featured';
-type SourceFilter = 'all' | 'profile' | 'group' | 'needs_station';
 
 const getProfileName = (profile: any) => {
   const name = typeof profile?.full_name === 'string' ? profile.full_name.trim() : '';
@@ -32,14 +31,6 @@ const getStationOwner = (station: any) => {
 const getOwnerName = (owner: any) => {
   const name = typeof owner?.name === 'string' ? owner.name.trim() : '';
   return name || getProfileName(owner);
-};
-
-const getSourceLabel = (source: any) => {
-  if (source?.kind === 'group') {
-    return source?.subtitle === 'Duo' ? 'Duo' : 'Group';
-  }
-
-  return 'Artist';
 };
 
 const getDefaultSelectedPlaylistIds = (source: any) => {
@@ -66,7 +57,6 @@ export default function AdminStationsPage() {
   const [sources, setSources] = useState<any[]>([]);
   const [loadingData, setLoadingData] = useState(true);
   const [search, setSearch] = useState('');
-  const [sourceFilter, setSourceFilter] = useState<SourceFilter>('all');
   const [stationFilter, setStationFilter] = useState<StationFilter>('all');
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [editingSource, setEditingSource] = useState<any | null>(null);
@@ -109,26 +99,6 @@ export default function AdminStationsPage() {
       fetchData();
     }
   }, [fetchData, isAdmin, loading, roleResolved]);
-
-  const visibleSources = useMemo(() => {
-    const query = search.trim().toLowerCase();
-
-    return sources.filter((source) => {
-      if (sourceFilter === 'profile' && source.kind !== 'profile') return false;
-      if (sourceFilter === 'group' && source.kind !== 'group') return false;
-      if (sourceFilter === 'needs_station' && source.station?.id) return false;
-
-      if (!query) return true;
-
-      return [
-        source.name,
-        source.subtitle,
-        source.genre,
-        source.station?.name,
-        ...(Array.isArray(source.playlists) ? source.playlists.map((playlist: any) => playlist?.title) : []),
-      ].some((value) => String(value || '').toLowerCase().includes(query));
-    });
-  }, [search, sourceFilter, sources]);
 
   const visibleStations = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -284,7 +254,7 @@ export default function AdminStationsPage() {
   if (loading || !roleResolved) {
     return (
       <View style={[styles.container, { backgroundColor: colors.background }]}>
-        <Header title="Admin - Stations" hideBackButton />
+        <Header title="Admin" hideBackButton />
         <ActivityIndicator size="large" color={colors.primary} style={{ marginTop: 40 }} />
       </View>
     );
@@ -293,7 +263,7 @@ export default function AdminStationsPage() {
   if (!isAdmin) {
     return (
       <View style={[styles.container, { backgroundColor: colors.background }]}>
-        <Header title="Admin - Stations" hideBackButton />
+        <Header title="Admin" hideBackButton />
         <View style={styles.centered}>
           <Text style={{ color: colors.textSecondary }}>Access denied</Text>
         </View>
@@ -305,14 +275,14 @@ export default function AdminStationsPage() {
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
-      <Header title="Admin - Stations" hideBackButton />
+      <Header title="Admin" hideBackButton />
 
       <ScrollView contentContainerStyle={styles.content}>
         <View style={styles.topRow}>
           <TextInput
             value={search}
             onChangeText={setSearch}
-            placeholder="Search artists, duos, groups, stations..."
+            placeholder="Search stations..."
             placeholderTextColor={colors.textSecondary}
             style={[
               styles.searchInput,
@@ -340,135 +310,6 @@ export default function AdminStationsPage() {
         </View>
 
         <View style={[styles.sectionHeader, { borderBottomColor: colors.border }]}>
-          <View>
-            <Text style={[styles.sectionTitle, { color: colors.text }]}>Playlist Sources</Text>
-            <Text style={[styles.sectionSub, { color: colors.textSecondary }]}>
-              Build stations from public artist, duo, and group playlists.
-            </Text>
-          </View>
-        </View>
-
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterRow}>
-          {(['all', 'profile', 'group', 'needs_station'] as SourceFilter[]).map((nextFilter) => (
-            <TouchableOpacity
-              key={nextFilter}
-              activeOpacity={0.85}
-              onPress={() => setSourceFilter(nextFilter)}
-              style={[
-                styles.filterChip,
-                {
-                  backgroundColor: sourceFilter === nextFilter ? colors.primary : colors.card,
-                  borderColor: sourceFilter === nextFilter ? colors.primary : colors.border,
-                },
-              ]}
-            >
-              <Text style={{ color: sourceFilter === nextFilter ? '#FFFFFF' : colors.text, fontSize: 13 }}>
-                {nextFilter === 'needs_station' ? 'Needs station' : nextFilter}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </ScrollView>
-
-        {loadingData ? (
-          <ActivityIndicator size="large" color={colors.primary} style={{ marginTop: 40 }} />
-        ) : (
-          <View>
-            {visibleSources.map((source) => {
-              const station = source.station;
-              const sourceKey = source.key || `${source.kind}:${source.id}`;
-              const isBusy = busyKey === sourceKey;
-
-              return (
-                <View key={sourceKey} style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
-                  <View style={styles.cardHeader}>
-                    <View style={[styles.iconWrap, { backgroundColor: colors.primary + '18' }]}>
-                      <Ionicons name={source.kind === 'group' ? 'people-outline' : 'person-outline'} size={22} color={colors.primary} />
-                    </View>
-                    <View style={{ flex: 1, minWidth: 0 }}>
-                      <Text style={{ color: colors.text, fontSize: 15, fontWeight: '700' }} numberOfLines={1}>
-                        {source.name || 'Untitled source'}
-                      </Text>
-                      <Text style={{ color: colors.textSecondary, fontSize: 12, marginTop: 2 }} numberOfLines={1}>
-                        {getSourceLabel(source)}{source.genre ? ` - ${source.genre}` : ''}
-                      </Text>
-                    </View>
-                    <View style={[styles.statusBadge, { backgroundColor: station?.id ? '#22C55E20' : '#F59E0B20' }]}>
-                      <Text style={{ color: station?.id ? '#22C55E' : '#D97706', fontSize: 11, fontWeight: '700' }}>
-                        {station?.id ? 'STATION' : 'READY'}
-                      </Text>
-                    </View>
-                  </View>
-
-                  <View style={styles.metaRow}>
-                    <Text style={{ color: colors.textSecondary, fontSize: 12 }}>
-                      {source.playlist_count || 0} playlist{source.playlist_count === 1 ? '' : 's'}
-                    </Text>
-                    <Text style={{ color: colors.textSecondary, fontSize: 12 }}>
-                      {source.track_count || 0} track{source.track_count === 1 ? '' : 's'}
-                    </Text>
-                    {station?.name ? (
-                      <Text style={{ color: colors.primary, fontSize: 12, fontWeight: '700' }} numberOfLines={1}>
-                        {station.name}
-                      </Text>
-                    ) : null}
-                  </View>
-
-                  <View style={styles.playlistPreview}>
-                    {(source.playlists || []).slice(0, 4).map((playlist: any) => (
-                      <View key={playlist.id} style={[styles.playlistPill, { backgroundColor: isDark ? '#0F172A' : '#F3F4F6' }]}>
-                        <Ionicons name="musical-notes-outline" size={13} color={colors.textSecondary} />
-                        <Text style={{ color: colors.textSecondary, fontSize: 11 }} numberOfLines={1}>
-                          {playlist.title || 'Untitled playlist'}
-                        </Text>
-                      </View>
-                    ))}
-                  </View>
-
-                  <View style={styles.actionRow}>
-                    <TouchableOpacity
-                      activeOpacity={0.85}
-                      disabled={isBusy}
-                      style={[styles.actionBtn, { backgroundColor: colors.primary + '18' }]}
-                      onPress={() => openSourceEditor(source)}
-                    >
-                      <Text style={{ color: colors.primary, fontSize: 12, fontWeight: '700' }}>
-                        {station?.id ? 'Edit Station' : 'Make Station'}
-                      </Text>
-                    </TouchableOpacity>
-
-                    {station?.id ? (
-                      <>
-                        <TouchableOpacity
-                          activeOpacity={0.85}
-                          style={[styles.actionBtn, { backgroundColor: isDark ? '#0F172A' : '#F3F4F6' }]}
-                          onPress={() => router.push({ pathname: '/station_details' as any, params: { station_id: station.id } })}
-                        >
-                          <Text style={{ color: colors.text, fontSize: 12, fontWeight: '700' }}>Open</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity
-                          activeOpacity={0.85}
-                          disabled={isBusy}
-                          style={[styles.actionBtn, { backgroundColor: '#EF444420' }]}
-                          onPress={() => deleteStation(station.id)}
-                        >
-                          <Text style={{ color: '#EF4444', fontSize: 12, fontWeight: '700' }}>Delete</Text>
-                        </TouchableOpacity>
-                      </>
-                    ) : null}
-                  </View>
-                </View>
-              );
-            })}
-
-            {visibleSources.length === 0 ? (
-              <Text style={{ color: colors.textSecondary, textAlign: 'center', marginTop: 28 }}>
-                No playlist sources found
-              </Text>
-            ) : null}
-          </View>
-        )}
-
-        <View style={[styles.sectionHeader, { borderBottomColor: colors.border, marginTop: 22 }]}>
           <View>
             <Text style={[styles.sectionTitle, { color: colors.text }]}>Existing Stations</Text>
             <Text style={[styles.sectionSub, { color: colors.textSecondary }]}>
@@ -498,14 +339,18 @@ export default function AdminStationsPage() {
           ))}
         </ScrollView>
 
-        {visibleStations.map((item) => {
-          const owner = getStationOwner(item);
-          const isBusy = busyKey === item.id;
-          const isLive = item.is_active !== false;
-          const source = sourceByStationId.get(item.id);
+        {loadingData ? (
+          <ActivityIndicator size="large" color={colors.primary} style={{ marginTop: 40 }} />
+        ) : (
+          <>
+            {visibleStations.map((item) => {
+              const owner = getStationOwner(item);
+              const isBusy = busyKey === item.id;
+              const isLive = item.is_active !== false;
+              const source = sourceByStationId.get(item.id);
 
-          return (
-            <View key={item.id} style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
+              return (
+                <View key={item.id} style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
               <View style={styles.cardHeader}>
                 <View style={[styles.iconWrap, { backgroundColor: isLive ? colors.primary + '18' : (isDark ? '#334155' : '#E5E7EB') }]}>
                   <Ionicons name="radio-outline" size={22} color={isLive ? colors.primary : colors.textSecondary} />
@@ -587,9 +432,17 @@ export default function AdminStationsPage() {
                   <Text style={{ color: '#EF4444', fontSize: 12, fontWeight: '700' }}>Delete</Text>
                 </TouchableOpacity>
               </View>
-            </View>
-          );
-        })}
+                </View>
+              );
+            })}
+
+            {visibleStations.length === 0 ? (
+              <Text style={{ color: colors.textSecondary, textAlign: 'center', marginTop: 28 }}>
+                No stations found
+              </Text>
+            ) : null}
+          </>
+        )}
       </ScrollView>
 
       <Modal visible={!!editingSource} animationType="fade" transparent onRequestClose={closeEditor}>
@@ -752,16 +605,6 @@ const styles = StyleSheet.create({
   },
   statusBadge: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 7 },
   metaRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 12, marginTop: 10 },
-  playlistPreview: { flexDirection: 'row', flexWrap: 'wrap', gap: 7, marginTop: 10 },
-  playlistPill: {
-    maxWidth: 190,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-    paddingHorizontal: 8,
-    paddingVertical: 5,
-    borderRadius: 7,
-  },
   actionRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 12 },
   actionBtn: { paddingHorizontal: 14, paddingVertical: 7, borderRadius: 7 },
   modalBackdrop: {

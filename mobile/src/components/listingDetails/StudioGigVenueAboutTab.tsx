@@ -515,7 +515,7 @@ const StudioGigVenueAboutTab = ({
             );
           }
           if (metadata.minimumSpend !== null) {
-            conditionLabels.push(`Min spend PHP ${metadata.minimumSpend.toLocaleString()}`);
+            conditionLabels.push(`Min spend ₱${metadata.minimumSpend.toLocaleString()}`);
           }
 
           return (

@@ -135,28 +135,11 @@ interface UserDetailsRequestTarget {
   email?: string | null;
 }
 
-interface ManualIdentityReviewEntry {
-  id: string;
-  user_id: string;
-  submitted_by_email: string;
-  document_type: string;
-  document_type_key?: string | null;
-  document_country: string;
-  source: string;
-  status: string;
-  created_at: string;
-  expected_decision_by?: string | null;
-  review_notes?: string | null;
-  front_image_url?: string | null;
-  back_image_url?: string | null;
-  selfie_image_url?: string | null;
-  profile?: {
-    id?: string;
-    full_name?: string | null;
-    email?: string | null;
-    verification_status?: string | null;
-  } | null;
-}
+type AdminAlertButton = {
+  text: string;
+  onPress?: () => void;
+  style?: 'default' | 'cancel' | 'destructive';
+};
 
 const subscriptionStatusOptions: SubscriptionStatusOption[] = ['none', 'active', 'cancelled', 'expired'];
 
@@ -542,20 +525,12 @@ export default function AdminUsersPage() {
   const [userFormSubscriptionPlanId, setUserFormSubscriptionPlanId] = useState('');
   const [userFormSubmitting, setUserFormSubmitting] = useState(false);
   const [userDetailsTarget, setUserDetailsTarget] = useState<UserDetailsEntry | null>(null);
-  const [manualReviews, setManualReviews] = useState<ManualIdentityReviewEntry[]>([]);
-  const [manualReviewsLoading, setManualReviewsLoading] = useState(false);
-  const [manualReviewActionLoadingId, setManualReviewActionLoadingId] = useState<string | null>(null);
-  const [manualReviewModalVisible, setManualReviewModalVisible] = useState(false);
-  const [manualReviewDecision, setManualReviewDecision] = useState<'APPROVED' | 'DECLINED'>('APPROVED');
-  const [manualReviewNotes, setManualReviewNotes] = useState('');
-  const [manualReviewSubmitting, setManualReviewSubmitting] = useState(false);
-  const [manualReviewTarget, setManualReviewTarget] = useState<ManualIdentityReviewEntry | null>(null);
-
   const [alertState, setAlertState] = useState<{
     visible: boolean;
     type: AlertType;
     title: string;
     message: string;
+    buttons?: AdminAlertButton[];
   }>({
     visible: false,
     type: 'info',
@@ -566,7 +541,7 @@ export default function AdminUsersPage() {
   const showInlineTabNav = !(Platform.OS === 'web' && width >= 768);
 
   const showAlert = useCallback((type: AlertType, title: string, message: string) => {
-    setAlertState({ visible: true, type, title, message });
+    setAlertState({ visible: true, type, title, message, buttons: undefined });
   }, []);
 
   const usersCacheKey = useMemo(() => getAdminPageCacheKey('users'), []);
@@ -627,32 +602,6 @@ export default function AdminUsersPage() {
     }
   }, [showAlert, usersCacheKey, invokeAdminUsersManagement]);
 
-  const fetchManualReviews = useCallback(async (options?: { silent?: boolean }) => {
-    if (!options?.silent) {
-      setManualReviewsLoading(true);
-    }
-
-    try {
-      const data = await invokeAdminUsersManagement({
-        action: 'fetch_manual_identity_reviews',
-        limit: 150,
-        status: 'PENDING_REVIEW',
-      });
-
-      const items = Array.isArray(data?.items) ? (data.items as ManualIdentityReviewEntry[]) : [];
-      setManualReviews(items);
-    } catch (error) {
-      if (!options?.silent) {
-        const message = await getErrorMessage(error, 'Unable to fetch manual identity reviews.');
-        showAlert('error', 'Failed to load manual reviews', message);
-      }
-    } finally {
-      if (!options?.silent) {
-        setManualReviewsLoading(false);
-      }
-    }
-  }, [invokeAdminUsersManagement, showAlert]);
-
   useEffect(() => {
     if (loading || !roleResolved || !session || isGuest || !isAdmin) {
       setInitializingUsers(false);
@@ -675,10 +624,7 @@ export default function AdminUsersPage() {
 
     void (async () => {
       try {
-        await Promise.all([
-          fetchUsers({ silent: Boolean(cachedUsers) }),
-          fetchManualReviews({ silent: true }),
-        ]);
+        await fetchUsers({ silent: Boolean(cachedUsers) });
       } finally {
         if (isMounted) {
           setInitializingUsers(false);
@@ -690,7 +636,7 @@ export default function AdminUsersPage() {
     return () => {
       isMounted = false;
     };
-  }, [loading, roleResolved, session, isGuest, isAdmin, usersCacheKey, fetchUsers, fetchManualReviews]);
+  }, [loading, roleResolved, session, isGuest, isAdmin, usersCacheKey, fetchUsers]);
 
   const resetUserForm = useCallback(() => {
     setUserFormFullName('');
@@ -809,86 +755,6 @@ export default function AdminUsersPage() {
     setUserDetailsTarget(null);
   }, []);
 
-  const openManualReviewAsset = useCallback((url?: string | null) => {
-    const normalized = String(url || '').trim();
-    if (!normalized) {
-      showAlert('warning', 'File unavailable', 'No uploaded file was found for this item.');
-      return;
-    }
-
-    if (Platform.OS === 'web' && typeof window !== 'undefined') {
-      window.open(normalized, '_blank', 'noopener,noreferrer');
-      return;
-    }
-
-    showAlert('info', 'Web only', 'Open this file from the web admin panel.');
-  }, [showAlert]);
-
-  const openManualReviewDecisionModal = useCallback((targetReview: ManualIdentityReviewEntry, decision: 'APPROVED' | 'DECLINED') => {
-    setManualReviewTarget(targetReview);
-    setManualReviewDecision(decision);
-    setManualReviewNotes('');
-    setManualReviewModalVisible(true);
-  }, []);
-
-  const closeManualReviewDecisionModal = useCallback(() => {
-    if (manualReviewSubmitting) return;
-    setManualReviewModalVisible(false);
-    setManualReviewTarget(null);
-    setManualReviewNotes('');
-    setManualReviewDecision('APPROVED');
-  }, [manualReviewSubmitting]);
-
-  const submitManualReviewDecision = useCallback(async () => {
-    if (!manualReviewTarget?.id) {
-      showAlert('warning', 'Missing review', 'Select a review before submitting a decision.');
-      return;
-    }
-
-    setManualReviewSubmitting(true);
-    setManualReviewActionLoadingId(manualReviewTarget.id);
-
-    try {
-      await invokeAdminUsersManagement({
-        action: 'review_manual_identity',
-        reviewId: manualReviewTarget.id,
-        decision: manualReviewDecision,
-        reviewNotes: manualReviewNotes.trim() || null,
-      });
-
-      showAlert(
-        'success',
-        manualReviewDecision === 'APPROVED' ? 'Identity approved' : 'Identity declined',
-        'The decision was saved and an email notification was sent automatically.',
-      );
-
-      setManualReviewModalVisible(false);
-      setManualReviewTarget(null);
-      setManualReviewNotes('');
-      setManualReviewDecision('APPROVED');
-
-      invalidateAdminPageCache();
-      await Promise.all([
-        fetchUsers({ silent: true }),
-        fetchManualReviews(),
-      ]);
-    } catch (error) {
-      const message = await getErrorMessage(error, 'Unable to save manual identity decision.');
-      showAlert('error', 'Failed to save decision', message);
-    } finally {
-      setManualReviewSubmitting(false);
-      setManualReviewActionLoadingId(null);
-    }
-  }, [
-    manualReviewTarget,
-    manualReviewDecision,
-    manualReviewNotes,
-    invokeAdminUsersManagement,
-    showAlert,
-    fetchUsers,
-    fetchManualReviews,
-  ]);
-
   const submitUserForm = useCallback(async () => {
     const email = userFormEmail.trim().toLowerCase();
     const fullName = userFormFullName.trim();
@@ -957,10 +823,7 @@ export default function AdminUsersPage() {
       setUserModalVisible(false);
       setEditingUserId(null);
       resetUserForm();
-      await Promise.all([
-        fetchUsers(),
-        fetchManualReviews({ silent: true }),
-      ]);
+      await fetchUsers();
     } catch (error) {
       const message = await getErrorMessage(error, 'Unable to save user changes.');
       showAlert('error', 'Failed to save user', message);
@@ -982,7 +845,6 @@ export default function AdminUsersPage() {
     showAlert,
     resetUserForm,
     fetchUsers,
-    fetchManualReviews,
     invokeAdminUsersManagement,
   ]);
 
@@ -993,42 +855,62 @@ export default function AdminUsersPage() {
         return;
       }
 
+      const message = `Are you sure you want to delete ${targetUser.full_name || targetUser.email}? This cannot be undone.`;
+      const performDelete = async () => {
+        setUserActionLoadingId(targetUser.id);
+        try {
+          await invokeAdminUsersManagement({
+            action: 'delete_user',
+            userId: targetUser.id,
+          });
+
+          invalidateAdminPageCache();
+          showAlert('success', 'User deleted', 'The user account has been removed.');
+          await fetchUsers();
+        } catch (error) {
+          const message = await getErrorMessage(error, 'Unable to delete this user.');
+          showAlert('error', 'Failed to delete user', message);
+        } finally {
+          setUserActionLoadingId(null);
+        }
+      };
+
+      if (Platform.OS === 'web') {
+        setAlertState({
+          visible: true,
+          type: 'warning',
+          title: 'Delete user',
+          message,
+          buttons: [
+            { text: 'Cancel', style: 'cancel' },
+            {
+              text: 'Delete',
+              style: 'destructive',
+              onPress: () => {
+                void performDelete();
+              },
+            },
+          ],
+        });
+        return;
+      }
+
       Alert.alert(
         'Delete user',
-        `Are you sure you want to delete ${targetUser.full_name || targetUser.email}? This cannot be undone.`,
+        message,
         [
           { text: 'Cancel', style: 'cancel' },
           {
             text: 'Delete',
             style: 'destructive',
             onPress: () => {
-              void (async () => {
-                setUserActionLoadingId(targetUser.id);
-                try {
-                  await invokeAdminUsersManagement({
-                    action: 'delete_user',
-                    userId: targetUser.id,
-                  });
-
-                  invalidateAdminPageCache();
-                  showAlert('success', 'User deleted', 'The user account has been removed.');
-                  await Promise.all([
-                    fetchUsers(),
-                    fetchManualReviews({ silent: true }),
-                  ]);
-                } catch (error) {
-                  const message = await getErrorMessage(error, 'Unable to delete this user.');
-                  showAlert('error', 'Failed to delete user', message);
-                } finally {
-                  setUserActionLoadingId(null);
-                }
-              })();
+              void performDelete();
             },
           },
         ],
       );
     },
-    [session?.user.id, showAlert, fetchUsers, fetchManualReviews, invokeAdminUsersManagement],
+    [session?.user.id, showAlert, fetchUsers, invokeAdminUsersManagement],
   );
 
   const filteredUsers = useMemo(() => {
@@ -1192,101 +1074,6 @@ export default function AdminUsersPage() {
               <Ionicons name="person-add-outline" size={16} color="#FFFFFF" />
               <Text style={styles.primaryActionText}>Add User</Text>
             </TouchableOpacity>
-          </View>
-
-          <View style={styles.sectionGap}>
-            <Text style={[styles.sectionHeading, { color: colors.text }]}>Manual Identity Reviews</Text>
-            <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Pending reviews are expected to be resolved within 5-7 business days.</Text>
-
-            {manualReviewsLoading ? (
-              <View style={styles.inlineLoader}>
-                <ActivityIndicator size="small" color={colors.primary} />
-              </View>
-            ) : manualReviews.length === 0 ? (
-              <Text style={[styles.emptyText, { color: colors.textSecondary }]}>No pending manual identity reviews.</Text>
-            ) : (
-              <View style={styles.sectionGap}>
-                {manualReviews.map((review) => {
-                  const profileName = review.profile?.full_name || review.submitted_by_email || 'Unknown user';
-                  const profileEmail = review.profile?.email || review.submitted_by_email || '-';
-                  const isReviewBusy = manualReviewActionLoadingId === review.id;
-
-                  return (
-                    <View key={review.id} style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
-                      <Text style={[styles.cardTitle, { color: colors.text }]}>{profileName}</Text>
-                      <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>{profileEmail}</Text>
-                      <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Document: {review.document_type} ({review.document_country || 'PHL'})</Text>
-                      <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Source: {String(review.source || 'MANUAL_UPLOAD').replace(/_/g, ' ')}</Text>
-                      <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Submitted: {formatDateTime(review.created_at)}</Text>
-                      {review.expected_decision_by ? (
-                        <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Expected by: {formatDateTime(review.expected_decision_by)}</Text>
-                      ) : null}
-
-                      <View style={styles.cardActionsRow}>
-                        <TouchableOpacity
-                          activeOpacity={1}
-                          onPress={() => openManualReviewAsset(review.front_image_url)}
-                          style={[styles.smallActionButton, { borderColor: colors.border }]}
-                        >
-                          <Ionicons name="image-outline" size={14} color={colors.text} />
-                          <Text style={[styles.smallActionText, { color: colors.text }]}>Front</Text>
-                        </TouchableOpacity>
-
-                        <TouchableOpacity
-                          activeOpacity={1}
-                          onPress={() => openManualReviewAsset(review.back_image_url)}
-                          style={[styles.smallActionButton, { borderColor: colors.border }]}
-                        >
-                          <Ionicons name="images-outline" size={14} color={colors.text} />
-                          <Text style={[styles.smallActionText, { color: colors.text }]}>Back</Text>
-                        </TouchableOpacity>
-
-                        <TouchableOpacity
-                          activeOpacity={1}
-                          onPress={() => openManualReviewAsset(review.selfie_image_url)}
-                          style={[styles.smallActionButton, { borderColor: colors.border }]}
-                        >
-                          <Ionicons name="person-circle-outline" size={14} color={colors.text} />
-                          <Text style={[styles.smallActionText, { color: colors.text }]}>Selfie</Text>
-                        </TouchableOpacity>
-
-                        <TouchableOpacity
-                          activeOpacity={1}
-                          disabled={isReviewBusy}
-                          onPress={() => openManualReviewDecisionModal(review, 'APPROVED')}
-                          style={[
-                            styles.smallActionButtonFilled,
-                            { backgroundColor: '#16A34A', opacity: isReviewBusy ? 0.6 : 1 },
-                          ]}
-                        >
-                          {isReviewBusy ? (
-                            <ActivityIndicator size="small" color="#FFFFFF" />
-                          ) : (
-                            <Text style={styles.smallActionTextFilled}>Approve</Text>
-                          )}
-                        </TouchableOpacity>
-
-                        <TouchableOpacity
-                          activeOpacity={1}
-                          disabled={isReviewBusy}
-                          onPress={() => openManualReviewDecisionModal(review, 'DECLINED')}
-                          style={[
-                            styles.smallActionButtonFilled,
-                            { backgroundColor: '#DC2626', opacity: isReviewBusy ? 0.6 : 1 },
-                          ]}
-                        >
-                          {isReviewBusy ? (
-                            <ActivityIndicator size="small" color="#FFFFFF" />
-                          ) : (
-                            <Text style={styles.smallActionTextFilled}>Decline</Text>
-                          )}
-                        </TouchableOpacity>
-                      </View>
-                    </View>
-                  );
-                })}
-              </View>
-            )}
           </View>
 
           {usersLoading ? (
@@ -1566,78 +1353,12 @@ export default function AdminUsersPage() {
         </View>
       </Modal>
 
-      <Modal visible={manualReviewModalVisible} transparent animationType="fade" onRequestClose={closeManualReviewDecisionModal}>
-        <View style={styles.modalBackdrop}>
-          <View style={[styles.modalCard, { backgroundColor: colors.card, borderColor: colors.border }]}> 
-            <Text style={[styles.modalTitle, { color: colors.text }]}>Review Identity Submission</Text>
-
-            <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>
-              Decision: {manualReviewDecision === 'APPROVED' ? 'Approve' : 'Decline'}
-            </Text>
-            <Text style={[styles.cardMeta, { color: colors.textSecondary }]}> 
-              User: {manualReviewTarget?.profile?.full_name || manualReviewTarget?.submitted_by_email || '-'}
-            </Text>
-            <Text style={[styles.cardMeta, { color: colors.textSecondary }]}> 
-              Document: {manualReviewTarget?.document_type || '-'}
-            </Text>
-
-            <TextInput
-              value={manualReviewNotes}
-              onChangeText={setManualReviewNotes}
-              multiline
-              numberOfLines={4}
-              placeholder="Optional admin notes"
-              placeholderTextColor={colors.textSecondary}
-              style={[
-                styles.modalInputCompact,
-                {
-                  minHeight: 96,
-                  color: colors.text,
-                  backgroundColor: colors.inputBackground,
-                  borderColor: colors.inputBorder,
-                  textAlignVertical: 'top',
-                },
-              ]}
-            />
-
-            <View style={styles.modalActionsRow}>
-              <TouchableOpacity
-                activeOpacity={1}
-                onPress={closeManualReviewDecisionModal}
-                disabled={manualReviewSubmitting}
-                style={[styles.modalButton, { backgroundColor: isDark ? '#334155' : '#E5E7EB' }]}
-              >
-                <Text style={[styles.modalButtonText, { color: colors.text }]}>Cancel</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                activeOpacity={1}
-                onPress={() => void submitManualReviewDecision()}
-                disabled={manualReviewSubmitting}
-                style={[
-                  styles.modalButton,
-                  {
-                    backgroundColor: manualReviewDecision === 'APPROVED' ? '#16A34A' : '#DC2626',
-                    opacity: manualReviewSubmitting ? 0.6 : 1,
-                  },
-                ]}
-              >
-                {manualReviewSubmitting ? (
-                  <ActivityIndicator size="small" color="#FFFFFF" />
-                ) : (
-                  <Text style={styles.modalButtonText}>Confirm {manualReviewDecision === 'APPROVED' ? 'Approval' : 'Decline'}</Text>
-                )}
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
-
       <CustomAlert
         visible={alertState.visible}
         type={alertState.type}
         title={alertState.title}
         message={alertState.message}
+        buttons={alertState.buttons}
         onClose={() => setAlertState((prev) => ({ ...prev, visible: false }))}
       />
     </View>

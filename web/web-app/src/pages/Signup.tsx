@@ -68,8 +68,8 @@ export default function SignupPage() {
     else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
       newErrors.email = "Invalid email address.";
     if (!password) newErrors.password = "Password is required.";
-    else if (password.length < 8)
-      newErrors.password = "Must be at least 8 characters.";
+    else if (password.length < 6)
+      newErrors.password = "Must be at least 6 characters.";
     if (password !== confirmPassword)
       newErrors.confirmPassword = "Passwords do not match.";
     setErrors(newErrors);
@@ -363,7 +363,7 @@ export default function SignupPage() {
                   >
                     <IoPersonOutline size={18} color={colors.textSecondary} />
                     <input
-                      className="flex-1 bg-transparent text-sm outline-none"
+                      className="h-full flex-1 bg-transparent py-0 text-sm leading-none outline-none"
                       style={{ color: colors.text }}
                       placeholder="Juan Dela Cruz"
                       value={fullName}
@@ -404,7 +404,7 @@ export default function SignupPage() {
                     <IoMailOutline size={18} color={colors.textSecondary} />
                     <input
                       type="email"
-                      className="flex-1 bg-transparent text-sm outline-none"
+                      className="h-full flex-1 bg-transparent py-0 text-sm leading-none outline-none"
                       style={{ color: colors.text }}
                       placeholder="name@email.com"
                       value={email}
@@ -445,9 +445,9 @@ export default function SignupPage() {
                   <IoLockClosedOutline size={18} color={colors.textSecondary} />
                   <input
                     type={showPassword ? "text" : "password"}
-                    className="flex-1 bg-transparent text-sm outline-none"
+                    className="h-full flex-1 bg-transparent py-0 text-sm leading-none outline-none"
                     style={{ color: colors.text }}
-                    placeholder="Min 8 characters"
+                    placeholder="Min 6 characters"
                     value={password}
                     onChange={(e) => {
                       setPassword(e.target.value);
@@ -514,7 +514,7 @@ export default function SignupPage() {
                   <IoLockClosedOutline size={18} color={colors.textSecondary} />
                   <input
                     type={showConfirmPassword ? "text" : "password"}
-                    className="flex-1 bg-transparent text-sm outline-none"
+                    className="h-full flex-1 bg-transparent py-0 text-sm leading-none outline-none"
                     style={{ color: colors.text }}
                     placeholder="Repeat your password"
                     value={confirmPassword}

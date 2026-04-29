@@ -1,3 +1,4 @@
+import { Ionicons } from '@expo/vector-icons';
 import { BlurView } from 'expo-blur';
 import * as Linking from 'expo-linking';
 import React from 'react';
@@ -12,7 +13,7 @@ type CustomModalProps = {
   message?: string;
   buttonText?: string;
   showInput?: boolean;
-  danger?: boolean; // New prop for destructive actions
+  danger?: boolean;
   onInputChange?: (text: string) => void;
   inputValue?: string;
   inputPlaceholder?: string;
@@ -81,10 +82,24 @@ const CustomModal: React.FC<CustomModalProps> = ({
     (requireTermsAcceptance && !isTermsAccepted) ||
     (hasCustomContract && !isContractAccepted);
 
+  const renderCheckbox = (checked: boolean) => (
+    <View
+      style={[
+        styles.checkbox,
+        {
+          borderColor: checked ? colors.primary : colors.border,
+          backgroundColor: checked ? colors.primary : 'transparent'
+        }
+      ]}
+    >
+      {checked ? <Ionicons name="checkmark" size={14} color="#FFFFFF" /> : null}
+    </View>
+  );
+
   return (
     <RNModal
       animationType="fade"
-      transparent={true}
+      transparent
       statusBarTranslucent
       navigationBarTranslucent
       visible={visible}
@@ -96,7 +111,7 @@ const CustomModal: React.FC<CustomModalProps> = ({
             styles.modalContainer,
             {
               backgroundColor: colors.card,
-              shadowColor: "#000",
+              shadowColor: '#000',
               shadowOffset: { width: 0, height: 4 },
               shadowOpacity: 0.25,
               shadowRadius: 10,
@@ -111,9 +126,7 @@ const CustomModal: React.FC<CustomModalProps> = ({
             </>
           ) : (
             <>
-              {title && (
-                <Text style={[styles.title, { color: colors.text }]}>{title}</Text>
-              )}
+              {title && <Text style={[styles.title, { color: colors.text }]}>{title}</Text>}
               <Text style={[styles.message, { color: colors.textSecondary }]}>{message}</Text>
 
               {showInput && (
@@ -137,89 +150,86 @@ const CustomModal: React.FC<CustomModalProps> = ({
               )}
 
               {hasCustomContract && (
-                <TouchableOpacity activeOpacity={1}
-                  onPress={() => setIsContractAccepted((prev) => !prev)}
-                  style={styles.termsRow}
+                <View
+                  style={[
+                    styles.agreementCard,
+                    {
+                      borderColor: isContractAccepted ? colors.primary : colors.border,
+                      backgroundColor: colors.background
+                    }
+                  ]}
                 >
-                  <View
-                    style={[
-                      styles.checkbox,
-                      {
-                        borderColor: isContractAccepted ? colors.primary : colors.border,
-                        backgroundColor: isContractAccepted ? colors.primary : 'transparent'
-                      }
-                    ]}
+                  <TouchableOpacity
+                    activeOpacity={0.85}
+                    onPress={() => setIsContractAccepted((prev) => !prev)}
+                    style={styles.agreementPressable}
                   >
-                    {isContractAccepted ? (
-                      <Text style={styles.checkboxTick}>✓</Text>
-                    ) : null}
-                  </View>
-                  <View style={{ flex: 1 }}>
+                    {renderCheckbox(isContractAccepted)}
                     <Text style={[styles.termsText, { color: colors.text }]}>
-                      I have read and agree to{' '}
-                      <Text style={{ fontFamily: 'Poppins_600SemiBold' }}>{contractName || 'the provider'}'s</Text>
-                      {' '}custom contract.
+                      I have read and agree to the custom contract from{' '}
+                      <Text style={styles.termsStrong}>{contractName || 'the provider'}</Text>.
                     </Text>
-                    <TouchableOpacity activeOpacity={1} onPress={() => { if (contractUrl) Linking.openURL(contractUrl); }} style={{ marginTop: 4 }}>
-                      <Text style={[styles.termsLinkText, { color: colors.primary }]}>View Custom Contract</Text>
-                    </TouchableOpacity>
-                  </View>
-                </TouchableOpacity>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    activeOpacity={0.75}
+                    onPress={() => { if (contractUrl) Linking.openURL(contractUrl); }}
+                    style={styles.inlineLinkButton}
+                  >
+                    <Ionicons name="document-text-outline" size={15} color={colors.primary} />
+                    <Text style={[styles.termsLinkText, { color: colors.primary }]}>View Custom Contract</Text>
+                  </TouchableOpacity>
+                </View>
               )}
 
               {requireTermsAcceptance && (
-                <>
-                  <TouchableOpacity activeOpacity={1}
+                <View
+                  style={[
+                    styles.agreementCard,
+                    {
+                      borderColor: isTermsAccepted ? colors.primary : colors.border,
+                      backgroundColor: colors.background
+                    }
+                  ]}
+                >
+                  <TouchableOpacity
+                    activeOpacity={0.85}
                     onPress={() => setIsTermsAccepted((prev) => !prev)}
-                    style={styles.termsRow}
+                    style={styles.agreementPressable}
                   >
-                    <View
-                      style={[
-                        styles.checkbox,
-                        {
-                          borderColor: isTermsAccepted ? colors.primary : colors.border,
-                          backgroundColor: isTermsAccepted ? colors.primary : 'transparent'
-                        }
-                      ]}
-                    >
-                      {isTermsAccepted ? (
-                        <Text style={styles.checkboxTick}>✓</Text>
-                      ) : null}
-                    </View>
+                    {renderCheckbox(isTermsAccepted)}
                     <Text style={[styles.termsText, { color: colors.text }]}>{termsLabel}</Text>
                   </TouchableOpacity>
 
-                  {onTermsPress && (
+                  {onTermsPress ? (
                     <TouchableOpacity
                       onPress={onTermsPress}
-                      activeOpacity={1}
-                      style={styles.termsLinkButton}
+                      activeOpacity={0.75}
+                      style={styles.inlineLinkButton}
                     >
-                      <Text style={[styles.termsLinkText, { color: colors.primary }]}>
-                        {termsLinkLabel}
-                      </Text>
+                      <Ionicons name="reader-outline" size={15} color={colors.primary} />
+                      <Text style={[styles.termsLinkText, { color: colors.primary }]}>{termsLinkLabel}</Text>
                     </TouchableOpacity>
-                  )}
-
-                  {!onTermsPress && (
-                    <TouchableOpacity activeOpacity={1}
+                  ) : (
+                    <TouchableOpacity
+                      activeOpacity={0.75}
                       onPress={() => setShowTermsContent(true)}
-                      style={styles.termsLinkButton}
+                      style={styles.inlineLinkButton}
                     >
-                      <Text style={[styles.termsLinkText, { color: colors.primary }]}>
-                        {termsLinkLabel}
-                      </Text>
+                      <Ionicons name="reader-outline" size={15} color={colors.primary} />
+                      <Text style={[styles.termsLinkText, { color: colors.primary }]}>{termsLinkLabel}</Text>
                     </TouchableOpacity>
                   )}
-                </>
+                </View>
               )}
 
               <View style={styles.buttonContainer}>
-                <TouchableOpacity activeOpacity={1}
+                <TouchableOpacity
+                  activeOpacity={1}
                   style={[
                     styles.confirmButton,
                     {
                       backgroundColor: danger ? '#EF4444' : colors.primary,
+                      opacity: isConfirmDisabled ? 0.6 : 1
                     }
                   ]}
                   disabled={isConfirmDisabled}
@@ -228,7 +238,8 @@ const CustomModal: React.FC<CustomModalProps> = ({
                   <Text style={styles.confirmButtonText}>{buttonText}</Text>
                 </TouchableOpacity>
 
-                <TouchableOpacity activeOpacity={1}
+                <TouchableOpacity
+                  activeOpacity={1}
                   style={styles.cancelButton}
                   disabled={!canInteract}
                   onPress={onClose}
@@ -243,7 +254,7 @@ const CustomModal: React.FC<CustomModalProps> = ({
 
       <RNModal
         animationType="slide"
-        transparent={true}
+        transparent
         statusBarTranslucent
         navigationBarTranslucent
         visible={showTermsContent}
@@ -262,13 +273,13 @@ const CustomModal: React.FC<CustomModalProps> = ({
               <Text style={[styles.termsBody, { color: colors.textSecondary }]}>This document is a legally binding agreement between you and Musika Lokal. By using our platform, you confirm you are at least 18 years of age.</Text>
 
               <Text style={[styles.termsSectionTitle, { color: colors.text }]}>1. Booking and Payments (Escrow)</Text>
-              <Text style={[styles.termsBody, { color: colors.textSecondary }]}>• All transactions are processed via the Musika Lokal Wallet.{"\n"}• Funds are held in escrow and released 48–72 hours after event completion if no dispute is raised.{"\n"}• Musika Lokal acts only as a facilitator and is not a party to the actual performance contract.</Text>
+              <Text style={[styles.termsBody, { color: colors.textSecondary }]}>- All transactions are processed via the Musika Lokal Wallet.{"\n"}- Funds are held in escrow and released 48-72 hours after event completion if no dispute is raised.{"\n"}- Musika Lokal acts only as a facilitator and is not a party to the actual performance contract.</Text>
 
               <Text style={[styles.termsSectionTitle, { color: colors.text }]}>2. Cancellation and Force Majeure</Text>
-              <Text style={[styles.termsBody, { color: colors.textSecondary }]}>• {'>'}7 days: 80% refund to client.{"\n"}• 3–7 days: 70% refund to client.{"\n"}• {'<'}3 days: No refund; 100% to provider.{"\n\n"}In cases of extreme weather, government-mandated lockdowns, or national emergencies, either party may cancel without penalty, subject to verification.</Text>
+              <Text style={[styles.termsBody, { color: colors.textSecondary }]}>- More than 7 days: 80% refund to client.{"\n"}- 3-7 days: 70% refund to client.{"\n"}- Less than 3 days: No refund; 100% to provider.{"\n\n"}In cases of extreme weather, government-mandated lockdowns, or national emergencies, either party may cancel without penalty, subject to verification.</Text>
 
               <Text style={[styles.termsSectionTitle, { color: colors.text }]}>3. Limitation of Liability</Text>
-              <Text style={[styles.termsBody, { color: colors.textSecondary }]}>Musika Lokal is provided &quot;as-is&quot; and is not liable for personal injury or property damage during sessions/events, external payment network failures, or loss of income due to app downtime.</Text>
+              <Text style={[styles.termsBody, { color: colors.textSecondary }]}>{'Musika Lokal is provided "as-is" and is not liable for personal injury or property damage during sessions/events, external payment network failures, or loss of income due to app downtime.'}</Text>
 
               <Text style={[styles.termsSectionTitle, { color: colors.text }]}>4. User Content and Intellectual Property</Text>
               <Text style={[styles.termsBody, { color: colors.textSecondary }]}>You retain ownership of uploaded content and grant Musika Lokal a non-exclusive license to display it for platform operations and promotion.</Text>
@@ -293,49 +304,50 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   modalContainer: {
-    width: '80%', // w-4/5
-    borderRadius: 24, // rounded-3xl
-    padding: 24, // p-6
+    width: '86%',
+    maxWidth: 560,
+    borderRadius: 24,
+    padding: 24,
     alignItems: 'center',
   },
   title: {
-    fontSize: 20, // text-xl
-    marginBottom: 12, // mb-3
+    fontSize: 20,
+    marginBottom: 12,
     textAlign: 'center',
     fontFamily: 'Poppins_600SemiBold',
   },
   message: {
-    fontSize: 14, // text-sm
+    fontSize: 14,
     textAlign: 'center',
-    marginBottom: 32, // mb-8
-    lineHeight: 24, // leading-6
+    marginBottom: 24,
+    lineHeight: 24,
     fontFamily: 'Poppins_400Regular',
   },
   buttonContainer: {
     width: '100%',
-    gap: 12, // gap-3
+    gap: 12,
   },
   confirmButton: {
     width: '100%',
-    borderRadius: 12, // rounded-xl
-    paddingVertical: 14, // py-3.5
+    borderRadius: 12,
+    paddingVertical: 14,
     alignItems: 'center',
     justifyContent: 'center',
   },
   confirmButtonText: {
     color: 'white',
-    fontSize: 14, // text-sm
+    fontSize: 14,
     fontFamily: 'Poppins_600SemiBold',
   },
   cancelButton: {
     width: '100%',
-    borderRadius: 12, // rounded-xl
-    paddingVertical: 14, // py-3.5
+    borderRadius: 12,
+    paddingVertical: 14,
     alignItems: 'center',
     justifyContent: 'center',
   },
   cancelButtonText: {
-    fontSize: 14, // text-sm
+    fontSize: 14,
     fontFamily: 'Poppins_500Medium',
   },
   input: {
@@ -348,38 +360,49 @@ const styles = StyleSheet.create({
     textAlignVertical: 'top',
     fontFamily: 'Poppins_400Regular',
   },
-  termsRow: {
+  agreementCard: {
+    width: '100%',
+    borderWidth: 1,
+    borderRadius: 14,
+    padding: 12,
+    marginBottom: 12,
+  },
+  agreementPressable: {
     width: '100%',
     flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 16,
+    alignItems: 'flex-start',
   },
   checkbox: {
-    width: 20,
-    height: 20,
+    width: 22,
+    height: 22,
     borderWidth: 1.5,
-    borderRadius: 4,
+    borderRadius: 6,
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 10,
+    marginTop: 1,
   },
-  checkboxTick: {
-    color: '#FFFFFF',
-    fontSize: 13,
-    fontFamily: 'Poppins_700Bold',
-    lineHeight: 14,
+  termsStrong: {
+    fontFamily: 'Poppins_600SemiBold',
   },
   termsText: {
     flex: 1,
     fontSize: 13,
+    lineHeight: 20,
     fontFamily: 'Poppins_400Regular',
   },
-  termsLinkButton: {
-    width: '100%',
-    marginBottom: 16,
+  inlineLinkButton: {
+    alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginLeft: 32,
+    marginTop: 8,
+    paddingVertical: 2,
   },
   termsLinkText: {
     fontSize: 13,
+    lineHeight: 18,
     fontFamily: 'Poppins_500Medium',
     textDecorationLine: 'underline',
   },

@@ -19,6 +19,17 @@ const syncGig3NF = async (client: any, gigId: string) => {
     if (error) throw error
 }
 
+const normalizeScheduleSessionType = (value: any): string => {
+    const normalized = String(value || '').trim().toLowerCase()
+    return ['rehearsal', 'recording', 'both'].includes(normalized) ? normalized : 'both'
+}
+
+const buildWeeklyScheduleReason = (source: any): string =>
+    `Weekly schedule [session_type:${normalizeScheduleSessionType(source?.session_type ?? source?.sessionType)}]`
+
+const buildDateOverrideReason = (source: any): string =>
+    `Custom schedule [session_type:${normalizeScheduleSessionType(source?.session_type ?? source?.sessionType)}]`
+
 function decodeJwtPayload(token: string): { sub?: string; email?: string } | null {
     try {
         const parts = token.replace('Bearer ', '').split('.')
@@ -503,7 +514,8 @@ serve(async (req: Request) => {
                                     is_open: true,
                                     open_time: slot.start,
                                     close_time: slot.end,
-                                    slot_order: slotIndex
+                                    slot_order: slotIndex,
+                                    reason: buildWeeklyScheduleReason(daySchedule)
                                 });
                             });
                         }
@@ -517,7 +529,8 @@ serve(async (req: Request) => {
                             day_of_week: day,
                             is_open: true,
                             open_time: '09:00',
-                            close_time: '22:00'
+                            close_time: '22:00',
+                            reason: 'Weekly schedule [session_type:both]'
                         })
                     }
                 }
@@ -529,15 +542,15 @@ serve(async (req: Request) => {
 
                     for (const dateEntry of calendarAvailability) {
                         if (dateEntry.date && dateEntry.slots && dateEntry.slots.length > 0) {
-                            const firstSlot = dateEntry.slots[0];
-                            dateOverrides.push({
+                            dateEntry.slots.forEach((slot: any, slotIndex: number) => dateOverrides.push({
                                 studio_id: studioId,
                                 override_date: dateEntry.date,
                                 is_open: true,
-                                open_time: firstSlot.start,
-                                close_time: firstSlot.end,
-                                reason: 'Custom schedule'
-                            });
+                                open_time: slot.start,
+                                close_time: slot.end,
+                                slot_order: slotIndex,
+                                reason: buildDateOverrideReason(dateEntry)
+                            }));
                         }
                     }
 
@@ -706,7 +719,8 @@ serve(async (req: Request) => {
                                 is_open: true,
                                 open_time: slot.start,
                                 close_time: slot.end,
-                                slot_order: slotIndex
+                                slot_order: slotIndex,
+                                reason: buildWeeklyScheduleReason(daySchedule)
                             });
                         });
                     }
@@ -730,15 +744,15 @@ serve(async (req: Request) => {
 
                 for (const dateEntry of calendarAvailability) {
                     if (dateEntry.date && dateEntry.slots && dateEntry.slots.length > 0) {
-                        const firstSlot = dateEntry.slots[0];
-                        dateOverrides.push({
+                        dateEntry.slots.forEach((slot: any, slotIndex: number) => dateOverrides.push({
                             studio_id: studioId,
                             override_date: dateEntry.date,
                             is_open: true,
-                            open_time: firstSlot.start,
-                            close_time: firstSlot.end,
-                            reason: 'Custom schedule'
-                        });
+                            open_time: slot.start,
+                            close_time: slot.end,
+                            slot_order: slotIndex,
+                            reason: buildDateOverrideReason(dateEntry)
+                        }));
                     }
                 }
 

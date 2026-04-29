@@ -208,7 +208,7 @@ const defaultMetrics: DashboardMetrics = {
 
 const formatCurrency = (value?: number | null) => {
   const safeValue = Number(value || 0);
-  return `â‚±${safeValue.toLocaleString('en-PH', {
+  return `₱${safeValue.toLocaleString('en-PH', {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   })}`;

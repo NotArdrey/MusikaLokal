@@ -82,12 +82,12 @@ export default function AdminPostsPage() {
     fetchPosts();
   };
 
-  if (loading || !roleResolved) return <View style={[styles.container, { backgroundColor: colors.background }]}><Header title="Admin - Posts" onBackPress={() => router.back()} /><ActivityIndicator size="large" color={colors.primary} style={{ marginTop: 40 }} /></View>;
-  if (!isAdmin) return <View style={[styles.container, { backgroundColor: colors.background }]}><Header title="Admin - Posts" onBackPress={() => router.back()} /><View style={styles.centered}><Text style={{ color: colors.textSecondary }}>Access denied</Text></View></View>;
+  if (loading || !roleResolved) return <View style={[styles.container, { backgroundColor: colors.background }]}><Header title="Admin" onBackPress={() => router.back()} /><ActivityIndicator size="large" color={colors.primary} style={{ marginTop: 40 }} /></View>;
+  if (!isAdmin) return <View style={[styles.container, { backgroundColor: colors.background }]}><Header title="Admin" onBackPress={() => router.back()} /><View style={styles.centered}><Text style={{ color: colors.textSecondary }}>Access denied</Text></View></View>;
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
-      <Header title="Admin - Posts" onBackPress={() => router.back()} />
+      <Header title="Admin" onBackPress={() => router.back()} />
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tabsRow}>
         {tabItems.map((item) => {
           const active = item.key === 'posts';

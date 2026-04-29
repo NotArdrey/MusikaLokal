@@ -600,13 +600,13 @@ export default function StudioDetailsScreen() {
             : "Rate";
   const studioRateDisplay =
     hasRehearsalRate && hasRecordingRate
-      ? `â‚±${rehearsalRateValue.toLocaleString()}/hr | â‚±${recordingRateValue.toLocaleString()}/song`
+      ? `₱${rehearsalRateValue.toLocaleString()}/hr | ₱${recordingRateValue.toLocaleString()}/song`
       : hasRecordingRate
-        ? `â‚±${recordingRateValue.toLocaleString()}/song`
+        ? `₱${recordingRateValue.toLocaleString()}/song`
         : hasRehearsalRate
-          ? `â‚±${rehearsalRateValue.toLocaleString()}/hr`
+          ? `₱${rehearsalRateValue.toLocaleString()}/hr`
           : hourlyRateValue > 0
-            ? `â‚±${hourlyRateValue.toLocaleString()}/hr`
+            ? `₱${hourlyRateValue.toLocaleString()}/hr`
             : "N/A";
 
   // Show loading while checking authorization
@@ -1017,7 +1017,7 @@ export default function StudioDetailsScreen() {
                       studio.instruments.map((item: any, i: number) => {
                         const name = item?.name || item;
                         const quantity = item?.quantity
-                          ? ` Ã—${item.quantity}`
+                          ? ` ×${item.quantity}`
                           : "";
                         return (
                           <View
@@ -1593,7 +1593,7 @@ export default function StudioDetailsScreen() {
                                 { color: colors.primary },
                               ]}
                             >
-                              â‚±
+                              ₱
                               {(
                                 booking.total_price ||
                                 booking.final_price ||

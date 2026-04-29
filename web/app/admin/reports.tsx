@@ -1427,8 +1427,6 @@ export default function AdminReportsPage() {
 
   const renderReportsManagementSection = () => (
     <View style={styles.sectionGap}>
-      <Text style={[styles.sectionHeading, { color: colors.text }]}>User Reports</Text>
-
       <TextInput
         value={reportSearch}
         onChangeText={setReportSearch}
@@ -1647,8 +1645,6 @@ export default function AdminReportsPage() {
 
   const renderIncidentQueueSection = () => (
     <View style={styles.sectionGap}>
-      <Text style={[styles.sectionHeading, { color: colors.text }]}>Booking Incident Queue</Text>
-
       <View style={styles.filterGroup}>
         <Text style={[styles.filterLabel, { color: colors.textSecondary }]}>Incident Status</Text>
         <View style={[styles.filterRow, styles.filterRowWrap]}>

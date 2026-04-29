@@ -501,7 +501,7 @@ export default function ProductionTeamScreen() {
     );
   }
 
-  // Ã¢â€â‚¬Ã¢â€â‚¬ Teams List View Ã¢â€â‚¬Ã¢â€â‚¬
+  // ── Teams List View ──
   return (
     <View style={[styles.flex1, { backgroundColor: colors.background }]}>
       <Header title={routeTeamId ? "Manage Production" : "Production Teams"} onBackPress={routeTeamId ? () => router.back() : undefined} />

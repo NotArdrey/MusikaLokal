@@ -73,7 +73,7 @@ const formatTempRoleLabel = (role: string | null | undefined) => {
 export default function LoginScreen() {
   const { colors, isDark } = useTheme();
   const { session, loading: authLoading, roleResolved, setGuestMode, userRole } = useAuth();
-  const { verified, accountCreated, email: createdEmail, verification_error } = useLocalSearchParams();
+  const { verified, accountCreated, email: createdEmail, verification_error, verificationPendingReview } = useLocalSearchParams();
   const { width } = Dimensions.get('window');
   const isWebDesktop = Platform.OS === 'web' && width >= 768;
 
@@ -279,6 +279,15 @@ export default function LoginScreen() {
   // Check for Account Created success (New User)
   useEffect(() => {
     if (accountCreated === 'true') {
+      if (verificationPendingReview === 'true') {
+        showAlert(
+          'success',
+          'Manual Review Submitted',
+          `Your requirements were submitted and your account is under manual review.\n\nWe will email ${createdEmail || 'you'} when the review is complete. If you receive an email confirmation link, confirm your email so you can sign in after approval.`
+        );
+        return;
+      }
+
       showAlert(
         'success',
         'Check Your Inbox',
@@ -293,7 +302,7 @@ export default function LoginScreen() {
         'Your identity has been verified. You can now log in.'
       );
     }
-  }, [verified, accountCreated, createdEmail]);
+  }, [verified, accountCreated, createdEmail, verificationPendingReview]);
 
   const signInWithCredentials = async (loginEmail: string, loginPassword: string) => {
     setLoading(true);
@@ -715,7 +724,7 @@ export default function LoginScreen() {
 
                 <View style={styles.signupLinkContainer}>
                   <Text style={[styles.signupLinkText, themeStyles.textSecondary]}>
-                    Don't have an account?{' '}
+                    Don&apos;t have an account?{' '}
                   </Text>
                   <TouchableOpacity activeOpacity={1} onPress={() => router.push('/signup' as any)}>
                     <Text style={[styles.signupLinkHighlight, themeStyles.primaryText]}>
@@ -863,6 +872,7 @@ const styles = StyleSheet.create({
     height: '100%',
     fontFamily: 'Poppins_400Regular',
     fontSize: 16,
+    includeFontPadding: false,
     textAlignVertical: 'center',
     paddingVertical: 0,
   },

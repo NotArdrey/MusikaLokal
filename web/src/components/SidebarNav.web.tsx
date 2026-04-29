@@ -30,7 +30,28 @@ type TopbarNotification = {
 };
 
 type AdminTab = 'dashboard' | 'users' | 'reports' | 'audit' | 'stations';
+type UsersSection = 'users_list' | 'identity_reviews';
 type ReportsSection = 'reports_list' | 'booking_incidents';
+
+const USERS_SECTION_ITEMS: {
+    key: UsersSection;
+    label: string;
+    description: string;
+    icon: string;
+}[] = [
+        {
+            key: 'users_list',
+            label: 'User Management',
+            description: 'Create, edit, verify, and manage user accounts',
+            icon: 'people-outline',
+        },
+        {
+            key: 'identity_reviews',
+            label: 'Identity Reviews',
+            description: 'Manual identity verification queue',
+            icon: 'id-card-outline',
+        },
+    ];
 
 const REPORTS_SECTION_ITEMS: {
     key: ReportsSection;
@@ -53,11 +74,16 @@ const REPORTS_SECTION_ITEMS: {
     ];
 
 const resolveAdminTab = (pathname: string): AdminTab => {
+    if (pathname.startsWith('/admin/identity-reviews')) return 'users';
     if (pathname.startsWith('/admin/users')) return 'users';
     if (pathname.startsWith('/admin/reports')) return 'reports';
     if (pathname.startsWith('/admin/audit')) return 'audit';
     if (pathname.startsWith('/admin/stations')) return 'stations';
     return 'dashboard';
+};
+
+const resolveUsersSection = (pathname: string): UsersSection => {
+    return pathname.startsWith('/admin/identity-reviews') ? 'identity_reviews' : 'users_list';
 };
 
 const resolveReportsSection = (search: string): ReportsSection => {
@@ -75,9 +101,20 @@ export default function SidebarNav() {
     const { isAdmin, isGuest, roleResolved, session, setGuestMode, userRole } = useAuth();
     const pathname = usePathname();
     const [manageRoute, setManageRoute] = useState('/manage'); // Fallback
+    const [activeUsersSection, setActiveUsersSection] = useState<UsersSection>(() => resolveUsersSection(pathname));
+    const [usersMenuExpanded, setUsersMenuExpanded] = useState(() => resolveAdminTab(pathname) === 'users');
     const [activeReportsSection, setActiveReportsSection] = useState<ReportsSection>(() => resolveReportsSection(getBrowserSearch()));
     const [reportsMenuExpanded, setReportsMenuExpanded] = useState(() => resolveAdminTab(pathname) === 'reports');
+    const usersRotateAnim = useRef(new Animated.Value(usersMenuExpanded ? 1 : 0)).current;
     const rotateAnim = useRef(new Animated.Value(reportsMenuExpanded ? 1 : 0)).current;
+
+    useEffect(() => {
+        Animated.timing(usersRotateAnim, {
+            toValue: usersMenuExpanded ? 1 : 0,
+            duration: 200,
+            useNativeDriver: false,
+        }).start();
+    }, [usersMenuExpanded, usersRotateAnim]);
 
     useEffect(() => {
         Animated.timing(rotateAnim, {
@@ -86,6 +123,24 @@ export default function SidebarNav() {
             useNativeDriver: false,
         }).start();
     }, [reportsMenuExpanded, rotateAnim]);
+
+    const usersChevronRotation = usersRotateAnim.interpolate({
+        inputRange: [0, 1],
+        outputRange: ['0deg', '180deg'],
+    });
+
+    const usersSubmenuHeight = usersRotateAnim.interpolate({
+        inputRange: [0, 1],
+        outputRange: [0, 250],
+    });
+    const usersSubmenuMarginTop = usersRotateAnim.interpolate({
+        inputRange: [0, 1],
+        outputRange: [0, 8],
+    });
+    const usersSubmenuOpacity = usersRotateAnim.interpolate({
+        inputRange: [0, 0.4, 1],
+        outputRange: [0, 0, 1],
+    });
 
     const chevronRotation = rotateAnim.interpolate({
         inputRange: [0, 1],
@@ -113,7 +168,6 @@ export default function SidebarNav() {
     const [processingTransferId, setProcessingTransferId] = useState<string | null>(null);
     const [isLoggingOut, setIsLoggingOut] = useState(false);
     const [alertVisible, setAlertVisible] = useState(false);
-    const previousAdminTabRef = useRef<AdminTab>(resolveAdminTab(pathname));
     const [alertConfig, setAlertConfig] = useState<{
         type: AlertType;
         title: string;
@@ -131,6 +185,15 @@ export default function SidebarNav() {
     );
 
     const activeAdminTab = useMemo(() => resolveAdminTab(pathname), [pathname]);
+
+    useEffect(() => {
+        const nextAdminTab = resolveAdminTab(pathname);
+        setActiveUsersSection(resolveUsersSection(pathname));
+
+        if (nextAdminTab === 'users') {
+            setUsersMenuExpanded(true);
+        }
+    }, [pathname]);
 
     const fetchUnreadCount = useCallback(async (userId: string) => {
         try {
@@ -422,6 +485,37 @@ export default function SidebarNav() {
         ];
     }, [isAdminContext, manageRoute]);
 
+    const handleUsersNavigation = useCallback((section: UsersSection) => {
+        LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+        setActiveUsersSection(section);
+        setUsersMenuExpanded(true);
+
+        if (section === 'identity_reviews') {
+            router.replace('/admin/identity-reviews' as any);
+            return;
+        }
+
+        router.replace('/admin/users' as any);
+    }, []);
+
+    const toggleUsersMenu = useCallback(() => {
+        LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+        setUsersMenuExpanded((prev) => !prev);
+    }, []);
+
+    const handleUsersHeaderPress = useCallback(() => {
+        LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+
+        if (activeAdminTab === 'users') {
+            setUsersMenuExpanded((prev) => !prev);
+            return;
+        }
+
+        setActiveUsersSection('users_list');
+        setUsersMenuExpanded(true);
+        router.replace('/admin/users' as any);
+    }, [activeAdminTab]);
+
     const handleReportsNavigation = useCallback((section: ReportsSection) => {
         LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
         setActiveReportsSection(section);
@@ -439,6 +533,19 @@ export default function SidebarNav() {
         LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
         setReportsMenuExpanded((prev) => !prev);
     }, []);
+
+    const handleReportsHeaderPress = useCallback(() => {
+        LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+
+        if (activeAdminTab === 'reports') {
+            setReportsMenuExpanded((prev) => !prev);
+            return;
+        }
+
+        setActiveReportsSection('reports_list');
+        setReportsMenuExpanded(true);
+        router.replace('/admin/reports' as any);
+    }, [activeAdminTab]);
 
     const showAlert = (
         type: AlertType,
@@ -785,15 +892,15 @@ export default function SidebarNav() {
                     {navItems.map((item) => {
                         const isActive = activeTab === item.id;
 
-                        if (item.id === 'reports') {
-                            const showReportsSubmenu = reportsMenuExpanded;
+                        if (item.id === 'users') {
+                            const showUsersSubmenu = usersMenuExpanded;
 
                             return (
                                 <View key={item.id} style={styles.navGroup}>
                                     <View
                                         style={[
                                             styles.navItemRow,
-                                            showReportsSubmenu && {
+                                            (isActive || showUsersSubmenu) && {
                                                 backgroundColor: isDark ? 'rgba(255,255,255,0.035)' : 'rgba(15,23,42,0.035)',
                                             },
                                         ]}
@@ -802,10 +909,12 @@ export default function SidebarNav() {
                                             style={[
                                                 styles.navItem,
                                                 styles.navItemMain,
-                                                isActive && { backgroundColor: isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)' },
                                             ]}
-                                            onPress={() => handleReportsNavigation(activeReportsSection)}
+                                            onPress={handleUsersHeaderPress}
                                             activeOpacity={0.8}
+                                            accessibilityRole="button"
+                                            accessibilityLabel={showUsersSubmenu ? 'Close users menu' : 'Open users menu'}
+                                            accessibilityState={{ expanded: showUsersSubmenu }}
                                         >
                                             <Ionicons
                                                 name={isActive ? item.icon as any : `${item.icon}-outline` as any}
@@ -829,11 +938,145 @@ export default function SidebarNav() {
                                         <TouchableOpacity
                                             style={[
                                                 styles.navToggleButton,
-                                                {
-                                                    backgroundColor: showReportsSubmenu
-                                                        ? (isDark ? 'rgba(59,130,246,0.16)' : '#DBEAFE')
-                                                        : 'transparent',
-                                                },
+                                                { backgroundColor: 'transparent' },
+                                            ]}
+                                            onPress={toggleUsersMenu}
+                                            activeOpacity={0.8}
+                                            accessibilityRole="button"
+                                            accessibilityLabel="Toggle users menu"
+                                            accessibilityState={{ expanded: showUsersSubmenu }}
+                                        >
+                                            <Animated.View style={{ transform: [{ rotate: usersChevronRotation }] }}>
+                                                <Ionicons
+                                                    name="chevron-down"
+                                                    size={18}
+                                                    color={showUsersSubmenu ? colors.primary : colors.textSecondary}
+                                                />
+                                            </Animated.View>
+                                        </TouchableOpacity>
+                                    </View>
+
+                                    <Animated.View
+                                        style={[
+                                            styles.subNavContainer,
+                                            {
+                                                borderLeftColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(15,23,42,0.09)',
+                                                overflow: 'hidden',
+                                                marginTop: usersSubmenuMarginTop,
+                                                maxHeight: usersSubmenuHeight,
+                                                opacity: usersSubmenuOpacity,
+                                            },
+                                        ]}
+                                    >
+                                        {USERS_SECTION_ITEMS.map((subItem) => {
+                                            const subActive = activeUsersSection === subItem.key && isActive;
+
+                                            return (
+                                                <TouchableOpacity
+                                                    key={subItem.key}
+                                                    style={[
+                                                        styles.subNavItem,
+                                                        {
+                                                            backgroundColor: subActive
+                                                                ? (isDark ? 'rgba(59,130,246,0.22)' : '#DBEAFE')
+                                                                : (isDark ? 'rgba(255,255,255,0.015)' : 'rgba(255,255,255,0.8)'),
+                                                            borderColor: subActive
+                                                                ? (isDark ? 'rgba(96,165,250,0.45)' : '#93C5FD')
+                                                                : 'transparent',
+                                                        },
+                                                    ]}
+                                                    onPress={() => handleUsersNavigation(subItem.key)}
+                                                    activeOpacity={0.85}
+                                                >
+                                                    <View style={styles.subNavItemMain}>
+                                                        <Ionicons
+                                                            name={subItem.icon as any}
+                                                            size={18}
+                                                            color={subActive ? colors.primary : colors.textSecondary}
+                                                            style={{ width: 24 }}
+                                                        />
+                                                        <View style={styles.subNavTextBlock}>
+                                                            <Text
+                                                                style={[
+                                                                    styles.subNavLabel,
+                                                                    { color: subActive ? colors.primary : colors.text },
+                                                                    subActive && { fontFamily: 'Poppins_600SemiBold' },
+                                                                ]}
+                                                            >
+                                                                {subItem.label}
+                                                            </Text>
+                                                            <Text
+                                                                style={[styles.subNavDescription, { color: colors.textSecondary }]}
+                                                            >
+                                                                {subItem.description}
+                                                            </Text>
+                                                        </View>
+                                                    </View>
+
+                                                    <View
+                                                        style={[
+                                                            styles.subNavStatusDot,
+                                                            {
+                                                                backgroundColor: subActive ? colors.primary : 'transparent',
+                                                                borderColor: subActive ? colors.primary : colors.border,
+                                                            },
+                                                        ]}
+                                                    />
+                                                </TouchableOpacity>
+                                            );
+                                        })}
+                                    </Animated.View>
+                                </View>
+                            );
+                        }
+
+                        if (item.id === 'reports') {
+                            const showReportsSubmenu = reportsMenuExpanded;
+
+                            return (
+                                <View key={item.id} style={styles.navGroup}>
+                                    <View
+                                        style={[
+                                            styles.navItemRow,
+                                            (isActive || showReportsSubmenu) && {
+                                                backgroundColor: isDark ? 'rgba(255,255,255,0.035)' : 'rgba(15,23,42,0.035)',
+                                            },
+                                        ]}
+                                    >
+                                        <TouchableOpacity
+                                            style={[
+                                                styles.navItem,
+                                                styles.navItemMain,
+                                            ]}
+                                            onPress={handleReportsHeaderPress}
+                                            activeOpacity={0.8}
+                                            accessibilityRole="button"
+                                            accessibilityLabel={showReportsSubmenu ? 'Close reports menu' : 'Open reports menu'}
+                                            accessibilityState={{ expanded: showReportsSubmenu }}
+                                        >
+                                            <Ionicons
+                                                name={isActive ? item.icon as any : `${item.icon}-outline` as any}
+                                                size={22}
+                                                color={isActive ? colors.primary : colors.textSecondary}
+                                                style={{ width: 30 }}
+                                            />
+                                            <View style={styles.navTextBlock}>
+                                                <Text
+                                                    style={[
+                                                        styles.navLabel,
+                                                        { color: isActive ? colors.primary : colors.text },
+                                                        isActive && { fontFamily: 'Poppins_600SemiBold' },
+                                                    ]}
+                                                >
+                                                    {item.label}
+                                                </Text>
+                                            </View>
+                                        </TouchableOpacity>
+
+                                        <TouchableOpacity
+                                            style={[
+                                                styles.navToggleButton,
+                                                { backgroundColor: 'transparent' },
                                             ]}
                                             onPress={toggleReportsMenu}
                                             activeOpacity={0.8}

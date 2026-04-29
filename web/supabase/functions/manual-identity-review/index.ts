@@ -9,6 +9,7 @@ const corsHeaders = {
 
 const IDENTITY_BUCKET = "identity-manual";
 const MAX_IMAGE_BYTES = 7 * 1024 * 1024;
+const allowedSignupRoles = new Set(["musician"]);
 
 function jsonResponse(payload: unknown, status = 200) {
   return new Response(JSON.stringify(payload), {
@@ -51,6 +52,55 @@ function sanitizeFileSegment(raw: string, fallback: string) {
   return normalized || fallback;
 }
 
+function escapeHtml(raw: unknown) {
+  return String(raw || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
+function buildMusikaLokalEmail({
+  title,
+  subtitle,
+  bodyHtml,
+}: {
+  title: string;
+  subtitle: string;
+  bodyHtml: string;
+}) {
+  return `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${escapeHtml(title)} - MusikaLokal</title>
+</head>
+<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; line-height: 1.6; color: #333333; max-width: 600px; margin: 0 auto; padding: 20px;">
+  <div style="text-align: center; margin-bottom: 30px;">
+    <h1 style="color: #6366f1; margin: 0; font-size: 30px; font-weight: 800;">MusikaLokal</h1>
+  </div>
+
+  <div style="background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%); color: #ffffff; padding: 30px; border-radius: 16px; text-align: center; margin-bottom: 30px;">
+    <div style="font-size: 13px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; opacity: 0.85; margin-bottom: 10px;">Identity Verification</div>
+    <h2 style="margin: 0 0 10px 0; font-size: 24px; line-height: 1.3;">${escapeHtml(title)}</h2>
+    <p style="margin: 0; opacity: 0.9;">${escapeHtml(subtitle)}</p>
+  </div>
+
+  ${bodyHtml}
+
+  <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 30px 0;">
+
+  <p style="color: #64748b; font-size: 12px; text-align: center; margin: 0;">
+    This email was sent by MusikaLokal. If you did not create an account, please ignore this email.<br>
+    &copy; ${new Date().getFullYear()} MusikaLokal. All rights reserved.
+  </p>
+</body>
+</html>`;
+}
+
 function extensionFromPayload(payload: any) {
   const mimeType = String(payload?.mimeType || "").toLowerCase();
   const ext = String(payload?.extension || "").toLowerCase();
@@ -91,6 +141,141 @@ function normalizeImagePayload(raw: any, label: string) {
   };
 }
 
+async function findAuthUserByEmail(supabaseAdmin: any, email: string) {
+  const normalizedEmail = email.trim().toLowerCase();
+  const perPage = 1000;
+
+  for (let page = 1; page <= 20; page += 1) {
+    const { data, error } = await supabaseAdmin.auth.admin.listUsers({ page, perPage });
+    if (error) {
+      throw new Error(`Failed to resolve existing signup user: ${error.message}`);
+    }
+
+    const users = data?.users || [];
+    const matchedUser = users.find((user: any) => String(user?.email || "").trim().toLowerCase() === normalizedEmail);
+    if (matchedUser) {
+      return matchedUser;
+    }
+
+    if (users.length < perPage) {
+      break;
+    }
+  }
+
+  return null;
+}
+
+async function ensurePendingReviewProfile(
+  supabaseAdmin: any,
+  authUser: any,
+  email: string,
+  diditSessionId: string | null = null,
+) {
+  const metadata = authUser?.user_metadata || {};
+  const fallbackName =
+    String(metadata.full_name || metadata.display_name || metadata.name || "").trim() ||
+    email.split("@")[0] ||
+    "Musician";
+
+  const { error } = await supabaseAdmin
+    .from("profiles")
+    .upsert({
+      id: authUser.id,
+      email,
+      full_name: fallbackName,
+      role: "musician",
+      is_verified: false,
+      verification_status: "PENDING_REVIEW",
+      didit_session_id: diditSessionId,
+    })
+    .select("id")
+    .single();
+
+  if (error) {
+    throw new Error(`Failed to prepare profile for manual review: ${error.message}`);
+  }
+}
+
+async function ensurePendingReviewAuthUser(
+  supabaseAdmin: any,
+  payload: {
+    userId: string;
+    email: string;
+    password: string;
+    role: string;
+    fullName: string;
+    documentType: string;
+    documentTypeKey: string | null;
+    verificationMode: string;
+    diditSessionId: string | null;
+  },
+) {
+  const role = String(payload.role || "musician").trim().toLowerCase();
+  if (!allowedSignupRoles.has(role)) {
+    throw new Error("Only musician accounts can submit manual identity review during signup.");
+  }
+
+  if (payload.userId) {
+    const { data: authUserData, error: authUserError } = await supabaseAdmin.auth.admin.getUserById(payload.userId);
+    if (authUserError || !authUserData?.user) {
+      throw new Error("User not found");
+    }
+
+    return authUserData.user;
+  }
+
+  const existingUser = await findAuthUserByEmail(supabaseAdmin, payload.email);
+  if (existingUser) {
+    const { data: existingProfile } = await supabaseAdmin
+      .from("profiles")
+      .select("id, role, is_verified, verification_status")
+      .eq("id", existingUser.id)
+      .maybeSingle();
+
+    const existingRole = String(existingProfile?.role || existingUser.user_metadata?.role || "").trim().toLowerCase();
+    const existingStatus = String(existingProfile?.verification_status || existingUser.user_metadata?.verification_status || "").trim().toUpperCase();
+
+    if (existingRole && existingRole !== "musician") {
+      throw new Error("This email is already registered with another account type. Please log in to continue.");
+    }
+
+    if (existingProfile?.is_verified || existingStatus === "APPROVED") {
+      throw new Error("This email is already registered and verified. Please log in.");
+    }
+
+    return existingUser;
+  }
+
+  if (!payload.password || payload.password.length < 6) {
+    throw new Error("Password must be at least 6 characters.");
+  }
+
+  const fallbackName = payload.fullName || payload.email.split("@")[0] || "Musician";
+  const { data: createdUser, error: createUserError } = await supabaseAdmin.auth.admin.createUser({
+    email: payload.email,
+    password: payload.password,
+    email_confirm: false,
+    user_metadata: {
+      role,
+      verification_status: "PENDING_REVIEW",
+      is_verified: false,
+      full_name: fallbackName,
+      display_name: fallbackName,
+      name: fallbackName,
+      selected_document_type: payload.documentType,
+      selected_document_type_key: payload.documentTypeKey,
+      verification_mode: payload.verificationMode,
+      didit_session_id: payload.diditSessionId,
+    },
+  });
+
+  if (createUserError || !createdUser?.user) {
+    throw new Error(createUserError?.message || "Unable to create manual review account.");
+  }
+
+  return createdUser.user;
+}
+
 async function uploadImage(
   supabaseAdmin: any,
   userId: string,
@@ -123,17 +308,22 @@ async function sendSubmissionEmail(
   userEmail: string,
   documentType: string,
 ) {
-  if (!userEmail) return false;
+  if (!userEmail) return { sent: false, queued: false, provider: "none", error: "Missing recipient email" };
 
   const subject = "Identity Verification Received - MusikaLokal";
-  const html = `
-    <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #111827;">
-      <h2 style="margin: 0 0 12px;">Manual Verification Submitted</h2>
-      <p style="margin: 0 0 12px;">We received your ${documentType} submission for manual identity verification.</p>
-      <p style="margin: 0 0 12px;">Our admin team will review this within <strong>5-7 business days</strong>.</p>
-      <p style="margin: 0;">We will automatically email you once a decision is made.</p>
-    </div>
-  `;
+  const safeDocumentType = escapeHtml(documentType);
+  const html = buildMusikaLokalEmail({
+    title: "Manual Verification Submitted",
+    subtitle: "Your document is now queued for admin review",
+    bodyHtml: `
+  <p style="margin: 0 0 12px;">We received your ${safeDocumentType} submission for manual identity verification.</p>
+  <ul style="background: #f8fafc; padding: 20px 20px 20px 40px; border-radius: 8px; border-left: 4px solid #6366f1; margin: 24px 0;">
+    <li>Our admin team will review this within <strong>5-7 business days</strong></li>
+    <li>We will automatically email you once a decision is made</li>
+    <li>No additional action is needed while your review is pending</li>
+  </ul>
+  <p style="margin: 0;">Thank you,<br>MusikaLokal Team</p>`,
+  });
 
   const resendApiKey = Deno.env.get("RESEND_API_KEY") || "";
   if (resendApiKey) {
@@ -154,9 +344,17 @@ async function sendSubmissionEmail(
       });
 
       if (response.ok) {
-        return true;
+        return { sent: true, queued: false, provider: "resend" };
       }
-    } catch {
+      const errorText = await response.text().catch(() => "");
+      console.error("manual_identity_review_submission_email_resend_failed", {
+        status: response.status,
+        body: errorText.slice(0, 500),
+      });
+    } catch (error) {
+      console.error("manual_identity_review_submission_email_resend_exception", {
+        message: error instanceof Error ? error.message : String(error),
+      });
       // Fall through to DB queue.
     }
   }
@@ -171,7 +369,12 @@ async function sendSubmissionEmail(
     created_at: new Date().toISOString(),
   });
 
-  return !error;
+  if (error) {
+    console.error("manual_identity_review_submission_email_queue_failed", { message: error.message });
+    return { sent: false, queued: false, provider: resendApiKey ? "resend" : "email_notifications", error: error.message };
+  }
+
+  return { sent: false, queued: true, provider: "email_notifications" };
 }
 
 serve(async (req: Request) => {
@@ -196,35 +399,57 @@ serve(async (req: Request) => {
       return jsonResponse({ error: `Unsupported action: ${action}` }, 400);
     }
 
-    const userId = String(body?.userId || "").trim();
+    let userId = String(body?.userId || "").trim();
     const email = String(body?.email || "").trim().toLowerCase();
+    const password = String(body?.password || "");
+    const role = String(body?.role || "musician").trim().toLowerCase();
+    const fullName = String(body?.fullName || body?.displayName || "").trim();
     const documentType = String(body?.documentType || "").trim();
     const documentTypeKey = String(body?.documentTypeKey || "").trim() || null;
     const documentCountry = String(body?.documentCountry || "PHL").trim().toUpperCase();
+    const source = String(body?.source || "MANUAL_UPLOAD").trim().toUpperCase();
+    const diditSessionId = String(body?.diditSessionId || body?.didit_session_id || "").trim() || null;
+    const verificationMode = source === "DIDIT_PENDING" ? "didit" : "manual_upload";
 
-    if (!userId || !email || !documentType) {
-      return jsonResponse({ error: "Missing required fields: userId, email, documentType" }, 400);
+    if (!email || !documentType) {
+      return jsonResponse({ error: "Missing required fields: email, documentType" }, 400);
     }
 
-    const { data: authUserData, error: authUserError } = await supabaseAdmin.auth.admin.getUserById(userId);
-    if (authUserError || !authUserData?.user) {
-      return jsonResponse({ error: "User not found" }, 404);
+    if (source !== "MANUAL_UPLOAD" && source !== "DIDIT_PENDING") {
+      return jsonResponse({ error: "Invalid manual identity review source" }, 400);
     }
 
-    const authEmail = String(authUserData.user.email || "").trim().toLowerCase();
+    const authUser = await ensurePendingReviewAuthUser(supabaseAdmin, {
+      userId,
+      email,
+      password,
+      role,
+      fullName,
+      documentType,
+      documentTypeKey,
+      verificationMode,
+      diditSessionId,
+    });
+
+    userId = String(authUser.id || "").trim();
+    const authEmail = String(authUser.email || "").trim().toLowerCase();
     if (authEmail && authEmail !== email) {
       return jsonResponse({ error: "Email mismatch for this user" }, 400);
     }
 
+    await ensurePendingReviewProfile(supabaseAdmin, authUser, authEmail || email, diditSessionId);
+
     const frontImage = normalizeImagePayload(body?.frontImage, "front");
-    if (!frontImage) {
+    if (!frontImage && source === "MANUAL_UPLOAD") {
       return jsonResponse({ error: "frontImage is required" }, 400);
     }
 
     const backImage = normalizeImagePayload(body?.backImage, "back");
     const selfieImage = normalizeImagePayload(body?.selfieImage, "selfie");
 
-    const frontPath = await uploadImage(supabaseAdmin, userId, "front", frontImage);
+    const frontPath = frontImage
+      ? await uploadImage(supabaseAdmin, userId, "front", frontImage)
+      : null;
     const backPath = backImage
       ? await uploadImage(supabaseAdmin, userId, "back", backImage)
       : null;
@@ -237,7 +462,7 @@ serve(async (req: Request) => {
       .select("id")
       .eq("user_id", userId)
       .eq("status", "PENDING_REVIEW")
-      .eq("source", "MANUAL_UPLOAD")
+      .eq("source", source)
       .order("created_at", { ascending: false })
       .limit(1)
       .maybeSingle();
@@ -253,6 +478,7 @@ serve(async (req: Request) => {
           document_type: documentType,
           document_type_key: documentTypeKey,
           document_country: documentCountry,
+          source,
           front_image_path: frontPath,
           back_image_path: backPath,
           selfie_image_path: selfiePath,
@@ -277,7 +503,7 @@ serve(async (req: Request) => {
           document_type: documentType,
           document_type_key: documentTypeKey,
           document_country: documentCountry,
-          source: "MANUAL_UPLOAD",
+          source,
           status: "PENDING_REVIEW",
           front_image_path: frontPath,
           back_image_path: backPath,
@@ -315,12 +541,13 @@ serve(async (req: Request) => {
       },
     });
 
-    await sendSubmissionEmail(supabaseAdmin, email, documentType);
+    const submissionEmail = await sendSubmissionEmail(supabaseAdmin, email, documentType);
 
     return jsonResponse({
       success: true,
       reviewId,
       status: "PENDING_REVIEW",
+      submissionEmail,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unexpected error";

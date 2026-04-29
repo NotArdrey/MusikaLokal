@@ -114,10 +114,7 @@ export default function OrdersScreen() {
 
   const formatTotal = (order: any) => {
     const amount = Number(order?.total_amount ?? order?.total ?? 0);
-    if (order?.currency && order.currency !== "PHP") {
-      return `${order.currency} ${amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}`;
-    }
-    return `â‚±${amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}`;
+    return `₱${amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}`;
   };
 
   const renderOrder = (item: any, isSelling = false) => (
