@@ -58,17 +58,26 @@ function Navbar() {
     }, [pathname]);
 
     const navItems = useMemo(
-        () => [
-            { id: 'home', icon: 'home', label: 'Home', route: '/home' },
-            { id: 'ai-suggest', icon: 'sparkles', label: 'AI', route: '/ai_suggestions' },
-            { id: 'activity', icon: 'calendar', label: 'Activity', route: '/bookings' },
-            { id: 'manage', icon: 'briefcase', label: 'Manage', route: manageRoute },
-            { id: 'profile', icon: 'person', label: 'Profile', route: '/profile' }
-        ],
-        [manageRoute],
+        () => {
+            if (isGuest) {
+                return [
+                    { id: 'home', icon: 'home', label: 'Home', route: '/home' },
+                    { id: 'profile', icon: 'person', label: 'Profile', route: '/profile' },
+                ];
+            }
+
+            return [
+                { id: 'home', icon: 'home', label: 'Home', route: '/home' },
+                { id: 'ai-suggest', icon: 'sparkles', label: 'AI', route: '/ai_suggestions' },
+                { id: 'activity', icon: 'calendar', label: 'Activity', route: '/bookings' },
+                { id: 'manage', icon: 'briefcase', label: 'Manage', route: manageRoute },
+                { id: 'profile', icon: 'person', label: 'Profile', route: '/profile' }
+            ];
+        },
+        [isGuest, manageRoute],
     );
 
-    if (Platform.OS === 'web') {
+    if (isGuest || Platform.OS === 'web') {
         return null;
     }
 

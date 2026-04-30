@@ -476,6 +476,13 @@ export default function SidebarNav() {
             ];
         }
 
+        if (isGuest) {
+            return [
+                { id: 'home', icon: 'home', label: 'Home', route: '/home' },
+                { id: 'profile', icon: 'person', label: 'Profile', route: '/profile' },
+            ];
+        }
+
         return [
             { id: 'home', icon: 'home', label: 'Home', route: '/home' },
             { id: 'discover', icon: 'compass', label: 'Discover', route: '/discover' },
@@ -483,7 +490,7 @@ export default function SidebarNav() {
             { id: 'activity', icon: 'calendar', label: 'Activity', route: '/bookings' },
             { id: 'manage', icon: 'briefcase', label: 'Manage', route: manageRoute },
         ];
-    }, [isAdminContext, manageRoute]);
+    }, [isAdminContext, isGuest, manageRoute]);
 
     const handleUsersNavigation = useCallback((section: UsersSection) => {
         LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);

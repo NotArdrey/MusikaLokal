@@ -4,13 +4,10 @@ import * as ImagePicker from 'expo-image-picker';
 import React, { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Image, Modal, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { supabase } from '../../lib/supabase';
-import { screenUploadsWithAiDecisions } from '../services/uploadSafetyScreen';
 import { useTheme } from '../context/ThemeContext';
 import CustomAlert, { AlertType } from './CustomAlert';
 
 const debugLog = (..._args: unknown[]) => {};
-const MAX_INLINE_SCREEN_BYTES = 4 * 1024 * 1024;
-const SAFETY_CHECK_TIMEOUT_MS = 6000;
 
 const sanitizeExtension = (rawExt?: string | null): string => {
   const cleaned = (rawExt || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -103,7 +100,6 @@ interface PreparedImageUpload {
   extension: string;
   mimeType: string;
   size: number;
-  contentDataUrl: string;
   uploadBody: ArrayBuffer | Blob | Uint8Array;
 }
 
@@ -133,7 +129,7 @@ const formatSkippedImageFeedback = (skippedItems: SkippedImageFeedback[]): strin
   return `\n\nBlocked/skipped:\n${details}${remainingText}`;
 };
 
-const prepareImageForScreeningAndUpload = async (
+const prepareImageForUpload = async (
   asset: ImagePicker.ImagePickerAsset,
 ): Promise<PreparedImageUpload> => {
   const fallbackName = asset.uri.split('/').pop() || 'image-upload.jpg';
@@ -163,34 +159,14 @@ const prepareImageForScreeningAndUpload = async (
     throw new Error('Could not read the selected image. Please try a different photo.');
   }
 
-  if (size > MAX_INLINE_SCREEN_BYTES) {
-    throw new Error('This image is too large to safety screen. Please choose an image under 4 MB.');
-  }
-
   return {
     asset,
     originalName: originalName || fallbackName,
     extension,
     mimeType,
     size,
-    contentDataUrl: `data:${mimeType};base64,${base64}`,
     uploadBody,
   };
-};
-
-const withSafetyTimeout = async <T,>(promise: Promise<T>): Promise<T> => {
-  let timeoutId: ReturnType<typeof setTimeout> | null = null;
-  const timeout = new Promise<never>((_, reject) => {
-    timeoutId = setTimeout(
-      () => reject(new Error('Safety screening timed out. Upload blocked. Please try again.')),
-      SAFETY_CHECK_TIMEOUT_MS,
-    );
-  });
-  try {
-    return await Promise.race([promise, timeout]);
-  } finally {
-    if (timeoutId) clearTimeout(timeoutId);
-  }
 };
 
 interface ImageUploaderProps {
@@ -221,7 +197,6 @@ export default function ImageUploader({
   bucketName = 'listings',
   userId,
   folder = 'general',
-  safetyContext,
 }: ImageUploaderProps) {
   const { colors, isDark } = useTheme();
   const uploadingRef = useRef(false);
@@ -261,15 +236,6 @@ export default function ImageUploader({
     return () => clearTimeout(timeoutId);
   }, [pendingAlert, uploading]);
 
-  const showUploadBlockedAlert = (message?: string) => {
-    showAlert(
-      'warning',
-      'Upload blocked',
-      message || 'One or more images did not pass safety screening.',
-      [{ text: 'Choose another', style: 'default' }],
-    );
-  };
-
   const pickAndUploadImages = async () => {
     try {
       // Check authentication first
@@ -305,7 +271,7 @@ export default function ImageUploader({
       setUploadMessage('Preparing photos...');
 
       const preparedResults = await Promise.allSettled(
-        result.assets.map((asset) => prepareImageForScreeningAndUpload(asset)),
+        result.assets.map((asset) => prepareImageForUpload(asset)),
       );
       const preparedUploads = preparedResults
         .filter((result): result is PromiseFulfilledResult<PreparedImageUpload> => result.status === 'fulfilled')
@@ -332,62 +298,11 @@ export default function ImageUploader({
         return;
       }
 
-      setUploadMessage('Checking photos...');
-      const safetyContextTag = safetyContext || `image_uploader:${bucketName}:${folder}`;
-      const screeningResult = await Promise.all(
-        preparedUploads.map(async (item) => {
-          const input = {
-            name: item.originalName,
-            mimeType: item.mimeType,
-            size: item.size,
-            uri: item.asset.uri,
-            contentDataUrl: item.contentDataUrl,
-            kind: 'photo' as const,
-          };
-
-          try {
-            const [decision] = await withSafetyTimeout(
-              screenUploadsWithAiDecisions([input], safetyContextTag),
-            );
-
-            return decision || {
-              input,
-              allowed: false,
-              reason: 'Safety screening did not return a valid decision.',
-            };
-          } catch (error: any) {
-            return {
-              input,
-              allowed: false,
-              reason: error?.message || 'Safety screening failed for this image.',
-            };
-          }
-        }),
-      );
-
-      const blockedBySafety = screeningResult.filter((decision) => !decision.allowed);
-      const uploadableItems = preparedUploads.filter((_, index) => screeningResult[index]?.allowed === true);
-
       setUploadMessage('Uploading photos...');
       const uploadedUrls: string[] = [];
-      const skippedImages: SkippedImageFeedback[] = [
-        ...skippedBeforeScreening,
-        ...blockedBySafety.map(
-          (decision) => ({
-            name: decision.input.name,
-            reason: decision.reason || 'Blocked by safety screening.',
-          }),
-        ),
-      ];
+      const skippedImages: SkippedImageFeedback[] = [...skippedBeforeScreening];
 
-      if (uploadableItems.length === 0) {
-        showUploadBlockedAlert(
-          `No images were uploaded.${formatSkippedImageFeedback(skippedImages)}`,
-        );
-        return;
-      }
-
-      for (const item of uploadableItems) {
+      for (const item of preparedUploads) {
         try {
           const fileName = `${userId}/${folder}/${Date.now()}_${Math.random().toString(36).substring(7)}.${item.extension}`;
 
@@ -464,11 +379,7 @@ export default function ImageUploader({
     } catch (e: any) {
       console.error('❌ Upload error:', e.message || e);
       const message = e.message || 'Failed to upload images';
-      if (String(message).toLowerCase().includes('safety screen')) {
-        showUploadBlockedAlert(message);
-      } else {
-        showAlert('error', 'Upload failed', message);
-      }
+      showAlert('error', 'Upload failed', message);
     } finally {
       uploadingRef.current = false;
       setUploading(false);
@@ -504,7 +415,7 @@ export default function ImageUploader({
             <ActivityIndicator size="large" color={colors.primary} />
             <Text style={[styles.loadingTitle, { color: colors.text }]}>{uploadMessage}</Text>
             <Text style={[styles.loadingSubtitle, { color: colors.textSecondary }]}>
-              Please wait while your media is checked and uploaded.
+              Please wait while your media is uploaded.
             </Text>
           </View>
         </View>

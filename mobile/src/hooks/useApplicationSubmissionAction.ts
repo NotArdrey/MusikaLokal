@@ -1,4 +1,4 @@
-import { useCallback } from "react";
+import { useCallback, useRef } from "react";
 import { supabase } from "../../lib/supabase";
 import { getGigApplicationDeadlineInfo } from "../utils/gigApplication";
 import { buildNotificationRouteMeta } from "../utils/notificationNavigation";
@@ -73,6 +73,8 @@ export const useApplicationSubmissionAction = ({
   setCvUrl,
   closeSheet,
 }: UseApplicationSubmissionActionParams) => {
+  const submissionInFlightRef = useRef(false);
+
   const invokeListingsCrudAction = useCallback(
     async (body: Record<string, unknown>) => {
       const {
@@ -127,6 +129,11 @@ export const useApplicationSubmissionAction = ({
   }, [userId]);
 
   const processApplicationSubmission = useCallback(async () => {
+    if (submissionInFlightRef.current) {
+      return;
+    }
+
+    submissionInFlightRef.current = true;
     setIsSubmittingApplication(true);
 
     try {
@@ -262,7 +269,7 @@ export const useApplicationSubmissionAction = ({
 
         setAlertConfig({
           type: "success",
-          title: "Application Submitted!",
+          title: "Application Sent",
           message:
             "Your application has been sent to the group leader. They can review your pitch, CV, and video.",
         });
@@ -324,8 +331,8 @@ export const useApplicationSubmissionAction = ({
 
         setAlertConfig({
           type: "success",
-          title: "Application Submitted!",
-          message: `${selectedProductionRoster?.display_name || "Your selected performer"} has been submitted through your production team. The venue owner will review it through the normal application flow.`,
+          title: "Application Sent",
+          message: `${selectedProductionRoster?.display_name || "Your selected performer"} was sent to the venue owner from your production team. We'll let you know when they respond.`,
         });
         setAlertVisible(true);
 
@@ -498,12 +505,12 @@ export const useApplicationSubmissionAction = ({
 
       setAlertConfig({
         type: "success",
-        title: "Application Submitted!",
+        title: "Application Sent",
         message: selectedGroupId
           ? needsLeaderApproval
             ? "Your group application was sent to your group leader for approval. Once approved, it will be visible to the venue owner."
-            : "Your group application has been submitted successfully. Group members have been notified. The venue owner will review it and get back to you soon."
-          : "Your application has been submitted successfully. The venue owner will review it and get back to you soon.",
+            : "Your group application has been sent. Group members have been notified. The venue owner will review it and get back to you soon."
+          : "Your application has been sent to the venue owner. They'll review it and get back to you soon.",
       });
       setAlertVisible(true);
 
@@ -524,6 +531,7 @@ export const useApplicationSubmissionAction = ({
       });
       setAlertVisible(true);
     } finally {
+      submissionInFlightRef.current = false;
       setIsSubmittingApplication(false);
     }
   }, [
@@ -555,6 +563,9 @@ export const useApplicationSubmissionAction = ({
   ]);
 
   const handleSubmitApplication = useCallback(async () => {
+    if (submissionInFlightRef.current) {
+      return;
+    }
 
     if (!userId || !listingId || !group) {
       console.error("Missing required data for application:", {

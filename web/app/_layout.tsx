@@ -59,6 +59,7 @@ function RootContent() {
     loading,
     identityRequired,
     identityChecked,
+    isGuest,
     userRole,
   } =
     useAuth();
@@ -203,7 +204,7 @@ function RootContent() {
   const currentScreen = segmentStrings.length > 0 ? segmentStrings[segmentStrings.length - 1] : "index";
   const isAuthScreen = authScreens.includes(currentScreen);
   const { width } = useWindowDimensions();
-  const showSidebar = Platform.OS === 'web' && width >= 768 && !isAuthScreen;
+  const showSidebar = Platform.OS === 'web' && width >= 768 && !isAuthScreen && !isGuest;
   const isAdminContext = userRole === 'admin' || segmentStrings.includes('admin');
   const useSidebarLayout = showSidebar && isAdminContext;
 

@@ -105,6 +105,51 @@ const isJwtLike = (token?: string | null): token is string => {
     return parts.length === 3 && parts.every((part) => part.length > 0);
 };
 
+const parseJwtPayload = (token?: string | null): Record<string, unknown> | null => {
+    if (!isJwtLike(token)) return null;
+
+    try {
+        const payloadPart = token.split('.')[1];
+        const normalized = payloadPart.replace(/-/g, '+').replace(/_/g, '/');
+        const padded = normalized + '='.repeat((4 - (normalized.length % 4)) % 4);
+        const atobFn = (globalThis as { atob?: (value: string) => string }).atob;
+        if (typeof atobFn !== 'function') return null;
+
+        const parsed = JSON.parse(atobFn(padded));
+        return parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : null;
+    } catch {
+        return null;
+    }
+};
+
+const getJwtExpiryMs = (token?: string | null): number | null => {
+    const payload = parseJwtPayload(token);
+    if (!payload) return null;
+
+    const rawExp = payload.exp;
+    const expSeconds =
+        typeof rawExp === 'number'
+            ? rawExp
+            : typeof rawExp === 'string'
+                ? Number(rawExp)
+                : NaN;
+
+    if (!Number.isFinite(expSeconds) || expSeconds <= 0) {
+        return null;
+    }
+
+    return expSeconds * 1000;
+};
+
+const isJwtExpiredOrNearExpiry = (
+    token?: string | null,
+    safetyWindowMs = 0,
+): boolean => {
+    const expMs = getJwtExpiryMs(token);
+    if (!expMs) return false;
+    return expMs - Date.now() <= Math.max(0, safetyWindowMs);
+};
+
 // In-memory token cache so we don't call refreshSession() on every invoke.
 // Token is considered stale after TOKEN_CACHE_TTL_MS and re-refreshed.
 const TOKEN_CACHE_TTL_MS = 4 * 60 * 1000; // 4 minutes
@@ -151,7 +196,12 @@ const refreshAccessToken = async (): Promise<string | null> => {
                 error: refreshError,
             } = await supabase.auth.refreshSession();
 
-            if (!refreshError && refreshedSession?.access_token && isJwtLike(refreshedSession.access_token)) {
+            if (
+                !refreshError &&
+                refreshedSession?.access_token &&
+                isJwtLike(refreshedSession.access_token) &&
+                !isJwtExpiredOrNearExpiry(refreshedSession.access_token, 0)
+            ) {
                 _cachedToken = refreshedSession.access_token;
                 _cachedTokenAt = Date.now();
                 _refreshCooldownUntil = 0;
@@ -198,8 +248,18 @@ const refreshAccessToken = async (): Promise<string | null> => {
 const getFreshAccessToken = async (): Promise<string | null> => {
     // 1. Return in-memory cached token if it's still young
     const now = Date.now();
-    if (_cachedToken && isJwtLike(_cachedToken) && now - _cachedTokenAt < TOKEN_CACHE_TTL_MS) {
+    if (
+        _cachedToken &&
+        isJwtLike(_cachedToken) &&
+        now - _cachedTokenAt < TOKEN_CACHE_TTL_MS &&
+        !isJwtExpiredOrNearExpiry(_cachedToken, TOKEN_REFRESH_SAFETY_WINDOW_MS)
+    ) {
         return _cachedToken;
+    }
+
+    if (_cachedToken && isJwtExpiredOrNearExpiry(_cachedToken, TOKEN_REFRESH_SAFETY_WINDOW_MS)) {
+        _cachedToken = null;
+        _cachedTokenAt = 0;
     }
 
     // 2. Prefer currently persisted session token first to avoid unnecessary
@@ -211,10 +271,14 @@ const getFreshAccessToken = async (): Promise<string | null> => {
         } = await supabase.auth.getSession();
 
         if (!currentSessionError && currentSession?.access_token && isJwtLike(currentSession.access_token)) {
+            const tokenIsNearExpiry = isJwtExpiredOrNearExpiry(
+                currentSession.access_token,
+                TOKEN_REFRESH_SAFETY_WINDOW_MS,
+            );
             const expiresAtMs = (currentSession.expires_at || 0) * 1000;
             const isNearExpiry = expiresAtMs > 0 && expiresAtMs - now <= TOKEN_REFRESH_SAFETY_WINDOW_MS;
 
-            if (!isNearExpiry) {
+            if (!isNearExpiry && !tokenIsNearExpiry) {
                 _cachedToken = currentSession.access_token;
                 _cachedTokenAt = now;
                 return _cachedToken;
@@ -236,7 +300,11 @@ const getFreshAccessToken = async (): Promise<string | null> => {
             data: { session: fallbackSession },
         } = await supabase.auth.getSession();
 
-        if (fallbackSession?.access_token && isJwtLike(fallbackSession.access_token)) {
+        if (
+            fallbackSession?.access_token &&
+            isJwtLike(fallbackSession.access_token) &&
+            !isJwtExpiredOrNearExpiry(fallbackSession.access_token, 0)
+        ) {
             _cachedToken = fallbackSession.access_token;
             _cachedTokenAt = Date.now();
             return _cachedToken;
@@ -635,7 +703,7 @@ supabase.auth.onAuthStateChange((_event, session) => {
     invalidateTokenCache();
 
     const token = session?.access_token;
-    if (token && isJwtLike(token)) {
+    if (token && isJwtLike(token) && !isJwtExpiredOrNearExpiry(token, 0)) {
         _cachedToken = token;
         _cachedTokenAt = Date.now();
 

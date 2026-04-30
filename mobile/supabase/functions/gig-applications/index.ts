@@ -435,7 +435,7 @@ Deno.serve(async (req: Request) => {
             if (teamMembershipError) throw teamMembershipError;
 
             if (!teamMembership) {
-                return new Response(JSON.stringify({ error: 'Only production team owners or managers can submit production applications' }), {
+                return new Response(JSON.stringify({ error: 'Only production team owners or managers can send this application' }), {
                     headers: { ...corsHeaders, 'Content-Type': 'application/json' },
                     status: 403,
                 })
@@ -555,7 +555,7 @@ Deno.serve(async (req: Request) => {
 
             if (insertError) {
                 if (insertError.code === '23505') {
-                    return new Response(JSON.stringify({ error: 'This production application already exists for the selected gig' }), {
+                    return new Response(JSON.stringify({ error: 'This production team already sent an application for this gig' }), {
                         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
                         status: 409,
                     })
@@ -576,8 +576,8 @@ Deno.serve(async (req: Request) => {
                     .insert({
                         user_id: gigRecord.organizer_id,
                         type: 'info',
-                        title: 'New Production Application',
-                        message: `${teamName} submitted ${performerName} for "${gigRecord.name}".`,
+                        title: 'New Application from a Production Team',
+                        message: `${teamName} sent ${performerName} for "${gigRecord.name}".`,
                         meta: buildNotificationRouteMeta('/manage_gig', { id: gigId }, {
                             gig_id: gigId,
                             application_id: insertedApplication.id,
@@ -603,8 +603,8 @@ Deno.serve(async (req: Request) => {
                     .insert({
                         user_id: member.user_id,
                         type: 'info',
-                        title: 'Production Application Submitted',
-                        message: `${teamName} submitted ${performerName} for "${gigRecord.name}".`,
+                        title: 'Application Sent',
+                        message: `${teamName} sent ${performerName} for "${gigRecord.name}".`,
                         meta: buildNotificationRouteMeta('/bookings', undefined, buildGigApplicationAudienceMeta(audienceApplication, member, {
                             status: 'pending',
                             event_type: 'production_gig_application_submitted',
@@ -640,7 +640,7 @@ Deno.serve(async (req: Request) => {
             if (membershipError) throw membershipError;
 
             if (!membership) {
-                return new Response(JSON.stringify({ error: 'Only team members can check production applications' }), {
+                return new Response(JSON.stringify({ error: 'Only team members can view this application' }), {
                     headers: { ...corsHeaders, 'Content-Type': 'application/json' },
                     status: 403,
                 })

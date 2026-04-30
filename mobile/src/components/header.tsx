@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router, useFocusEffect, usePathname } from "expo-router";
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
-import { StyleSheet, TouchableOpacity, View } from 'react-native';
+import { Modal, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import Animated, { interpolateColor, useAnimatedProps, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { supabase } from '../../lib/supabase';
@@ -23,12 +23,13 @@ interface HeaderProps {
 
 function Header({ title, transparent, onBackPress, leftComponent, rightComponent, rightIconName, rightIconOnPress }: HeaderProps) {
     const { colors, isDark } = useTheme();
-    const { isGuest, userId, userRole } = useAuth();
+    const { isGuest, setGuestMode, userId, userRole } = useAuth();
     const insets = useSafeAreaInsets();
 
     const pathname = usePathname();
     const [hasUnread, setHasUnread] = useState(false);
     const [hasUnreadChats, setHasUnreadChats] = useState(false);
+    const [guestMenuVisible, setGuestMenuVisible] = useState(false);
     const isMainNavPath = useMemo(
         () => pathname === "/home" || pathname === "/feed" || pathname === "/manage" || pathname === "/bookings" || pathname === "/ai_suggestions" || pathname === "/marketplace" || pathname === "/chat",
         [pathname],
@@ -87,6 +88,31 @@ function Header({ title, transparent, onBackPress, leftComponent, rightComponent
         if (pathname === "/my_production") return '/add_production';
         return '/add_group';
     }, [pathname]);
+
+    const guestMenuItems = useMemo(
+        () => [
+            { label: 'Home', icon: 'home-outline', route: '/home' },
+            { label: 'Profile', icon: 'person-outline', route: '/profile' },
+        ],
+        [],
+    );
+
+    const closeGuestMenu = useCallback(() => {
+        setGuestMenuVisible(false);
+    }, []);
+
+    const navigateGuestMenu = useCallback((route: string) => {
+        closeGuestMenu();
+        if (pathname !== route) {
+            router.navigate(route as any);
+        }
+    }, [closeGuestMenu, pathname]);
+
+    const handleGuestSignIn = useCallback(async () => {
+        closeGuestMenu();
+        await setGuestMode(false);
+        router.replace('/');
+    }, [closeGuestMenu, setGuestMode]);
 
     const checkUnreadNotifications = useCallback(async () => {
         try {
@@ -274,88 +300,149 @@ function Header({ title, transparent, onBackPress, leftComponent, rightComponent
     }), [isDark, transparent]);
 
     return (
-        <View style={[styles.container, {
-            paddingTop: insets.top + 8
-        }]}>
-            <Animated.View style={[styles.surface, surfaceAnimatedStyle, surfaceShadowStyle]}>
-                <Animated.View pointerEvents="none" style={[styles.surfaceGlowPrimary, accentDotAnimatedStyle]} />
-                <View pointerEvents="none" style={[styles.surfaceGlowSecondary, { backgroundColor: transparent ? 'rgba(255,255,255,0.08)' : (isDark ? '#1E3A8A33' : colors.primary + '14') }]} />
+        <>
+            <View style={[styles.container, {
+                paddingTop: insets.top + 8
+            }]}>
+                <Animated.View style={[styles.surface, surfaceAnimatedStyle, surfaceShadowStyle]}>
+                    <Animated.View pointerEvents="none" style={[styles.surfaceGlowPrimary, accentDotAnimatedStyle]} />
+                    <View pointerEvents="none" style={[styles.surfaceGlowSecondary, { backgroundColor: transparent ? 'rgba(255,255,255,0.08)' : (isDark ? '#1E3A8A33' : colors.primary + '14') }]} />
 
-                {/* Left Container - Only for Back Button or leftComponent */}
-                {(backVisible || leftComponent) && (
-                    <View style={styles.leftContainer}>
-                        {leftComponent ? (
-                            leftComponent
-                        ) : (
-                            <AnimatedTouchableOpacity activeOpacity={1}
-                                onPress={() => (onBackPress ? onBackPress() : router.back())}
-                                style={[styles.backButton, buttonAnimatedStyle]}
-                            >
-                                <AnimatedIcon name="chevron-back" size={20} animatedProps={iconAnimatedProps} />
-                            </AnimatedTouchableOpacity>
-                        )}
-                    </View>
-                )}
+                    {/* Left Container - Only for Back Button or leftComponent */}
+                    {(backVisible || leftComponent) && (
+                        <View style={styles.leftContainer}>
+                            {leftComponent ? (
+                                leftComponent
+                            ) : (
+                                <AnimatedTouchableOpacity activeOpacity={1}
+                                    onPress={() => (onBackPress ? onBackPress() : router.back())}
+                                    style={[styles.backButton, buttonAnimatedStyle]}
+                                >
+                                    <AnimatedIcon name="chevron-back" size={20} animatedProps={iconAnimatedProps} />
+                                </AnimatedTouchableOpacity>
+                            )}
+                        </View>
+                    )}
 
-                {/* Title - Dynamic Alignment */}
-                <View style={[
-                    styles.titleContainer,
-                    !(backVisible || leftComponent) && styles.mainTitleContainer
-                ]}>
-                    <View style={styles.overlineRow}>
-                        <Animated.Text style={[styles.overlineText, overlineAnimatedStyle]}>
-                            {titleOverline}
+                    {/* Title - Dynamic Alignment */}
+                    <View style={[
+                        styles.titleContainer,
+                        !(backVisible || leftComponent) && styles.mainTitleContainer
+                    ]}>
+                        <View style={styles.overlineRow}>
+                            <Animated.Text style={[styles.overlineText, overlineAnimatedStyle]}>
+                                {titleOverline}
+                            </Animated.Text>
+                        </View>
+                        <Animated.Text
+                            style={[
+                                styles.title,
+                                !backVisible && styles.mainTitle,
+                                titleAnimatedStyle
+                            ]}
+                            numberOfLines={1}
+                            ellipsizeMode="tail"
+                        >
+                            {title}
                         </Animated.Text>
                     </View>
-                    <Animated.Text
-                        style={[
-                            styles.title,
-                            !backVisible && styles.mainTitle,
-                            titleAnimatedStyle
-                        ]}
-                        numberOfLines={1}
-                        ellipsizeMode="tail"
-                    >
-                        {title}
-                    </Animated.Text>
-                </View>
 
-                {/* Action Buttons */}
-                <View style={styles.rightContainer}>
-                    {rightComponent ? (
-                        rightComponent
-                    ) : rightIconName ? (
-                        <AnimatedTouchableOpacity activeOpacity={1} onPress={rightIconOnPress} style={[styles.iconButton, buttonAnimatedStyle]}>
-                            <AnimatedIcon name={rightIconName as any} size={20} animatedProps={iconAnimatedProps} />
-                        </AnimatedTouchableOpacity>
-                    ) : notifVisible ? (
-                        <View style={styles.iconRow}>
-                            {/* Chat Button */}
-                            <AnimatedTouchableOpacity activeOpacity={1} onPress={() => router.push('/chat')} style={[styles.iconButton, buttonAnimatedStyle]}>
-                                <AnimatedIcon name="chatbubble-ellipses" size={20} animatedProps={iconAnimatedProps} />
-                                {hasUnreadChats && (
-                                    <View style={[styles.badge, transparent && { borderColor: 'rgba(0,0,0,0.3)' }]} />
-                                )}
+                    {/* Action Buttons */}
+                    <View style={styles.rightContainer}>
+                        {rightComponent ? (
+                            rightComponent
+                        ) : rightIconName ? (
+                            <AnimatedTouchableOpacity activeOpacity={1} onPress={rightIconOnPress} style={[styles.iconButton, buttonAnimatedStyle]}>
+                                <AnimatedIcon name={rightIconName as any} size={20} animatedProps={iconAnimatedProps} />
                             </AnimatedTouchableOpacity>
-                            {/* Notifications Button */}
-                            <AnimatedTouchableOpacity activeOpacity={1} onPress={() => router.push('/notifications')} style={[styles.iconButton, buttonAnimatedStyle]}>
-                                <AnimatedIcon name="notifications" size={20} animatedProps={iconAnimatedProps} />
-                                {hasUnread && (
-                                    <View style={[styles.badge, transparent && { borderColor: 'rgba(0,0,0,0.3)' }]} />
-                                )}
+                        ) : isGuest ? (
+                            <AnimatedTouchableOpacity
+                                activeOpacity={1}
+                                onPress={() => setGuestMenuVisible(true)}
+                                style={[styles.iconButton, buttonAnimatedStyle]}
+                            >
+                                <AnimatedIcon name="menu-outline" size={22} animatedProps={iconAnimatedProps} />
                             </AnimatedTouchableOpacity>
+                        ) : notifVisible ? (
+                            <View style={styles.iconRow}>
+                                {/* Chat Button */}
+                                <AnimatedTouchableOpacity activeOpacity={1} onPress={() => router.push('/chat')} style={[styles.iconButton, buttonAnimatedStyle]}>
+                                    <AnimatedIcon name="chatbubble-ellipses" size={20} animatedProps={iconAnimatedProps} />
+                                    {hasUnreadChats && (
+                                        <View style={[styles.badge, transparent && { borderColor: 'rgba(0,0,0,0.3)' }]} />
+                                    )}
+                                </AnimatedTouchableOpacity>
+                                {/* Notifications Button */}
+                                <AnimatedTouchableOpacity activeOpacity={1} onPress={() => router.push('/notifications')} style={[styles.iconButton, buttonAnimatedStyle]}>
+                                    <AnimatedIcon name="notifications" size={20} animatedProps={iconAnimatedProps} />
+                                    {hasUnread && (
+                                        <View style={[styles.badge, transparent && { borderColor: 'rgba(0,0,0,0.3)' }]} />
+                                    )}
+                                </AnimatedTouchableOpacity>
+                            </View>
+                        ) : addbtnvisible ? (
+                            <AnimatedTouchableOpacity activeOpacity={1}
+                                onPress={() => router.push(btn)}
+                                style={[styles.addButton, buttonAnimatedStyle]}
+                            >
+                                <AnimatedIcon name="add" size={22} animatedProps={iconAnimatedProps} />
+                            </AnimatedTouchableOpacity>
+                        ) : null}
+                    </View>
+                </Animated.View>
+            </View>
+
+            <Modal
+                visible={guestMenuVisible}
+                transparent
+                animationType="fade"
+                statusBarTranslucent
+                onRequestClose={closeGuestMenu}
+            >
+                <View style={styles.guestMenuOverlay}>
+                    <TouchableOpacity activeOpacity={1} style={styles.guestMenuBackdrop} onPress={closeGuestMenu} />
+                    <View style={[styles.guestMenuPanel, { backgroundColor: colors.background, borderLeftColor: colors.border }]}>
+                        <View style={[styles.guestMenuHeader, { borderBottomColor: colors.border }]}>
+                            <View>
+                                <Text style={[styles.guestMenuTitle, { color: colors.text }]}>Guest Menu</Text>
+                                <Text style={[styles.guestMenuSubtitle, { color: colors.textSecondary }]}>Browsing as guest</Text>
+                            </View>
+                            <TouchableOpacity activeOpacity={1} onPress={closeGuestMenu} style={styles.guestMenuClose}>
+                                <Ionicons name="close" size={20} color={colors.textSecondary} />
+                            </TouchableOpacity>
                         </View>
-                    ) : addbtnvisible ? (
-                        <AnimatedTouchableOpacity activeOpacity={1}
-                            onPress={() => router.push(btn)}
-                            style={[styles.addButton, buttonAnimatedStyle]}
-                        >
-                            <AnimatedIcon name="add" size={22} animatedProps={iconAnimatedProps} />
-                        </AnimatedTouchableOpacity>
-                    ) : null}
+
+                        <View style={styles.guestMenuList}>
+                            {guestMenuItems.map((item) => (
+                                <TouchableOpacity
+                                    activeOpacity={1}
+                                    key={item.label}
+                                    onPress={() => navigateGuestMenu(item.route)}
+                                    style={[styles.guestMenuItem, { borderBottomColor: isDark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.05)" }]}
+                                >
+                                    <View style={[styles.guestMenuIcon, { backgroundColor: isDark ? "#1E293B" : "#F1F5F9" }]}>
+                                        <Ionicons name={item.icon as any} size={19} color={colors.primary} />
+                                    </View>
+                                    <Text style={[styles.guestMenuLabel, { color: colors.text }]}>{item.label}</Text>
+                                    <Ionicons name="chevron-forward" size={16} color={colors.textSecondary} />
+                                </TouchableOpacity>
+                            ))}
+                            <TouchableOpacity
+                                activeOpacity={1}
+                                onPress={handleGuestSignIn}
+                                style={[styles.guestMenuItem, { borderBottomColor: "transparent" }]}
+                            >
+                                <View style={[styles.guestMenuIcon, { backgroundColor: isDark ? "#1E293B" : "#F1F5F9" }]}>
+                                    <Ionicons name="log-in-outline" size={19} color={colors.primary} />
+                                </View>
+                                <Text style={[styles.guestMenuLabel, { color: colors.text }]}>Sign In</Text>
+                                <Ionicons name="chevron-forward" size={16} color={colors.textSecondary} />
+                            </TouchableOpacity>
+                        </View>
+                    </View>
                 </View>
-            </Animated.View>
-        </View>
+            </Modal>
+        </>
     );
 }
 
@@ -481,5 +568,73 @@ const styles = StyleSheet.create({
         bottom: -40,
         right: 10,
         opacity: 1,
+    },
+    guestMenuOverlay: {
+        flex: 1,
+        flexDirection: 'row',
+        justifyContent: 'flex-end',
+        backgroundColor: 'rgba(15, 23, 42, 0.36)',
+    },
+    guestMenuBackdrop: {
+        ...StyleSheet.absoluteFillObject,
+    },
+    guestMenuPanel: {
+        width: '78%',
+        maxWidth: 320,
+        height: '100%',
+        borderLeftWidth: 1,
+        paddingTop: 56,
+        shadowColor: '#000',
+        shadowOffset: { width: -4, height: 0 },
+        shadowOpacity: 0.16,
+        shadowRadius: 18,
+        elevation: 18,
+    },
+    guestMenuHeader: {
+        paddingHorizontal: 20,
+        paddingBottom: 18,
+        borderBottomWidth: 1,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+    },
+    guestMenuTitle: {
+        fontSize: 18,
+        fontFamily: 'Poppins_700Bold',
+    },
+    guestMenuSubtitle: {
+        marginTop: 2,
+        fontSize: 12,
+        fontFamily: 'Poppins_500Medium',
+    },
+    guestMenuClose: {
+        width: 36,
+        height: 36,
+        borderRadius: 18,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    guestMenuList: {
+        paddingTop: 8,
+    },
+    guestMenuItem: {
+        minHeight: 58,
+        paddingHorizontal: 18,
+        flexDirection: 'row',
+        alignItems: 'center',
+        borderBottomWidth: 1,
+    },
+    guestMenuIcon: {
+        width: 36,
+        height: 36,
+        borderRadius: 18,
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginRight: 12,
+    },
+    guestMenuLabel: {
+        flex: 1,
+        fontSize: 15,
+        fontFamily: 'Poppins_600SemiBold',
     },
 });

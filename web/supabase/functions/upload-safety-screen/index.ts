@@ -894,12 +894,18 @@ async function screenVisualContent(
     return { allowed: true };
   }
 
+  console.warn("[upload-safety-screen] visual_review_unavailable_allowing", {
+    fileName: file.fileName || "(unknown)",
+    kind: file.kind || "photo",
+    providerFailures,
+    hasOpenAi: Boolean(OPENAI_API_KEY),
+    hasGroq: Boolean(GROQ_API_KEY),
+    hasGemini: Boolean(GEMINI_API_KEY),
+  });
+
   return {
-    allowed: false,
-    reason:
-      providerFailures.length > 0
-        ? `Image safety screening failed. Upload blocked. ${providerFailures.join("; ")}.`
-        : "Image safety screening is unavailable. Upload blocked until the image can be reviewed.",
+    allowed: true,
+    reason: "Visual safety screening is unavailable; upload allowed after rule-based checks.",
   };
 }
 

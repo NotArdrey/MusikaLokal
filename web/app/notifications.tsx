@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useFocusEffect } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
     ActivityIndicator,
@@ -16,6 +16,10 @@ import CustomAlert, { AlertType } from '../src/components/CustomAlert';
 import Header from '../src/components/header';
 import Navbar from '../src/components/navbar';
 import { useTheme } from '../src/context/ThemeContext';
+import {
+    buildNotificationRouteMeta,
+    resolveNotificationNavigationTarget,
+} from '../src/utils/notificationNavigation';
 
 
 const DEFAULT_NOTIFICATION_IMAGE = 'https://images.unsplash.com/photo-1598488035139-bdbb2231ce04?w=100&h=100&fit=crop';
@@ -268,7 +272,10 @@ export default function NotificationsScreen() {
                                         title: 'Leadership Transfer Accepted',
                                         message: `Your leadership transfer request for "${(request.groups as any)?.name}" was accepted.`,
                                         image: userAvatar || groupImage,
-                                        meta: { type: 'leadership_transfer_accepted', group_id: request.group_id }
+                                        meta: buildNotificationRouteMeta('/group_details', { id: request.group_id }, {
+                                            type: 'leadership_transfer_accepted',
+                                            group_id: request.group_id,
+                                        })
                                     }
                                 });
 
@@ -288,7 +295,10 @@ export default function NotificationsScreen() {
                                             title: 'Group Leadership Changed',
                                             message: `"${(request.groups as any)?.name}" has a new leader.`,
                                             image: groupImage || userAvatar,
-                                            meta: { type: 'leadership_changed', group_id: request.group_id }
+                                            meta: buildNotificationRouteMeta('/group_details', { id: request.group_id }, {
+                                                type: 'leadership_changed',
+                                                group_id: request.group_id,
+                                            })
                                         }));
 
                                     if (memberNotifications.length > 0) {
@@ -373,7 +383,10 @@ export default function NotificationsScreen() {
                                         title: 'Leadership Transfer Declined',
                                         message: `Your leadership transfer request for "${(request.groups as any)?.name}" was declined.`,
                                         image: userAvatar || groupImage,
-                                        meta: { type: 'leadership_transfer_declined' }
+                                        meta: buildNotificationRouteMeta('/group_details', { id: request.group_id }, {
+                                            type: 'leadership_transfer_declined',
+                                            group_id: request.group_id,
+                                        })
                                     }
                                 });
                             }
@@ -396,6 +409,22 @@ export default function NotificationsScreen() {
 
     const isLeadershipTransfer = (notification: any) => {
         return notification.meta?.type === 'leadership_transfer';
+    };
+
+    const handleNotificationPress = async (notification: any) => {
+        await markAsRead(notification.id, notification.read);
+
+        const target = resolveNotificationNavigationTarget(notification);
+        if (!target || target.pathname === '/notifications') {
+            return;
+        }
+
+        if (target.params && Object.keys(target.params).length > 0) {
+            router.push({ pathname: target.pathname as any, params: target.params } as any);
+            return;
+        }
+
+        router.push(target.pathname as any);
     };
 
     const unreadCount = notifications.filter(n => !n.read).length;
@@ -447,7 +476,11 @@ export default function NotificationsScreen() {
                         opacity: isRead ? 0.7 : 1,
                     }
                 ]}
-                onPress={() => !isTransfer && markAsRead(item.id, item.read)}
+                onPress={() => {
+                    if (!isTransfer) {
+                        void handleNotificationPress(item);
+                    }
+                }}
                 activeOpacity={1}
             >
                 <View style={styles.notificationContent}>
@@ -571,7 +604,7 @@ export default function NotificationsScreen() {
                                 <Ionicons name="notifications-outline" size={32} color={colors.textSecondary} />
                             </View>
                             <Text style={[styles.emptyTitle, { color: colors.text }]}>No Notifications</Text>
-                            <Text style={[styles.emptySubtitle, { color: colors.textSecondary }]}>We'll let you know when something update!</Text>
+                            <Text style={[styles.emptySubtitle, { color: colors.textSecondary }]}>We will let you know when something updates!</Text>
                         </View>
                     ) : null
                 }

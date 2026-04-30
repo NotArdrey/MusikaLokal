@@ -7,7 +7,7 @@ import {
 } from "@gorhom/bottom-sheet";
 import { LinearGradient } from "expo-linear-gradient";
 import { router } from "expo-router";
-import React, { forwardRef, useCallback, useEffect, useMemo, useState } from "react";
+import React, { forwardRef, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
   ActivityIndicator,
@@ -28,6 +28,7 @@ import { submitListingRequest, uploadListingRequestDocument } from "../utils/lis
 import CachedImage from "./CachedImage";
 import CustomAlert, { AlertType } from "./CustomAlert";
 import DocumentUploader from "./DocumentUploader";
+import Modal from "./modal";
 import TrackedBottomSheetModal from "./TrackedBottomSheetModal";
 import VideoUploader from "./VideoUploader";
 
@@ -80,6 +81,8 @@ type SheetAlertButton = {
   style?: "default" | "cancel" | "destructive";
 };
 
+type ProductionTeamTab = "About" | "Connect" | "Review";
+
 const formatRoleLabel = (value: string | null | undefined) => {
   if (!value) return "Member";
   return value.charAt(0).toUpperCase() + value.slice(1);
@@ -116,7 +119,7 @@ const ProductionTeamDetailsSheet = forwardRef<
   const [errorMessage, setErrorMessage] = useState("");
   const [currentUserRole, setCurrentUserRole] = useState<string | null>(null);
   const [currentUserName, setCurrentUserName] = useState("Musician");
-  const [activeTab, setActiveTab] = useState<"About" | "Connect" | "Review">("About");
+  const [activeTab, setActiveTab] = useState<ProductionTeamTab>("About");
   const [userGroups, setUserGroups] = useState<UserGroup[]>([]);
   const [loadingGroups, setLoadingGroups] = useState(false);
   const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
@@ -128,6 +131,7 @@ const ProductionTeamDetailsSheet = forwardRef<
   const [requestDocumentUrl, setRequestDocumentUrl] = useState("");
   const [requestVideoUrl, setRequestVideoUrl] = useState("");
   const [isSendingRequest, setIsSendingRequest] = useState(false);
+  const requestInFlightRef = useRef(false);
   const [isFavorited, setIsFavorited] = useState(false);
   const [favoriteCount, setFavoriteCount] = useState(0);
   const [alertVisible, setAlertVisible] = useState(false);
@@ -462,7 +466,7 @@ const ProductionTeamDetailsSheet = forwardRef<
   const canShowConnectTab = Boolean(
     team && membershipRole == null && currentUserRole === "musician" && team.owner_id !== userId,
   );
-  const tabsToRender = useMemo(
+  const tabsToRender = useMemo<readonly ProductionTeamTab[]>(
     () => (canShowConnectTab ? (["About", "Connect", "Review"] as const) : (["About", "Review"] as const)),
     [canShowConnectTab],
   );
@@ -553,6 +557,10 @@ const ProductionTeamDetailsSheet = forwardRef<
   }, [closeSheet, ownerMember?.avatar_url, ownerMember?.full_name, team?.logo_url, team?.name, team?.owner_id, userId]);
 
   const handleSendConnectionRequest = useCallback(async () => {
+    if (requestInFlightRef.current || isSendingRequest) {
+      return;
+    }
+
     if (!userId || !team?.id || !team.owner_id) {
       showSheetAlert("error", "Error", "This request is unavailable right now.");
       return;
@@ -594,40 +602,41 @@ const ProductionTeamDetailsSheet = forwardRef<
       return;
     }
 
-    let uploadedDocumentUrl = requestDocumentUrl.trim() || null;
-    if (requestDocumentFile) {
-      try {
-        uploadedDocumentUrl = await uploadListingRequestDocument(
-          userId,
-          requestDocumentFile,
-          "applications",
-        );
-      } catch (uploadError) {
-        console.error("Error uploading request document:", uploadError);
-        showSheetAlert("error", "Upload Failed", "We couldn't upload the CV right now.");
-        return;
-      }
-    }
-
-    const senderEntityType = selectedApplicationGroup ? "group" : "musician";
-    const senderEntityName = selectedApplicationGroup?.name || currentUserName;
-    const senderEntityId = selectedApplicationGroup?.id || userId;
-
-    const requestDetails = {
-      pitch_message: normalizedPitchMessage,
-      application_context: normalizedApplicationContext,
-      context_label: "Application Context",
-      request_kind: "application",
-      cv_url: uploadedDocumentUrl,
-      video_url: normalizedVideoUrl,
-      contract_url: null,
-      apply_as: selectedApplicationGroup ? "group" : "solo",
-      selected_group_id: selectedApplicationGroup?.id || null,
-      selected_group_type: selectedApplicationGroup?.group_type || null,
-    };
-
+    requestInFlightRef.current = true;
     setIsSendingRequest(true);
     try {
+      let uploadedDocumentUrl = requestDocumentUrl.trim() || null;
+      if (requestDocumentFile) {
+        try {
+          uploadedDocumentUrl = await uploadListingRequestDocument(
+            userId,
+            requestDocumentFile,
+            "applications",
+          );
+        } catch (uploadError) {
+          console.error("Error uploading request document:", uploadError);
+          showSheetAlert("error", "Upload Failed", "We couldn't upload the CV right now.");
+          return;
+        }
+      }
+
+      const senderEntityType = selectedApplicationGroup ? "group" : "musician";
+      const senderEntityName = selectedApplicationGroup?.name || currentUserName;
+      const senderEntityId = selectedApplicationGroup?.id || userId;
+
+      const requestDetails = {
+        pitch_message: normalizedPitchMessage,
+        application_context: normalizedApplicationContext,
+        context_label: "Application Context",
+        request_kind: "application",
+        cv_url: uploadedDocumentUrl,
+        video_url: normalizedVideoUrl,
+        contract_url: null,
+        apply_as: selectedApplicationGroup ? "group" : "solo",
+        selected_group_id: selectedApplicationGroup?.id || null,
+        selected_group_type: selectedApplicationGroup?.group_type || null,
+      };
+
       await submitListingRequest({
         currentUserId: userId,
         receiverUserId: team.owner_id,
@@ -659,8 +668,8 @@ const ProductionTeamDetailsSheet = forwardRef<
       setSelectedGroupId(null);
       showSheetAlert(
         "success",
-        "Success",
-        "Your structured application has been sent.",
+        "Application Sent",
+        "Your application has been sent to the production team. We'll let you know when they respond.",
         [
           {
             text: "OK",
@@ -678,6 +687,7 @@ const ProductionTeamDetailsSheet = forwardRef<
           : "We couldn't send that request right now.";
       showSheetAlert("error", "Error", errorMessage);
     } finally {
+      requestInFlightRef.current = false;
       setIsSendingRequest(false);
     }
   }, [
@@ -689,6 +699,7 @@ const ProductionTeamDetailsSheet = forwardRef<
     requestDocumentUrl,
     requestMessage,
     requestVideoUrl,
+    isSendingRequest,
     selectedApplicationGroup,
     team?.id,
     team?.logo_url,
@@ -1160,6 +1171,13 @@ const ProductionTeamDetailsSheet = forwardRef<
         message={alertConfig.message}
         buttons={alertConfig.buttons}
         onClose={() => setAlertVisible(false)}
+      />
+
+      <Modal
+        visible={isSendingRequest}
+        onClose={() => { }}
+        loading
+        loadingMessage="Sending application..."
       />
     </>
   );

@@ -16,7 +16,6 @@ import {
 } from "react-native";
 import { supabase } from "../lib/supabase";
 import CachedImage from "../src/components/CachedImage";
-import GuestSignInGate from "../src/components/GuestSignInGate";
 import Header from "../src/components/header";
 import ImageUploader from "../src/components/ImageUploader";
 import Navbar from "../src/components/navbar";
@@ -124,7 +123,7 @@ export default function MarketplaceScreen() {
   }, []);
 
   const fetchAll = useCallback(async (options: { showLoading?: boolean } = {}) => {
-    if (!session) {
+    if (!session && !isGuest) {
       setProducts([]);
       setSellerProducts([]);
       setLoading(false);
@@ -163,7 +162,7 @@ export default function MarketplaceScreen() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [session, category, invokeMarketplace, canSell, marketplaceCacheKey]);
+  }, [session, isGuest, category, invokeMarketplace, canSell, marketplaceCacheKey]);
 
   useFocusEffect(useCallback(() => {
     const cached = marketplaceScreenCache.get(marketplaceCacheKey);
@@ -421,16 +420,6 @@ export default function MarketplaceScreen() {
   const handlePublishProduct = async (productId: string) => {
     handleListingStatus(productId, "publish_product");
   };
-
-  if (isGuest) {
-    return (
-      <View style={[styles.container, { backgroundColor: colors.background }]}>
-        <Header title="Marketplace" />
-        <GuestSignInGate message="Sign in to access the marketplace" />
-        <Navbar />
-      </View>
-    );
-  }
 
   const tabs: { key: MarketTab; label: string; icon: string }[] = [
     { key: "browse", label: "Browse", icon: "storefront-outline" },

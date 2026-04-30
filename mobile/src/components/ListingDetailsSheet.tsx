@@ -260,6 +260,7 @@ const ListingDetailsSheet = forwardRef<
   const [requestDocumentUrl, setRequestDocumentUrl] = useState("");
   const [requestVideoUrl, setRequestVideoUrl] = useState("");
   const [isSendingRequest, setIsSendingRequest] = useState(false);
+  const listingRequestInFlightRef = useRef(false);
 
   // Venue Selection State (for venue owners sending invites)
   const [userVenues, setUserVenues] = useState<any[]>([]);
@@ -2962,7 +2963,7 @@ const ListingDetailsSheet = forwardRef<
       requireRosterSelection?: boolean;
       extraMeta?: Record<string, unknown> | null;
     }) => {
-      if (isSendingRequest) {
+      if (listingRequestInFlightRef.current || isSendingRequest) {
         return;
       }
 
@@ -3027,6 +3028,7 @@ const ListingDetailsSheet = forwardRef<
         }
       }
 
+      listingRequestInFlightRef.current = true;
       setIsSendingRequest(true);
       try {
         let uploadedDocumentUrl = requestDocumentUrl.trim() || null;
@@ -3113,6 +3115,7 @@ const ListingDetailsSheet = forwardRef<
             : "We couldn't send that request right now.";
         showSheetAlert("error", "Request Failed", errorMessage);
       } finally {
+        listingRequestInFlightRef.current = false;
         setIsSendingRequest(false);
       }
     },
@@ -3382,7 +3385,7 @@ const ListingDetailsSheet = forwardRef<
       return (
         <View style={[styles.section, { marginBottom: 0 }]}> 
           <Text style={[styles.sectionTitle, { color: colors.text }]}>Invite To Your Team</Text>
-          <Text style={[styles.description, { color: colors.textSecondary }]}>Select one of your production teams and send a structured invite with a pitch, invite context, and a required contract upload.</Text>
+          <Text style={[styles.description, { color: colors.textSecondary }]}>Select one of your production teams and send an invite with a pitch, details, and the required contract.</Text>
           {renderProductionTeamSelector()}
           {renderStructuredRequestFields({
             requestKind: "invite",
@@ -3411,7 +3414,7 @@ const ListingDetailsSheet = forwardRef<
       return (
         <View style={[styles.section, { marginBottom: 0 }]}> 
           <Text style={[styles.sectionTitle, { color: colors.text }]}>Apply As Production Team</Text>
-          <Text style={[styles.description, { color: colors.textSecondary }]}>Choose a team and send a structured application with a pitch, slot context, CV upload, and video link.</Text>
+          <Text style={[styles.description, { color: colors.textSecondary }]}>Choose a team and send an application with a pitch, selected slot, CV, and video.</Text>
           {renderProductionTeamSelector()}
           {renderStructuredRequestFields({
             requestKind: "application",
@@ -3597,12 +3600,13 @@ const ListingDetailsSheet = forwardRef<
               styles={styles}
               isFavorited={isFavorited}
               favoriteCount={favoriteCount}
+              showFavoriteButton={!isGuest}
               showReportButton={showReportButton}
               onClose={() => (ref as any)?.current?.dismiss()}
               onToggleFavorite={toggleFavorite}
               onReport={handleReport}
               onShare={handleShare}
-              onChat={openListingChat}
+              onChat={isGuest ? undefined : openListingChat}
             />
 
             {/* TABS SELECTOR */}
@@ -3659,6 +3663,17 @@ const ListingDetailsSheet = forwardRef<
           },
         ]}
         onClose={() => setAlertVisible(false)}
+      />
+
+      <Modal
+        visible={isSubmittingApplication || isSendingRequest}
+        onClose={() => { }}
+        loading
+        loadingMessage={
+          isSubmittingApplication
+            ? "Sending application..."
+            : "Sending request..."
+        }
       />
 
       <ReportModal

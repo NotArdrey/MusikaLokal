@@ -1,17 +1,13 @@
 import { Ionicons } from '@expo/vector-icons';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as ImagePicker from 'expo-image-picker';
-import * as VideoThumbnails from 'expo-video-thumbnails';
 import React, { useState } from 'react';
 import { ActivityIndicator, Modal, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { supabase } from '../../lib/supabase';
-import { screenUploadsWithAi } from '../services/uploadSafetyScreen';
+import { supabase, supabaseAnonKey, supabaseUrl } from '../../lib/supabase';
 import { useTheme } from '../context/ThemeContext';
 import CustomAlert, { AlertType } from './CustomAlert';
 
 const debugLog = (..._args: unknown[]) => {};
-const MAX_INLINE_SCREEN_BYTES = 4 * 1024 * 1024;
-const SAFETY_CHECK_TIMEOUT_MS = 6000;
 const ALLOWED_VIDEO_EXTENSIONS = new Set(['mp4', 'mov', 'avi', 'webm', 'm4v']);
 
 const sanitizeVideoExtension = (rawExt?: string | null): string => {
@@ -49,170 +45,86 @@ const resolveVideoMimeType = (asset: ImagePicker.ImagePickerAsset, ext: string):
   return map[ext] || 'video/mp4';
 };
 
-const estimateBase64Bytes = (base64: string): number => {
-  let padding = 0;
-  if (base64.endsWith('==')) padding = 2;
-  else if (base64.endsWith('=')) padding = 1;
-  return Math.max(0, Math.floor((base64.length * 3) / 4) - padding);
-};
 
-const ensureScreenableFrameSize = (dataUrl: string): string => {
-  const base64 = dataUrl.split(',')[1] || '';
-  if (!base64 || estimateBase64Bytes(base64) > MAX_INLINE_SCREEN_BYTES) {
-    throw new Error('Could not create a small enough video preview for safety screening.');
+const getAssetSizeBytes = async (asset: ImagePicker.ImagePickerAsset): Promise<number | null> => {
+  const directSize = (asset as any)?.fileSize;
+  if (typeof directSize === 'number' && Number.isFinite(directSize) && directSize > 0) {
+    return directSize;
   }
-  return dataUrl;
-};
 
-const extractWebVideoFrameDataUrl = async (
-  asset: ImagePicker.ImagePickerAsset,
-  mimeType: string,
-  arrayBuffer: ArrayBuffer,
-  targetTimeSeconds: number,
-): Promise<string> => {
-  const webFile = (asset as any)?.file;
-  const sourceBlob =
-    typeof Blob !== 'undefined' && webFile instanceof Blob
-      ? webFile
-      : new Blob([arrayBuffer], { type: mimeType });
-
-  return new Promise((resolve, reject) => {
-    const objectUrl = URL.createObjectURL(sourceBlob);
-    const video = document.createElement('video');
-    let settled = false;
-    const timeoutId = window.setTimeout(
-      () => fail('Video preview generation timed out during safety screening.'),
-      8000,
-    );
-
-    const cleanup = () => {
-      window.clearTimeout(timeoutId);
-      URL.revokeObjectURL(objectUrl);
-      video.removeAttribute('src');
-      video.load();
-    };
-
-    const fail = (message: string) => {
-      if (settled) return;
-      settled = true;
-      cleanup();
-      reject(new Error(message));
-    };
-
-    const capture = () => {
-      if (settled) return;
-      const sourceWidth = video.videoWidth || 640;
-      const sourceHeight = video.videoHeight || 360;
-      const maxDimension = 960;
-      const scale = Math.min(1, maxDimension / Math.max(sourceWidth, sourceHeight));
-      const canvas = document.createElement('canvas');
-      canvas.width = Math.max(1, Math.round(sourceWidth * scale));
-      canvas.height = Math.max(1, Math.round(sourceHeight * scale));
-      const context = canvas.getContext('2d');
-      if (!context) {
-        fail('Could not read a video preview frame for safety screening.');
-        return;
-      }
-
-      context.drawImage(video, 0, 0, canvas.width, canvas.height);
-      const dataUrl = canvas.toDataURL('image/jpeg', 0.72);
-      settled = true;
-      cleanup();
-      resolve(ensureScreenableFrameSize(dataUrl));
-    };
-
-    video.preload = 'metadata';
-    video.muted = true;
-    video.playsInline = true;
-    video.onloadedmetadata = () => {
-      const duration = Number.isFinite(video.duration) ? video.duration : 0;
-      if (duration <= 0) {
-        capture();
-        return;
-      }
-
-      try {
-        const latestUsefulTime = Math.max(0.05, duration - 0.05);
-        video.currentTime = Math.min(Math.max(0.05, targetTimeSeconds), latestUsefulTime);
-      } catch {
-        capture();
-      }
-    };
-    video.onloadeddata = () => {
-      if (!Number.isFinite(video.duration) || video.duration <= 0) {
-        capture();
-      }
-    };
-    video.onseeked = capture;
-    video.onerror = () => fail('Could not read the selected video for safety screening.');
-    video.src = objectUrl;
-    video.load();
-  });
-};
-
-const extractVideoFrameDataUrl = async (
-  asset: ImagePicker.ImagePickerAsset,
-  mimeType: string,
-  arrayBuffer: ArrayBuffer,
-  targetTimeMs: number,
-): Promise<string> => {
   if (Platform.OS === 'web') {
-    return extractWebVideoFrameDataUrl(asset, mimeType, arrayBuffer, targetTimeMs / 1000);
+    const webFile = (asset as any)?.file;
+    return typeof webFile?.size === 'number' && Number.isFinite(webFile.size)
+      ? webFile.size
+      : null;
   }
 
-  const thumbnail = await VideoThumbnails.getThumbnailAsync(asset.uri, {
-    time: targetTimeMs,
-    quality: 0.65,
-  });
-  const base64 = await FileSystem.readAsStringAsync(thumbnail.uri, {
-    encoding: 'base64',
-  });
-  return ensureScreenableFrameSize(`data:image/jpeg;base64,${base64}`);
-};
-
-const extractVideoFrameDataUrls = async (
-  asset: ImagePicker.ImagePickerAsset,
-  mimeType: string,
-  arrayBuffer: ArrayBuffer,
-): Promise<string[]> => {
-  const attempts = await Promise.allSettled(
-    [1000, 4000, 8000].map((timeMs) =>
-      extractVideoFrameDataUrl(asset, mimeType, arrayBuffer, timeMs),
-    ),
-  );
-  const frameDataUrls = Array.from(
-    new Set(
-      attempts
-        .filter((result): result is PromiseFulfilledResult<string> => result.status === 'fulfilled')
-        .map((result) => result.value),
-    ),
-  );
-
-  if (frameDataUrls.length === 0) {
-    const firstFailure = attempts.find(
-      (result): result is PromiseRejectedResult => result.status === 'rejected',
-    );
-    throw firstFailure?.reason instanceof Error
-      ? firstFailure.reason
-      : new Error('Could not create a video preview for safety screening.');
-  }
-
-  return frameDataUrls;
-};
-
-const withSafetyTimeout = async <T,>(promise: Promise<T>): Promise<T> => {
-  let timeoutId: ReturnType<typeof setTimeout> | null = null;
-  const timeout = new Promise<never>((_, reject) => {
-    timeoutId = setTimeout(
-      () => reject(new Error('Safety screening timed out. Upload blocked. Please try again.')),
-      SAFETY_CHECK_TIMEOUT_MS,
-    );
-  });
   try {
-    return await Promise.race([promise, timeout]);
-  } finally {
-    if (timeoutId) clearTimeout(timeoutId);
+    const info = await FileSystem.getInfoAsync(asset.uri);
+    return info.exists && typeof info.size === 'number' ? info.size : null;
+  } catch {
+    return null;
   }
+};
+
+const encodeStoragePath = (path: string): string =>
+  path.split('/').map((segment) => encodeURIComponent(segment)).join('/');
+
+const readStorageUploadError = (status: number, body: string): string => {
+  if (!body) {
+    return `Storage upload failed with status ${status}.`;
+  }
+
+  try {
+    const parsed = JSON.parse(body);
+    return parsed?.message || parsed?.error || body;
+  } catch {
+    return body;
+  }
+};
+
+const uploadVideoFile = async (input: {
+  accessToken: string;
+  assetUri: string;
+  bucketName: string;
+  fileName: string;
+  mimeType: string;
+}): Promise<{ path: string }> => {
+  if (Platform.OS !== 'web') {
+    const baseUrl = supabaseUrl.replace(/\/+$/, '');
+    const uploadUrl = `${baseUrl}/storage/v1/object/${encodeURIComponent(input.bucketName)}/${encodeStoragePath(input.fileName)}`;
+    const uploadResponse = await FileSystem.uploadAsync(uploadUrl, input.assetUri, {
+      httpMethod: 'POST',
+      uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT,
+      headers: {
+        Authorization: `Bearer ${input.accessToken}`,
+        apikey: supabaseAnonKey,
+        'Content-Type': input.mimeType,
+        'x-upsert': 'false',
+      },
+    });
+
+    if (uploadResponse.status < 200 || uploadResponse.status >= 300) {
+      throw new Error(readStorageUploadError(uploadResponse.status, uploadResponse.body || ''));
+    }
+
+    return { path: input.fileName };
+  }
+
+  const response = await fetch(input.assetUri);
+  const arrayBuffer = await response.arrayBuffer();
+  const { data, error } = await supabase.storage
+    .from(input.bucketName)
+    .upload(input.fileName, arrayBuffer, {
+      contentType: input.mimeType,
+      upsert: false,
+    });
+
+  if (error) {
+    throw error;
+  }
+
+  return { path: data.path };
 };
 
 interface VideoUploaderProps {
@@ -253,15 +165,6 @@ export default function VideoUploader({
     setAlertVisible(true);
   };
 
-  const showUploadBlockedAlert = (message?: string) => {
-    showAlert(
-      'warning',
-      'Upload blocked',
-      message || 'This video did not pass safety screening.',
-      [{ text: 'Choose another', style: 'default' }],
-    );
-  };
-
   const pickAndUploadVideo = async () => {
     try {
       // Check authentication first
@@ -288,12 +191,10 @@ export default function VideoUploader({
 
       const asset = result.assets[0];
 
-      // Check file size using ArrayBuffer
-      const response = await fetch(asset.uri);
-      const arrayBuffer = await response.arrayBuffer();
-      const fileSizeMB = arrayBuffer.byteLength / (1024 * 1024);
+      const fileSizeBytes = await getAssetSizeBytes(asset);
+      const fileSizeMB = (fileSizeBytes || 0) / (1024 * 1024);
 
-      if (fileSizeMB > maxSizeMB) {
+      if (fileSizeBytes && fileSizeMB > maxSizeMB) {
         showAlert('error', 'File Too Large', `Video must be under ${maxSizeMB}MB. Your file is ${fileSizeMB.toFixed(1)}MB.`);
         return;
       }
@@ -306,28 +207,6 @@ export default function VideoUploader({
         const originalName = getVideoOriginalName(asset);
         const fileExt = resolveVideoExtension(asset, originalName);
         const mimeType = resolveVideoMimeType(asset, fileExt);
-        setUploadMessage('Checking video...');
-
-        const screeningResult = await withSafetyTimeout((async () => {
-          const frameDataUrls = await extractVideoFrameDataUrls(asset, mimeType, arrayBuffer);
-          return screenUploadsWithAi(
-            frameDataUrls.map((contentDataUrl, index) => ({
-              name: originalName,
-              mimeType,
-              size: arrayBuffer.byteLength,
-              uri: `${asset.uri}#frame-${index + 1}`,
-              contentDataUrl,
-              kind: 'video',
-            })),
-            `video_uploader:${bucketName}:${folder}`,
-          );
-        })());
-
-        if (!screeningResult.allowed) {
-          showUploadBlockedAlert(screeningResult.reason);
-          return;
-        }
-
         const fileName = `${userId}/${folder}/${Date.now()}_video.${fileExt}`;
         setUploadMessage('Uploading video...');
 
@@ -335,30 +214,13 @@ export default function VideoUploader({
         debugLog('📦 File size:', fileSizeMB.toFixed(2), 'MB');
         debugLog('📍 File extension:', fileExt);
 
-        // Upload using ArrayBuffer for better React Native compatibility
-        const { data, error } = await supabase.storage
-          .from(bucketName)
-          .upload(fileName, arrayBuffer, {
-            contentType: mimeType,
-            upsert: false
-          });
-
-        if (error) {
-          console.error('❌ Upload error:', error);
-          console.error('Error details:', JSON.stringify(error, null, 2));
-
-          let errorMsg = error.message || 'Unknown error';
-          if (errorMsg.includes('row-level security') || errorMsg.includes('policy')) {
-            errorMsg = 'Permission denied. Storage policies may not be configured.';
-          } else if (errorMsg.includes('Bucket not found')) {
-            errorMsg = `Storage bucket "${bucketName}" does not exist.`;
-          } else if (errorMsg.includes('Network')) {
-            errorMsg = 'Network error. Check your internet connection.';
-          }
-
-          showAlert('error', 'Upload Failed', errorMsg);
-          return;
-        }
+        const data = await uploadVideoFile({
+          accessToken: session.access_token,
+          assetUri: asset.uri,
+          bucketName,
+          fileName,
+          mimeType,
+        });
 
         // Get public URL
         const { data: urlData } = supabase.storage
@@ -371,11 +233,7 @@ export default function VideoUploader({
       } catch (e: any) {
         console.error('Error uploading video:', e);
         const message = e.message || 'Failed to upload video';
-        if (String(message).toLowerCase().includes('safety screen')) {
-          showUploadBlockedAlert(message);
-        } else {
-          showAlert('error', 'Upload failed', message);
-        }
+        showAlert('error', 'Upload failed', message);
       } finally {
         setUploading(false);
         setUploadProgress(0);
@@ -383,11 +241,7 @@ export default function VideoUploader({
     } catch (e: any) {
       debugLog('Video picker error:', e);
       const message = e.message || 'Failed to select video';
-      if (String(message).toLowerCase().includes('safety screen')) {
-        showUploadBlockedAlert(message);
-      } else {
-        showAlert('error', 'Upload failed', message);
-      }
+      showAlert('error', 'Upload failed', message);
       setUploading(false);
     }
   };
@@ -416,7 +270,7 @@ export default function VideoUploader({
             <ActivityIndicator size="large" color={colors.primary} />
             <Text style={[styles.loadingTitle, { color: colors.text }]}>{uploadMessage}</Text>
             <Text style={[styles.loadingSubtitle, { color: colors.textSecondary }]}>
-              Please wait while your video is checked and uploaded.
+              Please wait while your video is uploaded.
             </Text>
           </View>
         </View>

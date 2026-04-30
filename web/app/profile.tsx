@@ -473,7 +473,7 @@ export default function ProfileScreen() {
       isGuest,
       isWebDesktop,
       width: winWidth,
-      menuButtonVisible: isOwner || isGuest,
+      menuButtonVisible: isOwner,
       reportButtonVisible: !isOwner && !isGuest,
       activeTab,
       profileId: profile?.id ?? null,
@@ -1485,7 +1485,7 @@ export default function ProfileScreen() {
         <Header
           title={isOwner ? "My Profile" : "User Profile"}
           {...(!isOwner ? { onBackPress: handleHeaderBack } : {})}
-          rightComponent={(isOwner || isGuest) ? (
+          rightComponent={isOwner ? (
             <TouchableOpacity
               activeOpacity={1}
               hitSlop={{ top: 10, right: 10, bottom: 10, left: 10 }}
@@ -1497,7 +1497,7 @@ export default function ProfileScreen() {
             >
               <Ionicons name="menu-outline" size={26} color={colors.text} />
             </TouchableOpacity>
-          ) : (
+          ) : !isGuest ? (
             <TouchableOpacity
               activeOpacity={1}
               hitSlop={{ top: 10, right: 10, bottom: 10, left: 10 }}
@@ -1509,7 +1509,7 @@ export default function ProfileScreen() {
             >
               <Ionicons name="ellipsis-horizontal" size={24} color={colors.text} />
             </TouchableOpacity>
-          )}
+          ) : null}
         />
 
         <ScrollView
@@ -2155,29 +2155,6 @@ export default function ProfileScreen() {
                       <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
                     </TouchableOpacity>
                   ))}
-                </View>
-              ) : isGuest ? (
-                <View style={styles.drawerMenuList}>
-                  <TouchableOpacity activeOpacity={1}
-                    onPress={() => {
-                      console.log("[ProfileMenu][web] Guest drawer settings selected", {
-                        timestamp: new Date().toISOString(),
-                        route: "/settings",
-                        isMenuOpen,
-                        isWebDesktop,
-                        width: winWidth,
-                      });
-                      closeMenu("guest-settings");
-                      router.push("/settings");
-                    }}
-                    style={[styles.drawerMenuItem, { borderBottomColor: colors.border }]}
-                  >
-                    <View style={[styles.drawerMenuIcon, { backgroundColor: isDark ? "#1E293B" : "#F3F4F6" }]}>
-                      <Ionicons name="settings-outline" size={20} color={colors.text} />
-                    </View>
-                    <Text style={[styles.drawerMenuLabel, { color: colors.text }]}>Settings</Text>
-                    <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
-                  </TouchableOpacity>
                 </View>
               ) : null}
             </ScrollView>

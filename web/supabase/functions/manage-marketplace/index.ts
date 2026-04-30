@@ -76,6 +76,11 @@ function extractAccessToken(authHeader: string): string | null {
   return trimmed;
 }
 
+const PUBLIC_ACTIONS = new Set([
+  "browse_products",
+  "get_product_details",
+]);
+
 async function insertNotification(
   supabaseAdmin: any,
   payload: {
@@ -99,10 +104,6 @@ Deno.serve(async (req: Request) => {
     const authHeader = req.headers.get("Authorization") || "";
     const accessToken = extractAccessToken(authHeader);
 
-    if (!accessToken) {
-      return jsonResponse({ error: "Missing authorization header" }, 401);
-    }
-
     const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
     const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
 
@@ -112,17 +113,39 @@ Deno.serve(async (req: Request) => {
 
     const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey);
 
-    const {
-      data: { user: authUser },
-      error: authErr,
-    } = await supabaseAdmin.auth.getUser(accessToken);
+    const requestBody = await req.json();
+    const { action: rawAction, ...params } = requestBody ?? {};
+    const action = typeof rawAction === "string" ? rawAction.trim() : "";
 
-    if (authErr || !authUser) {
+    if (!action) {
+      return jsonResponse({ error: "action is required" }, 400);
+    }
+
+    const requiresAuth = !PUBLIC_ACTIONS.has(action);
+    let authUser: any = null;
+
+    if (accessToken) {
+      const {
+        data: { user },
+        error: authErr,
+      } = await supabaseAdmin.auth.getUser(accessToken);
+
+      if (authErr || !user) {
+        if (requiresAuth) {
+          return jsonResponse({ error: "Invalid token" }, 401);
+        }
+      } else {
+        authUser = user;
+      }
+    } else if (requiresAuth) {
+      return jsonResponse({ error: "Missing authorization header" }, 401);
+    }
+
+    if (requiresAuth && !authUser) {
       return jsonResponse({ error: "Invalid token" }, 401);
     }
 
-    const uid = authUser.id;
-    const { action, ...params } = await req.json();
+    const uid = authUser?.id ?? null;
 
     // ── create_product ──────────────────────────────────────────────
     if (action === "create_product") {

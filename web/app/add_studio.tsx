@@ -25,7 +25,6 @@ import Modal from "../src/components/modal";
 import Navbar from "../src/components/navbar";
 import { useAuth } from "../src/context/AuthContext";
 import { useTheme } from "../src/context/ThemeContext";
-import { ensureUploadPassesSafetyScreening } from "../src/services/uploadSafetyScreen";
 import {
   formatRecordingRuleSentence,
   formatRecordingRuleShort,
@@ -1767,17 +1766,6 @@ export default function AddStudioScreen() {
       const fileName = file.name;
       const fileUri = file.uri;
 
-      await ensureUploadPassesSafetyScreening(
-        {
-          name: fileName,
-          mimeType: "application/pdf",
-          size: typeof (file as any)?.size === "number" ? (file as any).size : undefined,
-          uri: fileUri,
-          kind: "document",
-        },
-        "add_studio_contract",
-      );
-
       // Get current user session
       const {
         data: { session },
@@ -1856,20 +1844,6 @@ export default function AddStudioScreen() {
       const file = result.assets[0];
       const fileName = file.name;
       const fileUri = file.uri;
-      const isPdf = fileName.toLowerCase().endsWith('.pdf');
-
-      await ensureUploadPassesSafetyScreening(
-        {
-          name: fileName,
-          mimeType: isPdf
-            ? "application/pdf"
-            : (typeof (file as any)?.mimeType === "string" ? (file as any).mimeType : undefined),
-          size: typeof (file as any)?.size === "number" ? (file as any).size : undefined,
-          uri: fileUri,
-          kind: isPdf ? "document" : "photo",
-        },
-        "add_studio_business_permit",
-      );
 
       const {
         data: { session },
@@ -1942,16 +1916,6 @@ export default function AddStudioScreen() {
         ? 'application/pdf'
         : file.type || 'image/jpeg';
 
-      await ensureUploadPassesSafetyScreening(
-        {
-          name: fileName,
-          mimeType: contentType,
-          size: typeof file?.size === "number" ? file.size : undefined,
-          kind: contentType === "application/pdf" ? "document" : "photo",
-        },
-        "add_studio_business_permit_web",
-      );
-
       const filePath = `business-permits/${session.user.id}/${Date.now()}_${fileName}`;
       const { data, error } = await supabase.storage
         .from("documents")
@@ -2017,17 +1981,6 @@ export default function AddStudioScreen() {
       const fileExt = asset.uri.split(".").pop()?.toLowerCase() || "jpg";
       const fileName = `${session.user.id}/equipment/${Date.now()}_${Math.random().toString(36).substring(7)}.${fileExt}`;
 
-      await ensureUploadPassesSafetyScreening(
-        {
-          name: fileName,
-          mimeType: `image/${fileExt === "jpg" ? "jpeg" : fileExt}`,
-          size: typeof (asset as any)?.fileSize === "number" ? (asset as any).fileSize : undefined,
-          uri: asset.uri,
-          kind: "photo",
-        },
-        "add_studio_equipment_image",
-      );
-
       const base64 = await FileSystem.readAsStringAsync(asset.uri, {
         encoding: FileSystem.EncodingType.Base64,
       });
@@ -2072,18 +2025,7 @@ export default function AddStudioScreen() {
         setUploadingContract(false);
         return;
       }
-
-      await ensureUploadPassesSafetyScreening(
-        {
-          name: fileName,
-          mimeType: "application/pdf",
-          size: typeof file?.size === "number" ? file.size : undefined,
-          kind: "document",
-        },
-        "add_studio_contract_web",
-      );
-
-      const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
+const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
       const { data, error } = await supabase.storage
         .from("documents")
         .upload(filePath, file, {
@@ -2926,7 +2868,7 @@ export default function AddStudioScreen() {
                         <Text style={{ fontFamily: "Poppins_400Regular", color: colors.textSecondary, fontSize: 11, marginTop: 2 }}>
                           {promo.is_permanent
                             ? "Always available"
-                            : `${new Date(promo.start_date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })} – ${new Date(promo.end_date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}`}
+                            : `${new Date(promo.start_date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })} ï¿½ ${new Date(promo.end_date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}`}
                         </Text>
                       </View>
                       <View style={{ flexDirection: "row", gap: 8 , flexWrap: "wrap", minWidth: "100%" }}>
@@ -4988,10 +4930,10 @@ export default function AddStudioScreen() {
                           <Text style={{ color: colors.text, fontFamily: "Poppins_500Medium", fontSize: 12 }}>
                             "{promo.name}": {promo.discount_type === "percentage" ? `${promo.discount_value}% off` : `â‚±${promo.discount_value}/hr off`}
                             {" "}({promo.applies_to === "both" ? "All" : promo.applies_to})
-                            {promo.criteria ? ` • ${promo.criteria}` : ""}
-                            {promo.minimum_booking_hours ? ` • Min ${promo.minimum_booking_hours} hr` : ""}
-                            {promo.minimum_spend ? ` • Min â‚±${promo.minimum_spend}` : ""}
-                            {" "}• {promo.is_permanent ? "Regular" : `${promo.start_date} – ${promo.end_date}`}
+                            {promo.criteria ? ` ï¿½ ${promo.criteria}` : ""}
+                            {promo.minimum_booking_hours ? ` ï¿½ Min ${promo.minimum_booking_hours} hr` : ""}
+                            {promo.minimum_spend ? ` ï¿½ Min â‚±${promo.minimum_spend}` : ""}
+                            {" "}ï¿½ {promo.is_permanent ? "Regular" : `${promo.start_date} ï¿½ ${promo.end_date}`}
                           </Text>
                         </View>
                       ))}

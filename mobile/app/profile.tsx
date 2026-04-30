@@ -2075,7 +2075,7 @@ export default function ProfileScreen() {
         <Header
           title={isOwner ? "My Profile" : "User Profile"}
           {...(!isOwner ? { onBackPress: handleHeaderBack } : {})}
-          rightComponent={(isOwner || isGuest) ? (
+          rightComponent={isOwner ? (
             <TouchableOpacity
               activeOpacity={1}
               hitSlop={{ top: 10, right: 10, bottom: 10, left: 10 }}
@@ -2087,7 +2087,7 @@ export default function ProfileScreen() {
             >
               <Ionicons name="menu-outline" size={26} color={colors.text} />
             </TouchableOpacity>
-          ) : (
+          ) : !isGuest ? (
             <TouchableOpacity
               activeOpacity={1}
               hitSlop={{ top: 10, right: 10, bottom: 10, left: 10 }}
@@ -2099,7 +2099,7 @@ export default function ProfileScreen() {
             >
               <Ionicons name="ellipsis-horizontal" size={24} color={colors.text} />
             </TouchableOpacity>
-          )}
+          ) : null}
         />
 
         <ScrollView
@@ -3134,21 +3134,6 @@ export default function ProfileScreen() {
                       <Ionicons name="chevron-forward" size={16} color={colors.textSecondary} />
                     </TouchableOpacity>
                   ))
-                ) : isGuest ? (
-                  <TouchableOpacity
-                    activeOpacity={1}
-                    onPress={() => {
-                      closeDrawer("guest-settings");
-                      setTimeout(() => router.push("/settings"), 250);
-                    }}
-                    style={[styles.drawerMenuItem, { borderBottomColor: isDark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.05)" }]}
-                  >
-                    <View style={[styles.drawerMenuIcon, { backgroundColor: isDark ? "#1E293B" : "#F1F5F9" }]}>
-                      <Ionicons name="settings-outline" size={19} color={colors.primary} />
-                    </View>
-                    <Text style={[styles.drawerMenuLabel, { color: colors.text }]}>Settings</Text>
-                    <Ionicons name="chevron-forward" size={16} color={colors.textSecondary} />
-                  </TouchableOpacity>
                 ) : null}
               </View>
             </ScrollView>

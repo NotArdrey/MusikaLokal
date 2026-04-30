@@ -51,7 +51,7 @@ export default function ProductDetailsScreen() {
   const fetchProduct = useCallback(async () => {
     if (!product_id) return;
     try {
-      const { data } = await supabase.functions.invoke("manage-marketplace", { body: { action: "get_product", product_id } });
+      const { data } = await supabase.functions.invoke("manage-marketplace", { body: { action: "get_product_details", product_id } });
       if (data?.data) {
         setProduct(data.data);
         setVariants(data.data.variants || []);
@@ -68,6 +68,12 @@ export default function ProductDetailsScreen() {
 
   const handleBuyNow = async () => {
     if (!product) return;
+
+    if (isGuest || !userId) {
+      setAlert({ type: "info", title: "Sign In Required", message: "Sign in to buy this item." });
+      return;
+    }
+
     setOrdering(true);
     try {
       const items = [{ product_id: product.id, variant_id: selectedVariant?.id || null, quantity: 1 }];

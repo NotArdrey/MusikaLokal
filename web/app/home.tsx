@@ -21,6 +21,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { supabase } from "../lib/supabase";
 import CachedImage from "../src/components/CachedImage";
 import CustomAlert from "../src/components/CustomAlert";
+import Header from "../src/components/header";
 import ListingDetailsSheet from "../src/components/ListingDetailsSheet";
 import { ProfileCompletionBanner } from "../src/components/ProfileCompletionBanner";
 import RecentlyViewedSheet from "../src/components/RecentlyViewedSheet";
@@ -360,6 +361,7 @@ export default function HomeScreen() {
   const { width: viewportWidth } = useWindowDimensions();
   const params = useLocalSearchParams<{ reopenListingId?: string }>();
   const isWebDesktop = Platform.OS === "web" && viewportWidth >= 768;
+  const [isScrolled, setIsScrolled] = useState(false);
   const frameHorizontalPadding = isWebDesktop ? 20 : 24;
   const feedCardWidth = isWebDesktop ? 248 : 280;
   const compactCardWidth = isWebDesktop ? 248 : 240;
@@ -2810,11 +2812,24 @@ export default function HomeScreen() {
         backgroundColor="transparent"
       />
 
+      {isGuest && (
+        <View
+          style={{ position: "absolute", top: 0, left: 0, right: 0, zIndex: 100 }}
+        >
+          <Header title="MusikaLokal" transparent={!isScrolled} />
+        </View>
+      )}
+
       <ScrollView
         style={pageFrameStyle || undefined}
         showsVerticalScrollIndicator={false}
         contentContainerStyle={{ paddingBottom: isWebDesktop ? 56 : 180 }}
         bounces={true}
+        onScroll={(e) => {
+          const contentOffsetY = e.nativeEvent.contentOffset.y;
+          setIsScrolled(contentOffsetY > 50);
+        }}
+        scrollEventThrottle={16}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
@@ -2865,80 +2880,82 @@ export default function HomeScreen() {
         )}
 
         {/* Quick Access Modules */}
-        <View style={styles.sectionContainer}>
-          <Text style={[styles.sectionTitle, { color: colors.text, paddingHorizontal: frameHorizontalPadding, marginBottom: 12, textAlign: isWebDesktop ? "center" : "left" }]}>Explore More</Text>
-          {isWebDesktop ? (
-            <View style={[styles.quickAccessDesktopRow, { paddingHorizontal: frameHorizontalPadding }]}>
-              {quickAccessModules.map((mod, index) => (
-                <TouchableOpacity activeOpacity={1}
-                  key={mod.label}
-                  style={[
-                    styles.quickAccessCard,
-                    {
-                      width: quickActionWidth,
-                      marginRight: index === quickAccessModules.length - 1 ? 0 : 20,
-                    },
-                  ]}
-                  onPress={() => router.push(mod.route as any)}
-                >
-                  <View style={[styles.quickAccessIcon, { backgroundColor: mod.color + "14", borderColor: mod.color + "2D" }]}>
-                    <Ionicons name={mod.icon} size={20} color={mod.color} />
-                  </View>
-                  <Text
-                    numberOfLines={1}
-                    ellipsizeMode="tail"
-                    maxFontSizeMultiplier={1}
+        {!isGuest && (
+          <View style={styles.sectionContainer}>
+            <Text style={[styles.sectionTitle, { color: colors.text, paddingHorizontal: frameHorizontalPadding, marginBottom: 12, textAlign: isWebDesktop ? "center" : "left" }]}>Explore More</Text>
+            {isWebDesktop ? (
+              <View style={[styles.quickAccessDesktopRow, { paddingHorizontal: frameHorizontalPadding }]}>
+                {quickAccessModules.map((mod, index) => (
+                  <TouchableOpacity activeOpacity={1}
+                    key={mod.label}
                     style={[
-                      styles.quickAccessLabel,
+                      styles.quickAccessCard,
                       {
-                        color: colors.textSecondary,
-                        fontSize: 11.8,
-                        lineHeight: 14,
+                        width: quickActionWidth,
+                        marginRight: index === quickAccessModules.length - 1 ? 0 : 20,
                       },
                     ]}
+                    onPress={() => router.push(mod.route as any)}
                   >
-                    {mod.label}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-          ) : (
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: frameHorizontalPadding - 4 }}>
-              {quickAccessModules.map((mod) => (
-                <TouchableOpacity activeOpacity={1}
-                  key={mod.label}
-                  style={[
-                    styles.quickAccessCard,
-                    {
-                      width: quickActionWidth,
-                      marginRight: 14,
-                    },
-                  ]}
-                  onPress={() => router.push(mod.route as any)}
-                >
-                  <View style={[styles.quickAccessIcon, { backgroundColor: mod.color + "14", borderColor: mod.color + "2D" }]}>
-                    <Ionicons name={mod.icon} size={20} color={mod.color} />
-                  </View>
-                  <Text
-                    numberOfLines={1}
-                    ellipsizeMode="tail"
-                    maxFontSizeMultiplier={1}
+                    <View style={[styles.quickAccessIcon, { backgroundColor: mod.color + "14", borderColor: mod.color + "2D" }]}>
+                      <Ionicons name={mod.icon} size={20} color={mod.color} />
+                    </View>
+                    <Text
+                      numberOfLines={1}
+                      ellipsizeMode="tail"
+                      maxFontSizeMultiplier={1}
+                      style={[
+                        styles.quickAccessLabel,
+                        {
+                          color: colors.textSecondary,
+                          fontSize: 11.8,
+                          lineHeight: 14,
+                        },
+                      ]}
+                    >
+                      {mod.label}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            ) : (
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: frameHorizontalPadding - 4 }}>
+                {quickAccessModules.map((mod) => (
+                  <TouchableOpacity activeOpacity={1}
+                    key={mod.label}
                     style={[
-                      styles.quickAccessLabel,
+                      styles.quickAccessCard,
                       {
-                        color: colors.textSecondary,
-                        fontSize: moderateScale(11.1),
-                        lineHeight: 14,
+                        width: quickActionWidth,
+                        marginRight: 14,
                       },
                     ]}
+                    onPress={() => router.push(mod.route as any)}
                   >
-                    {mod.label}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-          )}
-        </View>
+                    <View style={[styles.quickAccessIcon, { backgroundColor: mod.color + "14", borderColor: mod.color + "2D" }]}>
+                      <Ionicons name={mod.icon} size={20} color={mod.color} />
+                    </View>
+                    <Text
+                      numberOfLines={1}
+                      ellipsizeMode="tail"
+                      maxFontSizeMultiplier={1}
+                      style={[
+                        styles.quickAccessLabel,
+                        {
+                          color: colors.textSecondary,
+                          fontSize: moderateScale(11.1),
+                          lineHeight: 14,
+                        },
+                      ]}
+                    >
+                      {mod.label}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            )}
+          </View>
+        )}
 
         {/* AI Recommendation Comparison Toggle */}
         {showForYouAiCard && userId && (

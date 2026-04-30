@@ -3,7 +3,6 @@ import { useFocusEffect } from "@react-navigation/native";
 import { router } from "expo-router";
 import React, { useCallback, useState } from "react";
 import {
-  ActivityIndicator,
   Dimensions,
   RefreshControl,
   ScrollView,
@@ -15,11 +14,8 @@ import {
 } from "react-native";
 import { supabase } from "../lib/supabase";
 import CachedImage from "../src/components/CachedImage";
-import GuestSignInGate from "../src/components/GuestSignInGate";
 import Header from "../src/components/header";
-import Navbar from "../src/components/navbar";
 import Skeleton from "../src/components/Skeleton";
-import { useAuth } from "../src/context/AuthContext";
 import { useTheme } from "../src/context/ThemeContext";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
@@ -32,7 +28,6 @@ const CARD_WIDTH = (SCREEN_WIDTH - 48) / 2;
 
 export default function ShopScreen() {
   const { colors, isDark } = useTheme();
-  const { session, isGuest } = useAuth();
 
   const [products, setProducts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -66,16 +61,6 @@ export default function ShopScreen() {
     if (!price) return "Free";
     return `₱${price.toLocaleString()}`;
   };
-
-  if (isGuest) {
-    return (
-      <View style={[styles.container, { backgroundColor: colors.background }]}>
-        <Header title="Shop" onBackPress={() => router.back()} />
-        <GuestSignInGate message="Sign in to browse the marketplace" />
-        
-      </View>
-    );
-  }
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>

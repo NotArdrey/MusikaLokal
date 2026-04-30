@@ -1,4 +1,4 @@
-import { useCallback } from "react";
+import { useCallback, useRef } from "react";
 import { submitListingRequest } from "../utils/listingRequests";
 
 interface AlertConfig {
@@ -36,7 +36,13 @@ export const useBookingRequestAction = ({
   setRequestMessage,
   closeSheet,
 }: UseBookingRequestActionParams) => {
+  const requestInFlightRef = useRef(false);
+
   return useCallback(() => {
+    if (requestInFlightRef.current) {
+      return;
+    }
+
     if (currentUserRole === "venue-owner" && userVenues.length === 0) {
       handleConfirm(
         () => {
@@ -81,6 +87,11 @@ export const useBookingRequestAction = ({
 
     handleConfirm(
       async () => {
+        if (requestInFlightRef.current) {
+          return;
+        }
+
+        requestInFlightRef.current = true;
         setIsSendingRequest(true);
         try {
           const receiverId = group.type === "Artist" ? group.id : group.owner_id;
@@ -134,6 +145,7 @@ export const useBookingRequestAction = ({
           });
           setAlertVisible(true);
         } finally {
+          requestInFlightRef.current = false;
           setIsSendingRequest(false);
         }
       },

@@ -10,6 +10,7 @@ interface ListingHeroSectionProps {
   styles: any;
   isFavorited: boolean;
   favoriteCount?: number;
+  showFavoriteButton?: boolean;
   showReportButton?: boolean;
   onClose: () => void;
   onToggleFavorite: () => void;
@@ -24,6 +25,7 @@ const ListingHeroSection = ({
   styles,
   isFavorited,
   favoriteCount = 0,
+  showFavoriteButton = true,
   showReportButton = false,
   onClose,
   onToggleFavorite,
@@ -84,14 +86,16 @@ const ListingHeroSection = ({
             style={actionIconStyle}
           />
         </TouchableOpacity>
-        <TouchableOpacity activeOpacity={1} onPress={onToggleFavorite} style={styles.roundBtn}>
-          <Ionicons
-            name={isFavorited ? "bookmark" : "bookmark-outline"}
-            size={22}
-            color={isFavorited ? colors.primary : "#000"}
-            style={actionIconStyle}
-          />
-        </TouchableOpacity>
+        {showFavoriteButton ? (
+          <TouchableOpacity activeOpacity={1} onPress={onToggleFavorite} style={styles.roundBtn}>
+            <Ionicons
+              name={isFavorited ? "bookmark" : "bookmark-outline"}
+              size={22}
+              color={isFavorited ? colors.primary : "#000"}
+              style={actionIconStyle}
+            />
+          </TouchableOpacity>
+        ) : null}
       </View>
     </View>
 
@@ -109,18 +113,20 @@ const ListingHeroSection = ({
         <Text style={styles.heroLocation}>{group.location || "Manila"}</Text>
         <Text style={[styles.heroLocation, { marginLeft: 12 }]}>• {group.genre || "Music"}</Text>
       </View>
-      <View
-        style={{
-          flexDirection: "row",
-          alignItems: "center",
-          marginTop: 4,
-        }}
-      >
-        <Ionicons name="bookmark" size={13} color="#FFF" />
-        <Text style={[styles.heroLocation, { marginLeft: 6 }]}> 
-          {favoriteCount} bookmarked
-        </Text>
-      </View>
+      {showFavoriteButton ? (
+        <View
+          style={{
+            flexDirection: "row",
+            alignItems: "center",
+            marginTop: 4,
+          }}
+        >
+          <Ionicons name="bookmark" size={13} color="#FFF" />
+          <Text style={[styles.heroLocation, { marginLeft: 6 }]}> 
+            {favoriteCount} bookmarked
+          </Text>
+        </View>
+      ) : null}
     </View>
   </View>
   );

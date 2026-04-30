@@ -135,15 +135,24 @@ function Navbar({ global = false, forceVisible = false }: NavbarProps) {
     }, [pathname]);
 
     const navItems = useMemo(
-        () => [
-            { id: 'home', icon: 'home', label: 'Home', route: '/feed' },
-            { id: 'ai', icon: 'sparkles', label: 'AI', route: '/ai_suggestions' },
-            { id: 'activity', icon: 'calendar', label: 'Activity', route: '/bookings' },
-            { id: 'marketplace', icon: 'storefront', label: 'Shop', route: '/marketplace' },
-            { id: 'manage', icon: 'briefcase', label: 'Manage', route: manageRoute },
-            { id: 'profile', icon: 'person', label: 'Profile', route: '/profile' }
-        ],
-        [manageRoute],
+        () => {
+            if (isGuest) {
+                return [
+                    { id: 'home', icon: 'home', label: 'Home', route: '/home' },
+                    { id: 'profile', icon: 'person', label: 'Profile', route: '/profile' },
+                ];
+            }
+
+            return [
+                { id: 'home', icon: 'home', label: 'Home', route: '/feed' },
+                { id: 'ai', icon: 'sparkles', label: 'AI', route: '/ai_suggestions' },
+                { id: 'activity', icon: 'calendar', label: 'Activity', route: '/bookings' },
+                { id: 'marketplace', icon: 'storefront', label: 'Shop', route: '/marketplace' },
+                { id: 'manage', icon: 'briefcase', label: 'Manage', route: manageRoute },
+                { id: 'profile', icon: 'person', label: 'Profile', route: '/profile' }
+            ];
+        },
+        [isGuest, manageRoute],
     );
 
     useEffect(() => {
@@ -160,7 +169,7 @@ function Navbar({ global = false, forceVisible = false }: NavbarProps) {
         });
     }, [activeTab, forceVisible, global, insets.bottom, isBottomOverlayActive, manageRoute, pathname, shouldRenderGlobalNavbar]);
 
-    if (!global || !shouldRenderGlobalNavbar) {
+    if (isGuest || !global || !shouldRenderGlobalNavbar) {
         return null;
     }
 

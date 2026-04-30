@@ -17,9 +17,7 @@ import {
 } from "react-native";
 import { supabase } from "../lib/supabase";
 import CachedImage from "../src/components/CachedImage";
-import GuestSignInGate from "../src/components/GuestSignInGate";
 import Header from "../src/components/header";
-import { useAuth } from "../src/context/AuthContext";
 import { useTheme } from "../src/context/ThemeContext";
 
 const moderateScale = (size: number, factor = 0.3) => {
@@ -32,7 +30,6 @@ const CATEGORIES = ["Merch", "Vinyl", "Digital", "Instruments", "Tickets"];
 
 export default function ShopScreen() {
   const { colors, isDark } = useTheme();
-  const { isGuest } = useAuth();
   const { width } = useWindowDimensions();
   const isWebDesktop = Platform.OS === "web" && width >= 768;
 
@@ -97,15 +94,6 @@ export default function ShopScreen() {
     </TouchableOpacity>
   );
 
-  if (isGuest) {
-    return (
-      <View style={[styles.container, { backgroundColor: bg }]}>
-        <Header title="Shop" onBackPress={() => router.back()} />
-        <GuestSignInGate message="Sign in to browse the marketplace" />
-      </View>
-    );
-  }
-
   return (
     <View style={[styles.container, { backgroundColor: bg }]}>
       <Header title="Shop" onBackPress={() => router.back()} />
@@ -128,7 +116,7 @@ export default function ShopScreen() {
             </View>
             <View style={[styles.searchRow, { borderColor: borderCol, backgroundColor: cardBg }]}>
             <Ionicons name="search" size={18} color={colors.textSecondary} />
-            <TextInput style={{ flex: 1, color: colors.text, fontSize: moderateScale(14), marginLeft: 8, paddingVertical: 8 }} placeholder="Search products..." placeholderTextColor={colors.textSecondary} value={search} onChangeText={setSearch} onSubmitEditing={fetchProducts} returnKeyType="search" />
+            <TextInput style={{ flex: 1, color: colors.text, fontSize: moderateScale(14), marginLeft: 8, paddingVertical: 8 }} placeholder="Search products..." placeholderTextColor={colors.textSecondary} value={search} onChangeText={setSearch} onSubmitEditing={() => fetchProducts()} returnKeyType="search" />
             </View>
             <FlatList
               data={["All", ...CATEGORIES]}

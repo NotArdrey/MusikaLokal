@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router, useFocusEffect, usePathname } from "expo-router";
 import { memo, useCallback, useMemo, useState } from 'react';
-import { Platform, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
+import { Modal, Platform, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../context/AuthContext';
@@ -18,13 +18,14 @@ interface HeaderProps {
 
 function Header({ title, transparent, onBackPress, hideBackButton = false, leftComponent, rightComponent }: HeaderProps) {
     const { colors, isDark } = useTheme();
-    const { isGuest } = useAuth();
+    const { isGuest, setGuestMode } = useAuth();
     const insets = useSafeAreaInsets();
     const { width } = useWindowDimensions();
     const isWebDesktop = Platform.OS === 'web' && width >= 768;
 
     const pathname = usePathname();
     const [hasUnread, setHasUnread] = useState(false);
+    const [guestMenuVisible, setGuestMenuVisible] = useState(false);
     const isAdminPath = useMemo(
         () => pathname === "/admin" || pathname.startsWith("/admin/"),
         [pathname],
@@ -59,6 +60,31 @@ function Header({ title, transparent, onBackPress, hideBackButton = false, leftC
         if (pathname === "/my_production") return '/add_production';
         return '/add_group';
     }, [pathname]);
+
+    const guestMenuItems = useMemo(
+        () => [
+            { label: 'Home', icon: 'home-outline', route: '/home' },
+            { label: 'Profile', icon: 'person-outline', route: '/profile' },
+        ],
+        [],
+    );
+
+    const closeGuestMenu = useCallback(() => {
+        setGuestMenuVisible(false);
+    }, []);
+
+    const navigateGuestMenu = useCallback((route: string) => {
+        closeGuestMenu();
+        if (pathname !== route) {
+            router.replace(route as any);
+        }
+    }, [closeGuestMenu, pathname]);
+
+    const handleGuestSignIn = useCallback(async () => {
+        closeGuestMenu();
+        await setGuestMode(false);
+        router.replace('/');
+    }, [closeGuestMenu, setGuestMode]);
 
     useFocusEffect(
         useCallback(() => {
@@ -99,83 +125,146 @@ function Header({ title, transparent, onBackPress, hideBackButton = false, leftC
     }
 
     return (
-        <View style={[styles.container, {
-            backgroundColor: transparent ? 'transparent' : colors.background,
-            paddingTop: isWebDesktop ? 16 : (insets.top + 8),
-            paddingHorizontal: isWebDesktop ? 32 : 16,
-            paddingBottom: isWebDesktop ? 20 : 16,
-            borderRadius: transparent ? 0 : (isWebDesktop ? 18 : 14),
-        }]}>
-            {/* Left Container - Only for Back Button or left component */}
-            {(backVisible || leftComponent) && (
-                <View style={styles.leftContainer}>
-                    {leftComponent ? (
-                        leftComponent
-                    ) : (
-                        <TouchableOpacity activeOpacity={1}
-                            onPress={() => (onBackPress ? onBackPress() : router.back())}
-                            style={[styles.backButton, {
+        <>
+            <View style={[styles.container, {
+                backgroundColor: transparent ? 'transparent' : colors.background,
+                paddingTop: isWebDesktop ? 16 : (insets.top + 8),
+                paddingHorizontal: isWebDesktop ? 32 : 16,
+                paddingBottom: isWebDesktop ? 20 : 16,
+                borderRadius: transparent ? 0 : (isWebDesktop ? 18 : 14),
+            }]}>
+                {/* Left Container - Only for Back Button or left component */}
+                {(backVisible || leftComponent) && (
+                    <View style={styles.leftContainer}>
+                        {leftComponent ? (
+                            leftComponent
+                        ) : (
+                            <TouchableOpacity activeOpacity={1}
+                                onPress={() => (onBackPress ? onBackPress() : router.back())}
+                                style={[styles.backButton, {
+                                    backgroundColor: isDark ? colors.surface : '#F3F4F6',
+                                    padding: isWebDesktop ? 12 : 8,
+                                }]}
+                            >
+                                <Ionicons name="arrow-back" size={isWebDesktop ? 24 : 20} color={colors.text} />
+                            </TouchableOpacity>
+                        )}
+                    </View>
+                )}
+
+                {/* Title - Dynamic Alignment */}
+                <View style={[
+                    styles.titleContainer,
+                    !(backVisible || leftComponent) && styles.mainTitleContainer
+                ]}>
+                <Text style={[
+                    styles.title,
+                    { color: transparent ? '#FFFFFF' : colors.text },
+                    !backVisible && styles.mainTitle
+                ]}>
+                        {title}
+                    </Text>
+                </View>
+
+                {/* Action Buttons */}
+                <View style={styles.rightContainer}>
+                    {rightComponent ? (
+                        rightComponent
+                    ) : isGuest ? (
+                        <TouchableOpacity
+                            activeOpacity={1}
+                            onPress={() => setGuestMenuVisible(true)}
+                            style={[styles.iconButton, {
                                 backgroundColor: isDark ? colors.surface : '#F3F4F6',
                                 padding: isWebDesktop ? 12 : 8,
                             }]}
                         >
-                            <Ionicons name="arrow-back" size={isWebDesktop ? 24 : 20} color={colors.text} />
+                            <Ionicons name="menu-outline" size={isWebDesktop ? 26 : 24} color={colors.text} />
                         </TouchableOpacity>
-                    )}
+                    ) : notifVisible ? (
+                        <View style={styles.iconRow}>
+                            {/* Chat Button */}
+                            <TouchableOpacity activeOpacity={1} onPress={() => router.push('/chat')} style={[styles.iconButton, {
+                                backgroundColor: isDark ? colors.surface : '#F3F4F6',
+                                padding: isWebDesktop ? 12 : 8,
+                            }]}>
+                                <Ionicons name="chatbubbles" size={isWebDesktop ? 26 : 24} color={colors.text} />
+                            </TouchableOpacity>
+                            {/* Notifications Button */}
+                            <TouchableOpacity activeOpacity={1} onPress={() => router.push('/notifications')} style={[styles.iconButton, {
+                                backgroundColor: isDark ? colors.surface : '#F3F4F6',
+                                padding: isWebDesktop ? 12 : 8,
+                            }]}>
+                                <Ionicons name="notifications" size={isWebDesktop ? 26 : 24} color={colors.text} />
+                                {hasUnread && (
+                                    <View style={styles.badge} />
+                                )}
+                            </TouchableOpacity>
+                        </View>
+                    ) : addbtnvisible ? (
+                        <TouchableOpacity activeOpacity={1}
+                            onPress={() => router.push(btn as any)}
+                            style={[styles.addButton, {
+                                backgroundColor: isDark ? colors.surface : '#F3F4F6',
+                                padding: isWebDesktop ? 12 : 8,
+                            }]}
+                        >
+                            <Ionicons name="add" size={isWebDesktop ? 28 : 24} color={colors.text} />
+                        </TouchableOpacity>
+                    ) : null}
                 </View>
-            )}
-
-            {/* Title - Dynamic Alignment */}
-            <View style={[
-                styles.titleContainer,
-                !(backVisible || leftComponent) && styles.mainTitleContainer
-            ]}>
-                <Text style={[
-                    styles.title,
-                    { color: colors.text },
-                    !backVisible && styles.mainTitle
-                ]}>
-                    {title}
-                </Text>
             </View>
 
-            {/* Action Buttons */}
-            <View style={styles.rightContainer}>
-                {rightComponent ? (
-                    rightComponent
-                ) : notifVisible ? (
-                    <View style={styles.iconRow}>
-                        {/* Chat Button */}
-                        <TouchableOpacity activeOpacity={1} onPress={() => router.push('/chat')} style={[styles.iconButton, {
-                            backgroundColor: isDark ? colors.surface : '#F3F4F6',
-                            padding: isWebDesktop ? 12 : 8,
-                        }]}>
-                            <Ionicons name="chatbubbles" size={isWebDesktop ? 26 : 24} color={colors.text} />
-                        </TouchableOpacity>
-                        {/* Notifications Button */}
-                        <TouchableOpacity activeOpacity={1} onPress={() => router.push('/notifications')} style={[styles.iconButton, {
-                            backgroundColor: isDark ? colors.surface : '#F3F4F6',
-                            padding: isWebDesktop ? 12 : 8,
-                        }]}>
-                            <Ionicons name="notifications" size={isWebDesktop ? 26 : 24} color={colors.text} />
-                            {hasUnread && (
-                                <View style={styles.badge} />
-                            )}
-                        </TouchableOpacity>
+            <Modal
+                visible={guestMenuVisible}
+                transparent
+                animationType="fade"
+                onRequestClose={closeGuestMenu}
+            >
+                <View style={styles.guestMenuOverlay}>
+                    <TouchableOpacity activeOpacity={1} style={styles.guestMenuBackdrop} onPress={closeGuestMenu} />
+                    <View style={[styles.guestMenuPanel, { backgroundColor: colors.background, borderLeftColor: colors.border }]}>
+                        <View style={[styles.guestMenuHeader, { borderBottomColor: colors.border }]}>
+                            <View>
+                                <Text style={[styles.guestMenuTitle, { color: colors.text }]}>Guest Menu</Text>
+                                <Text style={[styles.guestMenuSubtitle, { color: colors.textSecondary }]}>Browsing as guest</Text>
+                            </View>
+                            <TouchableOpacity activeOpacity={1} onPress={closeGuestMenu} style={styles.guestMenuClose}>
+                                <Ionicons name="close" size={20} color={colors.textSecondary} />
+                            </TouchableOpacity>
+                        </View>
+
+                        <View style={styles.guestMenuList}>
+                            {guestMenuItems.map((item) => (
+                                <TouchableOpacity
+                                    activeOpacity={1}
+                                    key={item.label}
+                                    onPress={() => navigateGuestMenu(item.route)}
+                                    style={[styles.guestMenuItem, { borderBottomColor: isDark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.05)" }]}
+                                >
+                                    <View style={[styles.guestMenuIcon, { backgroundColor: isDark ? "#1E293B" : "#F1F5F9" }]}>
+                                        <Ionicons name={item.icon as any} size={19} color={colors.primary} />
+                                    </View>
+                                    <Text style={[styles.guestMenuLabel, { color: colors.text }]}>{item.label}</Text>
+                                    <Ionicons name="chevron-forward" size={16} color={colors.textSecondary} />
+                                </TouchableOpacity>
+                            ))}
+                            <TouchableOpacity
+                                activeOpacity={1}
+                                onPress={handleGuestSignIn}
+                                style={[styles.guestMenuItem, { borderBottomColor: "transparent" }]}
+                            >
+                                <View style={[styles.guestMenuIcon, { backgroundColor: isDark ? "#1E293B" : "#F1F5F9" }]}>
+                                    <Ionicons name="log-in-outline" size={19} color={colors.primary} />
+                                </View>
+                                <Text style={[styles.guestMenuLabel, { color: colors.text }]}>Sign In</Text>
+                                <Ionicons name="chevron-forward" size={16} color={colors.textSecondary} />
+                            </TouchableOpacity>
+                        </View>
                     </View>
-                ) : addbtnvisible ? (
-                    <TouchableOpacity activeOpacity={1}
-                        onPress={() => router.push(btn as any)}
-                        style={[styles.addButton, {
-                            backgroundColor: isDark ? colors.surface : '#F3F4F6',
-                            padding: isWebDesktop ? 12 : 8,
-                        }]}
-                    >
-                        <Ionicons name="add" size={isWebDesktop ? 28 : 24} color={colors.text} />
-                    </TouchableOpacity>
-                ) : null}
-            </View>
-        </View>
+                </View>
+            </Modal>
+        </>
     );
 }
 
@@ -248,5 +337,73 @@ const styles = StyleSheet.create({
     addButton: {
         padding: 8,
         borderRadius: 9999,
+    },
+    guestMenuOverlay: {
+        flex: 1,
+        flexDirection: 'row',
+        justifyContent: 'flex-end',
+        backgroundColor: 'rgba(15, 23, 42, 0.36)',
+    },
+    guestMenuBackdrop: {
+        ...StyleSheet.absoluteFillObject,
+    },
+    guestMenuPanel: {
+        width: '78%',
+        maxWidth: 340,
+        height: '100%',
+        borderLeftWidth: 1,
+        paddingTop: 56,
+        shadowColor: '#000',
+        shadowOffset: { width: -4, height: 0 },
+        shadowOpacity: 0.16,
+        shadowRadius: 18,
+        elevation: 18,
+    },
+    guestMenuHeader: {
+        paddingHorizontal: 20,
+        paddingBottom: 18,
+        borderBottomWidth: 1,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+    },
+    guestMenuTitle: {
+        fontSize: 18,
+        fontFamily: 'Poppins_700Bold',
+    },
+    guestMenuSubtitle: {
+        marginTop: 2,
+        fontSize: 12,
+        fontFamily: 'Poppins_500Medium',
+    },
+    guestMenuClose: {
+        width: 36,
+        height: 36,
+        borderRadius: 18,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    guestMenuList: {
+        paddingTop: 8,
+    },
+    guestMenuItem: {
+        minHeight: 58,
+        paddingHorizontal: 18,
+        flexDirection: 'row',
+        alignItems: 'center',
+        borderBottomWidth: 1,
+    },
+    guestMenuIcon: {
+        width: 36,
+        height: 36,
+        borderRadius: 18,
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginRight: 12,
+    },
+    guestMenuLabel: {
+        flex: 1,
+        fontSize: 15,
+        fontFamily: 'Poppins_600SemiBold',
     },
 });

@@ -81,7 +81,7 @@ export const useRequireAuth = () => {
           router.replace("/");
         });
       } else {
-        router.replace("/feed");
+        router.replace("/home");
       }
     }
   }, [session, loading, isGuest]);

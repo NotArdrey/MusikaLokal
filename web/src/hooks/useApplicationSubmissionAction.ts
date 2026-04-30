@@ -1,4 +1,4 @@
-import { useCallback } from "react";
+import { useCallback, useRef } from "react";
 import { supabase } from "../../lib/supabase";
 
 interface AlertConfig {
@@ -66,6 +66,8 @@ export const useApplicationSubmissionAction = ({
   setCvUrl,
   closeSheet,
 }: UseApplicationSubmissionActionParams) => {
+  const submissionInFlightRef = useRef(false);
+
   const uploadDocument = useCallback(async (file: any) => {
     try {
       console.log("📤 Uploading CV:", file.name);
@@ -97,6 +99,11 @@ export const useApplicationSubmissionAction = ({
   }, [userId]);
 
   const processApplicationSubmission = useCallback(async () => {
+    if (submissionInFlightRef.current) {
+      return;
+    }
+
+    submissionInFlightRef.current = true;
     setIsSubmittingApplication(true);
     console.log("Inserting application into database...");
 
@@ -267,12 +274,12 @@ export const useApplicationSubmissionAction = ({
 
       setAlertConfig({
         type: "success",
-        title: "Application Submitted!",
+        title: "Application Sent",
         message: selectedGroupId
           ? needsLeaderApproval
             ? "Your group application was sent to your group leader for approval. Once approved, it will be visible to the venue owner."
-            : "Your group application has been submitted successfully. Group members have been notified. The venue owner will review it and get back to you soon."
-          : "Your application has been submitted successfully. The venue owner will review it and get back to you soon.",
+            : "Your group application has been sent. Group members have been notified. The venue owner will review it and get back to you soon."
+          : "Your application has been sent to the venue owner. They'll review it and get back to you soon.",
       });
       setAlertVisible(true);
 
@@ -293,6 +300,7 @@ export const useApplicationSubmissionAction = ({
       });
       setAlertVisible(true);
     } finally {
+      submissionInFlightRef.current = false;
       setIsSubmittingApplication(false);
     }
   }, [
@@ -319,6 +327,10 @@ export const useApplicationSubmissionAction = ({
   ]);
 
   const handleSubmitApplication = useCallback(async () => {
+    if (submissionInFlightRef.current) {
+      return;
+    }
+
     console.log("=== handleSubmitApplication CALLED ===");
 
     if (!userId || !listingId || !group) {

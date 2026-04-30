@@ -29,8 +29,8 @@ const configuredSupabaseAnonKey = readEnv(
 const hasSupabaseConfig = Boolean(configuredSupabaseUrl && configuredSupabaseAnonKey);
 
 // Avoid hard crashes on import when environment variables are missing.
-const supabaseUrl = configuredSupabaseUrl || 'https://placeholder.supabase.co';
-const supabaseAnonKey = configuredSupabaseAnonKey || 'missing-anon-key';
+export const supabaseUrl = configuredSupabaseUrl || 'https://placeholder.supabase.co';
+export const supabaseAnonKey = configuredSupabaseAnonKey || 'missing-anon-key';
 
 const projectRef = (() => {
     try {

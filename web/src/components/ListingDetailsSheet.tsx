@@ -238,6 +238,7 @@ const ListingDetailsSheet = forwardRef<
   const [requestDocumentUrl, setRequestDocumentUrl] = useState("");
   const [requestVideoUrl, setRequestVideoUrl] = useState("");
   const [isSendingRequest, setIsSendingRequest] = useState(false);
+  const listingRequestInFlightRef = useRef(false);
 
   // Venue Selection State (for venue owners sending invites)
   const [userVenues, setUserVenues] = useState<any[]>([]);
@@ -2447,6 +2448,10 @@ const ListingDetailsSheet = forwardRef<
       requireSlotSelection?: boolean;
       extraMeta?: Record<string, unknown> | null;
     }) => {
+      if (listingRequestInFlightRef.current || isSendingRequest) {
+        return;
+      }
+
       if (!currentUserId) {
         showSheetAlert("info", "Login Required", "Please sign in to send requests.");
         return;
@@ -2490,40 +2495,41 @@ const ListingDetailsSheet = forwardRef<
         return;
       }
 
-      let uploadedDocumentUrl = requestDocumentUrl.trim() || null;
-      if (requestDocumentFile) {
-        try {
-          uploadedDocumentUrl = await uploadListingRequestDocument(
-            currentUserId,
-            requestDocumentFile,
-            request.requestKind === "invite" ? "contracts" : "applications",
-          );
-        } catch (uploadError) {
-          console.error("Error uploading request document:", uploadError);
-          showSheetAlert(
-            "error",
-            "Upload Failed",
-            request.requestKind === "invite"
-              ? "We couldn't upload the contract right now."
-              : "We couldn't upload the CV right now.",
-          );
-          return;
-        }
-      }
-
-      const requestDetails = {
-        pitch_message: normalizedPitchMessage,
-        application_context: normalizedApplicationContext,
-        context_label: request.contextLabel || null,
-        request_kind: request.requestKind,
-        cv_url: request.requestKind === "application" ? uploadedDocumentUrl : null,
-        video_url: request.requestKind === "application" ? normalizedVideoUrl : null,
-        contract_url: request.requestKind === "invite" ? uploadedDocumentUrl : null,
-        slot_type: selectedSlotType || null,
-      };
-
+      listingRequestInFlightRef.current = true;
       setIsSendingRequest(true);
       try {
+        let uploadedDocumentUrl = requestDocumentUrl.trim() || null;
+        if (requestDocumentFile) {
+          try {
+            uploadedDocumentUrl = await uploadListingRequestDocument(
+              currentUserId,
+              requestDocumentFile,
+              request.requestKind === "invite" ? "contracts" : "applications",
+            );
+          } catch (uploadError) {
+            console.error("Error uploading request document:", uploadError);
+            showSheetAlert(
+              "error",
+              "Upload Failed",
+              request.requestKind === "invite"
+                ? "We couldn't upload the contract right now."
+                : "We couldn't upload the CV right now.",
+            );
+            return;
+          }
+        }
+
+        const requestDetails = {
+          pitch_message: normalizedPitchMessage,
+          application_context: normalizedApplicationContext,
+          context_label: request.contextLabel || null,
+          request_kind: request.requestKind,
+          cv_url: request.requestKind === "application" ? uploadedDocumentUrl : null,
+          video_url: request.requestKind === "application" ? normalizedVideoUrl : null,
+          contract_url: request.requestKind === "invite" ? uploadedDocumentUrl : null,
+          slot_type: selectedSlotType || null,
+        };
+
         await submitListingRequest({
           currentUserId,
           receiverUserId: request.receiverUserId,
@@ -2551,8 +2557,8 @@ const ListingDetailsSheet = forwardRef<
 
         setRequestPitchMessage("");
         setRequestApplicationContext("");
-  setRequestDocumentFile(null);
-  setRequestDocumentUrl("");
+        setRequestDocumentFile(null);
+        setRequestDocumentUrl("");
         setRequestVideoUrl("");
         showSheetAlert(
           "success",
@@ -2569,6 +2575,7 @@ const ListingDetailsSheet = forwardRef<
             : "We couldn't send that request right now.";
         showSheetAlert("error", "Request Failed", errorMessage);
       } finally {
+        listingRequestInFlightRef.current = false;
         setIsSendingRequest(false);
       }
     },
@@ -2582,6 +2589,7 @@ const ListingDetailsSheet = forwardRef<
       requestDocumentUrl,
       requestPitchMessage,
       requestVideoUrl,
+      isSendingRequest,
       requestSlotOptions.length,
       selectedSlotType,
       showSheetAlert,
@@ -2776,7 +2784,7 @@ const ListingDetailsSheet = forwardRef<
       return (
         <View style={[styles.section, { marginBottom: 0 }]}> 
           <Text style={[styles.sectionTitle, { color: colors.text }]}>Invite To Your Team</Text>
-          <Text style={[styles.description, { color: colors.textSecondary }]}>Select one of your production teams and send a structured invite with a pitch, invite context, and a required contract upload.</Text>
+          <Text style={[styles.description, { color: colors.textSecondary }]}>Select one of your production teams and send an invite with a pitch, details, and the required contract.</Text>
           {productionTeams.length > 0 ? renderRequestSelectorChips(productionTeams, selectedProductionTeamId, setSelectedProductionTeamId, "people-outline") : (
             <TouchableOpacity
               activeOpacity={1}
@@ -2808,7 +2816,7 @@ const ListingDetailsSheet = forwardRef<
       return (
         <View style={[styles.section, { marginBottom: 0 }]}> 
           <Text style={[styles.sectionTitle, { color: colors.text }]}>Apply As Production Team</Text>
-          <Text style={[styles.description, { color: colors.textSecondary }]}>Choose a team and send a structured application with a pitch, slot context, CV upload, and video link.</Text>
+          <Text style={[styles.description, { color: colors.textSecondary }]}>Choose a team and send an application with a pitch, selected slot, CV, and video.</Text>
           {productionTeams.length > 0 ? renderRequestSelectorChips(productionTeams, selectedProductionTeamId, setSelectedProductionTeamId, "people-outline") : (
             <TouchableOpacity
               activeOpacity={1}
@@ -2970,12 +2978,13 @@ const ListingDetailsSheet = forwardRef<
         styles={styles}
         isFavorited={isFavorited}
         favoriteCount={favoriteCount}
+        showFavoriteButton={!isGuest}
         showReportButton={showReportButton}
         onClose={dismissSelf}
         onToggleFavorite={toggleFavorite}
         onReport={handleReport}
         onShare={handleShare}
-        onChat={openListingChat}
+        onChat={isGuest ? undefined : openListingChat}
       />
 
       {/* TABS SELECTOR */}
@@ -3094,6 +3103,17 @@ const ListingDetailsSheet = forwardRef<
           },
         ]}
         onClose={() => setAlertVisible(false)}
+      />
+
+      <Modal
+        visible={isSubmittingApplication || isSendingRequest}
+        onClose={() => { }}
+        loading
+        loadingMessage={
+          isSubmittingApplication
+            ? "Sending application..."
+            : "Sending request..."
+        }
       />
 
       <ReportModal
