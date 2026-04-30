@@ -90,7 +90,7 @@ export default function CreatePlaylistScreen() {
           <Text style={[styles.label, { color: colors.text }]}>Genre</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 16 }}>
             {GENRES.map((g) => (
-              <TouchableOpacity key={g} onPress={() => setGenre(genre === g ? "" : g)} style={[styles.chip, { backgroundColor: genre === g ? colors.primary : "transparent", borderColor: genre === g ? colors.primary : borderCol }]}>
+              <TouchableOpacity activeOpacity={1} key={g} onPress={() => setGenre(genre === g ? "" : g)} style={[styles.chip, { backgroundColor: genre === g ? colors.primary : "transparent", borderColor: genre === g ? colors.primary : borderCol }]}>
                 <Text style={{ color: genre === g ? "#fff" : colors.text, fontSize: 13 }}>{g}</Text>
               </TouchableOpacity>
             ))}
@@ -98,12 +98,12 @@ export default function CreatePlaylistScreen() {
           <Text style={[styles.label, { color: colors.text }]}>Visibility</Text>
           <View style={styles.visRow}>
             {(["public", "private", "unlisted"] as const).map((v) => (
-              <TouchableOpacity key={v} onPress={() => setVisibility(v)} style={[styles.visBtn, { backgroundColor: visibility === v ? colors.primary : "transparent", borderColor: visibility === v ? colors.primary : borderCol }]}>
+              <TouchableOpacity activeOpacity={1} key={v} onPress={() => setVisibility(v)} style={[styles.visBtn, { backgroundColor: visibility === v ? colors.primary : "transparent", borderColor: visibility === v ? colors.primary : borderCol }]}>
                 <Text style={{ color: visibility === v ? "#fff" : colors.text, fontSize: 13, textTransform: "capitalize" }}>{v}</Text>
               </TouchableOpacity>
             ))}
           </View>
-          <TouchableOpacity style={[styles.submitBtn, { backgroundColor: colors.primary, opacity: submitting ? 0.6 : 1 }]} onPress={handleSubmit} disabled={submitting}>
+          <TouchableOpacity activeOpacity={1} style={[styles.submitBtn, { backgroundColor: colors.primary, opacity: submitting ? 0.6 : 1 }]} onPress={handleSubmit} disabled={submitting}>
             {submitting ? <ActivityIndicator size="small" color="#fff" /> : <Text style={styles.submitText}>{isEdit ? "Update Playlist" : "Create Playlist"}</Text>}
           </TouchableOpacity>
           <View style={{ height: 100 }} />

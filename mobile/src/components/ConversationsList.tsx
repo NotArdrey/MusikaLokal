@@ -104,7 +104,7 @@ const ConversationsList: React.FC<ConversationsListProps> = ({
                     hasUnread && { backgroundColor: isDark ? 'rgba(99,102,241,0.06)' : 'rgba(99,102,241,0.04)' },
                 ]}
                 onPress={() => onSelectConversation(item)}
-                activeOpacity={0.7}
+                activeOpacity={1}
             >
                 {/* Avatar */}
                 <View style={styles.avatarContainer}>
@@ -200,7 +200,7 @@ const ConversationsList: React.FC<ConversationsListProps> = ({
                     <TouchableOpacity
                         style={[styles.searchBar, { backgroundColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.05)' }]}
                         onPress={() => setShowNewMessageModal(true)}
-                        activeOpacity={0.7}
+                        activeOpacity={1}
                     >
                         <Ionicons name="search" size={17} color={colors.textSecondary} style={{ marginRight: 8 }} />
                         <Text style={{ color: colors.textSecondary, fontSize: 15 }}>Search or start new chat…</Text>
@@ -227,7 +227,7 @@ const ConversationsList: React.FC<ConversationsListProps> = ({
                     <TouchableOpacity
                         style={[styles.newMessageButton, { backgroundColor: colors.primary }]}
                         onPress={() => setShowNewMessageModal(true)}
-                        activeOpacity={0.85}
+                        activeOpacity={1}
                     >
                         <Ionicons name="create" size={18} color="#FFF" />
                         <Text style={styles.newMessageButtonText}>New Message</Text>

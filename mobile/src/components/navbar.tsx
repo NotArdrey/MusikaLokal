@@ -49,7 +49,6 @@ const GLOBAL_NAVBAR_ROUTES = new Set([
     '/playlist_details',
     '/post_details',
     '/privacy_policy',
-    '/producer_project_details',
     '/production_team',
     '/product_details',
     '/profile',
@@ -121,8 +120,6 @@ function Navbar({ global = false, forceVisible = false }: NavbarProps) {
             pathname === '/manage' ||
             pathname.startsWith('/manage/') ||
             pathname.includes('my_production') ||
-            pathname.includes('producer_projects') ||
-            pathname.includes('producer_project_details') ||
             pathname.includes('my_studio') ||
             pathname.includes('my_venue') ||
             pathname.includes('my_group') ||

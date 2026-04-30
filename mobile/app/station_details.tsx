@@ -455,7 +455,7 @@ export default function StationDetailsScreen() {
         {/* Player Controls */}
         {stationStatus === "live" && liveSlots.length > 0 && (
           <View style={[styles.playerBar, { backgroundColor: isDark ? "#1E293B" : "#F8FAFC", borderColor: isDark ? "#334155" : "#E2E8F0" }]}>
-            <TouchableOpacity activeOpacity={0.7} onPress={handlePlayPause} style={styles.playerBtn}>
+            <TouchableOpacity activeOpacity={1} onPress={handlePlayPause} style={styles.playerBtn}>
               <Ionicons name={playerIsPlaying ? "pause" : "play"} size={28} color={colors.primary} />
             </TouchableOpacity>
 
@@ -469,18 +469,18 @@ export default function StationDetailsScreen() {
             </View>
 
             <View style={styles.playerTransportGroup}>
-              <TouchableOpacity activeOpacity={0.7} onPress={handleSkipPrevious} style={styles.playerBtn}>
+              <TouchableOpacity activeOpacity={1} onPress={handleSkipPrevious} style={styles.playerBtn}>
                 <Ionicons name="play-skip-back" size={22} color={colors.text} />
               </TouchableOpacity>
 
               {canSkipTrack && (
-                <TouchableOpacity activeOpacity={0.7} onPress={handleSkipNext} style={styles.playerBtn}>
+                <TouchableOpacity activeOpacity={1} onPress={handleSkipNext} style={styles.playerBtn}>
                   <Ionicons name="play-skip-forward" size={22} color={colors.text} />
                 </TouchableOpacity>
               )}
             </View>
 
-            <TouchableOpacity activeOpacity={0.7} onPress={handleMuteToggle} style={styles.playerBtn}>
+            <TouchableOpacity activeOpacity={1} onPress={handleMuteToggle} style={styles.playerBtn}>
               <Ionicons
                 name={playerIsMuted ? "volume-mute" : "volume-high"}
                 size={22}
@@ -488,7 +488,7 @@ export default function StationDetailsScreen() {
               />
             </TouchableOpacity>
 
-            <TouchableOpacity activeOpacity={0.7} onPress={handleAutoplayToggle} style={styles.playerBtn}>
+            <TouchableOpacity activeOpacity={1} onPress={handleAutoplayToggle} style={styles.playerBtn}>
               <Ionicons
                 name={isAutoplayEnabled ? "repeat" : "repeat-outline"}
                 size={22}
@@ -512,7 +512,7 @@ export default function StationDetailsScreen() {
               )}
             </View>
             {canManageStation && (
-              <TouchableOpacity activeOpacity={0.7} onPress={openAddSlotModal} style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+              <TouchableOpacity activeOpacity={1} onPress={openAddSlotModal} style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
                 <Ionicons name="options" size={18} color={colors.primary} />
                 <Text style={{ color: colors.primary, fontSize: moderateScale(13), fontWeight: "600" }}>Manage Music</Text>
               </TouchableOpacity>
@@ -539,7 +539,7 @@ export default function StationDetailsScreen() {
                 )}
                 {canManageStation && (
                   <TouchableOpacity
-                    activeOpacity={0.7}
+                    activeOpacity={1}
                     onPress={() => handleRemoveSlot(slot.id)}
                     disabled={removingSlotId === slot.id}
                     style={{ padding: 6 }}
@@ -563,14 +563,14 @@ export default function StationDetailsScreen() {
         {/* Owner actions */}
         {canManageStation && (
           <View style={styles.section}>
-            <TouchableOpacity activeOpacity={0.7}
+            <TouchableOpacity activeOpacity={1}
               style={[styles.actionBtn, { backgroundColor: colors.primary }]}
               onPress={handleEditOpen}
             >
               <Ionicons name="create-outline" size={16} color="#fff" />
               <Text style={styles.actionBtnText}>Edit Station</Text>
             </TouchableOpacity>
-            <TouchableOpacity activeOpacity={0.7}
+            <TouchableOpacity activeOpacity={1}
               style={[styles.actionBtn, { backgroundColor: station.is_active ? "#f59e0b" : "#22c55e", marginTop: 10 }]}
               onPress={handleToggleActive}
               disabled={saving}
@@ -630,10 +630,10 @@ export default function StationDetailsScreen() {
             <Text style={[styles.modalHelper, { color: colors.textSecondary }]}>Only admins can change this. Range: 5 to 120 minutes.</Text>
 
             <View style={styles.modalButtons}>
-              <TouchableOpacity activeOpacity={0.7} style={[styles.modalBtn, { borderColor: isDark ? "#334155" : "#E2E8F0" }]} onPress={() => setEditModalVisible(false)}>
+              <TouchableOpacity activeOpacity={1} style={[styles.modalBtn, { borderColor: isDark ? "#334155" : "#E2E8F0" }]} onPress={() => setEditModalVisible(false)}>
                 <Text style={{ color: colors.textSecondary, fontWeight: "600" }}>Cancel</Text>
               </TouchableOpacity>
-              <TouchableOpacity activeOpacity={0.7} style={[styles.modalBtn, { backgroundColor: colors.primary }]} onPress={handleEditSave} disabled={saving}>
+              <TouchableOpacity activeOpacity={1} style={[styles.modalBtn, { backgroundColor: colors.primary }]} onPress={handleEditSave} disabled={saving}>
                 {saving ? <ActivityIndicator color="#fff" size="small" /> : <Text style={{ color: "#fff", fontWeight: "700" }}>Save</Text>}
               </TouchableOpacity>
             </View>
@@ -695,7 +695,7 @@ export default function StationDetailsScreen() {
               </View>
             )}
 
-            <TouchableOpacity activeOpacity={0.7} style={[styles.modalBtn, { borderColor: isDark ? "#334155" : "#E2E8F0", marginTop: 16, alignSelf: "stretch" }]} onPress={() => setAddSlotModalVisible(false)}>
+            <TouchableOpacity activeOpacity={1} style={[styles.modalBtn, { borderColor: isDark ? "#334155" : "#E2E8F0", marginTop: 16, alignSelf: "stretch" }]} onPress={() => setAddSlotModalVisible(false)}>
               <Text style={{ color: colors.textSecondary, fontWeight: "600", textAlign: "center" }}>Done</Text>
             </TouchableOpacity>
           </View>

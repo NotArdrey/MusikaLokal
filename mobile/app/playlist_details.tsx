@@ -850,7 +850,7 @@ export default function PlaylistDetailsScreen() {
   const canReportPlaylist = !isOwner && !!userId && !isGuest;
   const reportHeaderAction = canReportPlaylist ? (
     <TouchableOpacity
-      activeOpacity={0.8}
+      activeOpacity={1}
       onPress={openReportModal}
       hitSlop={8}
       style={[
@@ -899,7 +899,7 @@ export default function PlaylistDetailsScreen() {
 
         {/* Play button */}
         <TouchableOpacity
-          activeOpacity={0.8}
+          activeOpacity={1}
           style={[styles.playBtn, { backgroundColor: colors.primary }]}
           onPress={() => void handlePlayTeaser()}
           disabled={previewLoading}
@@ -917,7 +917,7 @@ export default function PlaylistDetailsScreen() {
           <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
             <Text style={[styles.sectionTitle, { color: colors.text, marginBottom: 0 }]}>Tracks</Text>
             {isOwner && (
-              <TouchableOpacity activeOpacity={0.8} hitSlop={8} onPress={() => setAddTrackVisible(true)} style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+              <TouchableOpacity activeOpacity={1} hitSlop={8} onPress={() => setAddTrackVisible(true)} style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
                 <Ionicons name="add-circle-outline" size={18} color={colors.primary} />
                 <Text style={{ color: colors.primary, fontSize: moderateScale(13), fontWeight: "600" }}>Add Track</Text>
               </TouchableOpacity>
@@ -936,7 +936,7 @@ export default function PlaylistDetailsScreen() {
                 ) : null}
                 {item.external_link?.url ? (
                   <TouchableOpacity
-                    activeOpacity={0.8}
+                    activeOpacity={1}
                     hitSlop={8}
                     onPress={() => void handleOpenExternalLink(item.external_link, item.id)}
                     style={{ marginLeft: 10 }}
@@ -946,10 +946,10 @@ export default function PlaylistDetailsScreen() {
                 ) : null}
                 {isOwner && (
                   <View style={{ flexDirection: "row", alignItems: "center", marginLeft: 10, gap: 10 }}>
-                    <TouchableOpacity activeOpacity={0.8} hitSlop={8} onPress={() => openEditTrackModal(item)}>
+                    <TouchableOpacity activeOpacity={1} hitSlop={8} onPress={() => openEditTrackModal(item)}>
                       <Ionicons name="create-outline" size={18} color={colors.primary} />
                     </TouchableOpacity>
-                    <TouchableOpacity activeOpacity={0.8} hitSlop={8} onPress={() => handleRemoveItem(item.id)}>
+                    <TouchableOpacity activeOpacity={1} hitSlop={8} onPress={() => handleRemoveItem(item.id)}>
                       <Ionicons name="remove-circle-outline" size={20} color="#ef4444" />
                     </TouchableOpacity>
                   </View>
@@ -969,7 +969,7 @@ export default function PlaylistDetailsScreen() {
               {teaserAssets.map((asset: any) => (
                 <TouchableOpacity
                   key={asset.id}
-                  activeOpacity={asset.asset_type === "cover_art" ? 1 : 0.8}
+                  activeOpacity={1}
                   disabled={asset.asset_type === "cover_art"}
                   onPress={() => void handlePlayTeaser(asset)}
                   style={[styles.assetCard, { borderColor: colors.border }]}
@@ -996,7 +996,7 @@ export default function PlaylistDetailsScreen() {
             <Text style={[styles.sectionTitle, { color: colors.text }]}>Listen On</Text>
             <View style={styles.linksRow}>
               {externalLinks.map((link: any) => (
-                <TouchableOpacity activeOpacity={0.8}
+                <TouchableOpacity activeOpacity={1}
                   key={link.id}
                   onPress={() => void handleOpenExternalLink(link)}
                   style={[styles.linkChip, { borderColor: colors.border }]}
@@ -1013,14 +1013,14 @@ export default function PlaylistDetailsScreen() {
         {isOwner && (
           <View style={styles.section}>
             <View style={styles.ownerActions}>
-              <TouchableOpacity activeOpacity={0.8}
+              <TouchableOpacity activeOpacity={1}
                 style={[styles.actionBtn, { backgroundColor: colors.primary }]}
                 onPress={() => router.push({ pathname: "/create_playlist", params: { edit_id: playlist.id } })}
               >
                 <Ionicons name="create" size={16} color="#fff" />
                 <Text style={styles.actionBtnText}>Edit</Text>
               </TouchableOpacity>
-              <TouchableOpacity activeOpacity={0.8}
+              <TouchableOpacity activeOpacity={1}
                 style={[styles.actionBtn, { backgroundColor: "#ef4444" }]}
                 onPress={handleDelete}
               >
@@ -1078,7 +1078,7 @@ export default function PlaylistDetailsScreen() {
             />
 
             <TouchableOpacity
-              activeOpacity={0.8}
+              activeOpacity={1}
               style={[styles.uploadAudioBtn, { borderColor: colors.border, backgroundColor: colors.background }]}
               onPress={() => void handlePickTrackAudio()}
               disabled={addingTrack}
@@ -1094,7 +1094,7 @@ export default function PlaylistDetailsScreen() {
                 <Text style={[styles.audioFileChipText, { color: colors.text }]} numberOfLines={1}>
                   {newTrackAudioFile.name}
                 </Text>
-                <TouchableOpacity activeOpacity={0.7} onPress={() => setNewTrackAudioFile(null)}>
+                <TouchableOpacity activeOpacity={1} onPress={() => setNewTrackAudioFile(null)}>
                   <Ionicons name="close-circle" size={18} color={colors.textSecondary} />
                 </TouchableOpacity>
               </View>
@@ -1102,7 +1102,7 @@ export default function PlaylistDetailsScreen() {
 
             <View style={{ flexDirection: "row", gap: 10 }}>
               <TouchableOpacity
-                activeOpacity={0.8}
+                activeOpacity={1}
                 style={[styles.modalBtn, { backgroundColor: colors.border, flex: 1 }]}
                 onPress={resetAddTrackForm}
                 disabled={addingTrack}
@@ -1110,7 +1110,7 @@ export default function PlaylistDetailsScreen() {
                 <Text style={{ color: colors.text, fontWeight: "600", fontSize: moderateScale(14) }}>Cancel</Text>
               </TouchableOpacity>
               <TouchableOpacity
-                activeOpacity={0.8}
+                activeOpacity={1}
                 style={[styles.modalBtn, { backgroundColor: colors.primary, flex: 1 }]}
                 onPress={handleSaveTrack}
                 disabled={addingTrack}

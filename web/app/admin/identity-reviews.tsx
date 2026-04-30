@@ -90,7 +90,7 @@ const readErrorContextMessage = async (context: unknown): Promise<string | null>
   }
 };
 
-type Tab = 'dashboard' | 'users' | 'reports' | 'audit' | 'posts' | 'products' | 'projects';
+type Tab = 'dashboard' | 'users' | 'reports' | 'audit' | 'posts' | 'products';
 
 interface ManualIdentityReviewEntry {
   id: string;
@@ -122,7 +122,6 @@ const adminTabRoutes: Record<Tab, string> = {
   audit: '/admin/audit',
   posts: '/admin/posts',
   products: '/admin/products',
-  projects: '/admin/projects',
 };
 
 const tabItems: { key: Tab; label: string; icon: string }[] = [
@@ -132,7 +131,6 @@ const tabItems: { key: Tab; label: string; icon: string }[] = [
   { key: 'audit', label: 'Audit', icon: 'time-outline' },
   { key: 'posts', label: 'Posts', icon: 'newspaper-outline' },
   { key: 'products', label: 'Products', icon: 'bag-handle-outline' },
-  { key: 'projects', label: 'Projects', icon: 'people-circle-outline' },
 ];
 
 const formatDateTime = (value?: string | null) => {

@@ -72,7 +72,7 @@ export default function PlaylistSelectionSection({
 
         {onCreatePlaylist ? (
           <TouchableOpacity
-            activeOpacity={0.8}
+            activeOpacity={1}
             onPress={onCreatePlaylist}
             disabled={disabled}
             style={{
@@ -138,7 +138,7 @@ export default function PlaylistSelectionSection({
             return (
               <TouchableOpacity
                 key={playlistId}
-                activeOpacity={0.85}
+                activeOpacity={1}
                 disabled={disabled}
                 onPress={() => onTogglePlaylist(playlistId)}
                 style={{

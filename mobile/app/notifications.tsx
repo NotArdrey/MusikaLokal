@@ -520,7 +520,6 @@ export default function NotificationsScreen() {
                         void handleNotificationPress(item);
                     }
                 }}
-                activeOpacity={1}
             >
                 <View style={styles.notificationContent}>
                     <View style={styles.leftContent}>

@@ -2,7 +2,6 @@ import { Ionicons } from "@expo/vector-icons";
 import { router, useLocalSearchParams } from "expo-router";
 import React, { useCallback, useEffect, useState } from "react";
 import {
-  ActivityIndicator,
   Dimensions,
   ScrollView,
   StyleSheet,
@@ -275,7 +274,24 @@ export default function ProductDetailsScreen() {
               </View>
             )}
           </View>
-          <Text style={[styles.price, { color: colors.primary }]}>{formatPrice(displayPrice)}</Text>
+          <View style={styles.priceActionRow}>
+            <Text style={[styles.price, { color: colors.primary, flex: 1 }]}>{formatPrice(displayPrice)}</Text>
+            {!isSeller && (
+              <TouchableOpacity activeOpacity={1}
+                style={[
+                  styles.inlineMessageBtn,
+                  { backgroundColor: isSold ? (isDark ? "#334155" : "#CBD5E1") : colors.primary },
+                ]}
+                onPress={handleMessageSeller}
+                disabled={isSold}
+              >
+                <Ionicons name={isSold ? "checkmark-circle" : "chatbubble-ellipses"} size={17} color="#fff" />
+                <Text style={styles.inlineMessageBtnText} numberOfLines={1}>
+                  {isSold ? "Sold" : "Message Seller"}
+                </Text>
+              </TouchableOpacity>
+            )}
+          </View>
           <Text style={[styles.seller, { color: colors.textSecondary }]}>
             Listed by {product.seller_name || "Seller"}
           </Text>
@@ -401,26 +417,6 @@ export default function ProductDetailsScreen() {
         )}
       </ScrollView>
 
-      {/* Message seller button (not shown for seller) */}
-      {!isSeller && (
-        <View style={[styles.buyBar, { backgroundColor: colors.surface, borderTopColor: colors.border }]}>
-          <View>
-            <Text style={[styles.buyPrice, { color: colors.text }]}>{formatPrice(displayPrice)}</Text>
-            {selectedVariant && (
-              <Text style={[styles.buyVariant, { color: colors.textSecondary }]}>{selectedVariant.label || selectedVariant.sku}</Text>
-            )}
-          </View>
-          <TouchableOpacity activeOpacity={1}
-            style={[styles.buyBtn, { backgroundColor: isSold ? (isDark ? "#334155" : "#CBD5E1") : colors.primary }]}
-            onPress={handleMessageSeller}
-            disabled={isSold}
-          >
-            <Ionicons name={isSold ? "checkmark-circle" : "chatbubble-ellipses"} size={18} color="#fff" />
-            <Text style={styles.buyBtnText}>{isSold ? "Sold" : "Message Seller"}</Text>
-          </TouchableOpacity>
-        </View>
-      )}
-
       <ReportModal
         visible={showReportModal}
         onClose={() => setShowReportModal(false)}
@@ -449,7 +445,10 @@ const styles = StyleSheet.create({
   productTitle: { fontSize: moderateScale(20), fontWeight: "800" },
   statusPill: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 6, marginTop: 3 },
   statusPillText: { fontSize: moderateScale(11), fontWeight: "700" },
+  priceActionRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12, marginTop: 4 },
   price: { fontSize: moderateScale(22), fontWeight: "800", marginTop: 4 },
+  inlineMessageBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 7, paddingHorizontal: 14, paddingVertical: 11, borderRadius: 12, maxWidth: 188 },
+  inlineMessageBtnText: { color: "#fff", fontSize: moderateScale(13), fontWeight: "700", flexShrink: 1 },
   seller: { fontSize: moderateScale(13), marginTop: 4 },
   marketNote: { fontSize: moderateScale(12), marginTop: 8, lineHeight: 18 },
   section: { marginTop: 20 },
@@ -463,9 +462,4 @@ const styles = StyleSheet.create({
   primarySellerBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, paddingVertical: 12, borderRadius: 10 },
   primarySellerBtnText: { color: "#fff", fontSize: moderateScale(13), fontWeight: "700" },
   headerReportBtn: { width: 40, height: 40, borderRadius: 14, borderWidth: 1, alignItems: "center", justifyContent: "center" },
-  buyBar: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", padding: 16, paddingBottom: 24, borderTopWidth: 1 },
-  buyPrice: { fontSize: moderateScale(18), fontWeight: "700" },
-  buyVariant: { fontSize: moderateScale(11), marginTop: 2 },
-  buyBtn: { flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 24, paddingVertical: 14, borderRadius: 12 },
-  buyBtnText: { color: "#fff", fontSize: moderateScale(15), fontWeight: "700" },
 });

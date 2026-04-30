@@ -354,10 +354,7 @@ export default function MyVenueScreen() {
     return (
         <>
             <View style={[styles.flex1, { backgroundColor: colors.background }]}>
-                <Header
-                    title="My Venue"
-                    rightComponent={isMusicianView ? <View style={styles.headerSpacer} /> : undefined}
-                />
+                <Header title="My Venue" />
 
                 <ScrollView
                     showsVerticalScrollIndicator={false}
@@ -607,10 +604,6 @@ export default function MyVenueScreen() {
 const styles = StyleSheet.create({
     flex1: {
         flex: 1,
-    },
-    headerSpacer: {
-        width: 40,
-        height: 40,
     },
     scrollContent: {
         paddingHorizontal: 24,

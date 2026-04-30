@@ -384,7 +384,7 @@ E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:1519:// For musicia
 E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:1523:bookingId: item.id,
 E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:1524:bookingType: item.type_id,
 E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:1525:reviewerRole,
-E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:1526:// Keep venue owners on Manage Applications > Completed after review submit.
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:1526:// Keep venue owners on Activity > Completed after review submit.
 E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:1527:returnTab: userRole === "venue-owner" ? "Review" : activeTab,
 E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:1532:// Owner reviews the musician (user)
 E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:1536:// Musician reviews the studio

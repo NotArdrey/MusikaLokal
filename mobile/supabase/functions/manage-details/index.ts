@@ -8,8 +8,8 @@ const corsHeaders = {
     'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-supabase-client-platform',
 }
 
-type NormalizedReportTargetType = 'group' | 'studio' | 'gig' | 'profile' | 'product' | 'project' | 'playlist'
-type FavoriteTargetType = 'group' | 'studio' | 'gig' | 'profile' | 'project'
+type NormalizedReportTargetType = 'group' | 'studio' | 'gig' | 'profile' | 'product' | 'playlist'
+type FavoriteTargetType = 'group' | 'studio' | 'gig' | 'profile'
 
 const reportTargetTableMap: Record<NormalizedReportTargetType, string> = {
     group: 'groups',
@@ -17,7 +17,6 @@ const reportTargetTableMap: Record<NormalizedReportTargetType, string> = {
     gig: 'gigs',
     profile: 'profiles',
     product: 'products',
-    project: 'producer_projects',
     playlist: 'playlists',
 }
 
@@ -26,7 +25,6 @@ const favoriteTargetColumnMap: Record<FavoriteTargetType, string> = {
     studio: 'studio_id',
     gig: 'gig_id',
     profile: 'profile_id',
-    project: 'project_id',
 }
 
 const uuidPattern =
@@ -39,7 +37,6 @@ const normalizeReportTargetType = (rawType: unknown): NormalizedReportTargetType
 
     if (value === 'venue') return 'studio'
     if (value === 'artist' || value === 'user') return 'profile'
-    if (value === 'producer project' || value === 'producer_project') return 'project'
     if (value === 'music') return 'playlist'
     if (
         value === 'group' ||
@@ -47,7 +44,6 @@ const normalizeReportTargetType = (rawType: unknown): NormalizedReportTargetType
         value === 'gig' ||
         value === 'profile' ||
         value === 'product' ||
-        value === 'project' ||
         value === 'playlist'
     ) {
         return value
@@ -61,8 +57,7 @@ const normalizeFavoriteTargetType = (rawType: unknown): FavoriteTargetType | nul
 
     if (value === 'venue') return 'studio'
     if (value === 'artist' || value === 'user') return 'profile'
-    if (value === 'producer project' || value === 'producer_project') return 'project'
-    if (value === 'group' || value === 'studio' || value === 'gig' || value === 'profile' || value === 'project') {
+    if (value === 'group' || value === 'studio' || value === 'gig' || value === 'profile') {
         return value
     }
 

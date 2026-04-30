@@ -740,7 +740,7 @@ export default function FeedScreen() {
 
     try {
       // Primary queries with strict filters (matching Home)
-      const [groupsResult, studiosResult, gigsResult, artistsResult, projectsResult, teamsResult] = await Promise.all([
+      const [groupsResult, studiosResult, gigsResult, artistsResult, teamsResult] = await Promise.all([
         supabase
           .from("groups_with_stats")
           .select("*")
@@ -767,12 +767,6 @@ export default function FeedScreen() {
           .order("created_at", { ascending: false })
           .limit(24),
         supabase
-          .from("producer_projects_with_summary")
-          .select("*")
-          .eq("status", "published")
-          .order("created_at", { ascending: false })
-          .limit(24),
-        supabase
           .from("production_teams")
           .select("id, owner_id, name, description, logo_url, created_at, updated_at")
           .order("created_at", { ascending: false })
@@ -782,7 +776,7 @@ export default function FeedScreen() {
 
       // If strict queries all return empty, try relaxed queries (drop permit_status)
       const strictTotal = (groupsResult.data || []).length + (studiosResult.data || []).length +
-        (gigsResult.data || []).length + (artistsResult.data || []).length + (projectsResult.data || []).length + (teamsResult.data || []).length;
+        (gigsResult.data || []).length + (artistsResult.data || []).length + (teamsResult.data || []).length;
 
       let relaxedStudios: any[] = [];
       let relaxedGigs: any[] = [];
@@ -819,7 +813,6 @@ export default function FeedScreen() {
       const finalStudios = (studiosResult.data || []).length > 0 ? studiosResult.data! : relaxedStudios;
       const finalGigs = (gigsResult.data || []).length > 0 ? gigsResult.data! : relaxedGigs;
       const finalArtists = (artistsResult.data || []).length > 0 ? artistsResult.data! : relaxedProfiles;
-      const finalProjects = projectsResult.data || [];
       const finalTeams = teamsResult.data || [];
 
       const artistIds = finalArtists
@@ -966,25 +959,6 @@ export default function FeedScreen() {
         social_follow_target_type: "profile",
       }));
 
-      const normalizedProjects = finalProjects.map((item: any) => ({
-        id: item.id,
-        type: "Project",
-        name: item.title || "Untitled Project",
-        image: item.cover_image_url || null,
-        images: item.cover_image_url ? [item.cover_image_url] : [],
-        rating: 0,
-        review_count: 0,
-        location: item.location || "",
-        genre: item.genre || "",
-        created_at: item.created_at || null,
-        updated_at: item.updated_at || null,
-        owner_id: item.owner_id || null,
-        owner_name: item.owner_name || null,
-        cover_image_url: item.cover_image_url || null,
-        social_follow_target_id: item.owner_id || null,
-        social_follow_target_type: "profile",
-      }));
-
       const normalizedTeams = finalTeams.map((item: any) => {
         const owner = teamOwnerById.get(item.owner_id);
         const primaryImage = item.logo_url || owner?.avatar_url || null;
@@ -1015,7 +989,6 @@ export default function FeedScreen() {
         ...normalizedStudios,
         ...normalizedGigs,
         ...normalizedArtists,
-        ...normalizedProjects,
         ...normalizedTeams,
       ];
 
@@ -1825,11 +1798,6 @@ export default function FeedScreen() {
             item={post}
             onPress={(item: any) => {
               const nextId = item?.id || post.id;
-              if (item?.type === "Project" && nextId) {
-                router.push({ pathname: "/producer_project_details", params: { project_id: nextId } });
-                return;
-              }
-
               if (item?.type === "Production" && nextId) {
                 openProductionTeamDetails(nextId);
                 return;
@@ -2034,7 +2002,7 @@ export default function FeedScreen() {
                 return (
                   <TouchableOpacity
                     key={st.id}
-                    activeOpacity={0.9}
+                    activeOpacity={1}
                     onPress={() => void handleLiveStationPress(st)}
                     style={[
                       styles.radioCard,
@@ -2089,7 +2057,7 @@ export default function FeedScreen() {
 
                       {creatorCtaLabel ? (
                         <TouchableOpacity
-                          activeOpacity={0.8}
+                          activeOpacity={1}
                           onPress={(event) => {
                             event.stopPropagation();
                             openLiveStationCreator(st);

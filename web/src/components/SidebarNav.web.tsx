@@ -639,7 +639,7 @@ export default function SidebarNav() {
                             {navItems.map((item) => {
                                 const isActive = activeTab === item.id;
                                 return (
-                                    <TouchableOpacity
+                                    <TouchableOpacity activeOpacity={1}
                                         key={item.id}
                                         style={[
                                             styles.topNavItem,
@@ -676,7 +676,7 @@ export default function SidebarNav() {
                         <View style={styles.topActions}>
                             {!isGuest && (
                                 <View style={styles.topCommActions}>
-                                    <TouchableOpacity
+                                    <TouchableOpacity activeOpacity={1}
                                         style={[
                                             styles.topIconButton,
                                             {
@@ -689,7 +689,7 @@ export default function SidebarNav() {
                                         <Ionicons name="chatbubbles-outline" size={19} color={colors.textSecondary} />
                                     </TouchableOpacity>
 
-                                    <TouchableOpacity
+                                    <TouchableOpacity activeOpacity={1}
                                         style={[
                                             styles.topIconButton,
                                             {
@@ -707,7 +707,7 @@ export default function SidebarNav() {
                                 </View>
                             )}
 
-                            <TouchableOpacity
+                            <TouchableOpacity activeOpacity={1}
                                 style={[styles.avatarButton, { borderColor: colors.border }]}
                                 onPress={() => router.replace('/profile')}
                             >
@@ -717,7 +717,7 @@ export default function SidebarNav() {
                                 />
                             </TouchableOpacity>
 
-                            <TouchableOpacity style={styles.topLogoutButton} onPress={handleLogout}>
+                            <TouchableOpacity activeOpacity={1} style={styles.topLogoutButton} onPress={handleLogout}>
                                 <Ionicons name="log-out-outline" size={20} color={colors.textSecondary} />
                                 <Text style={[styles.topLogoutLabel, { color: colors.textSecondary }]}>
                                     {isGuest ? 'Sign In' : 'Log Out'}
@@ -792,7 +792,7 @@ export default function SidebarNav() {
 
                                         return (
                                             <TouchableOpacity
-                                                activeOpacity={isTransfer ? 1 : 0.78}
+                                                activeOpacity={1}
                                                 key={notification.id}
                                                 style={[
                                                     styles.notificationItem,
@@ -911,7 +911,7 @@ export default function SidebarNav() {
                                                 styles.navItemMain,
                                             ]}
                                             onPress={handleUsersHeaderPress}
-                                            activeOpacity={0.8}
+                                            activeOpacity={1}
                                             accessibilityRole="button"
                                             accessibilityLabel={showUsersSubmenu ? 'Close users menu' : 'Open users menu'}
                                             accessibilityState={{ expanded: showUsersSubmenu }}
@@ -941,7 +941,7 @@ export default function SidebarNav() {
                                                 { backgroundColor: 'transparent' },
                                             ]}
                                             onPress={toggleUsersMenu}
-                                            activeOpacity={0.8}
+                                            activeOpacity={1}
                                             accessibilityRole="button"
                                             accessibilityLabel="Toggle users menu"
                                             accessibilityState={{ expanded: showUsersSubmenu }}
@@ -986,7 +986,7 @@ export default function SidebarNav() {
                                                         },
                                                     ]}
                                                     onPress={() => handleUsersNavigation(subItem.key)}
-                                                    activeOpacity={0.85}
+                                                    activeOpacity={1}
                                                 >
                                                     <View style={styles.subNavItemMain}>
                                                         <Ionicons
@@ -1049,7 +1049,7 @@ export default function SidebarNav() {
                                                 styles.navItemMain,
                                             ]}
                                             onPress={handleReportsHeaderPress}
-                                            activeOpacity={0.8}
+                                            activeOpacity={1}
                                             accessibilityRole="button"
                                             accessibilityLabel={showReportsSubmenu ? 'Close reports menu' : 'Open reports menu'}
                                             accessibilityState={{ expanded: showReportsSubmenu }}
@@ -1079,7 +1079,7 @@ export default function SidebarNav() {
                                                 { backgroundColor: 'transparent' },
                                             ]}
                                             onPress={toggleReportsMenu}
-                                            activeOpacity={0.8}
+                                            activeOpacity={1}
                                             accessibilityRole="button"
                                             accessibilityLabel="Toggle reports menu"
                                             accessibilityState={{ expanded: showReportsSubmenu }}
@@ -1124,7 +1124,7 @@ export default function SidebarNav() {
                                                         },
                                                     ]}
                                                     onPress={() => handleReportsNavigation(subItem.key)}
-                                                    activeOpacity={0.85}
+                                                    activeOpacity={1}
                                                 >
                                                     <View style={styles.subNavItemMain}>
                                                         <Ionicons
@@ -1169,7 +1169,7 @@ export default function SidebarNav() {
                         }
 
                         return (
-                            <TouchableOpacity
+                            <TouchableOpacity activeOpacity={1}
                                 key={item.id}
                                 style={[
                                     styles.navItem,
@@ -1202,7 +1202,7 @@ export default function SidebarNav() {
                 </ScrollView>
 
                 <View style={[styles.footer, { borderTopColor: colors.border }]}>
-                    <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
+                    <TouchableOpacity activeOpacity={1} style={styles.logoutButton} onPress={handleLogout}>
                         <Ionicons name="log-out-outline" size={22} color={colors.textSecondary} style={{ width: 30 }} />
                         <Text style={[styles.navLabel, { color: colors.textSecondary }]}>
                             {isGuest ? 'Sign In' : 'Log Out'}

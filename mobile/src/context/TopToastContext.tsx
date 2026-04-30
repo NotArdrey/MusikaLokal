@@ -1,4 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
+import { Portal } from "@gorhom/portal";
 import React, {
   createContext,
   useCallback,
@@ -238,63 +239,66 @@ export function TopToastProvider({ children }: { children: React.ReactNode }) {
     <TopToastContext.Provider value={value}>
       {children}
 
-      <View pointerEvents="box-none" style={StyleSheet.absoluteFillObject}>
-        {activeToast && config ? (
-          <Animated.View
-            style={[
-              styles.toast,
-              {
-                top: topOffset,
-                transform: [{ translateY }],
-                opacity,
-                backgroundColor: isDark
-                  ? config.darkBackground
-                  : config.lightBackground,
-                borderColor: isDark ? config.darkBorder : config.lightBorder,
-              },
-            ]}
-          >
-            <Pressable
-              onPress={hideToast}
-              style={styles.touchableArea}
-              accessibilityRole="alert"
-              accessibilityLabel={`${activeToast.title}. ${activeToast.message}`}
+      <Portal name="top-toast">
+        <View pointerEvents="box-none" style={StyleSheet.absoluteFillObject}>
+          {activeToast && config ? (
+            <Animated.View
+              pointerEvents="box-none"
+              style={[
+                styles.toast,
+                {
+                  top: topOffset,
+                  transform: [{ translateY }],
+                  opacity,
+                  backgroundColor: isDark
+                    ? config.darkBackground
+                    : config.lightBackground,
+                  borderColor: isDark ? config.darkBorder : config.lightBorder,
+                },
+              ]}
             >
-              <View
-                style={[
-                  styles.iconWrap,
-                  {
-                    backgroundColor: isDark
-                      ? config.darkIconBg
-                      : config.lightIconBg,
-                  },
-                ]}
+              <Pressable
+                onPress={hideToast}
+                style={styles.touchableArea}
+                accessibilityRole="alert"
+                accessibilityLabel={`${activeToast.title}. ${activeToast.message}`}
               >
-                <Ionicons name={config.icon as any} size={18} color={config.accent} />
-              </View>
-
-              <View style={styles.textContainer}>
-                <Text style={[styles.title, { color: colors.text }]}>
-                  {activeToast.title}
-                </Text>
-                <Text
-                  style={[styles.message, { color: colors.textSecondary }]}
-                  numberOfLines={3}
+                <View
+                  style={[
+                    styles.iconWrap,
+                    {
+                      backgroundColor: isDark
+                        ? config.darkIconBg
+                        : config.lightIconBg,
+                    },
+                  ]}
                 >
-                  {activeToast.message}
-                </Text>
-              </View>
+                  <Ionicons name={config.icon as any} size={18} color={config.accent} />
+                </View>
 
-              <Ionicons
-                name="close"
-                size={16}
-                color={colors.textSecondary}
-                style={styles.closeIcon}
-              />
-            </Pressable>
-          </Animated.View>
-        ) : null}
-      </View>
+                <View style={styles.textContainer}>
+                  <Text style={[styles.title, { color: colors.text }]}>
+                    {activeToast.title}
+                  </Text>
+                  <Text
+                    style={[styles.message, { color: colors.textSecondary }]}
+                    numberOfLines={3}
+                  >
+                    {activeToast.message}
+                  </Text>
+                </View>
+
+                <Ionicons
+                  name="close"
+                  size={16}
+                  color={colors.textSecondary}
+                  style={styles.closeIcon}
+                />
+              </Pressable>
+            </Animated.View>
+          ) : null}
+        </View>
+      </Portal>
     </TopToastContext.Provider>
   );
 }

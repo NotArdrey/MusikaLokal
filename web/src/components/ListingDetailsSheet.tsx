@@ -2554,7 +2554,13 @@ const ListingDetailsSheet = forwardRef<
   setRequestDocumentFile(null);
   setRequestDocumentUrl("");
         setRequestVideoUrl("");
-        showSheetAlert("success", "Request Sent", "Your structured request has been sent.");
+        showSheetAlert(
+          "success",
+          request.requestKind === "invite" ? "Invite Sent" : "Application Sent",
+          request.requestKind === "invite"
+            ? `Your invite to ${request.receiverEntityName || "this performer"} has been sent.`
+            : "Your application has been sent.",
+        );
       } catch (error) {
         console.error("Error creating listing request:", error);
         const errorMessage =
@@ -2657,7 +2663,7 @@ const ListingDetailsSheet = forwardRef<
         return (
           <TouchableOpacity
             key={item.id}
-            activeOpacity={0.85}
+            activeOpacity={1}
             onPress={() => onSelect(item.id)}
             style={{
               flexDirection: "row",
@@ -2773,7 +2779,7 @@ const ListingDetailsSheet = forwardRef<
           <Text style={[styles.description, { color: colors.textSecondary }]}>Select one of your production teams and send a structured invite with a pitch, invite context, and a required contract upload.</Text>
           {productionTeams.length > 0 ? renderRequestSelectorChips(productionTeams, selectedProductionTeamId, setSelectedProductionTeamId, "people-outline") : (
             <TouchableOpacity
-              activeOpacity={0.85}
+              activeOpacity={1}
               onPress={() => router.push("/my_production" as any)}
               style={[styles.primaryBtn, { backgroundColor: colors.primary, marginTop: 12 }]}
             >
@@ -2787,7 +2793,7 @@ const ListingDetailsSheet = forwardRef<
             contextPlaceholder: "Share the project scope, schedule, and the kind of collaboration you want.",
           })}
           <TouchableOpacity
-            activeOpacity={0.85}
+            activeOpacity={1}
             onPress={handleInviteGroupToTeam}
             disabled={isSendingRequest || loadingProductionTeams}
             style={[styles.primaryBtn, { backgroundColor: colors.primary, marginTop: 12 }]}
@@ -2805,7 +2811,7 @@ const ListingDetailsSheet = forwardRef<
           <Text style={[styles.description, { color: colors.textSecondary }]}>Choose a team and send a structured application with a pitch, slot context, CV upload, and video link.</Text>
           {productionTeams.length > 0 ? renderRequestSelectorChips(productionTeams, selectedProductionTeamId, setSelectedProductionTeamId, "people-outline") : (
             <TouchableOpacity
-              activeOpacity={0.85}
+              activeOpacity={1}
               onPress={() => router.push("/my_production" as any)}
               style={[styles.primaryBtn, { backgroundColor: colors.primary, marginTop: 12 }]}
             >
@@ -2820,7 +2826,7 @@ const ListingDetailsSheet = forwardRef<
             showSlotSelector: true,
           })}
           <TouchableOpacity
-            activeOpacity={0.85}
+            activeOpacity={1}
             onPress={handleApplyTeamToVenue}
             disabled={isSendingRequest || loadingProductionTeams}
             style={[styles.primaryBtn, { backgroundColor: colors.primary, marginTop: 12 }]}

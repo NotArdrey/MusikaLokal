@@ -285,7 +285,7 @@ export default function GroupDetailsScreen() {
               {favoriteCount} bookmarked
             </Text>
             {hasValidCoordinates(group?.latitude, group?.longitude) && (
-              <TouchableOpacity
+              <TouchableOpacity activeOpacity={1}
                 style={[styles.navigatePill, { backgroundColor: colors.primary }]}
                 onPress={handleNavigate}
               >

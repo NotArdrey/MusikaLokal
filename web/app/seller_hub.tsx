@@ -208,7 +208,7 @@ export default function SellerHubScreen() {
   const renderProducts = () => (
     <View style={{ flex: 1 }}>
       <View style={{ paddingHorizontal: 14, paddingTop: 12 }}>
-        <TouchableOpacity style={[styles.addBtn, { backgroundColor: colors.primary }]} onPress={() => setShowAddProduct(true)}>
+        <TouchableOpacity activeOpacity={1} style={[styles.addBtn, { backgroundColor: colors.primary }]} onPress={() => setShowAddProduct(true)}>
           <Ionicons name="add" size={20} color="#fff" /><Text style={{ color: "#fff", fontWeight: "700", marginLeft: 6 }}>Add Product</Text>
         </TouchableOpacity>
       </View>
@@ -219,7 +219,7 @@ export default function SellerHubScreen() {
         onRefresh={onRefresh}
         contentContainerStyle={{ paddingHorizontal: 14, paddingBottom: 100 }}
         renderItem={({ item }) => (
-          <TouchableOpacity
+          <TouchableOpacity activeOpacity={1}
             style={[styles.productRow, { backgroundColor: cardBg, borderColor: borderCol }]}
             onPress={() => router.push({ pathname: "/product_details", params: { product_id: item.id } })}
           >
@@ -241,7 +241,7 @@ export default function SellerHubScreen() {
                 </Text>
               </View>
               {item.status === "draft" && (
-                <TouchableOpacity style={{ marginTop: 6 }} onPress={() => handlePublish(item.id)}>
+                <TouchableOpacity activeOpacity={1} style={{ marginTop: 6 }} onPress={() => handlePublish(item.id)}>
                   <Text style={{ color: colors.primary, fontSize: 11, fontFamily: "Poppins_600SemiBold" }}>Publish</Text>
                 </TouchableOpacity>
               )}
@@ -266,7 +266,7 @@ export default function SellerHubScreen() {
       onRefresh={onRefresh}
       contentContainerStyle={{ paddingHorizontal: 14, paddingBottom: 100 }}
       renderItem={({ item }) => (
-        <TouchableOpacity
+        <TouchableOpacity activeOpacity={1}
           style={[styles.orderCard, { backgroundColor: cardBg, borderColor: borderCol }]}
         >
           <View style={styles.orderHeader}>
@@ -306,7 +306,7 @@ export default function SellerHubScreen() {
         <View style={[styles.pageFrame, { maxWidth: frameMaxWidth, paddingHorizontal: framePad }]}>
           <View style={[styles.tabs, { borderColor: panelBorder, backgroundColor: panelBg }]}>
             {(["dashboard", "products", "orders"] as Tab[]).map((t) => (
-              <TouchableOpacity
+              <TouchableOpacity activeOpacity={1}
                 key={t}
                 onPress={() => setTab(t)}
                 style={[
@@ -339,7 +339,7 @@ export default function SellerHubScreen() {
           <View style={[styles.modalBox, { backgroundColor: cardBg }]}>
             <View style={styles.modalHeader}>
               <Text style={{ color: colors.text, fontSize: moderateScale(17), fontWeight: "700" }}>Add Product</Text>
-              <TouchableOpacity onPress={() => setShowAddProduct(false)}><Ionicons name="close" size={24} color={colors.text} /></TouchableOpacity>
+              <TouchableOpacity activeOpacity={1} onPress={() => setShowAddProduct(false)}><Ionicons name="close" size={24} color={colors.text} /></TouchableOpacity>
             </View>
             <Text style={{ color: colors.text, fontSize: 13, fontWeight: "600", marginBottom: 4 }}>Title *</Text>
             <TextInput style={[styles.input, { color: colors.text, borderColor: borderCol }]} value={productTitle} onChangeText={setProductTitle} placeholder="Product name" placeholderTextColor={colors.textSecondary} maxLength={100} />
@@ -365,12 +365,12 @@ export default function SellerHubScreen() {
             <Text style={{ color: colors.text, fontSize: 13, fontWeight: "600", marginBottom: 8, marginTop: 10 }}>Type</Text>
             <View style={{ flexDirection: "row", gap: 10, marginBottom: 20 }}>
               {(["physical", "digital"] as const).map((t) => (
-                <TouchableOpacity key={t} onPress={() => setProductType(t)} style={[styles.typeBtn, { backgroundColor: productType === t ? colors.primary : "transparent", borderColor: productType === t ? colors.primary : borderCol }]}>
+                <TouchableOpacity activeOpacity={1} key={t} onPress={() => setProductType(t)} style={[styles.typeBtn, { backgroundColor: productType === t ? colors.primary : "transparent", borderColor: productType === t ? colors.primary : borderCol }]}>
                   <Text style={{ color: productType === t ? "#fff" : colors.text, textTransform: "capitalize" }}>{t}</Text>
                 </TouchableOpacity>
               ))}
             </View>
-            <TouchableOpacity style={[styles.submitBtn, { backgroundColor: colors.primary, opacity: submitting ? 0.6 : 1 }]} onPress={handleAddProduct} disabled={submitting}>
+            <TouchableOpacity activeOpacity={1} style={[styles.submitBtn, { backgroundColor: colors.primary, opacity: submitting ? 0.6 : 1 }]} onPress={handleAddProduct} disabled={submitting}>
               {submitting ? <ActivityIndicator size="small" color="#fff" /> : <Text style={{ color: "#fff", fontWeight: "700" }}>Create Product</Text>}
             </TouchableOpacity>
           </View>

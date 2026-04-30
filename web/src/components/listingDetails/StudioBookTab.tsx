@@ -1819,7 +1819,7 @@ const StudioBookTab = ({
                         showAlert("error", "Booking Error", errorMsg);
                       }
                     } else if (errors.length > 0) {
-                      showAlert("warning", "Partial Success", `${results.length} booking(s) created successfully, but ${errors.length} failed. Please check the Bookings page.`);
+                      showAlert("warning", "Partial Success", `${results.length} booking(s) created successfully, but ${errors.length} failed. Please check the Activity page.`);
                       setBookings([]);
                       setSelectedTimeSlots([]);
                       setBookingNotes("");

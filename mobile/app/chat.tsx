@@ -23,7 +23,6 @@ export default function ChatPage() {
         studioId?: string;
         studioBookingId?: string;
         gigApplicationId?: string;
-        producerProjectId?: string;
         // Group chat params
         isGroupChat?: string;
         groupChatId?: string;
@@ -65,7 +64,6 @@ export default function ChatPage() {
                     studioId: params.studioId,
                     studioBookingId: params.studioBookingId,
                     gigApplicationId: params.gigApplicationId,
-                    producerProjectId: params.producerProjectId,
                 });
 
                 if (conversation) {

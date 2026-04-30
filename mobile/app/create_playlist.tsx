@@ -20,6 +20,7 @@ import { useAuth } from "../src/context/AuthContext";
 import { showTopToast } from "../src/context/TopToastContext";
 import { useTheme } from "../src/context/ThemeContext";
 import {
+  ensurePlaylistAudioPassesCopyrightScreening,
   pickPlaylistAudioFile,
   uploadPlaylistAudioFile,
   type PlaylistAudioFile,
@@ -62,6 +63,24 @@ type PlaylistAlert = {
     onPress?: () => void;
     style?: "default" | "cancel" | "destructive";
   }[];
+};
+
+const getFriendlyUploadErrorMessage = (error: any) => {
+  const message = typeof error?.message === "string" ? error.message : "";
+  const normalizedMessage = message.toLowerCase();
+
+  if (
+    normalizedMessage.includes("different document picking in progress") ||
+    normalizedMessage.includes("document picking in progress")
+  ) {
+    return "Another file picker is already open. Please finish or close it, then tap Upload MP3 again.";
+  }
+
+  if (normalizedMessage.includes("cancel") || normalizedMessage.includes("dismiss")) {
+    return "No file was selected. Tap Upload MP3 when you're ready to choose a track.";
+  }
+
+  return message || "Please choose an MP3 file that is 5 minutes or less.";
 };
 
 export default function CreatePlaylistScreen() {
@@ -199,12 +218,13 @@ export default function CreatePlaylistScreen() {
       const audioFile = await pickPlaylistAudioFile();
       if (!audioFile) return;
 
+      await ensurePlaylistAudioPassesCopyrightScreening(audioFile);
       setTrackAudioFile(trackId, audioFile);
     } catch (error: any) {
       setAlert({
         type: "warning",
-        title: "Upload Feedback",
-        message: error?.message || "Only MP3 audio files up to 5 minutes are allowed.",
+        title: "Upload MP3",
+        message: getFriendlyUploadErrorMessage(error),
         forceModal: true,
       });
     }
@@ -442,7 +462,7 @@ export default function CreatePlaylistScreen() {
             <View style={styles.sectionHeader}>
               <Text style={[styles.label, styles.sectionLabel, { color: colors.text }]}>Musics</Text>
               <TouchableOpacity
-                activeOpacity={0.8}
+                activeOpacity={1}
                 style={[styles.addTrackBtn, { backgroundColor: colors.primary + "18", borderColor: colors.primary + "30" }]}
                 onPress={addTrackDraft}
               >
@@ -463,7 +483,7 @@ export default function CreatePlaylistScreen() {
                 <View key={track.id} style={[styles.trackCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
                   <View style={styles.trackCardHeader}>
                     <Text style={[styles.trackCardTitle, { color: colors.text }]}>Music {index + 1}</Text>
-                    <TouchableOpacity activeOpacity={0.7} onPress={() => removeTrackDraft(track.id)} style={styles.trackRemoveBtn}>
+                    <TouchableOpacity activeOpacity={1} onPress={() => removeTrackDraft(track.id)} style={styles.trackRemoveBtn}>
                       <Ionicons name="trash-outline" size={16} color="#ef4444" />
                     </TouchableOpacity>
                   </View>
@@ -483,7 +503,7 @@ export default function CreatePlaylistScreen() {
                     onChangeText={(value) => updateTrackDraft(track.id, "artist_name", value)}
                   />
                   <TouchableOpacity
-                    activeOpacity={0.8}
+                    activeOpacity={1}
                     style={[styles.audioPickerBtn, { borderColor: colors.border, backgroundColor: colors.background }]}
                     onPress={() => void handlePickTrackAudio(track.id)}
                   >
@@ -499,7 +519,7 @@ export default function CreatePlaylistScreen() {
                       <Text style={[styles.audioFileChipText, { color: colors.text }]} numberOfLines={1}>
                         {track.audio_file.name}
                       </Text>
-                      <TouchableOpacity activeOpacity={0.7} onPress={() => setTrackAudioFile(track.id, null)}>
+                      <TouchableOpacity activeOpacity={1} onPress={() => setTrackAudioFile(track.id, null)}>
                         <Ionicons name="close-circle" size={18} color={colors.textSecondary} />
                       </TouchableOpacity>
                     </View>
@@ -515,7 +535,7 @@ export default function CreatePlaylistScreen() {
           </View>
         )}
 
-        <TouchableOpacity activeOpacity={0.85}
+        <TouchableOpacity activeOpacity={1}
           style={[styles.saveBtn, { backgroundColor: colors.primary, opacity: saving || authLoading ? 0.6 : 1 }]}
           onPress={handleSave}
           disabled={saving || authLoading}

@@ -118,7 +118,7 @@ export default function OrdersScreen() {
   };
 
   const renderOrder = (item: any, isSelling = false) => (
-    <TouchableOpacity
+    <TouchableOpacity activeOpacity={1}
       key={item.id}
       style={[styles.orderCard, { backgroundColor: cardBg, borderColor: borderCol }]}
     >
@@ -161,7 +161,7 @@ export default function OrdersScreen() {
           {tabs.length > 1 && (
             <View style={[styles.tabs, { borderColor: panelBorder, backgroundColor: panelBg }]}>
               {tabs.map((t) => (
-                <TouchableOpacity
+                <TouchableOpacity activeOpacity={1}
                   key={t.key}
                   onPress={() => setTab(t.key)}
                   style={[

@@ -25,13 +25,12 @@ const debugLog = (..._args: unknown[]) => { };
 
 const getFavoriteTargetType = (
   listingType?: string,
-): "group" | "studio" | "gig" | "profile" | "project" | null => {
+): "group" | "studio" | "gig" | "profile" | null => {
   const normalized = (listingType || "").toLowerCase();
   if (normalized === "group") return "group";
   if (normalized === "artist" || normalized === "musician") return "profile";
   if (normalized === "studio" || normalized === "venue") return "studio";
   if (normalized === "gig") return "gig";
-  if (normalized === "project" || normalized === "producer project") return "project";
   return null;
 };
 
@@ -218,9 +217,6 @@ const ListingCard: React.FC<ListingCardProps> = ({
     } else if (normalizedType === "Production") {
       nextBadgeLabel = "Production Team";
       nextBadgeColor = "#F97316";
-    } else if (normalizedType === "Project") {
-      nextBadgeLabel = "Producer Project";
-      nextBadgeColor = "#6366F1";
     } else {
       nextBadgeLabel = normalizedType;
       nextBadgeColor = "#7C3AED";
@@ -301,7 +297,7 @@ const ListingCard: React.FC<ListingCardProps> = ({
         showTopToast({
           type: "info",
           title: "Bookmark unavailable",
-          message: "Bookmarking is currently available for artists, groups, studios, gigs, and producer projects.",
+          message: "Bookmarking is currently available for artists, groups, studios, and gigs.",
         });
         return;
       }

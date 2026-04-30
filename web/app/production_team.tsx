@@ -280,7 +280,7 @@ export default function ProductionTeamScreen() {
           <View style={styles.sectionHeader}>
             <Text style={[styles.sectionTitle, { color: colors.text }]}>Members</Text>
             {canManage && (
-              <TouchableOpacity
+              <TouchableOpacity activeOpacity={1}
                 onPress={() => setAddMemberModalVisible(true)}
                 style={[styles.addBtn, { backgroundColor: colors.primary }]}
               >
@@ -322,7 +322,7 @@ export default function ProductionTeamScreen() {
                     </Text>
                   </View>
                   {canManage && member.role !== "owner" && member.user_id !== userId && (
-                    <TouchableOpacity
+                    <TouchableOpacity activeOpacity={1}
                       onPress={() => handleRemoveMember(member.user_id)}
                       style={styles.removeBtn}
                     >
@@ -335,7 +335,7 @@ export default function ProductionTeamScreen() {
           )}
 
           {/* Back button */}
-          <TouchableOpacity
+          <TouchableOpacity activeOpacity={1}
             style={[styles.backBtn, { borderColor: colors.border }]}
             onPress={closeTeamDetail}
           >
@@ -368,7 +368,7 @@ export default function ProductionTeamScreen() {
             <Text style={[styles.inputLabel, { color: colors.text, marginTop: 12 }]}>Role</Text>
             <View style={styles.roleSelector}>
               {(["member", "manager"] as const).map((r) => (
-                <TouchableOpacity
+                <TouchableOpacity activeOpacity={1}
                   key={r}
                   onPress={() => setMemberRole(r)}
                   style={[
@@ -391,7 +391,7 @@ export default function ProductionTeamScreen() {
               ))}
             </View>
 
-            <TouchableOpacity
+            <TouchableOpacity activeOpacity={1}
               onPress={handleAddMember}
               disabled={addingMember}
               style={[styles.submitBtn, { backgroundColor: colors.primary, opacity: addingMember ? 0.6 : 1 }]}
@@ -403,7 +403,7 @@ export default function ProductionTeamScreen() {
               )}
             </TouchableOpacity>
           </View>
-              <TouchableOpacity onPress={() => setAddMemberModalVisible(false)} style={{ marginTop: 8, alignItems: "center" }}>
+              <TouchableOpacity activeOpacity={1} onPress={() => setAddMemberModalVisible(false)} style={{ marginTop: 8, alignItems: "center" }}>
                 <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_500Medium" }}>Close</Text>
               </TouchableOpacity>
             </View>
@@ -452,7 +452,7 @@ export default function ProductionTeamScreen() {
           </View>
         ) : (
           teams.map((team) => (
-            <TouchableOpacity
+            <TouchableOpacity activeOpacity={1}
               key={team.id}
               onPress={() => openTeamDetail(team)}
               style={[styles.teamCard, { backgroundColor: colors.card, borderColor: colors.border }]}
@@ -483,7 +483,7 @@ export default function ProductionTeamScreen() {
       </ScrollView>
 
       {/* FAB to create team */}
-      <TouchableOpacity
+      <TouchableOpacity activeOpacity={1}
         style={[styles.fab, { backgroundColor: colors.primary }]}
         onPress={() => setCreateModalVisible(true)}
       >
@@ -521,7 +521,7 @@ export default function ProductionTeamScreen() {
             numberOfLines={3}
           />
 
-          <TouchableOpacity
+          <TouchableOpacity activeOpacity={1}
             onPress={handleCreateTeam}
             disabled={creating}
             style={[styles.submitBtn, { backgroundColor: colors.primary, opacity: creating ? 0.6 : 1 }]}
@@ -533,7 +533,7 @@ export default function ProductionTeamScreen() {
             )}
           </TouchableOpacity>
         </View>
-            <TouchableOpacity onPress={() => setCreateModalVisible(false)} style={{ marginTop: 8, alignItems: "center" }}>
+            <TouchableOpacity activeOpacity={1} onPress={() => setCreateModalVisible(false)} style={{ marginTop: 8, alignItems: "center" }}>
               <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_500Medium" }}>Close</Text>
             </TouchableOpacity>
           </View>

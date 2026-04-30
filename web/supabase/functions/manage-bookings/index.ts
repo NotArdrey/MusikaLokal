@@ -2,6 +2,15 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 // @ts-ignore
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import {
+  buildNotificationRouteMeta,
+  withNotificationRouteMeta,
+} from "../_shared/notificationRoutes.ts";
+import {
+  buildGigApplicationAudienceMeta,
+  resolveGigApplicationAudience,
+  type GigApplicationAudienceMember,
+} from "../_shared/gigApplicationAudience.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -201,6 +210,7 @@ async function insertNotificationIfMissing(
 
   await supabaseAdmin.from("notifications").insert({
     ...payload,
+    meta: withNotificationRouteMeta(payload.meta),
     read: false,
   });
 }
@@ -227,6 +237,278 @@ async function getRequesterRole(supabaseClient: any, userId: string) {
   return data?.role || null;
 }
 
+const GIG_APPLICATION_BOOKING_SELECT = `
+  *,
+  gig:gig_id(name, event_date, location, organizer_id, organizer:organizer_id(avatar_url), gig_media(media_url, sort_order)),
+  group:group_id(id, name, group_type, owner_id),
+  production_team:production_team_id(id, name, logo_url),
+  production_roster:production_roster_id(
+    id,
+    entity_kind,
+    profile_id,
+    group_id,
+    roster_profile:profile_id(id, full_name, avatar_url),
+    roster_group:group_id(id, name, group_type, owner_id)
+  )
+`;
+
+function toStringId(value: unknown) {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function getReadOnlyApplicationViewer(
+  viewer_access: "selected_performer" | "group_member",
+): GigApplicationAudienceMember {
+  return {
+    user_id: "",
+    viewer_access,
+    viewer_can_act: false,
+    viewer_read_only_reason:
+      viewer_access === "selected_performer"
+        ? "This application was submitted by a production team on your behalf."
+        : "You can view this application because you are a member of the selected group or duo.",
+  };
+}
+
+async function loadGroupIdsForUser(supabaseAdmin: any, userId: string) {
+  const groupIds = new Set<string>();
+
+  const { data: ownedGroups, error: ownedError } = await supabaseAdmin
+    .from("groups")
+    .select("id")
+    .eq("owner_id", userId);
+
+  if (ownedError) throw ownedError;
+  (ownedGroups || []).forEach((group: any) => {
+    if (group?.id) groupIds.add(group.id);
+  });
+
+  const { data: memberships, error: membershipError } = await supabaseAdmin
+    .from("group_members")
+    .select("group_id")
+    .eq("user_id", userId);
+
+  if (membershipError) throw membershipError;
+  (memberships || []).forEach((membership: any) => {
+    if (membership?.group_id) groupIds.add(membership.group_id);
+  });
+
+  return Array.from(groupIds);
+}
+
+async function loadProductionRosterIdsForMusician(
+  supabaseAdmin: any,
+  userId: string,
+  groupIds: string[],
+) {
+  const rosterIds = new Set<string>();
+  const soloRosterIds = new Set<string>();
+  const groupRosterIds = new Set<string>();
+
+  const { data: soloRows, error: soloError } = await supabaseAdmin
+    .from("production_team_roster")
+    .select("id")
+    .eq("profile_id", userId);
+
+  if (soloError) throw soloError;
+  (soloRows || []).forEach((row: any) => {
+    if (row?.id) {
+      rosterIds.add(row.id);
+      soloRosterIds.add(row.id);
+    }
+  });
+
+  if (groupIds.length > 0) {
+    const { data: groupRows, error: groupError } = await supabaseAdmin
+      .from("production_team_roster")
+      .select("id")
+      .in("group_id", groupIds);
+
+    if (groupError) throw groupError;
+    (groupRows || []).forEach((row: any) => {
+      if (row?.id) {
+        rosterIds.add(row.id);
+        groupRosterIds.add(row.id);
+      }
+    });
+  }
+
+  return { rosterIds, soloRosterIds, groupRosterIds };
+}
+
+function mergeApplicationRows(rowGroups: any[][]) {
+  const byId = new Map<string, any>();
+
+  rowGroups.flat().forEach((row) => {
+    if (row?.id && !byId.has(row.id)) {
+      byId.set(row.id, row);
+    }
+  });
+
+  return Array.from(byId.values()).sort(
+    (a: any, b: any) =>
+      new Date(b?.created_at || 0).getTime() -
+      new Date(a?.created_at || 0).getTime(),
+  );
+}
+
+function resolveMusicianViewerForApplication(
+  app: any,
+  userId: string,
+  groupIds: Set<string>,
+  soloRosterIds: Set<string>,
+  groupRosterIds: Set<string>,
+): GigApplicationAudienceMember {
+  if (app?.applicant_id === userId || app?.submitted_by_user_id === userId) {
+    return {
+      user_id: userId,
+      viewer_access: "applicant",
+      viewer_can_act: true,
+      viewer_read_only_reason: null,
+    };
+  }
+
+  const rosterId = toStringId(app?.production_roster_id);
+  if (rosterId && soloRosterIds.has(rosterId)) {
+    return { ...getReadOnlyApplicationViewer("selected_performer"), user_id: userId };
+  }
+
+  if (
+    (rosterId && groupRosterIds.has(rosterId)) ||
+    (app?.group_id && groupIds.has(app.group_id))
+  ) {
+    return { ...getReadOnlyApplicationViewer("group_member"), user_id: userId };
+  }
+
+  return {
+    user_id: userId,
+    viewer_access: "applicant",
+    viewer_can_act: true,
+    viewer_read_only_reason: null,
+  };
+}
+
+async function fetchGigApplicationsVisibleToMusician(
+  supabaseAdmin: any,
+  userId: string,
+) {
+  const groupIds = await loadGroupIdsForUser(supabaseAdmin, userId);
+  const groupIdSet = new Set(groupIds);
+  const { rosterIds, soloRosterIds, groupRosterIds } =
+    await loadProductionRosterIdsForMusician(supabaseAdmin, userId, groupIds);
+
+  const directResult = await supabaseAdmin
+    .from("gig_applications")
+    .select(GIG_APPLICATION_BOOKING_SELECT)
+    .eq("applicant_id", userId)
+    .order("created_at", { ascending: false });
+
+  if (directResult.error) throw directResult.error;
+
+  const rowGroups = [directResult.data || []];
+
+  if (rosterIds.size > 0) {
+    const productionResult = await supabaseAdmin
+      .from("gig_applications")
+      .select(GIG_APPLICATION_BOOKING_SELECT)
+      .in("production_roster_id", Array.from(rosterIds))
+      .order("created_at", { ascending: false });
+
+    if (productionResult.error) throw productionResult.error;
+    rowGroups.push(productionResult.data || []);
+  }
+
+  if (groupIds.length > 0) {
+    const groupResult = await supabaseAdmin
+      .from("gig_applications")
+      .select(GIG_APPLICATION_BOOKING_SELECT)
+      .in("group_id", groupIds)
+      .is("production_team_id", null)
+      .order("created_at", { ascending: false });
+
+    if (groupResult.error) throw groupResult.error;
+    rowGroups.push(groupResult.data || []);
+  }
+
+  const visibleRows = mergeApplicationRows(rowGroups).filter((app: any) => {
+    const waitingForOwnerApproval =
+      app?.leader_approval_status === "pending" &&
+      app?.group?.owner_id === userId &&
+      app?.applicant_id !== userId &&
+      app?.submitted_by_user_id !== userId;
+
+    return !waitingForOwnerApproval;
+  });
+
+  const visibleApplications = [];
+
+  for (const app of visibleRows) {
+    let viewer: GigApplicationAudienceMember | null = null;
+
+    try {
+      const { audience } = await resolveGigApplicationAudience(supabaseAdmin, app);
+      viewer = audience.find((member) => member.user_id === userId) || null;
+    } catch (audienceError) {
+      console.error("Failed to resolve gig application audience:", audienceError);
+    }
+
+    visibleApplications.push({
+      ...app,
+      __viewer:
+        viewer ||
+        resolveMusicianViewerForApplication(
+          app,
+          userId,
+          groupIdSet,
+          soloRosterIds,
+          groupRosterIds,
+        ),
+    });
+  }
+
+  return visibleApplications;
+}
+
+function getProductionApplicationType(app: any) {
+  const groupType =
+    app?.group?.group_type ||
+    app?.production_roster?.roster_group?.group_type;
+  const hasGroup =
+    app?.group_id ||
+    app?.production_roster?.group_id ||
+    app?.production_roster?.roster_group?.id ||
+    app?.production_roster?.roster_group?.name;
+
+  if (app?.production_team?.name) {
+    if (groupType === "duo") return "Production Duo Application";
+    if (hasGroup) return "Production Group Application";
+    return "Production Musician Application";
+  }
+
+  if (groupType === "duo") return "Duo Application";
+  if (hasGroup) return "Group Application";
+  return "Solo Application";
+}
+
+function getGigApplicationStatusLabel(status: unknown, fallback: unknown = status) {
+  const normalizedStatus = String(status || "").trim().toLowerCase();
+
+  if (normalizedStatus === "pending") return "Applied";
+  if (normalizedStatus === "accepted") return "Accepted";
+  if (normalizedStatus === "completed") return "Completed";
+  if (normalizedStatus === "rejected") return "Declined";
+  if (normalizedStatus === "cancelled") return "Cancelled";
+  if (normalizedStatus === "resigned") return "Resigned";
+  if (normalizedStatus === "fired") return "Fired";
+
+  return fallback || status;
+}
+
+function toNonEmptyString(value: unknown) {
+  const normalized = String(value ?? "").trim();
+  return normalized.length > 0 ? normalized : null;
+}
+
 const reportTargetTableMap: Record<string, string> = {
   group: "groups",
   studio: "studios",
@@ -234,6 +516,8 @@ const reportTargetTableMap: Record<string, string> = {
   gig: "gigs",
   user: "profiles",
   profile: "profiles",
+  product: "products",
+  playlist: "playlists",
 };
 
 async function fetchReportTargetDetails(
@@ -273,9 +557,21 @@ async function fetchReportTargetDetails(
 
   if (recordError) throw recordError;
 
+  if (targetType === "profile" || targetType === "user") {
+    return {
+      type: targetType,
+      id: targetId,
+      table,
+      record: record || null,
+      owner_profile: record || null,
+    };
+  }
+
   const ownerId = String(
     record?.owner_id ||
       record?.organizer_id ||
+      record?.seller_id ||
+      record?.creator_id ||
       record?.user_id ||
       "",
   ).trim();
@@ -476,7 +772,7 @@ serve(async (req: Request) => {
       if (userRole === "musician") {
         const { data: bookings, error: bookingError } = await supabaseClient
           .from("studio_bookings")
-          .select("*, studio:studios(name, owner_id, studio_type, studio_media(media_url, sort_order))")
+          .select("*, studio:studios(name, owner_id, studio_media(media_url, sort_order))")
           .eq("user_id", userId)
           .order("booking_date", { ascending: false });
 
@@ -496,7 +792,6 @@ serve(async (req: Request) => {
 
           if (incidentError) {
             if (!isMissingTableError(incidentError, "booking_incidents")) {
-              console.log("Error fetching open booking incidents:", incidentError);
             }
           } else {
             (openIncidents || []).forEach((incident: any) => {
@@ -515,7 +810,7 @@ serve(async (req: Request) => {
           const isVenue = false;
 
           // DEBUG: Log date parsing for first few items
-          // console.log(`[DEBUG] Booking ${b.id}: Status=${b.status}, End=${endDate.toISOString()}, Now=${now.toISOString()}`)
+          // undefined
 
           // Determine status text - for pending bookings, check if payment is needed
           const isUnpaid = b.status === "pending" && (!b.payment_status || b.payment_status === "unpaid" || b.payment_status === "pending" || b.payment_status === "failed");
@@ -646,7 +941,7 @@ serve(async (req: Request) => {
           const { data: bookings, error: bookingError } = await supabaseClient
             .from("studio_bookings")
             .select(
-              "*, studio:studios(name, owner_id, studio_type, studio_media(media_url, sort_order)), profile:user_id(full_name, avatar_url, email, contact_number, address)",
+              "*, studio:studios(name, owner_id, studio_media(media_url, sort_order)), profile:user_id(full_name, avatar_url, email, contact_number, address)",
             )
             .in("studio_id", studioIds)
             .order("booking_date", { ascending: false });
@@ -666,7 +961,6 @@ serve(async (req: Request) => {
               .order("created_at", { ascending: false });
 
             if (lateEventsError) {
-              console.log("Error fetching late attendance events:", lateEventsError);
             } else {
               (lateEvents || []).forEach((event: any) => {
                 const existing = lateReportByBooking.get(event.booking_id);
@@ -692,7 +986,6 @@ serve(async (req: Request) => {
 
             if (incidentError) {
               if (!isMissingTableError(incidentError, "booking_incidents")) {
-                console.log("Error fetching open booking incidents for studio owner:", incidentError);
               }
             } else {
               (openIncidents || []).forEach((incident: any) => {
@@ -837,23 +1130,28 @@ serve(async (req: Request) => {
 
       // C. For Musicians: Fetch Gig Applications
       if (userRole === "musician") {
-        const { data: gigApps, error: gigError } = await supabaseClient
-          .from("gig_applications")
-          .select(
-            "*, gig:gig_id(name, event_date, location, organizer:organizer_id(avatar_url), gig_media(media_url, sort_order)), group:group_id(name)",
-          )
-          .eq("applicant_id", userId)
-          .order("created_at", { ascending: false });
+        let gigApps: any[] = [];
 
-        if (gigError) {
-          console.log("Error fetching gig apps:", gigError);
+        try {
+          gigApps = await fetchGigApplicationsVisibleToMusician(
+            supabaseAdmin,
+            userId,
+          );
+        } catch (gigError) {
+          console.error("Failed to fetch visible gig applications:", gigError);
         }
 
         // Process Gig Applications
         // @ts-ignore
-        gigApps?.forEach((g: any) => {
+        gigApps.forEach((g: any) => {
           const normalizedStatus = (g.status || "").toLowerCase();
           const gig = g.gig;
+          const viewer: GigApplicationAudienceMember = g.__viewer || {
+            user_id: userId,
+            viewer_access: "applicant",
+            viewer_can_act: true,
+            viewer_read_only_reason: null,
+          };
           const dateStr =
             gig?.event_date || g.created_at?.split("T")[0] || "TBA";
 
@@ -870,7 +1168,20 @@ serve(async (req: Request) => {
             type_id: "gig_application",
             gig_id: g.gig_id,
             group_id: g.group_id, // Include group_id for musicians
-            performer: g.group?.name || null, // Group name if applied as group
+            applicant_id: g.applicant_id,
+            submitted_by_user_id: g.submitted_by_user_id,
+            production_team_id: g.production_team_id,
+            production_roster_id: g.production_roster_id,
+            production_team_name: g.production_team?.name || null,
+            raw_status: g.status,
+            viewer_access: viewer.viewer_access,
+            viewer_can_act: viewer.viewer_can_act,
+            viewer_read_only_reason: viewer.viewer_read_only_reason || null,
+            performer:
+              g.group?.name ||
+              g.production_roster?.roster_profile?.full_name ||
+              g.production_roster?.roster_group?.name ||
+              null,
             raw_date: dateStr,
             start_time: gig?.event_date, // Add for consistency
             name: gig?.name || "Unknown Gig",
@@ -881,25 +1192,21 @@ serve(async (req: Request) => {
                 ?.media_url ||
               gig?.organizer?.avatar_url ||
               "https://images.unsplash.com/photo-1516280440614-37939bbacd81?w=400&h=200&fit=crop",
-            status:
-              normalizedStatus === "pending"
-                ? "Applied"
-                : normalizedStatus === "accepted"
-                  ? "Accepted"
-                  : normalizedStatus === "completed"
-                    ? "Completed"
-                    : normalizedStatus === "rejected" ||
-                        normalizedStatus === "cancelled" ||
-                        normalizedStatus === "fired"
-                      ? "Fired"
-                      : g.status,
-            type: g.group_id ? "Group Application" : "Solo Application",
+            status: getGigApplicationStatusLabel(normalizedStatus, g.status),
+            type: getProductionApplicationType(g),
             isCancelled:
               normalizedStatus === "cancelled" ||
               normalizedStatus === "rejected" ||
               normalizedStatus === "fired",
-            action: normalizedStatus === "accepted" ? "View Details" : "Details",
+            action:
+              viewer.viewer_can_act === false || normalizedStatus === "accepted"
+                ? "View Details"
+                : "Details",
             location: gig?.location,
+            pitch_message: g.pitch_message,
+            video_url: g.video_url,
+            cv_url: g.cv_url,
+            slot_type: g.slot_type,
             reviewed_by_applicant: g.reviewed_by_applicant || false,
           };
 
@@ -935,10 +1242,14 @@ serve(async (req: Request) => {
           } else if (
             normalizedStatus === "rejected" ||
             normalizedStatus === "cancelled" ||
+            normalizedStatus === "resigned" ||
             normalizedStatus === "fired"
           ) {
             // @ts-ignore
-            categorized.Review.push({ ...item, status: "Fired" });
+            categorized.Review.push({
+              ...item,
+              status: getGigApplicationStatusLabel(normalizedStatus, g.status),
+            });
           } else if (normalizedStatus === "completed") {
             // @ts-ignore
             categorized.Review.push({ ...item, status: "Completed" });
@@ -957,7 +1268,6 @@ serve(async (req: Request) => {
           .order("created_at", { ascending: false });
 
         if (leaderPendingError) {
-          console.log("Error fetching leader pending apps:", leaderPendingError);
         }
 
         // @ts-ignore
@@ -1002,6 +1312,158 @@ serve(async (req: Request) => {
         });
       }
 
+      // C2. For Producers: Fetch production-routed gig applications
+      if (userRole === "producer") {
+        const { data: teamMemberships, error: teamMembershipError } = await supabaseClient
+          .from("production_team_members")
+          .select("team_id, role")
+          .eq("user_id", userId);
+
+        if (teamMembershipError) {
+        }
+
+        const teamIds = Array.from(
+          new Set((teamMemberships || []).map((row: any) => row.team_id).filter(Boolean)),
+        );
+        const teamRoleById = new Map(
+          (teamMemberships || [])
+            .filter((row: any) => row?.team_id)
+            .map((row: any) => [row.team_id, row.role || "member"]),
+        );
+
+        if (teamIds.length > 0) {
+          const { data: productionApps, error: productionAppsError } = await supabaseClient
+            .from("gig_applications")
+            .select(
+              `
+                *,
+                gig:gig_id(name, event_date, location, organizer:organizer_id(avatar_url), gig_media(media_url, sort_order)),
+                group:group_id(name, group_type),
+                production_team:production_team_id(id, name, logo_url),
+                production_roster:production_roster_id(
+                  id,
+                  entity_kind,
+                  roster_profile:profile_id(full_name, avatar_url),
+                  roster_group:group_id(name, group_type)
+                )
+              `,
+            )
+            .in("production_team_id", teamIds)
+            .order("created_at", { ascending: false });
+
+          if (productionAppsError) {
+          }
+
+          productionApps?.forEach((app: any) => {
+            const normalizedStatus = (app.status || "").toLowerCase();
+            const gig = app.gig;
+            const teamRole = teamRoleById.get(app.production_team_id) || "member";
+            const canManageApplication =
+              ["owner", "manager"].includes(String(teamRole)) ||
+              app.applicant_id === userId ||
+              app.submitted_by_user_id === userId;
+            const dateStr = gig?.event_date || app.created_at?.split("T")[0] || "TBA";
+            const performerName =
+              app.group?.name ||
+              app.production_roster?.roster_profile?.full_name ||
+              app.production_roster?.roster_group?.name ||
+              "Performer";
+
+            let eventDate: Date | null = null;
+            if (gig?.event_date) {
+              eventDate = new Date(gig.event_date);
+              eventDate.setHours(23, 59, 59, 999);
+            }
+
+            const item = {
+              id: app.id,
+              type_id: "gig_application",
+              created_at: app.created_at,
+              gig_id: app.gig_id,
+              group_id: app.group_id,
+              applicant_id: app.applicant_id,
+              submitted_by_user_id: app.submitted_by_user_id,
+              production_team_id: app.production_team_id,
+              production_roster_id: app.production_roster_id,
+              production_team_name: app.production_team?.name || null,
+              raw_status: app.status,
+              viewer_access: canManageApplication ? "production_manager" : "group_member",
+              viewer_can_act: canManageApplication,
+              viewer_read_only_reason: canManageApplication
+                ? null
+                : "Only production owners or managers can act on this application.",
+              performer: performerName,
+              customer_name: performerName,
+              raw_date: dateStr,
+              start_time: gig?.event_date,
+              name: gig?.name || "Unknown Gig",
+              date: dateStr,
+              image:
+                app.production_roster?.roster_profile?.avatar_url ||
+                app.production_team?.logo_url ||
+                gig?.organizer?.avatar_url ||
+                "https://images.unsplash.com/photo-1516280440614-37939bbacd81?w=400&h=200&fit=crop",
+              status: getGigApplicationStatusLabel(normalizedStatus, app.status),
+              type: getProductionApplicationType(app),
+              isCancelled:
+                normalizedStatus === "cancelled" ||
+                normalizedStatus === "rejected" ||
+                normalizedStatus === "fired",
+              action:
+                !canManageApplication || normalizedStatus === "accepted"
+                  ? "View Details"
+                  : "Details",
+              location: gig?.location,
+              pitch_message: app.pitch_message,
+              video_url: app.video_url,
+              cv_url: app.cv_url,
+              slot_type: app.slot_type,
+              reviewed_by_applicant: app.reviewed_by_applicant || false,
+            };
+
+            if (normalizedStatus === "pending") {
+              // @ts-ignore
+              categorized.Pending.push(item);
+            } else if (normalizedStatus === "accepted") {
+              if (eventDate) {
+                const eventStart = new Date(gig.event_date);
+                eventStart.setHours(0, 0, 0, 0);
+
+                if (now >= eventStart && now <= eventDate) {
+                  // @ts-ignore
+                  categorized.Ongoing.push({ ...item, status: "Happening Now" });
+                } else if (now > eventDate) {
+                  if (!app.reviewed_by_applicant) {
+                    // @ts-ignore
+                    categorized.Review.push({ ...item, status: "Completed" });
+                  }
+                } else {
+                  // @ts-ignore
+                  categorized.Upcoming.push(item);
+                }
+              } else {
+                // @ts-ignore
+                categorized.Upcoming.push(item);
+              }
+            } else if (
+              normalizedStatus === "rejected" ||
+              normalizedStatus === "cancelled" ||
+              normalizedStatus === "resigned" ||
+              normalizedStatus === "fired"
+            ) {
+              // @ts-ignore
+              categorized.Review.push({
+                ...item,
+                status: getGigApplicationStatusLabel(normalizedStatus, app.status),
+              });
+            } else if (normalizedStatus === "completed") {
+              // @ts-ignore
+              categorized.Review.push({ ...item, status: "Completed" });
+            }
+          });
+        }
+      }
+
       // D. For Venue Owners: Fetch accepted applications for their gigs
       if (userRole === "venue-owner") {
         // First get their gigs
@@ -1019,16 +1481,23 @@ serve(async (req: Request) => {
               `
                             *,
                             applicant:applicant_id(full_name, avatar_url),
-                            group:group_id(name)
+                            submitter:submitted_by_user_id(full_name, avatar_url),
+                            group:group_id(name, group_type),
+                            production_team:production_team_id(id, name, logo_url),
+                            production_roster:production_roster_id(
+                              id,
+                              entity_kind,
+                              roster_profile:profile_id(full_name, avatar_url),
+                              roster_group:group_id(name, group_type)
+                            )
                         `,
             )
             .in("gig_id", gigIds)
-            .in("status", ["accepted", "pending", "rejected", "cancelled", "completed"])
+            .in("status", ["accepted", "pending", "rejected", "cancelled", "resigned", "completed", "fired"])
             .or("leader_approval_status.is.null,leader_approval_status.eq.approved")
             .order("created_at", { ascending: false });
 
           if (appError) {
-            console.log("Error fetching accepted applications:", appError);
           }
 
           // Process accepted applications
@@ -1036,7 +1505,11 @@ serve(async (req: Request) => {
             const gig = gigs?.find((g: any) => g.id === app.gig_id);
             const dateStr = gig?.event_date || "TBA";
             const performerName =
-              app.group?.name || app.applicant?.full_name || "Performer";
+              app.group?.name ||
+              app.production_roster?.roster_profile?.full_name ||
+              app.production_roster?.roster_group?.name ||
+              app.applicant?.full_name ||
+              "Performer";
 
             // Parse event date for time-based categorization
             let eventDate: Date | null = null;
@@ -1052,10 +1525,22 @@ serve(async (req: Request) => {
               group_id: app.group_id, // Include group_id
               applicant_id: app.applicant_id, // For renew contract
               user_id: app.applicant_id, // For profile link
+              submitted_by_user_id: app.submitted_by_user_id,
+              production_team_id: app.production_team_id,
+              production_roster_id: app.production_roster_id,
+              production_team_name: app.production_team?.name || null,
+              raw_status: app.status,
+              viewer_access: "organizer",
+              viewer_can_act: true,
+              viewer_read_only_reason: null,
+              submitted_by_name: app.submitter?.full_name || null,
               raw_date: dateStr,
               name: `${gig?.name || "Gig"} - ${performerName}`,
               date: dateStr,
               image:
+                app.group?.images?.[0] ||
+                app.production_roster?.roster_profile?.avatar_url ||
+                app.production_team?.logo_url ||
                 app.applicant?.avatar_url ||
                 "https://picsum.photos/400/300",
               status:
@@ -1063,16 +1548,17 @@ serve(async (req: Request) => {
                   ? "Action Required"
                   : app.status === "accepted"
                     ? "Confirmed"
-                    : app.status === "rejected" || app.status === "cancelled"
-                      ? "Fired"
-                      : "Completed",
-              type: app.group_id ? "Group Application" : "Solo Application",
-              isCancelled: app.status === "rejected" || app.status === "cancelled",
+                    : getGigApplicationStatusLabel(app.status),
+              type: getProductionApplicationType(app),
+              isCancelled: app.status === "rejected" || app.status === "cancelled" || app.status === "fired",
               action: app.status === "pending" ? "Confirm Now" : "View Details",
               location: gig?.location,
               performer: performerName,
               customer_name: performerName,
-              customer_avatar: app.applicant?.avatar_url,
+              customer_avatar:
+                app.group?.images?.[0] ||
+                app.production_roster?.roster_profile?.avatar_url ||
+                app.applicant?.avatar_url,
               video_url: app.video_url,
               cv_url: app.cv_url, // Added CV URL
               note: app.note,
@@ -1107,12 +1593,15 @@ serve(async (req: Request) => {
                 // @ts-ignore
                 categorized.Upcoming.push(item);
               }
-            } else if (app.status === "rejected" || app.status === "cancelled") {
-              // Fired musicians go to Review (Completed tab)
+            } else if (app.status === "rejected" || app.status === "cancelled" || app.status === "resigned" || app.status === "fired") {
+              // Terminal applications go to the venue owner's history bucket.
               // @ts-ignore
-              categorized.Review.push({ ...item, status: "Fired" });
+              categorized.Review.push({
+                ...item,
+                status: getGigApplicationStatusLabel(app.status),
+              });
             } else if (app.status === "completed") {
-              // Completed contracts go to Review (Completed tab) - can be renewed
+              // Completed contracts go to the venue owner's history bucket - can be renewed.
               // @ts-ignore
               categorized.Review.push({ ...item, status: "Completed" });
             }
@@ -1174,22 +1663,9 @@ serve(async (req: Request) => {
       if (time_slots && Array.isArray(time_slots) && time_slots.length > 0) {
         // New multi-slot format
         slots = time_slots;
-        console.log("📥 Creating multi-slot booking:", {
-          studio_id,
-          user_id,
-          date,
-          time_slots,
-        });
       } else if (start_time && end_time) {
         // Backwards compatibility: single slot format
         slots = [{ start: start_time, end: end_time }];
-        console.log("📥 Creating single-slot booking:", {
-          studio_id,
-          user_id,
-          date,
-          start_time,
-          end_time,
-        });
       } else {
         return new Response(
           JSON.stringify({
@@ -1542,37 +2018,7 @@ serve(async (req: Request) => {
         }
       }
 
-      // Check if user already has a pending booking for this studio ON THIS DATE (prevent spam)
-      const { data: existingPendingBooking, error: existingError } =
-        await supabaseClient
-          .from("studio_bookings")
-          .select("id, status, booking_date")
-          .eq("studio_id", studio_id)
-          .eq("user_id", user_id)
-          .eq("booking_date", date)
-          .eq("status", "pending")
-          .maybeSingle();
-
-      if (existingError) {
-        console.error("Error checking existing bookings:", existingError);
-      }
-
-      if (existingPendingBooking) {
-        return new Response(
-          JSON.stringify({
-            error:
-              "You already have a pending booking for this studio on this date. Please wait for the studio owner to respond, or cancel your existing booking to create a new one.",
-            existing_booking_id: existingPendingBooking.id,
-          }),
-          {
-            headers: { ...corsHeaders, "Content-Type": "application/json" },
-            status: 409, // Conflict
-          },
-        );
-      }
-
       // Use multi-slot availability check
-      console.log("🔍 Checking multi-slot availability...");
       const { data: isAvailable, error: availError } = await supabaseClient.rpc(
         "are_slots_available",
         {
@@ -1590,7 +2036,6 @@ serve(async (req: Request) => {
           availError.message?.includes("function") ||
           availError.code === "42883"
         ) {
-          console.log("⚠️ Falling back to single-slot availability check...");
           // Check each slot individually using old function
           for (const slot of slots) {
             const { data: slotAvailable, error: slotError } =
@@ -1656,7 +2101,6 @@ serve(async (req: Request) => {
         );
       }
 
-      console.log("✅ All slots available");
 
       // First, verify studio has valid rates for the requested session type
       const { data: studioData, error: studioError } = await supabaseClient
@@ -1678,7 +2122,6 @@ serve(async (req: Request) => {
         );
       }
 
-      console.log("📊 Studio data:", studioData);
 
       if (isRecordingSession) {
         if (!studioData.recording_rate || studioData.recording_rate <= 0) {
@@ -1717,7 +2160,6 @@ serve(async (req: Request) => {
       }
 
       // Calculate pricing for all slots combined
-      console.log("💰 Calculating multi-slot booking price...");
       let pricingData: any = null;
 
       if (isRecordingSession) {
@@ -1756,7 +2198,6 @@ serve(async (req: Request) => {
           pricingError.message?.includes("function") ||
           pricingError.code === "42883"
         ) {
-          console.log("⚠️ Falling back to individual slot pricing...");
           let totalHours = 0;
           let totalPrice = 0;
           let baseRate = 0;
@@ -1829,7 +2270,6 @@ serve(async (req: Request) => {
             final_price: studioData.hourly_rate * totalSelectedHours,
           };
         }
-        console.log("📊 Manual pricing fallback:", pricingData);
       }
 
       // Apply active promotions server-side to keep saved booking totals aligned with listing pricing.
@@ -1871,7 +2311,6 @@ serve(async (req: Request) => {
         console.warn("⚠️ Promotion RPC unavailable, proceeding without promo:", promoCatchError);
       }
 
-      console.log("✅ Pricing calculated:", pricingData);
 
       // Get overall start and end times (for backwards compatibility)
       const allStartTimes = slots.map((s) => s.start).sort();
@@ -1918,20 +2357,6 @@ serve(async (req: Request) => {
         );
       }
 
-      console.log("📤 Inserting multi-slot booking...", {
-        studio_id,
-        user_id,
-        date,
-        session_type: normalizedSessionType,
-        song_count: isRecordingSession ? requestedSongCount : null,
-        overallStart,
-        overallEnd,
-        slots,
-        base_rate: finalBaseRate,
-        hours: finalHours,
-        subtotal: pricingData.subtotal || finalBaseRate * finalHours,
-        final_price: pricingData.final_price || finalBaseRate * finalHours,
-      });
 
       const finalModifiers = {
         ...(pricingData.modifiers || {}),
@@ -2059,17 +2484,10 @@ serve(async (req: Request) => {
     if (action === "update_status") {
       const { booking_id, new_status, type_id, cancellation_reason } = params; // type_id: 'studio_booking' or 'gig_application'
 
-      console.log("📝 update_status called with:", {
-        booking_id,
-        new_status,
-        type_id,
-        cancellation_reason,
-      });
 
       let table = "studio_bookings";
       if (type_id === "gig_application") table = "gig_applications";
 
-      console.log("📝 Updating table:", table);
 
       const attendanceIssueStatuses = ["late", "not_attending", "no_show"];
       const isAttendanceIssue =
@@ -2134,7 +2552,7 @@ serve(async (req: Request) => {
       if (table === "gig_applications") {
         const { data: targetApplication, error: targetError } = await supabaseAdmin
           .from("gig_applications")
-          .select("id, applicant_id, gig_id")
+          .select("id, applicant_id, submitted_by_user_id, gig_id, production_team_id")
           .eq("id", booking_id)
           .maybeSingle();
 
@@ -2156,13 +2574,31 @@ serve(async (req: Request) => {
         if (targetGigError) throw targetGigError;
 
         const isOrganizer = targetGig?.organizer_id === authUser.id;
-        const isApplicant = targetApplication.applicant_id === authUser.id;
-        const organizerAllowedStatuses = ["accepted", "rejected", "completed", "cancelled"];
-        const applicantAllowedStatuses = ["cancelled"];
+        const isApplicant =
+          targetApplication.applicant_id === authUser.id ||
+          targetApplication.submitted_by_user_id === authUser.id;
+        let isProductionManager = false;
+
+        if (targetApplication.production_team_id) {
+          const { data: productionMembership, error: productionMembershipError } =
+            await supabaseAdmin
+              .from("production_team_members")
+              .select("role")
+              .eq("team_id", targetApplication.production_team_id)
+              .eq("user_id", authUser.id)
+              .in("role", ["owner", "manager"])
+              .maybeSingle();
+
+          if (productionMembershipError) throw productionMembershipError;
+          isProductionManager = !!productionMembership;
+        }
+
+        const organizerAllowedStatuses = ["accepted", "rejected", "completed", "cancelled", "fired"];
+        const applicantAllowedStatuses = ["cancelled", "resigned"];
 
         if (
           !(isOrganizer && organizerAllowedStatuses.includes(new_status)) &&
-          !(isApplicant && applicantAllowedStatuses.includes(new_status))
+          !((isApplicant || isProductionManager) && applicantAllowedStatuses.includes(new_status))
         ) {
           return new Response(JSON.stringify({ error: "Forbidden" }), {
             headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -2171,15 +2607,14 @@ serve(async (req: Request) => {
         }
       }
 
-      // Add cancellation_reason if status is cancelled/rejected and reason is provided
+      // Add cancellation_reason if status is a terminal negative outcome and reason is provided
       if (
-        (new_status === "cancelled" || new_status === "rejected") &&
+        (new_status === "cancelled" || new_status === "resigned" || new_status === "rejected" || new_status === "fired") &&
         cancellation_reason
       ) {
         updateData.cancellation_reason = cancellation_reason;
       }
 
-      console.log("📝 Update data:", updateData);
 
       const updateClient = table === "gig_applications" ? supabaseAdmin : supabaseClient;
 
@@ -2190,7 +2625,6 @@ serve(async (req: Request) => {
         .select()
         .maybeSingle();
 
-      console.log("📝 Update result:", { data, error });
 
       if (error) throw error;
 
@@ -2208,7 +2642,6 @@ serve(async (req: Request) => {
             "calculate_booking_cancellation_penalty",
             { p_booking_id: booking_id },
           );
-          console.log("🧮 Penalty calculation:", { penaltyResult, penaltyCalcErr });
 
           if (!penaltyCalcErr && penaltyResult && penaltyResult.penalty_amount > 0) {
             const { data: penaltyApplied, error: penaltyApplyErr } = await supabaseAdmin.rpc(
@@ -2220,7 +2653,6 @@ serve(async (req: Request) => {
                 p_cancelled_by: authUser.id,
               },
             );
-            console.log("💰 Penalty applied:", { penaltyApplied, penaltyApplyErr });
 
             if (penaltyApplyErr) {
               console.error("Failed to apply penalty:", penaltyApplyErr);
@@ -2233,10 +2665,13 @@ serve(async (req: Request) => {
 
       // NOTIFICATION LOGIC
       if (
-        ["cancelled", "rejected", "confirmed", "accepted", "completed"].includes(new_status)
+        ["cancelled", "resigned", "rejected", "confirmed", "accepted", "completed", "fired"].includes(new_status)
       ) {
         try {
-          const notificationEventType = `${table}_${new_status}`;
+          const notificationEventType =
+            table === "gig_applications"
+              ? `gig_application_${new_status}`
+              : `${table}_${new_status}`;
 
           // Determine who to notify
           let targetUserId = null;
@@ -2288,47 +2723,100 @@ serve(async (req: Request) => {
               }
             }
           } else if (table === "gig_applications") {
-            // For Gig Applications
-            const { data: applicationInfo, error: applicationInfoError } = await supabaseAdmin
-              .from("gig_applications")
-              .select("applicant_id, gig_id")
-              .eq("id", booking_id)
-              .maybeSingle();
+            const { application, audience } = await resolveGigApplicationAudience(
+              supabaseAdmin,
+              booking_id,
+              { includeOrganizer: true },
+            );
 
-            if (applicationInfoError) throw applicationInfoError;
-
-            let gigMeta: { name?: string; images?: string[] | null } | null = null;
-            if (applicationInfo?.gig_id) {
+            if (application) {
               const { data: gigRow, error: gigRowError } = await supabaseAdmin
                 .from("gigs")
-                .select("name, images")
-                .eq("id", applicationInfo.gig_id)
+                .select("name, images, organizer_id")
+                .eq("id", application.gig_id)
                 .maybeSingle();
 
               if (gigRowError) throw gigRowError;
-              gigMeta = gigRow as any;
-            }
 
-            if (applicationInfo) {
-              notificationImage = Array.isArray(gigMeta?.images)
-                ? gigMeta.images[0] || null
+              const gigName =
+                gigRow?.name ||
+                application.gig?.name ||
+                "this gig";
+              notificationImage = Array.isArray(gigRow?.images)
+                ? gigRow.images[0] || null
                 : null;
 
+              const actorIsApplicant =
+                authUser.id === application.applicant_id ||
+                authUser.id === application.submitted_by_user_id;
+              const actorIsOrganizer =
+                authUser.id === gigRow?.organizer_id ||
+                authUser.id === application.gig?.organizer_id;
+              const cancelledByApplicant =
+                (new_status === "cancelled" || new_status === "resigned") &&
+                actorIsApplicant &&
+                !actorIsOrganizer;
+
               if (new_status === "rejected") {
-                targetUserId = applicationInfo.applicant_id;
                 notificationTitle = "Application Declined";
-                notificationMessage = `Your application for ${gigMeta?.name || "this gig"} has been declined.`;
+                notificationMessage = `Your application for ${gigName} has been declined.`;
                 notificationType = "error";
               } else if (new_status === "accepted") {
-                targetUserId = applicationInfo.applicant_id;
                 notificationTitle = "Application Accepted!";
-                notificationMessage = `Your application for ${gigMeta?.name || "this gig"} has been accepted!`;
+                notificationMessage = `Your application for ${gigName} has been accepted!`;
                 notificationType = "success";
               } else if (new_status === "completed") {
-                targetUserId = applicationInfo.applicant_id;
                 notificationTitle = "Gig Completed";
-                notificationMessage = `Your contract for ${gigMeta?.name || "this gig"} has been marked as completed.`;
+                notificationMessage = `Your contract for ${gigName} has been marked as completed.`;
                 notificationType = "success";
+              } else if (new_status === "fired") {
+                notificationTitle = "Gig Cancelled";
+                notificationMessage = `Your contract for ${gigName} has been cancelled by the venue.`;
+                notificationType = "error";
+              } else if (new_status === "resigned") {
+                notificationTitle = "Musician Resigned";
+                notificationMessage = `A musician has resigned from ${gigName}.`;
+                notificationType = "warning";
+              } else if (new_status === "cancelled") {
+                notificationTitle = cancelledByApplicant
+                  ? "Musician Resigned"
+                  : "Gig Cancelled";
+                notificationMessage = cancelledByApplicant
+                  ? `A musician has resigned from ${gigName}.`
+                  : `Your contract for ${gigName} has been cancelled.`;
+                notificationType = cancelledByApplicant ? "warning" : "error";
+              }
+
+              if (notificationTitle && notificationMessage) {
+                for (const member of audience) {
+                  if (member.user_id === authUser.id) continue;
+
+                  await insertNotificationIfMissing(supabaseAdmin, {
+                    user_id: member.user_id,
+                    type: notificationType,
+                    title: notificationTitle,
+                    message: notificationMessage,
+                    image: notificationImage,
+                    meta: buildNotificationRouteMeta(
+                      "/bookings",
+                      undefined,
+                      buildGigApplicationAudienceMeta(application, member, {
+                        booking_id: booking_id,
+                        source_table: table,
+                        status: new_status,
+                        event_type: notificationEventType,
+                        cancellation_reason: cancellation_reason || null,
+                        cancelled_by_user_id:
+                          new_status === "cancelled" ||
+                          new_status === "resigned" ||
+                          new_status === "fired"
+                            ? authUser.id
+                            : null,
+                        cancelled_by_role: cancellationActorRole,
+                      }),
+                    ),
+                  });
+                }
               }
             }
           }
@@ -2346,13 +2834,10 @@ serve(async (req: Request) => {
                 status: new_status,
                 event_type: notificationEventType,
                 cancellation_reason: cancellation_reason || null,
-                cancelled_by_user_id: new_status === "cancelled" ? authUser.id : null,
+                cancelled_by_user_id: new_status === "cancelled" || new_status === "resigned" || new_status === "fired" ? authUser.id : null,
                 cancelled_by_role: cancellationActorRole,
               },
             });
-            console.log(
-              `🔔 Notification sent to ${targetUserId}: ${notificationTitle}`,
-            );
           }
         } catch (notifyError) {
           console.error("Error sending notification:", notifyError);
@@ -2652,11 +3137,11 @@ serve(async (req: Request) => {
             title: "Booking Declined",
             message: `Your booking request for ${bookingDetails.studio?.name || "this studio"} has been declined.`,
             read: false,
-            meta: {
+            meta: buildNotificationRouteMeta("/bookings", undefined, {
               booking_id,
               studio_id: bookingDetails.studio_id,
               event_type: "booking_all_slots_declined",
-            },
+            }),
           });
 
         return new Response(
@@ -2761,7 +3246,7 @@ serve(async (req: Request) => {
               ? `Your booking was partially approved. Accepted slots: ${slotLabel}.`
               : `Your booking at ${bookingDetails.studio?.name || "the studio"} has been confirmed.`,
           read: false,
-          meta: {
+          meta: buildNotificationRouteMeta("/bookings", undefined, {
             booking_id,
             studio_id: bookingDetails.studio_id,
             accepted_slots: normalizedAcceptedSlots,
@@ -2770,7 +3255,7 @@ serve(async (req: Request) => {
               safeDeclinedSlots.length > 0
                 ? "booking_partial_slot_approval"
                 : "booking_confirmed",
-          },
+          }),
         });
 
       return new Response(
@@ -3023,7 +3508,6 @@ serve(async (req: Request) => {
     if (action === "scan_qr") {
       const { qr_code, scanner_id } = params;
 
-      console.log("📷 Scan QR request:", { qr_code, scanner_id });
 
       // 1. Verify the booking exists and is confirmed
       const { data: booking, error: fetchError } = await supabaseClient
@@ -3032,7 +3516,6 @@ serve(async (req: Request) => {
         .eq("id", qr_code)
         .single();
 
-      console.log("📷 Booking fetch result:", { booking, fetchError });
 
       if (fetchError) {
         console.error("📷 Fetch error details:", fetchError);
@@ -3056,10 +3539,6 @@ serve(async (req: Request) => {
       }
 
       // 2. Verify scanner is the studio owner
-      console.log("📷 Verifying owner:", {
-        studio_owner: booking.studio?.owner_id,
-        scanner_id,
-      });
       if (!booking.studio || booking.studio.owner_id !== scanner_id) {
         return new Response(
           JSON.stringify({
@@ -3074,7 +3553,6 @@ serve(async (req: Request) => {
       }
 
       // 3. Verify status
-      console.log("📷 Current booking status:", booking.status);
       if (booking.status === "checked_in") {
         return new Response(
           JSON.stringify({ message: "Already checked in!", booking }),
@@ -3098,7 +3576,6 @@ serve(async (req: Request) => {
       }
 
       // 4. Update status to checked_in
-      console.log("📷 Attempting to update booking to checked_in...");
       const { data: updated, error: updateError } = await supabaseClient
         .from("studio_bookings")
         .update({
@@ -3124,7 +3601,6 @@ serve(async (req: Request) => {
         );
       }
 
-      console.log("📷 Check-in successful:", updated);
       return new Response(JSON.stringify({ success: true, booking: updated }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
         status: 200,
@@ -3133,19 +3609,26 @@ serve(async (req: Request) => {
 
     // 8. RENEW CONTRACT (Venue Owner re-hires a musician)
     if (action === "renew_contract") {
-      const { application_id, gig_id, applicant_id, organizer_id } = params;
+      const { application_id } = params;
 
-      console.log("🔄 Renew contract request:", {
-        application_id,
-        gig_id,
-        applicant_id,
-        organizer_id,
-      });
+      if (!application_id) {
+        return new Response(JSON.stringify({ error: "application_id is required." }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+          status: 400,
+        });
+      }
+
 
       // 1. Verify the original application exists
-      const { data: originalApp, error: fetchError } = await supabaseClient
+      const { data: originalApp, error: fetchError } = await supabaseAdmin
         .from("gig_applications")
-        .select("*, gig:gig_id(name, organizer_id)")
+        .select(`
+          *,
+          gig:gig_id(id, name, organizer_id),
+          applicant:applicant_id(full_name, email, avatar_url),
+          group:group_id(id, name, owner_id, group_type),
+          production_team:production_team_id(id, name, owner_id, logo_url)
+        `)
         .eq("id", application_id)
         .single();
 
@@ -3160,7 +3643,7 @@ serve(async (req: Request) => {
       }
 
       // 2. Verify the user is the gig organizer
-      if (originalApp.gig?.organizer_id !== organizer_id) {
+      if (originalApp.gig?.organizer_id !== authUser.id) {
         return new Response(
           JSON.stringify({
             error: "You are not authorized to renew this contract.",
@@ -3172,49 +3655,173 @@ serve(async (req: Request) => {
         );
       }
 
-      // 3. Get the applicant info for the notification
-      const { data: applicantProfile } = await supabaseClient
-        .from("profiles")
-        .select("full_name, email")
-        .eq("id", applicant_id)
-        .single();
-
-      const applicantName =
-        applicantProfile?.full_name || applicantProfile?.email || "Musician";
-      const gigName = originalApp.gig?.name || "Gig";
-
-      // 4. Send notification to the musician about the renewal offer
-      const { error: notifyError } = await supabaseAdmin
-        .from("notifications")
-        .insert({
-          user_id: applicant_id,
-          type: "success",
-          title: "Contract Renewal Offer! 🎉",
-          message: `Great news! The venue wants to work with you again for "${gigName}". Check the gig listing to apply!`,
-          read: false,
-          meta: {
-            type: "contract_renewal",
-            gig_id: gig_id,
-            original_application_id: application_id,
-            organizer_id: organizer_id,
+      if (String(originalApp.status || "").toLowerCase() !== "completed") {
+        return new Response(
+          JSON.stringify({ error: "Only completed contracts can be renewed." }),
+          {
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+            status: 409,
           },
-        });
-
-      if (notifyError) {
-        console.error("Error sending renewal notification:", notifyError);
+        );
       }
 
-      // 5. Log the renewal for tracking (could be used for analytics later)
-      console.log(
-        `🔄 Contract renewal sent from ${organizer_id} to ${applicant_id} for gig ${gig_id}`,
-      );
+      const gigName = originalApp.gig?.name || "Gig";
+      const renewalRecipientId =
+        toNonEmptyString(originalApp.submitted_by_user_id) ||
+        toNonEmptyString(originalApp.applicant_id) ||
+        toNonEmptyString(originalApp.production_team?.owner_id);
+
+      if (!renewalRecipientId) {
+        return new Response(
+          JSON.stringify({ error: "Could not identify who should receive this renewal offer." }),
+          {
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+            status: 400,
+          },
+        );
+      }
+
+      const { data: organizerProfile } = await supabaseAdmin
+        .from("profiles")
+        .select("full_name, avatar_url")
+        .eq("id", authUser.id)
+        .maybeSingle();
+
+      const receiverEntityType = originalApp.production_team_id
+        ? "production_team"
+        : originalApp.group_id
+          ? "group"
+          : "musician";
+      const receiverEntityId =
+        receiverEntityType === "production_team"
+          ? originalApp.production_team_id
+          : receiverEntityType === "group"
+            ? originalApp.group_id
+            : renewalRecipientId;
+      const receiverEntityName =
+        originalApp.production_team?.name ||
+        originalApp.group?.name ||
+        originalApp.applicant?.full_name ||
+        originalApp.applicant?.email ||
+        "Musician";
+      const senderEntityName = organizerProfile?.full_name || "Venue";
+      const renewalMessage = `Renewal offer for "${gigName}".`;
+      const renewalEventDetails = {
+        type: "listing_connection_request",
+        source: "contract_renewal",
+        event_type: "contract_renewal",
+        sender_entity_type: "venue",
+        sender_entity_id: originalApp.gig_id || originalApp.gig?.id || null,
+        sender_entity_name: senderEntityName,
+        receiver_entity_type: receiverEntityType,
+        receiver_entity_id: receiverEntityId,
+        receiver_entity_name: receiverEntityName,
+        production_team_id: originalApp.production_team_id || null,
+        listing_type: "Gig",
+        listing_id: originalApp.gig_id || originalApp.gig?.id || null,
+        gig_id: originalApp.gig_id || originalApp.gig?.id || null,
+        original_application_id: application_id,
+        route: "/bookings",
+        route_params: { tab: "Pending" },
+        request_kind: "invite",
+        request_details: {
+          request_kind: "invite",
+          pitch_message: renewalMessage,
+          application_context: `Contract renewal for "${gigName}".`,
+          context_label: "Renewal Context",
+          original_application_id: application_id,
+          gig_id: originalApp.gig_id || originalApp.gig?.id || null,
+        },
+      };
+
+      const { data: existingRenewals, error: existingRenewalError } = await supabaseAdmin
+        .from("booking_requests")
+        .select("id, created_at, sender_id, receiver_id, group_id, studio_id, status, event_details, attachment_url")
+        .eq("sender_id", authUser.id)
+        .eq("receiver_id", renewalRecipientId)
+        .eq("status", "pending")
+        .contains("event_details", {
+          source: "contract_renewal",
+          original_application_id: application_id,
+        })
+        .limit(1);
+
+      if (existingRenewalError) {
+        return new Response(
+          JSON.stringify({ error: existingRenewalError.message }),
+          {
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+            status: 500,
+          },
+        );
+      }
+
+      let requestRow = existingRenewals?.[0] || null;
+      const alreadyPending = Boolean(requestRow);
+
+      if (!requestRow) {
+        const { data: insertedRequest, error: requestError } = await supabaseAdmin
+          .from("booking_requests")
+          .insert({
+            sender_id: authUser.id,
+            receiver_id: renewalRecipientId,
+            group_id: receiverEntityType === "group" ? originalApp.group_id : null,
+            message: renewalMessage,
+            status: "pending",
+            event_details: renewalEventDetails,
+          })
+          .select("id, created_at, sender_id, receiver_id, group_id, studio_id, status, event_details, attachment_url")
+          .single();
+
+        if (requestError) {
+          return new Response(
+            JSON.stringify({ error: requestError.message }),
+            {
+              headers: { ...corsHeaders, "Content-Type": "application/json" },
+              status: 500,
+            },
+          );
+        }
+
+        requestRow = insertedRequest;
+      }
+
+      if (!alreadyPending) {
+        // 4. Send notification to the recipient about the actionable renewal offer
+        const { error: notifyError } = await supabaseAdmin
+          .from("notifications")
+          .insert({
+            user_id: renewalRecipientId,
+            type: "success",
+            title: "Contract Renewal Offer",
+            message: `Great news! ${senderEntityName} wants to work with you again for "${gigName}". Open Activity to accept or decline the offer.`,
+            read: false,
+            meta: buildNotificationRouteMeta("/bookings", { tab: "Pending" }, {
+              type: "contract_renewal",
+              event_type: "contract_renewal",
+              request_id: requestRow?.id || null,
+              gig_id: originalApp.gig_id || originalApp.gig?.id || null,
+              original_application_id: application_id,
+              organizer_id: authUser.id,
+              production_team_id: originalApp.production_team_id || null,
+            }),
+          });
+
+        if (notifyError) {
+          console.error("Error sending renewal notification:", notifyError);
+        }
+      }
 
       return new Response(
         JSON.stringify({
           success: true,
-          message: `Renewal offer sent to ${applicantName}!`,
-          applicant_id,
-          gig_id,
+          message: alreadyPending
+            ? `A renewal offer is already pending for ${receiverEntityName}.`
+            : `Renewal offer sent to ${receiverEntityName}!`,
+          applicant_id: renewalRecipientId,
+          gig_id: originalApp.gig_id || originalApp.gig?.id || null,
+          request: requestRow,
+          already_pending: alreadyPending,
         }),
         {
           headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -3227,7 +3834,6 @@ serve(async (req: Request) => {
     if (action === "confirm_payment") {
       const { booking_id, payment_intent_id, payment_method_id, amount } = params;
 
-      console.log("💳 Confirm payment requested:", { booking_id, amount });
 
       if (!booking_id) {
         return new Response(JSON.stringify({ error: "Booking ID is required" }), {
@@ -3267,7 +3873,6 @@ serve(async (req: Request) => {
         updateData.remaining_balance = 0;
       }
 
-      console.log("💳 Updating booking with:", updateData);
 
       // 3. Update using Admin client to bypass RLS if necessary (though service role is used here)
       const { data: updatedBooking, error: updateError } = await supabaseAdmin
@@ -3293,10 +3898,10 @@ serve(async (req: Request) => {
           title: "Payment Successful! 🎉",
           message: `Your booking at ${booking.studio?.name} has been confirmed.`,
           read: false,
-          meta: {
+          meta: buildNotificationRouteMeta("/bookings", undefined, {
             booking_id: booking.id,
             type: "booking_confirmation"
-          }
+          })
         });
       } catch (notifyError) {
         console.error("❌ Notification error:", notifyError);
@@ -3414,14 +4019,12 @@ serve(async (req: Request) => {
           .insert({
             wallet_id: wallet.id,
             amount: balanceAmount,
-            type: "credit",
-            description: `F2F payment collected - ${booking.studio?.name || "Studio"}`,
+            type: "earning",
+            description: `Remaining balance payment received for booking at ${booking.studio?.name || "Studio"}`,
+            reference_id: booking_id,
+            reference_type: "booking_balance",
+            is_credit: true,
             status: "completed",
-            meta: {
-              booking_id: booking_id,
-              payment_method: "face_to_face",
-              studio_name: booking.studio?.name,
-            },
           });
 
         if (transactionError) {
@@ -3438,20 +4041,17 @@ serve(async (req: Request) => {
           title: "Balance Cleared! ✅",
           message: `Your remaining balance of ₱${balanceAmount.toLocaleString()} for ${booking.studio?.name || "your booking"} has been marked as paid.`,
           read: false,
-          meta: {
+          meta: buildNotificationRouteMeta("/bookings", undefined, {
             type: "balance_cleared",
             booking_id: booking_id,
             amount: balanceAmount,
-          },
+          }),
         });
 
       if (notifyError) {
         console.error("Notification error:", notifyError);
       }
 
-      console.log(
-        `💵 Balance cleared: ₱${balanceAmount} for booking ${booking_id} by owner ${owner_id}`,
-      );
 
       return new Response(
         JSON.stringify({

@@ -1,7 +1,11 @@
 import { Ionicons } from "@expo/vector-icons";
 import { router, useLocalSearchParams } from "expo-router";
+import { useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { supabase } from "../lib/supabase";
 import { useTheme } from "../src/context/ThemeContext";
+
+type VerificationState = "idle" | "checking" | "verified" | "delayed" | "failed";
 
 export default function PaymentResultScreen() {
   const { colors } = useTheme();
@@ -19,7 +23,63 @@ export default function PaymentResultScreen() {
     normalizedStatus === "completed";
   const isPending = normalizedStatus === "pending";
   const isDeposit = params.type === "deposit";
-  const title = isPending
+  const bookingId = typeof params.booking_id === "string" ? params.booking_id : "";
+  const [verificationState, setVerificationState] = useState<VerificationState>("idle");
+  const [verifiedPaymentStatus, setVerifiedPaymentStatus] = useState<string | null>(null);
+  const shouldVerifyBookingPayment = isSuccess && !isDeposit && Boolean(bookingId);
+  const isCheckingBookingPayment = verificationState === "checking";
+
+  useEffect(() => {
+    if (!shouldVerifyBookingPayment) return;
+
+    let cancelled = false;
+    const verifyPayment = async () => {
+      setVerificationState("checking");
+
+      for (let attempt = 1; attempt <= 4; attempt += 1) {
+        if (attempt > 1) {
+          await new Promise((resolve) => setTimeout(resolve, 1200 * attempt));
+        }
+
+        const { data, error } = await supabase.functions.invoke("paymongo", {
+          body: {
+            action: "check_payment",
+            booking_id: bookingId,
+          },
+        });
+
+        if (cancelled) return;
+        if (error) throw error;
+
+        const paymentStatus = String(data?.payment_status || "").toLowerCase();
+        setVerifiedPaymentStatus(paymentStatus || null);
+
+        if (paymentStatus === "paid" || paymentStatus === "partial") {
+          setVerificationState("verified");
+          return;
+        }
+      }
+
+      setVerificationState("delayed");
+    };
+
+    verifyPayment().catch((error) => {
+      if (cancelled) return;
+      console.error("Payment verification error:", error);
+      setVerificationState("failed");
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [bookingId, shouldVerifyBookingPayment]);
+
+  const bookingsTab = useMemo(
+    () => (verifiedPaymentStatus === "partial" ? "Pending" : "Upcoming"),
+    [verifiedPaymentStatus],
+  );
+
+  const title = isPending || isCheckingBookingPayment
     ? "Processing Payment"
     : isSuccess
       ? isDeposit
@@ -28,12 +88,16 @@ export default function PaymentResultScreen() {
       : isDeposit
         ? "Top-Up Cancelled"
         : "Payment Cancelled";
-  const message = isPending
+  const message = isPending || isCheckingBookingPayment
     ? "We are checking your payment status. Please wait a moment."
     : isSuccess
       ? isDeposit
         ? `₱${params.amount || "0"} has been added to your wallet.`
-        : "Your payment was processed successfully."
+        : verificationState === "delayed"
+          ? "Your payment was received. The booking may take a few more seconds to update."
+          : verificationState === "failed"
+            ? "Your payment was received, but the booking check did not finish. Refresh Bookings in a moment."
+            : "Your payment was processed successfully."
       : isDeposit
         ? "Your wallet balance was not changed."
         : "Your payment was not completed. You can try again anytime.";
@@ -44,10 +108,10 @@ export default function PaymentResultScreen() {
         <View
           style={[
             styles.iconContainer,
-            { backgroundColor: isPending ? "#F59E0B" : isSuccess ? "#10B981" : "#EF4444" },
+            { backgroundColor: isPending || isCheckingBookingPayment ? "#F59E0B" : isSuccess ? "#10B981" : "#EF4444" },
           ]}
         >
-          {isPending ? (
+          {isPending || isCheckingBookingPayment ? (
             <ActivityIndicator color="white" size="large" />
           ) : (
             <Ionicons
@@ -62,13 +126,25 @@ export default function PaymentResultScreen() {
         <Text style={[styles.description, { color: colors.textSecondary }]}>{message}</Text>
 
         <View style={styles.buttonContainer}>
-          {params.booking_id ? (
+          {bookingId ? (
             <TouchableOpacity
               activeOpacity={1}
-              style={[styles.primaryButton, { backgroundColor: colors.primary }]}
-              onPress={() => router.replace("/bookings")}
+              disabled={isCheckingBookingPayment}
+              style={[
+                styles.primaryButton,
+                {
+                  backgroundColor: colors.primary,
+                  opacity: isCheckingBookingPayment ? 0.65 : 1,
+                },
+              ]}
+              onPress={() =>
+                router.replace({
+                  pathname: "/bookings",
+                  params: { tab: isSuccess ? bookingsTab : "Pending" },
+                } as any)
+              }
             >
-              <Text style={styles.primaryButtonText}>View Bookings</Text>
+              <Text style={styles.primaryButtonText}>View Activity</Text>
             </TouchableOpacity>
           ) : null}
           <TouchableOpacity

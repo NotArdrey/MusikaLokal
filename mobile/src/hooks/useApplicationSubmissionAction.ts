@@ -443,15 +443,33 @@ export const useApplicationSubmissionAction = ({
             .eq("group_id", selectedGroupId)
             .neq("user_id", userId);
 
-          if (members && members.length > 0) {
-            const selectedGroup = userGroups.find((g) => g.id === selectedGroupId);
+          const selectedGroup = userGroups.find((g) => g.id === selectedGroupId);
+          const recipientIds = new Set(
+            (members || [])
+              .map((m) => m.user_id)
+              .filter(Boolean)
+              .filter((memberId) => memberId !== userId),
+          );
 
-            const notifications = members.map((m) => ({
-              user_id: m.user_id,
+          if (selectedGroup?.owner_id && selectedGroup.owner_id !== userId) {
+            recipientIds.add(selectedGroup.owner_id);
+          }
+
+          if (recipientIds.size > 0) {
+            const notifications = Array.from(recipientIds).map((recipientId) => ({
+              user_id: recipientId,
               type: "info",
               title: "Group Gig Application",
               message: `${selectedGroup?.name || "Your group"} has applied for "${group.name}". Check the gig details for more info.`,
-              meta: { gig_id: listingId, application_id: data.id },
+              meta: buildNotificationRouteMeta("/bookings", undefined, {
+                gig_id: listingId,
+                application_id: data.id,
+                group_id: selectedGroupId,
+                status: "pending",
+                viewer_access: "group_member",
+                viewer_can_act: false,
+                event_type: "group_gig_application_submitted",
+              }),
             }));
 
             await invokeListingsCrudAction({

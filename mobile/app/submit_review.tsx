@@ -226,7 +226,6 @@ export default function SubmitReviewScreen() {
                 <TouchableOpacity activeOpacity={1}
                   key={item}
                   onPress={() => setSelectedValue(item)}
-                  activeOpacity={1}
                 >
                   <Ionicons
                     name={item <= selectedValue ? "star" : "star-outline"}

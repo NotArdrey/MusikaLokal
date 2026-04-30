@@ -101,7 +101,12 @@ export async function createBookingCheckout(
       return { success: false, error: "One or more bookings have already been paid" };
     }
 
-    const amountInCentavos = 100;
+    const checkoutAmount = Number(amount);
+    if (!Number.isFinite(checkoutAmount) || checkoutAmount <= 0) {
+      return { success: false, error: "Invalid checkout amount" };
+    }
+
+    const amountInCentavos = Math.round(checkoutAmount * 100);
     const isMultiBooking = targetBookingIds.length > 1;
     const bookingDescription =
       description ||

@@ -144,6 +144,17 @@ const interleaveSearchResultsByType = (items: any[]) => {
   return output;
 };
 
+const getSearchResultKey = (item: any, index: number) => {
+  const typeKey =
+    typeof item?.type === "string" && item.type.length > 0 ? item.type : "item";
+  const idKey =
+    item?.id !== null && item?.id !== undefined && String(item.id).length > 0
+      ? String(item.id)
+      : String(index);
+
+  return `${typeKey}-${idKey}`;
+};
+
 const collectProfileValues = (rows: any[] | null | undefined, valueKey: string) => {
   const valueMap = new Map<string, string[]>();
 
@@ -350,10 +361,6 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
                 .eq("role", "musician");
             }
 
-            if (table === "producer_projects_with_summary") {
-              query = query.eq("status", "published");
-            }
-
             if (table === "production_teams") {
               query = query.select("id, owner_id, name, description, logo_url, created_at, updated_at");
             }
@@ -362,10 +369,6 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
               if (table === "profiles") {
                 query = query.or(
                   `full_name.ilike.%${searchQuery}%,address.ilike.%${searchQuery}%`,
-                );
-              } else if (table === "producer_projects_with_summary") {
-                query = query.or(
-                  `title.ilike.%${searchQuery}%,genre.ilike.%${searchQuery}%,location.ilike.%${searchQuery}%`,
                 );
               } else if (table === "production_teams") {
                 query = query.or(
@@ -389,7 +392,7 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
 
             if (
               selectedGenre !== "All" &&
-              (table === "groups_with_stats" || table === "gigs_with_stats" || table === "producer_projects_with_summary")
+              (table === "groups_with_stats" || table === "gigs_with_stats")
             ) {
               query = query.ilike("genre", `%${selectedGenre}%`);
             }
@@ -527,11 +530,9 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
                   ? "Studio"
                   : table === "profiles"
                     ? "Artist"
-                    : table.includes("producer_project")
-                      ? "Project"
-                      : table === "production_teams"
-                        ? "Production"
-                        : "Gig";
+                    : table === "production_teams"
+                      ? "Production"
+                      : "Gig";
 
               const mapped = qData.map((item: any) => ({
                 ...item,
@@ -705,13 +706,13 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
           const existingKeys = new Set<string>();
           if (!isReset) {
             dataRef.current.forEach((item: any, index: number) => {
-              existingKeys.add(`${item.type || "item"}-${item.id || index}`);
+              existingKeys.add(getSearchResultKey(item, index));
             });
           }
 
           const pooledMap = new Map<string, any>();
           [...spilloverRef.current, ...results].forEach((item: any, index: number) => {
-            const key = `${item.type || "item"}-${item.id || index}`;
+            const key = getSearchResultKey(item, index);
             if (existingKeys.has(key) || pooledMap.has(key)) {
               return;
             }
@@ -809,11 +810,6 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
         InteractionManager.runAfterInteractions(() => {
           requestAnimationFrame(() => {
             setTimeout(() => {
-              if (item?.type === "Project") {
-                router.push({ pathname: "/producer_project_details", params: { project_id: listingId } });
-                return;
-              }
-
               if (item?.type === "Production") {
                 if (onProductionTeamPress) {
                   onProductionTeamPress(listingId);
@@ -979,7 +975,7 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
               actionSlot={
                 canFollow ? (
                   <TouchableOpacity
-                    activeOpacity={0.9}
+                    activeOpacity={1}
                     disabled={isFollowBusy}
                     onPress={() => handleFollowToggle(item)}
                     style={[
@@ -1026,7 +1022,7 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
     );
 
     const keyExtractor = useCallback(
-      (item: any, index: number) => item.id?.toString?.() || String(index),
+      (item: any, index: number) => getSearchResultKey(item, index),
       [],
     );
 

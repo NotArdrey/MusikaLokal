@@ -91,6 +91,8 @@ export default function CustomAlert({
     }
   };
 
+  const usesStackedButtons = buttons.length > 2;
+
   return (
     <Modal
       transparent
@@ -131,7 +133,7 @@ export default function CustomAlert({
           </Text>
 
           {/* Buttons */}
-          <View style={styles.buttonContainer}>
+          <View style={[styles.buttonContainer, usesStackedButtons && styles.buttonContainerStacked]}>
             {buttons.map((button, index) => {
               const btnStyle = getButtonStyle(button.style);
               return (
@@ -141,11 +143,16 @@ export default function CustomAlert({
                   style={[
                     styles.button,
                     { backgroundColor: btnStyle.backgroundColor },
-                    buttons.length > 1 && { flex: 1 },
+                    buttons.length === 1 || usesStackedButtons ? styles.fullWidthButton : null,
+                    buttons.length === 2 && { flex: 1 },
+                    usesStackedButtons && index > 0 && { marginTop: 10 },
                   ]}
                 >
                   <Text
                     style={[styles.buttonText, { color: btnStyle.textColor }]}
+                    numberOfLines={1}
+                    adjustsFontSizeToFit
+                    minimumFontScale={0.85}
                   >
                     {button.text}
                   </Text>
@@ -208,6 +215,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 10,
   },
+  buttonContainerStacked: {
+    flexDirection: 'column',
+    gap: 0,
+  },
   button: {
     paddingVertical: 12,
     paddingHorizontal: 20,
@@ -216,6 +227,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     minWidth: IS_WEB ? 110 : 100,
     minHeight: 44,
+  },
+  fullWidthButton: {
+    width: '100%',
   },
   buttonText: {
     fontSize: 14,

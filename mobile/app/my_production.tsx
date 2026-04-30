@@ -147,10 +147,7 @@ export default function MyProductionScreen() {
   return (
     <>
       <View style={[styles.flex1, { backgroundColor: colors.background }]}>
-        <Header
-          title="My Production"
-          rightComponent={isMusicianView ? <View style={styles.headerSpacer} /> : undefined}
-        />
+        <Header title="My Production" />
 
         <ScrollView
           showsVerticalScrollIndicator={false}
@@ -323,7 +320,6 @@ export default function MyProductionScreen() {
 
 const styles = StyleSheet.create({
   flex1: { flex: 1 },
-  headerSpacer: { width: 40, height: 40 },
   scrollContent: { paddingHorizontal: 24, paddingBottom: 180, paddingTop: 16 },
   pageTabsWrap: {
     borderWidth: 1,

@@ -159,7 +159,7 @@ The mobile app is the product reference shell. It contains the broadest route in
 - listing creation and management for gigs, groups, studios, and production surfaces
 - unified activity in `/bookings`
 - chat, notifications, wallet, and payment result flows
-- producer network routes such as `/producer_projects`, `/producer_project_details`, `/production_team`, and `/my_production`
+- production routes such as `/production_team` and `/my_production`
 - playlists and radio routes such as `/create_playlist`, `/create_station`, `/playlist_details`, and `/station_details`
 - marketplace routes such as `/marketplace`, `/seller_hub`, `/orders`, `/product_details`, and `/shop`
 
@@ -175,7 +175,7 @@ Important mobile-specific behavior:
 [mobile/app/bookings.tsx](mobile/app/bookings.tsx) is no longer a narrow booking-status screen. It acts as a unified activity inbox that combines:
 
 - booking lifecycle items
-- producer-network applications and invites
+- production-team applications and invites
 - commercial deal activity
 
 This is an important architectural decision because multiple backend domains now converge on one user-facing operational surface.
@@ -218,8 +218,8 @@ The Expo web shell is desktop-oriented and shares many concepts with mobile, but
 Current route coverage includes:
 
 - Phase 1 core flows such as auth, account, discovery, bookings, manage, profile, notifications, wallet, and payment handling
-- selected newer routes such as `deal_details`, `production_team`, `producer_projects`, `producer_project_details`, `create_playlist`, `playlist_details`, `station_details`, `post_details`, `seller_hub`, `shop`, `orders`, and `product_details`
-- admin routes under [web/app/admin](web/app/admin) including `index`, `permits`, `users`, `reports`, `audit`, `deals`, `posts`, `products`, and `projects`
+- selected newer routes such as `deal_details`, `production_team`, `create_playlist`, `playlist_details`, `station_details`, `post_details`, `seller_hub`, `shop`, `orders`, and `product_details`
+- admin routes under [web/app/admin](web/app/admin) including `index`, `permits`, `users`, `reports`, `audit`, `deals`, `posts`, and `products`
 
 Important differences from mobile:
 
@@ -299,7 +299,7 @@ Representative function groups in [mobile/supabase/functions](mobile/supabase/fu
 
 Phase 2 feature routers:
 
-- `manage-producer-network`: producer projects, applications, invites, and saved talent
+- `manage-producer-network`: retired compatibility endpoint for older clients
 - `manage-deals`: production teams and commercial deal workflows
 - `manage-social-feed`: posts, follows, reactions, comments, and moderation flows
 - `manage-playlists`: playlists, playlist items, stations, and station slots
@@ -344,7 +344,7 @@ Major data domains:
 - booking, wallet, and subscription: `studio_bookings`, request and hold tables, attendance events, wallets, wallet transactions, wallet deposits, withdrawal requests, subscriptions, and subscription payments
 - messaging and notifications: `conversations`, `conversation_participants`, `messages`, `message_reactions`, `notifications`, and notification preferences
 - moderation and admin: `reports`, booking incidents, permit audit data, admin audit data, deletion audit tables, and penalties
-- commercial and producer collaboration: production teams, deal tables, producer projects, project roles, applications, invites, and saved talent
+- commercial and producer collaboration: production teams, direct connection requests, and deal tables
 - social feed: follows, posts, media, reactions, and comments
 - playlists and radio: playlists, playlist items, teaser assets, external links, stations, station playlist slots, and play-event tracking
 - marketplace: products, variants, product media, orders, order items, fulfillments, shipping profiles, and user entitlements
@@ -353,7 +353,7 @@ Recent migration themes visible in the repo:
 
 - February 2026: major 3NF expansion, backfill, dual-write, and legacy-column retirement work
 - March 2026: permit review, studio or gig safety fixes, and booking lifecycle refinements
-- April 2026: commercial booking tables, producer-network tables, social feed tables, playlists and radio tables, marketplace tables, push notification delivery, and production-roster support in gig applications
+- April 2026: commercial booking tables, production-team connection flows, social feed tables, playlists and radio tables, marketplace tables, push notification delivery, and production-roster support in gig applications
 
 The database is therefore not just a passive persistence layer. It carries compatibility rules, projection support, and evolving workflow primitives that the shells and Edge Functions both depend on.
 
@@ -363,9 +363,9 @@ The database is therefore not just a passive persistence layer. It carries compa
 
 Clients mix direct reads with detail and booking functions to browse listings, submit applications, and manage booking status. The mobile shell then folds those items into the unified `/bookings` activity model.
 
-### Producer network to commercial deal flow
+### Production team to commercial deal flow
 
-Producer collaboration starts in `manage-producer-network` with projects, roles, applications, and invites. Venue or recording negotiations then escalate into `manage-deals`, where production teams and deal terms are managed on the server side.
+Producer collaboration now starts from production teams and direct connection requests. Venue or recording negotiations then escalate into `manage-deals`, where production teams and deal terms are managed on the server side.
 
 ### Social feed to playlist and radio flow
 
@@ -377,7 +377,7 @@ The backend supports richer commerce primitives, but the mobile client currently
 
 ### Moderation and admin flow
 
-Administrative operations are concentrated in the web shells, especially the Expo web admin routes and their supporting admin Edge Functions. Admin responsibilities now span permits, users, reports, audit data, deals, posts, products, and projects.
+Administrative operations are concentrated in the web shells, especially the Expo web admin routes and their supporting admin Edge Functions. Admin responsibilities now span permits, users, reports, audit data, deals, posts, and products.
 
 ## 9. Role-Based User Flows
 
@@ -398,11 +398,11 @@ There is also a `guest` mode in the client auth layer. Groups and duos are not s
 | Role | Primary shell landing or dashboard pages | Main interaction pages | Shell coverage notes |
 | --- | --- | --- | --- |
 | Guest | [mobile/app/index.tsx](mobile/app/index.tsx), [web/app/index.tsx](web/app/index.tsx), [web/web-app/src/pages/Login.tsx](web/web-app/src/pages/Login.tsx) | signup, recovery, legal, and payment-result pages | guest or unauthenticated flow exists in all three shells |
-| Musician | [mobile/app/my_group.tsx](mobile/app/my_group.tsx), [web/app/my_group.tsx](web/app/my_group.tsx), [web/web-app/src/pages/MyGroup.tsx](web/web-app/src/pages/MyGroup.tsx) | bookings, chat, producer projects, reviews, social, playlists, marketplace | mobile has the richest musician experience |
+| Musician | [mobile/app/my_group.tsx](mobile/app/my_group.tsx), [web/app/my_group.tsx](web/app/my_group.tsx), [web/web-app/src/pages/MyGroup.tsx](web/web-app/src/pages/MyGroup.tsx) | bookings, chat, reviews, social, playlists, marketplace | mobile has the richest musician experience |
 | Studio owner | [mobile/app/my_studio.tsx](mobile/app/my_studio.tsx), [web/app/my_studio.tsx](web/app/my_studio.tsx), [web/web-app/src/pages/MyStudio.tsx](web/web-app/src/pages/MyStudio.tsx) | studio CRUD, bookings, wallet, chat, reviews | supported across all three shells |
 | Venue owner | [mobile/app/my_venue.tsx](mobile/app/my_venue.tsx), [web/app/my_venue.tsx](web/app/my_venue.tsx), [web/web-app/src/pages/MyVenue.tsx](web/web-app/src/pages/MyVenue.tsx) | gig CRUD, bookings, chat, deals, reviews | supported across all three shells, but mobile and Expo web have the broader deal and producer-adjacent surface |
-| Producer | [mobile/app/my_production.tsx](mobile/app/my_production.tsx), [web/app/my_production.tsx](web/app/my_production.tsx) | production team, producer projects, bookings, deals, chat | no dedicated producer shell exists yet in the Vite app |
-| Admin | [web/app/admin/index.tsx](web/app/admin/index.tsx), [web/web-app/src/pages/AdminDashboard.tsx](web/web-app/src/pages/AdminDashboard.tsx) | permits, users, reports, audit, deals, posts, products, projects | admin is effectively web-first; there is no dedicated mobile admin shell |
+| Producer | [mobile/app/my_production.tsx](mobile/app/my_production.tsx), [web/app/my_production.tsx](web/app/my_production.tsx) | production team, bookings, deals, chat | no dedicated producer shell exists yet in the Vite app |
+| Admin | [web/app/admin/index.tsx](web/app/admin/index.tsx), [web/web-app/src/pages/AdminDashboard.tsx](web/web-app/src/pages/AdminDashboard.tsx) | permits, users, reports, audit, deals, posts, products | admin is effectively web-first; there is no dedicated mobile admin shell |
 
 ### Guest flow
 
@@ -425,15 +425,15 @@ Primary pages:
 - Mobile discovery and identity: [mobile/app/feed.tsx](mobile/app/feed.tsx), [mobile/app/home.tsx](mobile/app/home.tsx), [mobile/app/profile.tsx](mobile/app/profile.tsx), [mobile/app/settings.tsx](mobile/app/settings.tsx), [mobile/app/account_details.tsx](mobile/app/account_details.tsx), [mobile/app/identity_verification.tsx](mobile/app/identity_verification.tsx)
 - Mobile performer management: [mobile/app/my_group.tsx](mobile/app/my_group.tsx), [mobile/app/add_group.tsx](mobile/app/add_group.tsx), [mobile/app/add_duo.tsx](mobile/app/add_duo.tsx), [mobile/app/manage_group.tsx](mobile/app/manage_group.tsx), [mobile/app/edit_group.tsx](mobile/app/edit_group.tsx), [mobile/app/group_details.tsx](mobile/app/group_details.tsx)
 - Mobile interaction and activity: [mobile/app/bookings.tsx](mobile/app/bookings.tsx), [mobile/app/chat.tsx](mobile/app/chat.tsx), [mobile/app/notifications.tsx](mobile/app/notifications.tsx), [mobile/app/submit_review.tsx](mobile/app/submit_review.tsx), [mobile/app/to_review.tsx](mobile/app/to_review.tsx)
-- Mobile producer, social, and media pages: [mobile/app/producer_projects.tsx](mobile/app/producer_projects.tsx), [mobile/app/producer_project_details.tsx](mobile/app/producer_project_details.tsx), [mobile/app/post_details.tsx](mobile/app/post_details.tsx), [mobile/app/create_playlist.tsx](mobile/app/create_playlist.tsx), [mobile/app/create_station.tsx](mobile/app/create_station.tsx), [mobile/app/playlist_details.tsx](mobile/app/playlist_details.tsx), [mobile/app/station_details.tsx](mobile/app/station_details.tsx)
+- Mobile social and media pages: [mobile/app/post_details.tsx](mobile/app/post_details.tsx), [mobile/app/create_playlist.tsx](mobile/app/create_playlist.tsx), [mobile/app/create_station.tsx](mobile/app/create_station.tsx), [mobile/app/playlist_details.tsx](mobile/app/playlist_details.tsx), [mobile/app/station_details.tsx](mobile/app/station_details.tsx)
 - Mobile marketplace overlay: [mobile/app/marketplace.tsx](mobile/app/marketplace.tsx), [mobile/app/shop.tsx](mobile/app/shop.tsx), [mobile/app/product_details.tsx](mobile/app/product_details.tsx), [mobile/app/orders.tsx](mobile/app/orders.tsx), [mobile/app/seller_hub.tsx](mobile/app/seller_hub.tsx)
-- Expo web equivalents: [web/app/home.tsx](web/app/home.tsx), [web/app/discover.tsx](web/app/discover.tsx), [web/app/profile.tsx](web/app/profile.tsx), [web/app/my_group.tsx](web/app/my_group.tsx), [web/app/manage_group.tsx](web/app/manage_group.tsx), [web/app/group_details.tsx](web/app/group_details.tsx), [web/app/bookings.tsx](web/app/bookings.tsx), [web/app/chat.tsx](web/app/chat.tsx), [web/app/producer_projects.tsx](web/app/producer_projects.tsx), [web/app/producer_project_details.tsx](web/app/producer_project_details.tsx), [web/app/create_playlist.tsx](web/app/create_playlist.tsx), [web/app/playlist_details.tsx](web/app/playlist_details.tsx), [web/app/station_details.tsx](web/app/station_details.tsx), [web/app/product_details.tsx](web/app/product_details.tsx), [web/app/orders.tsx](web/app/orders.tsx), [web/app/seller_hub.tsx](web/app/seller_hub.tsx)
+- Expo web equivalents: [web/app/home.tsx](web/app/home.tsx), [web/app/discover.tsx](web/app/discover.tsx), [web/app/profile.tsx](web/app/profile.tsx), [web/app/my_group.tsx](web/app/my_group.tsx), [web/app/manage_group.tsx](web/app/manage_group.tsx), [web/app/group_details.tsx](web/app/group_details.tsx), [web/app/bookings.tsx](web/app/bookings.tsx), [web/app/chat.tsx](web/app/chat.tsx), [web/app/create_playlist.tsx](web/app/create_playlist.tsx), [web/app/playlist_details.tsx](web/app/playlist_details.tsx), [web/app/station_details.tsx](web/app/station_details.tsx), [web/app/product_details.tsx](web/app/product_details.tsx), [web/app/orders.tsx](web/app/orders.tsx), [web/app/seller_hub.tsx](web/app/seller_hub.tsx)
 - Vite equivalents where present: [web/web-app/src/pages/Home.tsx](web/web-app/src/pages/Home.tsx), [web/web-app/src/pages/Discover.tsx](web/web-app/src/pages/Discover.tsx), [web/web-app/src/pages/Profile.tsx](web/web-app/src/pages/Profile.tsx), [web/web-app/src/pages/MyGroup.tsx](web/web-app/src/pages/MyGroup.tsx), [web/web-app/src/pages/ManageGroup.tsx](web/web-app/src/pages/ManageGroup.tsx), [web/web-app/src/pages/GroupDetails.tsx](web/web-app/src/pages/GroupDetails.tsx), [web/web-app/src/pages/Bookings.tsx](web/web-app/src/pages/Bookings.tsx), [web/web-app/src/pages/Chat.tsx](web/web-app/src/pages/Chat.tsx)
 
 How musicians interact with other user types:
 
 - with venue owners: they discover opportunities through discovery or listing surfaces, then the relationship moves into [mobile/app/bookings.tsx](mobile/app/bookings.tsx), [mobile/app/chat.tsx](mobile/app/chat.tsx), [mobile/app/submit_review.tsx](mobile/app/submit_review.tsx), and [mobile/app/to_review.tsx](mobile/app/to_review.tsx)
-- with producers: they browse or respond to collaboration opportunities in [mobile/app/producer_projects.tsx](mobile/app/producer_projects.tsx) and [mobile/app/producer_project_details.tsx](mobile/app/producer_project_details.tsx), then continue through [mobile/app/bookings.tsx](mobile/app/bookings.tsx), [mobile/app/chat.tsx](mobile/app/chat.tsx), and [mobile/app/notifications.tsx](mobile/app/notifications.tsx)
+- with producers: they connect through production-team flows, then continue through [mobile/app/bookings.tsx](mobile/app/bookings.tsx), [mobile/app/chat.tsx](mobile/app/chat.tsx), and [mobile/app/notifications.tsx](mobile/app/notifications.tsx)
 - with studio owners: studio discovery starts in browse or listing surfaces, while the operational relationship lands in [mobile/app/bookings.tsx](mobile/app/bookings.tsx), [mobile/app/chat.tsx](mobile/app/chat.tsx), [mobile/app/submit_review.tsx](mobile/app/submit_review.tsx), and [mobile/app/to_review.tsx](mobile/app/to_review.tsx)
 - with other musicians: coordination happens through [mobile/app/my_group.tsx](mobile/app/my_group.tsx), [mobile/app/add_group.tsx](mobile/app/add_group.tsx), [mobile/app/add_duo.tsx](mobile/app/add_duo.tsx), [mobile/app/group_details.tsx](mobile/app/group_details.tsx), [mobile/app/feed.tsx](mobile/app/feed.tsx), playlists, radio pages, and chat
 
@@ -473,13 +473,13 @@ This is the role where direct hiring and producer-mediated hiring converge into 
 
 Primary pages:
 
-- Mobile: [mobile/app/my_production.tsx](mobile/app/my_production.tsx), [mobile/app/add_production.tsx](mobile/app/add_production.tsx), [mobile/app/edit_production.tsx](mobile/app/edit_production.tsx), [mobile/app/production_team.tsx](mobile/app/production_team.tsx), [mobile/app/producer_projects.tsx](mobile/app/producer_projects.tsx), [mobile/app/producer_project_details.tsx](mobile/app/producer_project_details.tsx), [mobile/app/bookings.tsx](mobile/app/bookings.tsx), [mobile/app/deal_details.tsx](mobile/app/deal_details.tsx), [mobile/app/chat.tsx](mobile/app/chat.tsx), [mobile/app/notifications.tsx](mobile/app/notifications.tsx)
-- Expo web: [web/app/my_production.tsx](web/app/my_production.tsx), [web/app/production_team.tsx](web/app/production_team.tsx), [web/app/producer_projects.tsx](web/app/producer_projects.tsx), [web/app/producer_project_details.tsx](web/app/producer_project_details.tsx), [web/app/bookings.tsx](web/app/bookings.tsx), [web/app/deal_details.tsx](web/app/deal_details.tsx), [web/app/chat.tsx](web/app/chat.tsx)
-- Vite: no dedicated producer dashboard or producer-project pages currently exist in [web/web-app/src/pages](web/web-app/src/pages)
+- Mobile: [mobile/app/my_production.tsx](mobile/app/my_production.tsx), [mobile/app/add_production.tsx](mobile/app/add_production.tsx), [mobile/app/edit_production.tsx](mobile/app/edit_production.tsx), [mobile/app/production_team.tsx](mobile/app/production_team.tsx), [mobile/app/bookings.tsx](mobile/app/bookings.tsx), [mobile/app/deal_details.tsx](mobile/app/deal_details.tsx), [mobile/app/chat.tsx](mobile/app/chat.tsx), [mobile/app/notifications.tsx](mobile/app/notifications.tsx)
+- Expo web: [web/app/my_production.tsx](web/app/my_production.tsx), [web/app/production_team.tsx](web/app/production_team.tsx), [web/app/bookings.tsx](web/app/bookings.tsx), [web/app/deal_details.tsx](web/app/deal_details.tsx), [web/app/chat.tsx](web/app/chat.tsx)
+- Vite: no dedicated producer dashboard currently exists in [web/web-app/src/pages](web/web-app/src/pages)
 
 How producers interact with other user types:
 
-- with musicians: talent discovery, invites, applications, and role matching happen through [mobile/app/producer_projects.tsx](mobile/app/producer_projects.tsx) and [mobile/app/producer_project_details.tsx](mobile/app/producer_project_details.tsx), while status and follow-up move into [mobile/app/bookings.tsx](mobile/app/bookings.tsx), [mobile/app/chat.tsx](mobile/app/chat.tsx), and notifications
+- with musicians: production-team connection requests move through [mobile/app/bookings.tsx](mobile/app/bookings.tsx), [mobile/app/chat.tsx](mobile/app/chat.tsx), and notifications
 - with venue owners: producers represent a production team in venue-facing opportunities, then track approvals and negotiation in [mobile/app/bookings.tsx](mobile/app/bookings.tsx) and [mobile/app/deal_details.tsx](mobile/app/deal_details.tsx)
 - with studio owners: when the relationship becomes a recording or commercial deal, the producer-side workflow also lands in the deal pages
 
@@ -489,13 +489,13 @@ This role acts as the coordination layer between talent discovery and venue-faci
 
 Primary pages:
 
-- Expo web admin shell: [web/app/admin/index.tsx](web/app/admin/index.tsx), [web/app/admin/permits.tsx](web/app/admin/permits.tsx), [web/app/admin/users.tsx](web/app/admin/users.tsx), [web/app/admin/reports.tsx](web/app/admin/reports.tsx), [web/app/admin/audit.tsx](web/app/admin/audit.tsx), [web/app/admin/deals.tsx](web/app/admin/deals.tsx), [web/app/admin/posts.tsx](web/app/admin/posts.tsx), [web/app/admin/products.tsx](web/app/admin/products.tsx), [web/app/admin/projects.tsx](web/app/admin/projects.tsx)
+- Expo web admin shell: [web/app/admin/index.tsx](web/app/admin/index.tsx), [web/app/admin/permits.tsx](web/app/admin/permits.tsx), [web/app/admin/users.tsx](web/app/admin/users.tsx), [web/app/admin/reports.tsx](web/app/admin/reports.tsx), [web/app/admin/audit.tsx](web/app/admin/audit.tsx), [web/app/admin/deals.tsx](web/app/admin/deals.tsx), [web/app/admin/posts.tsx](web/app/admin/posts.tsx), [web/app/admin/products.tsx](web/app/admin/products.tsx)
 - Vite admin shell: [web/web-app/src/pages/AdminDashboard.tsx](web/web-app/src/pages/AdminDashboard.tsx)
 - Mobile: there is no dedicated mobile admin route set in [mobile/app](mobile/app)
 
 How admins interact with other user types:
 
-- admins do not participate as peer actors in booking or marketplace pages; they supervise those relationships through permits, reports, audit, deal, post, product, and project review screens
+- admins do not participate as peer actors in booking or marketplace pages; they supervise those relationships through permits, reports, audit, deal, post, and product review screens
 - admin actions affect every other role indirectly by changing moderation state, approval state, visibility, or enforcement state in the shared backend
 
 ### Cross-role capability overlays
@@ -505,7 +505,7 @@ Some user-facing flows cut across multiple profile roles instead of belonging to
 Interaction pathways that matter architecturally:
 
 - musician to venue owner: opportunity discovery starts in browse or listing surfaces, then moves into [mobile/app/bookings.tsx](mobile/app/bookings.tsx), [mobile/app/chat.tsx](mobile/app/chat.tsx), [mobile/app/submit_review.tsx](mobile/app/submit_review.tsx), and [mobile/app/to_review.tsx](mobile/app/to_review.tsx)
-- musician to producer: collaboration starts in [mobile/app/producer_projects.tsx](mobile/app/producer_projects.tsx) and [mobile/app/producer_project_details.tsx](mobile/app/producer_project_details.tsx), then continues in bookings, chat, and notifications
+- musician to producer: collaboration starts with production-team connection flows, then continues in bookings, chat, and notifications
 - musician or group to studio owner: discovery starts in browse or detail surfaces; scheduling, attendance, and review happen in bookings, chat, submit-review, and to-review pages
 - buyer to seller: product discovery starts in [mobile/app/marketplace.tsx](mobile/app/marketplace.tsx), [mobile/app/shop.tsx](mobile/app/shop.tsx), and [mobile/app/product_details.tsx](mobile/app/product_details.tsx); negotiation typically continues in [mobile/app/chat.tsx](mobile/app/chat.tsx), while inventory control stays in [mobile/app/seller_hub.tsx](mobile/app/seller_hub.tsx) and [mobile/app/orders.tsx](mobile/app/orders.tsx)
 - all signed-in roles to social and playlist features: mobile users primarily use [mobile/app/feed.tsx](mobile/app/feed.tsx), [mobile/app/post_details.tsx](mobile/app/post_details.tsx), [mobile/app/create_playlist.tsx](mobile/app/create_playlist.tsx), [mobile/app/playlist_details.tsx](mobile/app/playlist_details.tsx), [mobile/app/create_station.tsx](mobile/app/create_station.tsx), and [mobile/app/station_details.tsx](mobile/app/station_details.tsx)

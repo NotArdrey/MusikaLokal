@@ -242,7 +242,6 @@ const reportTargetTableMap: Record<string, string> = {
   user: "profiles",
   profile: "profiles",
   product: "products",
-  project: "producer_projects",
   playlist: "playlists",
 };
 

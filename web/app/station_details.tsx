@@ -76,7 +76,7 @@ export default function StationDetailsScreen() {
           </View>
 
           {isOwner && (
-            <TouchableOpacity style={[styles.manageBtn, { backgroundColor: colors.primary }]}>
+            <TouchableOpacity activeOpacity={1} style={[styles.manageBtn, { backgroundColor: colors.primary }]}>
               <Ionicons name="settings-outline" size={18} color="#fff" />
               <Text style={{ color: "#fff", fontWeight: "600", marginLeft: 8 }}>Manage Station</Text>
             </TouchableOpacity>

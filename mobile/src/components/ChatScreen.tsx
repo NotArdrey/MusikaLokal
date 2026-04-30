@@ -671,7 +671,7 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
                         style={[styles.inputAction, uploading && styles.inputActionDisabled]}
                         onPress={() => setShowAttachmentPicker(true)}
                         disabled={uploading}
-                        activeOpacity={0.7}
+                        activeOpacity={1}
                     >
                         {uploading ? (
                             <ActivityIndicator size="small" color={colors.primary} />
@@ -700,12 +700,12 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
                             onPress={handleSend}
                             disabled={!text.trim()}
                             style={[styles.sendButton, { backgroundColor: colors.primary }]}
-                            activeOpacity={0.8}
+                            activeOpacity={1}
                         >
                             <Ionicons name="send" size={19} color="#FFF" style={{ marginLeft: 2 }} />
                         </TouchableOpacity>
                     ) : (
-                        <TouchableOpacity style={styles.thumbsUpButton} onPress={handleQuickLike} activeOpacity={0.7}>
+                        <TouchableOpacity style={styles.thumbsUpButton} onPress={handleQuickLike} activeOpacity={1}>
                             <Ionicons name="thumbs-up" size={28} color={colors.primary} />
                         </TouchableOpacity>
                     )}
@@ -730,7 +730,7 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
                         onPress={onBack}
                         style={styles.backButton}
                         hitSlop={{ top: 10, left: 10, right: 10, bottom: 10 }}
-                        activeOpacity={0.7}
+                        activeOpacity={1}
                     >
                         <Ionicons name="chevron-back" size={26} color={colors.text} />
                     </TouchableOpacity>
@@ -738,7 +738,7 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
                 <TouchableOpacity
                     onPress={openOtherUserProfile}
                     disabled={isGroupChat || !otherUser?.id || otherUser.id === currentUserId}
-                    activeOpacity={0.75}
+                    activeOpacity={1}
                     style={styles.headerMainTouchable}
                 >
                     {/* Avatar with online indicator */}
@@ -782,7 +782,7 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
                     <TouchableOpacity
                         style={[styles.headerActionBtn, { backgroundColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)' }]}
                         onPress={() => setShowOptions(true)}
-                        activeOpacity={0.7}
+                        activeOpacity={1}
                     >
                         <Ionicons name="ellipsis-horizontal" size={20} color={colors.text} />
                     </TouchableOpacity>

@@ -368,7 +368,6 @@ export default function HomeScreen() {
   const compactSnapInterval = compactCardWidth + 16;
   const quickAccessModules = [
     { label: "Discover", icon: "compass-outline" as const, route: "/discover", color: "#3b82f6" },
-    { label: "Projects", icon: "people-outline" as const, route: "/producer_projects", color: "#8b5cf6" },
     { label: "Shop", icon: "bag-handle-outline" as const, route: "/shop", color: "#22c55e" },
     { label: "Orders", icon: "receipt-outline" as const, route: "/orders", color: "#eab308" },
     { label: "Seller Hub", icon: "storefront-outline" as const, route: "/seller_hub", color: "#ec4899" },
@@ -2871,7 +2870,7 @@ export default function HomeScreen() {
           {isWebDesktop ? (
             <View style={[styles.quickAccessDesktopRow, { paddingHorizontal: frameHorizontalPadding }]}>
               {quickAccessModules.map((mod, index) => (
-                <TouchableOpacity
+                <TouchableOpacity activeOpacity={1}
                   key={mod.label}
                   style={[
                     styles.quickAccessCard,
@@ -2906,7 +2905,7 @@ export default function HomeScreen() {
           ) : (
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: frameHorizontalPadding - 4 }}>
               {quickAccessModules.map((mod) => (
-                <TouchableOpacity
+                <TouchableOpacity activeOpacity={1}
                   key={mod.label}
                   style={[
                     styles.quickAccessCard,

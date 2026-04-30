@@ -1,6 +1,6 @@
 ﻿import { Ionicons } from "@expo/vector-icons";
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
-import React, { useState } from "react";
+import React, { useRef, useState } from "react";
 import {
     ActivityIndicator,
     Image,
@@ -65,6 +65,7 @@ export default function StudioDetailsScreen() {
   );
   const [showReasonInput, setShowReasonInput] = useState(false);
   const [cancellationReason, setCancellationReason] = useState("");
+  const cancellationReasonRef = useRef("");
 
   // Calendar View State
   const [viewMode, setViewMode] = useState<"list" | "calendar">("list");
@@ -429,6 +430,7 @@ export default function StudioDetailsScreen() {
     setModalButtonText(status === "confirmed" ? "Accept" : "Decline");
     setShowReasonInput(isDecline);
     setCancellationReason("");
+    cancellationReasonRef.current = "";
     setModalAction(() => async () => {
       try {
         const {
@@ -440,7 +442,7 @@ export default function StudioDetailsScreen() {
           bookingId,
           status as "confirmed" | "cancelled",
           user.id,
-          isDecline ? cancellationReason : undefined,
+          isDecline ? cancellationReasonRef.current.trim() : undefined,
         );
 
         // Update local state
@@ -450,6 +452,7 @@ export default function StudioDetailsScreen() {
         setModalVisible(false);
         setShowReasonInput(false);
         setCancellationReason("");
+        cancellationReasonRef.current = "";
       } catch (e) {
         Alert.alert("Error", "Failed to update booking status");
       }
@@ -1886,13 +1889,18 @@ export default function StudioDetailsScreen() {
           setModalVisible(false);
           setShowReasonInput(false);
           setCancellationReason("");
+          cancellationReasonRef.current = "";
         }}
         onConfirm={modalAction}
         title={modalTitle}
         message={modalMessage}
         buttonText={modalButtonText}
         showInput={showReasonInput}
-        onInputChange={setCancellationReason}
+        inputValue={cancellationReason}
+        onInputChange={(text) => {
+          cancellationReasonRef.current = text;
+          setCancellationReason(text);
+        }}
       />
       <CustomAlert
         visible={alertVisible}

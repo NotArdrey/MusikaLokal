@@ -174,7 +174,7 @@ export default function ProductDetailsScreen() {
               <Text style={{ color: colors.text, fontSize: moderateScale(15), fontWeight: "700", marginTop: 16 }}>Variants</Text>
               <View style={styles.variantsRow}>
                 {variants.map((v: any) => (
-                  <TouchableOpacity key={v.id} onPress={() => setSelectedVariant(v)} style={[styles.variantPill, { backgroundColor: selectedVariant?.id === v.id ? colors.primary : "transparent", borderColor: selectedVariant?.id === v.id ? colors.primary : borderCol }]}>
+                  <TouchableOpacity activeOpacity={1} key={v.id} onPress={() => setSelectedVariant(v)} style={[styles.variantPill, { backgroundColor: selectedVariant?.id === v.id ? colors.primary : "transparent", borderColor: selectedVariant?.id === v.id ? colors.primary : borderCol }]}>
                     <Text style={{ color: selectedVariant?.id === v.id ? "#fff" : colors.text, fontSize: 13 }}>{v.label || v.sku || "Option"}</Text>
                   </TouchableOpacity>
                 ))}
@@ -183,7 +183,7 @@ export default function ProductDetailsScreen() {
           )}
 
           {product.seller_name && (
-            <TouchableOpacity style={[styles.sellerRow, { borderColor: borderCol }]} onPress={() => router.push("/seller_hub")}>
+            <TouchableOpacity activeOpacity={1} style={[styles.sellerRow, { borderColor: borderCol }]} onPress={() => router.push("/seller_hub")}>
               <Ionicons name="storefront-outline" size={18} color={colors.primary} />
               <Text style={{ color: colors.text, fontSize: 14, fontWeight: "600", marginLeft: 8 }}>{product.seller_name}</Text>
               <Ionicons name="chevron-forward" size={16} color={colors.textSecondary} style={{ marginLeft: "auto" }} />
@@ -198,7 +198,7 @@ export default function ProductDetailsScreen() {
           <Text style={{ color: colors.textSecondary, fontSize: 12 }}>Total</Text>
           <Text style={{ color: colors.primary, fontSize: moderateScale(18), fontWeight: "800" }}>₱{Number(currentPrice).toLocaleString(undefined, { minimumFractionDigits: 2 })}</Text>
         </View>
-        <TouchableOpacity style={[styles.buyBtn, { backgroundColor: colors.primary, opacity: ordering ? 0.6 : 1 }]} onPress={handleBuyNow} disabled={ordering}>
+        <TouchableOpacity activeOpacity={1} style={[styles.buyBtn, { backgroundColor: colors.primary, opacity: ordering ? 0.6 : 1 }]} onPress={handleBuyNow} disabled={ordering}>
           {ordering ? <ActivityIndicator size="small" color="#fff" /> : <Text style={{ color: "#fff", fontWeight: "700", fontSize: moderateScale(15) }}>Buy Now</Text>}
         </TouchableOpacity>
       </View>

@@ -140,7 +140,7 @@ export default function SignupScreen() {
         const normalizedMessage = message || '';
         const type = resolveAlertType(normalizedTitle);
 
-        if (isSimpleTopToastButtons(buttons)) {
+        if ((type === 'success' || type === 'info') && isSimpleTopToastButtons(buttons)) {
             showTopToast({
                 type,
                 title: normalizedTitle,
@@ -824,6 +824,17 @@ export default function SignupScreen() {
 
         if (Object.keys(newErrors).length > 0) {
             setErrors(newErrors);
+            const issues = Object.entries(newErrors).map(([field, message]) => {
+                const label =
+                    field === 'confirmPassword'
+                        ? 'Confirm password'
+                        : field.charAt(0).toUpperCase() + field.slice(1);
+                return `${label}: ${message}`;
+            });
+            Alert.alert(
+                'Required Fields',
+                `Please fix the following before continuing:\n- ${issues.join('\n- ')}`,
+            );
             return;
         }
 

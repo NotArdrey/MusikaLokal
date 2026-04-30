@@ -448,7 +448,7 @@ export default function NotificationsScreen() {
                     }
                 ]}
                 onPress={() => !isTransfer && markAsRead(item.id, item.read)}
-                activeOpacity={isTransfer ? 1 : 0.7}
+                activeOpacity={1}
             >
                 <View style={styles.notificationContent}>
                     <View style={styles.leftContent}>

@@ -160,10 +160,10 @@ export default function PlaylistDetailsScreen() {
 
           {isOwner && (
             <View style={styles.ownerRow}>
-              <TouchableOpacity style={[styles.ownerBtn, { backgroundColor: colors.primary }]} onPress={() => router.push({ pathname: "/create_playlist", params: { edit_id: playlist.id } })}>
+              <TouchableOpacity activeOpacity={1} style={[styles.ownerBtn, { backgroundColor: colors.primary }]} onPress={() => router.push({ pathname: "/create_playlist", params: { edit_id: playlist.id } })}>
                 <Ionicons name="pencil" size={16} color="#fff" /><Text style={styles.ownerBtnText}>Edit</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={[styles.ownerBtn, { backgroundColor: "#ef4444" }]} onPress={handleDelete}>
+              <TouchableOpacity activeOpacity={1} style={[styles.ownerBtn, { backgroundColor: "#ef4444" }]} onPress={handleDelete}>
                 <Ionicons name="trash" size={16} color="#fff" /><Text style={styles.ownerBtnText}>Delete</Text>
               </TouchableOpacity>
             </View>
@@ -174,7 +174,7 @@ export default function PlaylistDetailsScreen() {
               <Text style={{ color: colors.text, fontSize: moderateScale(16), fontWeight: "700", marginTop: 20 }}>Teaser Assets</Text>
               <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 10 }}>
                 {teaserAssets.map((a: any) => (
-                  <TouchableOpacity key={a.id} style={[styles.teaserCard, { backgroundColor: cardBg, borderColor: borderCol }]} onPress={() => handlePlayTeaser(a.id)}>
+                  <TouchableOpacity activeOpacity={1} key={a.id} style={[styles.teaserCard, { backgroundColor: cardBg, borderColor: borderCol }]} onPress={() => handlePlayTeaser(a.id)}>
                     {a.thumbnail_url && <CachedImage uri={a.thumbnail_url } style={styles.teaserThumb} />}
                     <Ionicons name="play-circle" size={28} color={colors.primary} style={{ marginTop: 4 }} />
                     <Text style={{ color: colors.text, fontSize: 12, marginTop: 4 }} numberOfLines={1}>{a.asset_type}</Text>
@@ -189,7 +189,7 @@ export default function PlaylistDetailsScreen() {
               <Text style={{ color: colors.text, fontSize: moderateScale(16), fontWeight: "700", marginTop: 20 }}>Listen On</Text>
               <View style={styles.linksRow}>
                 {externalLinks.map((l: any) => (
-                  <TouchableOpacity key={l.id} style={[styles.linkChip, { backgroundColor: colors.primary + "18" }]}>
+                  <TouchableOpacity activeOpacity={1} key={l.id} style={[styles.linkChip, { backgroundColor: colors.primary + "18" }]}>
                     <Ionicons name="link" size={14} color={colors.primary} />
                     <Text style={{ color: colors.primary, fontSize: 13, marginLeft: 6 }}>{l.platform_name}</Text>
                   </TouchableOpacity>
@@ -207,7 +207,7 @@ export default function PlaylistDetailsScreen() {
                 <Text style={{ color: colors.text, fontSize: 14, fontWeight: "600" }} numberOfLines={1}>{item.title || "Untitled"}</Text>
                 {item.artist_name && <Text style={{ color: colors.textSecondary, fontSize: 12 }}>{item.artist_name}</Text>}
               </View>
-              {isOwner && <TouchableOpacity onPress={() => handleRemoveItem(item.id)}><Ionicons name="close-circle" size={20} color="#ef4444" /></TouchableOpacity>}
+              {isOwner && <TouchableOpacity activeOpacity={1} onPress={() => handleRemoveItem(item.id)}><Ionicons name="close-circle" size={20} color="#ef4444" /></TouchableOpacity>}
             </View>
           )) : <Text style={{ color: colors.textSecondary, textAlign: "center", marginTop: 20 }}>No tracks yet</Text>}
           <View style={{ height: 100 }} />

@@ -1,4 +1,4 @@
-﻿import { Ionicons } from "@expo/vector-icons";
+import { Ionicons } from "@expo/vector-icons";
 import React from "react";
 import {
     ActivityIndicator,
@@ -59,7 +59,7 @@ const GroupConnectTab = ({
               <Text style={[styles.label, { color: colors.textSecondary }]}>Select Venue</Text>
               <ScrollView horizontal showsHorizontalScrollIndicator={false}>
                 {userVenues.map((v) => (
-                  <TouchableOpacity
+                  <TouchableOpacity activeOpacity={1}
                     key={v.id}
                     style={[
                       styles.groupSelectChip,
@@ -140,7 +140,7 @@ const GroupConnectTab = ({
             />
           </View>
 
-          <TouchableOpacity
+          <TouchableOpacity activeOpacity={1}
             style={[
               styles.uploadBox,
               { borderColor: colors.border, height: 80, marginBottom: 16 },
@@ -156,7 +156,7 @@ const GroupConnectTab = ({
             style={[styles.primaryBtn, { backgroundColor: colors.primary }]}
             onPress={handleSendBookingRequest}
             disabled={checkingVenue || isSendingRequest}
-            activeOpacity={0.8}
+            activeOpacity={1}
           >
             {isSendingRequest ? (
               <ActivityIndicator color="#FFF" />
@@ -228,7 +228,7 @@ const GroupConnectTab = ({
                       `Confirm your application for the ${group.requirements.audition_role || "Musician"} position?`,
                     )
                   }
-                  activeOpacity={0.85}
+                  activeOpacity={1}
                 >
                   <View style={{ flexDirection: "row", alignItems: "center", flex: 1 }}>
                     <View

@@ -2353,7 +2353,7 @@ export default function EditGigScreen() {
                                 </Text>
                               </View>
                               <TouchableOpacity
-                                activeOpacity={0.8}
+                                activeOpacity={1}
                                 onPress={(event) => {
                                   event.stopPropagation();
                                   setPreferredGroupTypes((prev) => {

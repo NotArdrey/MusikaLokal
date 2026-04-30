@@ -633,6 +633,49 @@ serve(async (req: Request) => {
       return jsonResponse({ success: true, team });
     }
 
+    if (action === "delete_production_team") {
+      const { team_id } = params;
+      if (!team_id) return jsonResponse({ error: "team_id is required" }, 400);
+
+      const { data: team } = await supabaseAdmin
+        .from("production_teams")
+        .select("id, owner_id, name")
+        .eq("id", team_id)
+        .maybeSingle();
+
+      if (!team) return jsonResponse({ error: "Production team not found" }, 404);
+      if (team.owner_id !== authUser.id) {
+        return jsonResponse({ error: "Only the team owner can delete this team" }, 403);
+      }
+
+      const { error: memberDeleteError } = await supabaseAdmin
+        .from("production_team_members")
+        .delete()
+        .eq("team_id", team_id);
+
+      if (memberDeleteError) return jsonResponse({ error: memberDeleteError.message }, 500);
+
+      const { error: applicationClearError } = await supabaseAdmin
+        .from("gig_applications")
+        .update({
+          production_team_id: null,
+          production_roster_id: null,
+        })
+        .eq("production_team_id", team_id);
+
+      if (applicationClearError) return jsonResponse({ error: applicationClearError.message }, 500);
+
+      const { error: teamDeleteError } = await supabaseAdmin
+        .from("production_teams")
+        .delete()
+        .eq("id", team_id)
+        .eq("owner_id", authUser.id);
+
+      if (teamDeleteError) return jsonResponse({ error: teamDeleteError.message }, 500);
+
+      return jsonResponse({ success: true, team: { id: team.id, name: team.name } });
+    }
+
     if (action === "add_team_member") {
       const { team_id, user_id, role } = params;
       if (!team_id || !user_id) return jsonResponse({ error: "team_id and user_id are required" }, 400);

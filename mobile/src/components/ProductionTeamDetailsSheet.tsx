@@ -758,7 +758,7 @@ const ProductionTeamDetailsSheet = forwardRef<
               return (
                 <TouchableOpacity
                   key={option.id ?? "__solo__"}
-                  activeOpacity={0.85}
+                  activeOpacity={1}
                   onPress={() => setSelectedGroupId(option.id)}
                   style={[
                     styles.optionCard,
@@ -955,7 +955,7 @@ const ProductionTeamDetailsSheet = forwardRef<
         />
 
         <TouchableOpacity
-          activeOpacity={0.85}
+          activeOpacity={1}
           onPress={handleSendConnectionRequest}
           disabled={isSendingRequest}
           style={[styles.primaryButton, { backgroundColor: colors.primary, marginTop: 16 }]}
@@ -1112,7 +1112,7 @@ const ProductionTeamDetailsSheet = forwardRef<
                       <Ionicons name="chatbubble-ellipses-outline" size={22} color="#000" />
                     </TouchableOpacity>
                   ) : null}
-                  <TouchableOpacity activeOpacity={0.7} onPress={handleShare} style={styles.roundBtn}>
+                  <TouchableOpacity activeOpacity={1} onPress={handleShare} style={styles.roundBtn}>
                     <Ionicons name="share-outline" size={22} color="#000" />
                   </TouchableOpacity>
                   <TouchableOpacity activeOpacity={1} onPress={toggleFavorite} style={styles.roundBtn}>

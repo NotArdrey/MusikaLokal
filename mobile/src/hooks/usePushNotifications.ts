@@ -15,23 +15,29 @@ import {
 } from '../notifications/expoNotifications';
 import { resolveNotificationNavigationTarget } from '../utils/notificationNavigation';
 
+const PUSH_NOTIFICATION_CHANNEL_ID = 'musika-lokal-alerts-v2';
+
 let notificationHandlerConfigured = false;
+
+type ForegroundNotificationHandler = (notification: any) => void;
 
 const ensureNotificationHandler = () => {
   if (notificationHandlerConfigured || Platform.OS === 'web') {
     return;
   }
 
-  if (!Notifications) {
+  const notifications = Notifications;
+  if (!notifications?.setNotificationHandler) {
     return;
   }
 
-  Notifications.setNotificationHandler({
+  notifications.setNotificationHandler({
     handleNotification: async () => ({
-      shouldShowBanner: false,
-      shouldShowList: false,
-      shouldPlaySound: false,
+      shouldShowBanner: true,
+      shouldShowList: true,
+      shouldPlaySound: true,
       shouldSetBadge: false,
+      priority: 'max',
     }),
   });
 
@@ -54,29 +60,64 @@ const handleNotificationResponse = (response: any) => {
   router.push(target.pathname as any);
 };
 
-export const usePushNotifications = (userId: string | null | undefined) => {
+export const usePushNotifications = (
+  userId: string | null | undefined,
+  onForegroundNotification?: ForegroundNotificationHandler,
+) => {
   const handledResponseIdsRef = useRef<Set<string>>(new Set());
+  const foregroundNotificationHandlerRef = useRef(onForegroundNotification);
 
   useEffect(() => {
-    if (Platform.OS === 'web' || !Notifications) {
+    foregroundNotificationHandlerRef.current = onForegroundNotification;
+  }, [onForegroundNotification]);
+
+  useEffect(() => {
+    const notifications = Notifications;
+    if (Platform.OS === 'web' || !notifications) {
       return;
     }
 
     ensureNotificationHandler();
 
-    if (Platform.OS === 'android') {
-      void Notifications.setNotificationChannelAsync('default', {
-        name: 'Default',
+    if (Platform.OS === 'android' && notifications.setNotificationChannelAsync) {
+      void notifications.setNotificationChannelAsync(PUSH_NOTIFICATION_CHANNEL_ID, {
+        name: 'MusikaLokal Alerts',
         importance: NotificationAndroidImportance.MAX,
         vibrationPattern: [0, 250, 250, 250],
         lightColor: '#0F172A',
         sound: 'default',
+        enableVibrate: true,
+        showBadge: true,
       });
     }
   }, []);
 
   useEffect(() => {
-    if (Platform.OS === 'web' || !Notifications) {
+    const notifications = Notifications;
+    if (
+      Platform.OS === 'web' ||
+      !userId ||
+      !notifications?.addNotificationReceivedListener
+    ) {
+      return;
+    }
+
+    const receivedSubscription = notifications.addNotificationReceivedListener((notification: any) => {
+      foregroundNotificationHandlerRef.current?.(notification);
+    });
+
+    return () => {
+      receivedSubscription.remove();
+    };
+  }, [userId]);
+
+  useEffect(() => {
+    const notifications = Notifications;
+    if (
+      Platform.OS === 'web' ||
+      !notifications?.getLastNotificationResponseAsync ||
+      !notifications.addNotificationResponseReceivedListener
+    ) {
       return;
     }
 
@@ -116,14 +157,14 @@ export const usePushNotifications = (userId: string | null | undefined) => {
       }
 
       handleNotificationResponse(response);
-      void Notifications.clearLastNotificationResponseAsync().catch(() => undefined);
+      void notifications.clearLastNotificationResponseAsync?.().catch(() => undefined);
     };
 
-    void Notifications.getLastNotificationResponseAsync()
+    void notifications.getLastNotificationResponseAsync()
       .then(consumeResponse)
       .catch(() => undefined);
 
-    const responseSubscription = Notifications.addNotificationResponseReceivedListener((response) => {
+    const responseSubscription = notifications.addNotificationResponseReceivedListener((response: any) => {
       consumeResponse(response);
     });
 
@@ -134,20 +175,34 @@ export const usePushNotifications = (userId: string | null | undefined) => {
   }, []);
 
   useEffect(() => {
-    if (Platform.OS === 'web' || !userId || !Device.isDevice || !Notifications || !isExpoNotificationsAvailable) {
+    const notifications = Notifications;
+    if (
+      Platform.OS === 'web' ||
+      !userId ||
+      !Device.isDevice ||
+      !notifications ||
+      !isExpoNotificationsAvailable ||
+      !notifications.getPermissionsAsync ||
+      !notifications.requestPermissionsAsync ||
+      !notifications.getExpoPushTokenAsync
+    ) {
       return;
     }
+
+    const getPermissionsAsync = notifications.getPermissionsAsync.bind(notifications);
+    const requestPermissionsAsync = notifications.requestPermissionsAsync.bind(notifications);
+    const getExpoPushTokenAsync = notifications.getExpoPushTokenAsync.bind(notifications);
 
     let isDisposed = false;
 
     const syncPushRegistration = async () => {
       const installationId = await getOrCreatePushInstallationId();
 
-      const existingPermissions = await Notifications.getPermissionsAsync();
+      const existingPermissions = await getPermissionsAsync();
       let finalStatus = existingPermissions.status;
 
       if (finalStatus !== 'granted') {
-        const requestedPermissions = await Notifications.requestPermissionsAsync();
+        const requestedPermissions = await requestPermissionsAsync();
         finalStatus = requestedPermissions.status;
       }
 
@@ -165,8 +220,8 @@ export const usePushNotifications = (userId: string | null | undefined) => {
 
       const projectId = getExpoPushProjectId();
       const tokenResponse = projectId
-        ? await Notifications.getExpoPushTokenAsync({ projectId })
-        : await Notifications.getExpoPushTokenAsync();
+        ? await getExpoPushTokenAsync({ projectId })
+        : await getExpoPushTokenAsync();
 
       if (isDisposed || !tokenResponse.data) {
         return;

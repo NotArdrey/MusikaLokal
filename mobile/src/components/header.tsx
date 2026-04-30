@@ -23,7 +23,7 @@ interface HeaderProps {
 
 function Header({ title, transparent, onBackPress, leftComponent, rightComponent, rightIconName, rightIconOnPress }: HeaderProps) {
     const { colors, isDark } = useTheme();
-    const { isGuest, userId } = useAuth();
+    const { isGuest, userId, userRole } = useAuth();
     const insets = useSafeAreaInsets();
 
     const pathname = usePathname();
@@ -50,8 +50,15 @@ function Header({ title, transparent, onBackPress, leftComponent, rightComponent
     );
 
     const backVisible = !!onBackPress || !(isMainNavPath || isSettingsOrProfile || isMyListingPath || isManageDetailPath);
-    const notifVisible = isMainNavPath && !isGuest;
-    const addbtnvisible = isMyListingPath;
+    const addbtnvisible = useMemo(() => {
+        if (!isMyListingPath) return false;
+        if (pathname === "/my_group") return userRole === "musician";
+        if (pathname === "/my_venue") return userRole === "venue-owner";
+        if (pathname === "/my_studio") return userRole === "studio-owner";
+        if (pathname === "/my_production") return userRole === "producer";
+        return false;
+    }, [isMyListingPath, pathname, userRole]);
+    const notifVisible = !isGuest && (isMainNavPath || (isMyListingPath && !addbtnvisible));
     const titleOverline = useMemo(() => {
         const normalizedTitle = title.trim().toLowerCase();
 
@@ -69,7 +76,6 @@ function Header({ title, transparent, onBackPress, leftComponent, rightComponent
         if (pathname.startsWith('/manage')) return 'Workspace';
         if (pathname === '/profile') return 'Account';
         if (pathname === '/production_team') return 'Production';
-        if (pathname === '/producer_projects' || pathname === '/producer_project_details') return 'Producer Network';
         if (pathname === '/notifications') return 'Updates';
         if (pathname === '/chat') return 'Messages';
         return 'MusikaLokal';

@@ -46,7 +46,7 @@
       [
         "expo-camera",
         {
-          "cameraPermission": "Allow MusikaLokal to access your camera to verify your identity.",
+          "cameraPermission": "Allow MusikaLokal to access your camera to take profile photos and verify your identity.",
           "microphonePermission": "Allow MusikaLokal to access your microphone for video verification."
         }
       ],

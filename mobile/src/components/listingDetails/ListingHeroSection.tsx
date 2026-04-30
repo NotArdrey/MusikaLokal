@@ -76,7 +76,7 @@ const ListingHeroSection = ({
             />
           </TouchableOpacity>
         ) : null}
-        <TouchableOpacity activeOpacity={0.7} onPress={onShare} style={styles.roundBtn}>
+        <TouchableOpacity activeOpacity={1} onPress={onShare} style={styles.roundBtn}>
           <Ionicons
             name="share-outline"
             size={22}

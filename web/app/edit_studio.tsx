@@ -1,4 +1,4 @@
-﻿import { Ionicons } from "@expo/vector-icons";
+import { Ionicons } from "@expo/vector-icons";
 import * as FileSystem from "expo-file-system/legacy";
 import * as ImagePicker from "expo-image-picker";
 import { router } from "expo-router";
@@ -881,40 +881,40 @@ export default function EditStudioScreen() {
   };
 
   const fetchStudioDetails = async () => {
-    console.log("🔄 ===== FETCH STUDIO DETAILS STARTED =====");
-    console.log("🔄 Timestamp:", new Date().toISOString());
-    console.log("🔄 Studio ID (raw):", id);
-    console.log("🔄 Studio ID type:", typeof id);
-    console.log("🔄 Is Array?:", Array.isArray(id));
+    console.log("?? ===== FETCH STUDIO DETAILS STARTED =====");
+    console.log("?? Timestamp:", new Date().toISOString());
+    console.log("?? Studio ID (raw):", id);
+    console.log("?? Studio ID type:", typeof id);
+    console.log("?? Is Array?:", Array.isArray(id));
 
     try {
       setLoading(true);
-      console.log("🔄 Loading state set to true");
+      console.log("?? Loading state set to true");
 
       const {
         data: { user },
       } = await supabase.auth.getUser();
-      console.log("👤 User fetched:", user?.id);
+      console.log("?? User fetched:", user?.id);
 
       if (!user) {
-        console.error("❌ No user found, redirecting to login");
+        console.error("? No user found, redirecting to login");
         router.replace("/");
         return;
       }
 
       // Ensure id is a string, not an array
       const studioId = Array.isArray(id) ? id[0] : id;
-      console.log("🎯 Studio ID (processed):", studioId);
-      console.log("🎯 Studio ID type after processing:", typeof studioId);
+      console.log("?? Studio ID (processed):", studioId);
+      console.log("?? Studio ID type after processing:", typeof studioId);
 
       if (!studioId) {
-        console.error("❌ Invalid studio ID after processing");
+        console.error("? Invalid studio ID after processing");
         showAlert("warning", "Invalid Studio", "Invalid studio ID. Please try again.");
         router.replace("/home");
         return;
       }
 
-      console.log("📡 Calling edge function with params:", {
+      console.log("?? Calling edge function with params:", {
         action: "fetch_one",
         type: "studio",
         id: studioId,
@@ -979,18 +979,18 @@ export default function EditStudioScreen() {
       ]);
 
       console.log("===== EDGE FUNCTION RESPONSE =====");
-      console.log("📥 Response timestamp:", new Date().toISOString());
-      console.log("📥 Error object:", baseError);
-      console.log("📥 Data object:", baseData);
-      console.log("📥 Data type:", typeof baseData);
-      console.log("📥 Data is null?:", baseData === null);
-      console.log("📥 Data is undefined?:", baseData === undefined);
-      console.log("📥 Data is array?:", Array.isArray(baseData));
-      console.log("📥 Data keys:", baseData ? Object.keys(baseData) : "NO DATA");
-      console.log("📥 Data stringified:", JSON.stringify(baseData, null, 2));
+      console.log("?? Response timestamp:", new Date().toISOString());
+      console.log("?? Error object:", baseError);
+      console.log("?? Data object:", baseData);
+      console.log("?? Data type:", typeof baseData);
+      console.log("?? Data is null?:", baseData === null);
+      console.log("?? Data is undefined?:", baseData === undefined);
+      console.log("?? Data is array?:", Array.isArray(baseData));
+      console.log("?? Data keys:", baseData ? Object.keys(baseData) : "NO DATA");
+      console.log("?? Data stringified:", JSON.stringify(baseData, null, 2));
 
       if (baseError) {
-        console.error("❌ Base studio query returned error:", baseError);
+        console.error("? Base studio query returned error:", baseError);
         throw baseError;
       }
 
@@ -1087,7 +1087,7 @@ export default function EditStudioScreen() {
 
       // If no data returned, user doesn't own this studio
       if (!baseData) {
-        console.error("❌ No data returned from edge function");
+        console.error("? No data returned from edge function");
         showAlert(
           "warning",
           "Not Found",
@@ -1124,15 +1124,15 @@ export default function EditStudioScreen() {
         recording_rate_negotiable: false,
       } as any;
 
-      console.log("✅ ===== DATA VALIDATION PASSED =====");
+      console.log("? ===== DATA VALIDATION PASSED =====");
       console.log(
-        "📦 Full studio data received:",
+        "?? Full studio data received:",
         JSON.stringify(data, null, 2),
       );
-      console.log("📦 Data field count:", Object.keys(data).length);
+      console.log("?? Data field count:", Object.keys(data).length);
 
       // Log each critical field
-      console.log("📦 Field Analysis:");
+      console.log("?? Field Analysis:");
       console.log("  - name:", data.name, "(type:", typeof data.name, ")");
       console.log(
         "  - description:",
@@ -1242,31 +1242,31 @@ export default function EditStudioScreen() {
       console.log("  - off_peak_multiplier:", data.off_peak_multiplier);
       console.log("  - off_peak_dates:", data.off_peak_dates);
 
-      console.log("🔧 ===== SETTING STATE VALUES =====");
+      console.log("?? ===== SETTING STATE VALUES =====");
 
-      console.log("🔧 Setting studioName to:", data.name);
+      console.log("?? Setting studioName to:", data.name);
       setStudioName(data.name);
 
       console.log(
-        "🔧 Setting description to:",
+        "?? Setting description to:",
         data.description?.substring(0, 50),
       );
       setDescription(data.description);
 
-      console.log("🔧 Setting address to:", data.address);
+      console.log("?? Setting address to:", data.address);
       setAddress(data.address);
 
-      console.log("🔧 Setting latitude to:", data.latitude || null);
+      console.log("?? Setting latitude to:", data.latitude || null);
       setLatitude(data.latitude || null);
 
-      console.log("🔧 Setting longitude to:", data.longitude || null);
+      console.log("?? Setting longitude to:", data.longitude || null);
       setLongitude(data.longitude || null);
 
       // Load dynamic pricing
       const rehearsalValue =
         data.rehearsal_rate?.toString() || data.hourly_rate?.toString() || "";
       console.log(
-        "🔧 Setting rehearsalRate to:",
+        "?? Setting rehearsalRate to:",
         rehearsalValue,
         "(from rehearsal_rate:",
         data.rehearsal_rate,
@@ -1277,11 +1277,11 @@ export default function EditStudioScreen() {
       setRehearsalRate(rehearsalValue);
 
       const recordingValue = data.recording_rate?.toString() || "";
-      console.log("🔧 Setting recordingRate to:", recordingValue);
+      console.log("?? Setting recordingRate to:", recordingValue);
       setRecordingRate(recordingValue);
 
       const typeValue = data.type || "Both";
-      console.log("🔧 Setting studioType to:", typeValue);
+      console.log("?? Setting studioType to:", typeValue);
       setStudioType(typeValue);
 
       const loadedSongsPerBlock = parsePositiveInteger(
@@ -1301,7 +1301,7 @@ export default function EditStudioScreen() {
 
       const paxValue = data.pax?.toString() || "";
       console.log(
-        "🔧 Setting pax to:",
+        "?? Setting pax to:",
         paxValue,
         "(original value:",
         data.pax,
@@ -1310,44 +1310,44 @@ export default function EditStudioScreen() {
         ")",
       );
       setPax(paxValue);
-      console.log("✅ setPax STATE UPDATE completed");
+      console.log("? setPax STATE UPDATE completed");
 
-      console.log("🔧 Setting amenities to:", data.amenities || []);
+      console.log("?? Setting amenities to:", data.amenities || []);
       setAmenities(data.amenities || []);
 
-      console.log("🔧 Setting contractUrl to:", data.contract_url || "");
+      console.log("?? Setting contractUrl to:", data.contract_url || "");
       setContractUrl(data.contract_url || "");
       if (data.contract_url) {
         const fileName = data.contract_url.split("/").pop() || "Contract.pdf";
-        console.log("🔧 Setting contractFileName to:", fileName);
+        console.log("?? Setting contractFileName to:", fileName);
         setContractFileName(decodeURIComponent(fileName));
       }
 
-      console.log("🔧 Setting businessPermitUrl to:", data.business_permit_url || "");
+      console.log("?? Setting businessPermitUrl to:", data.business_permit_url || "");
       setBusinessPermitUrl(data.business_permit_url || "");
       setPermitStatus(String(data.permit_status || "approved").toLowerCase());
       setPermitRejectionReason(data.permit_rejection_reason || "");
       if (data.business_permit_url) {
         const fileName = data.business_permit_url.split("/").pop() || "BusinessPermit.pdf";
-        console.log("🔧 Setting businessPermitFileName to:", fileName);
+        console.log("?? Setting businessPermitFileName to:", fileName);
         setBusinessPermitFileName(decodeURIComponent(fileName));
       }
 
       // Load equipment/instruments from instruments JSONB
-      console.log("🎸 ===== PARSING INSTRUMENTS =====");
-      console.log("🎸 Raw data.instruments:", data.instruments);
-      console.log("🎸 Type of data.instruments:", typeof data.instruments);
-      console.log("🎸 Is Array?:", Array.isArray(data.instruments));
+      console.log("?? ===== PARSING INSTRUMENTS =====");
+      console.log("?? Raw data.instruments:", data.instruments);
+      console.log("?? Type of data.instruments:", typeof data.instruments);
+      console.log("?? Is Array?:", Array.isArray(data.instruments));
 
       const instrumentsData = Array.isArray(data.instruments)
         ? data.instruments
         : [];
       console.log(
-        "🎸 Processed instrumentsData:",
+        "?? Processed instrumentsData:",
         JSON.stringify(instrumentsData, null, 2),
       );
-      console.log("🎸 instrumentsData array length:", instrumentsData.length);
-      console.log("🎸 instrumentsData items:");
+      console.log("?? instrumentsData array length:", instrumentsData.length);
+      console.log("?? instrumentsData items:");
       instrumentsData.forEach((item: any, index: number) => {
         console.log(`  [${index}]:`, {
           name: item?.name,
@@ -1364,11 +1364,11 @@ export default function EditStudioScreen() {
         INSTRUMENT_OPTIONS.map((item) => [item.name, item.image]),
       );
 
-      console.log("🎸 ===== FILTERING EQUIPMENT ITEMS =====");
+      console.log("?? ===== FILTERING EQUIPMENT ITEMS =====");
       const equipmentItems = instrumentsData
         .filter((item: any) => {
           if (!item || typeof item !== "object") {
-            console.log("🎸 Skipping invalid item:", item);
+            console.log("?? Skipping invalid item:", item);
             return false;
           }
 
@@ -1384,14 +1384,14 @@ export default function EditStudioScreen() {
 
           if (hasQuantity || hasDescription) {
             console.log(
-              `🎸 Treating "${name}" as equipment (has quantity/description)`
+              `?? Treating "${name}" as equipment (has quantity/description)`
             );
             return true;
           }
 
           const presetImage = presetLookup.get(name);
           if (!presetImage) {
-            console.log(`🎸 Treating "${name}" as equipment (not a preset)`);
+            console.log(`?? Treating "${name}" as equipment (not a preset)`);
             return true;
           }
 
@@ -1399,7 +1399,7 @@ export default function EditStudioScreen() {
           const isCustomImage = image.length > 0 && image !== presetImage;
           if (isCustomImage) {
             console.log(
-              `🎸 Treating "${name}" as equipment (custom image)`
+              `?? Treating "${name}" as equipment (custom image)`
             );
           }
           return isCustomImage;
@@ -1415,28 +1415,28 @@ export default function EditStudioScreen() {
             description: eq.description || "",
             image: eq.image || "",
           };
-          console.log(`🎸 Mapped equipment [${index}]:`, mapped);
+          console.log(`?? Mapped equipment [${index}]:`, mapped);
           return mapped;
         });
       console.log(
-        "🎸 Final filtered equipment items count:",
+        "?? Final filtered equipment items count:",
         equipmentItems.length,
       );
       console.log(
-        "🎸 Final filtered equipment items:",
+        "?? Final filtered equipment items:",
         JSON.stringify(equipmentItems, null, 2),
       );
 
-      console.log("🎸 ===== FILTERING PRESET ITEMS =====");
+      console.log("?? ===== FILTERING PRESET ITEMS =====");
       const presetItems = instrumentsData
         .filter((item: any) => {
           if (!item || typeof item !== "object") {
-            console.log("🎸 Preset: Skipping invalid item:", item);
+            console.log("?? Preset: Skipping invalid item:", item);
             return false;
           }
           const name = typeof item.name === "string" ? item.name.trim() : "";
           if (!name) {
-            console.log("🎸 Preset: Skipping item without name:", item);
+            console.log("?? Preset: Skipping item without name:", item);
             return false;
           }
 
@@ -1444,7 +1444,7 @@ export default function EditStudioScreen() {
           const presetImage = presetLookup.get(name);
           const willInclude = !!presetImage && image === presetImage;
           console.log(
-            `🎸 Preset: Evaluating "${name}": willInclude=${willInclude}`,
+            `?? Preset: Evaluating "${name}": willInclude=${willInclude}`,
           );
           return willInclude;
         })
@@ -1453,24 +1453,24 @@ export default function EditStudioScreen() {
             name: item.name,
             image: item.image,
           };
-          console.log("🎸 Preset: Mapped item:", mapped);
+          console.log("?? Preset: Mapped item:", mapped);
           return mapped;
         });
-      console.log("🎸 Final filtered preset items count:", presetItems.length);
+      console.log("?? Final filtered preset items count:", presetItems.length);
       console.log(
-        "🎸 Final filtered preset items:",
+        "?? Final filtered preset items:",
         JSON.stringify(presetItems, null, 2),
       );
 
       // Always set equipment even if length is 0 to clear old data
       console.log(
-        "🔧 Setting equipment state with",
+        "?? Setting equipment state with",
         equipmentItems.length,
         "items",
       );
       setEquipment(equipmentItems);
       console.log(
-        "✅ setEquipment STATE UPDATE completed with",
+        "? setEquipment STATE UPDATE completed with",
         equipmentItems.length,
         "items",
       );
@@ -1567,7 +1567,7 @@ export default function EditStudioScreen() {
         originalSelectedDatesRef.current = JSON.parse(
           JSON.stringify(calendarDates),
         );
-        console.log("📅 Loaded date overrides:", calendarDates);
+        console.log("?? Loaded date overrides:", calendarDates);
       } else if (
         data.calendar_availability &&
         Array.isArray(data.calendar_availability)
@@ -1608,7 +1608,7 @@ export default function EditStudioScreen() {
       }
 
       // Load availability
-      console.log("📅 Loading availability from data:", data.availability);
+      console.log("?? Loading availability from data:", data.availability);
       if (data.availability && Array.isArray(data.availability)) {
         // Helper function to convert 24-hour to 12-hour format
         const convertTo12Hour = (time24: string) => {
@@ -1636,13 +1636,13 @@ export default function EditStudioScreen() {
             ),
           };
         });
-        console.log("📅 Loaded availability:", loadedAvailability);
+        console.log("?? Loaded availability:", loadedAvailability);
         setAvailability(loadedAvailability);
         originalAvailabilityRef.current = JSON.parse(
           JSON.stringify(loadedAvailability),
         );
       } else {
-        console.log("📅 No availability data, using default empty schedule");
+        console.log("?? No availability data, using default empty schedule");
         // Initialize with empty schedule if no availability data
         const defaultAvailability = daysOfWeek.map((day) => ({
           day,
@@ -1656,50 +1656,50 @@ export default function EditStudioScreen() {
       }
 
       // Load preset instruments
-      console.log("🔧 Checking preset items for selectedInstruments update");
+      console.log("?? Checking preset items for selectedInstruments update");
       if (presetItems.length > 0) {
         console.log(
-          "🔧 Setting selectedInstruments with",
+          "?? Setting selectedInstruments with",
           presetItems.length,
           "items:",
           presetItems,
         );
         setSelectedInstruments(presetItems);
         console.log(
-          "✅ setSelectedInstruments STATE UPDATE completed with",
+          "? setSelectedInstruments STATE UPDATE completed with",
           presetItems.length,
           "items",
         );
       } else {
         console.log(
-          "⚠️ No preset items to set, selectedInstruments will remain empty",
+          "?? No preset items to set, selectedInstruments will remain empty",
         );
       }
 
-      console.log("🔧 Setting images - raw data.images:", data.images);
-      console.log("🔧 Images array length:", data.images?.length || 0);
+      console.log("?? Setting images - raw data.images:", data.images);
+      console.log("?? Images array length:", data.images?.length || 0);
       setSelectedImages(data.images || []);
       console.log(
-        "✅ setSelectedImages STATE UPDATE completed with",
+        "? setSelectedImages STATE UPDATE completed with",
         (data.images || []).length,
         "images",
       );
 
       if (data.images && data.images.length > 0) {
-        console.log("🔧 Setting thumbnailIndex to 0");
+        console.log("?? Setting thumbnailIndex to 0");
         setThumbnailIndex(0);
-        console.log("✅ setThumbnailIndex STATE UPDATE completed");
+        console.log("? setThumbnailIndex STATE UPDATE completed");
       } else {
-        console.log("⚠️ No images available, thumbnailIndex not updated");
+        console.log("?? No images available, thumbnailIndex not updated");
       }
-      console.log("✅ ===== FETCH STUDIO DETAILS COMPLETED SUCCESSFULLY =====");
-      console.log("✅ Timestamp:", new Date().toISOString());
+      console.log("? ===== FETCH STUDIO DETAILS COMPLETED SUCCESSFULLY =====");
+      console.log("? Timestamp:", new Date().toISOString());
     } catch (e) {
-      console.error("❌ ===== FETCH STUDIO DETAILS FAILED =====");
-      console.error("❌ Error timestamp:", new Date().toISOString());
-      console.error("❌ Error object:", e);
-      console.error("❌ Error message:", (e as any)?.message);
-      console.error("❌ Error stack:", (e as any)?.stack);
+      console.error("? ===== FETCH STUDIO DETAILS FAILED =====");
+      console.error("? Error timestamp:", new Date().toISOString());
+      console.error("? Error object:", e);
+      console.error("? Error message:", (e as any)?.message);
+      console.error("? Error stack:", (e as any)?.stack);
       showAlert("warning", "Couldn't Load Details", "Failed to load studio details.");
       router.replace("/home");
     } finally {
@@ -2226,13 +2226,13 @@ export default function EditStudioScreen() {
       }
 
       // Check for booking conflicts before saving
-      console.log("🔍 Checking for booking conflicts...");
+      console.log("?? Checking for booking conflicts...");
 
       const { conflicts, conflictingHoldCount } =
         await findScheduleConflictsForEditedState(studioId);
 
       if (conflicts.length > 0) {
-        console.log("⚠️ Found conflicts:", conflicts.length);
+        console.log("?? Found conflicts:", conflicts.length);
         setConflictingBookings(conflicts);
         setConflictModalVisible(true);
         setSaving(false);
@@ -2251,7 +2251,7 @@ export default function EditStudioScreen() {
 
       await executeSave();
     } catch (e: any) {
-      console.error("❌ Error checking bookings:", e);
+      console.error("? Error checking bookings:", e);
       showAlert(
         "warning",
         "Couldn't Save Studio",
@@ -2762,15 +2762,15 @@ export default function EditStudioScreen() {
         JSON.stringify(availability, null, 2),
       );
       console.log(
-        "📅 FILTERED availability (days with slots):",
+        "?? FILTERED availability (days with slots):",
         payload.availability,
       );
       console.log(
-        "📅 Number of days with availability:",
+        "?? Number of days with availability:",
         payload.availability.length,
       );
       console.log(
-        "🔵 Updating studio with payload:",
+        "?? Updating studio with payload:",
         JSON.stringify(
           {
             action: "update",
@@ -2810,11 +2810,11 @@ export default function EditStudioScreen() {
         .select()
         .single();
 
-      console.log("🔵 Response data:", studioData);
-      console.log("🔵 Response error:", updateError);
+      console.log("?? Response data:", studioData);
+      console.log("?? Response error:", updateError);
 
       if (updateError) {
-        console.error("❌ Error details:", JSON.stringify(updateError, null, 2));
+        console.error("? Error details:", JSON.stringify(updateError, null, 2));
         let alertMessage = `Failed to update studio: ${updateError.message}`;
         if (updateError.hint) alertMessage += `\n\nHint: ${updateError.hint}`;
         if (updateError.details) alertMessage += `\n\nDetails: ${updateError.details}`;
@@ -3046,7 +3046,7 @@ export default function EditStudioScreen() {
         throw new Error("No data returned from server");
       }
 
-      console.log("✅ Studio Updated successfully");
+      console.log("? Studio Updated successfully");
       const successMessage = "Studio updated successfully!";
 
       showAlert("success", "Success", successMessage, [
@@ -3058,11 +3058,11 @@ export default function EditStudioScreen() {
         },
       ]);
     } catch (e: any) {
-      console.error("❌ Error updating studio:", e);
-      console.error("❌ Error message:", e?.message);
-      console.error("❌ Error stack:", e?.stack);
+      console.error("? Error updating studio:", e);
+      console.error("? Error message:", e?.message);
+      console.error("? Error stack:", e?.stack);
       console.error(
-        "❌ Full error object:",
+        "? Full error object:",
         JSON.stringify(e, Object.getOwnPropertyNames(e), 2),
       );
       showAlert(
@@ -3914,7 +3914,7 @@ export default function EditStudioScreen() {
                       marginRight: 4,
                     }}
                   >
-                    ₱
+                    ?
                   </Text>
                   <TextInput
                     value={rehearsalRate}
@@ -3985,7 +3985,7 @@ export default function EditStudioScreen() {
                       marginRight: 4,
                     }}
                   >
-                    ₱
+                    ?
                   </Text>
                   <TextInput
                     value={recordingRate}
@@ -4161,7 +4161,7 @@ export default function EditStudioScreen() {
               </View>
               {!showPromotionForm && promotions.length < 5 && (
                 <TouchableOpacity
-                  activeOpacity={0.8}
+                  activeOpacity={1}
                   onPress={() => {
                     resetPromotionForm();
                     setShowPromotionForm(true);
@@ -4217,20 +4217,20 @@ export default function EditStudioScreen() {
                           promo.minimum_spend ? `Min spend ₱${promo.minimum_spend}` : null,
                         ]
                           .filter(Boolean)
-                          .join(" • ")}
+                          .join(" � ")}
                       </Text>
                     )}
                     <Text style={{ fontFamily: "Poppins_400Regular", color: colors.textSecondary, fontSize: 11, marginTop: 2 }}>
                       {promo.is_permanent
                         ? "Always available"
-                        : `${new Date(promo.start_date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })} – ${new Date(promo.end_date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}`}
+                        : `${new Date(promo.start_date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })} � ${new Date(promo.end_date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}`}
                     </Text>
                   </View>
                   <View style={{ flexDirection: "row", gap: 8 , flexWrap: "wrap", minWidth: "100%" }}>
-                    <TouchableOpacity activeOpacity={0.8} onPress={() => handleEditPromotion(promo)}>
+                    <TouchableOpacity activeOpacity={1} onPress={() => handleEditPromotion(promo)}>
                       <Ionicons name="create-outline" size={18} color={colors.primary} />
                     </TouchableOpacity>
-                    <TouchableOpacity activeOpacity={0.8} onPress={() => handleRemovePromotion(promo.id)}>
+                    <TouchableOpacity activeOpacity={1} onPress={() => handleRemovePromotion(promo.id)}>
                       <Ionicons name="trash-outline" size={18} color="#EF4444" />
                     </TouchableOpacity>
                   </View>
@@ -4393,7 +4393,7 @@ export default function EditStudioScreen() {
                   {(["percentage", "fixed_amount"] as const).map((dt) => (
                     <TouchableOpacity
                       key={dt}
-                      activeOpacity={0.8}
+                      activeOpacity={1}
                       onPress={() => setPromotionForm((p) => ({ ...p, discount_type: dt }))}
                       style={{
                         flex: 1,
@@ -4470,7 +4470,7 @@ export default function EditStudioScreen() {
                   ] as const).map((opt) => (
                     <TouchableOpacity
                       key={String(opt.key)}
-                      activeOpacity={0.8}
+                      activeOpacity={1}
                       onPress={() => setPromotionForm((p) => ({ ...p, is_permanent: opt.key as boolean }))}
                       style={{
                         flex: 1,
@@ -4500,7 +4500,7 @@ export default function EditStudioScreen() {
                   <View style={{ marginBottom: 12 }}>
                     <View style={{ flexDirection: "row", gap: 8 , flexWrap: "wrap", minWidth: "100%" }}>
                       <TouchableOpacity
-                        activeOpacity={0.8}
+                        activeOpacity={1}
                         onPress={() => { setShowPromoStartCalendar(!showPromoStartCalendar); setShowPromoEndCalendar(false); }}
                         style={{
                           flex: 1,
@@ -4522,7 +4522,7 @@ export default function EditStudioScreen() {
                         </Text>
                       </TouchableOpacity>
                       <TouchableOpacity
-                        activeOpacity={0.8}
+                        activeOpacity={1}
                         onPress={() => { setShowPromoEndCalendar(!showPromoEndCalendar); setShowPromoStartCalendar(false); }}
                         style={{
                           flex: 1,
@@ -4599,7 +4599,7 @@ export default function EditStudioScreen() {
                   {allowedPromotionTargets.map((at) => (
                     <TouchableOpacity
                       key={at}
-                      activeOpacity={0.8}
+                      activeOpacity={1}
                       onPress={() => setPromotionForm((p) => ({ ...p, applies_to: at }))}
                       style={{
                         flex: 1,
@@ -4627,7 +4627,7 @@ export default function EditStudioScreen() {
                 {/* Save / Cancel */}
                 <View style={{ flexDirection: "row", gap: 10 , flexWrap: "wrap", minWidth: "100%" }}>
                   <TouchableOpacity
-                    activeOpacity={0.8}
+                    activeOpacity={1}
                     onPress={() => { resetPromotionForm(); setShowPromotionForm(false); }}
                     style={{
                       flex: 1,
@@ -4641,7 +4641,7 @@ export default function EditStudioScreen() {
                     <Text style={{ fontFamily: "Poppins_600SemiBold", fontSize: 13, color: colors.textSecondary }}>Cancel</Text>
                   </TouchableOpacity>
                   <TouchableOpacity
-                    activeOpacity={0.8}
+                    activeOpacity={1}
                     onPress={handleSavePromotion}
                     style={{
                       flex: 1,
@@ -5661,7 +5661,7 @@ export default function EditStudioScreen() {
                                 marginTop: 8,
                               }}
                             >
-                              ⚠️ This overrides weekly {dayName} schedule (
+                              ?? This overrides weekly {dayName} schedule (
                               {weeklySchedule.slots[0]?.start} -{" "}
                               {weeklySchedule.slots[0]?.end})
                             </Text>

@@ -75,8 +75,14 @@ export default function CustomAlert({
       !firstButton.onPress &&
       (!firstButton.style || firstButton.style === "default");
 
-    return !forceModal && !hasStructuredMessage && hasSingleButton && isDefaultOkButton;
-  }, [buttons, forceModal, hasStructuredMessage]);
+    return (
+      !forceModal &&
+      (type === "success" || type === "info") &&
+      !hasStructuredMessage &&
+      hasSingleButton &&
+      isDefaultOkButton
+    );
+  }, [buttons, forceModal, hasStructuredMessage, type]);
 
   useEffect(() => {
     if (!visible || !shouldUseTopToast) return;
@@ -93,6 +99,8 @@ export default function CustomAlert({
   if (shouldUseTopToast) {
     return null;
   }
+
+  const usesStackedButtons = buttons.length > 2;
 
   const handleButtonPress = (button: AlertButton) => {
     // Call the onPress callback first, then close the alert
@@ -169,7 +177,7 @@ export default function CustomAlert({
           </Text>
 
           {/* Buttons */}
-          <View style={styles.buttonContainer}>
+          <View style={[styles.buttonContainer, usesStackedButtons && styles.buttonContainerStacked]}>
             {buttons.map((button, index) => {
               const btnStyle = getButtonStyle(button.style);
               return (
@@ -179,14 +187,18 @@ export default function CustomAlert({
                   style={[
                     styles.button,
                     { backgroundColor: btnStyle.backgroundColor },
-                    buttons.length === 1 ? styles.fullWidthButton : null,
-                    buttons.length > 1 && { flex: 1 },
-                    index > 0 && { marginLeft: 12 },
+                    buttons.length === 1 || usesStackedButtons ? styles.fullWidthButton : null,
+                    buttons.length === 2 && { flex: 1 },
+                    usesStackedButtons && index > 0 && { marginTop: 10 },
+                    !usesStackedButtons && index > 0 && { marginLeft: 12 },
                   ]}
-                  activeOpacity={0.85}
+                  activeOpacity={1}
                 >
                   <Text
                     style={[styles.buttonText, { color: btnStyle.textColor }]}
+                    numberOfLines={1}
+                    adjustsFontSizeToFit
+                    minimumFontScale={0.85}
                   >
                     {button.text}
                   </Text>
@@ -251,6 +263,9 @@ const styles = StyleSheet.create({
     width: '100%',
     justifyContent: 'center',
   },
+  buttonContainerStacked: {
+    flexDirection: 'column',
+  },
   button: {
     paddingVertical: 14,
     paddingHorizontal: 24,
@@ -258,6 +273,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     minWidth: 100,
+    minHeight: 52,
   },
   fullWidthButton: {
     width: '100%',

@@ -90,7 +90,7 @@ const readErrorContextMessage = async (context: unknown): Promise<string | null>
   }
 };
 
-type Tab = 'dashboard' | 'users' | 'reports' | 'audit' | 'posts' | 'products' | 'projects';
+type Tab = 'dashboard' | 'users' | 'reports' | 'audit' | 'posts' | 'products';
 
 const adminTabRoutes: Record<Tab, string> = {
   dashboard: '/admin',
@@ -99,7 +99,6 @@ const adminTabRoutes: Record<Tab, string> = {
   audit: '/admin/audit',
   posts: '/admin/posts',
   products: '/admin/products',
-  projects: '/admin/projects',
 };
 
 const DASHBOARD_CACHE_TTL_MS = 30_000;
@@ -549,7 +548,6 @@ const tabItems: Array<{ key: Tab; label: string; icon: string }> = [
   { key: 'audit', label: 'Audit', icon: 'time-outline' },
   { key: 'posts', label: 'Posts', icon: 'newspaper-outline' },
   { key: 'products', label: 'Products', icon: 'bag-handle-outline' },
-  { key: 'projects', label: 'Projects', icon: 'people-circle-outline' },
 ];
 
 export default function AdminDashboardPage() {
@@ -884,7 +882,7 @@ export default function AdminDashboardPage() {
                 const isActive = dashboardDateRange === r;
                 const labels = { '7d': 'Last 7 Days', '30d': 'Last 30 Days', 'all': 'All Time' };
                 return (
-                  <TouchableOpacity
+                  <TouchableOpacity activeOpacity={1}
                     key={r}
                     onPress={() => setDashboardDateRange(r)}
                     style={[styles.filterChip, { backgroundColor: isActive ? colors.primary : colors.card, borderColor: isActive ? colors.primary : colors.border }]}
@@ -983,10 +981,10 @@ export default function AdminDashboardPage() {
                   <Text style={[styles.panelSubtitle, { color: colors.textSecondary, marginBottom: 0 }]}>{dashboardDateRangeLabel} real payment aggregates</Text>
                 </View>
                 <View style={{ flexDirection: 'row', borderRadius: 8, borderWidth: 1, borderColor: colors.border, overflow: 'hidden' }}>
-                  <TouchableOpacity onPress={() => setRevenueFilter('gross')} style={{ paddingHorizontal: 12, paddingVertical: 6, backgroundColor: revenueFilter === 'gross' ? colors.primary : 'transparent' }}>
+                  <TouchableOpacity activeOpacity={1} onPress={() => setRevenueFilter('gross')} style={{ paddingHorizontal: 12, paddingVertical: 6, backgroundColor: revenueFilter === 'gross' ? colors.primary : 'transparent' }}>
                     <Text style={{ fontSize: 11, color: revenueFilter === 'gross' ? '#fff' : colors.textSecondary }}>Gross</Text>
                   </TouchableOpacity>
-                  <TouchableOpacity onPress={() => setRevenueFilter('net')} style={{ paddingHorizontal: 12, paddingVertical: 6, backgroundColor: revenueFilter === 'net' ? colors.primary : 'transparent' }}>
+                  <TouchableOpacity activeOpacity={1} onPress={() => setRevenueFilter('net')} style={{ paddingHorizontal: 12, paddingVertical: 6, backgroundColor: revenueFilter === 'net' ? colors.primary : 'transparent' }}>
                     <Text style={{ fontSize: 11, color: revenueFilter === 'net' ? '#fff' : colors.textSecondary }}>Net</Text>
                   </TouchableOpacity>
                 </View>
@@ -1077,7 +1075,7 @@ export default function AdminDashboardPage() {
                 </View>
                 <View style={{ flexDirection: 'row', borderRadius: 8, borderWidth: 1, borderColor: colors.border, overflow: 'hidden' }}>
                   {(['all', 'booking', 'profile'] as const).map((typeKey) => (
-                    <TouchableOpacity
+                    <TouchableOpacity activeOpacity={1}
                       key={typeKey}
                       onPress={() => setIncidentTypeFilter(typeKey)}
                       style={{ paddingHorizontal: 12, paddingVertical: 6, backgroundColor: incidentTypeFilter === typeKey ? colors.primary : 'transparent' }}

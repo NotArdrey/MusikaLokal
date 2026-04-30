@@ -228,6 +228,11 @@ export default function LoginScreen() {
     );
   };
 
+  const showLoginError = (title: string, message: string) => {
+    setLoginMessage({ type: 'error', text: message });
+    showAlert('error', title, message, [{ text: 'OK', style: 'default' }], true);
+  };
+
   const openTemporaryLoginValidation = async (option: TempLoginOption) => {
     try {
       const { data: profile, error } = await supabase
@@ -348,17 +353,17 @@ export default function LoginScreen() {
       if (error) {
         // Handle specific error cases
         if (error.message.includes('Invalid login credentials')) {
-          setLoginMessage({ type: 'error', text: 'Invalid email or password.' });
+          showLoginError('Invalid Login', 'Invalid email or password.');
         } else if (error.message.includes('Email not confirmed')) {
-          setLoginMessage({ type: 'error', text: 'Email not confirmed. Check your inbox.' });
+          showLoginError('Email Not Confirmed', 'Email not confirmed. Check your inbox.');
         } else if (error.message.includes('rate') || error.status === 429) {
-          setLoginMessage({ type: 'error', text: 'Too many attempts. Please wait.' });
+          showLoginError('Too Many Attempts', 'Too many attempts. Please wait before trying again.');
         } else if (error.message.includes('refresh') || error.message.includes('token')) {
           // Clear storage and retry once
           await supabase.auth.signOut({ scope: 'local' });
-          setLoginMessage({ type: 'error', text: 'Session expired. Please try again.' });
+          showLoginError('Session Expired', 'Session expired. Please try again.');
         } else {
-          setLoginMessage({ type: 'error', text: error.message });
+          showLoginError('Sign In Failed', error.message);
         }
       } else {
         // Login succeeded - VALIDATE VERIFICATION STATUS
@@ -366,7 +371,7 @@ export default function LoginScreen() {
 
         if (!user) {
           console.error('Failed to retrieve user after login:', getUserError?.message || 'user is null');
-          setLoginMessage({ type: 'error', text: 'Unable to verify your account. Please try again.' });
+          showLoginError('Verification Failed', 'Unable to verify your account. Please try again.');
         } else if (user) {
           const blockAdminAccess = async () => {
             await supabase.auth.signOut({ scope: 'local' });

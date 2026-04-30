@@ -215,7 +215,7 @@ const StudioGigVenueAboutTab = ({
         </Text>
         {canNavigate && (
           <TouchableOpacity
-            activeOpacity={0.9}
+            activeOpacity={1}
             style={{
               marginTop: 12,
               alignSelf: "flex-start",
@@ -308,7 +308,7 @@ const StudioGigVenueAboutTab = ({
         </Text>
         {canNavigate && (
           <TouchableOpacity
-            activeOpacity={0.9}
+            activeOpacity={1}
             style={{
               marginTop: 12,
               alignSelf: "flex-start",

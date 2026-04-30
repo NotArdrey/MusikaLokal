@@ -38,6 +38,9 @@ verify_jwt = false
 [functions.instrument-suggestions]
 verify_jwt = false
 
+[functions.gig-applications]
+verify_jwt = false
+
 [functions.manual-identity-review]
 verify_jwt = false
 

@@ -92,6 +92,7 @@ type NormalizedFunctionsError = Error & {
     details?: string;
     hint?: string;
     status?: number;
+    responseBody?: unknown;
 };
 
 const FUNCTIONS_INVOKE_DEBUG_LOGS = false;
@@ -265,11 +266,19 @@ export const prepareRealtimeAuth = async (): Promise<boolean> => {
 const normalizeFunctionsError = (
     rawError: any,
     fallbackMessage: string,
+    responseBody?: unknown,
 ): NormalizedFunctionsError => {
+    const responseMessage =
+        responseBody && typeof responseBody === 'object' && !Array.isArray(responseBody)
+            ? String((responseBody as any).error || (responseBody as any).message || '').trim()
+            : typeof responseBody === 'string'
+                ? responseBody.trim()
+                : '';
     const message =
-        typeof rawError?.message === 'string' && rawError.message.trim().length > 0
+        responseMessage ||
+        (typeof rawError?.message === 'string' && rawError.message.trim().length > 0
             ? rawError.message
-            : fallbackMessage;
+            : fallbackMessage);
 
     const normalizedError = new Error(message) as NormalizedFunctionsError;
 
@@ -293,7 +302,44 @@ const normalizeFunctionsError = (
         }
     }
 
+    if (responseBody !== undefined) {
+        normalizedError.responseBody = responseBody;
+
+        if (!normalizedError.details) {
+            normalizedError.details =
+                typeof responseBody === 'string' ? responseBody : JSON.stringify(responseBody);
+        }
+    }
+
     return normalizedError;
+};
+
+const readFunctionsErrorBody = async (rawError: any): Promise<unknown> => {
+    const response = rawError?.context;
+    if (!response || typeof response !== 'object') {
+        return undefined;
+    }
+
+    try {
+        const clone = typeof response.clone === 'function' ? response.clone() : response;
+        if (typeof clone.json === 'function') {
+            return await clone.json();
+        }
+    } catch {
+        // Fall back to text below.
+    }
+
+    try {
+        const clone = typeof response.clone === 'function' ? response.clone() : response;
+        if (typeof clone.text === 'function') {
+            const text = await clone.text();
+            return text || undefined;
+        }
+    } catch {
+        // The React Native response body may already be consumed by functions-js.
+    }
+
+    return undefined;
 };
 
 const isInvalidJwtError = (rawError: any): boolean => {
@@ -329,6 +375,23 @@ const isInvalidJwtError = (rawError: any): boolean => {
         contextMessage.includes('jwt') ||
         contextError.includes('jwt') ||
         contextDetails.includes('jwt')
+    );
+};
+
+const isAuthUnauthorizedError = (rawError: any): boolean => {
+    const message = String(rawError?.message || '').toLowerCase();
+    const details = String(rawError?.details || '').toLowerCase();
+    const hint = String(rawError?.hint || '').toLowerCase();
+    const contextMessage = String(rawError?.context?.message || '').toLowerCase();
+    const status = getFunctionsErrorStatus(rawError);
+
+    return (
+        status === 401 ||
+        message.includes('unauthorized') ||
+        details.includes('unauthorized') ||
+        hint.includes('unauthorized') ||
+        contextMessage.includes('unauthorized') ||
+        isInvalidJwtError(rawError)
     );
 };
 
@@ -485,8 +548,8 @@ const unregisterCurrentPushDevice = async () => {
             error: any;
         };
 
-        if (result.error && firstAttemptHadAuthorization && isInvalidJwtError(result.error)) {
-            console.warn('[supabase.functions.invoke] Invalid JWT detected, retrying once with refreshed session', {
+        if (result.error && firstAttemptHadAuthorization && isAuthUnauthorizedError(result.error)) {
+            console.warn('[supabase.functions.invoke] Authorization failed, retrying once with refreshed session', {
                 functionName,
                 message: result.error?.message,
                 status: result.error?.status,
@@ -526,6 +589,8 @@ const unregisterCurrentPushDevice = async () => {
         }
 
         if (result.error) {
+            const responseBody = await readFunctionsErrorBody(result.error);
+
             if (__DEV__) {
                 console.warn('[supabase.functions.invoke] Function invoke failed after retries', {
                     functionName,
@@ -534,6 +599,7 @@ const unregisterCurrentPushDevice = async () => {
                     code: result.error?.code,
                     details: result.error?.details,
                     hint: result.error?.hint,
+                    responseBody,
                     context: result.error?.context,
                     body: getInvokeBodySummary(invokeOptions || options),
                 });
@@ -542,15 +608,16 @@ const unregisterCurrentPushDevice = async () => {
             // Convert FunctionsError to plain Error for Hermes compatibility
             return {
                 data: null,
-                error: normalizeFunctionsError(result.error, 'Function invocation failed'),
+                error: normalizeFunctionsError(result.error, 'Function invocation failed', responseBody),
             };
         }
         return { data: result.data ?? null, error: null };
     } catch (err) {
         // Catch any instantiation errors from functions-js error classes
+        const responseBody = await readFunctionsErrorBody(err);
         return {
             data: null,
-            error: normalizeFunctionsError(err, 'Unknown error invoking function'),
+            error: normalizeFunctionsError(err, 'Unknown error invoking function', responseBody),
         };
     }
 };

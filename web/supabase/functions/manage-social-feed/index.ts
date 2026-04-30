@@ -251,7 +251,7 @@ Deno.serve(async (req: Request) => {
 
     // ── create_post ─────────────────────────────────────────────────
     if (action === "create_post") {
-      const { content, post_type, visibility, linked_project_id, linked_playlist_id, linked_product_id, media } = params;
+      const { content, post_type, visibility, linked_playlist_id, linked_product_id, media } = params;
       if (!content && (!media || media.length === 0)) {
         return jsonResponse({ error: "content or media is required" }, 400);
       }
@@ -263,7 +263,6 @@ Deno.serve(async (req: Request) => {
           content: content || null,
           post_type: post_type || "text",
           visibility: visibility || "public",
-          linked_project_id: linked_project_id || null,
           linked_playlist_id: linked_playlist_id || null,
           linked_product_id: linked_product_id || null,
         })

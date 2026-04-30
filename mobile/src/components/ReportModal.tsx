@@ -13,6 +13,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../context/ThemeContext';
+import CustomAlert from './CustomAlert';
 
 export const REPORT_REASONS_BY_TYPE: Record<string, string[]> = {
     group: [
@@ -63,14 +64,6 @@ export const REPORT_REASONS_BY_TYPE: Record<string, string[]> = {
         'Unsafe or suspicious seller behavior',
         'Other',
     ],
-    project: [
-        'Misleading project details',
-        'Spam or scam',
-        'Harassment or bullying',
-        'Inappropriate content',
-        'Unsafe or exploitative request',
-        'Other',
-    ],
     playlist: [
         'Inappropriate or offensive content',
         'Misleading or fake upload',
@@ -116,6 +109,7 @@ export default function ReportModal({
     const [submitting, setSubmitting] = useState(false);
     const [submitted, setSubmitted] = useState(false);
     const [errorMessage, setErrorMessage] = useState<string | null>(null);
+    const [feedbackVisible, setFeedbackVisible] = useState(false);
 
     // Pick reasons based on type; fallback to generic group reasons
     const reasons = (reportType && REPORT_REASONS_BY_TYPE[reportType.toLowerCase()])
@@ -127,11 +121,15 @@ export default function ReportModal({
         setDetails('');
         setSubmitted(false);
         setErrorMessage(null);
+        setFeedbackVisible(false);
         onClose();
     };
 
     const handleSubmit = async () => {
-        if (!selectedReason) return;
+        if (!selectedReason) {
+            setFeedbackVisible(true);
+            return;
+        }
         setSubmitting(true);
         setErrorMessage(null);
         try {
@@ -233,7 +231,7 @@ export default function ReportModal({
                                                 },
                                             ]}
                                             onPress={() => setSelectedReason(reason)}
-                                            activeOpacity={0.7}
+                                            activeOpacity={1}
                                         >
                                             <Text
                                                 style={[
@@ -297,7 +295,7 @@ export default function ReportModal({
                                         },
                                     ]}
                                     onPress={handleSubmit}
-                                    disabled={!selectedReason || submitting}
+                                    disabled={submitting}
                                     activeOpacity={1}
                                 >
                                     {submitting ? (
@@ -327,6 +325,14 @@ export default function ReportModal({
                     )}
                 </Pressable>
             </Pressable>
+            <CustomAlert
+                visible={feedbackVisible}
+                type="warning"
+                title="Reason Required"
+                message="Please select a reason before submitting your report."
+                forceModal
+                onClose={() => setFeedbackVisible(false)}
+            />
         </Modal>
     );
 }

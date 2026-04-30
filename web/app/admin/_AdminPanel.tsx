@@ -471,9 +471,6 @@ const reportTargetLabels: Record<string, string> = {
   user: 'User Profile',
   profile: 'User Profile',
   product: 'Marketplace Item',
-  project: 'Producer Project',
-  'producer project': 'Producer Project',
-  producer_project: 'Producer Project',
   playlist: 'Music',
   music: 'Music',
 };
@@ -2061,7 +2058,7 @@ export default function AdminPanel({ initialTab, children }: AdminPanelProps) {
                   const isActive = dashboardDateRange === r;
                   const labels = { '7d': 'Last 7 Days', '30d': 'Last 30 Days', 'all': 'All Time' };
                   return (
-                    <TouchableOpacity
+                    <TouchableOpacity activeOpacity={1}
                       key={r}
                       onPress={() => setDashboardDateRange(r)}
                       style={[styles.filterChip, { backgroundColor: isActive ? colors.primary : colors.card, borderColor: isActive ? colors.primary : colors.border }]}
@@ -2160,10 +2157,10 @@ export default function AdminPanel({ initialTab, children }: AdminPanelProps) {
                     <Text style={[styles.panelSubtitle, { color: colors.textSecondary, marginBottom: 0 }]}>{dashboardDateRangeLabel} real payment aggregates</Text>
                   </View>
                   <View style={{ flexDirection: 'row', borderRadius: 8, borderWidth: 1, borderColor: colors.border, overflow: 'hidden' }}>
-                    <TouchableOpacity onPress={() => setRevenueFilter('gross')} style={{ paddingHorizontal: 12, paddingVertical: 6, backgroundColor: revenueFilter === 'gross' ? colors.primary : 'transparent' }}>
+                    <TouchableOpacity activeOpacity={1} onPress={() => setRevenueFilter('gross')} style={{ paddingHorizontal: 12, paddingVertical: 6, backgroundColor: revenueFilter === 'gross' ? colors.primary : 'transparent' }}>
                       <Text style={{ fontSize: 11, color: revenueFilter === 'gross' ? '#fff' : colors.textSecondary }}>Gross</Text>
                     </TouchableOpacity>
-                    <TouchableOpacity onPress={() => setRevenueFilter('net')} style={{ paddingHorizontal: 12, paddingVertical: 6, backgroundColor: revenueFilter === 'net' ? colors.primary : 'transparent' }}>
+                    <TouchableOpacity activeOpacity={1} onPress={() => setRevenueFilter('net')} style={{ paddingHorizontal: 12, paddingVertical: 6, backgroundColor: revenueFilter === 'net' ? colors.primary : 'transparent' }}>
                       <Text style={{ fontSize: 11, color: revenueFilter === 'net' ? '#fff' : colors.textSecondary }}>Net</Text>
                     </TouchableOpacity>
                   </View>
@@ -2254,7 +2251,7 @@ export default function AdminPanel({ initialTab, children }: AdminPanelProps) {
                   </View>
                   <View style={{ flexDirection: 'row', borderRadius: 8, borderWidth: 1, borderColor: colors.border, overflow: 'hidden' }}>
                     {(['all', 'booking', 'profile'] as const).map((typeKey) => (
-                      <TouchableOpacity
+                      <TouchableOpacity activeOpacity={1}
                         key={typeKey}
                         onPress={() => setIncidentTypeFilter(typeKey)}
                         style={{ paddingHorizontal: 12, paddingVertical: 6, backgroundColor: incidentTypeFilter === typeKey ? colors.primary : 'transparent' }}

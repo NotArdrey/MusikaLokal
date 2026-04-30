@@ -36,6 +36,21 @@ export default function ChangeEmailScreen() {
 
     const isValidEmail = (value: string) => /\S+@\S+\.\S+/.test(value);
 
+    const validateEmailBeforeConfirm = () => {
+        const trimmedEmail = email.trim().toLowerCase();
+        if (!trimmedEmail) {
+            showAlert('error', 'Email Required', 'Please enter a new email address.');
+            return false;
+        }
+
+        if (!isValidEmail(trimmedEmail)) {
+            showAlert('error', 'Invalid Email', 'Please enter a valid email address.');
+            return false;
+        }
+
+        return true;
+    };
+
     const handleConfirmEmailChange = async () => {
         if (loading) return;
         setModalVisible(false);
@@ -117,7 +132,11 @@ export default function ChangeEmailScreen() {
                             loading && { opacity: 0.7 }
                         ]}
                         disabled={loading}
-                        onPress={() => setModalVisible(true)}
+                        onPress={() => {
+                            if (validateEmailBeforeConfirm()) {
+                                setModalVisible(true);
+                            }
+                        }}
                     >
                         <Text style={styles.buttonText}>
                             {loading ? 'Updating...' : 'Update Email'}

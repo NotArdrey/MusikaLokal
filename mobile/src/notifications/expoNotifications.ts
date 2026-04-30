@@ -8,6 +8,7 @@ type ExpoNotificationsModuleLike = {
   requestPermissionsAsync?: (...args: any[]) => Promise<any>;
   getExpoPushTokenAsync?: (...args: any[]) => Promise<any>;
   getLastNotificationResponseAsync?: (...args: any[]) => Promise<any>;
+  addNotificationReceivedListener?: (...args: any[]) => { remove: () => void };
   addNotificationResponseReceivedListener?: (...args: any[]) => { remove: () => void };
   clearLastNotificationResponseAsync?: (...args: any[]) => Promise<any>;
 };
@@ -17,7 +18,7 @@ let nativeNotifications: ExpoNotificationsModuleLike | null = null;
 try {
   const dynamicRequire = eval("require") as (id: string) => any;
   nativeNotifications = dynamicRequire("expo-notifications");
-} catch (error) {
+} catch {
   if (__DEV__) {
     console.warn(
       "[push] expo-notifications unavailable; native push registration is disabled until dependencies are installed and Metro is restarted.",

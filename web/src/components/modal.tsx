@@ -4,6 +4,7 @@ import * as Linking from 'expo-linking';
 import React from 'react';
 import { ActivityIndicator, Modal as RNModal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useTheme } from '../context/ThemeContext';
+import CustomAlert from './CustomAlert';
 
 type CustomModalProps = {
   visible: boolean;
@@ -58,6 +59,8 @@ const CustomModal: React.FC<CustomModalProps> = ({
   const [isTermsAccepted, setIsTermsAccepted] = React.useState(false);
   const [isContractAccepted, setIsContractAccepted] = React.useState(false);
   const [showTermsContent, setShowTermsContent] = React.useState(false);
+  const [feedbackVisible, setFeedbackVisible] = React.useState(false);
+  const [feedbackMessage, setFeedbackMessage] = React.useState('');
   const hasCustomContract = Boolean(contractUrl);
 
   React.useEffect(() => {
@@ -65,6 +68,8 @@ const CustomModal: React.FC<CustomModalProps> = ({
       setIsTermsAccepted(false);
       setIsContractAccepted(false);
       setShowTermsContent(false);
+      setFeedbackVisible(false);
+      setFeedbackMessage('');
     }
   }, [visible]);
 
@@ -72,6 +77,39 @@ const CustomModal: React.FC<CustomModalProps> = ({
     confirmDisabled ||
     (requireTermsAcceptance && !isTermsAccepted) ||
     (hasCustomContract && !isContractAccepted);
+
+  const getValidationFeedback = () => {
+    if (showInput && !String(inputValue ?? '').trim()) {
+      return inputPlaceholder
+        ? `Please fill in "${inputPlaceholder.replace(/\.+$/, '')}" before continuing.`
+        : 'Please fill in the required field before continuing.';
+    }
+
+    if (requireTermsAcceptance && !isTermsAccepted) {
+      return 'Please accept the terms and conditions before continuing.';
+    }
+
+    if (hasCustomContract && !isContractAccepted) {
+      return 'Please read and accept the custom contract before continuing.';
+    }
+
+    if (confirmDisabled) {
+      return 'Please complete the required information before continuing.';
+    }
+
+    return null;
+  };
+
+  const handleConfirmPress = () => {
+    const validationFeedback = getValidationFeedback();
+    if (validationFeedback) {
+      setFeedbackMessage(validationFeedback);
+      setFeedbackVisible(true);
+      return;
+    }
+
+    (onConfirm || onClose)();
+  };
 
   const renderCheckbox = (checked: boolean) => (
     <View
@@ -151,7 +189,7 @@ const CustomModal: React.FC<CustomModalProps> = ({
                   ]}
                 >
                   <TouchableOpacity
-                    activeOpacity={0.85}
+                    activeOpacity={1}
                     onPress={() => setIsContractAccepted((prev) => !prev)}
                     style={styles.agreementPressable}
                   >
@@ -162,7 +200,7 @@ const CustomModal: React.FC<CustomModalProps> = ({
                     </Text>
                   </TouchableOpacity>
                   <TouchableOpacity
-                    activeOpacity={0.75}
+                    activeOpacity={1}
                     onPress={() => { if (contractUrl) Linking.openURL(contractUrl); }}
                     style={styles.inlineLinkButton}
                   >
@@ -183,7 +221,7 @@ const CustomModal: React.FC<CustomModalProps> = ({
                   ]}
                 >
                   <TouchableOpacity
-                    activeOpacity={0.85}
+                    activeOpacity={1}
                     onPress={() => setIsTermsAccepted((prev) => !prev)}
                     style={styles.agreementPressable}
                   >
@@ -194,7 +232,7 @@ const CustomModal: React.FC<CustomModalProps> = ({
                   {onTermsPress ? (
                     <TouchableOpacity
                       onPress={onTermsPress}
-                      activeOpacity={0.75}
+                      activeOpacity={1}
                       style={styles.inlineLinkButton}
                     >
                       <Ionicons name="reader-outline" size={15} color={colors.primary} />
@@ -203,7 +241,7 @@ const CustomModal: React.FC<CustomModalProps> = ({
                   ) : (
                     <TouchableOpacity
                       onPress={() => setShowTermsContent(true)}
-                      activeOpacity={0.75}
+                      activeOpacity={1}
                       style={styles.inlineLinkButton}
                     >
                       <Ionicons name="reader-outline" size={15} color={colors.primary} />
@@ -223,8 +261,7 @@ const CustomModal: React.FC<CustomModalProps> = ({
                       opacity: isConfirmDisabled ? 0.6 : 1
                     }
                   ]}
-                  disabled={isConfirmDisabled}
-                  onPress={onConfirm || onClose}
+                  onPress={handleConfirmPress}
                 >
                   <Text style={styles.confirmButtonText}>{buttonText}</Text>
                 </TouchableOpacity>
@@ -289,6 +326,15 @@ const CustomModal: React.FC<CustomModalProps> = ({
           </View>
         </View>
       </RNModal>
+
+      <CustomAlert
+        visible={feedbackVisible}
+        type="warning"
+        title="Required Field"
+        message={feedbackMessage}
+        forceModal
+        onClose={() => setFeedbackVisible(false)}
+      />
     </RNModal>
   );
 };

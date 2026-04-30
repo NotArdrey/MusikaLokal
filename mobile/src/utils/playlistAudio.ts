@@ -207,18 +207,9 @@ export const pickPlaylistAudioFile = async (): Promise<PlaylistAudioFile | null>
   };
 };
 
-export const uploadPlaylistAudioFile = async (
+export const ensurePlaylistAudioPassesCopyrightScreening = async (
   audioFile: PlaylistAudioFile,
-  playlistId: string,
 ) => {
-  const {
-    data: { session },
-  } = await supabase.auth.getSession();
-
-  if (!session?.user?.id) {
-    throw new Error("Your session expired. Please log in again.");
-  }
-
   const base64 = await FileSystem.readAsStringAsync(audioFile.uri, {
     encoding: FileSystem.EncodingType.Base64,
   });
@@ -235,6 +226,22 @@ export const uploadPlaylistAudioFile = async (
     "playlist_audio_upload",
   );
 
+  return base64;
+};
+
+export const uploadPlaylistAudioFile = async (
+  audioFile: PlaylistAudioFile,
+  playlistId: string,
+) => {
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+
+  if (!session?.user?.id) {
+    throw new Error("Your session expired. Please log in again.");
+  }
+
+  const base64 = await ensurePlaylistAudioPassesCopyrightScreening(audioFile);
   const bytes = base64ToUint8Array(base64);
 
   const safeFileName = sanitizeFileName(audioFile.name, audioFile.extension);

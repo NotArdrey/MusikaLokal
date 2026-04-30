@@ -109,7 +109,6 @@ const createEmptyBookmarks = () => ({
   studios: [] as any[],
   gigs: [] as any[],
   musicians: [] as any[],
-  productions: [] as any[],
 });
 
 const logProfileMedia = (event: string, details?: Record<string, unknown>) => {
@@ -123,7 +122,6 @@ const normalizeBookmarkBuckets = (value: any) => ({
   studios: Array.isArray(value?.studios) ? value.studios : [],
   gigs: Array.isArray(value?.gigs) ? value.gigs : [],
   musicians: Array.isArray(value?.musicians) ? value.musicians : [],
-  productions: Array.isArray(value?.productions) ? value.productions : [],
 });
 
 type ProfileScreenCachePayload = {
@@ -595,7 +593,7 @@ export default function ProfileScreen() {
   const [supportsGigVisibilityPreference, setSupportsGigVisibilityPreference] = useState(true);
   const [activeTab, setActiveTab] = useState<"about" | "gigs" | "bookmarks" | "playlists">("about");
   const [isMenuOpen, setIsMenuOpen] = useState(false);
-  const [bookmarkFilter, setBookmarkFilter] = useState<"all" | "studios" | "gigs" | "musicians" | "productions">("all");
+  const [bookmarkFilter, setBookmarkFilter] = useState<"all" | "studios" | "gigs" | "musicians">("all");
   const [userPlaylists, setUserPlaylists] = useState<any[]>([]);
   const [loadingPlaylists, setLoadingPlaylists] = useState(false);
   const [userStation, setUserStation] = useState<any>(null);
@@ -686,7 +684,7 @@ export default function ProfileScreen() {
     try {
       const { data: favoritesData, error: favoritesError } = await supabase
         .from("favorites")
-        .select("group_id, profile_id, studio_id, gig_id, project_id, created_at")
+        .select("group_id, profile_id, studio_id, gig_id, created_at")
         .eq("user_id", viewerId)
         .order("created_at", { ascending: false });
 
@@ -705,11 +703,8 @@ export default function ProfileScreen() {
       const gigIds = favorites
         .map((entry: any) => entry.gig_id)
         .filter((value: any): value is string => typeof value === "string");
-      const projectIds = favorites
-        .map((entry: any) => entry.project_id)
-        .filter((value: any): value is string => typeof value === "string");
 
-      const [groupsResult, profilesResult, studiosResult, gigsResult, projectsResult] = await Promise.all([
+      const [groupsResult, profilesResult, studiosResult, gigsResult] = await Promise.all([
         groupIds.length > 0
           ? supabase
             .from("groups_with_stats")
@@ -734,25 +729,17 @@ export default function ProfileScreen() {
             .select("id, name, location, event_date, images")
             .in("id", gigIds)
           : Promise.resolve({ data: [] as any[], error: null }),
-        projectIds.length > 0
-          ? supabase
-            .from("producer_projects_with_summary")
-            .select("id, title, genre, location, cover_image_url, owner_name")
-            .in("id", projectIds)
-          : Promise.resolve({ data: [] as any[], error: null }),
       ]);
 
       if (groupsResult.error) throw groupsResult.error;
       if (profilesResult.error) throw profilesResult.error;
       if (studiosResult.error) throw studiosResult.error;
       if (gigsResult.error) throw gigsResult.error;
-      if (projectsResult.error) throw projectsResult.error;
 
       const groupById = new Map((groupsResult.data || []).map((entry: any) => [entry.id, entry]));
       const profileById = new Map((profilesResult.data || []).map((entry: any) => [entry.id, entry]));
       const studioById = new Map((studiosResult.data || []).map((entry: any) => [entry.id, entry]));
       const gigById = new Map((gigsResult.data || []).map((entry: any) => [entry.id, entry]));
-      const projectById = new Map((projectsResult.data || []).map((entry: any) => [entry.id, entry]));
 
       const musicians = favorites
         .map((entry: any) => {
@@ -818,23 +805,10 @@ export default function ProfileScreen() {
           type: "Gig",
         }));
 
-      const productions = favorites
-        .filter((entry: any) => !!entry.project_id)
-        .map((entry: any) => projectById.get(entry.project_id))
-        .filter(Boolean)
-        .map((entry: any) => ({
-          id: entry.id,
-          name: entry.title || "Untitled Production",
-          subtitle: entry.location || entry.genre || entry.owner_name || "Producer Project",
-          image: resolveBookmarkImage(entry),
-          type: "Production",
-        }));
-
       setBookmarkedListings(normalizeBookmarkBuckets({
         studios: studios.slice(0, 8),
         gigs: gigs.slice(0, 8),
         musicians: musicians.slice(0, 8),
-        productions: productions.slice(0, 8),
       }));
     } catch (bookmarkError) {
       setBookmarkedListings(createEmptyBookmarks());
@@ -1397,11 +1371,6 @@ export default function ProfileScreen() {
   const openBookmarkedListing = async (item: any) => {
     const itemId = item?.id;
     if (!itemId) return;
-
-    if (item?.type === "Production") {
-      router.push({ pathname: "/producer_project_details", params: { project_id: itemId } });
-      return;
-    }
 
     try {
       await AsyncStorage.setItem("pending_reopen_listing_id", itemId);
@@ -2192,7 +2161,7 @@ export default function ProfileScreen() {
 
             {canFollowProfile ? (
               <TouchableOpacity
-                activeOpacity={0.9}
+                activeOpacity={1}
                 disabled={isProfileFollowBusy}
                 onPress={() => void handleProfileFollowToggle()}
                 style={[
@@ -2427,7 +2396,7 @@ export default function ProfileScreen() {
                 ) : (
                   <>
                     <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 16, paddingVertical: 8, gap: 12, flexGrow: 0 }} style={{ maxHeight: 60, marginBottom: 8 }}>
-                       {['all', 'studios', 'gigs', 'musicians', 'productions'].map((key) => {
+                       {['all', 'studios', 'gigs', 'musicians'].map((key) => {
                           const isActive = bookmarkFilter === key;
                           return (
                             <TouchableOpacity activeOpacity={1} key={key} onPress={() => setBookmarkFilter(key as any)} style={{ paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20, backgroundColor: isActive ? colors.primary : isDark ? "#1E293B" : "#F3F4F6", justifyContent: "center" }}>
@@ -2439,14 +2408,13 @@ export default function ProfileScreen() {
 
                     <View style={{ paddingHorizontal: 16, gap: 12, paddingBottom: 24 }}>
                       {(() => {
-                         const filterToKey: any = { 'studios': 'studios', 'gigs': 'gigs', 'musicians': 'musicians', 'productions': 'productions' };
+                         const filterToKey: any = { 'studios': 'studios', 'gigs': 'gigs', 'musicians': 'musicians' };
                          let displayedItems: any[] = [];
                          if (bookmarkFilter === "all") {
                            displayedItems = [
                              ...safeBookmarkedListings.studios,
                              ...safeBookmarkedListings.gigs,
                              ...safeBookmarkedListings.musicians,
-                             ...safeBookmarkedListings.productions,
                            ];
                          } else {
                             displayedItems = safeBookmarkedListings[filterToKey[bookmarkFilter] as keyof typeof safeBookmarkedListings] || [];
@@ -2461,7 +2429,7 @@ export default function ProfileScreen() {
                          }
 
                          return displayedItems.map((item, index) => {
-                             let icon = item.type === "Studio" ? "business-outline" : item.type === "Gig" ? "mic-outline" : item.type === "Production" ? "albums-outline" : "people-outline";
+                             let icon = item.type === "Studio" ? "business-outline" : item.type === "Gig" ? "mic-outline" : "people-outline";
 
                              return (
                                 <TouchableOpacity
@@ -2524,7 +2492,7 @@ export default function ProfileScreen() {
 
                   {isOwner && !isGuest && (
                     <TouchableOpacity
-                      activeOpacity={0.8}
+                      activeOpacity={1}
                       style={{
                         flexDirection: "row",
                         alignItems: "center",
@@ -2564,7 +2532,7 @@ export default function ProfileScreen() {
                     }}
                   >
                     <TouchableOpacity
-                      activeOpacity={0.88}
+                      activeOpacity={1}
                       onPress={() => void handleStationPrimaryAction()}
                       style={{ paddingHorizontal: 14, paddingTop: 14, paddingBottom: 12 }}
                     >
@@ -2634,7 +2602,7 @@ export default function ProfileScreen() {
 
                     <View style={{ flexDirection: "row", gap: 10, paddingHorizontal: 14, paddingBottom: 14 }}>
                       <TouchableOpacity
-                        activeOpacity={0.85}
+                        activeOpacity={1}
                         onPress={() => void handleStationPrimaryAction()}
                         style={{
                           flex: 1,
@@ -2660,7 +2628,7 @@ export default function ProfileScreen() {
 
                       {canPlayStationFromProfile && (
                         <TouchableOpacity
-                          activeOpacity={0.85}
+                          activeOpacity={1}
                           onPress={openStationScreen}
                           style={{
                             minWidth: 128,
@@ -2720,7 +2688,7 @@ export default function ProfileScreen() {
 
                     {canManageStations && (
                       <TouchableOpacity
-                        activeOpacity={0.85}
+                        activeOpacity={1}
                         onPress={() => router.push("/create_station" as any)}
                         style={{
                           marginTop: 14,
@@ -2768,7 +2736,7 @@ export default function ProfileScreen() {
                       >
                         <View style={{ flexDirection: "row", alignItems: "center" }}>
                           <TouchableOpacity
-                            activeOpacity={0.82}
+                            activeOpacity={1}
                             style={{ flex: 1, flexDirection: "row", alignItems: "center" }}
                             onPress={() => router.push({ pathname: "/playlist_details" as any, params: { playlist_id: pl.id } })}
                           >
@@ -2815,7 +2783,7 @@ export default function ProfileScreen() {
 
                           {canManageStations && (
                             <TouchableOpacity
-                              activeOpacity={0.6}
+                              activeOpacity={1}
                               style={{
                                 minWidth: 96,
                                 minHeight: 36,
@@ -2849,7 +2817,7 @@ export default function ProfileScreen() {
                         {isOwner && !isGuest && (
                           <View style={{ flexDirection: "row", gap: 8, marginTop: 12, paddingLeft: 62 }}>
                             <TouchableOpacity
-                              activeOpacity={0.85}
+                              activeOpacity={1}
                               hitSlop={8}
                               onPress={() => promptDeletePlaylist(pl)}
                               disabled={playlistActionId === pl.id || authLoading}
@@ -2927,7 +2895,7 @@ export default function ProfileScreen() {
 
                     {isOwner && !isGuest && (
                       <TouchableOpacity
-                        activeOpacity={0.85}
+                        activeOpacity={1}
                         onPress={() => router.push("/create_playlist" as any)}
                         style={{
                           marginTop: 16,
@@ -3027,7 +2995,7 @@ export default function ProfileScreen() {
 
                         {isOwner && (
                           <TouchableOpacity
-                            activeOpacity={0.85}
+                            activeOpacity={1}
                             onPress={(event: any) => {
                               event?.stopPropagation?.();
                               confirmRemoveMedia(url);

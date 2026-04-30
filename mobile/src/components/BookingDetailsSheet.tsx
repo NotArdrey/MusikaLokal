@@ -50,6 +50,7 @@ const moderateScale = (size: number, factor = 0.3) => {
 
 interface BookingDetailsSheetProps {
   booking: any;
+  readOnly?: boolean;
   onCancel?: (bookingId: string) => void;
   onConfirm?: (bookingId: string) => void;
   onLeaveReview?: (booking: any) => void;
@@ -58,7 +59,7 @@ interface BookingDetailsSheetProps {
 const BookingDetailsSheet = forwardRef<
   BottomSheetModal,
   BookingDetailsSheetProps
->(({ booking, onCancel, onConfirm, onLeaveReview }, ref) => {
+>(({ booking, readOnly = false, onCancel, onConfirm, onLeaveReview }, ref) => {
   const { colors, isDark } = useTheme();
   const [loading, setLoading] = useState(false);
   const [studioDetails, setStudioDetails] = useState<any>(null);
@@ -546,6 +547,7 @@ const BookingDetailsSheet = forwardRef<
 
   const isStudio = booking.type_id === "studio_booking" || !!booking.studio_id;
   const isGig = booking.type_id === "gig_application" || !!booking.gig_id;
+  const isReadOnly = readOnly || booking?.viewer_can_act === false;
   const bookingDateTimeLabel = splitDateAndTimeLabel(booking?.date);
   const normalizedSessionType =
     typeof booking.session_type === "string"
@@ -1698,7 +1700,26 @@ const BookingDetailsSheet = forwardRef<
 
               {/* Action Buttons */}
               <View style={styles.actions}>
-                {booking.status === "pending" && onConfirm && (
+                {isReadOnly ? (
+                  <TouchableOpacity
+                    activeOpacity={1}
+                    style={[
+                      styles.actionBtn,
+                      styles.cancelBtn,
+                      { borderColor: colors.border },
+                    ]}
+                    onPress={() => (ref as any)?.current?.dismiss()}
+                  >
+                    <Ionicons
+                      name="close-circle-outline"
+                      size={20}
+                      color="#EF4444"
+                    />
+                    <Text style={styles.cancelBtnText}>Close</Text>
+                  </TouchableOpacity>
+                ) : null}
+
+                {!isReadOnly && booking.status === "pending" && onConfirm && (
                   <TouchableOpacity activeOpacity={1}
                     style={[styles.actionBtn, styles.confirmBtn]}
                     onPress={() => {
@@ -1717,7 +1738,7 @@ const BookingDetailsSheet = forwardRef<
                   </TouchableOpacity>
                 )}
 
-                {booking.status === "completed" && (
+                {!isReadOnly && booking.status === "completed" && (
                   <TouchableOpacity activeOpacity={1}
                     style={[
                       styles.actionBtn,
@@ -1740,7 +1761,7 @@ const BookingDetailsSheet = forwardRef<
                   </TouchableOpacity>
                 )}
 
-                {(booking.status === "confirmed" ||
+                {!isReadOnly && (booking.status === "confirmed" ||
                   booking.status === "pending" ||
                   booking.status === "accepted") &&
                   onCancel && (

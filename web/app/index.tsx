@@ -197,6 +197,35 @@ export default function LoginScreen() {
     setAlertState(prev => ({ ...prev, visible: false }));
   };
 
+  const showValidationAlert = (nextErrors: { email?: string; password?: string }) => {
+    const issues: string[] = [];
+
+    if (nextErrors.email) {
+      issues.push(nextErrors.email === 'Email is required.' ? 'Enter your email address.' : nextErrors.email);
+    }
+
+    if (nextErrors.password) {
+      issues.push(nextErrors.password === 'Password is required.' ? 'Enter your password.' : nextErrors.password);
+    }
+
+    const title = issues.length > 1
+      ? 'Complete Required Fields'
+      : nextErrors.email
+        ? 'Check Your Email'
+        : 'Password Required';
+
+    const message = issues.length > 1
+      ? `We need a few details before you can sign in:\n- ${issues.join('\n- ')}`
+      : issues[0] || 'Please review your login details and try again.';
+
+    showAlert('warning', title, message, [{ text: 'OK', style: 'default' }]);
+  };
+
+  const showLoginError = (title: string, message: string) => {
+    setLoginMessage({ type: 'error', text: message });
+    showAlert('error', title, message, [{ text: 'OK', style: 'default' }]);
+  };
+
   const openTemporaryLoginValidation = async (option: TempLoginOption) => {
     try {
       const { data: profile, error } = await supabase
@@ -321,20 +350,20 @@ export default function LoginScreen() {
         console.log('Login error:', error.message);
         // Handle specific error cases
         if (error.message.includes('Invalid login credentials')) {
-          setLoginMessage({ type: 'error', text: 'Invalid email or password.' });
+          showLoginError('Invalid Login', 'Invalid email or password.');
         } else if (error.message.includes('Email not confirmed')) {
-          setLoginMessage({ type: 'error', text: 'Email not confirmed. Check your inbox.' });
+          showLoginError('Email Not Confirmed', 'Email not confirmed. Check your inbox.');
         } else if (error.message.includes('rate') || error.status === 429) {
-          setLoginMessage({ type: 'error', text: 'Too many attempts. Please wait.' });
+          showLoginError('Too Many Attempts', 'Too many attempts. Please wait before trying again.');
         } else if (error.message.includes('refresh') || error.message.includes('token')) {
           // Clear storage and retry once
           console.log('Token error detected, clearing storage and retrying...');
           await supabase.auth.signOut({ scope: 'local' });
-          setLoginMessage({ type: 'error', text: 'Session expired. Please try again.' });
+          showLoginError('Session Expired', 'Session expired. Please try again.');
         } else if (isSchemaQueryError(error)) {
-          setLoginMessage({ type: 'error', text: schemaErrorLoginMessage });
+          showLoginError('Database Setup Required', schemaErrorLoginMessage);
         } else {
-          setLoginMessage({ type: 'error', text: error.message });
+          showLoginError('Sign In Failed', error.message);
         }
       } else {
         // Login succeeded - VALIDATE VERIFICATION STATUS
@@ -343,7 +372,7 @@ export default function LoginScreen() {
 
         if (!user) {
           console.error('Failed to retrieve user after login:', getUserError?.message || 'user is null');
-          setLoginMessage({ type: 'error', text: 'Unable to verify your account. Please try again.' });
+          showLoginError('Verification Failed', 'Unable to verify your account. Please try again.');
         } else if (user) {
           // 1. Check Metadata (Fastest)
           const metaVerified = user.user_metadata?.is_verified;
@@ -488,6 +517,7 @@ export default function LoginScreen() {
 
     if (Object.keys(newErrors).length > 0) {
       setErrors(newErrors);
+      showValidationAlert(newErrors);
       return;
     }
 

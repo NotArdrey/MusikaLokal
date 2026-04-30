@@ -295,7 +295,7 @@ export default function AdminStationsPage() {
           />
 
           <TouchableOpacity
-            activeOpacity={0.85}
+            activeOpacity={1}
             disabled={busyKey === 'auto-create'}
             onPress={autoCreateStations}
             style={[styles.primaryBtn, { backgroundColor: colors.primary, opacity: busyKey === 'auto-create' ? 0.7 : 1 }]}
@@ -322,7 +322,7 @@ export default function AdminStationsPage() {
           {(['all', 'live', 'offline', 'featured'] as StationFilter[]).map((nextFilter) => (
             <TouchableOpacity
               key={nextFilter}
-              activeOpacity={0.85}
+              activeOpacity={1}
               onPress={() => setStationFilter(nextFilter)}
               style={[
                 styles.filterChip,
@@ -384,7 +384,7 @@ export default function AdminStationsPage() {
 
               <View style={styles.actionRow}>
                 <TouchableOpacity
-                  activeOpacity={0.85}
+                  activeOpacity={1}
                   disabled={isBusy}
                   style={[styles.actionBtn, { backgroundColor: isLive ? '#EF444420' : '#22C55E20' }]}
                   onPress={() => updateStationFlag(item.id, { is_active: !isLive })}
@@ -395,7 +395,7 @@ export default function AdminStationsPage() {
                 </TouchableOpacity>
 
                 <TouchableOpacity
-                  activeOpacity={0.85}
+                  activeOpacity={1}
                   disabled={isBusy}
                   style={[styles.actionBtn, { backgroundColor: item.is_featured ? '#F59E0B20' : colors.primary + '18' }]}
                   onPress={() => updateStationFlag(item.id, { is_featured: !item.is_featured })}
@@ -406,7 +406,7 @@ export default function AdminStationsPage() {
                 </TouchableOpacity>
 
                 <TouchableOpacity
-                  activeOpacity={0.85}
+                  activeOpacity={1}
                   style={[styles.actionBtn, { backgroundColor: isDark ? '#0F172A' : '#F3F4F6' }]}
                   onPress={() => router.push({ pathname: '/station_details' as any, params: { station_id: item.id } })}
                 >
@@ -415,7 +415,7 @@ export default function AdminStationsPage() {
 
                 {source ? (
                   <TouchableOpacity
-                    activeOpacity={0.85}
+                    activeOpacity={1}
                     style={[styles.actionBtn, { backgroundColor: colors.primary + '18' }]}
                     onPress={() => openSourceEditor(source)}
                   >
@@ -424,7 +424,7 @@ export default function AdminStationsPage() {
                 ) : null}
 
                 <TouchableOpacity
-                  activeOpacity={0.85}
+                  activeOpacity={1}
                   disabled={isBusy}
                   style={[styles.actionBtn, { backgroundColor: '#EF444420' }]}
                   onPress={() => deleteStation(item.id)}
@@ -457,7 +457,7 @@ export default function AdminStationsPage() {
                   {editingSource?.name || ''}
                 </Text>
               </View>
-              <TouchableOpacity onPress={closeEditor} style={styles.iconButton}>
+              <TouchableOpacity activeOpacity={1} onPress={closeEditor} style={styles.iconButton}>
                 <Ionicons name="close" size={22} color={colors.text} />
               </TouchableOpacity>
             </View>
@@ -504,7 +504,7 @@ export default function AdminStationsPage() {
                 return (
                   <TouchableOpacity
                     key={playlist.id}
-                    activeOpacity={0.85}
+                    activeOpacity={1}
                     onPress={() => togglePlaylist(playlist.id)}
                     style={[styles.playlistOption, { borderColor: selected ? colors.primary : colors.border, backgroundColor: selected ? colors.primary + '14' : 'transparent' }]}
                   >
@@ -524,14 +524,14 @@ export default function AdminStationsPage() {
 
             <View style={styles.modalActions}>
               <TouchableOpacity
-                activeOpacity={0.85}
+                activeOpacity={1}
                 onPress={closeEditor}
                 style={[styles.secondaryBtn, { borderColor: colors.border }]}
               >
                 <Text style={{ color: colors.text, fontWeight: '700' }}>Cancel</Text>
               </TouchableOpacity>
               <TouchableOpacity
-                activeOpacity={0.85}
+                activeOpacity={1}
                 disabled={editorBusy}
                 onPress={saveStation}
                 style={[styles.primaryBtn, { backgroundColor: colors.primary, opacity: editorBusy ? 0.7 : 1 }]}

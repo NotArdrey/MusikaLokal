@@ -65,6 +65,17 @@ interface WithdrawalErrorPayload {
   suggestion?: string;
 }
 
+const BOOKING_EARNING_REFERENCE_TYPES = new Set([
+  'booking',
+  'booking_payment',
+  'booking_downpayment',
+  'booking_balance',
+]);
+
+const isBookingEarningTransaction = (tx: any) =>
+  tx?.type === 'earning' &&
+  (BOOKING_EARNING_REFERENCE_TYPES.has(tx?.reference_type) || !tx?.reference_type);
+
 export default function WalletScreen() {
   const { colors, isDark } = useTheme();
   const { contentBottomPadding } = useBottomBarClearance(24);
@@ -170,7 +181,7 @@ export default function WalletScreen() {
     const normalizedMessage = message || '';
     const type = resolveAlertType(normalizedTitle);
 
-    if (isSimpleTopToastButtons(buttons)) {
+    if ((type === 'success' || type === 'info') && isSimpleTopToastButtons(buttons)) {
       showTopToast({
         type,
         title: normalizedTitle,
@@ -323,7 +334,7 @@ export default function WalletScreen() {
           .order('created_at', { ascending: false });
 
         if (txError) throw txError;
-        setTransactions(txs || []);
+        setTransactions((txs || []).filter(isBookingEarningTransaction));
       }
 
       // 3. Get Unpaid Bookings (remaining balance > 0)
@@ -862,10 +873,10 @@ export default function WalletScreen() {
   }, [transactions, txFilter]);
 
   const txFilterOptions = [
-    { key: "all", label: "All" },
-    { key: "booking", label: "Booking" },
-    { key: "penalty", label: "Penalty" },
-    { key: "refund", label: "Refund" },
+    { key: "all", label: "All earnings" },
+    { key: "booking_payment", label: "Full payment" },
+    { key: "booking_downpayment", label: "Downpayment" },
+    { key: "booking_balance", label: "Balance" },
   ];
 
   return (
@@ -1048,7 +1059,7 @@ export default function WalletScreen() {
 
           {/* Transaction History */}
           <View style={styles.historySection}>
-            <Text style={[styles.historyTitle, { color: colors.text }]}>Transaction History</Text>
+            <Text style={[styles.historyTitle, { color: colors.text }]}>Earnings Activity</Text>
 
             {/* Filter chips */}
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 10 }}>
@@ -1079,7 +1090,7 @@ export default function WalletScreen() {
                 </View>
               ) : filteredTransactions.length === 0 ? (
                 <View style={{ padding: 20, alignItems: 'center' }}>
-                  <Text style={{ color: colors.textSecondary, fontFamily: 'Poppins_400Regular' }}>No transaction history</Text>
+                  <Text style={{ color: colors.textSecondary, fontFamily: 'Poppins_400Regular' }}>No booking earnings yet</Text>
                 </View>
               ) : (
                 filteredTransactions.map((tx, index) => (

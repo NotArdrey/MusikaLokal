@@ -16,6 +16,7 @@ import { supabase } from "../lib/supabase";
 import CachedImage from "../src/components/CachedImage";
 import CustomAlert, { AlertType } from "../src/components/CustomAlert";
 import Header from "../src/components/header";
+import Modal from "../src/components/modal";
 import Navbar from "../src/components/navbar";
 import Skeleton from "../src/components/Skeleton";
 import { useBottomBarClearance } from "../src/hooks/useBottomBarClearance";
@@ -63,6 +64,10 @@ export default function ProductionTeamScreen() {
   const [activeTab, setActiveTab] = useState<"About" | "Members" | "Reviews">("About");
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
   const [loadingMembers, setLoadingMembers] = useState(false);
+  const [fireModalVisible, setFireModalVisible] = useState(false);
+  const [memberToFire, setMemberToFire] = useState<TeamMember | null>(null);
+  const [fireReason, setFireReason] = useState("");
+  const [firingMember, setFiringMember] = useState(false);
 
   // Alert
   const [alertVisible, setAlertVisible] = useState(false);
@@ -284,22 +289,55 @@ export default function ProductionTeamScreen() {
     }
   };
 
-  const handleRemoveMember = async (memberUserId: string) => {
-    if (!selectedTeam) return;
+  const openFireMemberModal = (member: TeamMember) => {
+    setMemberToFire(member);
+    setFireReason("");
+    setFireModalVisible(true);
+  };
+
+  const closeFireMemberModal = () => {
+    if (firingMember) return;
+    setFireModalVisible(false);
+    setMemberToFire(null);
+    setFireReason("");
+  };
+
+  const handleRemoveMember = async () => {
+    if (!selectedTeam || !memberToFire || firingMember) return;
+    const reason = fireReason.trim();
+    if (!reason) {
+      showAlert("warning", "Reason Required", "Please provide a reason before firing this member.");
+      return;
+    }
+
+    setFiringMember(true);
     try {
       const { data, error } = await supabase.functions.invoke("manage-production", {
         body: {
           action: "remove_team_member",
           team_id: selectedTeam.id,
-          user_id: memberUserId,
+          user_id: memberToFire.user_id,
+          reason,
         },
       });
       if (error) throw error;
       if (data?.error) throw new Error(data.error);
-      showAlert("success", "Removed", "Member removed from team");
+      const firedMemberName = memberToFire.full_name || "Member";
+      setFireModalVisible(false);
+      setMemberToFire(null);
+      setFireReason("");
+      showAlert(
+        data?.notification_sent === false ? "warning" : "success",
+        "Member Fired",
+        data?.notification_sent === false
+          ? `${firedMemberName} was removed, but the notification could not be sent.`
+          : `${firedMemberName} was removed and notified.`,
+      );
       fetchTeamMembers(selectedTeam.id);
     } catch (e: any) {
       showAlert("error", "Error", e.message || "Failed to remove member");
+    } finally {
+      setFiringMember(false);
     }
   };
 
@@ -318,6 +356,9 @@ export default function ProductionTeamScreen() {
     setActiveTab("About");
     setSelectedTeam(null);
     setTeamMembers([]);
+    setFireModalVisible(false);
+    setMemberToFire(null);
+    setFireReason("");
   };
 
   const statusColor = (role: string) => {
@@ -462,7 +503,7 @@ export default function ProductionTeamScreen() {
                         {canManage && member.role !== "owner" && member.user_id !== userId && (
                           <TouchableOpacity
                             activeOpacity={1}
-                            onPress={() => handleRemoveMember(member.user_id)}
+                            onPress={() => openFireMemberModal(member)}
                             style={styles.removeBtn}
                           >
                             <Ionicons name="close-circle" size={22} color="#EF4444" />
@@ -489,6 +530,27 @@ export default function ProductionTeamScreen() {
           </ScrollView>
           <Navbar />
         </View>
+
+        <Modal
+          visible={fireModalVisible}
+          onClose={closeFireMemberModal}
+          title="Fire Member"
+          message={
+            firingMember
+              ? "Removing member and sending notification..."
+              : `Tell ${memberToFire?.full_name || "this member"} why they are being removed from ${selectedTeam.name}. This reason will be sent to their notifications.`
+          }
+          buttonText={firingMember ? "Firing..." : "Fire Member"}
+          onConfirm={handleRemoveMember}
+          danger
+          showInput
+          inputPlaceholder="Reason for firing"
+          inputValue={fireReason}
+          onInputChange={setFireReason}
+          confirmDisabled={!fireReason.trim() || firingMember}
+          loading={firingMember}
+          loadingMessage="Removing member and sending notification..."
+        />
 
         <CustomAlert
           visible={alertVisible}

@@ -464,14 +464,15 @@ Deno.serve(async (req: Request) => {
 
     // ── browse_products (shop) ──────────────────────────────────────
     if (action === "browse_products") {
-      const { category, product_type, seller_id, featured_only, limit: lim, offset } = params;
+      const { category, product_type, seller_id, featured_only, include_sold, limit: lim, offset } = params;
       const pageSize = Math.min(Number(lim) || 20, 50);
       const pageOffset = Number(offset) || 0;
+      const visibleStatuses = include_sold === false ? ["active"] : ["active", "sold_out"];
 
       let query = supabaseAdmin
         .from("products_with_summary")
         .select("*")
-        .eq("status", "active")
+        .in("status", visibleStatuses)
         .order("created_at", { ascending: false })
         .range(pageOffset, pageOffset + pageSize - 1);
 
@@ -482,7 +483,17 @@ Deno.serve(async (req: Request) => {
 
       const { data, error } = await query;
       if (error) return jsonResponse({ error: error.message }, 500);
-      return jsonResponse({ success: true, data: (data || []).map((item: any) => normalizeProductRecord(item)) });
+      const sortedData = (data || []).sort((a: any, b: any) => {
+        const aSold = a?.status === "sold_out";
+        const bSold = b?.status === "sold_out";
+
+        if (aSold !== bSold) {
+          return aSold ? 1 : -1;
+        }
+
+        return new Date(b?.created_at || 0).getTime() - new Date(a?.created_at || 0).getTime();
+      });
+      return jsonResponse({ success: true, data: sortedData.map((item: any) => normalizeProductRecord(item)) });
     }
 
     // ── create_order (checkout) ─────────────────────────────────────

@@ -326,7 +326,7 @@ export default function EditProfileScreen() {
     );
   }
 
-  async function handleChangePhoto() {
+  async function chooseAvatarFromLibrary() {
     if (!userId) return;
 
     try {
@@ -379,6 +379,75 @@ export default function EditProfileScreen() {
       console.error("❌ Error:", err);
       showAlert("warning", "Upload Failed", err.message || "Failed to upload photo");
     }
+  }
+
+  async function captureAvatarWithCamera() {
+    if (!userId) return;
+
+    try {
+      const { status } = await ImagePicker.requestCameraPermissionsAsync();
+      if (status !== "granted") {
+        showAlert(
+          "warning",
+          "Permission Required",
+          "Please allow camera access to take a profile photo.",
+        );
+        return;
+      }
+
+      const result = await ImagePicker.launchCameraAsync({
+        mediaTypes: ["images"],
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.5,
+        base64: true,
+      });
+
+      if (result.canceled || !result.assets?.[0]) return;
+
+      const asset = result.assets[0];
+
+      if (!asset.base64) {
+        showAlert("warning", "Couldn't Read Image", "Could not read image data. Please try again.");
+        return;
+      }
+
+      const ext = asset.uri.split(".").pop()?.toLowerCase() || "jpg";
+      const mimeType = `image/${ext === "jpg" ? "jpeg" : ext}`;
+      await ensureUploadPassesSafetyScreening(
+        {
+          name: (asset as any)?.fileName || `profile-photo.${ext}`,
+          mimeType,
+          size: Math.floor((asset.base64.length * 3) / 4),
+          uri: asset.uri,
+          contentDataUrl: `data:${mimeType};base64,${asset.base64}`,
+          kind: "photo",
+        },
+        "edit_profile_avatar",
+      );
+      setPendingAvatar({ base64: asset.base64, ext });
+      setAvatarUrl(asset.uri);
+      showAlert("info", "Photo selected", "Tap Save Profile to apply your new photo.");
+    } catch (err: any) {
+      setUploadingPhoto(false);
+      console.error("Camera capture error:", err);
+      showAlert("warning", "Capture Failed", err.message || "Failed to capture photo.");
+    }
+  }
+
+  function handleChangePhoto() {
+    if (!userId) return;
+
+    showAlert(
+      "info",
+      "Update Profile Photo",
+      "Take a new photo or choose one from your gallery.",
+      [
+        { text: "Take Photo", onPress: () => void captureAvatarWithCamera() },
+        { text: "Choose from Gallery", onPress: () => void chooseAvatarFromLibrary() },
+        { text: "Cancel", style: "cancel" },
+      ],
+    );
   }
 
   async function handleSave() {

@@ -85,7 +85,7 @@ export default function ShopScreen() {
   const colWidth = isWebDesktop ? (Math.min(width, 900) - 48) / numColumns : (width - 40) / numColumns;
 
   const renderProduct = ({ item }: { item: any }) => (
-    <TouchableOpacity style={[styles.productCard, { width: colWidth, backgroundColor: cardBg, borderColor: borderCol }]} onPress={() => router.push({ pathname: "/product_details", params: { product_id: item.id } })}>
+    <TouchableOpacity activeOpacity={1} style={[styles.productCard, { width: colWidth, backgroundColor: cardBg, borderColor: borderCol }]} onPress={() => router.push({ pathname: "/product_details", params: { product_id: item.id } })}>
       {item.cover_image_url || item.thumbnail_url ? <CachedImage uri={item.cover_image_url || item.thumbnail_url } style={[styles.productImg, { width: colWidth - 2 }]} /> : <View style={[styles.productImgPlaceholder, { width: colWidth - 2, backgroundColor: colors.primary + "10" }]}><Ionicons name="bag-outline" size={32} color={colors.primary} /></View>}
       <View style={{ padding: 10 }}>
         <Text style={{ color: colors.text, fontSize: moderateScale(13), fontWeight: "600" }} numberOfLines={2}>{item.title}</Text>
@@ -118,7 +118,7 @@ export default function ShopScreen() {
                 <Text style={[styles.introTitle, { color: colors.text }]}>Browse listings or open Seller Hub to post your own.</Text>
                 <Text style={[styles.introSubtitle, { color: colors.textSecondary }]}>Every signed-in account can sell merch, gear, and digital drops.</Text>
               </View>
-              <TouchableOpacity
+              <TouchableOpacity activeOpacity={1}
                 onPress={() => router.push("/seller_hub")}
                 style={[styles.introAction, { backgroundColor: colors.primary }]}
               >
@@ -138,7 +138,7 @@ export default function ShopScreen() {
               contentContainerStyle={{ paddingHorizontal: 14 }}
               keyExtractor={(i) => i}
               renderItem={({ item }) => (
-                <TouchableOpacity
+                <TouchableOpacity activeOpacity={1}
                   onPress={() => {
                     if (item === "All") {
                       setCategory(null);

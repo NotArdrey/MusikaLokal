@@ -1,4 +1,4 @@
-﻿import { Ionicons } from "@expo/vector-icons";
+import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect } from "@react-navigation/native";
 import { BlurView } from "expo-blur";
 import { CameraView, useCameraPermissions } from "expo-camera";
@@ -242,11 +242,52 @@ const getPaymentItemDueAmount = (item: any) => {
   const remainingBalance = toPaymentAmount(item?.remaining_balance);
   const status = String(item?.payment_status || "").toLowerCase();
 
-  if (remainingBalance > 0) return remainingBalance;
   if (status === "paid") return 0;
+  if (remainingBalance > 0) return remainingBalance;
 
   return getPaymentItemTotalAmount(item);
 };
+
+const getBookingPaymentStatus = (item: any) =>
+  String(item?.payment_status || "").toLowerCase();
+
+const getBookingRemainingBalance = (item: any) =>
+  toPaymentAmount(item?.remaining_balance);
+
+const isBookingPaymentSettled = (item: any) =>
+  getBookingPaymentStatus(item) === "paid";
+
+const isDownpaymentBalanceItem = (item: any) =>
+  item?.payment_type === "downpayment" && getBookingRemainingBalance(item) > 0;
+
+const isBalancePaymentProcessing = (item: any) =>
+  isDownpaymentBalanceItem(item) &&
+  getBookingPaymentStatus(item) === "pending" &&
+  item?.raw_status === "confirmed" &&
+  Boolean(item?.checkout_session_id);
+
+const canPayRemainingBalance = (item: any) => {
+  if (!isDownpaymentBalanceItem(item) || isBookingPaymentSettled(item)) {
+    return false;
+  }
+
+  const status = getBookingPaymentStatus(item);
+  return (
+    status === "partial" ||
+    (
+      item?.raw_status === "confirmed" &&
+      (status === "unpaid" || status === "failed")
+    )
+  );
+};
+
+const shouldShowBalanceDueBadge = (item: any) =>
+  isDownpaymentBalanceItem(item) &&
+  !isBookingPaymentSettled(item) &&
+  !isBalancePaymentProcessing(item);
+
+const shouldShowPaidBalanceBadge = (item: any) =>
+  item?.payment_type === "downpayment" && isBookingPaymentSettled(item);
 
 const getPendingStudioBatchKey = (item: any) => {
   if (item?.type_id !== "studio_booking") return null;
@@ -278,9 +319,16 @@ const mergePendingStudioBookingBatch = (items: any[]) => {
   const dueAmount = sorted.reduce((sum, item) => sum + getPaymentItemDueAmount(item), 0);
   const paidAmount = Math.max(0, totalCost - dueAmount);
   const hasBalanceDue = sorted.some(
-    (item) =>
-      toPaymentAmount(item?.remaining_balance) > 0 ||
-      String(item?.payment_status || "").toLowerCase() === "partial",
+    (item) => {
+      const status = getBookingPaymentStatus(item);
+      return (
+        status !== "paid" &&
+        (
+          toPaymentAmount(item?.remaining_balance) > 0 ||
+          status === "partial"
+        )
+      );
+    },
   );
 
   return {
@@ -302,7 +350,7 @@ const mergePendingStudioBookingBatch = (items: any[]) => {
     status: hasBalanceDue ? "Balance Due" : first?.status,
     date:
       sorted.length > 1 && first?.raw_date
-        ? `${first.raw_date} • ${first?.start_time || "TBA"} - ${last?.end_time || "TBA"}`
+        ? `${first.raw_date} � ${first?.start_time || "TBA"} - ${last?.end_time || "TBA"}`
         : first?.date,
   };
 };
@@ -338,6 +386,53 @@ const isProductionTeamInviteRequest = (item: any) =>
   item?.request_kind === "invite" &&
   Boolean(item?.production_team_id);
 
+const mergeUniqueActivityItems = (...groups: any[][]) => {
+  const seen = new Set<string>();
+  const merged: any[] = [];
+
+  groups.flat().forEach((item: any) => {
+    const key = `${item?.type_id || "activity"}:${item?.id || ""}`;
+    if (!item?.id || seen.has(key)) return;
+    seen.add(key);
+    merged.push(item);
+  });
+
+  return merged;
+};
+
+const normalizeActivityRole = (role: unknown) =>
+  String(role || "").trim().toLowerCase().replace(/[_\s]+/g, "-");
+
+const isProducerActivityRole = (role: unknown) => {
+  const normalizedRole = normalizeActivityRole(role);
+  return (
+    normalizedRole === "producer" ||
+    normalizedRole === "production" ||
+    normalizedRole === "production-user"
+  );
+};
+
+const getGigApplicationStatusLabel = (
+  status: unknown,
+  fallback: unknown = status,
+) => {
+  const normalizedStatus = String(status || "").trim().toLowerCase();
+
+  if (normalizedStatus === "pending") return "Applied";
+  if (normalizedStatus === "accepted") return "Accepted";
+  if (normalizedStatus === "completed") return "Completed";
+  if (normalizedStatus === "rejected") return "Declined";
+  if (normalizedStatus === "cancelled") return "Cancelled";
+  if (normalizedStatus === "resigned") return "Resigned";
+  if (normalizedStatus === "fired") return "Fired";
+
+  return fallback || status;
+};
+
+const canRenewGigApplication = (item: any) =>
+  item?.type_id === "gig_application" &&
+  String(item?.raw_status || item?.status || "").trim().toLowerCase() === "completed";
+
 type Tab =
   | "Applicants"
   | "Active Musicians"
@@ -348,7 +443,7 @@ type Tab =
   | "History";
 
 // Venue owner specific tabs for managing gig applications
-type VenueOwnerTab = "Applicants" | "Active Musicians" | "Completed";
+type VenueOwnerTab = "Applicants" | "Active Musicians" | "History";
 
 // Application-specific tabs for musician's gig application flow
 type ApplicationTab = "Applied" | "Accepted" | "Completed";
@@ -561,11 +656,11 @@ export default function BookingsScreen() {
           appState.current.match(/inactive|background/) &&
           nextAppState === "active"
         ) {
-          debugLog("📱 App returned to foreground");
+          debugLog("?? App returned to foreground");
 
           // If we were in payment flow, check status and refresh
           if (paymentInProgressRef.current && userId) {
-            debugLog("💳 Checking payment status after return...");
+            debugLog("?? Checking payment status after return...");
             const bookingId = pendingPaymentBookingId.current;
             paymentInProgressRef.current = false;
             pendingPaymentBookingId.current = null;
@@ -573,7 +668,7 @@ export default function BookingsScreen() {
             // Poll for payment status with retries (webhook might be processing)
             let paymentConfirmed = false;
             for (let attempt = 1; attempt <= 3; attempt++) {
-              debugLog(`💳 Payment status check attempt ${attempt}/3...`);
+              debugLog(`?? Payment status check attempt ${attempt}/3...`);
               await new Promise((resolve) =>
                 setTimeout(resolve, 1500 * attempt),
               ); // Increasing delay
@@ -588,7 +683,7 @@ export default function BookingsScreen() {
 
                 if (booking?.payment_status === "paid") {
                   paymentConfirmed = true;
-                  debugLog("✅ Payment confirmed for booking:", bookingId);
+                  debugLog("? Payment confirmed for booking:", bookingId);
                   break;
                 }
               } else {
@@ -603,7 +698,7 @@ export default function BookingsScreen() {
 
                 if (recentPaid && recentPaid.length > 0) {
                   paymentConfirmed = true;
-                  debugLog("✅ Found recently paid booking");
+                  debugLog("? Found recently paid booking");
                   break;
                 }
               }
@@ -838,7 +933,7 @@ export default function BookingsScreen() {
       }
 
       channel = liveChannel.subscribe((status: string) => {
-        debugLog("📡 Realtime status:", status);
+        debugLog("?? Realtime status:", status);
       });
     };
 
@@ -893,6 +988,15 @@ export default function BookingsScreen() {
     targetUserId: string,
     role: string,
   ) {
+    if (role !== "musician" && role !== "studio-owner") {
+      return {
+        Pending: [] as any[],
+        Upcoming: [] as any[],
+        Ongoing: [] as any[],
+        Review: [] as any[],
+      };
+    }
+
     let studioQuery = supabase
       .from("studio_bookings")
       .select("*, studio:studios(name, owner_id, studio_media(media_url, sort_order))")
@@ -1000,7 +1104,7 @@ export default function BookingsScreen() {
         start_time: b.start_time,
         end_time: b.end_time,
         name: b.studio?.name || "Unknown Studio",
-        date: `${b.booking_date} • ${b.start_time} - ${b.end_time}`,
+        date: `${b.booking_date} � ${b.start_time} - ${b.end_time}`,
         image:
           b.studio?.studio_media
             ?.sort((a: any, b: any) => (a.sort_order || 0) - (b.sort_order || 0))[0]
@@ -1064,7 +1168,7 @@ export default function BookingsScreen() {
         fallback.Pending.push(item);
       } else if (b.status === "confirmed") {
         if (role === "musician" && b.payment_status === "partial" && (b.remaining_balance || 0) > 0) {
-          // Downpayment paid but balance still owed — keep in Pending so musician can pay balance
+          // Downpayment paid but balance still owed � keep in Pending so musician can pay balance
           fallback.Pending.push({ ...item, status: "Balance Due" });
         } else if (now > endDate) {
           fallback.Review.push({ ...item, status: "Completed" });
@@ -1087,6 +1191,280 @@ export default function BookingsScreen() {
         }
       } else if (b.status === "cancelled") {
         fallback.Upcoming.push(item);
+      }
+    });
+
+    return fallback;
+  }
+
+  async function buildLocalProducerGigApplicationsFallback(targetUserId: string) {
+    const fallback = {
+      Pending: [] as any[],
+      Upcoming: [] as any[],
+      Ongoing: [] as any[],
+      Review: [] as any[],
+    };
+
+    const { data: productionApps, error: productionAppsError } = await supabase
+      .from("gig_applications")
+      .select(
+        `
+          *,
+          gig:gig_id(name, event_date, location, organizer:organizer_id(avatar_url), gig_media(media_url, sort_order)),
+          group:group_id(name, group_type),
+          production_team:production_team_id(id, name, logo_url),
+          production_roster:production_roster_id(
+            entity_kind,
+            roster_profile:profile_id(full_name, avatar_url),
+            roster_group:group_id(name, group_type)
+          )
+        `,
+      )
+      .eq("applicant_id", targetUserId)
+      .not("production_team_id", "is", null)
+      .order("created_at", { ascending: false });
+
+    if (productionAppsError) {
+      debugLog("Error fetching local producer gig applications:", productionAppsError);
+      return fallback;
+    }
+
+    const now = new Date();
+
+    (productionApps || []).forEach((app: any) => {
+      const normalizedStatus = String(app.status || "").toLowerCase();
+      const gig = app.gig;
+      const dateStr = gig?.event_date || app.created_at?.split("T")[0] || "TBA";
+      const performerName =
+        app.group?.name ||
+        app.production_roster?.roster_profile?.full_name ||
+        app.production_roster?.roster_group?.name ||
+        "Performer";
+
+      let eventDate: Date | null = null;
+      if (gig?.event_date) {
+        eventDate = new Date(gig.event_date);
+        eventDate.setHours(23, 59, 59, 999);
+      }
+
+      const item = {
+        id: app.id,
+        type_id: "gig_application",
+        created_at: app.created_at,
+        gig_id: app.gig_id,
+        group_id: app.group_id,
+        applicant_id: app.applicant_id,
+        submitted_by_user_id: app.submitted_by_user_id,
+        production_team_id: app.production_team_id,
+        production_team_name: app.production_team?.name || null,
+        performer: performerName,
+        customer_name: performerName,
+        raw_date: dateStr,
+        start_time: gig?.event_date,
+        name: gig?.name || "Unknown Gig",
+        date: dateStr,
+        image:
+          app.production_roster?.roster_profile?.avatar_url ||
+          app.production_team?.logo_url ||
+          gig?.organizer?.avatar_url ||
+          "https://images.unsplash.com/photo-1516280440614-37939bbacd81?w=400&h=200&fit=crop",
+        status: getGigApplicationStatusLabel(normalizedStatus, app.status),
+        raw_status: app.status,
+        type:
+          app.group?.group_type === "duo"
+            ? "Production Duo Application"
+            : app.group_id
+              ? "Production Group Application"
+              : "Production Musician Application",
+        isCancelled: ["cancelled", "rejected", "fired"].includes(normalizedStatus),
+        action: normalizedStatus === "accepted" ? "View Details" : "Details",
+        location: gig?.location,
+        pitch_message: app.pitch_message,
+        video_url: app.video_url,
+        cv_url: app.cv_url,
+        slot_type: app.slot_type,
+        reviewed_by_applicant: app.reviewed_by_applicant || false,
+      };
+
+      if (normalizedStatus === "pending") {
+        fallback.Pending.push(item);
+      } else if (normalizedStatus === "accepted") {
+        if (eventDate) {
+          const eventStart = new Date(gig.event_date);
+          eventStart.setHours(0, 0, 0, 0);
+
+          if (now >= eventStart && now <= eventDate) {
+            fallback.Ongoing.push({ ...item, status: "Happening Now" });
+          } else if (now > eventDate) {
+            if (!app.reviewed_by_applicant) {
+              fallback.Review.push({ ...item, status: "Completed" });
+            }
+          } else {
+            fallback.Upcoming.push(item);
+          }
+        } else {
+          fallback.Upcoming.push(item);
+        }
+      } else if (["rejected", "cancelled", "resigned", "fired"].includes(normalizedStatus)) {
+        fallback.Review.push({
+          ...item,
+          status: getGigApplicationStatusLabel(normalizedStatus, app.status),
+        });
+      } else if (normalizedStatus === "completed") {
+        fallback.Review.push({ ...item, status: "Completed" });
+      }
+    });
+
+    return fallback;
+  }
+
+  async function buildLocalVenueOwnerGigApplicationsFallback(targetUserId: string) {
+    const fallback = {
+      Pending: [] as any[],
+      Upcoming: [] as any[],
+      Ongoing: [] as any[],
+      Review: [] as any[],
+    };
+
+    const { data: gigs, error: gigsError } = await supabase
+      .from("gigs")
+      .select("id, name, event_date, location")
+      .eq("organizer_id", targetUserId);
+
+    if (gigsError) {
+      debugLog("Error fetching local venue gigs:", gigsError);
+      return fallback;
+    }
+
+    const gigRows = gigs || [];
+    const gigIds = gigRows.map((gig: any) => gig?.id).filter(Boolean);
+
+    if (gigIds.length === 0) return fallback;
+
+    const gigById = new Map(gigRows.map((gig: any) => [gig.id, gig]));
+    const { data: venueApps, error: venueAppsError } = await supabase
+      .from("gig_applications")
+      .select(
+        `
+          *,
+          applicant:applicant_id(full_name, avatar_url),
+          submitter:submitted_by_user_id(full_name, avatar_url),
+          group:group_id(name, group_type),
+          production_team:production_team_id(id, name, logo_url),
+          production_roster:production_roster_id(
+            entity_kind,
+            roster_profile:profile_id(full_name, avatar_url),
+            roster_group:group_id(name, group_type)
+          )
+        `,
+      )
+      .in("gig_id", gigIds)
+      .in("status", ["accepted", "pending", "rejected", "cancelled", "resigned", "completed", "fired"])
+      .or("leader_approval_status.is.null,leader_approval_status.eq.approved")
+      .order("created_at", { ascending: false });
+
+    if (venueAppsError) {
+      debugLog("Error fetching local venue gig applications:", venueAppsError);
+      return fallback;
+    }
+
+    const now = new Date();
+
+    (venueApps || []).forEach((app: any) => {
+      const gig = gigById.get(app.gig_id);
+      const normalizedStatus = String(app.status || "").toLowerCase();
+      const dateStr = gig?.event_date || "TBA";
+      const performerName =
+        app.group?.name ||
+        app.production_roster?.roster_profile?.full_name ||
+        app.production_roster?.roster_group?.name ||
+        app.applicant?.full_name ||
+        "Performer";
+
+      let eventDate: Date | null = null;
+      if (gig?.event_date) {
+        eventDate = new Date(gig.event_date);
+        eventDate.setHours(23, 59, 59, 999);
+      }
+
+      const item = {
+        id: app.id,
+        type_id: "gig_application",
+        created_at: app.created_at,
+        gig_id: app.gig_id,
+        group_id: app.group_id,
+        applicant_id: app.applicant_id,
+        user_id: app.applicant_id,
+        submitted_by_user_id: app.submitted_by_user_id,
+        production_team_id: app.production_team_id,
+        production_team_name: app.production_team?.name || null,
+        submitted_by_name: app.submitter?.full_name || null,
+        raw_date: dateStr,
+        start_time: gig?.event_date,
+        name: `${gig?.name || "Gig"} - ${performerName}`,
+        date: dateStr,
+        image:
+          app.group?.images?.[0] ||
+          app.production_roster?.roster_profile?.avatar_url ||
+          app.production_team?.logo_url ||
+          app.applicant?.avatar_url ||
+          "https://picsum.photos/400/300",
+        status:
+          normalizedStatus === "pending"
+            ? "Action Required"
+            : normalizedStatus === "accepted"
+              ? "Confirmed"
+              : getGigApplicationStatusLabel(normalizedStatus, app.status),
+        raw_status: app.status,
+        type: app.production_team?.name
+          ? app.group?.group_type === "duo"
+            ? "Production Duo Application"
+            : app.group_id
+              ? "Production Group Application"
+              : "Production Musician Application"
+          : app.group_id
+            ? "Group Application"
+            : "Solo Application",
+        isCancelled: normalizedStatus === "rejected" || normalizedStatus === "cancelled" || normalizedStatus === "fired",
+        action: normalizedStatus === "pending" ? "Confirm Now" : "View Details",
+        location: gig?.location,
+        performer: performerName,
+        customer_name: performerName,
+        customer_avatar:
+          app.group?.images?.[0] ||
+          app.production_roster?.roster_profile?.avatar_url ||
+          app.applicant?.avatar_url,
+        video_url: app.video_url,
+        cv_url: app.cv_url,
+        note: app.note,
+        pitch_message: app.pitch_message,
+        slot_type: app.slot_type,
+        group_members: [],
+        reviewed_by_organizer: app.reviewed_by_organizer || false,
+      };
+
+      if (normalizedStatus === "pending") {
+        fallback.Pending.push(item);
+      } else if (normalizedStatus === "accepted") {
+        if (eventDate) {
+          const eventStart = new Date(gig.event_date);
+          eventStart.setHours(0, 0, 0, 0);
+
+          if (now >= eventStart && now <= eventDate) {
+            fallback.Ongoing.push({ ...item, status: "Happening Now" });
+          } else {
+            fallback.Upcoming.push(item);
+          }
+        } else {
+          fallback.Upcoming.push(item);
+        }
+      } else if (["rejected", "cancelled", "resigned", "fired"].includes(normalizedStatus)) {
+        fallback.Review.push({
+          ...item,
+          status: getGigApplicationStatusLabel(normalizedStatus, app.status),
+        });
+      } else if (normalizedStatus === "completed") {
+        fallback.Review.push({ ...item, status: "Completed" });
       }
     });
 
@@ -1154,7 +1532,31 @@ export default function BookingsScreen() {
           ? await buildLocalStudioBookingsFallback(targetUserId, role)
           : null;
 
-      const effectiveBookings = fallbackBookings || bookings;
+      let effectiveBookings = fallbackBookings || bookings;
+
+      if (role === "venue-owner") {
+        const venueFallbackBookings = await buildLocalVenueOwnerGigApplicationsFallback(targetUserId);
+        effectiveBookings = {
+          ...effectiveBookings,
+          Pending: mergeUniqueActivityItems(
+            venueFallbackBookings.Pending,
+            effectiveBookings?.Pending || [],
+          ),
+          Upcoming: mergeUniqueActivityItems(
+            venueFallbackBookings.Upcoming,
+            effectiveBookings?.Upcoming || [],
+          ),
+          Ongoing: mergeUniqueActivityItems(
+            venueFallbackBookings.Ongoing,
+            effectiveBookings?.Ongoing || [],
+          ),
+          Review: mergeUniqueActivityItems(
+            venueFallbackBookings.Review,
+            effectiveBookings?.Review || [],
+          ),
+        };
+      }
+
 
       let connectionRequestItems: any[] = [];
       try {
@@ -1321,6 +1723,30 @@ export default function BookingsScreen() {
 
       if (!effectiveBookings) throw error || new Error("Failed to fetch bookings");
 
+      if (isProducerActivityRole(role)) {
+        const producerFallbackBookings =
+          await buildLocalProducerGigApplicationsFallback(targetUserId);
+
+        effectiveBookings = {
+          ...effectiveBookings,
+          Pending: mergeUniqueActivityItems(
+            effectiveBookings?.Pending || [],
+            producerFallbackBookings.Pending,
+          ),
+          Upcoming: mergeUniqueActivityItems(
+            effectiveBookings?.Upcoming || [],
+            producerFallbackBookings.Upcoming,
+          ),
+          Ongoing: mergeUniqueActivityItems(
+            effectiveBookings?.Ongoing || [],
+            producerFallbackBookings.Ongoing,
+          ),
+          Review: mergeUniqueActivityItems(
+            effectiveBookings?.Review || [],
+            producerFallbackBookings.Review,
+          ),
+        };
+      }
       const combinedBookingItems = [
         ...(effectiveBookings?.Pending || []),
         ...connectionRequestItems,
@@ -1435,7 +1861,7 @@ export default function BookingsScreen() {
       const pendingItems =
         role === "venue-owner"
           ? []
-          : role === "musician"
+          : role === "musician" || isProducerActivityRole(role)
             ? [...pendingGigApplications, ...pendingConnectionRequests, ...groupedStudioPending]
             : [...pendingConnectionRequests, ...groupedStudioPending];
 
@@ -1499,7 +1925,7 @@ export default function BookingsScreen() {
       // 4. History - Cancelled/Declined bookings + already-reviewed completed items (by current viewer)
       const rawReview = attachLateReportMeta(effectiveBookings?.Review || []);
       const cancelledFromUpcoming = rawUpcoming.filter(
-        (item: any) => item.isCancelled || item.status === "Declined"
+        (item: any) => item.isCancelled || item.status === "Declined" || item.status === "Cancelled"
       );
       const alreadyReviewedCompleted = rawReview.filter((item: any) => {
         if (item.type_id === "gig_application") return false;
@@ -1517,11 +1943,11 @@ export default function BookingsScreen() {
       const terminalGigApplications = rawReview.filter((item: any) => {
         if (item.type_id !== "gig_application") return false;
         const status = normalizeStatus(item.status);
-        if (!["completed", "fired", "declined", "rejected", "cancelled"].includes(status)) {
+        if (!["completed", "fired", "declined", "rejected", "cancelled", "resigned"].includes(status)) {
           return false;
         }
 
-        if (role === "producer") {
+        if (isProducerActivityRole(role)) {
           return item.reviewed_by_applicant === true;
         }
 
@@ -1550,14 +1976,15 @@ export default function BookingsScreen() {
       const unreviewedItems = [
         ...rawReview.filter((item: any) => {
           if (role === "venue-owner") {
-            // For venue owners, Review tab = Completed tab: fired musicians + completed contracts.
-            // Shows gig applications with status "Fired" or "Completed" (never "Accepted").
+            // Venue owners see terminal gig applications here; accepted contracts stay active.
+            const status = normalizeStatus(item.raw_status || item.status);
             return item.type_id === "gig_application" &&
-              (item.status === "Fired" || item.status === "Completed");
+              ["rejected", "cancelled", "fired", "completed", "resigned"].includes(status);
           }
 
-          if (role === "producer") {
+          if (isProducerActivityRole(role)) {
             return item.type_id === "gig_application" &&
+              item.viewer_can_act !== false &&
               item.reviewed_by_applicant !== true;
           }
 
@@ -1629,7 +2056,7 @@ export default function BookingsScreen() {
         const completedApps = allGigApps.filter(
           (app: any) => {
             const status = normalizeStatus(app.status);
-            return ["completed", "declined", "rejected", "fired", "cancelled"].includes(status);
+            return ["completed", "declined", "rejected", "fired", "cancelled", "resigned"].includes(status);
           },
         );
 
@@ -1670,7 +2097,16 @@ export default function BookingsScreen() {
     reason?: string,
   ): Promise<boolean> {
     try {
-      debugLog("📤 handleStatusUpdate called with:", {
+      if (
+        typeId === "gig_application" &&
+        selectedItem?.id === bookingId &&
+        isReadOnlyBookingItem(selectedItem)
+      ) {
+        showReadOnlyBookingAlert();
+        return false;
+      }
+
+      debugLog("?? handleStatusUpdate called with:", {
         bookingId,
         newStatus,
         typeId,
@@ -1693,7 +2129,7 @@ export default function BookingsScreen() {
         error = rpcResult.error;
 
         if (error) {
-          debugLog("⚠️ record_booking_attendance failed, falling back to manage-bookings:", error);
+          debugLog("?? record_booking_attendance failed, falling back to manage-bookings:", error);
 
           const invokeFallback = await supabase.functions.invoke("manage-bookings", {
             body: {
@@ -1725,7 +2161,7 @@ export default function BookingsScreen() {
         error = invokeResult.error;
       }
 
-      debugLog("📥 handleStatusUpdate response:", { data, error });
+      debugLog("?? handleStatusUpdate response:", { data, error });
 
       if (error) {
         const errorContext = (error as any)?.context;
@@ -1895,6 +2331,15 @@ export default function BookingsScreen() {
     bookingDetailsRef.current?.present();
   };
 
+  const isReadOnlyBookingItem = (item: any) =>
+    item?.type_id === "gig_application" && item?.viewer_can_act === false;
+
+  const showReadOnlyBookingAlert = () => {
+    Alert.alert(
+      "View Only",
+      "This application was submitted on your behalf. You can view the details, but actions are managed by the applicant or production team.",
+    );
+  };
   const canRespondToConnectionRequest = (item: any) => {
     if (item?.type_id !== "booking_request") return false;
     if (!userId) return false;
@@ -2098,7 +2543,7 @@ export default function BookingsScreen() {
                       needsRpcFallback = true;
                     } else {
                       result = data;
-                      // Edge function caught an internal error — fall through to RPC
+                      // Edge function caught an internal error � fall through to RPC
                       if (result?.code === "DELETE_STUDIO_WITH_STORAGE_FAILED") {
                         needsRpcFallback = true;
                         result = null;
@@ -2158,12 +2603,22 @@ export default function BookingsScreen() {
   };
 
   const handleConfirmBooking = async (bookingId: string) => {
+    if (selectedItem?.id === bookingId && isReadOnlyBookingItem(selectedItem)) {
+      showReadOnlyBookingAlert();
+      return;
+    }
+
     // Open modal instead of confirming immediately
     setModalMode("confirm");
     setModalVisible(true);
   };
 
   const handleCancelBooking = async (bookingId: string) => {
+    if (selectedItem?.id === bookingId && isReadOnlyBookingItem(selectedItem)) {
+      showReadOnlyBookingAlert();
+      return;
+    }
+
     // If it's an active musician, we treat it as 'fire'
     const isFire =
       activeTab === "Active Musicians" && userRole === "venue-owner";
@@ -2173,6 +2628,11 @@ export default function BookingsScreen() {
   };
 
   const handleDeclineBooking = (item: any) => {
+    if (isReadOnlyBookingItem(item)) {
+      showReadOnlyBookingAlert();
+      return;
+    }
+
     setSelectedItem(item);
     setCancellationReason("");
     setModalMode("decline");
@@ -2274,6 +2734,10 @@ export default function BookingsScreen() {
     }
 
     if (item.type_id === "gig_application") {
+      if (isReadOnlyBookingItem(item)) {
+        return false;
+      }
+
       if (userRole === "venue-owner") {
         return !!(item.applicant_id || item.user_id || item.submitted_by_user_id);
       }
@@ -2293,6 +2757,11 @@ export default function BookingsScreen() {
   const handleMessagePress = async (item: any) => {
     if (!userId) {
       showAlert("info", "Sign in required", "Please sign in to use chat.");
+      return;
+    }
+
+    if (isReadOnlyBookingItem(item)) {
+      showReadOnlyBookingAlert();
       return;
     }
 
@@ -2456,7 +2925,7 @@ export default function BookingsScreen() {
     const timePart = timeValue.substring(0, 5);
     const parsed = new Date(`${dateValue}T${timePart}`);
     if (isNaN(parsed.getTime())) return `${dateValue} ${timePart}`;
-    return `${parsed.toLocaleDateString()} • ${parsed.toLocaleTimeString([], {
+    return `${parsed.toLocaleDateString()} � ${parsed.toLocaleTimeString([], {
       hour: "2-digit",
       minute: "2-digit",
       hour12: true,
@@ -2602,6 +3071,11 @@ export default function BookingsScreen() {
 
   // Leave Review handler with proper params
   const handleLeaveReview = (item: any) => {
+    if (isReadOnlyBookingItem(item)) {
+      showReadOnlyBookingAlert();
+      return;
+    }
+
     // Determine reviewer role based on user role and item type
     const isOwner =
       item.type_id === "studio_booking" && userRole === "studio-owner";
@@ -2652,6 +3126,11 @@ export default function BookingsScreen() {
 
   // Renew Contract Logic
   const handleRenewContract = async (item: any) => {
+    if (isReadOnlyBookingItem(item)) {
+      showReadOnlyBookingAlert();
+      return;
+    }
+
     setSelectedItem(item);
     setModalMode("renew");
     setModalVisible(true);
@@ -2659,6 +3138,17 @@ export default function BookingsScreen() {
 
   const processRenewContract = async () => {
     if (!selectedItem || !userId) return;
+    if (isReadOnlyBookingItem(selectedItem)) {
+      showReadOnlyBookingAlert();
+      return;
+    }
+    if (!canRenewGigApplication(selectedItem)) {
+      Alert.alert(
+        "Renewal Unavailable",
+        "Only completed contracts can receive renewal offers.",
+      );
+      return;
+    }
 
     try {
       setLoading(true);
@@ -2680,7 +3170,7 @@ export default function BookingsScreen() {
 
       Alert.alert(
         "Success",
-        "Contract renewal sent! The musician will be notified.",
+        "Contract renewal sent! The offer now appears in the recipient's Pending activity.",
       );
       setModalVisible(false);
       fetchBookings(userId);
@@ -2699,8 +3189,21 @@ export default function BookingsScreen() {
   const showPaymentOptions = (item: any) => {
     setPaymentItem(item);
 
+    if (isBookingPaymentSettled(item)) {
+      Alert.alert("Already Paid", "This booking is already fully paid.");
+      return;
+    }
+
+    if (isBalancePaymentProcessing(item)) {
+      Alert.alert(
+        "Payment Processing",
+        "We are still confirming your remaining balance payment. Please refresh in a moment.",
+      );
+      return;
+    }
+
     // Check if user already paid a downpayment - if so, they should only pay remaining balance
-    const hasDownpaymentPaid = item.payment_type === "downpayment" && item.remaining_balance > 0;
+    const hasDownpaymentPaid = canPayRemainingBalance(item);
 
     if (hasDownpaymentPaid) {
       // Skip modal and directly pay balance
@@ -2733,7 +3236,7 @@ export default function BookingsScreen() {
         paymentType === "downpayment" ? Math.round(totalAmount / 2) : 0;
 
       debugLog(
-        "💳 Initiating payment for booking:",
+        "?? Initiating payment for booking:",
         item.id,
         "Type:",
         paymentType,
@@ -2774,7 +3277,7 @@ export default function BookingsScreen() {
       }
 
       if (result.checkout_url) {
-        debugLog("✅ Opening checkout URL:", result.checkout_url);
+        debugLog("? Opening checkout URL:", result.checkout_url);
         const canOpen = await Linking.canOpenURL(result.checkout_url);
         if (canOpen) {
           paymentInProgressRef.current = true;
@@ -2804,6 +3307,16 @@ export default function BookingsScreen() {
   const handlePayBalance = async (item: any) => {
     if (!item || !userId || !item.remaining_balance) return;
 
+    if (!canPayRemainingBalance(item)) {
+      if (isBalancePaymentProcessing(item)) {
+        Alert.alert(
+          "Payment Processing",
+          "We are still confirming your remaining balance payment. Please refresh in a moment.",
+        );
+      }
+      return;
+    }
+
     try {
       setLoading(true);
       const bookingIds = getBookingIdsForPaymentItem(item);
@@ -2811,7 +3324,7 @@ export default function BookingsScreen() {
       const bookingCount = bookingIds.length || 1;
       const dueAmount = getPaymentItemDueAmount(item);
       debugLog(
-        "💳 Paying remaining balance for booking:",
+        "?? Paying remaining balance for booking:",
         primaryBookingId,
         "Amount:",
         dueAmount,
@@ -2847,7 +3360,7 @@ export default function BookingsScreen() {
       }
 
       if (result.checkout_url) {
-        debugLog("✅ Opening checkout URL:", result.checkout_url);
+        debugLog("? Opening checkout URL:", result.checkout_url);
         const canOpen = await Linking.canOpenURL(result.checkout_url);
         if (canOpen) {
           paymentInProgressRef.current = true;
@@ -2890,7 +3403,7 @@ export default function BookingsScreen() {
       const balanceAmount = selectedItem.remaining_balance;
 
       debugLog(
-        "💵 Clearing remaining balance for booking:",
+        "?? Clearing remaining balance for booking:",
         bookingId,
         "Amount:",
         balanceAmount,
@@ -2950,9 +3463,10 @@ export default function BookingsScreen() {
         await supabase.from("wallet_transactions").insert({
           wallet_id: wallet.id,
           amount: balanceAmount,
-          type: "credit",
-          description: `F2F payment collected - ${booking.studio?.name || "Studio"}`,
+          type: "earning",
+          description: `Remaining balance payment received for booking at ${booking.studio?.name || "Studio"}`,
           reference_id: bookingId,
+          reference_type: "booking_balance",
           is_credit: true,
           status: "completed",
         });
@@ -2962,7 +3476,7 @@ export default function BookingsScreen() {
       await supabase.from("notifications").insert({
         user_id: booking.user_id,
         type: "success",
-        title: "Balance Cleared! ✅",
+        title: "Balance Cleared!",
         message: `Your remaining balance of ₱${balanceAmount.toLocaleString()} for ${booking.studio?.name || "your booking"} has been marked as paid.`,
         read: false,
         meta: {
@@ -2972,7 +3486,7 @@ export default function BookingsScreen() {
         },
       });
 
-      debugLog(`💵 Balance cleared: ₱${balanceAmount} for booking ${bookingId}`);
+      debugLog(`Balance cleared: ₱${balanceAmount} for booking ${bookingId}`);
 
       Alert.alert(
         "Balance Cleared",
@@ -3047,7 +3561,7 @@ export default function BookingsScreen() {
     // Call backend to verify check-in
     try {
       setLoading(true);
-      debugLog("📷 Scanning QR code:", {
+      debugLog("?? Scanning QR code:", {
         qr_code: data,
         scanner_id: userId,
       });
@@ -3063,8 +3577,8 @@ export default function BookingsScreen() {
 
       setLoading(false);
 
-      debugLog("📷 Check-in response:", response);
-      debugLog("📷 Check-in error:", error);
+      debugLog("?? Check-in response:", response);
+      debugLog("?? Check-in error:", error);
 
       if (error) {
         console.error("Check-in error:", error);
@@ -3150,6 +3664,32 @@ export default function BookingsScreen() {
     );
   };
 
+  const inferApplicationKind = (item: any): "solo" | "duo" | "group" => {
+    const candidates = [
+      item?.performer,
+      item?.type,
+      item?.application_type,
+      item?.slot_type,
+      item?.category,
+    ]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase();
+
+    if (candidates.includes("duo")) return "duo";
+    if (candidates.includes("group") || candidates.includes("band")) return "group";
+    if (candidates.includes("solo") || candidates.includes("individual")) return "solo";
+    if (item?.group_id) return "group";
+    return "solo";
+  };
+
+  const getApplicationDisplayLabel = (item: any): string => {
+    const kind = inferApplicationKind(item);
+    if (kind === "duo") return "Duo";
+    if (kind === "group") return "Group";
+    return "Solo Artist";
+  };
+
   // Render venue owner specific tab for managing gig applications
   const renderVenueOwnerTab = (tab: VenueOwnerTab) => {
     // Map tab to actual data key
@@ -3159,7 +3699,7 @@ export default function BookingsScreen() {
           return data.Applicants;
         case "Active Musicians":
           return data.ActiveMusicians;
-        case "Completed":
+        case "History":
           return data.Review.filter((item: any) => item.type_id === "gig_application");
         default:
           return [];
@@ -3168,12 +3708,12 @@ export default function BookingsScreen() {
 
     const tabData = getTabData();
     const count = tabData.length;
-    const isActive = activeTab === (tab === "Completed" ? "Review" : tab);
+    const isActive = activeTab === (tab === "History" ? "Review" : tab);
 
     return (
       <TouchableOpacity activeOpacity={1}
         key={tab}
-        onPress={() => setActiveTab(tab === "Completed" ? "Review" : tab as Tab)}
+        onPress={() => setActiveTab(tab === "History" ? "Review" : tab as Tab)}
         style={[
           styles.tabButton,
           {
@@ -3298,7 +3838,7 @@ export default function BookingsScreen() {
     <>
       <View style={[styles.flex1, { backgroundColor: pageBackground }]}> 
         <View style={[styles.pageFrame, isWebDesktop && styles.pageFrameWeb]}>
-        <Header title={userRole === "venue-owner" ? "Manage Applications" : "My Activity"} />
+        <Header title="My Activity" />
 
         {/* Tab Navigation */}
         <View
@@ -3318,7 +3858,7 @@ export default function BookingsScreen() {
           >
             {userRole === "venue-owner" ? (
               // Venue owner specific tabs for managing gig applications
-              (["Applicants", "Active Musicians", "Completed"] as VenueOwnerTab[]).map(
+              (["Applicants", "Active Musicians", "History"] as VenueOwnerTab[]).map(
                 (tab) => renderVenueOwnerTab(tab),
               )
             ) : (
@@ -3584,7 +4124,7 @@ export default function BookingsScreen() {
                     : activeTab === "Active Musicians"
                       ? "No active musicians"
                       : activeTab === "Review"
-                        ? "No completed gigs"
+                        ? "No history yet"
                         : "No items"
                     : userRole === "studio-owner" && activeTab === "Pending" && pendingPermitStudios.length > 0
                       ? "No pending booking requests below"
@@ -3626,11 +4166,11 @@ export default function BookingsScreen() {
                     : null,
                 ]
                   .filter(Boolean)
-                  .join(" • ");
+                  .join(" � ");
 
                 return (
                   <TouchableOpacity
-                    activeOpacity={0.9}
+                    activeOpacity={1}
                     key={item.id}
                     onPress={() => handleDetailsPress(item)}
                     style={[
@@ -3644,7 +4184,43 @@ export default function BookingsScreen() {
                       },
                     ]}
                   >
-                    <View style={{ padding: scale(16) }}>
+                    <View>
+                      <CachedImage
+                        uri={item.image}
+                        fallbackUri={REQUEST_PLACEHOLDER_IMAGE}
+                        style={styles.cardImage}
+                        width={800}
+                        height={400}
+                        quality={72}
+                        cacheVersion={item.updated_at || item.created_at || item.id}
+                      />
+                      <View style={[styles.typeBadge, styles.topLeftImageBadge]}>
+                        <Text style={styles.typeBadgeText} numberOfLines={1}>
+                          {item.type}
+                        </Text>
+                      </View>
+                      <View style={styles.topRightBadgeStack}>
+                        <View
+                          style={[
+                            styles.typeBadge,
+                            styles.stackedImageBadge,
+                            {
+                              backgroundColor:
+                                item.status === "Accepted"
+                                  ? "rgba(16, 185, 129, 0.85)"
+                                  : item.status === "Declined" || item.status === "Cancelled"
+                                    ? "rgba(239, 68, 68, 0.85)"
+                                    : "rgba(0,0,0,0.6)",
+                            },
+                          ]}
+                        >
+                          <Text style={styles.typeBadgeText} numberOfLines={1}>
+                            {item.status}
+                          </Text>
+                        </View>
+                      </View>
+                    </View>
+                    <View style={styles.cardContent}>
                       <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: moderateScale(8), gap: scale(8) }}>
                         <View style={{ flexDirection: "row", alignItems: "center", gap: scale(8), flex: 1 }}>
                           <Ionicons
@@ -3676,7 +4252,7 @@ export default function BookingsScreen() {
                       ) : null}
                       {item.message ? (
                         <Text style={{ fontSize: moderateScale(12), color: colors.textSecondary, fontStyle: "italic" }} numberOfLines={3}>
-                          "{item.message}"
+                          {`"${item.message}"`}
                         </Text>
                       ) : null}
                       {item.request_application_context ? (
@@ -3692,7 +4268,7 @@ export default function BookingsScreen() {
                         <View style={{ flexDirection: "row", gap: scale(8), marginTop: moderateScale(8) }}>
                           {item.request_contract_url ? (
                             <TouchableOpacity
-                              activeOpacity={0.9}
+                              activeOpacity={1}
                               onPress={(e) => {
                                 e.stopPropagation();
                                 openConnectionRequestLink(item.request_contract_url, "Contract");
@@ -3706,7 +4282,7 @@ export default function BookingsScreen() {
                                 borderWidth: 1,
                                 borderColor: colors.border,
                                 paddingVertical: scale(8),
-                                borderRadius: scale(8),
+                                borderRadius: moderateScale(100),
                               }}
                             >
                               <Ionicons name="document-attach-outline" size={16} color={colors.textSecondary} />
@@ -3717,7 +4293,7 @@ export default function BookingsScreen() {
                           ) : null}
                           {item.request_cv_url ? (
                             <TouchableOpacity
-                              activeOpacity={0.9}
+                              activeOpacity={1}
                               onPress={(e) => {
                                 e.stopPropagation();
                                 openConnectionRequestLink(item.request_cv_url, "CV");
@@ -3731,7 +4307,7 @@ export default function BookingsScreen() {
                                 borderWidth: 1,
                                 borderColor: colors.border,
                                 paddingVertical: scale(8),
-                                borderRadius: scale(8),
+                                borderRadius: moderateScale(100),
                               }}
                             >
                               <Ionicons name="document-text-outline" size={16} color={colors.textSecondary} />
@@ -3742,7 +4318,7 @@ export default function BookingsScreen() {
                           ) : null}
                           {item.request_video_url ? (
                             <TouchableOpacity
-                              activeOpacity={0.9}
+                              activeOpacity={1}
                               onPress={(e) => {
                                 e.stopPropagation();
                                 openConnectionRequestLink(item.request_video_url, "Video");
@@ -3756,7 +4332,7 @@ export default function BookingsScreen() {
                                 borderWidth: 1,
                                 borderColor: colors.border,
                                 paddingVertical: scale(8),
-                                borderRadius: scale(8),
+                                borderRadius: moderateScale(100),
                               }}
                             >
                               <Ionicons name="play-circle-outline" size={16} color={colors.textSecondary} />
@@ -3781,7 +4357,7 @@ export default function BookingsScreen() {
                             borderWidth: 1,
                             borderColor: colors.border,
                             paddingVertical: scale(8),
-                            borderRadius: scale(8),
+                            borderRadius: moderateScale(100),
                           }}
                         >
                           <Ionicons name="eye-outline" size={16} color={colors.textSecondary} />
@@ -3801,7 +4377,7 @@ export default function BookingsScreen() {
                               gap: 4,
                               backgroundColor: colors.primary,
                               paddingVertical: scale(8),
-                              borderRadius: scale(8),
+                              borderRadius: moderateScale(100),
                             }}
                           >
                             <Ionicons name="chatbubble-ellipses-outline" size={16} color="#fff" />
@@ -3821,7 +4397,7 @@ export default function BookingsScreen() {
                           )}
                           <View style={{ flexDirection: "row", gap: scale(8) }}>
                             <TouchableOpacity
-                              activeOpacity={isRequestActionPending ? 1 : 0.9}
+                              activeOpacity={1}
                               disabled={isRequestActionPending}
                               onPress={() => promptConnectionRequestDecision(item, "declined")}
                               style={{
@@ -3834,7 +4410,7 @@ export default function BookingsScreen() {
                                 borderColor: "#EF4444",
                                 backgroundColor: pageCardBackground,
                                 paddingVertical: scale(8),
-                                borderRadius: scale(8),
+                                borderRadius: moderateScale(100),
                                 opacity: isRequestActionPending ? 0.6 : 1,
                               }}
                             >
@@ -3844,7 +4420,7 @@ export default function BookingsScreen() {
                               </Text>
                             </TouchableOpacity>
                             <TouchableOpacity
-                              activeOpacity={isRequestActionPending ? 1 : 0.9}
+                              activeOpacity={1}
                               disabled={isRequestActionPending}
                               onPress={() => promptConnectionRequestDecision(item, "accepted")}
                               style={{
@@ -3855,7 +4431,7 @@ export default function BookingsScreen() {
                                 gap: 4,
                                 backgroundColor: "#10B981",
                                 paddingVertical: scale(8),
-                                borderRadius: scale(8),
+                                borderRadius: moderateScale(100),
                                 opacity: isRequestActionPending ? 0.6 : 1,
                               }}
                             >
@@ -3879,7 +4455,11 @@ export default function BookingsScreen() {
                 // Determine if this is the musician's own application view
                 const isMusicianView = userRole === "musician";
                 const isLeaderConfirmation = !!item.leader_approval_required;
+                const isReadOnlyApplication = isReadOnlyBookingItem(item);
                 const gigName = item.name ? item.name.split(" - ")[0] : "Gig";
+                const applicationLabel = getApplicationDisplayLabel(item);
+                const applicationIcon = applicationLabel === "Solo Artist" ? "person-outline" : "people-outline";
+                const applicationTypeBadge = `${applicationLabel} Application`;
 
                 return (
                   <View
@@ -3911,36 +4491,37 @@ export default function BookingsScreen() {
                         quality={72}
                         cacheVersion={item.updated_at || item.created_at || item.id}
                       />
-                      <View style={styles.typeBadge}>
-                        <Text style={styles.typeBadgeText}>
-                          {item.type || "Application"}
+                      <View style={[styles.typeBadge, styles.topLeftImageBadge]}>
+                        <Text style={styles.typeBadgeText} numberOfLines={1}>
+                          {applicationTypeBadge}
                         </Text>
                       </View>
-                      <View
-                        style={[
-                          styles.typeBadge,
-                          {
-                            left: undefined,
-                            right: scale(12),
-                            backgroundColor:
-                              item.status === "Accepted" ||
-                                item.status === "Happening Now" ||
-                                item.status === "Confirmed"
-                                ? "rgba(16, 185, 129, 0.85)"
-                                : item.status === "Declined"
-                                  ? "rgba(239, 68, 68, 0.85)"
-                                  : "rgba(0,0,0,0.6)",
-                          },
-                        ]}
-                      >
-                        <Text style={styles.typeBadgeText}>{item.status}</Text>
-                      </View>
-                      {item.status === "Happening Now" && (
-                        <View style={styles.liveBadge}>
-                          <View style={styles.liveDot} />
-                          <Text style={styles.liveText}>Live</Text>
+                      <View style={styles.topRightBadgeStack}>
+                        <View
+                          style={[
+                            styles.typeBadge,
+                            styles.stackedImageBadge,
+                            {
+                              backgroundColor:
+                                item.status === "Accepted" ||
+                                  item.status === "Happening Now" ||
+                                  item.status === "Confirmed"
+                                  ? "rgba(16, 185, 129, 0.85)"
+                                  : item.status === "Declined" || item.status === "Cancelled"
+                                    ? "rgba(239, 68, 68, 0.85)"
+                                    : "rgba(0,0,0,0.6)",
+                            },
+                          ]}
+                        >
+                          <Text style={styles.typeBadgeText} numberOfLines={1}>{item.status}</Text>
                         </View>
-                      )}
+                        {item.status === "Happening Now" && (
+                          <View style={[styles.liveBadge, styles.stackedImageBadge]}>
+                            <View style={styles.liveDot} />
+                            <Text style={styles.liveText}>Live</Text>
+                          </View>
+                        )}
+                      </View>
                     </View>
 
                     <View style={styles.cardContent}>
@@ -3963,19 +4544,17 @@ export default function BookingsScreen() {
                             {/* Role / Context */}
                             <View style={styles.cardDetailRow}>
                               <Ionicons
-                                name={isMusicianView ? "person-outline" : item.group_id ? "people-outline" : "mic-outline"}
+                                name={applicationIcon as any}
                                 size={14}
                                 color={colors.primary}
                               />
-                              <Text style={[styles.cardDetailText, { color: colors.textSecondary }]}>
+                              <Text style={[styles.cardDetailText, { color: colors.textSecondary }]} numberOfLines={2}>
                                 {isMusicianView
                                   ? isLeaderConfirmation
                                     ? `Member submission by ${item.customer_name || "Group Member"}`
-                                    : item.performer
-                                      ? `Applied as ${item.performer}`
-                                      : "Applied as Solo Artist"
-                                  : item.group_id
-                                    ? `Applied for ${gigName}`
+                                    : `Applied as ${applicationLabel}`
+                                  : applicationLabel !== "Solo Artist"
+                                    ? `${applicationLabel} applied for ${gigName}`
                                     : `Applied for ${gigName}`}
                               </Text>
                             </View>
@@ -4042,7 +4621,7 @@ export default function BookingsScreen() {
                                 }}
                                 numberOfLines={3}
                               >
-                                "{item.note}"
+                                {`"${item.note}"`}
                               </Text>
                             </View>
                           )}
@@ -4147,7 +4726,7 @@ export default function BookingsScreen() {
                           <View style={styles.statusContainer}>
                             {item.status === "Happening Now" || item.status === "Accepted" || item.status === "Confirmed" || item.status === "Completed" ? (
                               <Ionicons name="checkmark-circle" size={16} color="#10B981" />
-                            ) : item.status === "Declined" || item.status === "Fired" ? (
+                            ) : item.status === "Declined" || item.status === "Cancelled" || item.status === "Fired" || item.status === "Resigned" ? (
                               <Ionicons name="close-circle" size={16} color="#EF4444" />
                             ) : (
                               <Ionicons name="time-outline" size={16} color="#F59E0B" />
@@ -4162,7 +4741,7 @@ export default function BookingsScreen() {
                                       item.status === "Confirmed" ||
                                       item.status === "Completed"
                                       ? "#10B981"
-                                      : item.status === "Declined" || item.status === "Fired"
+                                      : item.status === "Declined" || item.status === "Cancelled" || item.status === "Fired" || item.status === "Resigned"
                                         ? "#EF4444"
                                         : "#F59E0B",
                                 },
@@ -4198,7 +4777,36 @@ export default function BookingsScreen() {
                             { marginTop: 0, width: "100%", flexDirection: "column", gap: moderateScale(8) },
                           ]}
                         >
-                          {activeTab === "Applicants" ? (
+                          {isReadOnlyApplication ? (
+                            <TouchableOpacity activeOpacity={1}
+                              onPress={() => handleDetailsPress(item)}
+                              style={{
+                                flexDirection: "row",
+                                alignItems: "center",
+                                justifyContent: "center",
+                                borderColor: colors.border,
+                                borderWidth: 1,
+                                padding: 10,
+                                borderRadius: 100,
+                                gap: 6,
+                              }}
+                            >
+                              <Ionicons
+                                name="eye-outline"
+                                size={16}
+                                color={colors.textSecondary}
+                              />
+                              <Text
+                                style={{
+                                  color: colors.textSecondary,
+                                  fontFamily: "Poppins_500Medium",
+                                  fontSize: 12,
+                                }}
+                              >
+                                View Details
+                              </Text>
+                            </TouchableOpacity>
+                          ) : activeTab === "Applicants" ? (
                             userRole === "venue-owner" ? (
                               <>
                                 {/* View Details Button for Venue Owners */}
@@ -4212,7 +4820,7 @@ export default function BookingsScreen() {
                                       ? "rgba(99, 102, 241, 0.15)"
                                       : "#EEF2FF",
                                     padding: 10,
-                                    borderRadius: 8,
+                                    borderRadius: 100,
                                     gap: 6,
                                   }}
                                 >
@@ -4265,7 +4873,7 @@ export default function BookingsScreen() {
                                       flex: 1,
                                       backgroundColor: "#10B981",
                                       padding: 10,
-                                      borderRadius: 8,
+                                      borderRadius: 100,
                                       alignItems: "center",
                                     }}
                                   >
@@ -4491,9 +5099,10 @@ export default function BookingsScreen() {
                               </TouchableOpacity>
                             </View>
                           ) : activeTab === "Review" ? (
-                            // Review Tab: Leave Review + Renew Contract for venue owners
+                            // History tab: completed contracts can be renewed by venue owners.
                             <View style={{ flexDirection: "row", gap: 8, flex: 1 }}>
-                              <TouchableOpacity activeOpacity={1}
+                              {!(userRole === "venue-owner" && item.type_id === "gig_application") && (
+                                <TouchableOpacity activeOpacity={1}
                                 onPress={() => handleLeaveReview(item)}
                                 style={{
                                   flex: 1,
@@ -4521,9 +5130,10 @@ export default function BookingsScreen() {
                                 >
                                   Leave Review
                                 </Text>
-                              </TouchableOpacity>
+                                </TouchableOpacity>
+                              )}
 
-                              {userRole === "venue-owner" && (
+                              {userRole === "venue-owner" && canRenewGigApplication(item) && (
                                 <TouchableOpacity activeOpacity={1}
                                   onPress={() => handleRenewContract(item)}
                                   style={{
@@ -4596,8 +5206,9 @@ export default function BookingsScreen() {
                     isWebDesktop && styles.cardContainerWeb,
                     isWebDesktop && styles.gridItemWeb,
                     {
-                      backgroundColor: colors.card,
-                      borderColor: colors.border,
+                      backgroundColor: pageCardBackground,
+                      borderColor: borderSoft,
+                      borderWidth: 1,
                     },
                   ]}
                 >
@@ -4616,31 +5227,41 @@ export default function BookingsScreen() {
                       quality={72}
                       cacheVersion={item.updated_at || item.created_at || item.id}
                     />
-                    <View style={styles.typeBadge}>
-                      <Text style={styles.typeBadgeText}>{item.type}</Text>
+                    <View style={[styles.typeBadge, styles.topLeftImageBadge]}>
+                      <Text style={styles.typeBadgeText} numberOfLines={1}>{item.type}</Text>
                     </View>
 
                     {/* Pax Badge for Studios */}
                     {item.pax && (
-                      <View
-                        style={[
-                          styles.typeBadge,
-                          {
-                            left: undefined,
-                            right: 10,
-                            backgroundColor: "#10B981",
-                          },
-                        ]}
-                      >
-                        <Text style={styles.typeBadgeText}>{item.pax} pax</Text>
+                      <View style={styles.topRightBadgeStack}>
+                        <View
+                          style={[
+                            styles.typeBadge,
+                            styles.stackedImageBadge,
+                            {
+                              backgroundColor: "#10B981",
+                            },
+                          ]}
+                        >
+                          <Text style={styles.typeBadgeText} numberOfLines={1}>{item.pax} pax</Text>
+                        </View>
+
+                        {/* Status Overlays */}
+                        {activeTab === "Ongoing" && (
+                          <View style={[styles.liveBadge, styles.stackedImageBadge]}>
+                            <View style={styles.liveDot} />
+                            <Text style={styles.liveText}>Live</Text>
+                          </View>
+                        )}
                       </View>
                     )}
 
-                    {/* Status Overlays */}
-                    {activeTab === "Ongoing" && (
-                      <View style={styles.liveBadge}>
-                        <View style={styles.liveDot} />
-                        <Text style={styles.liveText}>Live</Text>
+                    {!item.pax && activeTab === "Ongoing" && (
+                      <View style={styles.topRightBadgeStack}>
+                        <View style={[styles.liveBadge, styles.stackedImageBadge]}>
+                          <View style={styles.liveDot} />
+                          <Text style={styles.liveText}>Live</Text>
+                        </View>
                       </View>
                     )}
 
@@ -4842,7 +5463,7 @@ export default function BookingsScreen() {
                                       color: colors.text,
                                     }}
                                   >
-                                    "{item.note}"
+                                    {`"${item.note}"`}
                                   </Text>
                                 </View>
                               )}
@@ -5021,7 +5642,7 @@ export default function BookingsScreen() {
                                             { color: colors.textSecondary },
                                           ]}
                                         >
-                                          Recording • {recordingSongCount} song
+                                          Recording � {recordingSongCount} song
                                           {recordingSongCount > 1 ? "s" : ""}
                                         </Text>
                                       </View>
@@ -5039,7 +5660,7 @@ export default function BookingsScreen() {
                                             { color: colors.textSecondary },
                                           ]}
                                         >
-                                          Rule • {recordingRuleLabel}
+                                          Rule � {recordingRuleLabel}
                                         </Text>
                                       </View>
                                     ) : null}
@@ -5057,11 +5678,11 @@ export default function BookingsScreen() {
                                           ]}
                                         >
                                           {requiredBlocks
-                                            ? `Need ${requiredBlocks} block${requiredBlocks > 1 ? "s" : ""} • `
+                                            ? `Need ${requiredBlocks} block${requiredBlocks > 1 ? "s" : ""} � `
                                             : ""}
                                           Min {formatRecordingHours(requiredTotalHours)}h
                                           {selectedTotalHours
-                                            ? ` • Selected ${formatRecordingHours(selectedTotalHours)}h`
+                                            ? ` � Selected ${formatRecordingHours(selectedTotalHours)}h`
                                             : ""}
                                         </Text>
                                       </View>
@@ -5155,32 +5776,75 @@ export default function BookingsScreen() {
                             {item.status}
                           </Text>
 
-                          {/* Downpayment Badge - only show if balance remains AND not fully paid */}
-                          {item.payment_type === "downpayment" &&
-                            item.remaining_balance > 0 &&
-                            item.payment_status !== "paid" && (
-                              <View
+                          {shouldShowPaidBalanceBadge(item) && (
+                            <View
+                              style={[
+                                styles.downpaymentBadge,
+                                { backgroundColor: "#10B98120" },
+                              ]}
+                            >
+                              <Ionicons
+                                name="checkmark-circle"
+                                size={12}
+                                color="#10B981"
+                              />
+                              <Text
                                 style={[
-                                  styles.downpaymentBadge,
-                                  { backgroundColor: "#F59E0B20" },
+                                  styles.downpaymentText,
+                                  { color: "#10B981" },
                                 ]}
                               >
-                                <Ionicons
-                                  name="warning"
-                                  size={12}
-                                  color="#F59E0B"
-                                />
-                                <Text
-                                  style={[
-                                    styles.downpaymentText,
-                                    { color: "#F59E0B" },
-                                  ]}
-                                >
-                                  Downpayment paid · Balance ₱
-                                  {item.remaining_balance?.toLocaleString()}
-                                </Text>
-                              </View>
-                            )}
+                                Fully paid
+                              </Text>
+                            </View>
+                          )}
+
+                          {isBalancePaymentProcessing(item) && (
+                            <View
+                              style={[
+                                styles.downpaymentBadge,
+                                { backgroundColor: "#10B98120" },
+                              ]}
+                            >
+                              <Ionicons
+                                name="time-outline"
+                                size={12}
+                                color="#10B981"
+                              />
+                              <Text
+                                style={[
+                                  styles.downpaymentText,
+                                  { color: "#10B981" },
+                                ]}
+                              >
+                                Payment submitted
+                              </Text>
+                            </View>
+                          )}
+
+                          {shouldShowBalanceDueBadge(item) && (
+                            <View
+                              style={[
+                                styles.downpaymentBadge,
+                                { backgroundColor: "#F59E0B20" },
+                              ]}
+                            >
+                              <Ionicons
+                                name="warning"
+                                size={12}
+                                color="#F59E0B"
+                              />
+                              <Text
+                                style={[
+                                  styles.downpaymentText,
+                                  { color: "#F59E0B" },
+                                ]}
+                              >
+                                Downpayment paid · Balance ₱
+                                {item.remaining_balance?.toLocaleString()}
+                              </Text>
+                            </View>
+                          )}
                         </View>
 
                         {shouldShowMessageForItem(item) && (
@@ -5387,7 +6051,7 @@ export default function BookingsScreen() {
                               flex: 1,
                             }}
                           >
-                            {/* Row 1 — Details + Pay Now (hidden when fully paid & awaiting confirmation) */}
+                            {/* Row 1 � Details + Pay Now (hidden when fully paid & awaiting confirmation) */}
                             <View style={{ flexDirection: "row", gap: scale(8) }}>
                               {/* Details Button */}
                               <TouchableOpacity activeOpacity={1}
@@ -5412,8 +6076,9 @@ export default function BookingsScreen() {
                                 </Text>
                               </TouchableOpacity>
 
-                              {/* Pay Now / Pay Balance — only when payment is not fully settled */}
-                              {item.payment_status !== "paid" && (
+                              {/* Pay Now / Pay Balance � only when payment is not fully settled */}
+                              {!isBookingPaymentSettled(item) &&
+                                !isBalancePaymentProcessing(item) && (
                                 <TouchableOpacity activeOpacity={1}
                                   onPress={() => showPaymentOptions(item)}
                                   style={[
@@ -5435,7 +6100,7 @@ export default function BookingsScreen() {
                                       { color: "white" },
                                     ]}
                                   >
-                                    {item.payment_type === "downpayment" && item.remaining_balance > 0
+                                    {canPayRemainingBalance(item)
                                       ? "Pay Balance"
                                       : "Pay Now"}
                                   </Text>
@@ -5631,9 +6296,7 @@ export default function BookingsScreen() {
                             {/* Pay Balance / Clear Balance (F2F) Buttons */}
                             {activeTab === "Upcoming" &&
                               item.type_id === "studio_booking" &&
-                              item.payment_type === "downpayment" &&
-                              item.remaining_balance > 0 &&
-                              item.payment_status !== "paid" && (
+                              canPayRemainingBalance(item) && (
                                 <>
                                   {userRole === "musician" ? (
                                     <TouchableOpacity activeOpacity={1}
@@ -5951,6 +6614,7 @@ export default function BookingsScreen() {
           modalMode === "decline" ||
           modalMode === "cancel"
         }
+        inputValue={cancellationReason}
         onInputChange={setCancellationReason}
         onConfirm={async () => {
           // Validation for modes that require input
@@ -5974,10 +6638,16 @@ export default function BookingsScreen() {
           }
 
           if (selectedItem) {
-            debugLog("🔍 Modal onConfirm - selectedItem:", selectedItem);
-            debugLog("🔍 Modal onConfirm - modalMode:", modalMode);
+            if (isReadOnlyBookingItem(selectedItem)) {
+              showReadOnlyBookingAlert();
+              setModalVisible(false);
+              return;
+            }
+
+            debugLog("?? Modal onConfirm - selectedItem:", selectedItem);
+            debugLog("?? Modal onConfirm - modalMode:", modalMode);
             debugLog(
-              "🔍 Modal onConfirm - selectedItem.type_id:",
+              "?? Modal onConfirm - selectedItem.type_id:",
               selectedItem.type_id,
             );
 
@@ -6038,9 +6708,9 @@ export default function BookingsScreen() {
               status = "late";
             }
 
-            debugLog("🔍 Modal onConfirm - Final status:", status);
+            debugLog("?? Modal onConfirm - Final status:", status);
             debugLog(
-              "🔍 Modal onConfirm - Calling handleStatusUpdate with:",
+              "?? Modal onConfirm - Calling handleStatusUpdate with:",
               {
                 id: selectedItem.id,
                 status,
@@ -6092,8 +6762,16 @@ export default function BookingsScreen() {
       <BookingDetailsSheet
         ref={bookingDetailsRef}
         booking={selectedItem}
-        onConfirm={handleConfirmBooking}
-        onCancel={handleCancelBooking}
+        readOnly={isReadOnlyBookingItem(selectedItem)}
+        onConfirm={
+          isReadOnlyBookingItem(selectedItem) ? undefined : handleConfirmBooking
+        }
+        onCancel={
+          isReadOnlyBookingItem(selectedItem) ? undefined : handleCancelBooking
+        }
+        onLeaveReview={
+          isReadOnlyBookingItem(selectedItem) ? undefined : handleLeaveReview
+        }
       />
 
       {/* Payment Option Modal */}
@@ -6114,7 +6792,7 @@ export default function BookingsScreen() {
           >
             {/* Close button - absolutely positioned inside the card */}
             <TouchableOpacity
-              activeOpacity={0.7}
+              activeOpacity={1}
               onPress={() => setShowPaymentOptionModal(false)}
               style={styles.modalCloseIcon}
             >
@@ -6281,7 +6959,7 @@ export default function BookingsScreen() {
           />
           <View style={styles.scannerOverlay}>
             <View style={styles.scanBox} />
-            <Text style={styles.scanText}>Scan Musician's Entry Pass</Text>
+            <Text style={styles.scanText}>{"Scan Musician's Entry Pass"}</Text>
             <TouchableOpacity activeOpacity={1}
               onPress={() => setShowScanModal(false)}
               style={styles.closeScannerButton}
@@ -6419,6 +7097,24 @@ const styles = StyleSheet.create({
     borderRadius: moderateScale(9999),
     backgroundColor: "rgba(0,0,0,0.65)",
     backdropFilter: "blur(4px)",
+  },
+  topLeftImageBadge: {
+    maxWidth: "56%",
+  },
+  topRightBadgeStack: {
+    position: "absolute",
+    top: moderateScale(12),
+    right: scale(12),
+    alignItems: "flex-end",
+    gap: moderateScale(6),
+    maxWidth: "44%",
+  },
+  stackedImageBadge: {
+    position: "relative",
+    top: undefined,
+    left: undefined,
+    right: undefined,
+    maxWidth: "100%",
   },
   typeBadgeText: {
     color: "white",

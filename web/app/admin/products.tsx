@@ -17,7 +17,7 @@ import { useAuth } from '../../src/context/AuthContext';
 import { useTheme } from '../../src/context/ThemeContext';
 import { supabase } from '../../lib/supabase';
 
-type Tab = 'dashboard' | 'users' | 'reports' | 'audit' | 'posts' | 'products' | 'projects';
+type Tab = 'dashboard' | 'users' | 'reports' | 'audit' | 'posts' | 'products';
 
 const adminTabRoutes: Record<Tab, string> = {
   dashboard: '/admin',
@@ -26,7 +26,6 @@ const adminTabRoutes: Record<Tab, string> = {
   audit: '/admin/audit',
   posts: '/admin/posts',
   products: '/admin/products',
-  projects: '/admin/projects',
 };
 
 const tabItems: { key: Tab; label: string; icon: string }[] = [
@@ -36,7 +35,6 @@ const tabItems: { key: Tab; label: string; icon: string }[] = [
   { key: 'audit', label: 'Audit', icon: 'time-outline' },
   { key: 'posts', label: 'Posts', icon: 'newspaper-outline' },
   { key: 'products', label: 'Products', icon: 'bag-handle-outline' },
-  { key: 'projects', label: 'Projects', icon: 'people-circle-outline' },
 ];
 
 type ProductFilter = 'all' | 'draft' | 'active' | 'reported' | 'suspended';
@@ -102,7 +100,7 @@ export default function AdminProductsPage() {
         <TextInput value={search} onChangeText={setSearch} placeholder="Search products..." placeholderTextColor={colors.textSecondary} style={[styles.searchInput, { color: colors.text, backgroundColor: colors.card, borderColor: colors.border }]} />
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 8 }}>
           {(['all', 'draft', 'active', 'reported', 'suspended'] as ProductFilter[]).map((f) => (
-            <TouchableOpacity key={f} onPress={() => setFilter(f)} style={[styles.filterChip, { backgroundColor: filter === f ? colors.primary : colors.card, borderColor: filter === f ? colors.primary : colors.border }]}>
+            <TouchableOpacity activeOpacity={1} key={f} onPress={() => setFilter(f)} style={[styles.filterChip, { backgroundColor: filter === f ? colors.primary : colors.card, borderColor: filter === f ? colors.primary : colors.border }]}>
               <Text style={{ color: filter === f ? '#fff' : colors.text, fontSize: 13, textTransform: 'capitalize' }}>{f}</Text>
             </TouchableOpacity>
           ))}
@@ -125,12 +123,12 @@ export default function AdminProductsPage() {
               </View>
               <View style={styles.actionRow}>
                 {item.status !== 'suspended' && (
-                  <TouchableOpacity style={[styles.actionBtn, { backgroundColor: '#ef444420' }]} onPress={() => handleSuspend(item.id)}>
+                  <TouchableOpacity activeOpacity={1} style={[styles.actionBtn, { backgroundColor: '#ef444420' }]} onPress={() => handleSuspend(item.id)}>
                     <Text style={{ color: '#ef4444', fontSize: 12, fontWeight: '600' }}>Suspend</Text>
                   </TouchableOpacity>
                 )}
                 {item.status === 'suspended' && (
-                  <TouchableOpacity style={[styles.actionBtn, { backgroundColor: '#22c55e20' }]} onPress={() => handleActivate(item.id)}>
+                  <TouchableOpacity activeOpacity={1} style={[styles.actionBtn, { backgroundColor: '#22c55e20' }]} onPress={() => handleActivate(item.id)}>
                     <Text style={{ color: '#22c55e', fontSize: 12, fontWeight: '600' }}>Activate</Text>
                   </TouchableOpacity>
                 )}

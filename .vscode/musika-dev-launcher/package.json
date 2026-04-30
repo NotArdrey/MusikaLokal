@@ -1,0 +1,16 @@
+{
+  "name": "musika-lokal-dev-launcher",
+  "displayName": "MusikaLokal Dev Launcher",
+  "version": "0.0.1",
+  "publisher": "local",
+  "engines": {
+    "vscode": "^1.117.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./extension.js"
+}

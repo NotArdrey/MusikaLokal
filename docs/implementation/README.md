@@ -29,7 +29,7 @@ This plan assumes:
 | 1 | Domain boundaries and contracts | canonical schema and API contracts | none beyond contract review | none |
 | 2 | Commercial booking MVP | deals, packages, penalties, wallet references, SQL functions, settlement flows | none beyond integration scaffolding | 1 |
 | 3 | Commercial UI rollout | no new core schema | deals surfaces, studio policy editors, proposal entry points | 2 |
-| 4 | Producer network and home discovery | producer projects, invites, applications, talent matching views | role-aware home modules, producer discovery, invite/apply flows | 2 |
+| 4 | Production team discovery | production teams and connection requests | role-aware home modules, production team discovery, application/invite flows | 2 |
 | 5 | Artist graph and newsfeed | follows, posts, comments, activity projections | feed routes and follower activity UI | 4 |
 | 6 | Teaser playlists and radio MVP | playlists, tracks, station schedules, storage namespaces | playlist and station discovery/detail views | 5 |
 | 7 | Marketplace and digital drops | products, variants, orders, entitlements, payout references | catalog, checkout, order history, seller UI | 4 |
@@ -74,13 +74,11 @@ Detailed phase guide: [phase-1-commercial-booking.md](./phase-1-commercial-booki
 - Extend studio and gig creation flows with negotiable commercial options.
 - Reuse the existing chat and notification patterns for negotiation state changes.
 
-### Phase 4. Producer network and home discovery
+### Phase 4. Production team discovery
 
-- Add producer project, application, invite, saved-talent, and match activity domains.
-- Surface producer matching directly on Home for both producers and musicians instead of burying it in a separate route.
+- Keep producer collaboration centered on production teams and direct connection requests.
+- Do not add a producer-project or casting-call domain.
 - Reuse production teams, notifications, and existing listing discovery patterns.
-
-Detailed phase guide: [phase-2-producer-social-media-marketplace.md](./phase-2-producer-social-media-marketplace.md)
 
 ### Phase 5. Artist graph and newsfeed
 

@@ -1077,7 +1077,7 @@ export function GlobalRadioMiniPlayer() {
       ]}
     >
       <TouchableOpacity
-        activeOpacity={0.8}
+        activeOpacity={1}
         style={{ flex: 1, marginRight: 10 }}
         onPress={() => router.push({ pathname: "/station_details" as any, params: { station_id: activeStation.id } })}
       >
@@ -1089,11 +1089,11 @@ export function GlobalRadioMiniPlayer() {
         </Text>
       </TouchableOpacity>
 
-      <TouchableOpacity activeOpacity={0.7} onPress={() => void toggleMute()} style={styles.radioPlayerBtn}>
+      <TouchableOpacity activeOpacity={1} onPress={() => void toggleMute()} style={styles.radioPlayerBtn}>
         <Ionicons name={isMuted ? "volume-mute" : "volume-high"} size={18} color={isMuted ? "#ef4444" : colors.text} />
       </TouchableOpacity>
 
-      <TouchableOpacity activeOpacity={0.7} onPress={() => void stop()} style={styles.radioPlayerBtn}>
+      <TouchableOpacity activeOpacity={1} onPress={() => void stop()} style={styles.radioPlayerBtn}>
         <Ionicons name="close" size={18} color={colors.textSecondary} />
       </TouchableOpacity>
     </View>

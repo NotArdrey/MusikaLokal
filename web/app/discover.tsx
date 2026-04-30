@@ -349,7 +349,7 @@ export default function DiscoverScreen() {
 							</View>
 
 							<TouchableOpacity
-								activeOpacity={0.9}
+								activeOpacity={1}
 								onPress={() => router.replace("/ai_suggestions")}
 								style={styles.aiShortcut}
 							>
@@ -386,7 +386,7 @@ export default function DiscoverScreen() {
 
 						{searchQuery.length > 0 && (
 							<TouchableOpacity
-								activeOpacity={0.8}
+								activeOpacity={1}
 								onPress={() => setSearchQuery("")}
 								style={{ marginLeft: 4 }}
 							>
@@ -395,7 +395,7 @@ export default function DiscoverScreen() {
 						)}
 
 						<TouchableOpacity
-							activeOpacity={0.85}
+							activeOpacity={1}
 							onPress={() => fetchListings(true)}
 							style={[
 								styles.refreshButton,
@@ -425,7 +425,7 @@ export default function DiscoverScreen() {
 							return (
 								<TouchableOpacity
 									key={chip}
-									activeOpacity={0.85}
+									activeOpacity={1}
 									onPress={() => setActiveFilter(chip)}
 									style={[
 										styles.chip,
@@ -520,7 +520,7 @@ export default function DiscoverScreen() {
 									}}
 								>
 									<TouchableOpacity
-										activeOpacity={0.92}
+										activeOpacity={1}
 										style={[
 											styles.listCard,
 											{ backgroundColor: isDark ? "#1F2937" : "#FFFFFF" },

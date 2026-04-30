@@ -1487,7 +1487,7 @@ export default function ProfileScreen() {
           {...(!isOwner ? { onBackPress: handleHeaderBack } : {})}
           rightComponent={(isOwner || isGuest) ? (
             <TouchableOpacity
-              activeOpacity={0.8}
+              activeOpacity={1}
               hitSlop={{ top: 10, right: 10, bottom: 10, left: 10 }}
               onPress={() => openMenu("header-menu-button")}
               style={[
@@ -1499,7 +1499,7 @@ export default function ProfileScreen() {
             </TouchableOpacity>
           ) : (
             <TouchableOpacity
-              activeOpacity={0.8}
+              activeOpacity={1}
               hitSlop={{ top: 10, right: 10, bottom: 10, left: 10 }}
               onPress={openReportModal}
               style={[
@@ -1667,18 +1667,18 @@ export default function ProfileScreen() {
 
             {/* TAB NAVIGATION */}
             <View style={[styles.tabContainer, { borderBottomColor: borderSoft }]}>
-              <TouchableOpacity onPress={() => setActiveTab("about")} style={[styles.tabButton, activeTab === "about" && { borderBottomColor: colors.text, borderBottomWidth: 2 }]}>
+              <TouchableOpacity activeOpacity={1} onPress={() => setActiveTab("about")} style={[styles.tabButton, activeTab === "about" && { borderBottomColor: colors.text, borderBottomWidth: 2 }]}>
                 <Ionicons name="grid-outline" size={24} color={activeTab === "about" ? colors.text : colors.textSecondary} />
               </TouchableOpacity>
 
               {profile?.role === "musician" && profile?.show_gig_statuses !== false && (
-                <TouchableOpacity onPress={() => setActiveTab("gigs")} style={[styles.tabButton, activeTab === "gigs" && { borderBottomColor: colors.text, borderBottomWidth: 2 }]}>
+                <TouchableOpacity activeOpacity={1} onPress={() => setActiveTab("gigs")} style={[styles.tabButton, activeTab === "gigs" && { borderBottomColor: colors.text, borderBottomWidth: 2 }]}>
                   <Ionicons name="mic-outline" size={24} color={activeTab === "gigs" ? colors.text : colors.textSecondary} />
                 </TouchableOpacity>
               )}
 
               {isOwner && !isGuest && (
-                <TouchableOpacity onPress={() => setActiveTab("bookmarks")} style={[styles.tabButton, activeTab === "bookmarks" && { borderBottomColor: colors.text, borderBottomWidth: 2 }]}>
+                <TouchableOpacity activeOpacity={1} onPress={() => setActiveTab("bookmarks")} style={[styles.tabButton, activeTab === "bookmarks" && { borderBottomColor: colors.text, borderBottomWidth: 2 }]}>
                   <Ionicons name="bookmark-outline" size={24} color={activeTab === "bookmarks" ? colors.text : colors.textSecondary} />
                 </TouchableOpacity>
               )}
@@ -1778,7 +1778,7 @@ export default function ProfileScreen() {
                        {['all', 'studios', 'gigs', 'musicians'].map((key) => {
                           const isActive = bookmarkFilter === key;
                           return (
-                            <TouchableOpacity key={key} onPress={() => setBookmarkFilter(key as any)} style={{ paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20, backgroundColor: isActive ? colors.primary : surfaceBackground, justifyContent: "center" }}>
+                            <TouchableOpacity activeOpacity={1} key={key} onPress={() => setBookmarkFilter(key as any)} style={{ paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20, backgroundColor: isActive ? colors.primary : surfaceBackground, justifyContent: "center" }}>
                                <Text style={{ color: isActive ? "#fff" : colors.textSecondary, fontFamily: "Poppins_500Medium" }}>{key.charAt(0).toUpperCase() + key.slice(1)}</Text>
                             </TouchableOpacity>
                           )
@@ -1898,7 +1898,7 @@ export default function ProfileScreen() {
                   <TouchableOpacity
                     onPress={addMediaToPortfolio}
                     disabled={uploading}
-                    activeOpacity={0.8}
+                    activeOpacity={1}
                     style={[
                       styles.addMediaBtn,
                       {
@@ -1966,7 +1966,7 @@ export default function ProfileScreen() {
                   <TouchableOpacity
                     onPress={addMediaToPortfolio}
                     disabled={uploading}
-                    activeOpacity={0.7}
+                    activeOpacity={1}
                     style={[
                       styles.uploadBtn,
                       {
@@ -1995,7 +1995,7 @@ export default function ProfileScreen() {
                     key={i}
                     style={[styles.gridItem, { width: ITEM_SIZE, height: ITEM_SIZE }]}
                     onPress={() => openMediaViewer(url)}
-                    activeOpacity={0.8}
+                    activeOpacity={1}
                   >
                     {isVideo(url) ? (
                       <View
@@ -2030,7 +2030,7 @@ export default function ProfileScreen() {
 
                     {isOwner && (
                       <TouchableOpacity
-                        activeOpacity={0.85}
+                        activeOpacity={1}
                         onPress={(event: any) => {
                           event?.stopPropagation?.();
                           confirmRemoveMedia(url);
@@ -2124,7 +2124,7 @@ export default function ProfileScreen() {
           <View style={[styles.drawerContent, { backgroundColor: colors.background, borderLeftColor: borderSoft }]}>
             <View style={styles.drawerHeader}>
               <Text style={[styles.drawerTitle, { color: colors.text }]}>Menu</Text>
-              <TouchableOpacity activeOpacity={0.8} onPress={() => closeMenu("drawer-close-button")}>
+              <TouchableOpacity activeOpacity={1} onPress={() => closeMenu("drawer-close-button")}>
                 <Ionicons name="close" size={24} color={colors.text} />
               </TouchableOpacity>
             </View>

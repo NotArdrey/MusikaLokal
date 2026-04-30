@@ -532,7 +532,7 @@ export default function GroupDetailsScreen() {
               {group?.location || "Location N/A"}
             </Text>
             {hasValidCoordinates(group?.latitude, group?.longitude) && (
-              <TouchableOpacity
+              <TouchableOpacity activeOpacity={1}
                 style={[styles.navigateButton, { backgroundColor: colors.primary }]}
                 onPress={handleNavigateToGroup}
               >

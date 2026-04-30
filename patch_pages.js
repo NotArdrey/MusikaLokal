@@ -2,8 +2,7 @@ const fs = require("fs");
 const files = [
   "mobile/app/seller_hub.tsx",
   "mobile/app/orders.tsx",
-  "mobile/app/shop.tsx",
-  "mobile/app/producer_projects.tsx"
+  "mobile/app/shop.tsx"
 ];
 
 for (const file of files) {

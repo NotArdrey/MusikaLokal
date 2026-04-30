@@ -85,7 +85,7 @@ export default function MarketplaceScreen() {
   const [sellerProducts, setSellerProducts] = useState<any[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [category, setCategory] = useState<string | null>(null);
-  const marketplaceCacheKey = `${userId || "guest"}:${category || "all"}:${canSell ? "seller" : "buyer"}`;
+  const marketplaceCacheKey = `${userId || "guest"}:${category || "all"}:${canSell ? "seller" : "buyer"}:sold-visible`;
 
   // Add product modal
   const [showAddProduct, setShowAddProduct] = useState(false);
@@ -137,7 +137,7 @@ export default function MarketplaceScreen() {
     }
 
     try {
-      const browseBody: any = { action: "browse_products", limit: 40 };
+      const browseBody: any = { action: "browse_products", include_sold: true, limit: 40 };
       if (category) browseBody.category = category;
 
       const promises: Promise<any>[] = [invokeMarketplace(browseBody)];
@@ -187,16 +187,43 @@ export default function MarketplaceScreen() {
 
   const onRefresh = () => { setRefreshing(true); fetchAll(); };
 
+  const browseProducts = useMemo(() => {
+    const merged = new Map<string, any>();
+
+    products.forEach((product) => {
+      if (product?.id) {
+        merged.set(product.id, product);
+      }
+    });
+
+    sellerProducts.forEach((product) => {
+      if (product?.id && product?.status === "sold_out") {
+        merged.set(product.id, product);
+      }
+    });
+
+    return Array.from(merged.values()).sort((a, b) => {
+      const aSold = a?.status === "sold_out";
+      const bSold = b?.status === "sold_out";
+
+      if (aSold !== bSold) {
+        return aSold ? 1 : -1;
+      }
+
+      return new Date(b?.created_at || 0).getTime() - new Date(a?.created_at || 0).getTime();
+    });
+  }, [products, sellerProducts]);
+
   const filteredProducts = useMemo(() => {
     const needle = searchQuery.trim().toLowerCase();
-    if (!needle) return products;
+    if (!needle) return browseProducts;
 
-    return products.filter((product) =>
+    return browseProducts.filter((product) =>
       [product?.title, product?.seller_name, product?.category, product?.product_type]
         .filter((value): value is string => typeof value === "string")
         .some((value) => value.toLowerCase().includes(needle)),
     );
-  }, [products, searchQuery]);
+  }, [browseProducts, searchQuery]);
 
   const listingStats = useMemo(() => ({
     total: sellerProducts.length,
@@ -480,39 +507,68 @@ export default function MarketplaceScreen() {
 
       {filteredProducts.length > 0 ? (
         <View style={styles.grid}>
-          {filteredProducts.map((product) => (
-            <TouchableOpacity activeOpacity={1}
-              key={product.id}
-              style={[styles.productCard, { backgroundColor: colors.surface, borderColor: isDark ? "#334155" : "#E2E8F0" }]}
-              onPress={() => router.push({ pathname: "/product_details", params: { product_id: product.id } })}
-            >
-              {getProductImage(product) ? (
-                <CachedImage uri={getProductImage(product)} style={styles.productImage} />
-              ) : (
-                <View style={[styles.productImagePlaceholder, { backgroundColor: colors.primary + "10" }]}>
-                  <Ionicons name="bag-outline" size={28} color={colors.primary} />
+          {filteredProducts.map((product) => {
+            const isSold = product?.status === "sold_out";
+            const cardBorderColor = isSold ? "#F97316" + "55" : isDark ? "#334155" : "#E2E8F0";
+            const categoryLabel = getCategoryLabel(product.category);
+
+            return (
+              <TouchableOpacity activeOpacity={1}
+                key={product.id}
+                style={[
+                  styles.productCard,
+                  {
+                    backgroundColor: colors.surface,
+                    borderColor: cardBorderColor,
+                    opacity: isSold ? 0.78 : 1,
+                  },
+                ]}
+                onPress={() => router.push({ pathname: "/product_details", params: { product_id: product.id } })}
+              >
+                <View style={styles.productImageWrap}>
+                  {getProductImage(product) ? (
+                    <CachedImage uri={getProductImage(product)} style={styles.productImage} />
+                  ) : (
+                    <View style={[styles.productImagePlaceholder, { backgroundColor: colors.primary + "10" }]}>
+                      <Ionicons name="bag-outline" size={28} color={colors.primary} />
+                    </View>
+                  )}
+                  {isSold && (
+                    <View style={styles.soldOverlay}>
+                      <View style={styles.soldBadge}>
+                        <Ionicons name="checkmark-circle" size={13} color="#fff" />
+                        <Text style={styles.soldBadgeText}>Sold</Text>
+                      </View>
+                    </View>
+                  )}
                 </View>
-              )}
-              <View style={styles.productInfo}>
-                <Text style={[styles.productTitle, { color: colors.text }]} numberOfLines={2}>{product.title}</Text>
-                <Text style={[styles.productSeller, { color: colors.textSecondary }]} numberOfLines={1}>
-                  {product.seller_name || "Seller"}
-                </Text>
-                <Text style={[styles.productPrice, { color: colors.primary }]}>{formatPrice(product.price)}</Text>
-                <View style={styles.cardFooterRow}>
-                  {getCategoryLabel(product.category) ? (
-                    <Text style={[styles.variantCount, { color: colors.textSecondary }]} numberOfLines={1}>
-                      {getCategoryLabel(product.category)}
-                    </Text>
-                  ) : <View />}
-                  <View style={[styles.chatHint, { backgroundColor: colors.primary + "12" }]}>
-                    <Ionicons name="chatbubble-ellipses-outline" size={12} color={colors.primary} />
-                    <Text style={[styles.chatHintText, { color: colors.primary }]}>Message</Text>
+                <View style={styles.productInfo}>
+                  <Text style={[styles.productTitle, { color: isSold ? colors.textSecondary : colors.text }]} numberOfLines={2}>{product.title}</Text>
+                  <Text style={[styles.productSeller, { color: colors.textSecondary }]} numberOfLines={1}>
+                    {product.seller_name || "Seller"}
+                  </Text>
+                  <Text style={[styles.productPrice, { color: isSold ? "#F97316" : colors.primary }]}>{formatPrice(product.price)}</Text>
+                  <View style={styles.cardFooterRow}>
+                    {categoryLabel ? (
+                      <Text style={[styles.variantCount, { color: colors.textSecondary }]} numberOfLines={1}>
+                        {categoryLabel}
+                      </Text>
+                    ) : <View />}
+                    <View style={[styles.chatHint, { backgroundColor: isSold ? "#F97316" + "14" : colors.primary + "12" }]}>
+                      <Ionicons
+                        name={isSold ? "ban-outline" : "chatbubble-ellipses-outline"}
+                        size={12}
+                        color={isSold ? "#F97316" : colors.primary}
+                      />
+                      <Text style={[styles.chatHintText, { color: isSold ? "#F97316" : colors.primary }]}>
+                        {isSold ? "Sold" : "Message"}
+                      </Text>
+                    </View>
                   </View>
                 </View>
-              </View>
-            </TouchableOpacity>
-          ))}
+              </TouchableOpacity>
+            );
+          })}
         </View>
       ) : (
         <View style={styles.emptyContainer}>
@@ -812,8 +868,12 @@ const styles = StyleSheet.create({
   modalCategoryPill: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 14, paddingVertical: 9 },
   grid: { flexDirection: "row", flexWrap: "wrap", justifyContent: "space-between" },
   productCard: { width: CARD_WIDTH, borderRadius: 12, borderWidth: 1, marginBottom: 14, overflow: "hidden" },
+  productImageWrap: { position: "relative", width: "100%", height: CARD_WIDTH },
   productImage: { width: "100%", height: CARD_WIDTH },
   productImagePlaceholder: { width: "100%", height: CARD_WIDTH, alignItems: "center", justifyContent: "center" },
+  soldOverlay: { ...StyleSheet.absoluteFillObject, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(15, 23, 42, 0.42)" },
+  soldBadge: { flexDirection: "row", alignItems: "center", gap: 4, borderRadius: 999, backgroundColor: "#F97316", paddingHorizontal: 10, paddingVertical: 6 },
+  soldBadgeText: { color: "#fff", fontSize: moderateScale(11), fontFamily: "Poppins_700Bold" },
   productInfo: { padding: 10 },
   productTitle: { fontSize: moderateScale(13), fontFamily: "Poppins_600SemiBold" },
   productSeller: { fontSize: moderateScale(11), marginTop: 2 },

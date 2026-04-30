@@ -84,7 +84,7 @@ export default function AccountDetailsScreen() {
     <TouchableOpacity
       onPress={onPress}
       disabled={!onPress}
-      activeOpacity={onPress ? 0.7 : 1}
+      activeOpacity={1}
       style={[
         styles.itemRow,
         !isLast && { borderBottomWidth: 1 },

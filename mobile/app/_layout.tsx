@@ -44,8 +44,10 @@ LogBox.ignoreLogs([
 const NOTIFICATION_TOAST_DEDUPE_LIMIT = 120;
 const NOTIFICATION_TOAST_BACKFILL_LIMIT = 12;
 const NOTIFICATION_TOAST_BACKFILL_SKEW_MS = 15000;
+const NOTIFICATION_TOAST_POLL_INTERVAL_MS = 6000;
+const NOTIFICATION_TOAST_POLL_LOOKBACK_MS = 45000;
 const NOTIFICATION_TOAST_RECONNECT_DELAY_MS = 1500;
-const NOTIFICATION_TOAST_DEBUG_LOGS = false;
+const NOTIFICATION_TOAST_DEBUG_LOGS = __DEV__;
 
 type IncomingNotificationToastRecord = {
   id?: string | null;
@@ -58,6 +60,7 @@ type IncomingNotificationToastRecord = {
 
 const logNotificationToastDebug = (...args: unknown[]) => {
   if (__DEV__ && NOTIFICATION_TOAST_DEBUG_LOGS) {
+    console.log("[notification-toast]", ...args);
   }
 };
 
@@ -83,9 +86,9 @@ export default function RootLayout() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <ThemeProvider>
-        <TopToastProvider>
-          <AuthProvider>
-            <PortalProvider>
+        <PortalProvider>
+          <TopToastProvider>
+            <AuthProvider>
               <BottomSheetModalProvider>
                 <BottomOverlayProvider>
                   <RadioPlayerProvider>
@@ -93,9 +96,9 @@ export default function RootLayout() {
                   </RadioPlayerProvider>
                 </BottomOverlayProvider>
               </BottomSheetModalProvider>
-            </PortalProvider>
-          </AuthProvider>
-        </TopToastProvider>
+            </AuthProvider>
+          </TopToastProvider>
+        </PortalProvider>
       </ThemeProvider>
     </GestureHandlerRootView>
   );
@@ -110,7 +113,6 @@ function RootContent() {
     identityChecked,
   } =
     useAuth();
-  usePushNotifications(session?.user?.id ?? null);
   const segments = useSegments();
   const processedDeepLinksRef = useRef<Set<string>>(new Set());
   const shownNotificationToastIdsRef = useRef<Set<string>>(new Set());
@@ -192,6 +194,55 @@ function RootContent() {
     [rememberShownNotificationToast],
   );
 
+  const showNotificationToastFromPush = useCallback(
+    (notification: any) => {
+      const content = notification?.request?.content || {};
+      const data =
+        content.data && typeof content.data === "object"
+          ? (content.data as Record<string, unknown>)
+          : {};
+      const meta =
+        data.meta && typeof data.meta === "object" && !Array.isArray(data.meta)
+          ? (data.meta as Record<string, unknown>)
+          : {};
+
+      const firstText = (...values: unknown[]) => {
+        for (const value of values) {
+          if (typeof value !== "string" && typeof value !== "number") {
+            continue;
+          }
+
+          const normalizedValue = String(value).trim();
+          if (normalizedValue) {
+            return normalizedValue;
+          }
+        }
+
+        return "";
+      };
+
+      showNotificationToastFromRecord(
+        {
+          id: firstText(
+            data.notificationId,
+            data.notification_id,
+            data.id,
+            meta.notificationId,
+            meta.notification_id,
+            notification?.request?.identifier,
+          ),
+          title: firstText(content.title, data.title, meta.title),
+          message: firstText(content.body, data.message, meta.message),
+          type: firstText(data.type, meta.type),
+        },
+        "push",
+      );
+    },
+    [showNotificationToastFromRecord],
+  );
+
+  usePushNotifications(session?.user?.id ?? null, showNotificationToastFromPush);
+
   const backfillRecentNotificationToasts = useCallback(
     async (userId: string, sinceMs: number, reason: string) => {
       const queryFloorIso = new Date(
@@ -244,6 +295,8 @@ function RootContent() {
     let activeChannelGeneration = 0;
     let connectAttemptGeneration = 0;
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    let pollTimer: ReturnType<typeof setInterval> | null = null;
+    let isPollingRecentNotifications = false;
     let latestSubscribeStartedAt = Date.now();
 
     const isNotificationAppActive = () =>
@@ -254,6 +307,51 @@ function RootContent() {
         clearTimeout(reconnectTimer);
         reconnectTimer = null;
       }
+    };
+
+    const clearPollTimer = () => {
+      if (pollTimer) {
+        clearInterval(pollTimer);
+        pollTimer = null;
+      }
+    };
+
+    const pollRecentNotifications = async (reason: string) => {
+      if (
+        isDisposed ||
+        isPollingRecentNotifications ||
+        !isNotificationAppActive()
+      ) {
+        return;
+      }
+
+      isPollingRecentNotifications = true;
+
+      try {
+        await backfillRecentNotificationToasts(
+          activeUserId,
+          Date.now() - NOTIFICATION_TOAST_POLL_LOOKBACK_MS,
+          `poll:${reason}`,
+        );
+      } finally {
+        isPollingRecentNotifications = false;
+      }
+    };
+
+    const startPollTimer = (reason: string) => {
+      if (isDisposed || pollTimer || !isNotificationAppActive()) return;
+
+      logNotificationToastDebug("Starting notification toast poll fallback", {
+        reason,
+        activeUserId,
+        intervalMs: NOTIFICATION_TOAST_POLL_INTERVAL_MS,
+        lookbackMs: NOTIFICATION_TOAST_POLL_LOOKBACK_MS,
+      });
+
+      void pollRecentNotifications(reason);
+      pollTimer = setInterval(() => {
+        void pollRecentNotifications("interval");
+      }, NOTIFICATION_TOAST_POLL_INTERVAL_MS);
     };
 
     const disposeChannel = async (reason: string) => {
@@ -338,8 +436,16 @@ function RootContent() {
               return;
             }
 
+            const nextRecord =
+              (payload as { new?: IncomingNotificationToastRecord })?.new ?? null;
+
+            logNotificationToastDebug("Received notification realtime payload", {
+              reason,
+              notification: nextRecord,
+            });
+
             showNotificationToastFromRecord(
-              (payload as { new?: IncomingNotificationToastRecord })?.new ?? null,
+              nextRecord,
               "realtime",
             );
           },
@@ -388,6 +494,7 @@ function RootContent() {
     };
 
     void connectChannel("initial");
+    startPollTimer("initial");
 
     const appStateSub = AppState.addEventListener("change", (nextState) => {
       const previousState = notificationAppStateRef.current;
@@ -400,6 +507,7 @@ function RootContent() {
       if (previousState === "active" && nextState !== "active") {
         notificationBackgroundedAtRef.current = Date.now();
         clearReconnectTimer();
+        clearPollTimer();
         void disposeChannel(`app-state:${nextState}`);
         return;
       }
@@ -411,6 +519,8 @@ function RootContent() {
         if (activeChannelStatus !== "SUBSCRIBED") {
           void connectChannel("foreground");
         }
+
+        startPollTimer("foreground");
 
         if (backgroundedAt) {
           void backfillRecentNotificationToasts(
@@ -425,6 +535,7 @@ function RootContent() {
     return () => {
       isDisposed = true;
       clearReconnectTimer();
+      clearPollTimer();
       appStateSub.remove();
       void disposeChannel("cleanup");
     };

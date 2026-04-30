@@ -74,7 +74,7 @@ export default function GroupLinkedPlaylistsSection({
             return (
               <TouchableOpacity
                 key={playlistId}
-                activeOpacity={0.85}
+                activeOpacity={1}
                 onPress={() => onPlaylistPress(playlistId)}
                 style={{
                   borderRadius: 14,

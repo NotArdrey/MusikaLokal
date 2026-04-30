@@ -106,7 +106,7 @@ export default function PostDetailsScreen() {
               <Text style={{ color: colors.text, fontSize: moderateScale(15), fontWeight: "700" }}>{post.author_name}</Text>
               <Text style={{ color: colors.textSecondary, fontSize: moderateScale(12) }}>{new Date(post.created_at).toLocaleString()}</Text>
             </View>
-            {isOwner && <TouchableOpacity onPress={handleDeletePost}><Ionicons name="trash-outline" size={20} color="#ef4444" /></TouchableOpacity>}
+            {isOwner && <TouchableOpacity activeOpacity={1} onPress={handleDeletePost}><Ionicons name="trash-outline" size={20} color="#ef4444" /></TouchableOpacity>}
           </View>
           <Text style={{ color: colors.text, fontSize: moderateScale(15), lineHeight: 24, marginBottom: 12 }}>{post.body}</Text>
           {post.media?.length > 0 && (
@@ -115,7 +115,7 @@ export default function PostDetailsScreen() {
             </ScrollView>
           )}
           <View style={[styles.reactionsBar, { borderColor: borderCol }]}>
-            <TouchableOpacity style={styles.reactionItem} onPress={handleReaction}>
+            <TouchableOpacity activeOpacity={1} style={styles.reactionItem} onPress={handleReaction}>
               <Ionicons name={post.my_reaction ? "heart" : "heart-outline"} size={22} color={post.my_reaction ? "#ef4444" : colors.textSecondary} />
               <Text style={{ color: colors.textSecondary, marginLeft: 6 }}>{post.reaction_count || 0}</Text>
             </TouchableOpacity>
@@ -132,7 +132,7 @@ export default function PostDetailsScreen() {
                 <Text style={{ color: colors.text, fontSize: moderateScale(12), fontWeight: "600" }}>{c.author_name}</Text>
                 <Text style={{ color: colors.textSecondary, fontSize: moderateScale(13), marginTop: 2 }}>{c.body}</Text>
               </View>
-              {c.author_id === userId && <TouchableOpacity onPress={() => handleDeleteComment(c.id)}><Ionicons name="trash-outline" size={16} color="#ef4444" /></TouchableOpacity>}
+              {c.author_id === userId && <TouchableOpacity activeOpacity={1} onPress={() => handleDeleteComment(c.id)}><Ionicons name="trash-outline" size={16} color="#ef4444" /></TouchableOpacity>}
             </View>
           )) : <Text style={{ color: colors.textSecondary, textAlign: "center", marginTop: 20 }}>No comments yet</Text>}
           <View style={{ height: 120 }} />
@@ -140,7 +140,7 @@ export default function PostDetailsScreen() {
       </ScrollView>
       <View style={[styles.inputRow, { backgroundColor: cardBg, borderTopColor: borderCol }]}>
         <TextInput style={[styles.commentInput, { color: colors.text, borderColor: borderCol }]} placeholder="Add a comment..." placeholderTextColor={colors.textSecondary} value={commentText} onChangeText={setCommentText} multiline maxLength={1000} />
-        <TouchableOpacity style={[styles.sendBtn, { backgroundColor: colors.primary, opacity: submitting ? 0.6 : 1 }]} onPress={handleAddComment} disabled={submitting || !commentText.trim()}>
+        <TouchableOpacity activeOpacity={1} style={[styles.sendBtn, { backgroundColor: colors.primary, opacity: submitting ? 0.6 : 1 }]} onPress={handleAddComment} disabled={submitting || !commentText.trim()}>
           {submitting ? <ActivityIndicator size="small" color="#fff" /> : <Ionicons name="send" size={18} color="#fff" />}
         </TouchableOpacity>
       </View>

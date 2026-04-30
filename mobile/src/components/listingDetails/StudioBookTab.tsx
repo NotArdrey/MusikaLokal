@@ -1949,7 +1949,7 @@ const StudioBookTab = ({
                         showAlert("warning", "Booking Not Submitted", errorMsg);
                       }
                     } else if (errors.length > 0) {
-                      showAlert("warning", "Partially Submitted", `${results.length} session(s) were booked, but ${errors.length} could not be submitted. Please check the Bookings page.`);
+                      showAlert("warning", "Partially Submitted", `${results.length} session(s) were booked, but ${errors.length} could not be submitted. Please check the Activity page.`);
                       setBookings([]);
                       setSelectedTimeSlots([]);
                       setBookingNotes("");
