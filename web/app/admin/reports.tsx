@@ -4,6 +4,7 @@ import { router, useLocalSearchParams } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Image,
   Modal,
   Platform,
   ScrollView,
@@ -20,6 +21,7 @@ import { useAuth } from '../../src/context/AuthContext';
 import { useTheme } from '../../src/context/ThemeContext';
 import { supabase } from '../../lib/supabase';
 import { getAdminPageCacheKey, invalidateAdminPageCache, readAdminPageCache, writeAdminPageCache } from './_cache';
+import { getFriendlyDetailEntries, getFriendlyDetailImage } from './_formatters';
 
 const readErrorContextMessage = async (context: unknown): Promise<string | null> => {
   if (!context) return null;
@@ -225,6 +227,15 @@ const REPORTS_PAGE_SIZE = 50;
 const REPORTS_CACHE_TTL_MS = 30_000;
 const INCIDENTS_CACHE_TTL_MS = 30_000;
 
+const getDetailsSectionIcon = (title: string) => {
+  const normalized = title.toLowerCase();
+  if (normalized.includes('account') || normalized.includes('owner') || normalized.includes('reporter')) return 'person-circle-outline';
+  if (normalized.includes('report')) return 'flag-outline';
+  if (normalized.includes('review')) return 'shield-checkmark-outline';
+  if (normalized.includes('content') || normalized.includes('item')) return 'document-text-outline';
+  return 'information-circle-outline';
+};
+
 const formatDateTime = (value?: string | null) => {
   if (!value) return '-';
   const date = new Date(value);
@@ -238,8 +249,6 @@ const formatDateTime = (value?: string | null) => {
     minute: '2-digit',
   });
 };
-
-import { formatDetailLabel, formatDetailValue } from './_formatters';
 
 const getErrorMessage = async (error: unknown, fallback: string) => {
   if (!error) return fallback;
@@ -309,12 +318,19 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
   },
   detailLabel: {
-    fontSize: 11,
+    flexBasis: 132,
+    flexShrink: 0,
+    fontSize: 12,
     fontFamily: 'Poppins_600SemiBold',
-    textTransform: 'uppercase',
   },
   detailRow: {
-    gap: 4,
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
   },
   detailsEmptyText: {
     fontSize: 12,
@@ -324,24 +340,73 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   detailsScroll: {
-    maxHeight: 460,
+    maxHeight: 520,
   },
   detailsScrollContent: {
-    gap: 10,
+    gap: 12,
     paddingBottom: 4,
   },
   detailsSection: {
     borderWidth: 1,
-    borderRadius: 10,
-    paddingHorizontal: 10,
-    paddingVertical: 10,
-    gap: 8,
+    borderRadius: 16,
+    padding: 14,
+    gap: 12,
+  },
+  detailsSectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  detailsSectionHeaderCopy: {
+    flex: 1,
+    minWidth: 0,
+  },
+  detailsSectionIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  detailsSectionImage: {
+    width: 112,
+    height: 112,
+    borderRadius: 18,
+    borderWidth: 1,
   },
   detailsSectionTitle: {
-    fontSize: 13,
+    fontSize: 14,
+    fontFamily: 'Poppins_600SemiBold',
+  },
+  detailsSectionMeta: {
+    fontSize: 11,
+    fontFamily: 'Poppins_400Regular',
+    marginTop: 1,
+  },
+  detailHighlightGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+  },
+  detailHighlightCard: {
+    flexGrow: 1,
+    flexBasis: 190,
+    borderWidth: 1,
+    borderRadius: 14,
+    padding: 12,
+    gap: 4,
+  },
+  detailHighlightLabel: {
+    fontSize: 11,
+    fontFamily: 'Poppins_600SemiBold',
+  },
+  detailHighlightValue: {
+    fontSize: 15,
+    lineHeight: 21,
     fontFamily: 'Poppins_600SemiBold',
   },
   detailValue: {
+    flex: 1,
     fontSize: 12,
     lineHeight: 18,
     fontFamily: 'Poppins_400Regular',
@@ -452,15 +517,33 @@ const styles = StyleSheet.create({
   },
   modalCardLarge: {
     width: '100%',
-    maxWidth: 760,
-    borderRadius: 16,
+    maxWidth: 860,
+    borderRadius: 20,
     borderWidth: 1,
-    padding: 16,
-    gap: 10,
+    padding: 20,
+    gap: 14,
+  },
+  detailsModalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  detailsModalIcon: {
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  detailsModalCopy: {
+    flex: 1,
+    minWidth: 0,
   },
   modalDescription: {
     fontSize: 13,
+    lineHeight: 19,
     fontFamily: 'Poppins_400Regular',
+    marginTop: 2,
   },
   modalInput: {
     borderWidth: 1,
@@ -1308,6 +1391,13 @@ export default function AdminReportsPage() {
 
   const reportDetailsTargetType = String(reportDetailsTarget?.target?.type || '').trim().toLowerCase();
   const reportDetailsTargetRecord = reportDetailsTarget?.target?.record || null;
+  const reportDetailsTargetName = String(
+    reportDetailsTargetRecord?.['title'] ||
+    reportDetailsTargetRecord?.['name'] ||
+    reportDetailsTargetRecord?.['full_name'] ||
+    reportDetailsTargetRecord?.['display_name'] ||
+    '',
+  ).trim();
   const reportDetailsReporterId = String(
     reportDetailsTarget?.reporter_profile?.id ||
     reportDetailsTarget?.report?.['reporter_id'] ||
@@ -1389,39 +1479,90 @@ export default function AdminReportsPage() {
   }, []);
 
   const renderDetailsSection = useCallback((title: string, details: Record<string, unknown> | null, emptyText: string) => {
-    const hiddenDetailKeys = new Set(['auth', 'interest_vector', 'interestVector']);
-    const entries = Object.entries(details || {})
-      .filter(([key]) => !hiddenDetailKeys.has(key))
-      .sort(([a], [b]) => a.localeCompare(b));
+    const entries = getFriendlyDetailEntries(details);
+    const imageUrl = getFriendlyDetailImage(details);
+    const highlightEntries = entries.slice(0, 2);
+    const supportingEntries = entries.slice(2);
+    const sectionIcon = getDetailsSectionIcon(title);
 
     return (
       <View
         style={[
           styles.detailsSection,
           {
-            backgroundColor: colors.inputBackground,
+            backgroundColor: isDark ? '#0F172A' : '#FFFFFF',
             borderColor: colors.border,
           },
         ]}
       >
-        <Text style={[styles.detailsSectionTitle, { color: colors.text }]}>{title}</Text>
+        <View style={styles.detailsSectionHeader}>
+          <View style={[styles.detailsSectionIcon, { backgroundColor: `${colors.primary}18` }]}>
+            <Ionicons name={sectionIcon as any} size={18} color={colors.primary} />
+          </View>
+          <View style={styles.detailsSectionHeaderCopy}>
+            <Text style={[styles.detailsSectionTitle, { color: colors.text }]}>{title}</Text>
+            <Text style={[styles.detailsSectionMeta, { color: colors.textSecondary }]}>
+              {entries.length > 0 ? `${entries.length} visible details` : 'Nothing to review yet'}
+            </Text>
+          </View>
+          {imageUrl ? (
+            <Image
+              source={{ uri: imageUrl }}
+              resizeMode="cover"
+              style={[styles.detailsSectionImage, { borderColor: colors.border }]}
+            />
+          ) : null}
+        </View>
         {entries.length === 0 ? (
           <Text style={[styles.detailsEmptyText, { color: colors.textSecondary }]}>{emptyText}</Text>
         ) : (
-          <View style={styles.detailsRows}>
-            {entries.map(([key, value]) => (
-              <View key={`${title}-${key}`} style={styles.detailRow}>
-                <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>{formatDetailLabel(key)}</Text>
-                <Text selectable style={[styles.detailValue, { color: colors.text }]}>
-                  {formatDetailValue(value)}
-                </Text>
+          <>
+            <View style={styles.detailHighlightGrid}>
+              {highlightEntries.map((entry) => (
+                <View
+                  key={`${title}-${entry.key}-highlight`}
+                  style={[
+                    styles.detailHighlightCard,
+                    {
+                      backgroundColor: isDark ? '#111827' : '#F8FAFC',
+                      borderColor: colors.border,
+                    },
+                  ]}
+                >
+                  <Text style={[styles.detailHighlightLabel, { color: colors.textSecondary }]}>{entry.label}</Text>
+                  <Text selectable style={[styles.detailHighlightValue, { color: colors.text }]}>
+                    {entry.value}
+                  </Text>
+                </View>
+              ))}
+            </View>
+
+            {supportingEntries.length > 0 && (
+              <View style={styles.detailsRows}>
+                {supportingEntries.map((entry) => (
+                  <View
+                    key={`${title}-${entry.key}`}
+                    style={[
+                      styles.detailRow,
+                      {
+                        backgroundColor: isDark ? '#111827' : '#F8FAFC',
+                        borderColor: colors.border,
+                      },
+                    ]}
+                  >
+                    <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>{entry.label}</Text>
+                    <Text selectable style={[styles.detailValue, { color: colors.text }]}>
+                      {entry.value}
+                    </Text>
+                  </View>
+                ))}
               </View>
-            ))}
-          </View>
+            )}
+          </>
         )}
       </View>
     );
-  }, [colors.border, colors.inputBackground, colors.text, colors.textSecondary]);
+  }, [colors.border, colors.primary, colors.text, colors.textSecondary, isDark]);
 
   const renderReportsManagementSection = () => (
     <View style={styles.sectionGap}>
@@ -1852,14 +1993,24 @@ export default function AdminReportsPage() {
       <Modal visible={!!userDetailsTarget} transparent animationType="fade" onRequestClose={closeUserDetailsModal}>
         <View style={styles.modalBackdrop}>
           <View style={[styles.modalCardLarge, { backgroundColor: colors.card, borderColor: colors.border }]}> 
-            <Text style={[styles.modalTitle, { color: colors.text }]}>User Details</Text>
+            <View style={styles.detailsModalHeader}>
+              <View style={[styles.detailsModalIcon, { backgroundColor: `${colors.primary}18` }]}>
+                <Ionicons name="person-circle-outline" size={24} color={colors.primary} />
+              </View>
+              <View style={styles.detailsModalCopy}>
+                <Text style={[styles.modalTitle, { color: colors.text }]}>User Summary</Text>
+                <Text style={[styles.modalDescription, { color: colors.textSecondary }]}>
+                  A clean account overview for admin review.
+                </Text>
+              </View>
+            </View>
 
             <ScrollView
               style={styles.detailsScroll}
               contentContainerStyle={styles.detailsScrollContent}
               showsVerticalScrollIndicator={false}
             >
-              {renderDetailsSection('Profile', userDetailsTarget?.profile || null, 'Profile details are unavailable.')}
+              {renderDetailsSection('Account', userDetailsTarget?.profile || null, 'Account details are unavailable.')}
             </ScrollView>
 
             <View style={styles.modalActionsRow}>
@@ -1878,14 +2029,24 @@ export default function AdminReportsPage() {
       <Modal visible={!!reportDetailsTarget} transparent animationType="fade" onRequestClose={closeReportDetailsModal}>
         <View style={styles.modalBackdrop}>
           <View style={[styles.modalCardLarge, { backgroundColor: colors.card, borderColor: colors.border }]}> 
-            <Text style={[styles.modalTitle, { color: colors.text }]}>Report Details</Text>
+            <View style={styles.detailsModalHeader}>
+              <View style={[styles.detailsModalIcon, { backgroundColor: `${colors.primary}18` }]}>
+                <Ionicons name="flag-outline" size={23} color={colors.primary} />
+              </View>
+              <View style={styles.detailsModalCopy}>
+                <Text style={[styles.modalTitle, { color: colors.text }]}>Report Summary</Text>
+                <Text style={[styles.modalDescription, { color: colors.textSecondary }]}>
+                  Reporter, reported content, and linked account in one readable view.
+                </Text>
+              </View>
+            </View>
 
             <ScrollView
               style={styles.detailsScroll}
               contentContainerStyle={styles.detailsScrollContent}
               showsVerticalScrollIndicator={false}
             >
-              {renderDetailsSection('Report', reportDetailsTarget?.report || null, 'Report details are unavailable.')}
+              {renderDetailsSection('Report Overview', reportDetailsTarget?.report || null, 'Report details are unavailable.')}
 
               {renderDetailsSection(
                 'Reporter',
@@ -1912,21 +2073,22 @@ export default function AdminReportsPage() {
               )}
 
               {renderDetailsSection(
-                'Target Reference',
+                'Reported Item',
                 reportDetailsTarget?.target
                   ? {
                     target_type: reportDetailsTarget.target.type,
+                    target_name: reportDetailsTargetName,
                     target_id: reportDetailsTarget.target.id,
                     source_table: reportDetailsTarget.target.table,
                   }
                   : null,
-                'Target reference details are unavailable.',
+                'Reported item details are unavailable.',
               )}
 
               {renderDetailsSection(
-                'Target Record',
+                'Reported Content',
                 reportDetailsTarget?.target?.record || null,
-                'Target record details are unavailable.',
+                'Reported content details are unavailable.',
               )}
 
               {renderDetailsSection(

@@ -372,7 +372,7 @@ const getConstantsExtraSources = () => {
 };
 
 const resolveConfigValue = (
-  candidates: Array<{ source: string; value: unknown }>,
+  candidates: { source: string; value: unknown }[],
   fallback = "",
   fallbackSource = "default",
 ): ResolvedConfigValue => {
@@ -410,15 +410,10 @@ const getResolvedGroqConfig = () => {
       source: "process.env.EXPO_PUBLIC_GROQ_API_KEY",
       value: process.env.EXPO_PUBLIC_GROQ_API_KEY,
     },
-    {
-      source: "process.env.GROQ_API_KEY",
-      value: process.env.GROQ_API_KEY,
-    },
     ...extraSources.flatMap(({ source, data }) => [
       { source: `${source}.groqApiKey`, value: data.groqApiKey },
       { source: `${source}.expoPublicGroqApiKey`, value: data.expoPublicGroqApiKey },
       { source: `${source}.EXPO_PUBLIC_GROQ_API_KEY`, value: data.EXPO_PUBLIC_GROQ_API_KEY },
-      { source: `${source}.GROQ_API_KEY`, value: data.GROQ_API_KEY },
     ]),
   ]);
 
@@ -1387,12 +1382,3 @@ export const askInstrumentSuggestionFollowupWithGroq = async (
     };
   }
 };
-
-// Legacy aliases so existing screens can switch providers without refactoring symbol names.
-export const GEMINI_FLASH_LITE_MODEL_ID = GROQ_PRIMARY_MODEL_ID;
-export const GEMINI_FLASH_LITE_LABEL = GROQ_PRIMARY_LABEL;
-export const getGeminiFlashLiteInfo = getGroqModelInfo;
-export const isGeminiFlashLiteConfigured = isGroqConfigured;
-export const generateInstrumentSuggestionsWithGeminiFlashLite = generateInstrumentSuggestionsWithGroq;
-export const rerankHomeFeedWithGeminiFlashLite = rerankHomeFeedWithGroq;
-export const askInstrumentSuggestionFollowupWithGeminiFlashLite = askInstrumentSuggestionFollowupWithGroq;

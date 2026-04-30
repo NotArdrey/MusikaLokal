@@ -11,7 +11,7 @@ declare const Deno: {
 
 const corsHeaders = {
     "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-groq-api-key",
+    "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform",
 };
 
 const GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions";
@@ -23,26 +23,17 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "
 
 interface GroqProviderStatus {
     envConfigured: boolean;
-    requestConfigured: boolean;
     active: boolean;
 }
 
-const resolveGroqApiKey = (req: Request): string => {
-    if (ENV_GROQ_API_KEY) {
-        return ENV_GROQ_API_KEY;
-    }
+const resolveGroqApiKey = (): string => ENV_GROQ_API_KEY;
 
-    return req.headers.get("x-groq-api-key")?.trim() || "";
-};
-
-const getGroqProviderStatus = (req: Request): GroqProviderStatus => {
-    const requestConfigured = Boolean(req.headers.get("x-groq-api-key")?.trim());
+const getGroqProviderStatus = (): GroqProviderStatus => {
     const envConfigured = Boolean(ENV_GROQ_API_KEY);
 
     return {
         envConfigured,
-        requestConfigured,
-        active: LOCAL_ONLY_MODE ? false : envConfigured || requestConfigured,
+        active: LOCAL_ONLY_MODE ? false : envConfigured,
     };
 };
 
@@ -686,8 +677,8 @@ serve(async (req: Request) => {
 
         const action = body.action || "featured";
         const limit = Math.max(4, Math.min(Number(body.limit || 20), 30));
-        const groqApiKey = resolveGroqApiKey(req);
-        const providerStatus = getGroqProviderStatus(req);
+        const groqApiKey = resolveGroqApiKey();
+        const providerStatus = getGroqProviderStatus();
 
         if (action === "ai-status") {
             return new Response(
@@ -698,7 +689,7 @@ serve(async (req: Request) => {
                         ? "Local-only mode is active. External AI providers are disabled for home-feed recommendations."
                         : providerStatus.active
                             ? "Groq provider is configured for home-feed recommendations."
-                            : "Groq provider is not configured. Set GROQ_API_KEY in function secrets or pass x-groq-api-key.",
+                            : "Groq provider is not configured. Set GROQ_API_KEY in function secrets.",
                 }),
                 {
                     headers: { ...corsHeaders, "Content-Type": "application/json" },

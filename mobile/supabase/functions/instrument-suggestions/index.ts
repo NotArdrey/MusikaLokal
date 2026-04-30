@@ -11,7 +11,7 @@ declare const Deno: {
 
 const corsHeaders = {
     'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-groq-api-key',
+    'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-supabase-client-platform',
 }
 
 // Free AI API configurations (in priority order)
@@ -33,16 +33,8 @@ interface AIProviderStatus {
     anyConfigured: boolean;
 }
 
-function resolveGroqApiKey(req?: Request): string {
-    if (ENV_GROQ_API_KEY) {
-        return ENV_GROQ_API_KEY;
-    }
-
-    if (!req) {
-        return '';
-    }
-
-    return req.headers.get('x-groq-api-key')?.trim() || '';
+function resolveGroqApiKey(): string {
+    return ENV_GROQ_API_KEY;
 }
 
 function getAIProviderStatus(groqApiKey: string): AIProviderStatus {
@@ -876,7 +868,7 @@ serve(async (req: Request) => {
     try {
         const body = await req.json();
         const { action } = body;
-        const groqApiKey = resolveGroqApiKey(req);
+        const groqApiKey = resolveGroqApiKey();
 
         let result: any;
 
@@ -916,7 +908,7 @@ serve(async (req: Request) => {
                         ? 'Local-only mode is active. External AI providers are disabled.'
                         : status.anyConfigured
                             ? 'At least one AI provider is configured.'
-                            : 'No AI provider keys configured. Set GROQ_API_KEY, GEMINI_API_KEY, or OPENAI_API_KEY, or pass x-groq-api-key.'
+                            : 'No AI provider keys configured. Set GROQ_API_KEY, GEMINI_API_KEY, or OPENAI_API_KEY.'
                 };
                 break;
 

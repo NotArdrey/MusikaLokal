@@ -1,8 +1,11 @@
+/* global __dirname */
+
 const { resolve } = require("path");
 
 require("dotenv").config({
   path: resolve(__dirname, "..", ".env"),
   override: true,
+  quiet: true,
 });
 
 const appJson = require("./app.json");
@@ -31,10 +34,6 @@ module.exports = () => {
       groqApiKey: readEnv(
         "EXPO_PUBLIC_GROQ_API_KEY",
         sanitize(existingExtra.groqApiKey),
-      ),
-      googleMapsApiKey: readEnv(
-        "EXPO_PUBLIC_GOOGLE_MAPS_API_KEY",
-        sanitize(existingExtra.googleMapsApiKey),
       ),
     },
   };

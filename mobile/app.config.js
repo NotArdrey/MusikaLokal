@@ -1,8 +1,11 @@
+/* global __dirname */
+
 const { resolve } = require("path");
 
 require("dotenv").config({
   path: resolve(__dirname, "..", ".env"),
   override: true,
+  quiet: true,
 });
 
 const appJson = require("./app.json");
@@ -31,14 +34,6 @@ module.exports = () => {
       groqApiKey: readEnv(
         "EXPO_PUBLIC_GROQ_API_KEY",
         sanitize(existingExtra.groqApiKey),
-      ),
-      geminiApiKey: readEnv(
-        "EXPO_PUBLIC_GEMINI_API_KEY",
-        sanitize(existingExtra.geminiApiKey),
-      ),
-      geminiModel: readEnv(
-        "EXPO_PUBLIC_GEMINI_MODEL",
-        sanitize(existingExtra.geminiModel) || "gemini-2.5-flash-lite",
       ),
     },
   };

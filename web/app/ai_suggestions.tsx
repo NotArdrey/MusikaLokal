@@ -23,9 +23,9 @@ import Navbar, { NAVBAR_CLEARANCE } from '../src/components/navbar';
 import { useAuth } from '../src/context/AuthContext';
 import { useTheme } from '../src/context/ThemeContext';
 import {
-    askInstrumentSuggestionFollowupWithGeminiFlashLite,
-    generateInstrumentSuggestionsWithGeminiFlashLite,
-    getGeminiFlashLiteInfo,
+    askInstrumentSuggestionFollowupWithGroq,
+    generateInstrumentSuggestionsWithGroq,
+    getGroqModelInfo,
 } from '../src/services/groqModelRouter';
 import { getOfflineInstrumentSuggestions } from '../src/utils/offlineInstrumentRecommender';
 import {
@@ -90,14 +90,14 @@ export default function AiSuggestionsScreen() {
     const [followupQuestion, setFollowupQuestion] = useState('');
     const [followupMessages, setFollowupMessages] = useState<FollowupChatMessage[]>([]);
     const [followupLoading, setFollowupLoading] = useState(false);
-    const geminiInfo = getGeminiFlashLiteInfo();
-    const geminiModelLabel = geminiInfo.modelLabel;
-    const geminiTransportLabel = geminiInfo.transportLabel;
-    const geminiConfigured = geminiInfo.configured;
-    const geminiStatusMessage = geminiInfo.statusMessage;
-    const geminiModelSource = geminiInfo.modelSource;
-    const geminiApiKeySource = geminiInfo.apiKeySource;
-    const geminiApiKeySignature = geminiInfo.apiKeySignature;
+    const groqInfo = getGroqModelInfo();
+    const groqModelLabel = groqInfo.modelLabel;
+    const groqTransportLabel = groqInfo.transportLabel;
+    const groqConfigured = groqInfo.configured;
+    const groqStatusMessage = groqInfo.statusMessage;
+    const groqModelSource = groqInfo.modelSource;
+    const groqApiKeySource = groqInfo.apiKeySource;
+    const groqApiKeySignature = groqInfo.apiKeySignature;
 
     // User profile data
     const [userRoles, setUserRoles] = useState<string[]>([]);
@@ -158,7 +158,7 @@ export default function AiSuggestionsScreen() {
             setFollowupLoading(true);
 
             try {
-                const result = await askInstrumentSuggestionFollowupWithGeminiFlashLite({
+                const result = await askInstrumentSuggestionFollowupWithGroq({
                     question,
                     suggestions,
                     selectedGenres,
@@ -218,23 +218,23 @@ export default function AiSuggestionsScreen() {
             platform: 'web',
             aiPowered: isAIPowered,
             provider: aiProvider || null,
-            configured: geminiConfigured,
-            model: geminiModelLabel,
-            modelSource: geminiModelSource,
-            apiKeySource: geminiApiKeySource,
-            apiKeySignature: geminiApiKeySignature,
-            transport: geminiTransportLabel,
-            status: geminiStatusMessage,
+            configured: groqConfigured,
+            model: groqModelLabel,
+            modelSource: groqModelSource,
+            apiKeySource: groqApiKeySource,
+            apiKeySignature: groqApiKeySignature,
+            transport: groqTransportLabel,
+            status: groqStatusMessage,
         });
     }, [
         aiProvider,
-        geminiApiKeySignature,
-        geminiApiKeySource,
-        geminiConfigured,
-        geminiModelLabel,
-        geminiModelSource,
-        geminiStatusMessage,
-        geminiTransportLabel,
+        groqApiKeySignature,
+        groqApiKeySource,
+        groqConfigured,
+        groqModelLabel,
+        groqModelSource,
+        groqStatusMessage,
+        groqTransportLabel,
         isAIPowered,
         step,
     ]);
@@ -355,12 +355,12 @@ export default function AiSuggestionsScreen() {
         };
 
         try {
-            const generated = await generateInstrumentSuggestionsWithGeminiFlashLite(requestInput);
+            const generated = await generateInstrumentSuggestionsWithGroq(requestInput);
 
             if (!generated.aiPowered && isGroqQuotaExhausted(generated.message || '')) {
                 setSuggestions([]);
                 setIsAIPowered(false);
-                setAIProvider(generated.aiProvider || geminiModelLabel);
+                setAIProvider(generated.aiProvider || groqModelLabel);
                 setSuggestionMessage(null);
                 setStep('preferences');
                 setError('AI free-tier limit is exhausted. Suggestions are temporarily unavailable.');
@@ -372,7 +372,7 @@ export default function AiSuggestionsScreen() {
                 setIsAIPowered(generated.aiPowered);
                 setAIProvider(
                     generated.aiProvider ||
-                    (generated.aiPowered ? geminiModelLabel : 'Local Ranker')
+                    (generated.aiPowered ? groqModelLabel : 'Local Ranker')
                 );
                 setSuggestionMessage(generated.message || null);
                 setStep('results');
@@ -389,7 +389,7 @@ export default function AiSuggestionsScreen() {
             } else {
                 setSuggestions([]);
                 setIsAIPowered(false);
-                setAIProvider(generated.aiProvider || geminiModelLabel);
+                setAIProvider(generated.aiProvider || groqModelLabel);
                 setError('Unable to generate suggestions right now. Please try again.');
             }
         } catch (err: any) {
@@ -399,7 +399,7 @@ export default function AiSuggestionsScreen() {
             if (isGroqQuotaExhausted(errorMessage)) {
                 setSuggestions([]);
                 setIsAIPowered(false);
-                setAIProvider(geminiModelLabel);
+                setAIProvider(groqModelLabel);
                 setSuggestionMessage(null);
                 setStep('preferences');
                 setError('AI free-tier limit is exhausted. Suggestions are temporarily unavailable.');
@@ -462,7 +462,7 @@ export default function AiSuggestionsScreen() {
                 {userRoles.length > 0 ? (
                     <>
                         <Text style={[styles.profileSubtitle, { color: textSecondary }]}>
-                            You're a <Text style={{ color: accentColor, fontFamily: 'Poppins_600SemiBold' }}>{userRoles.join(', ')}</Text>
+                            You&apos;re a <Text style={{ color: accentColor, fontFamily: 'Poppins_600SemiBold' }}>{userRoles.join(', ')}</Text>
                         </Text>
                         <Text style={[styles.profileHint, { color: textSecondary }]}>
                             These suggestions complement your role
@@ -573,7 +573,7 @@ export default function AiSuggestionsScreen() {
             <View style={styles.chipGrid}>
                 {filteredGenres.length === 0 ? (
                     <Text style={[styles.noResultsText, { color: textSecondary }]}>
-                        No genres found for "{genreSearch}"
+                        {`No genres found for "${genreSearch}"`}
                     </Text>
                 ) : filteredGenres.map(genre => {
                     const isSelected = selectedGenres.includes(genre);
@@ -738,7 +738,7 @@ export default function AiSuggestionsScreen() {
                         {/* AI Headline */}
                         {suggestion.headline && (
                             <Text style={[styles.headline, { color: accentColor }]}>
-                                "{suggestion.headline}"
+                                {`"${suggestion.headline}"`}
                             </Text>
                         )}
 

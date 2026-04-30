@@ -22,11 +22,6 @@ import {
     SuggestionPurpose,
 } from '../types/instruments';
 
-const GROQ_REQUEST_HEADERS = (() => {
-    const key = (process.env.EXPO_PUBLIC_GROQ_API_KEY || '').trim();
-    return key ? { 'x-groq-api-key': key } : undefined;
-})();
-
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 interface InstrumentSuggestionSheetProps {
@@ -91,7 +86,6 @@ export default function InstrumentSuggestionSheet({
         
         try {
             const { data, error: funcError } = await supabase.functions.invoke('instrument-suggestions', {
-                headers: GROQ_REQUEST_HEADERS,
                 body: {
                     action: 'suggest',
                     genres: selectedGenres,
@@ -211,7 +205,7 @@ export default function InstrumentSuggestionSheet({
     const renderPurposeSelector = () => (
         <View style={styles.selectorContainer}>
             <Text style={[styles.sectionTitle, { color: colors.text }]}>
-                🎯 What's your purpose?
+                🎯 What&apos;s your purpose?
             </Text>
             <View style={styles.purposeGrid}>
                 {PURPOSE_OPTIONS.map(option => {
@@ -356,7 +350,7 @@ export default function InstrumentSuggestionSheet({
                         ))}
                     </View>
                     <Text style={[styles.helperText, { color: colors.textSecondary }]}>
-                        We'll suggest instruments that complement these
+                        We&apos;ll suggest instruments that complement these
                     </Text>
                 </View>
             )}

@@ -234,7 +234,7 @@ async function getGroqSuggestions(request: AISuggestionRequest): Promise<Instrum
     const { systemPrompt, userPrompt } = buildPrompts(request, availableInstruments);
 
     try {
-        console.log('Calling Groq API with key:', GROQ_API_KEY?.substring(0, 10) + '...');
+        console.log('Calling Groq API');
         const response = await fetch(GROQ_API_URL, {
             method: 'POST',
             headers: {

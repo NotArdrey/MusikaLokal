@@ -4,6 +4,7 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useS
 import {
   ActivityIndicator,
   Alert,
+  Image,
   Linking,
   Modal,
   Platform,
@@ -20,6 +21,7 @@ import CustomAlert, { AlertType } from '../../src/components/CustomAlert';
 import Header from '../../src/components/header';
 import { useAuth } from '../../src/context/AuthContext';
 import { useTheme } from '../../src/context/ThemeContext';
+import { getFriendlyDetailEntries, getFriendlyDetailImage } from './_formatters';
 
 export type Tab = 'dashboard' | 'permits' | 'users' | 'reports' | 'audit';
 type PermitFilter = 'all' | 'pending_review' | 'approved' | 'rejected' | 'resubmitted';
@@ -463,6 +465,16 @@ const userFilters: { value: UserFilter; label: string }[] = [
 const auditEntityTypes: AuditEntityFilter[] = ['all', 'studio', 'gig'];
 const auditActions: AuditActionFilter[] = ['all', 'approved', 'rejected', 'submitted', 'resubmitted'];
 const REPORTS_PAGE_SIZE = 50;
+
+const getDetailsSectionIcon = (title: string) => {
+  const normalized = title.toLowerCase();
+  if (normalized.includes('account') || normalized.includes('owner') || normalized.includes('reporter')) return 'person-circle-outline';
+  if (normalized.includes('report')) return 'flag-outline';
+  if (normalized.includes('review')) return 'shield-checkmark-outline';
+  if (normalized.includes('content') || normalized.includes('item')) return 'document-text-outline';
+  return 'information-circle-outline';
+};
+
 const reportTargetLabels: Record<string, string> = {
   group: 'Group',
   studio: 'Studio',
@@ -526,8 +538,6 @@ const toDateTimeLocalValue = (value?: string | null) => {
   const timezoneOffsetMs = date.getTimezoneOffset() * 60 * 1000;
   return new Date(date.getTime() - timezoneOffsetMs).toISOString().slice(0, 16);
 };
-
-import { formatDetailLabel, formatDetailValue } from './_formatters';
 
 export default function AdminPanel({ initialTab, children }: AdminPanelProps) {
   const { colors, isDark } = useTheme();
@@ -1835,39 +1845,90 @@ export default function AdminPanel({ initialTab, children }: AdminPanelProps) {
   }, [reviewSubmitting]);
 
   const renderDetailsSection = useCallback((title: string, details: Record<string, unknown> | null, emptyText: string) => {
-    const hiddenDetailKeys = new Set(['auth', 'interest_vector', 'interestVector']);
-    const entries = Object.entries(details || {})
-      .filter(([key]) => !hiddenDetailKeys.has(key))
-      .sort(([a], [b]) => a.localeCompare(b));
+    const entries = getFriendlyDetailEntries(details);
+    const imageUrl = getFriendlyDetailImage(details);
+    const highlightEntries = entries.slice(0, 2);
+    const supportingEntries = entries.slice(2);
+    const sectionIcon = getDetailsSectionIcon(title);
 
     return (
       <View
         style={[
           styles.detailsSection,
           {
-            backgroundColor: colors.inputBackground,
+            backgroundColor: isDark ? '#0F172A' : '#FFFFFF',
             borderColor: colors.border,
           },
         ]}
       >
-        <Text style={[styles.detailsSectionTitle, { color: colors.text }]}>{title}</Text>
+        <View style={styles.detailsSectionHeader}>
+          <View style={[styles.detailsSectionIcon, { backgroundColor: `${colors.primary}18` }]}>
+            <Ionicons name={sectionIcon as any} size={18} color={colors.primary} />
+          </View>
+          <View style={styles.detailsSectionHeaderCopy}>
+            <Text style={[styles.detailsSectionTitle, { color: colors.text }]}>{title}</Text>
+            <Text style={[styles.detailsSectionMeta, { color: colors.textSecondary }]}>
+              {entries.length > 0 ? `${entries.length} visible details` : 'Nothing to review yet'}
+            </Text>
+          </View>
+          {imageUrl ? (
+            <Image
+              source={{ uri: imageUrl }}
+              resizeMode="cover"
+              style={[styles.detailsSectionImage, { borderColor: colors.border }]}
+            />
+          ) : null}
+        </View>
         {entries.length === 0 ? (
           <Text style={[styles.detailsEmptyText, { color: colors.textSecondary }]}>{emptyText}</Text>
         ) : (
-          <View style={styles.detailsRows}>
-            {entries.map(([key, value]) => (
-              <View key={`${title}-${key}`} style={styles.detailRow}>
-                <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>{formatDetailLabel(key)}</Text>
-                <Text selectable style={[styles.detailValue, { color: colors.text }]}>
-                  {formatDetailValue(value)}
-                </Text>
+          <>
+            <View style={styles.detailHighlightGrid}>
+              {highlightEntries.map((entry) => (
+                <View
+                  key={`${title}-${entry.key}-highlight`}
+                  style={[
+                    styles.detailHighlightCard,
+                    {
+                      backgroundColor: isDark ? '#111827' : '#F8FAFC',
+                      borderColor: colors.border,
+                    },
+                  ]}
+                >
+                  <Text style={[styles.detailHighlightLabel, { color: colors.textSecondary }]}>{entry.label}</Text>
+                  <Text selectable style={[styles.detailHighlightValue, { color: colors.text }]}>
+                    {entry.value}
+                  </Text>
+                </View>
+              ))}
+            </View>
+
+            {supportingEntries.length > 0 && (
+              <View style={styles.detailsRows}>
+                {supportingEntries.map((entry) => (
+                  <View
+                    key={`${title}-${entry.key}`}
+                    style={[
+                      styles.detailRow,
+                      {
+                        backgroundColor: isDark ? '#111827' : '#F8FAFC',
+                        borderColor: colors.border,
+                      },
+                    ]}
+                  >
+                    <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>{entry.label}</Text>
+                    <Text selectable style={[styles.detailValue, { color: colors.text }]}>
+                      {entry.value}
+                    </Text>
+                  </View>
+                ))}
               </View>
-            ))}
-          </View>
+            )}
+          </>
         )}
       </View>
     );
-  }, [colors.border, colors.inputBackground, colors.text, colors.textSecondary]);
+  }, [colors.border, colors.primary, colors.text, colors.textSecondary, isDark]);
 
   const useExternalSections = Boolean(children);
 
@@ -3302,14 +3363,24 @@ export default function AdminPanel({ initialTab, children }: AdminPanelProps) {
       <Modal visible={!!userDetailsTarget} transparent animationType="fade" onRequestClose={closeUserDetailsModal}>
         <View style={styles.modalBackdrop}>
           <View style={[styles.modalCardLarge, { backgroundColor: colors.card, borderColor: colors.border }]}> 
-            <Text style={[styles.modalTitle, { color: colors.text }]}>User Details</Text>
+            <View style={styles.detailsModalHeader}>
+              <View style={[styles.detailsModalIcon, { backgroundColor: `${colors.primary}18` }]}>
+                <Ionicons name="person-circle-outline" size={24} color={colors.primary} />
+              </View>
+              <View style={styles.detailsModalCopy}>
+                <Text style={[styles.modalTitle, { color: colors.text }]}>User Summary</Text>
+                <Text style={[styles.modalDescription, { color: colors.textSecondary }]}>
+                  A clean account overview for admin review.
+                </Text>
+              </View>
+            </View>
 
             <ScrollView
               style={styles.detailsScroll}
               contentContainerStyle={styles.detailsScrollContent}
               showsVerticalScrollIndicator={false}
             >
-              {renderDetailsSection('Profile', userDetailsTarget?.profile || null, 'Profile details are unavailable.')}
+              {renderDetailsSection('Account', userDetailsTarget?.profile || null, 'Account details are unavailable.')}
             </ScrollView>
 
             <View style={styles.modalActionsRow}>
@@ -3328,14 +3399,24 @@ export default function AdminPanel({ initialTab, children }: AdminPanelProps) {
       <Modal visible={!!reportDetailsTarget} transparent animationType="fade" onRequestClose={closeReportDetailsModal}>
         <View style={styles.modalBackdrop}>
           <View style={[styles.modalCardLarge, { backgroundColor: colors.card, borderColor: colors.border }]}> 
-            <Text style={[styles.modalTitle, { color: colors.text }]}>Report Details</Text>
+            <View style={styles.detailsModalHeader}>
+              <View style={[styles.detailsModalIcon, { backgroundColor: `${colors.primary}18` }]}>
+                <Ionicons name="flag-outline" size={23} color={colors.primary} />
+              </View>
+              <View style={styles.detailsModalCopy}>
+                <Text style={[styles.modalTitle, { color: colors.text }]}>Report Summary</Text>
+                <Text style={[styles.modalDescription, { color: colors.textSecondary }]}>
+                  Reporter, reported content, and linked account in one readable view.
+                </Text>
+              </View>
+            </View>
 
             <ScrollView
               style={styles.detailsScroll}
               contentContainerStyle={styles.detailsScrollContent}
               showsVerticalScrollIndicator={false}
             >
-              {renderDetailsSection('Report', reportDetailsTarget?.report || null, 'Report details are unavailable.')}
+              {renderDetailsSection('Report Overview', reportDetailsTarget?.report || null, 'Report details are unavailable.')}
 
               {renderDetailsSection(
                 'Reporter',
@@ -3362,7 +3443,7 @@ export default function AdminPanel({ initialTab, children }: AdminPanelProps) {
               )}
 
               {renderDetailsSection(
-                'Target Reference',
+                'Reported Item',
                 reportDetailsTarget?.target
                   ? {
                     target_type: formatReportTargetType(reportDetailsTarget.target.type),
@@ -3371,19 +3452,19 @@ export default function AdminPanel({ initialTab, children }: AdminPanelProps) {
                     source_table: reportDetailsTarget.target.table,
                   }
                   : null,
-                'Target reference details are unavailable.',
+                'Reported item details are unavailable.',
               )}
 
               {renderDetailsSection(
-                'Target Record',
+                'Reported Content',
                 reportDetailsTarget?.target?.record || null,
-                'Target record details are unavailable.',
+                'Reported content details are unavailable.',
               )}
 
               {renderDetailsSection(
-                'Target Owner / Organizer',
+                'Responsible Account',
                 reportDetailsTarget?.target?.owner_profile || null,
-                'Target owner or organizer details are unavailable.',
+                'Responsible account details are unavailable.',
               )}
             </ScrollView>
 
@@ -3919,42 +4000,98 @@ const styles = StyleSheet.create({
   },
   modalCardLarge: {
     width: '100%',
-    maxWidth: 760,
-    borderRadius: 16,
+    maxWidth: 860,
+    borderRadius: 20,
     borderWidth: 1,
-    padding: 16,
-    gap: 10,
+    padding: 20,
+    gap: 14,
   },
   detailsScroll: {
-    maxHeight: 460,
+    maxHeight: 520,
   },
   detailsScrollContent: {
-    gap: 10,
+    gap: 12,
     paddingBottom: 4,
   },
   detailsSection: {
     borderWidth: 1,
-    borderRadius: 10,
-    paddingHorizontal: 10,
-    paddingVertical: 10,
-    gap: 8,
+    borderRadius: 16,
+    padding: 14,
+    gap: 12,
+  },
+  detailsSectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  detailsSectionHeaderCopy: {
+    flex: 1,
+    minWidth: 0,
+  },
+  detailsSectionIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  detailsSectionImage: {
+    width: 112,
+    height: 112,
+    borderRadius: 18,
+    borderWidth: 1,
   },
   detailsSectionTitle: {
-    fontSize: 13,
+    fontSize: 14,
     fontFamily: 'Poppins_600SemiBold',
+  },
+  detailsSectionMeta: {
+    fontSize: 11,
+    fontFamily: 'Poppins_400Regular',
+    marginTop: 1,
   },
   detailsRows: {
     gap: 8,
   },
-  detailRow: {
+  detailHighlightGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+  },
+  detailHighlightCard: {
+    flexGrow: 1,
+    flexBasis: 190,
+    borderWidth: 1,
+    borderRadius: 14,
+    padding: 12,
     gap: 4,
   },
-  detailLabel: {
+  detailHighlightLabel: {
     fontSize: 11,
     fontFamily: 'Poppins_600SemiBold',
-    textTransform: 'uppercase',
+  },
+  detailHighlightValue: {
+    fontSize: 15,
+    lineHeight: 21,
+    fontFamily: 'Poppins_600SemiBold',
+  },
+  detailRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  detailLabel: {
+    flexBasis: 132,
+    flexShrink: 0,
+    fontSize: 12,
+    fontFamily: 'Poppins_600SemiBold',
   },
   detailValue: {
+    flex: 1,
     fontSize: 12,
     lineHeight: 18,
     fontFamily: 'Poppins_400Regular',
@@ -3969,7 +4106,25 @@ const styles = StyleSheet.create({
   },
   modalDescription: {
     fontSize: 13,
+    lineHeight: 19,
     fontFamily: 'Poppins_400Regular',
+    marginTop: 2,
+  },
+  detailsModalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  detailsModalIcon: {
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  detailsModalCopy: {
+    flex: 1,
+    minWidth: 0,
   },
   formLabel: {
     fontSize: 12,

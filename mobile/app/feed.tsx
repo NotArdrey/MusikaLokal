@@ -54,8 +54,8 @@ import {
 } from "../src/utils/socialFollow";
 import type { SocialFollowTargetType } from "../src/utils/socialFollow";
 import {
-  getGeminiFlashLiteInfo,
-  rerankHomeFeedWithGeminiFlashLite,
+  getGroqModelInfo,
+  rerankHomeFeedWithGroq,
 } from "../src/services/groqModelRouter";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
@@ -117,7 +117,7 @@ const logFeedInvokeError = (
 const FEED_PAGE_SIZE = 20;
 const AI_CARD_LIMIT = 20;
 const FEED_FOCUS_REFRESH_COOLDOWN_MS = 30000;
-const feedScreenCache = createFeedCache(getGeminiFlashLiteInfo().modelLabel);
+const feedScreenCache = createFeedCache(getGroqModelInfo().modelLabel);
 const feedLastFetchAt: Record<FeedTab, number> = {
   for_you: 0,
   following: 0,
@@ -501,13 +501,13 @@ export default function FeedScreen() {
   const { isPlaying, loadingStationId } = useRadioPlayerPlayback();
   const { syncStationData, tuneIn } = useRadioPlayerActions();
   const insets = useSafeAreaInsets();
-  const geminiModelLabel = getGeminiFlashLiteInfo().modelLabel;
+  const groqModelLabel = getGroqModelInfo().modelLabel;
 
   const [tab, setTab] = useState<FeedTab>("for_you");
   const [posts, setPosts] = useState<any[]>([]);
   const [aiCards, setAiCards] = useState<any[]>([]);
   const [aiFeedMessage, setAiFeedMessage] = useState("");
-  const [aiFeedProvider, setAiFeedProvider] = useState(geminiModelLabel);
+  const [aiFeedProvider, setAiFeedProvider] = useState(groqModelLabel);
   const [isAiCardsLoading, setIsAiCardsLoading] = useState(false);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -550,12 +550,12 @@ export default function FeedScreen() {
     setPosts(snapshot.posts);
     setAiCards(snapshot.aiCards);
     setAiFeedMessage(snapshot.aiFeedMessage);
-    setAiFeedProvider(snapshot.aiFeedProvider || geminiModelLabel);
+    setAiFeedProvider(snapshot.aiFeedProvider || groqModelLabel);
     setHasMore(snapshot.hasMore);
     setLoading(false);
     setRefreshing(false);
     setLoadingMore(false);
-  }, [geminiModelLabel]);
+  }, [groqModelLabel]);
 
   const hydrateCachedFeed = useCallback((feedTab: FeedTab) => {
     const cached = feedCacheRef.current[feedTab];
@@ -733,7 +733,7 @@ export default function FeedScreen() {
 
   const fetchAiCardsForYou = useCallback(async (): Promise<FeedAiCardsResult> => {
     if (!session || !userId) {
-      return { cards: [], provider: geminiModelLabel, message: "" };
+      return { cards: [], provider: groqModelLabel, message: "" };
     }
 
     setIsAiCardsLoading(true);
@@ -1018,7 +1018,7 @@ export default function FeedScreen() {
         AI_CARD_LIMIT,
         normalizedTeams.length > 0 ? 1 : 0,
       );
-      const llmResult = await rerankHomeFeedWithGeminiFlashLite({
+      const llmResult = await rerankHomeFeedWithGroq({
         candidates: localRanked,
         profileSignals,
         limit: AI_CARD_LIMIT,
@@ -1045,8 +1045,8 @@ export default function FeedScreen() {
           cards: ensuredRecommendations
             .slice(0, AI_CARD_LIMIT)
             .map((item: any) => ({ ...item, __feedKind: "ai_card" })),
-          provider: llmResult.aiProvider || geminiModelLabel,
-          message: llmResult.message || `Realtime For You cards reranked by ${geminiModelLabel}.`,
+          provider: llmResult.aiProvider || groqModelLabel,
+          message: llmResult.message || `Realtime For You cards reranked by ${groqModelLabel}.`,
         };
       }
 
@@ -1065,7 +1065,7 @@ export default function FeedScreen() {
     } finally {
       setIsAiCardsLoading(false);
     }
-  }, [geminiModelLabel, session, userId]);
+  }, [groqModelLabel, session, userId]);
 
   const loadFollowingGraph = useCallback(async () => {
     if (!session) {
@@ -1132,13 +1132,13 @@ export default function FeedScreen() {
     const requestId = ++feedRequestIdRef.current[feedTab];
 
     if (!session) {
-      feedCacheRef.current = createFeedCache(geminiModelLabel);
+      feedCacheRef.current = createFeedCache(groqModelLabel);
       setFollowingKeys(new Set());
       setFollowingEntities([]);
       setFollowBusyByKey({});
 
       if (activeTabRef.current === feedTab) {
-        applyFeedSnapshot(createEmptyFeedCacheEntry(geminiModelLabel));
+        applyFeedSnapshot(createEmptyFeedCacheEntry(groqModelLabel));
       }
 
       return;
@@ -1188,19 +1188,19 @@ export default function FeedScreen() {
       let nextAiCards = append ? cachedEntry.aiCards : [];
       let nextAiFeedMessage = append ? cachedEntry.aiFeedMessage : "";
       let nextAiFeedProvider = append
-        ? (cachedEntry.aiFeedProvider || geminiModelLabel)
-        : geminiModelLabel;
+        ? (cachedEntry.aiFeedProvider || groqModelLabel)
+        : groqModelLabel;
 
       if (!append) {
         if (feedTab === "for_you" && page.length === 0) {
           const aiResult = await fetchAiCardsForYou();
           nextAiCards = aiResult.cards;
           nextAiFeedMessage = aiResult.message;
-          nextAiFeedProvider = aiResult.provider || geminiModelLabel;
+          nextAiFeedProvider = aiResult.provider || groqModelLabel;
         } else {
           nextAiCards = [];
           nextAiFeedMessage = "";
-          nextAiFeedProvider = geminiModelLabel;
+          nextAiFeedProvider = groqModelLabel;
         }
       }
 
@@ -1243,22 +1243,22 @@ export default function FeedScreen() {
             posts: [],
             aiCards: aiResult.cards,
             aiFeedMessage: aiResult.message || "Social feed is unavailable. Loading recommendation cards.",
-            aiFeedProvider: aiResult.provider || geminiModelLabel,
+            aiFeedProvider: aiResult.provider || groqModelLabel,
             hasMore: false,
             loaded: true,
           };
         } catch (aiError) {
           console.error("Fallback AI cards error:", aiError);
           fallbackSnapshot = {
-            ...createEmptyFeedCacheEntry(geminiModelLabel),
-            aiFeedProvider: geminiModelLabel,
+            ...createEmptyFeedCacheEntry(groqModelLabel),
+            aiFeedProvider: groqModelLabel,
             hasMore: false,
             loaded: true,
           };
         }
       } else if (!fallbackSnapshot.loaded) {
         fallbackSnapshot = {
-          ...createEmptyFeedCacheEntry(geminiModelLabel),
+          ...createEmptyFeedCacheEntry(groqModelLabel),
           hasMore: false,
           loaded: true,
         };
@@ -1282,7 +1282,7 @@ export default function FeedScreen() {
         setLoadingMore(false);
       }
     }
-  }, [applyFeedSnapshot, authLoading, fetchAiCardsForYou, geminiModelLabel, loadFollowingGraph, session]);
+  }, [applyFeedSnapshot, authLoading, fetchAiCardsForYou, groqModelLabel, loadFollowingGraph, session]);
 
   // ── Radio station helpers ──────────────────────────────────────
   const fetchLiveStations = useCallback(async () => {
@@ -2097,8 +2097,8 @@ export default function FeedScreen() {
             <View style={[styles.aiStatusDot, { backgroundColor: isAiCardsLoading ? "#F59E0B" : "#10B981" }]} />
             <Text style={[styles.aiStatusText, { color: colors.textSecondary }]} numberOfLines={2}>
               {isAiCardsLoading
-                ? `Building ${geminiModelLabel} Feed cards...`
-                : aiFeedMessage || `Feed cards powered by ${aiFeedProvider || geminiModelLabel}.`}
+                ? `Building ${groqModelLabel} Feed cards...`
+                : aiFeedMessage || `Feed cards powered by ${aiFeedProvider || groqModelLabel}.`}
             </Text>
           </View>
         ) : null}

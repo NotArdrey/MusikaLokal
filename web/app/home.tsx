@@ -28,8 +28,8 @@ import SearchBottomSheet from "../src/components/SearchBottomSheet";
 import Skeleton from "../src/components/Skeleton";
 import { useTheme } from "../src/context/ThemeContext";
 import {
-  getGeminiFlashLiteInfo,
-  rerankHomeFeedWithGeminiFlashLite,
+  getGroqModelInfo,
+  rerankHomeFeedWithGroq,
 } from "../src/services/groqModelRouter";
 import { getScreenCacheKey, peekScreenCache, readScreenCache, writeScreenCache } from "../src/utils/screenCache";
 
@@ -436,12 +436,12 @@ export default function HomeScreen() {
   const [recentlyViewed, setRecentlyViewed] = useState<any[]>([]);
   const [userName, setUserName] = useState(() => initialHomeProfileSnapshot?.userName || "Guest");
   const [timeGreeting, setTimeGreeting] = useState("Hey");
-  const geminiInfo = getGeminiFlashLiteInfo();
-  const geminiModelLabel = geminiInfo.modelLabel;
-  const geminiConfigured = geminiInfo.configured;
-  const geminiModelSource = geminiInfo.modelSource;
-  const geminiApiKeySource = geminiInfo.apiKeySource;
-  const geminiApiKeySignature = geminiInfo.apiKeySignature;
+  const groqInfo = getGroqModelInfo();
+  const groqModelLabel = groqInfo.modelLabel;
+  const groqConfigured = groqInfo.configured;
+  const groqModelSource = groqInfo.modelSource;
+  const groqApiKeySource = groqInfo.apiKeySource;
+  const groqApiKeySignature = groqInfo.apiKeySignature;
 
   // AI Recommendation Mode
   const aiModeEnabled = true;
@@ -454,7 +454,7 @@ export default function HomeScreen() {
     Array.isArray(initialHomeFeedSnapshot?.randomRecommendations) ? initialHomeFeedSnapshot.randomRecommendations : [],
   );
   const [aiFeedProvider, setAiFeedProvider] = useState(
-    () => initialHomeFeedSnapshot?.aiFeedProvider || geminiModelLabel,
+    () => initialHomeFeedSnapshot?.aiFeedProvider || groqModelLabel,
   );
   const [aiFeedMessage, setAiFeedMessage] = useState(
     () => initialHomeFeedSnapshot?.aiFeedMessage || "",
@@ -464,18 +464,18 @@ export default function HomeScreen() {
   const homeAiStatusLabel = useMemo(() => {
     if (!userId) return "AI status: Sign in required";
 
-    const providerText = aiFeedProvider || geminiModelLabel;
+    const providerText = aiFeedProvider || groqModelLabel;
     const hasResults = aiRecommendations.length > 0;
 
     if (isHomeLlmRerankPending) {
-      return `AI status: Fetching ${geminiModelLabel} picks...`;
+      return `AI status: Fetching ${groqModelLabel} picks...`;
     }
 
     if (hasResults) {
       return `AI status: Working (${providerText})`;
     }
 
-    if (!geminiConfigured) {
+    if (!groqConfigured) {
       return "AI status: Groq API key not configured";
     }
 
@@ -488,8 +488,8 @@ export default function HomeScreen() {
     aiFeedProvider,
     aiFeedMessage,
     aiRecommendations.length,
-    geminiConfigured,
-    geminiModelLabel,
+    groqConfigured,
+    groqModelLabel,
     isHomeLlmRerankPending,
     userId,
   ]);
@@ -534,12 +534,12 @@ export default function HomeScreen() {
     setNewArrivals(Array.isArray(snapshot.newArrivals) ? snapshot.newArrivals : []);
     setRandomRecommendations(Array.isArray(snapshot.randomRecommendations) ? snapshot.randomRecommendations : []);
     setAiRecommendations(Array.isArray(snapshot.aiRecommendations) ? snapshot.aiRecommendations : []);
-    setAiFeedProvider(snapshot.aiFeedProvider || geminiModelLabel);
+    setAiFeedProvider(snapshot.aiFeedProvider || groqModelLabel);
     setAiFeedMessage(snapshot.aiFeedMessage || "");
     lastHomeAiRerankAtRef.current = snapshot.aiRerankAt || 0;
     lastHomeRefreshAtRef.current = snapshot.fetchedAt || Date.now();
     hasHydratedHomeCacheRef.current = true;
-  }, [geminiModelLabel]);
+  }, [groqModelLabel]);
 
   const loadViewedNewArrivals = useCallback(async () => {
     if (viewedNewArrivalsLoadedRef.current) {
@@ -674,7 +674,7 @@ export default function HomeScreen() {
   useEffect(() => {
     if (!userId) return;
 
-    const providerText = aiFeedProvider || geminiModelLabel;
+    const providerText = aiFeedProvider || groqModelLabel;
     const aiFeedActive = aiRecommendations.length > 0;
 
     console.log("[HOME_AI_STATUS]", {
@@ -682,21 +682,21 @@ export default function HomeScreen() {
       picks: aiRecommendations.length,
       aiActive: aiFeedActive,
       aiFeedPending: isHomeLlmRerankPending,
-      configured: geminiConfigured,
-      modelSource: geminiModelSource,
-      apiKeySource: geminiApiKeySource,
-      apiKeySignature: geminiApiKeySignature,
+      configured: groqConfigured,
+      modelSource: groqModelSource,
+      apiKeySource: groqApiKeySource,
+      apiKeySignature: groqApiKeySignature,
       message: aiFeedMessage || "",
     });
   }, [
     aiFeedProvider,
     aiFeedMessage,
     aiRecommendations.length,
-    geminiApiKeySignature,
-    geminiApiKeySource,
-    geminiConfigured,
-    geminiModelLabel,
-    geminiModelSource,
+    groqApiKeySignature,
+    groqApiKeySource,
+    groqConfigured,
+    groqModelLabel,
+    groqModelSource,
     isHomeLlmRerankPending,
     userId,
   ]);
@@ -1479,27 +1479,27 @@ export default function HomeScreen() {
                 return currentMessage;
               }
 
-              return `Using cached ${aiFeedProvider || geminiModelLabel} Home feed.`;
+              return `Using cached ${aiFeedProvider || groqModelLabel} Home feed.`;
             });
           } else if (!hasExistingAiFeed) {
             setAiRecommendations([]);
-            setAiFeedProvider(geminiModelLabel);
+            setAiFeedProvider(groqModelLabel);
 
             if (localRankedItems.length === 0) {
               setAiFeedMessage("No listings available for AI feed ranking yet.");
             } else if (homeLlmRerankInFlightRef.current) {
-              setAiFeedMessage(`${geminiModelLabel} rerank is already running for Home feed.`);
+              setAiFeedMessage(`${groqModelLabel} rerank is already running for Home feed.`);
             } else if (hasProfileSignals) {
-              setAiFeedMessage(`Preparing ${geminiModelLabel} feed for your profile.`);
+              setAiFeedMessage(`Preparing ${groqModelLabel} feed for your profile.`);
             } else {
-              setAiFeedMessage(`Preparing ${geminiModelLabel} feed.`);
+              setAiFeedMessage(`Preparing ${groqModelLabel} feed.`);
             }
           }
 
           if (hasFreshAiFeed) {
             debugLog("Skipping Home rerank because cached AI feed is still fresh.");
           } else if (homeLlmRerankInFlightRef.current) {
-            setAiFeedMessage(`${geminiModelLabel} rerank is already running for Home feed.`);
+            setAiFeedMessage(`${groqModelLabel} rerank is already running for Home feed.`);
           } else {
             const llmRequestId = ++homeLlmRequestIdRef.current;
             homeLlmRerankInFlightRef.current = true;
@@ -1507,7 +1507,7 @@ export default function HomeScreen() {
 
             void (async () => {
               try {
-                const llmResult = await rerankHomeFeedWithGeminiFlashLite({
+                const llmResult = await rerankHomeFeedWithGroq({
                   candidates: localRankedItems,
                   profileSignals,
                   limit: 20,
@@ -1528,10 +1528,10 @@ export default function HomeScreen() {
                 if (llmResult.aiPowered && llmResult.recommendations.length > 0) {
                   lastHomeAiRerankAtRef.current = Date.now();
                   setAiRecommendations(llmResult.recommendations);
-                  setAiFeedProvider(llmResult.aiProvider || geminiModelLabel);
+                  setAiFeedProvider(llmResult.aiProvider || groqModelLabel);
                   setAiFeedMessage(
                     llmResult.message ||
-                    `Realtime For You feed reranked by ${geminiModelLabel}.`,
+                    `Realtime For You feed reranked by ${groqModelLabel}.`,
                   );
                   return;
                 }
@@ -1539,13 +1539,13 @@ export default function HomeScreen() {
                 if (strictLlmModeForAiPages) {
                   if (!hasExistingAiFeed) {
                     setAiRecommendations([]);
-                    setAiFeedProvider(geminiModelLabel);
+                    setAiFeedProvider(groqModelLabel);
                   }
                   setAiFeedMessage(
                     llmResult.message ||
                     (hasExistingAiFeed
-                      ? `Keeping the previous ${geminiModelLabel} feed while Home refresh retries.`
-                      : `${geminiModelLabel} is required for Home AI mode on this build.`),
+                      ? `Keeping the previous ${groqModelLabel} feed while Home refresh retries.`
+                      : `${groqModelLabel} is required for Home AI mode on this build.`),
                   );
                   return;
                 }
@@ -1578,13 +1578,13 @@ export default function HomeScreen() {
 
           if (!hasExistingAiFeed) {
             setAiRecommendations([]);
-            setAiFeedProvider(geminiModelLabel);
+            setAiFeedProvider(groqModelLabel);
           }
           setAiFeedMessage(
             strictLlmModeForAiPages
               ? hasExistingAiFeed
-                ? `Keeping the previous ${geminiModelLabel} feed while Home refresh retries.`
-                : `${geminiModelLabel} is unavailable for Home AI mode right now.`
+                ? `Keeping the previous ${groqModelLabel} feed while Home refresh retries.`
+                : `${groqModelLabel} is unavailable for Home AI mode right now.`
               : "Local personalization is temporarily unavailable. Showing general picks.",
           );
         }
@@ -1592,7 +1592,7 @@ export default function HomeScreen() {
         debugLog("No user logged in - skipping AI recommendations");
         lastHomeAiRerankAtRef.current = 0;
         setAiRecommendations([]);
-        setAiFeedProvider(geminiModelLabel);
+        setAiFeedProvider(groqModelLabel);
         setAiFeedMessage("");
       }
 

@@ -21,9 +21,9 @@ import { useBottomBarClearance } from '../src/hooks/useBottomBarClearance';
 import { useAuth } from '../src/context/AuthContext';
 import { useTheme } from '../src/context/ThemeContext';
 import {
-    askInstrumentSuggestionFollowupWithGeminiFlashLite,
-    generateInstrumentSuggestionsWithGeminiFlashLite,
-    getGeminiFlashLiteInfo,
+    askInstrumentSuggestionFollowupWithGroq,
+    generateInstrumentSuggestionsWithGroq,
+    getGroqModelInfo,
 } from '../src/services/groqModelRouter';
 import { getOfflineInstrumentSuggestions } from '../src/utils/offlineInstrumentRecommender';
 import {
@@ -78,9 +78,9 @@ export default function AiSuggestionsScreen() {
     const [followupMessages, setFollowupMessages] = useState<FollowupChatMessage[]>([]);
     const [followupLoading, setFollowupLoading] = useState(false);
     const suggestionRequestIdRef = React.useRef(0);
-    const geminiInfo = getGeminiFlashLiteInfo();
-    const geminiModelLabel = geminiInfo.modelLabel;
-    const geminiConfigured = geminiInfo.configured;
+    const groqInfo = getGroqModelInfo();
+    const groqModelLabel = groqInfo.modelLabel;
+    const groqConfigured = groqInfo.configured;
 
     // User profile data
     const [userRoles, setUserRoles] = useState<string[]>([]);
@@ -154,7 +154,7 @@ export default function AiSuggestionsScreen() {
             setFollowupLoading(true);
 
             try {
-                const result = await askInstrumentSuggestionFollowupWithGeminiFlashLite({
+                const result = await askInstrumentSuggestionFollowupWithGroq({
                     question,
                     suggestions,
                     selectedGenres,
@@ -375,19 +375,19 @@ export default function AiSuggestionsScreen() {
             setSuggestions(localSuggestions);
             setIsAIPowered(false);
             setAIProvider('Local Ranker');
-            setSuggestionMessage(geminiConfigured ? 'Showing smart local suggestions while AI refreshes.' : null);
+            setSuggestionMessage(groqConfigured ? 'Showing smart local suggestions while AI refreshes.' : null);
             setStep('results');
         }
 
         try {
-            const generated = await generateInstrumentSuggestionsWithGeminiFlashLite(requestInput);
+            const generated = await generateInstrumentSuggestionsWithGroq(requestInput);
             if (suggestionRequestIdRef.current !== activeRequestId) {
                 return;
             }
 
             if (!generated.aiPowered && isGroqQuotaExhausted(generated.message || '')) {
                 setIsAIPowered(false);
-                setAIProvider(generated.aiProvider || geminiModelLabel);
+                setAIProvider(generated.aiProvider || groqModelLabel);
                 setSuggestionMessage(
                     localSuggestions.length > 0
                         ? 'AI free-tier limit is exhausted. Showing smart local suggestions.'
@@ -408,7 +408,7 @@ export default function AiSuggestionsScreen() {
                 setIsAIPowered(generated.aiPowered);
                 setAIProvider(
                     generated.aiProvider ||
-                    (generated.aiPowered ? geminiModelLabel : 'Local Ranker')
+                    (generated.aiPowered ? groqModelLabel : 'Local Ranker')
                 );
                 setSuggestionMessage(generated.message || null);
                 setStep('results');
@@ -424,7 +424,7 @@ export default function AiSuggestionsScreen() {
             } else {
                 setSuggestions([]);
                 setIsAIPowered(false);
-                setAIProvider(generated.aiProvider || geminiModelLabel);
+                setAIProvider(generated.aiProvider || groqModelLabel);
                 setError('Unable to generate suggestions right now. Please try again.');
             }
         } catch (err: any) {
@@ -441,7 +441,7 @@ export default function AiSuggestionsScreen() {
             if (isGroqQuotaExhausted(errorMessage)) {
                 setSuggestions([]);
                 setIsAIPowered(false);
-                setAIProvider(geminiModelLabel);
+                setAIProvider(groqModelLabel);
                 setSuggestionMessage(null);
                 setStep('preferences');
                 setError('AI free-tier limit is exhausted. Suggestions are temporarily unavailable.');
@@ -912,7 +912,7 @@ export default function AiSuggestionsScreen() {
     // Render results step
     const renderResultsStep = () => {
         const badgeColor = isAIPowered ? '#8B5CF6' : '#2563EB';
-        const providerLabel = aiProvider || (isAIPowered ? geminiModelLabel : 'Local Ranker');
+        const providerLabel = aiProvider || (isAIPowered ? groqModelLabel : 'Local Ranker');
 
         return (
             <ScrollView
