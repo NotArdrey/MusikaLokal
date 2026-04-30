@@ -144,8 +144,7 @@ const inferNotificationRoute = (
   }
 
   const walletEvent = eventType === "wallet_deposit" ||
-    eventType?.startsWith("subscription_") ||
-    readString(meta.withdrawal_id, meta.withdrawalId, meta.refund_id, meta.refundId, meta.plan_id, meta.planId);
+    readString(meta.withdrawal_id, meta.withdrawalId, meta.refund_id, meta.refundId);
 
   if (walletEvent) {
     return { pathname: "/wallet" };

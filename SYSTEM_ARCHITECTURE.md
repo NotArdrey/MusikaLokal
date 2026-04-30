@@ -124,7 +124,6 @@ Auth state is not just signed-in versus signed-out. The auth contexts across she
 
 - guest mode
 - role resolution and admin access
-- subscription-required gating
 - identity-verification gating
 - unpaid booking or system lock conditions
 - presence lifecycle
@@ -153,7 +152,7 @@ Entry points:
 
 The mobile app is the product reference shell. It contains the broadest route inventory under [mobile/app](mobile/app), including:
 
-- auth, onboarding, subscription, and identity gates
+- auth, onboarding, and identity gates
 - discovery and recommendations through `/home`
 - the social home feed through `/feed`
 - listing creation and management for gigs, groups, studios, and production surfaces
@@ -341,7 +340,7 @@ Major data domains:
 
 - identity and verification: `profiles`, profile skill and genre tables, verification sessions, address verification sessions
 - listings and review: `studios`, `gigs`, `groups`, related media and availability tables, favorites, reviews, and review interactions
-- booking, wallet, and subscription: `studio_bookings`, request and hold tables, attendance events, wallets, wallet transactions, wallet deposits, withdrawal requests, subscriptions, and subscription payments
+- booking and wallet: `studio_bookings`, request and hold tables, attendance events, wallets, wallet transactions, wallet deposits, and withdrawal requests
 - messaging and notifications: `conversations`, `conversation_participants`, `messages`, `message_reactions`, `notifications`, and notification preferences
 - moderation and admin: `reports`, booking incidents, permit audit data, admin audit data, deletion audit tables, and penalties
 - commercial and producer collaboration: production teams, direct connection requests, and deal tables

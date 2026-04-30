@@ -104,7 +104,7 @@ export default function SettingsScreen() {
     router.replace('/');
   };
 
-  // Check if user is studio/venue owner (shows wallet & subscription)
+  // Check if user is studio/venue owner (shows wallet)
   const isOwner = userRole === 'studio-owner' || userRole === 'venue-owner';
 
   const settingsSections: {

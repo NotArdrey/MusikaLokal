@@ -1,6 +1,6 @@
 ﻿import { Ionicons } from '@expo/vector-icons';
 import * as ExpoLinking from 'expo-linking';
-import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
+import { useFocusEffect, useLocalSearchParams } from 'expo-router';
 import React, { useCallback, useMemo, useState } from 'react';
 import { ActivityIndicator, Image, KeyboardAvoidingView, Linking, Platform, RefreshControl, Modal as RNModal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { supabase } from '../lib/supabase';
@@ -35,27 +35,6 @@ interface WithdrawalRequest {
   created_at: string;
 }
 
-// Subscription Plan Type
-interface SubscriptionPlan {
-  id: string;
-  name: string;
-  description: string;
-  price: number;
-  features: string[];
-  duration_days: number;
-}
-
-// User Subscription Type
-interface Subscription {
-  id: string;
-  plan_id: string;
-  status: 'active' | 'cancelled' | 'expired' | 'pending' | 'past_due';
-  current_period_start: string;
-  current_period_end: string;
-  cancel_at_period_end: boolean;
-  plan?: SubscriptionPlan;
-}
-
 interface WithdrawalErrorPayload {
   error?: string;
   error_code?: string;
@@ -76,12 +55,8 @@ const isBookingEarningTransaction = (tx: any) =>
 
 export default function WalletScreen() {
   const { colors, isDark } = useTheme();
-  const router = useRouter();
   const params = useLocalSearchParams<{ refresh?: string }>();
   const walletRefreshKey = Array.isArray(params.refresh) ? params.refresh[0] : params.refresh;
-  const [modalVisible, setModalVisible] = useState(false);
-  const [subscriptionModalVisible, setSubscriptionModalVisible] = useState(false);
-  const [cancelSubscriptionModalVisible, setCancelSubscriptionModalVisible] = useState(false);
 
   // Withdrawal modal states
   const [withdrawModalVisible, setWithdrawModalVisible] = useState(false);
@@ -113,12 +88,7 @@ export default function WalletScreen() {
   const [topUpAmount, setTopUpAmount] = useState('');
   const [isTopping, setIsTopping] = useState(false);
 
-  // Subscription state
   const [userRole, setUserRole] = useState<string | null>(null);
-  const [subscription, setSubscription] = useState<Subscription | null>(null);
-  const [subscriptionPlans, setSubscriptionPlans] = useState<SubscriptionPlan[]>([]);
-  const [selectedPlan, setSelectedPlan] = useState<SubscriptionPlan | null>(null);
-  const [subscribing, setSubscribing] = useState(false);
 
   // Refund-based withdrawal state (no ID required)
   const [hasRefundEligiblePayments, setHasRefundEligiblePayments] = useState(false);
@@ -346,9 +316,6 @@ export default function WalletScreen() {
       if (!bookingsError && bookings) {
         setUnpaidBookings(bookings);
       }
-      setSubscriptionPlans([]);
-      setSubscription(null);
-
       // 4. Fetch Payout Methods
       await fetchPayoutMethods();
 
@@ -834,23 +801,6 @@ export default function WalletScreen() {
       case 'completed': return { bg: '#DCFCE7', text: '#15803D' };
       case 'failed': return { bg: '#FEE2E2', text: '#DC2626' };
       case 'cancelled': return { bg: '#F3F4F6', text: '#6B7280' };
-      default: return { bg: '#E5E7EB', text: '#6B7280' };
-    }
-  };
-
-  // Subscriptions are no longer sold from the wallet.
-  const handleSubscribe = async (_plan: SubscriptionPlan) => {};
-
-  // Cancel subscription
-  const handleCancelSubscription = async () => {};
-
-  // Get subscription status badge color
-  const getSubscriptionStatusColor = (status: string) => {
-    switch (status) {
-      case 'active': return { bg: '#DCFCE7', text: '#15803D' };
-      case 'cancelled': return { bg: '#FEE2E2', text: '#DC2626' };
-      case 'expired': return { bg: '#FEF3C7', text: '#D97706' };
-      case 'past_due': return { bg: '#FEE2E2', text: '#DC2626' };
       default: return { bg: '#E5E7EB', text: '#6B7280' };
     }
   };
@@ -1465,7 +1415,7 @@ export default function WalletScreen() {
                   </View>
                   <View style={[styles.summaryDivider, { backgroundColor: colors.border }]} />
                   <View style={styles.summaryRow}>
-                    <Text style={[styles.summaryLabelBold, { color: colors.text }]}>You'll Receive</Text>
+                    <Text style={[styles.summaryLabelBold, { color: colors.text }]}>{"You'll Receive"}</Text>
                     <Text style={[styles.summaryValueBold, { color: colors.primary }]}>₱{parseFloat(withdrawAmount).toLocaleString()}</Text>
                   </View>
                 </View>
@@ -1758,44 +1708,6 @@ const styles = StyleSheet.create({
     gap: 8,
     borderWidth: 1,
   },
-  subscriptionCard: {
-    padding: 20,
-    borderRadius: 16,
-    borderWidth: 1,
-  },
-  subscriptionHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    marginBottom: 8,
-  },
-  subscriptionTitle: {
-    fontSize: 16, // text-base
-    fontFamily: 'Poppins_600SemiBold',
-  },
-  subscriptionDate: {
-    fontSize: 12, // text-xs
-    fontFamily: 'Poppins_400Regular',
-  },
-  activeBadge: {
-    paddingHorizontal: 12,
-    paddingVertical: 4,
-    borderRadius: 999,
-    backgroundColor: '#DCFCE7', // green-100
-  },
-  activeBadgeText: {
-    fontSize: 12, // text-xs
-    color: '#15803D', // green-700
-    fontFamily: 'Poppins_600SemiBold',
-  },
-  manageSubBtn: {
-    marginTop: 8,
-    alignSelf: 'flex-start',
-  },
-  manageSubText: {
-    fontFamily: 'Poppins_500Medium',
-    fontSize: 13,
-  },
   historySection: {
     paddingHorizontal: 24,
     marginTop: 32,
@@ -1931,102 +1843,10 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: '#FECACA',
   },
-  // Subscription Styles
-  featuresContainer: {
-    marginTop: 12,
-    marginBottom: 8,
-  },
-  featureRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginBottom: 6,
-  },
-  featureText: {
-    fontSize: 13,
-    fontFamily: 'Poppins_400Regular',
-  },
-  subscriptionActions: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginTop: 12,
-    paddingTop: 12,
-    borderTopWidth: 1,
-    borderTopColor: '#E5E7EB',
-  },
-  cancelSubBtn: {
-    paddingVertical: 8,
-  },
-  cancelSubText: {
-    fontSize: 13,
-    fontFamily: 'Poppins_500Medium',
-    color: '#DC2626',
-  },
-  noSubContainer: {
-    alignItems: 'center',
-    paddingVertical: 24,
-  },
-  noSubIcon: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 16,
-  },
-  noSubTitle: {
-    fontSize: 18,
-    fontFamily: 'Poppins_600SemiBold',
-    marginBottom: 8,
-  },
-  noSubDesc: {
-    fontSize: 14,
-    fontFamily: 'Poppins_400Regular',
-    textAlign: 'center',
-    paddingHorizontal: 16,
-    marginBottom: 20,
-  },
-  subscribeBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    paddingHorizontal: 24,
-    paddingVertical: 14,
-    borderRadius: 12,
-  },
-  subscribeBtnText: {
-    fontSize: 15,
-    fontFamily: 'Poppins_600SemiBold',
-    color: 'white',
-  },
-  // Plans Modal Styles
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.5)',
     justifyContent: 'flex-end',
-  },
-  plansModal: {
-    borderTopLeftRadius: 28,
-    borderTopRightRadius: 28,
-    maxHeight: '90%',
-    padding: 24,
-    width: '100%',
-  },
-  plansModalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 24,
-  },
-  plansModalTitle: {
-    fontSize: 24,
-    fontFamily: 'Poppins_700Bold',
-  },
-  plansModalSubtitle: {
-    fontSize: 14,
-    fontFamily: 'Poppins_400Regular',
-    marginTop: 2,
   },
   closeModalButton: {
     width: 36,
@@ -2034,104 +1854,6 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  plansScrollView: {
-    maxHeight: '100%',
-  },
-  planCard: {
-    borderRadius: 20,
-    padding: 20,
-    marginBottom: 16,
-    position: 'relative',
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 8,
-    elevation: 3,
-  },
-  planCardHeader: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    marginBottom: 16,
-    gap: 12,
-  },
-  planIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  popularBadge: {
-    position: 'absolute',
-    top: 0,
-    right: 0,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderBottomLeftRadius: 16,
-    zIndex: 10,
-  },
-  popularBadgeText: {
-    color: 'white',
-    fontSize: 10,
-    fontFamily: 'Poppins_700Bold',
-  },
-  planName: {
-    fontSize: 18,
-    fontFamily: 'Poppins_700Bold',
-    marginBottom: 4,
-  },
-  planDescription: {
-    fontSize: 13,
-    fontFamily: 'Poppins_400Regular',
-    lineHeight: 18,
-  },
-  planPriceInfo: {
-    flexDirection: 'row',
-    alignItems: 'baseline',
-    marginBottom: 16,
-  },
-  planPrice: {
-    fontSize: 28,
-    fontFamily: 'Poppins_700Bold',
-  },
-  planPeriod: {
-    fontSize: 14,
-    fontFamily: 'Poppins_500Medium',
-  },
-  separator: {
-    height: 1,
-    backgroundColor: 'rgba(0,0,0,0.05)',
-    marginBottom: 16,
-  },
-  planFeatures: {
-    gap: 12,
-    marginBottom: 20,
-  },
-  planFeatureRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-  },
-  planFeatureText: {
-    fontSize: 14,
-    fontFamily: 'Poppins_400Regular',
-    flex: 1,
-  },
-  selectPlanBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 14,
-    borderRadius: 14,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.2,
-    shadowRadius: 8,
-    elevation: 4,
-  },
-  selectPlanBtnText: {
-    fontSize: 15,
-    fontFamily: 'Poppins_600SemiBold',
   },
   // Withdraw Modal Styles
   withdrawModal: {

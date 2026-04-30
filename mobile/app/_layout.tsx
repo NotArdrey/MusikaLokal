@@ -646,7 +646,6 @@ function RootContent() {
         const status = queryParams?.status as string;
         const bookingId = queryParams?.booking_id as string;
         const type = queryParams?.type as string;
-        const planId = queryParams?.plan_id as string;
 
         const normalizedStatus = String(status || "").toLowerCase();
         if (normalizedStatus === "success" || normalizedStatus === "paid" || normalizedStatus === "completed") {
@@ -677,7 +676,6 @@ function RootContent() {
             status,
             booking_id: bookingId,
             type,
-            plan_id: planId
           },
         });
       }

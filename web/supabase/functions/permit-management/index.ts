@@ -119,34 +119,6 @@ function isInRange(rawValue: unknown, rangeStartMs: number | null): boolean {
   return ts !== null && ts >= rangeStartMs;
 }
 
-function normalizeSubscriptionStatus(rawValue: unknown): string {
-  const status = String(rawValue || "").trim().toLowerCase();
-  if (status === "canceled") return "cancelled";
-  return status;
-}
-
-function isActiveSubscriptionInRange(subscription: any, rangeStartMs: number | null, nowMs: number): boolean {
-  const status = normalizeSubscriptionStatus(subscription?.status);
-  if (!["active", "trialing"].includes(status)) return false;
-  if (!rangeStartMs) return true;
-
-  const activeStartMs = toTimestampMs(subscription?.current_period_start) ?? toTimestampMs(subscription?.created_at);
-  const activeEndMs = toTimestampMs(subscription?.current_period_end);
-
-  if (activeStartMs !== null && activeStartMs > nowMs) return false;
-  if (activeEndMs !== null && activeEndMs < rangeStartMs) return false;
-
-  return true;
-}
-
-function getSubscriptionChurnTimestampMs(subscription: any): number | null {
-  return (
-    toTimestampMs(subscription?.cancelled_at) ??
-    toTimestampMs(subscription?.current_period_end) ??
-    toTimestampMs(subscription?.created_at)
-  );
-}
-
 function toNumber(rawValue: unknown): number {
   const value = Number(rawValue || 0);
   return Number.isFinite(value) ? value : 0;
@@ -814,13 +786,10 @@ serve(async (req: Request) => {
         openIncidents,
         resolvedIncidents,
         profileRows,
-        subscriptionRows,
         reportRows,
         incidentRows,
         bookingRows,
         withdrawalRows,
-        subscriptionPaymentRows,
-        subscriptionPlanRows,
       ] = await Promise.all([
         safeCount(client.from("profiles").select("id", { count: "exact", head: true }), queryHealthTracker),
         safeCount(client.from("studios").select("id", { count: "exact", head: true }), queryHealthTracker),
@@ -905,12 +874,6 @@ serve(async (req: Request) => {
           queryHealthTracker,
         ),
         safeRows(
-          client
-            .from("subscriptions")
-            .select("id, user_id, plan_id, status, current_period_start, current_period_end, cancelled_at, created_at"),
-          queryHealthTracker,
-        ),
-        safeRows(
           (() => {
             let query = client
               .from("reports")
@@ -951,18 +914,6 @@ serve(async (req: Request) => {
             .select("id, status, amount, net_amount, created_at, reference_number, notes, payout_account_name"),
           queryHealthTracker,
         ),
-        safeRows(
-          client
-            .from("subscription_payments")
-            .select("id, amount, status, paid_at, created_at"),
-          queryHealthTracker,
-        ),
-        safeRows(
-          client
-            .from("subscription_plans")
-            .select("id, name"),
-          queryHealthTracker,
-        ),
       ]);
 
       let dau = 0;
@@ -984,73 +935,6 @@ serve(async (req: Request) => {
         }
         return count;
       }, 0);
-
-      const activeSubscriptionRows = (subscriptionRows as any[]).filter((row) =>
-        isActiveSubscriptionInRange(row, rangeStartMs, nowMs)
-      );
-
-      const activeSubscriptionUserIds = new Set<string>();
-      for (const subscription of activeSubscriptionRows) {
-        const userIdKey = String(subscription?.user_id || subscription?.id || "").trim();
-        if (userIdKey) {
-          activeSubscriptionUserIds.add(userIdKey);
-        }
-      }
-
-      const activeSubscriptions = activeSubscriptionUserIds.size;
-
-      const churnedSubscriptionUserIds = new Set<string>();
-      for (const subscription of subscriptionRows as any[]) {
-        const status = normalizeSubscriptionStatus(subscription?.status);
-        if (!["cancelled", "expired", "past_due"].includes(status)) continue;
-
-        const churnAtMs = getSubscriptionChurnTimestampMs(subscription);
-        if (rangeStartMs && (churnAtMs === null || churnAtMs < rangeStartMs)) continue;
-
-        const userIdKey = String(subscription?.user_id || subscription?.id || "").trim();
-        if (userIdKey) {
-          churnedSubscriptionUserIds.add(userIdKey);
-        }
-      }
-
-      const churnedSubscriptions = churnedSubscriptionUserIds.size;
-
-      const churnBase = activeSubscriptions + churnedSubscriptions;
-      const churnRatePercent = churnBase > 0
-        ? roundTo((churnedSubscriptions / churnBase) * 100, 1)
-        : 0;
-
-      const planNameById = new Map<string, string>();
-      for (const plan of subscriptionPlanRows as any[]) {
-        const id = String(plan?.id || "").trim();
-        if (!id) continue;
-        planNameById.set(id, String(plan?.name || "").trim().toLowerCase());
-      }
-
-      let subscriptionTierBasic = 0;
-      let subscriptionTierPro = 0;
-      let subscriptionTierOther = 0;
-
-      for (const subscription of activeSubscriptionRows) {
-        const planId = String(subscription?.plan_id || "").trim();
-        const normalizedPlan = (planNameById.get(planId) || planId).toLowerCase();
-
-        if (
-          normalizedPlan.includes("pro") ||
-          normalizedPlan.includes("premium") ||
-          normalizedPlan.includes("plus")
-        ) {
-          subscriptionTierPro += 1;
-        } else if (
-          normalizedPlan.includes("basic") ||
-          normalizedPlan.includes("starter") ||
-          normalizedPlan.includes("free")
-        ) {
-          subscriptionTierBasic += 1;
-        } else {
-          subscriptionTierOther += 1;
-        }
-      }
 
       let grossBookingRevenue = 0;
       let refundedBookingRevenue = 0;
@@ -1101,22 +985,6 @@ serve(async (req: Request) => {
         bookingSlotCounter.set(slotLabel, (bookingSlotCounter.get(slotLabel) || 0) + 1);
       }
 
-      let grossSubscriptionRevenue = 0;
-      for (const payment of subscriptionPaymentRows as any[]) {
-        const paidAt = payment?.paid_at || payment?.created_at;
-        if (!isInRange(paidAt, rangeStartMs)) continue;
-
-        const paidAtMs = toTimestampMs(paidAt);
-        const trendBucket = findRevenueTrendBucket(paidAtMs, revenueTrendBuckets);
-
-        const status = String(payment?.status || "").trim().toLowerCase();
-        if (status !== "paid") continue;
-
-        const amount = toNumber(payment?.amount);
-        grossSubscriptionRevenue += amount;
-        if (trendBucket) trendBucket.gross += amount;
-      }
-
       let pendingPayouts = 0;
       let completedPayoutsInRange = 0;
       for (const withdrawal of withdrawalRows as any[]) {
@@ -1135,7 +1003,7 @@ serve(async (req: Request) => {
         }
       }
 
-      const grossRevenue = roundTo(grossBookingRevenue + grossSubscriptionRevenue, 2);
+      const grossRevenue = roundTo(grossBookingRevenue, 2);
       const netRevenue = roundTo(
         Math.max(grossRevenue - completedPayoutsInRange - refundedBookingRevenue, 0),
         2,
@@ -1330,8 +1198,6 @@ serve(async (req: Request) => {
         resolvedIncidents,
         openIncidentsInRange,
         resolvedIncidentsInRange,
-        activeSubscriptions,
-        churnRatePercent,
         dau,
         mau,
         newSignups24h,
@@ -1344,9 +1210,6 @@ serve(async (req: Request) => {
         dbHealthy,
         apiHealthy,
         paymongoHealthy,
-        subscriptionTierBasic,
-        subscriptionTierPro,
-        subscriptionTierOther,
         revenueTrend,
         incidentTypeBreakdown,
         peakActivitySlots,

@@ -41,7 +41,6 @@ type BookingIncidentFilter =
   | 'dismissed';
 type BookingIncidentResolution = 'resolved_refund' | 'resolved_no_refund' | 'dismissed';
 type UserRole = 'musician' | 'studio-owner' | 'venue-owner' | 'producer' | 'admin';
-type SubscriptionStatusOption = 'none' | 'active' | 'cancelled' | 'expired';
 type UserFilter = 'all' | 'musicians' | 'studio-owner' | 'venue-owner' | 'producer';
 type AuditEntityFilter = 'all' | 'studio' | 'gig';
 type AuditActionFilter = 'all' | 'approved' | 'rejected' | 'submitted' | 'resubmitted';
@@ -69,8 +68,6 @@ interface DashboardMetrics {
   resolvedIncidents: number;
   openIncidentsInRange: number;
   resolvedIncidentsInRange: number;
-  activeSubscriptions: number;
-  churnRatePercent: number;
   dau: number;
   mau: number;
   newSignups24h: number;
@@ -83,9 +80,6 @@ interface DashboardMetrics {
   dbHealthy: boolean;
   apiHealthy: boolean;
   paymongoHealthy: boolean;
-  subscriptionTierBasic: number;
-  subscriptionTierPro: number;
-  subscriptionTierOther: number;
   incidentTypeBreakdown: {
     key: string;
     label: string;
@@ -132,9 +126,6 @@ interface UserEntry {
   role: string;
   is_verified: boolean;
   created_at: string;
-  subscription_status?: string | null;
-  subscription_expires_at?: string | null;
-  subscription_plan_id?: string | null;
 }
 
 interface UserDetailsEntry {
@@ -263,8 +254,6 @@ const defaultMetrics: DashboardMetrics = {
   resolvedIncidents: 0,
   openIncidentsInRange: 0,
   resolvedIncidentsInRange: 0,
-  activeSubscriptions: 0,
-  churnRatePercent: 0,
   dau: 0,
   mau: 0,
   newSignups24h: 0,
@@ -277,9 +266,6 @@ const defaultMetrics: DashboardMetrics = {
   dbHealthy: false,
   apiHealthy: false,
   paymongoHealthy: false,
-  subscriptionTierBasic: 0,
-  subscriptionTierPro: 0,
-  subscriptionTierOther: 0,
   incidentTypeBreakdown: [],
   peakActivitySlots: [],
   revenueTrend: [],
@@ -454,7 +440,6 @@ const manageBookingsActionFallbacks: Record<string, string> = {
   admin_resolve_booking_incident: 'resolve_booking_incident',
 };
 const userRoleOptions: UserRole[] = ['musician', 'studio-owner', 'venue-owner', 'producer', 'admin'];
-const subscriptionStatusOptions: SubscriptionStatusOption[] = ['none', 'active', 'cancelled', 'expired'];
 const userFilters: { value: UserFilter; label: string }[] = [
   { value: 'all', label: 'all' },
   { value: 'musicians', label: 'musicians' },
@@ -524,21 +509,6 @@ const normalizeUserRole = (rawRole: unknown): UserRole => {
   return userRoleOptions.includes(normalized as UserRole) ? (normalized as UserRole) : 'musician';
 };
 
-const normalizeSubscriptionStatus = (rawStatus: unknown): SubscriptionStatusOption => {
-  const normalized = String(rawStatus || '').trim().toLowerCase() as SubscriptionStatusOption;
-  return subscriptionStatusOptions.includes(normalized) ? normalized : 'none';
-};
-
-const toDateTimeLocalValue = (value?: string | null) => {
-  if (!value) return '';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return '';
-
-  // Convert UTC timestamp to local datetime-local compatible text.
-  const timezoneOffsetMs = date.getTimezoneOffset() * 60 * 1000;
-  return new Date(date.getTime() - timezoneOffsetMs).toISOString().slice(0, 16);
-};
-
 export default function AdminPanel({ initialTab, children }: AdminPanelProps) {
   const { colors, isDark } = useTheme();
   const { session, loading, isGuest, isAdmin, roleResolved } = useAuth();
@@ -598,9 +568,6 @@ export default function AdminPanel({ initialTab, children }: AdminPanelProps) {
   const [userFormPassword, setUserFormPassword] = useState('');
   const [userFormIsVerified, setUserFormIsVerified] = useState(false);
   const [userFormEmailConfirmed, setUserFormEmailConfirmed] = useState(false);
-  const [userFormSubscriptionStatus, setUserFormSubscriptionStatus] = useState<SubscriptionStatusOption>('none');
-  const [userFormSubscriptionExpiresAt, setUserFormSubscriptionExpiresAt] = useState('');
-  const [userFormSubscriptionPlanId, setUserFormSubscriptionPlanId] = useState('');
   const [userFormSubmitting, setUserFormSubmitting] = useState(false);
 
   const [userDetailsTarget, setUserDetailsTarget] = useState<UserDetailsEntry | null>(null);
@@ -714,8 +681,6 @@ export default function AdminPanel({ initialTab, children }: AdminPanelProps) {
       resolvedIncidents: Number(data?.resolvedIncidents || 0),
       openIncidentsInRange: Number(data?.openIncidentsInRange || 0),
       resolvedIncidentsInRange: Number(data?.resolvedIncidentsInRange || 0),
-      activeSubscriptions: Number(data?.activeSubscriptions || 0),
-      churnRatePercent: Number(data?.churnRatePercent || 0),
       dau: Number(data?.dau || 0),
       mau: Number(data?.mau || 0),
       newSignups24h: Number(data?.newSignups24h || 0),
@@ -728,9 +693,6 @@ export default function AdminPanel({ initialTab, children }: AdminPanelProps) {
       dbHealthy: Boolean(data?.dbHealthy),
       apiHealthy: Boolean(data?.apiHealthy),
       paymongoHealthy: Boolean(data?.paymongoHealthy),
-      subscriptionTierBasic: Number(data?.subscriptionTierBasic || 0),
-      subscriptionTierPro: Number(data?.subscriptionTierPro || 0),
-      subscriptionTierOther: Number(data?.subscriptionTierOther || 0),
       incidentTypeBreakdown,
       peakActivitySlots,
       revenueTrend,
@@ -1361,9 +1323,6 @@ export default function AdminPanel({ initialTab, children }: AdminPanelProps) {
     setUserFormPassword('');
     setUserFormIsVerified(false);
     setUserFormEmailConfirmed(false);
-    setUserFormSubscriptionStatus('none');
-    setUserFormSubscriptionExpiresAt('');
-    setUserFormSubscriptionPlanId('');
   }, []);
 
   const openCreateUserModal = useCallback(() => {
@@ -1382,9 +1341,6 @@ export default function AdminPanel({ initialTab, children }: AdminPanelProps) {
     setUserFormPassword('');
     setUserFormIsVerified(Boolean(targetUser.is_verified));
     setUserFormEmailConfirmed(false);
-    setUserFormSubscriptionStatus(normalizeSubscriptionStatus(targetUser.subscription_status));
-    setUserFormSubscriptionExpiresAt(toDateTimeLocalValue(targetUser.subscription_expires_at));
-    setUserFormSubscriptionPlanId(String(targetUser.subscription_plan_id || '').trim());
     setUserModalVisible(true);
   }, []);
 
@@ -1491,22 +1447,6 @@ export default function AdminPanel({ initialTab, children }: AdminPanelProps) {
   const submitUserForm = useCallback(async () => {
     const email = userFormEmail.trim().toLowerCase();
     const fullName = userFormFullName.trim();
-    const shouldClearSubscription = userFormSubscriptionStatus === 'none';
-    const subscriptionPlanId = shouldClearSubscription ? null : (userFormSubscriptionPlanId.trim() || null);
-    let subscriptionExpiresAt: string | null = null;
-
-    if (!shouldClearSubscription) {
-      const rawExpiry = userFormSubscriptionExpiresAt.trim();
-      if (rawExpiry) {
-        const parsedExpiry = new Date(rawExpiry);
-        if (Number.isNaN(parsedExpiry.getTime())) {
-          showAlert('warning', 'Invalid expiration date', 'Use a valid date/time for subscription expiration.');
-          return;
-        }
-
-        subscriptionExpiresAt = parsedExpiry.toISOString();
-      }
-    }
 
     if (!email) {
       showAlert('warning', 'Email required', 'Please provide an email address.');
@@ -1544,9 +1484,6 @@ export default function AdminPanel({ initialTab, children }: AdminPanelProps) {
           fullName,
           role: userFormRole,
           isVerified: userFormIsVerified,
-          subscriptionStatus: shouldClearSubscription ? null : userFormSubscriptionStatus,
-          subscriptionExpiresAt,
-          subscriptionPlanId,
         });
 
         showAlert('success', 'User updated', 'User details have been updated.');
@@ -1570,9 +1507,6 @@ export default function AdminPanel({ initialTab, children }: AdminPanelProps) {
     userFormRole,
     userFormIsVerified,
     userFormEmailConfirmed,
-    userFormSubscriptionStatus,
-    userFormSubscriptionExpiresAt,
-    userFormSubscriptionPlanId,
     editingUserId,
     showAlert,
     resetUserForm,
@@ -1786,25 +1720,6 @@ export default function AdminPanel({ initialTab, children }: AdminPanelProps) {
     return metrics.incidentTypeBreakdown.filter((row) => row.category === incidentTypeFilter);
   }, [metrics.incidentTypeBreakdown, incidentTypeFilter]);
 
-  const subscriptionTierTotal = useMemo(() => {
-    return metrics.subscriptionTierBasic + metrics.subscriptionTierPro + metrics.subscriptionTierOther;
-  }, [metrics.subscriptionTierBasic, metrics.subscriptionTierPro, metrics.subscriptionTierOther]);
-
-  const basicTierPercent = useMemo(() => {
-    if (!subscriptionTierTotal) return 0;
-    return (metrics.subscriptionTierBasic / subscriptionTierTotal) * 100;
-  }, [metrics.subscriptionTierBasic, subscriptionTierTotal]);
-
-  const proTierPercent = useMemo(() => {
-    if (!subscriptionTierTotal) return 0;
-    return (metrics.subscriptionTierPro / subscriptionTierTotal) * 100;
-  }, [metrics.subscriptionTierPro, subscriptionTierTotal]);
-
-  const otherTierPercent = useMemo(() => {
-    if (!subscriptionTierTotal) return 0;
-    return (metrics.subscriptionTierOther / subscriptionTierTotal) * 100;
-  }, [metrics.subscriptionTierOther, subscriptionTierTotal]);
-
   const peakActivityMaxCount = useMemo(() => {
     if (!metrics.peakActivitySlots.length) return 1;
     return Math.max(...metrics.peakActivitySlots.map((slot) => Number(slot.count || 0)), 1);
@@ -1964,10 +1879,6 @@ export default function AdminPanel({ initialTab, children }: AdminPanelProps) {
     selectedRevenueValue,
     revenueTrendRows,
     revenueTrendMax,
-    subscriptionTierTotal,
-    basicTierPercent,
-    proTierPercent,
-    otherTierPercent,
     dashboardIncidentRows,
     peakActivityMaxCount,
     permitSearch,
@@ -2159,21 +2070,6 @@ export default function AdminPanel({ initialTab, children }: AdminPanelProps) {
 
               <View style={[styles.pulseCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
                 <View style={styles.pulseHeader}>
-                  <Text style={[styles.pulseTitle, { color: colors.textSecondary }]}>Plan Health</Text>
-                  <Ionicons name="star-outline" size={20} color={colors.primary} />
-                </View>
-                <View style={styles.pulseRow}>
-                  <Text style={[styles.pulseValueMain, { color: colors.text }]}>{metrics.activeSubscriptions}</Text>
-                </View>
-                <View style={{ flexDirection: 'row', gap: 8, marginTop: 12 }}>
-                  <View style={styles.badgeGreen}><Text style={styles.badgeTextGreen}>Active subscribers</Text></View>
-                  <View style={styles.badgeRed}><Text style={styles.badgeTextRed}>Churn {formatPercent(metrics.churnRatePercent)}</Text></View>
-                </View>
-                <Text style={[styles.pulseSubtitle, { color: colors.textSecondary, marginTop: 8 }]}>Tier base tracked from active profiles</Text>
-              </View>
-
-              <View style={[styles.pulseCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
-                <View style={styles.pulseHeader}>
                   <Text style={[styles.pulseTitle, { color: colors.textSecondary }]}>Financial Overview</Text>
                   <Ionicons name="wallet-outline" size={20} color={colors.primary} />
                 </View>
@@ -2262,45 +2158,6 @@ export default function AdminPanel({ initialTab, children }: AdminPanelProps) {
                 </View>
               </View>
 
-              <View style={[styles.dataEnginePanel, styles.dataEnginePanelRight, { backgroundColor: colors.card, borderColor: colors.border, flex: Platform.OS === 'web' ? 3 : 1 }]}>
-                <Text style={[styles.panelTitle, { color: colors.text }]}>Plan Tier Split</Text>
-                <Text style={[styles.panelSubtitle, { color: colors.textSecondary, marginBottom: -10 }]}>Tracked plans by tier ({dashboardDateRangeLabel})</Text>
-                <View style={styles.subscriptionStackWrapper}>
-                  {subscriptionTierTotal === 0 ? (
-                    <Text style={[styles.emptyText, { color: colors.textSecondary, textAlign: 'left', paddingVertical: 8 }]}>No plan data in this date range.</Text>
-                  ) : (
-                    <View style={[styles.subscriptionStackBar, { backgroundColor: isDark ? '#1E293B' : '#E2E8F0' }]}>
-                      {metrics.subscriptionTierBasic > 0 && (
-                        <View style={[styles.subscriptionStackSegment, { flex: basicTierPercent, backgroundColor: colors.primary }]} />
-                      )}
-                      {metrics.subscriptionTierPro > 0 && (
-                        <View style={[styles.subscriptionStackSegment, { flex: proTierPercent, backgroundColor: '#6366f1' }]} />
-                      )}
-                      {metrics.subscriptionTierOther > 0 && (
-                        <View style={[styles.subscriptionStackSegment, { flex: otherTierPercent, backgroundColor: '#f59e0b' }]} />
-                      )}
-                    </View>
-                  )}
-                </View>
-
-                <View style={styles.chartLegendVertical}>
-                  <View style={styles.legendItem}>
-                    <View style={[styles.legendDot, { backgroundColor: colors.primary }]} />
-                    <Text style={[styles.legendText, { color: colors.textSecondary }]}>Basic: {metrics.subscriptionTierBasic} ({formatPercent(basicTierPercent)})</Text>
-                  </View>
-                  <View style={styles.legendItem}>
-                    <View style={[styles.legendDot, { backgroundColor: '#6366f1' }]} />
-                    <Text style={[styles.legendText, { color: colors.textSecondary }]}>Pro: {metrics.subscriptionTierPro} ({formatPercent(proTierPercent)})</Text>
-                  </View>
-                  {metrics.subscriptionTierOther > 0 && (
-                    <View style={styles.legendItem}>
-                      <View style={[styles.legendDot, { backgroundColor: '#f59e0b' }]} />
-                      <Text style={[styles.legendText, { color: colors.textSecondary }]}>Other: {metrics.subscriptionTierOther} ({formatPercent(otherTierPercent)})</Text>
-                    </View>
-                  )}
-                  <Text style={[styles.legendText, { color: colors.textSecondary, marginTop: 6 }]}>Total tracked: {subscriptionTierTotal}</Text>
-                </View>
-              </View>
             </View>
 
             <View style={styles.actionCenterRow}>
@@ -4233,17 +4090,6 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontFamily: 'Poppins_600SemiBold',
   },
-  badgeRed: {
-    backgroundColor: 'rgba(239, 68, 68, 0.1)',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 12,
-  },
-  badgeTextRed: {
-    color: '#ef4444',
-    fontSize: 11,
-    fontFamily: 'Poppins_600SemiBold',
-  },
   mockSparklineContainer: {
     position: 'absolute',
     bottom: -10,
@@ -4342,19 +4188,6 @@ const styles = StyleSheet.create({
   revenueBarLabel: {
     fontSize: 10,
     fontFamily: 'Poppins_500Medium',
-  },
-  subscriptionStackWrapper: {
-    marginTop: 14,
-    gap: 8,
-  },
-  subscriptionStackBar: {
-    height: 18,
-    borderRadius: 999,
-    overflow: 'hidden',
-    flexDirection: 'row',
-  },
-  subscriptionStackSegment: {
-    height: '100%',
   },
   chartLegendHorizontal: {
     flexDirection: 'row',

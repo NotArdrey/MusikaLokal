@@ -98,8 +98,6 @@ type Tab = 'dashboard' | 'users' | 'reports' | 'audit' | 'posts' | 'products';
 
 type UserRole = 'musician' | 'studio-owner' | 'venue-owner' | 'producer' | 'admin';
 
-type SubscriptionStatusOption = 'none' | 'active' | 'cancelled' | 'expired';
-
 type UserFilter = 'all' | 'musicians' | 'studio-owner' | 'venue-owner' | 'producer';
 
 const adminTabRoutes: Record<Tab, string> = {
@@ -121,9 +119,6 @@ interface UserEntry {
   is_verified: boolean;
   verification_status?: string | null;
   created_at: string;
-  subscription_status?: string | null;
-  subscription_expires_at?: string | null;
-  subscription_plan_id?: string | null;
 }
 
 interface UserDetailsEntry {
@@ -141,8 +136,6 @@ type AdminAlertButton = {
   onPress?: () => void;
   style?: 'default' | 'cancel' | 'destructive';
 };
-
-const subscriptionStatusOptions: SubscriptionStatusOption[] = ['none', 'active', 'cancelled', 'expired'];
 
 const userRoleOptions: UserRole[] = ['musician', 'studio-owner', 'venue-owner', 'producer', 'admin'];
 
@@ -215,11 +208,6 @@ const isUnsupportedActionMessage = (message: string, action: string) => {
   return normalizedMessage.includes('unsupported action') || normalizedMessage.includes('invalid action');
 };
 
-const normalizeSubscriptionStatus = (rawStatus: unknown): SubscriptionStatusOption => {
-  const normalized = String(rawStatus || '').trim().toLowerCase() as SubscriptionStatusOption;
-  return subscriptionStatusOptions.includes(normalized) ? normalized : 'none';
-};
-
 const normalizeUserRole = (rawRole: unknown): UserRole => {
   const normalized = String(rawRole || '').trim().toLowerCase();
 
@@ -228,15 +216,6 @@ const normalizeUserRole = (rawRole: unknown): UserRole => {
   }
 
   return userRoleOptions.includes(normalized as UserRole) ? (normalized as UserRole) : 'musician';
-};
-
-const toDateTimeLocalValue = (value?: string | null) => {
-  if (!value) return '';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return '';
-
-  const timezoneOffsetMs = date.getTimezoneOffset() * 60 * 1000;
-  return new Date(date.getTime() - timezoneOffsetMs).toISOString().slice(0, 16);
 };
 
 const styles = StyleSheet.create({
@@ -605,9 +584,6 @@ export default function AdminUsersPage() {
   const [userFormPassword, setUserFormPassword] = useState('');
   const [userFormIsVerified, setUserFormIsVerified] = useState(false);
   const [userFormEmailConfirmed, setUserFormEmailConfirmed] = useState(false);
-  const [userFormSubscriptionStatus, setUserFormSubscriptionStatus] = useState<(typeof subscriptionStatusOptions)[number]>('none');
-  const [userFormSubscriptionExpiresAt, setUserFormSubscriptionExpiresAt] = useState('');
-  const [userFormSubscriptionPlanId, setUserFormSubscriptionPlanId] = useState('');
   const [userFormSubmitting, setUserFormSubmitting] = useState(false);
   const [userDetailsTarget, setUserDetailsTarget] = useState<UserDetailsEntry | null>(null);
   const [alertState, setAlertState] = useState<{
@@ -730,9 +706,6 @@ export default function AdminUsersPage() {
     setUserFormPassword('');
     setUserFormIsVerified(false);
     setUserFormEmailConfirmed(false);
-    setUserFormSubscriptionStatus('none');
-    setUserFormSubscriptionExpiresAt('');
-    setUserFormSubscriptionPlanId('');
   }, []);
 
   const openCreateUserModal = useCallback(() => {
@@ -751,9 +724,6 @@ export default function AdminUsersPage() {
     setUserFormPassword('');
     setUserFormIsVerified(Boolean(targetUser.is_verified));
     setUserFormEmailConfirmed(false);
-    setUserFormSubscriptionStatus(normalizeSubscriptionStatus(targetUser.subscription_status));
-    setUserFormSubscriptionExpiresAt(toDateTimeLocalValue(targetUser.subscription_expires_at));
-    setUserFormSubscriptionPlanId(String(targetUser.subscription_plan_id || '').trim());
     setUserModalVisible(true);
   }, []);
 
@@ -843,22 +813,6 @@ export default function AdminUsersPage() {
   const submitUserForm = useCallback(async () => {
     const email = userFormEmail.trim().toLowerCase();
     const fullName = userFormFullName.trim();
-    const shouldClearSubscription = userFormSubscriptionStatus === 'none';
-    const subscriptionPlanId = shouldClearSubscription ? null : (userFormSubscriptionPlanId.trim() || null);
-    let subscriptionExpiresAt: string | null = null;
-
-    if (!shouldClearSubscription) {
-      const rawExpiry = userFormSubscriptionExpiresAt.trim();
-      if (rawExpiry) {
-        const parsedExpiry = new Date(rawExpiry);
-        if (Number.isNaN(parsedExpiry.getTime())) {
-          showAlert('warning', 'Invalid expiration date', 'Use a valid date/time for subscription expiration.');
-          return;
-        }
-
-        subscriptionExpiresAt = parsedExpiry.toISOString();
-      }
-    }
 
     if (!email) {
       showAlert('warning', 'Email required', 'Please provide an email address.');
@@ -896,9 +850,6 @@ export default function AdminUsersPage() {
           fullName,
           role: userFormRole,
           isVerified: userFormIsVerified,
-          subscriptionStatus: shouldClearSubscription ? null : userFormSubscriptionStatus,
-          subscriptionExpiresAt,
-          subscriptionPlanId,
         });
 
         showAlert('success', 'User updated', 'User details have been updated.');
@@ -923,9 +874,6 @@ export default function AdminUsersPage() {
     userFormRole,
     userFormIsVerified,
     userFormEmailConfirmed,
-    userFormSubscriptionStatus,
-    userFormSubscriptionExpiresAt,
-    userFormSubscriptionPlanId,
     editingUserId,
     showAlert,
     resetUserForm,

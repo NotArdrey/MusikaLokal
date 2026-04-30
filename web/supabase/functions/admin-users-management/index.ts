@@ -27,12 +27,6 @@ const roleAliases: Record<string, string> = {
   "musician-member": "musician",
 };
 
-const allowedSubscriptionStatuses = new Set([
-  "active",
-  "cancelled",
-  "expired",
-]);
-
 function jsonResponse(payload: unknown, status = 200) {
   return new Response(JSON.stringify(payload), {
     status,
@@ -380,7 +374,7 @@ serve(async (req: Request) => {
       const { data, error } = await client
         .from("profiles")
         .select(
-          "id, full_name, email, role, is_verified, verification_status, created_at, subscription_status, subscription_expires_at, subscription_plan_id",
+          "id, full_name, email, role, is_verified, verification_status, created_at",
         )
         .order("created_at", { ascending: false })
         .limit(limit);
@@ -694,9 +688,6 @@ serve(async (req: Request) => {
       const maybeFullName = body?.fullName;
       const maybeEmail = body?.email;
       const maybeIsVerified = body?.isVerified;
-      const maybeSubscriptionStatus = body?.subscriptionStatus;
-      const maybeSubscriptionExpiresAt = body?.subscriptionExpiresAt;
-      const maybeSubscriptionPlanId = body?.subscriptionPlanId;
 
       if (!userId) {
         return jsonResponse({ error: "Missing userId" }, 400);
@@ -757,47 +748,6 @@ serve(async (req: Request) => {
         }
       }
 
-      if (maybeSubscriptionStatus !== undefined) {
-        const status = String(maybeSubscriptionStatus ?? "").trim().toLowerCase();
-
-        if (!status || status === "none" || status === "null") {
-          profileUpdates.subscription_status = null;
-        } else if (allowedSubscriptionStatuses.has(status)) {
-          profileUpdates.subscription_status = status;
-        } else {
-          return jsonResponse({ error: "Invalid subscriptionStatus value" }, 400);
-        }
-      }
-
-      if (maybeSubscriptionExpiresAt !== undefined) {
-        const rawDate = String(maybeSubscriptionExpiresAt ?? "").trim();
-
-        if (!rawDate || rawDate.toLowerCase() === "none" || rawDate.toLowerCase() === "null") {
-          profileUpdates.subscription_expires_at = null;
-        } else {
-          const parsedDate = new Date(rawDate);
-          if (Number.isNaN(parsedDate.getTime())) {
-            return jsonResponse({ error: "Invalid subscriptionExpiresAt value" }, 400);
-          }
-
-          profileUpdates.subscription_expires_at = parsedDate.toISOString();
-        }
-      }
-
-      if (maybeSubscriptionPlanId !== undefined) {
-        const planId = String(maybeSubscriptionPlanId ?? "").trim();
-        profileUpdates.subscription_plan_id = planId || null;
-      }
-
-      if (profileUpdates.subscription_status === null) {
-        if (maybeSubscriptionExpiresAt === undefined) {
-          profileUpdates.subscription_expires_at = null;
-        }
-        if (maybeSubscriptionPlanId === undefined) {
-          profileUpdates.subscription_plan_id = null;
-        }
-      }
-
       if (Object.keys(profileUpdates).length === 0) {
         return jsonResponse({ error: "No updates provided" }, 400);
       }
@@ -843,7 +793,7 @@ serve(async (req: Request) => {
         .update(profileUpdates)
         .eq("id", userId)
         .select(
-          "id, full_name, email, role, is_verified, created_at, subscription_status, subscription_expires_at, subscription_plan_id",
+          "id, full_name, email, role, is_verified, created_at",
         )
         .maybeSingle();
 

@@ -622,7 +622,7 @@ serve(async (req: Request) => {
 
     // ============================================================
     // REQUEST WITHDRAWAL VIA REFUND (No ID verification required)
-    // Uses PayMongo refunds on eligible subscription payments
+    // Uses PayMongo refunds on eligible booking payments
     // ============================================================
     if (action === 'request_withdrawal_refund') {
       const { amount } = body;
@@ -662,38 +662,10 @@ serve(async (req: Request) => {
       const fee = FIXED_WITHDRAWAL_FEE + (amount * WITHDRAWAL_FEE_PERCENTAGE / 100);
       const netAmount = amount - fee;
 
-      // Find an eligible payment to refund
-      // Priority 1: User's own subscription payments (goes back to their own account)
-      const { data: subPayments } = await supabaseAdmin
-        .from('subscription_payments')
-        .select('checkout_session_id, amount, paid_at')
-        .eq('user_id', user.id)
-        .eq('status', 'paid')
-        .not('checkout_session_id', 'is', null)
-        .order('paid_at', { ascending: false })
-        .limit(5);
-
       let paymentId: string | null = null;
       let paymentSource: string = '';
-      let refundableAmount = 0;
 
-      // Check subscription payments for a valid payment ID
-      if (subPayments && subPayments.length > 0) {
-        for (const payment of subPayments) {
-          if (payment.checkout_session_id) {
-            const paymentInfo = await getPaymentFromCheckoutSession(payment.checkout_session_id);
-            if (paymentInfo.payment_id && paymentInfo.amount >= netAmount) {
-              paymentId = paymentInfo.payment_id;
-              paymentSource = 'subscription';
-              refundableAmount = paymentInfo.amount;
-              console.log('✅ Found eligible subscription payment:', paymentId);
-              break;
-            }
-          }
-        }
-      }
-
-      // Priority 2: Check bookings user made (studio rentals they paid for)
+      // Check bookings user made (studio rentals they paid for)
       if (!paymentId) {
         const { data: bookingPayments } = await supabaseAdmin
           .from('studio_bookings')
@@ -711,7 +683,6 @@ serve(async (req: Request) => {
               if (paymentInfo.payment_id && paymentInfo.amount >= netAmount) {
                 paymentId = paymentInfo.payment_id;
                 paymentSource = 'booking';
-                refundableAmount = paymentInfo.amount;
                 console.log('✅ Found eligible booking payment:', paymentId);
                 break;
               }
@@ -841,15 +812,6 @@ serve(async (req: Request) => {
     // GET ELIGIBLE REFUND PAYMENTS (for checking if refund withdrawal is available)
     // ============================================================
     if (action === 'get_refund_eligible_payments') {
-      // Get subscription payments
-      const { data: subPayments } = await supabaseAdmin
-        .from('subscription_payments')
-        .select('id, checkout_session_id, amount, paid_at')
-        .eq('user_id', user.id)
-        .eq('status', 'paid')
-        .not('checkout_session_id', 'is', null)
-        .order('paid_at', { ascending: false })
-        .limit(5);
 
       // Get booking payments  
       const { data: bookingPayments } = await supabaseAdmin
@@ -862,24 +824,6 @@ serve(async (req: Request) => {
         .limit(5);
 
       const eligiblePayments: any[] = [];
-
-      // Check each subscription payment
-      if (subPayments) {
-        for (const payment of subPayments) {
-          if (payment.checkout_session_id) {
-            const paymentInfo = await getPaymentFromCheckoutSession(payment.checkout_session_id);
-            if (paymentInfo.payment_id) {
-              eligiblePayments.push({
-                type: 'subscription',
-                amount: paymentInfo.amount,
-                payment_method: paymentInfo.payment_method,
-                paid_at: payment.paid_at,
-              });
-            }
-          }
-        }
-      }
-
       // Check each booking payment
       if (bookingPayments) {
         for (const booking of bookingPayments) {

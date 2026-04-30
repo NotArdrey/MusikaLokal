@@ -35,11 +35,6 @@ type AuthContextType = {
   unpaidBookings: UnpaidBooking[];
   checkSystemLock: () => Promise<void>;
   showLockAlert: (onBeforeNavigate?: () => void) => void;
-  // Subscription status
-  subscriptionStatus: string | null;
-  subscriptionRequired: boolean;
-  subscriptionChecked: boolean;
-  checkSubscription: () => Promise<void>;
   identityStatus: string | null;
   identityRequired: boolean;
   identityChecked: boolean;
@@ -60,10 +55,6 @@ const AuthContext = createContext<AuthContextType>({
   unpaidBookings: [],
   checkSystemLock: async () => { },
   showLockAlert: () => { },
-  subscriptionStatus: null,
-  subscriptionRequired: false,
-  subscriptionChecked: false,
-  checkSubscription: async () => { },
   identityStatus: null,
   identityRequired: false,
   identityChecked: false,
@@ -115,13 +106,6 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [unpaidBalance, setUnpaidBalance] = useState(0);
   const [unpaidBookings, setUnpaidBookings] = useState<UnpaidBooking[]>([]);
 
-  // Subscription state
-  const [subscriptionStatus, setSubscriptionStatus] = useState<string | null>(
-    null,
-  );
-  const [subscriptionRequired, setSubscriptionRequired] = useState(false);
-  const [subscriptionChecked, setSubscriptionChecked] = useState(false);
-  const [subscriptionExpiresAt, setSubscriptionExpiresAt] = useState<string | null>(null);
   const [identityStatus, setIdentityStatus] = useState<string | null>(null);
   const [identityRequired, setIdentityRequired] = useState(false);
   const [identityChecked, setIdentityChecked] = useState(false);
@@ -139,7 +123,6 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   });
   const presenceChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
   const profileRealtimeChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
-  const subscriptionExpiryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const identityExpiryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const roleFetchInFlightRef = useRef<Promise<void> | null>(null);
   const lastRoleFetchRef = useRef<{ userId: string | null; fetchedAt: number }>({
@@ -174,16 +157,6 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     } catch (e) {
     }
   }, []);
-
-  // Subscriptions are no longer required for any role.
-  const checkSubscription = useCallback(async () => {
-    setSubscriptionStatus(null);
-    setSubscriptionRequired(false);
-    setSubscriptionExpiresAt(null);
-    setSubscriptionChecked(true);
-    return;
-  }, []);
-
 
   const checkIdentityStatus = useCallback(async () => {
     if (!session?.user?.id) {
@@ -369,10 +342,6 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       setIsSystemLocked(false);
       setUnpaidBalance(0);
       setUnpaidBookings([]);
-      setSubscriptionStatus(null);
-      setSubscriptionRequired(false);
-      setSubscriptionChecked(true);
-      setSubscriptionExpiresAt(null);
       setIdentityStatus(null);
       setIdentityRequired(false);
       setIdentityChecked(true);
@@ -444,10 +413,6 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         setIsSystemLocked(false);
         setUnpaidBalance(0);
         setUnpaidBookings([]);
-        setSubscriptionStatus(null);
-        setSubscriptionRequired(false);
-        setSubscriptionChecked(true);
-        setSubscriptionExpiresAt(null);
         setIdentityStatus(null);
         setIdentityRequired(false);
         setIdentityChecked(true);
@@ -479,10 +444,6 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         setIsSystemLocked(false);
         setUnpaidBalance(0);
         setUnpaidBookings([]);
-        setSubscriptionStatus(null);
-        setSubscriptionRequired(false);
-        setSubscriptionChecked(true);
-        setSubscriptionExpiresAt(null);
         setIdentityStatus(null);
         setIdentityRequired(false);
         setIdentityChecked(true);
@@ -552,18 +513,6 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     }
   }, [session?.user?.id, checkSystemLock]);
 
-  // Check subscription when session changes (don't wait for userRole state, 
-  // checkSubscription fetches role from DB directly)
-  useEffect(() => {
-    if (session?.user?.id) {
-      setSubscriptionChecked(false); // Reset before checking
-      checkSubscription();
-    } else {
-      setSubscriptionChecked(true); // No session, no check needed
-      setSubscriptionExpiresAt(null);
-    }
-  }, [session?.user?.id, checkSubscription]);
-
   // Check identity verification and expiry when session changes
   useEffect(() => {
     if (session?.user?.id) {
@@ -577,7 +526,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     }
   }, [session?.user?.id, checkIdentityStatus]);
 
-  // Re-check subscription, identity, and lock state whenever the profile row changes.
+  // Re-check identity and lock state whenever the profile row changes.
   useEffect(() => {
     const activeUserId = session?.user?.id;
 
@@ -600,11 +549,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
           filter: `id=eq.${activeUserId}`,
         },
         async () => {
-          await Promise.all([
-            checkSubscription(),
-            checkIdentityStatus(),
-            checkSystemLock(),
-          ]);
+          await Promise.all([checkIdentityStatus(), checkSystemLock()]);
         },
       )
       .subscribe();
@@ -617,7 +562,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         profileRealtimeChannelRef.current = null;
       }
     };
-  }, [session?.user?.id, checkSubscription, checkIdentityStatus, checkSystemLock]);
+  }, [session?.user?.id, checkIdentityStatus, checkSystemLock]);
 
   // Re-check on app foreground to catch expiry transitions after backgrounding.
   useEffect(() => {
@@ -625,57 +570,14 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
     const appStateSub = AppState.addEventListener("change", (nextState: AppStateStatus) => {
       if (nextState === "active") {
-        void Promise.all([
-          checkSubscription(),
-          checkIdentityStatus(),
-          checkSystemLock(),
-        ]);
+        void Promise.all([checkIdentityStatus(), checkSystemLock()]);
       }
     });
 
     return () => {
       appStateSub.remove();
     };
-  }, [session?.user?.id, checkSubscription, checkIdentityStatus, checkSystemLock]);
-
-  // Trigger re-check exactly when subscription expiry timestamp is reached.
-  useEffect(() => {
-    if (subscriptionExpiryTimerRef.current) {
-      clearTimeout(subscriptionExpiryTimerRef.current);
-      subscriptionExpiryTimerRef.current = null;
-    }
-
-    if (!subscriptionExpiresAt || !session?.user?.id) {
-      return;
-    }
-
-    const expiryDate = new Date(subscriptionExpiresAt);
-    if (Number.isNaN(expiryDate.getTime())) {
-      return;
-    }
-
-    const schedule = () => {
-      const remainingMs = expiryDate.getTime() - Date.now() + 1000;
-      if (remainingMs <= 0) {
-        void checkSubscription();
-        return;
-      }
-
-      const nextDelay = Math.min(remainingMs, 2_147_483_647);
-      subscriptionExpiryTimerRef.current = setTimeout(() => {
-        schedule();
-      }, nextDelay);
-    };
-
-    schedule();
-
-    return () => {
-      if (subscriptionExpiryTimerRef.current) {
-        clearTimeout(subscriptionExpiryTimerRef.current);
-        subscriptionExpiryTimerRef.current = null;
-      }
-    };
-  }, [subscriptionExpiresAt, session?.user?.id, checkSubscription]);
+  }, [session?.user?.id, checkIdentityStatus, checkSystemLock]);
 
   // Trigger re-check exactly when identity document expiry timestamp is reached.
   useEffect(() => {
@@ -802,10 +704,6 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         unpaidBookings,
         checkSystemLock,
         showLockAlert,
-        subscriptionStatus,
-        subscriptionRequired,
-        subscriptionChecked,
-        checkSubscription,
         identityStatus,
         identityRequired,
         identityChecked,
