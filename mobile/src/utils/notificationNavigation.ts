@@ -9,6 +9,8 @@ const isRecord = (value: unknown): value is Record<string, unknown> => (
   !!value && typeof value === "object" && !Array.isArray(value)
 );
 
+const NOTIFICATION_SEVERITY_TYPES = new Set(["success", "info", "warning", "error"]);
+
 const normalizeRoute = (value: unknown) => {
   if (typeof value !== "string") {
     return undefined;
@@ -24,13 +26,40 @@ const normalizeRoute = (value: unknown) => {
 
 const readStringId = (...values: unknown[]) => {
   for (const value of values) {
-    if (typeof value !== "string") {
+    if (typeof value !== "string" && typeof value !== "number") {
       continue;
     }
 
-    const trimmed = value.trim();
+    const trimmed = String(value).trim();
     if (trimmed) {
       return trimmed;
+    }
+  }
+
+  return undefined;
+};
+
+const readNotificationEventType = (
+  record: Record<string, unknown>,
+  meta: Record<string, unknown>,
+) => {
+  const eventTypeCandidates = [
+    meta.event_type,
+    meta.eventType,
+    meta.notification_type,
+    meta.notificationType,
+    meta.type,
+    record.event_type,
+    record.eventType,
+    record.notification_type,
+    record.notificationType,
+    record.type,
+  ];
+
+  for (const candidate of eventTypeCandidates) {
+    const eventType = readStringId(candidate)?.toLowerCase();
+    if (eventType && !NOTIFICATION_SEVERITY_TYPES.has(eventType)) {
+      return eventType;
     }
   }
 
@@ -93,12 +122,21 @@ export const resolveNotificationNavigationTarget = (
       : { pathname: explicitPath };
   }
 
-  const notificationType = readStringId(record.type, meta.type)?.toLowerCase();
+  const notificationType = readNotificationEventType(record, meta);
   if (notificationType === "leadership_transfer") {
     return { pathname: "/notifications" };
   }
 
-  const teamId = readStringId(record.team_id, record.teamId, meta.team_id, meta.teamId);
+  const teamId = readStringId(
+    record.team_id,
+    record.teamId,
+    record.production_team_id,
+    record.productionTeamId,
+    meta.team_id,
+    meta.teamId,
+    meta.production_team_id,
+    meta.productionTeamId,
+  );
   if (teamId) {
     return { pathname: "/production_team", params: { teamId } };
   }

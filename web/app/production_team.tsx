@@ -1,5 +1,5 @@
 ﻿import { Ionicons } from "@expo/vector-icons";
-import { router, useFocusEffect } from "expo-router";
+import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import React, { useCallback, useState } from "react";
 import {
   ActivityIndicator,
@@ -41,6 +41,8 @@ interface TeamMember {
 export default function ProductionTeamScreen() {
   const { colors, isDark } = useTheme();
   const { isAuthenticated, loading: authLoading, userId } = useRequireAuth();
+  const params = useLocalSearchParams<{ teamId?: string }>();
+  const routeTeamId = Array.isArray(params.teamId) ? params.teamId[0] : params.teamId;
 
   const [teams, setTeams] = useState<Team[]>([]);
   const [loading, setLoading] = useState(true);
@@ -92,16 +94,7 @@ export default function ProductionTeamScreen() {
     }
   }, [userId]);
 
-  useFocusEffect(
-    useCallback(() => {
-      if (!authLoading && isAuthenticated) {
-        setLoading(true);
-        fetchTeams();
-      }
-    }, [authLoading, isAuthenticated, fetchTeams])
-  );
-
-  const fetchTeamMembers = async (teamId: string) => {
+  const fetchTeamMembers = useCallback(async (teamId: string) => {
     setLoadingMembers(true);
     try {
       const { data, error } = await supabase
@@ -123,7 +116,56 @@ export default function ProductionTeamScreen() {
     } finally {
       setLoadingMembers(false);
     }
-  };
+  }, []);
+
+  const fetchTeamById = useCallback(async (teamId: string) => {
+    try {
+      const { data, error } = await supabase
+        .from("production_teams")
+        .select("id, name, description, logo_url, owner_id, created_at")
+        .eq("id", teamId)
+        .maybeSingle();
+
+      if (error) throw error;
+
+      if (!data) {
+        showAlert("warning", "Not Found", "Production team not found.");
+        setSelectedTeam(null);
+        return;
+      }
+
+      const { data: membershipData } = await supabase
+        .from("production_team_members")
+        .select("role")
+        .eq("team_id", teamId)
+        .eq("user_id", userId)
+        .maybeSingle();
+
+      setSelectedTeam({
+        ...data,
+        member_role: data.owner_id === userId ? "owner" : membershipData?.role || "viewer",
+      });
+      await fetchTeamMembers(teamId);
+    } catch (e: any) {
+      showAlert("error", "Error", e.message || "Failed to fetch team");
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, [fetchTeamMembers, userId]);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (!authLoading && isAuthenticated) {
+        setLoading(true);
+        if (routeTeamId) {
+          void fetchTeamById(routeTeamId);
+        } else {
+          fetchTeams();
+        }
+      }
+    }, [authLoading, fetchTeamById, fetchTeams, isAuthenticated, routeTeamId])
+  );
 
   const handleCreateTeam = async () => {
     if (!newTeamName.trim()) {
@@ -224,6 +266,11 @@ export default function ProductionTeamScreen() {
   };
 
   const closeTeamDetail = () => {
+    if (routeTeamId) {
+      router.back();
+      return;
+    }
+
     setSelectedTeam(null);
     setTeamMembers([]);
   };

@@ -7,6 +7,7 @@ import {
     useFonts,
 } from "@expo-google-fonts/poppins";
 import { BottomSheetModalProvider } from "@gorhom/bottom-sheet";
+import { PortalProvider } from "@gorhom/portal";
 import * as Linking from "expo-linking";
 import { router, Stack, useSegments } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
@@ -17,6 +18,7 @@ import "../global.css";
 import SidebarNav from "../src/components/SidebarNav";
 import { AuthProvider, useAuth } from "../src/context/AuthContext";
 import { ThemeProvider, useTheme } from "../src/context/ThemeContext";
+import { TopToastProvider } from "../src/context/TopToastContext";
 
 SplashScreen.preventAutoHideAsync();
 
@@ -42,11 +44,15 @@ export default function RootLayout() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <ThemeProvider>
-        <AuthProvider>
-          <BottomSheetModalProvider>
-            <RootContent />
-          </BottomSheetModalProvider>
-        </AuthProvider>
+        <PortalProvider>
+          <TopToastProvider>
+            <AuthProvider>
+              <BottomSheetModalProvider>
+                <RootContent />
+              </BottomSheetModalProvider>
+            </AuthProvider>
+          </TopToastProvider>
+        </PortalProvider>
       </ThemeProvider>
     </GestureHandlerRootView>
   );

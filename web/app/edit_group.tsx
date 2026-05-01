@@ -33,6 +33,7 @@ import {
     getGroupTypeLabel,
     isGroupLeaderMember,
 } from "../src/utils/groupMembers";
+import { buildNotificationRouteMeta } from "../src/utils/notificationNavigation";
 
 import { useLocalSearchParams } from "expo-router";
 import { supabase } from "../lib/supabase";
@@ -1183,12 +1184,12 @@ export default function EditGroupScreen() {
         type: "info",
         title: "Leadership Transfer Request",
         message: `You have been invited to become the leader of "${groupName}". Open to accept or decline.`,
-        meta: {
+        meta: buildNotificationRouteMeta('/notifications', undefined, {
           type: "leadership_transfer",
           request_id: data.id,
           group_id: groupId,
           group_name: groupName,
-        },
+        }),
         read: false,
       });
 

@@ -1,6 +1,6 @@
 ﻿import { router, useLocalSearchParams } from 'expo-router';
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, View } from 'react-native';
+import { ActivityIndicator, Text, TouchableOpacity, View } from 'react-native';
 import { supabase } from '../lib/supabase';
 import ChatScreen from '../src/components/ChatScreen';
 import ConversationsList from '../src/components/ConversationsList';
@@ -10,7 +10,7 @@ import { Conversation, useConversation, useGroupConversation } from '../src/hook
 
 export default function ChatPage() {
     const { colors } = useTheme();
-    const { userId } = useAuth();
+    const { loading: authLoading, userId } = useAuth();
     const params = useLocalSearchParams<{
         recipientId?: string;
         conversationId?: string;
@@ -166,7 +166,7 @@ export default function ChatPage() {
         }
     };
 
-    if (loading) {
+    if (loading || authLoading) {
         return (
             <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.background }}>
                 <ActivityIndicator size="large" color={colors.primary} />
@@ -218,6 +218,53 @@ export default function ChatPage() {
         );
     }
 
-    return null;
+    return (
+        <View
+            style={{
+                flex: 1,
+                justifyContent: 'center',
+                alignItems: 'center',
+                backgroundColor: colors.background,
+                padding: 24,
+            }}
+        >
+            <Text
+                style={{
+                    color: colors.text,
+                    fontFamily: 'Poppins_600SemiBold',
+                    fontSize: 20,
+                    textAlign: 'center',
+                    marginBottom: 8,
+                }}
+            >
+                Sign in to view your messages
+            </Text>
+            <Text
+                style={{
+                    color: colors.textSecondary,
+                    fontFamily: 'Poppins_400Regular',
+                    fontSize: 14,
+                    textAlign: 'center',
+                    marginBottom: 20,
+                }}
+            >
+                Your conversations are available after you sign in.
+            </Text>
+            <TouchableOpacity
+                activeOpacity={1}
+                onPress={() => router.replace('/')}
+                style={{
+                    backgroundColor: colors.primary,
+                    borderRadius: 10,
+                    paddingHorizontal: 20,
+                    paddingVertical: 12,
+                }}
+            >
+                <Text style={{ color: '#FFFFFF', fontFamily: 'Poppins_600SemiBold' }}>
+                    Sign In
+                </Text>
+            </TouchableOpacity>
+        </View>
+    );
 }
 

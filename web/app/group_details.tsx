@@ -211,7 +211,24 @@ export default function GroupDetailsScreen() {
     );
   }
 
-  if (!group) return null;
+  if (!group) {
+    return (
+      <View style={[styles.emptyState, { backgroundColor: colors.background }]}>
+        <Ionicons name="musical-notes-outline" size={42} color={colors.textSecondary} />
+        <Text style={[styles.emptyTitle, { color: colors.text }]}>Group unavailable</Text>
+        <Text style={[styles.emptyMessage, { color: colors.textSecondary }]}>
+          We could not load this group right now.
+        </Text>
+        <TouchableOpacity
+          activeOpacity={1}
+          onPress={() => router.replace('/home')}
+          style={[styles.emptyButton, { backgroundColor: colors.primary }]}
+        >
+          <Text style={styles.emptyButtonText}>Back to Home</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
 
   const isOwner = !!userId && group?.owner_id === userId;
 
@@ -448,6 +465,35 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  emptyState: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 28,
+  },
+  emptyTitle: {
+    fontSize: 22,
+    fontFamily: 'Poppins_600SemiBold',
+    marginTop: 14,
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  emptyMessage: {
+    fontSize: 14,
+    fontFamily: 'Poppins_400Regular',
+    textAlign: 'center',
+    marginBottom: 20,
+  },
+  emptyButton: {
+    borderRadius: 10,
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+  },
+  emptyButtonText: {
+    color: '#FFFFFF',
+    fontFamily: 'Poppins_600SemiBold',
+    fontSize: 14,
   },
   scrollContent: {
     paddingBottom: 120, // Space for bottom bar

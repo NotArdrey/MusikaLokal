@@ -1,5 +1,6 @@
 // @ts-ignore
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { withNotificationRouteMeta } from "../_shared/notificationRoutes.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -41,7 +42,11 @@ async function insertNotification(
     meta?: Record<string, any>;
   },
 ) {
-  await supabaseAdmin.from("notifications").insert({ ...payload, read: false });
+  await supabaseAdmin.from("notifications").insert({
+    ...payload,
+    meta: withNotificationRouteMeta(payload.meta),
+    read: false,
+  });
 }
 
 Deno.serve(async (req: Request) => {

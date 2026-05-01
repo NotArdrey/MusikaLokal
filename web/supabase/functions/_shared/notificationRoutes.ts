@@ -14,15 +14,28 @@ const isRecord = (value: unknown): value is Record<string, unknown> => (
   !!value && typeof value === "object" && !Array.isArray(value)
 );
 
+const NOTIFICATION_SEVERITY_TYPES = new Set(["success", "info", "warning", "error"]);
+
 const readString = (...values: unknown[]) => {
   for (const value of values) {
-    if (typeof value !== "string") {
+    if (typeof value !== "string" && typeof value !== "number") {
       continue;
     }
 
-    const trimmed = value.trim();
+    const trimmed = String(value).trim();
     if (trimmed) {
       return trimmed;
+    }
+  }
+
+  return null;
+};
+
+const readEventType = (...values: unknown[]) => {
+  for (const value of values) {
+    const eventType = readString(value)?.toLowerCase();
+    if (eventType && !NOTIFICATION_SEVERITY_TYPES.has(eventType)) {
+      return eventType;
     }
   }
 
@@ -69,9 +82,20 @@ const normalizeRouteParams = (value: unknown) => {
 const inferNotificationRoute = (
   meta: Record<string, unknown>,
 ): NotificationRouteTarget | null => {
-  const eventType = readString(meta.event_type, meta.type)?.toLowerCase() || null;
+  const eventType = readEventType(
+    meta.event_type,
+    meta.eventType,
+    meta.notification_type,
+    meta.notificationType,
+    meta.type,
+  );
 
-  const teamId = readString(meta.team_id, meta.teamId);
+  const teamId = readString(
+    meta.team_id,
+    meta.teamId,
+    meta.production_team_id,
+    meta.productionTeamId,
+  );
   if (teamId) {
     return {
       pathname: "/production_team",

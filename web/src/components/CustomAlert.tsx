@@ -1,7 +1,8 @@
 import { Ionicons } from "@expo/vector-icons";
 import { BlurView } from "expo-blur";
-import React from "react";
+import React, { useEffect, useMemo } from "react";
 import { Modal, Platform, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { useTopToast } from "../context/TopToastContext";
 import { useTheme } from "../context/ThemeContext";
 
 export type AlertType = "error" | "success" | "warning" | "info";
@@ -57,10 +58,49 @@ export default function CustomAlert({
   title,
   message,
   buttons = [{ text: "OK", style: "default" }],
+  forceModal = false,
   onClose,
 }: CustomAlertProps) {
   const { colors, isDark } = useTheme();
+  const { showToast } = useTopToast();
   const config = alertConfig[type];
+  const hasStructuredMessage = useMemo(() => {
+    return message.includes("\n") || message.includes("•") || message.includes("- ");
+  }, [message]);
+
+  const shouldUseTopToast = useMemo(() => {
+    const firstButton = buttons[0];
+    const hasSingleButton = buttons.length === 1;
+    const isDefaultOkButton =
+      !!firstButton &&
+      firstButton.text.trim().toLowerCase() === "ok" &&
+      !firstButton.onPress &&
+      (!firstButton.style || firstButton.style === "default");
+
+    return (
+      !forceModal &&
+      (type === "success" || type === "info") &&
+      !hasStructuredMessage &&
+      hasSingleButton &&
+      isDefaultOkButton
+    );
+  }, [buttons, forceModal, hasStructuredMessage, type]);
+
+  useEffect(() => {
+    if (!visible || !shouldUseTopToast) return;
+
+    showToast({
+      type,
+      title,
+      message,
+    });
+
+    onClose();
+  }, [message, onClose, shouldUseTopToast, showToast, title, type, visible]);
+
+  if (shouldUseTopToast) {
+    return null;
+  }
 
   const handleButtonPress = (button: AlertButton) => {
     // Call the onPress callback first, then close the alert
@@ -128,7 +168,13 @@ export default function CustomAlert({
           <Text style={[styles.title, { color: colors.text }]}>{title}</Text>
 
           {/* Message */}
-          <Text style={[styles.message, { color: colors.textSecondary }]}>
+          <Text
+            style={[
+              styles.message,
+              { color: colors.textSecondary },
+              hasStructuredMessage ? styles.messageStructured : null,
+            ]}
+          >
             {message}
           </Text>
 
@@ -208,6 +254,10 @@ const styles = StyleSheet.create({
     lineHeight: IS_WEB ? 21 : 22,
     marginBottom: IS_WEB ? 20 : 24,
     fontFamily: 'Poppins_400Regular',
+  },
+  messageStructured: {
+    width: '100%',
+    textAlign: 'left',
   },
   buttonContainer: {
     flexDirection: 'row',

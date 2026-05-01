@@ -2,6 +2,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 // @ts-ignore
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
+import { withNotificationRouteMeta } from "../_shared/notificationRoutes.ts"
 
 const corsHeaders = {
     'Access-Control-Allow-Origin': '*',
@@ -84,7 +85,7 @@ serve(async (req: Request) => {
 
         // 3. CREATE NOTIFICATION (Helper for demo/testing)
         if (action === 'create') {
-            const { userId, title, message, type, image } = params
+            const { userId, title, message, type, image, meta } = params
 
             const { data, error } = await supabaseClient
                 .from('notifications')
@@ -94,6 +95,7 @@ serve(async (req: Request) => {
                     message,
                     type: type || 'info',
                     image,
+                    meta: withNotificationRouteMeta(meta),
                     read: false
                 }])
                 .select()

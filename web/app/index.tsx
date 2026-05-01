@@ -641,6 +641,8 @@ export default function LoginScreen() {
                   ]}>
                     <Ionicons name="mail-outline" size={20} color={colors.textSecondary} />
                     <TextInput
+                      testID="auth-email-input"
+                      accessibilityLabel="auth-email-input"
                       style={[styles.input, themeStyles.text]}
                       placeholder="name@email.com"
                       placeholderTextColor={colors.textSecondary}
@@ -669,6 +671,8 @@ export default function LoginScreen() {
                   ]}>
                     <Ionicons name="lock-closed-outline" size={20} color={colors.textSecondary} />
                     <TextInput
+                      testID="auth-password-input"
+                      accessibilityLabel="auth-password-input"
                       style={[styles.input, themeStyles.text]}
                       placeholder="Enter your password"
                       placeholderTextColor={colors.textSecondary}
@@ -679,14 +683,25 @@ export default function LoginScreen() {
                       }}
                       secureTextEntry={!showPassword}
                     />
-                    <TouchableOpacity activeOpacity={1} onPress={() => setShowPassword(!showPassword)}>
+                    <TouchableOpacity
+                      activeOpacity={1}
+                      testID="auth-toggle-password-button"
+                      accessibilityLabel="auth-toggle-password-button"
+                      onPress={() => setShowPassword(!showPassword)}
+                    >
                       <Ionicons name={showPassword ? "eye-off-outline" : "eye-outline"} size={20} color={colors.textSecondary} />
                     </TouchableOpacity>
                   </View>
                   {errors.password ? (
                     <Text style={styles.errorText}>{errors.password}</Text>
                   ) : (
-                    <TouchableOpacity activeOpacity={1} onPress={() => router.push('/forget_password' as any)} style={styles.forgotPasswordButton}>
+                    <TouchableOpacity
+                      activeOpacity={1}
+                      testID="auth-forgot-password-link"
+                      accessibilityLabel="auth-forgot-password-link"
+                      onPress={() => router.push('/forget_password' as any)}
+                      style={styles.forgotPasswordButton}
+                    >
                       <Text style={[styles.forgotPasswordText, themeStyles.primaryText]}>
                         Forgot Password?
                       </Text>
@@ -695,6 +710,8 @@ export default function LoginScreen() {
                 </View>
 
                 <TouchableOpacity
+                  testID="auth-sign-in-button"
+                  accessibilityLabel="auth-sign-in-button"
                   onPress={handleLogin}
                   disabled={loading}
                   activeOpacity={1}
@@ -717,6 +734,8 @@ export default function LoginScreen() {
                     {TEMP_LOGIN_OPTIONS.map((option) => (
                       <TouchableOpacity
                         key={option.email}
+                        testID={`auth-temp-login-${option.expectedRole}`}
+                        accessibilityLabel={`auth-temp-login-${option.expectedRole}`}
                         onPress={() => handleTemporaryLogin(option)}
                         disabled={loading}
                         activeOpacity={1}
@@ -737,6 +756,8 @@ export default function LoginScreen() {
                 </View>
 
                 <TouchableOpacity
+                  testID="auth-continue-guest-button"
+                  accessibilityLabel="auth-continue-guest-button"
                   onPress={handleContinueAsGuest}
                   activeOpacity={1}
                   style={[styles.guestButton, { borderColor: colors.border }]}
@@ -756,7 +777,12 @@ export default function LoginScreen() {
                   <Text style={[styles.signupLinkText, themeStyles.textSecondary]}>
                     Don&apos;t have an account?{' '}
                   </Text>
-                  <TouchableOpacity activeOpacity={1} onPress={() => router.push('/signup' as any)}>
+                  <TouchableOpacity
+                    activeOpacity={1}
+                    testID="auth-create-account-link"
+                    accessibilityLabel="auth-create-account-link"
+                    onPress={() => router.push('/signup' as any)}
+                  >
                     <Text style={[styles.signupLinkHighlight, themeStyles.primaryText]}>
                       Create Account
                     </Text>

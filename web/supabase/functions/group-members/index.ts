@@ -1,5 +1,6 @@
 // @ts-ignore
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { buildNotificationRouteMeta } from "../_shared/notificationRoutes.ts";
 
 const corsHeaders = {
     'Access-Control-Allow-Origin': '*',
@@ -166,7 +167,10 @@ Deno.serve(async (req: Request) => {
                 type: 'success',
                 title: 'Added to Group',
                 message: `You have been added to the group "${group.name}"`,
-                meta: { type: 'group_member_added', group_id: groupId }
+                meta: buildNotificationRouteMeta('/group_details', { id: groupId }, {
+                    type: 'group_member_added',
+                    group_id: groupId,
+                })
             });
 
             return new Response(JSON.stringify(data), {
@@ -227,7 +231,10 @@ Deno.serve(async (req: Request) => {
                     type: 'warning',
                     title: 'Removed from Group',
                     message: `You have been removed from the group "${group.name}"`,
-                    meta: { type: 'group_member_removed', group_id: groupId }
+                    meta: buildNotificationRouteMeta('/group_details', { id: groupId }, {
+                        type: 'group_member_removed',
+                        group_id: groupId,
+                    })
                 });
             }
 

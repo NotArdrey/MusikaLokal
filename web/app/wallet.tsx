@@ -969,7 +969,7 @@ export default function WalletScreen() {
                 ))}
 
                 <Text style={styles.unpaidWarning}>
-                  ⚠️ Please settle your outstanding balance to continue using the app
+                  You can settle outstanding balances from Activity when ready.
                 </Text>
               </View>
             </View>

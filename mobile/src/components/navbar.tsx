@@ -199,6 +199,9 @@ function Navbar({ global = false, forceVisible = false }: NavbarProps) {
                         return (
                             <TouchableOpacity activeOpacity={1}
                                 key={item.id}
+                                testID={`nav-${item.id}`}
+                                accessibilityRole="button"
+                                accessibilityLabel={`nav-${item.id}`}
                                 style={[
                                     styles.tabButton,
                                     isActive && { backgroundColor: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.05)' }

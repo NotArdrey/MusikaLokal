@@ -11,7 +11,6 @@ import React, {
 } from "react";
 import { AppState, AppStateStatus } from "react-native";
 import { clearSupabaseAuthStorage, supabase } from "../../lib/supabase";
-import CustomAlert, { AlertType } from "../components/CustomAlert";
 
 type UnpaidBooking = {
   id: string;
@@ -29,7 +28,7 @@ type AuthContextType = {
   userRole: string | null;
   roleResolved: boolean;
   userId: string | null;
-  // System lock for unpaid balances
+  // Backward-compatible fields; unpaid balances no longer lock app actions.
   isSystemLocked: boolean;
   unpaidBalance: number;
   unpaidBookings: UnpaidBooking[];
@@ -101,7 +100,8 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [userRole, setUserRole] = useState<string | null>(null);
   const [roleResolved, setRoleResolved] = useState(false);
 
-  // System lock state
+  // Payment reminder state. Outstanding balances are surfaced in wallet/activity,
+  // but they no longer lock app actions.
   const [isSystemLocked, setIsSystemLocked] = useState(false);
   const [unpaidBalance, setUnpaidBalance] = useState(0);
   const [unpaidBookings, setUnpaidBookings] = useState<UnpaidBooking[]>([]);
@@ -110,17 +110,6 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [identityRequired, setIdentityRequired] = useState(false);
   const [identityChecked, setIdentityChecked] = useState(false);
   const [identityExpiresAt, setIdentityExpiresAt] = useState<string | null>(null);
-  const [alertVisible, setAlertVisible] = useState(false);
-  const [alertConfig, setAlertConfig] = useState<{
-    type: AlertType;
-    title: string;
-    message: string;
-    buttons?: any[];
-  }>({
-    type: "info",
-    title: "",
-    message: "",
-  });
   const presenceChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
   const profileRealtimeChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
   const identityExpiryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -132,19 +121,6 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
   const ROLE_FETCH_COOLDOWN_MS = 5000;
   const AUTH_DEBUG_LOGS = false;
-
-  const showAlert = useCallback(
-    (
-      type: AlertType,
-      title: string,
-      message: string,
-      buttons?: any[],
-    ) => {
-      setAlertConfig({ type, title, message, buttons });
-      setAlertVisible(true);
-    },
-    [],
-  );
 
   const setGuestMode = useCallback(async (enabled: boolean) => {
     setIsGuest(enabled);
@@ -226,73 +202,17 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     }
   }, [session?.user?.id]);
 
-  // Check for unpaid balances
+  // Outstanding balances should not block product actions.
   const checkSystemLock = useCallback(async () => {
-    if (!session?.user?.id) {
-      setIsSystemLocked(false);
-      setUnpaidBalance(0);
-      setUnpaidBookings([]);
-      return;
-    }
+    setIsSystemLocked(false);
+    setUnpaidBalance(0);
+    setUnpaidBookings((current) => (current.length > 0 ? [] : current));
+  }, []);
 
-    try {
-      const { data: bookings, error } = await supabase
-        .from("studio_bookings")
-        .select("id, remaining_balance, booking_date, studio:studios(name)")
-        .eq("user_id", session.user.id)
-        .gt("remaining_balance", 0)
-        .in("status", ["pending", "confirmed"]);
-
-      if (error) {
-        return;
-      }
-
-      if (bookings && bookings.length > 0) {
-        const totalBalance = bookings.reduce(
-          (sum, b) => sum + (b.remaining_balance || 0),
-          0,
-        );
-        setUnpaidBalance(totalBalance);
-        setUnpaidBookings(
-          bookings.map((b) => ({
-            id: b.id,
-            remaining_balance: b.remaining_balance,
-            studio_name: (b.studio as any)?.name || "Unknown Studio",
-            booking_date: b.booking_date,
-          })),
-        );
-        setIsSystemLocked(true);
-      } else {
-        setIsSystemLocked(false);
-        setUnpaidBalance(0);
-        setUnpaidBookings([]);
-      }
-    } catch (e) {
-    }
-  }, [session?.user?.id]);
-
-  // Show lock alert and redirect to bookings (Pending tab has "Pay Balance" button)
-  // onBeforeNavigate is optional — callers like ListingDetailsSheet pass it to close the BottomSheet first
+  // Compatibility no-op for callers that still reference the old payment gate.
   const showLockAlert = useCallback((onBeforeNavigate?: () => void) => {
-    showAlert(
-      "warning",
-      "Action Blocked",
-      `You have an outstanding balance of ₱${unpaidBalance.toLocaleString()}. Please settle your payment to continue using the app.`,
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Pay Now",
-          onPress: () => {
-            if (onBeforeNavigate) onBeforeNavigate();
-            // Navigate to the Pending tab in bookings where the "Pay Balance" button lives
-            setTimeout(() => {
-              router.navigate({ pathname: "/bookings", params: { tab: "Pending" } });
-            }, 100);
-          },
-        },
-      ],
-    );
-  }, [showAlert, unpaidBalance]);
+    onBeforeNavigate?.();
+  }, []);
 
   useEffect(() => {
     AsyncStorage.getItem("auth_guest_mode")
@@ -506,7 +426,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     };
   }, [session?.user?.id]);
 
-  // Check system lock when session changes
+  // Reset legacy payment gate state when session changes.
   useEffect(() => {
     if (session?.user?.id) {
       checkSystemLock();
@@ -711,14 +631,6 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       }}
     >
       {children}
-      <CustomAlert
-        visible={alertVisible}
-        type={alertConfig.type}
-        title={alertConfig.title}
-        message={alertConfig.message}
-        buttons={alertConfig.buttons}
-        onClose={() => setAlertVisible(false)}
-      />
     </AuthContext.Provider>
   );
 };

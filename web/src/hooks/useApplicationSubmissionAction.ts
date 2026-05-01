@@ -1,5 +1,6 @@
 import { useCallback, useRef } from "react";
 import { supabase } from "../../lib/supabase";
+import { buildNotificationRouteMeta } from "../utils/notificationNavigation";
 
 interface AlertConfig {
   type: "success" | "error" | "warning" | "info";
@@ -209,12 +210,12 @@ export const useApplicationSubmissionAction = ({
                 type: "info",
                 title: "New Gig Application",
                 message: `You have a new application for "${group.name}".`,
-                meta: {
+                meta: buildNotificationRouteMeta("/manage_gig", { id: listingId }, {
                   gig_id: listingId,
                   application_id: data.id,
                   applicant_id: userId,
                   group_id: selectedGroupId || null,
-                },
+                }),
               },
             });
           }
@@ -239,7 +240,10 @@ export const useApplicationSubmissionAction = ({
               type: "info",
               title: "Group Gig Application",
               message: `${selectedGroup?.name || "Your group"} has applied for "${group.name}". Check the gig details for more info.`,
-              meta: { gig_id: listingId, application_id: data.id },
+              meta: buildNotificationRouteMeta("/bookings", undefined, {
+                gig_id: listingId,
+                application_id: data.id,
+              }),
             }));
 
             await supabase.functions.invoke("listings-crud", {
