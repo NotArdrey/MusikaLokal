@@ -388,6 +388,11 @@ export default function MarketplaceScreen() {
     }
   };
 
+  const parsedListingPrice = Number.parseFloat(newPrice);
+  const isProductFormReady =
+    newTitle.trim().length > 0 &&
+    (!newPrice.trim() || Number.isFinite(parsedListingPrice));
+
   const handleListingStatus = async (productId: string, action: "publish_product" | "mark_product_sold" | "relist_product") => {
     setStatusUpdatingId(productId);
     try {
@@ -814,11 +819,11 @@ export default function MarketplaceScreen() {
                 })}
               </ScrollView>
               <TouchableOpacity activeOpacity={1}
-                style={[styles.submitBtn, { backgroundColor: colors.primary, opacity: adding ? 0.6 : 1 }]}
+                style={[styles.submitBtn, { backgroundColor: isProductFormReady ? colors.primary : colors.border, opacity: adding ? 0.6 : 1 }]}
                 onPress={handleSubmitProduct}
-                disabled={adding}
+                disabled={adding || !isProductFormReady}
               >
-                {adding ? <ActivityIndicator color="#fff" /> : <Text style={styles.submitBtnText}>{editingProductId ? "Save Changes" : "Post Listing"}</Text>}
+                {adding ? <ActivityIndicator color="#fff" /> : <Text style={[styles.submitBtnText, { color: isProductFormReady ? "#FFFFFF" : colors.textSecondary }]}>{editingProductId ? "Save Changes" : "Post Listing"}</Text>}
               </TouchableOpacity>
             </ScrollView>
           </View>

@@ -130,6 +130,7 @@ export default function AdminStationsPage() {
     }
     return result;
   }, [sources]);
+  const isStationEditorReady = selectedPlaylistIds.length > 0;
 
   const openSourceEditor = useCallback((source: any) => {
     setEditingSource(source);
@@ -532,12 +533,12 @@ export default function AdminStationsPage() {
               </TouchableOpacity>
               <TouchableOpacity
                 activeOpacity={1}
-                disabled={editorBusy}
+                disabled={editorBusy || !isStationEditorReady}
                 onPress={saveStation}
-                style={[styles.primaryBtn, { backgroundColor: colors.primary, opacity: editorBusy ? 0.7 : 1 }]}
+                style={[styles.primaryBtn, { backgroundColor: isStationEditorReady ? colors.primary : colors.border, opacity: editorBusy ? 0.7 : 1 }]}
               >
-                {editorBusy ? <ActivityIndicator size="small" color="#FFFFFF" /> : <Ionicons name="save-outline" size={17} color="#FFFFFF" />}
-                <Text style={styles.primaryBtnText}>Save Station</Text>
+                {editorBusy ? <ActivityIndicator size="small" color="#FFFFFF" /> : <Ionicons name="save-outline" size={17} color={isStationEditorReady ? "#FFFFFF" : colors.textSecondary} />}
+                <Text style={[styles.primaryBtnText, { color: isStationEditorReady ? "#FFFFFF" : colors.textSecondary }]}>Save Station</Text>
               </TouchableOpacity>
             </View>
           </View>

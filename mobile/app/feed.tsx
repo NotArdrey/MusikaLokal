@@ -2296,11 +2296,11 @@ export default function FeedScreen() {
               <TouchableOpacity activeOpacity={1} onPress={() => setShowCreate(false)}><Ionicons name="close" size={24} color={colors.text} /></TouchableOpacity>
               <Text style={[styles.modalTitle, { color: colors.text }]}>Create Post</Text>
               <TouchableOpacity activeOpacity={1}
-                style={[styles.postBtn, { backgroundColor: colors.primary, opacity: creating || !postBody.trim() ? 0.5 : 1 }]}
+                style={[styles.postBtn, { backgroundColor: postBody.trim() ? colors.primary : colors.border, opacity: creating ? 0.6 : 1 }]}
                 onPress={handleCreatePost}
                 disabled={creating || !postBody.trim()}
               >
-                {creating ? <ActivityIndicator color="#fff" size="small" /> : <Text style={styles.postBtnText}>Post</Text>}
+                {creating ? <ActivityIndicator color="#fff" size="small" /> : <Text style={[styles.postBtnText, { color: postBody.trim() ? "#fff" : colors.textSecondary }]}>Post</Text>}
               </TouchableOpacity>
             </View>
             <View style={styles.composerAuthorRow}>

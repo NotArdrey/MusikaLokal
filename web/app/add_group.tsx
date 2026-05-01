@@ -848,6 +848,19 @@ export default function AddGroupScreen() {
   const disableNextForMissingInstruments =
     step === 2 &&
     (membersMissingInstrumentCount > 0 || membersNeedFinalizationCount > 0);
+  const selectedGroupType = PH_MUSIC_GROUP_TYPES.find((type) => type.id === groupType);
+  const requiredMemberCount = selectedGroupType?.minMembers || 1;
+  const remainingMemberCount = Math.max(requiredMemberCount - members.length, 0);
+  const isCurrentStepComplete =
+    step === 1
+      ? groupName.trim().length > 0 &&
+        selectedGenres.length > 0 &&
+        description.trim().length > 0 &&
+        Boolean(address && latitude && longitude) &&
+        images.length > 0
+      : step === 2
+        ? remainingMemberCount === 0 && !disableNextForMissingInstruments
+        : true;
 
   return (
     <>
@@ -1762,7 +1775,7 @@ export default function AddGroupScreen() {
             {/* Navigation Buttons */}
             {!isKeyboardVisible && (
               <View style={styles.navigationButtons}>
-                {disableNextForMissingInstruments && (
+                {(remainingMemberCount > 0 || disableNextForMissingInstruments) && (
                   <Text
                     style={{
                       width: "100%",
@@ -1773,11 +1786,13 @@ export default function AddGroupScreen() {
                       fontSize: 12,
                     }}
                   >
-                    {leaderNeedsFinalization
-                      ? "Tap the check icon to finalize the leader instrument."
-                      : nonLeaderNeedsFinalization
-                        ? "Tap each check icon to finalize member instruments."
-                        : "Add instruments for all members to continue."}
+                    {remainingMemberCount > 0
+                      ? `${selectedGroupType?.label || "This group type"} requires at least ${requiredMemberCount} members. Add ${remainingMemberCount} more member${remainingMemberCount === 1 ? "" : "s"} to continue.`
+                      : leaderNeedsFinalization
+                        ? "Tap the check icon to finalize the leader instrument."
+                        : nonLeaderNeedsFinalization
+                          ? "Tap each check icon to finalize member instruments."
+                          : "Add instruments for all members to continue."}
                   </Text>
                 )}
                 <TouchableOpacity
@@ -1805,17 +1820,19 @@ export default function AddGroupScreen() {
                 </TouchableOpacity>
                 <TouchableOpacity
                   onPress={handleNext}
-                  disabled={creating || disableNextForMissingInstruments}
+                  disabled={creating || !isCurrentStepComplete}
                   activeOpacity={1}
                   style={[
                     styles.nextBtn,
                     {
-                      backgroundColor: creating || disableNextForMissingInstruments
+                      backgroundColor: creating
                         ? isDark
                           ? "#4338CA"
                           : "#9CA3AF"
-                        : colors.primary,
-                      opacity: creating || disableNextForMissingInstruments ? 0.7 : 1,
+                        : isCurrentStepComplete
+                          ? colors.primary
+                          : colors.border,
+                      opacity: creating ? 0.7 : 1,
                       flex: 1
                     },
                   ]}
@@ -1823,7 +1840,7 @@ export default function AddGroupScreen() {
                   {creating ? (
                     <ActivityIndicator color="#fff" size="small" />
                   ) : (
-                    <Text style={styles.nextBtnText}>
+                    <Text style={[styles.nextBtnText, { color: isCurrentStepComplete ? "#FFFFFF" : colors.textSecondary }]}>
                       {step === 3 ? "Create Group" : "Next"}
                     </Text>
                   )}

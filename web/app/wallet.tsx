@@ -106,6 +106,22 @@ export default function WalletScreen() {
     title: '',
     message: '',
   });
+  const parsedTopUpAmount = Number(topUpAmount);
+  const isTopUpReady = Number.isFinite(parsedTopUpAmount) && parsedTopUpAmount >= 50;
+  const parsedWithdrawAmount = Number(withdrawAmount);
+  const isWithdrawReady =
+    Number.isFinite(parsedWithdrawAmount) &&
+    parsedWithdrawAmount >= 100 &&
+    parsedWithdrawAmount <= balance &&
+    (
+      withdrawalMethod === 'payout'
+        ? Boolean(selectedPayoutMethod)
+        : hasRefundEligiblePayments && parsedWithdrawAmount <= maxRefundableAmount
+    );
+  const isPayoutMethodReady =
+    newAccountName.trim().length > 0 &&
+    newAccountNumber.trim().length > 0 &&
+    (newPayoutType !== 'bank' || newBankName.trim().length > 0);
 
   const showAlert = (type: AlertType, title: string, message: string, buttons?: any[]) => {
     setAlertConfig({ type, title, message, buttons });
@@ -1162,18 +1178,18 @@ export default function WalletScreen() {
 
             <TouchableOpacity activeOpacity={1}
               onPress={handleTopUp}
-              disabled={isTopping || !topUpAmount || parseFloat(topUpAmount) < 50}
+              disabled={isTopping || !isTopUpReady}
               style={[
                 styles.withdrawSubmitBtn,
                 {
-                  backgroundColor: (!topUpAmount || parseFloat(topUpAmount) < 50) ? colors.border : colors.primary,
+                  backgroundColor: isTopUpReady ? colors.primary : colors.border,
                   marginTop: 24,
                 }
               ]}
             >
               {isTopping
                 ? <ActivityIndicator size="small" color="white" />
-                : <Text style={styles.withdrawSubmitText}>Proceed to Payment</Text>
+                : <Text style={[styles.withdrawSubmitText, { color: isTopUpReady ? "white" : colors.textSecondary }]}>Proceed to Payment</Text>
               }
             </TouchableOpacity>
           </View>
@@ -1436,24 +1452,11 @@ export default function WalletScreen() {
             {/* Submit Button */}
             <TouchableOpacity activeOpacity={1}
               onPress={handleWithdraw}
-              disabled={
-                withdrawing ||
-                !withdrawAmount ||
-                parseFloat(withdrawAmount) < 100 ||
-                (withdrawalMethod === 'payout' && !selectedPayoutMethod) ||
-                (withdrawalMethod === 'refund' && (!hasRefundEligiblePayments || parseFloat(withdrawAmount) > maxRefundableAmount))
-              }
+              disabled={withdrawing || !isWithdrawReady}
               style={[
                 styles.withdrawSubmitBtn,
                 {
-                  backgroundColor: (
-                    !withdrawAmount ||
-                    parseFloat(withdrawAmount) < 100 ||
-                    (withdrawalMethod === 'payout' && !selectedPayoutMethod) ||
-                    (withdrawalMethod === 'refund' && (!hasRefundEligiblePayments || parseFloat(withdrawAmount) > maxRefundableAmount))
-                  )
-                    ? colors.border
-                    : colors.primary,
+                  backgroundColor: isWithdrawReady ? colors.primary : colors.border,
                   opacity: withdrawing ? 0.7 : 1
                 }
               ]}
@@ -1462,8 +1465,8 @@ export default function WalletScreen() {
                 <ActivityIndicator size="small" color="white" />
               ) : (
                 <>
-                  <Ionicons name={withdrawalMethod === 'refund' ? 'refresh' : 'arrow-down-circle'} size={20} color="white" />
-                  <Text style={styles.withdrawSubmitText}>
+                  <Ionicons name={withdrawalMethod === 'refund' ? 'refresh' : 'arrow-down-circle'} size={20} color={isWithdrawReady ? "white" : colors.textSecondary} />
+                  <Text style={[styles.withdrawSubmitText, { color: isWithdrawReady ? "white" : colors.textSecondary }]}>
                     {withdrawalMethod === 'refund' ? 'Request Refund' : 'Confirm Withdrawal'}
                   </Text>
                 </>
@@ -1577,15 +1580,15 @@ export default function WalletScreen() {
             {/* Add Button */}
             <TouchableOpacity activeOpacity={1}
               onPress={handleAddPayoutMethod}
-              disabled={addingPayoutMethod}
-              style={[styles.withdrawSubmitBtn, { backgroundColor: colors.primary, opacity: addingPayoutMethod ? 0.7 : 1 }]}
+              disabled={addingPayoutMethod || !isPayoutMethodReady}
+              style={[styles.withdrawSubmitBtn, { backgroundColor: isPayoutMethodReady ? colors.primary : colors.border, opacity: addingPayoutMethod ? 0.7 : 1 }]}
             >
               {addingPayoutMethod ? (
                 <ActivityIndicator size="small" color="white" />
               ) : (
                 <>
-                  <Ionicons name="add-circle" size={20} color="white" />
-                  <Text style={styles.withdrawSubmitText}>Add Payout Method</Text>
+                  <Ionicons name="add-circle" size={20} color={isPayoutMethodReady ? "white" : colors.textSecondary} />
+                  <Text style={[styles.withdrawSubmitText, { color: isPayoutMethodReady ? "white" : colors.textSecondary }]}>Add Payout Method</Text>
                 </>
               )}
             </TouchableOpacity>

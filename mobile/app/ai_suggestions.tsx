@@ -1167,7 +1167,7 @@ export default function AiSuggestionsScreen() {
                                     },
                                 ]}
                             >
-                                <Ionicons name="send" size={16} color="#FFFFFF" />
+                                <Ionicons name="send" size={16} color={followupQuestion.trim() ? "#FFFFFF" : colors.textSecondary} />
                             </TouchableOpacity>
                         </View>
                     </View>

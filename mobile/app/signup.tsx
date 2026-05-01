@@ -490,6 +490,14 @@ export default function SignupScreen() {
             borderColor: isDark ? '#374151' : '#E5E7EB',
         }
     };
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    const isDetailsStepReady =
+        isAllowedSignupRole(selectedRole) &&
+        emailRegex.test(email.trim()) &&
+        password.length >= 6 &&
+        password === confirmPassword &&
+        Boolean(selectedDocumentOption?.key);
+    const isManualReviewReady = !selectedDocumentOption.diditSupported && Boolean(manualFrontImage);
 
     const handleDocumentSelect = (documentKey: string) => {
         setSelectedDocumentKey(documentKey);
@@ -864,7 +872,6 @@ export default function SignupScreen() {
         }
 
         // Basic Validation
-        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
         if (!email) newErrors.email = 'Required';
         else if (!emailRegex.test(email)) newErrors.email = 'Invalid email';
 
@@ -1220,11 +1227,11 @@ export default function SignupScreen() {
 
             <TouchableOpacity
                 onPress={handleNext}
-                disabled={loading}
+                disabled={loading || !isDetailsStepReady}
                 activeOpacity={1}
-                style={[styles.nextButton, themeStyles.primaryButton]}
+                style={[styles.nextButton, { backgroundColor: isDetailsStepReady ? colors.primary : colors.border }]}
             >
-                {loading ? <ActivityIndicator color="white" /> : <Text style={styles.nextButtonText}>Next</Text>}
+                {loading ? <ActivityIndicator color="white" /> : <Text style={[styles.nextButtonText, { color: isDetailsStepReady ? "white" : colors.textSecondary }]}>Next</Text>}
             </TouchableOpacity>
 
             <RNModal
@@ -1460,10 +1467,10 @@ export default function SignupScreen() {
                         <TouchableOpacity
                             activeOpacity={1}
                             onPress={() => void submitManualReviewSignup()}
-                            disabled={loading}
-                            style={[styles.nextButton, themeStyles.primaryButton, { marginTop: 8 }]}
+                            disabled={loading || !isManualReviewReady}
+                            style={[styles.nextButton, { backgroundColor: isManualReviewReady ? colors.primary : colors.border, marginTop: 8 }]}
                         >
-                            {loading ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.nextButtonText}>Submit for Manual Review</Text>}
+                            {loading ? <ActivityIndicator color="#FFFFFF" /> : <Text style={[styles.nextButtonText, { color: isManualReviewReady ? "white" : colors.textSecondary }]}>Submit for Manual Review</Text>}
                         </TouchableOpacity>
                     </ScrollView>
                 </View>

@@ -1349,6 +1349,17 @@ export default function EditGroupScreen() {
     membersMissingInstrumentCount > 0 ||
     leaderNeedsFinalization ||
     nonLeaderNeedsFinalizationCount > 0;
+  const selectedGroupType = PH_MUSIC_GROUP_TYPES.find((type) => type.id === groupType);
+  const requiredMemberCount = selectedGroupType?.minMembers || 1;
+  const remainingMemberCount = Math.max(requiredMemberCount - members.length, 0);
+  const isFormComplete =
+    groupName.trim().length > 0 &&
+    selectedGenres.length > 0 &&
+    description.trim().length > 0 &&
+    Boolean(address && latitude && longitude) &&
+    images.length > 0 &&
+    remainingMemberCount === 0 &&
+    !disableSaveForMissingInstruments;
 
   // Show loading while checking authorization
   if (checkingAuth) {
@@ -2093,7 +2104,7 @@ export default function EditGroupScreen() {
           </Text>
 
           <View style={styles.footerActions}>
-            {disableSaveForMissingInstruments && (
+            {(remainingMemberCount > 0 || disableSaveForMissingInstruments) && (
               <Text
                 style={{
                   width: "100%",
@@ -2104,31 +2115,35 @@ export default function EditGroupScreen() {
                   fontSize: 12,
                 }}
               >
-                {leaderNeedsFinalization
-                  ? "Tap the check icon to finalize the leader instrument before saving."
-                  : nonLeaderNeedsFinalizationCount > 0
-                    ? "Tap each check icon to finalize member instruments before saving."
-                    : "Add instruments for all members before saving."}
+                {remainingMemberCount > 0
+                  ? `${selectedGroupType?.label || "This group type"} requires at least ${requiredMemberCount} members. Add ${remainingMemberCount} more member${remainingMemberCount === 1 ? "" : "s"} before saving.`
+                  : leaderNeedsFinalization
+                    ? "Tap the check icon to finalize the leader instrument before saving."
+                    : nonLeaderNeedsFinalizationCount > 0
+                      ? "Tap each check icon to finalize member instruments before saving."
+                      : "Add instruments for all members before saving."}
               </Text>
             )}
             <TouchableOpacity
               style={[
                 styles.saveButton,
                 {
-                  backgroundColor: saving || disableSaveForMissingInstruments
+                  backgroundColor: saving
                     ? colors.textSecondary
-                    : colors.primary,
+                    : isFormComplete
+                      ? colors.primary
+                      : colors.border,
                   shadowColor: colors.primary,
                 },
               ]}
               onPress={handleSave}
-              disabled={saving || disableSaveForMissingInstruments}
+              disabled={saving || !isFormComplete}
               activeOpacity={1}
             >
               {saving ? (
                 <ActivityIndicator size="small" color="#fff" />
               ) : (
-                <Text style={styles.saveButtonText}>Save Changes</Text>
+                <Text style={[styles.saveButtonText, { color: isFormComplete ? "#FFFFFF" : colors.textSecondary }]}>Save Changes</Text>
               )}
             </TouchableOpacity>
 

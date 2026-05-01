@@ -379,6 +379,15 @@ export default function CreatePlaylistScreen() {
     }
   };
 
+  const hasValidTrackDrafts = trackDrafts.every((track) => {
+    const hasAnyDraftValue =
+      track.title.trim().length > 0 ||
+      track.artist_name.trim().length > 0 ||
+      Boolean(track.audio_file);
+    return !hasAnyDraftValue || track.title.trim().length > 0;
+  });
+  const isSaveReady = title.trim().length > 0 && hasValidTrackDrafts;
+
   if (loading) {
     return (
       <View style={[styles.container, { backgroundColor: colors.background }]}>
@@ -536,14 +545,14 @@ export default function CreatePlaylistScreen() {
         )}
 
         <TouchableOpacity activeOpacity={1}
-          style={[styles.saveBtn, { backgroundColor: colors.primary, opacity: saving || authLoading ? 0.6 : 1 }]}
+          style={[styles.saveBtn, { backgroundColor: isSaveReady ? colors.primary : colors.border, opacity: saving || authLoading ? 0.6 : 1 }]}
           onPress={handleSave}
-          disabled={saving || authLoading}
+          disabled={saving || authLoading || !isSaveReady}
         >
           {saving ? (
             <ActivityIndicator color="#fff" />
           ) : (
-            <Text style={styles.saveBtnText}>{isEditing ? "Update Playlist" : "Create Playlist"}</Text>
+            <Text style={[styles.saveBtnText, { color: isSaveReady ? "#FFFFFF" : colors.textSecondary }]}>{isEditing ? "Update Playlist" : "Create Playlist"}</Text>
           )}
         </TouchableOpacity>
 

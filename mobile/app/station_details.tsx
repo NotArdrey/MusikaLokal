@@ -245,6 +245,7 @@ export default function StationDetailsScreen() {
       setSaving(false);
     }
   };
+  const isEditStationReady = editName.trim().length > 0;
 
   const handleToggleActive = async () => {
     if (!station) return;
@@ -633,8 +634,8 @@ export default function StationDetailsScreen() {
               <TouchableOpacity activeOpacity={1} style={[styles.modalBtn, { borderColor: isDark ? "#334155" : "#E2E8F0" }]} onPress={() => setEditModalVisible(false)}>
                 <Text style={{ color: colors.textSecondary, fontWeight: "600" }}>Cancel</Text>
               </TouchableOpacity>
-              <TouchableOpacity activeOpacity={1} style={[styles.modalBtn, { backgroundColor: colors.primary }]} onPress={handleEditSave} disabled={saving}>
-                {saving ? <ActivityIndicator color="#fff" size="small" /> : <Text style={{ color: "#fff", fontWeight: "700" }}>Save</Text>}
+              <TouchableOpacity activeOpacity={1} style={[styles.modalBtn, { backgroundColor: isEditStationReady ? colors.primary : colors.border }]} onPress={handleEditSave} disabled={saving || !isEditStationReady}>
+                {saving ? <ActivityIndicator color="#fff" size="small" /> : <Text style={{ color: isEditStationReady ? "#fff" : colors.textSecondary, fontWeight: "700" }}>Save</Text>}
               </TouchableOpacity>
             </View>
           </View>

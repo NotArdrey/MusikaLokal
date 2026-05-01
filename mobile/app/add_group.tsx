@@ -995,6 +995,16 @@ export default function AddGroupScreen() {
   const selectedGroupType = PH_MUSIC_GROUP_TYPES.find((type) => type.id === groupType);
   const requiredMemberCount = selectedGroupType?.minMembers || 1;
   const remainingMemberCount = Math.max(requiredMemberCount - members.length, 0);
+  const isCurrentStepComplete =
+    step === 1
+      ? groupName.trim().length > 0 &&
+        selectedGenres.length > 0 &&
+        description.trim().length > 0 &&
+        Boolean(address && latitude && longitude) &&
+        images.length > 0
+      : step === 2
+        ? remainingMemberCount === 0 && !disableNextForMissingInstruments
+        : true;
   const showMemberStepHint =
     step === 2 && (remainingMemberCount > 0 || disableNextForMissingInstruments);
   const footerClearance = NAVBAR_CLEARANCE + insets.bottom + 24;
@@ -1992,16 +2002,18 @@ export default function AddGroupScreen() {
               </TouchableOpacity>
               <TouchableOpacity
                 onPress={handleNext}
-                disabled={creating}
+                disabled={creating || !isCurrentStepComplete}
                 activeOpacity={1}
                 style={[
                   styles.nextBtn,
                   {
-                    backgroundColor: creating
-                      ? isDark
-                        ? "#4338CA"
-                        : "#9CA3AF"
-                      : colors.primary,
+                  backgroundColor: creating
+                    ? isDark
+                      ? "#4338CA"
+                      : "#9CA3AF"
+                    : isCurrentStepComplete
+                      ? colors.primary
+                      : colors.border,
                     opacity: creating ? 0.7 : 1,
                     flex: 1
                   },
@@ -2010,7 +2022,7 @@ export default function AddGroupScreen() {
                 {creating ? (
                   <ActivityIndicator color="#fff" size="small" />
                 ) : (
-                  <Text style={styles.nextBtnText}>
+                  <Text style={[styles.nextBtnText, { color: isCurrentStepComplete ? "#FFFFFF" : colors.textSecondary }]}>
                     {step === 3 ? "Create Group" : "Next"}
                   </Text>
                 )}

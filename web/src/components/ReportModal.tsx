@@ -295,7 +295,7 @@ export default function ReportModal({
                                         },
                                     ]}
                                     onPress={handleSubmit}
-                                    disabled={submitting}
+                                    disabled={submitting || !selectedReason}
                                     activeOpacity={1}
                                 >
                                     {submitting ? (

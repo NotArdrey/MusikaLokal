@@ -164,6 +164,7 @@ export default function PostDetailsScreen() {
       setSubmitting(false);
     }
   };
+  const canSubmitComment = commentText.trim().length > 0;
 
   const handleDeleteComment = async (commentId: string) => {
     try {
@@ -338,11 +339,11 @@ export default function PostDetailsScreen() {
           maxLength={1000}
         />
         <TouchableOpacity activeOpacity={1}
-          style={[styles.sendBtn, { backgroundColor: colors.primary, opacity: submitting ? 0.6 : 1 }]}
+          style={[styles.sendBtn, { backgroundColor: canSubmitComment ? colors.primary : colors.border, opacity: submitting ? 0.6 : 1 }]}
           onPress={handleAddComment}
-          disabled={submitting || !commentText.trim()}
+          disabled={submitting || !canSubmitComment}
         >
-          {submitting ? <ActivityIndicator size="small" color="#fff" /> : <Ionicons name="send" size={18} color="#fff" />}
+          {submitting ? <ActivityIndicator size="small" color="#fff" /> : <Ionicons name="send" size={18} color={canSubmitComment ? "#fff" : colors.textSecondary} />}
         </TouchableOpacity>
       </View>
 

@@ -847,6 +847,7 @@ export default function PlaylistDetailsScreen() {
   const teaserAssets = playlist.teaser_assets || [];
   const externalLinks = playlist.external_links || [];
   const isEditingTrack = editingTrackId !== null;
+  const isTrackFormReady = newTrackTitle.trim().length > 0;
   const canReportPlaylist = !isOwner && !!userId && !isGuest;
   const reportHeaderAction = canReportPlaylist ? (
     <TouchableOpacity
@@ -1111,11 +1112,11 @@ export default function PlaylistDetailsScreen() {
               </TouchableOpacity>
               <TouchableOpacity
                 activeOpacity={1}
-                style={[styles.modalBtn, { backgroundColor: colors.primary, flex: 1 }]}
+                style={[styles.modalBtn, { backgroundColor: isTrackFormReady ? colors.primary : colors.border, flex: 1 }]}
                 onPress={handleSaveTrack}
-                disabled={addingTrack}
+                disabled={addingTrack || !isTrackFormReady}
               >
-                {addingTrack ? <ActivityIndicator size="small" color="#fff" /> : <Text style={{ color: "#fff", fontWeight: "700", fontSize: moderateScale(14) }}>{isEditingTrack ? "Save" : "Add"}</Text>}
+                {addingTrack ? <ActivityIndicator size="small" color="#fff" /> : <Text style={{ color: isTrackFormReady ? "#fff" : colors.textSecondary, fontWeight: "700", fontSize: moderateScale(14) }}>{isEditingTrack ? "Save" : "Add"}</Text>}
               </TouchableOpacity>
             </View>
           </View>

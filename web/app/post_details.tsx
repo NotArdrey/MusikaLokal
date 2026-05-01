@@ -79,6 +79,7 @@ export default function PostDetailsScreen() {
     } catch (e: any) { setAlert({ type: "error", title: "Error", message: e.message }); }
     finally { setSubmitting(false); }
   };
+  const canSubmitComment = commentText.trim().length > 0;
 
   const handleDeleteComment = async (commentId: string) => {
     const { data } = await supabase.functions.invoke("manage-social-feed", { body: { action: "delete_comment", comment_id: commentId } });
@@ -140,8 +141,8 @@ export default function PostDetailsScreen() {
       </ScrollView>
       <View style={[styles.inputRow, { backgroundColor: cardBg, borderTopColor: borderCol }]}>
         <TextInput style={[styles.commentInput, { color: colors.text, borderColor: borderCol }]} placeholder="Add a comment..." placeholderTextColor={colors.textSecondary} value={commentText} onChangeText={setCommentText} multiline maxLength={1000} />
-        <TouchableOpacity activeOpacity={1} style={[styles.sendBtn, { backgroundColor: colors.primary, opacity: submitting ? 0.6 : 1 }]} onPress={handleAddComment} disabled={submitting || !commentText.trim()}>
-          {submitting ? <ActivityIndicator size="small" color="#fff" /> : <Ionicons name="send" size={18} color="#fff" />}
+        <TouchableOpacity activeOpacity={1} style={[styles.sendBtn, { backgroundColor: canSubmitComment ? colors.primary : colors.border, opacity: submitting ? 0.6 : 1 }]} onPress={handleAddComment} disabled={submitting || !canSubmitComment}>
+          {submitting ? <ActivityIndicator size="small" color="#fff" /> : <Ionicons name="send" size={18} color={canSubmitComment ? "#fff" : colors.textSecondary} />}
         </TouchableOpacity>
       </View>
       {alert && <CustomAlert visible type={alert.type} title={alert.title} message={alert.message} onClose={() => setAlert(null)} />}

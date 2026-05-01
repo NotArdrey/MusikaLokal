@@ -1498,6 +1498,14 @@ export default function EditGroupScreen() {
   const selectedGroupType = PH_MUSIC_GROUP_TYPES.find((type) => type.id === groupType);
   const requiredMemberCount = selectedGroupType?.minMembers || 1;
   const remainingMemberCount = Math.max(requiredMemberCount - members.length, 0);
+  const isFormComplete =
+    groupName.trim().length > 0 &&
+    selectedGenres.length > 0 &&
+    description.trim().length > 0 &&
+    Boolean(address && latitude && longitude) &&
+    images.length > 0 &&
+    remainingMemberCount === 0 &&
+    !disableSaveForMissingInstruments;
   const footerClearance = NAVBAR_CLEARANCE + insets.bottom + 24;
 
   // Show loading while checking authorization
@@ -2311,18 +2319,20 @@ export default function EditGroupScreen() {
                 {
                   backgroundColor: saving
                     ? colors.textSecondary
-                    : colors.primary,
+                    : isFormComplete
+                      ? colors.primary
+                      : colors.border,
                   shadowColor: colors.primary,
                 },
               ]}
               onPress={handleSave}
-              disabled={saving}
+              disabled={saving || !isFormComplete}
               activeOpacity={1}
             >
               {saving ? (
                 <ActivityIndicator size="small" color="#fff" />
               ) : (
-                <Text style={styles.saveButtonText}>Save Changes</Text>
+                <Text style={[styles.saveButtonText, { color: isFormComplete ? "#FFFFFF" : colors.textSecondary }]}>Save Changes</Text>
               )}
             </TouchableOpacity>
 

@@ -35,6 +35,7 @@ export default function ChangeEmailScreen() {
     };
 
     const isValidEmail = (value: string) => /\S+@\S+\.\S+/.test(value);
+    const canSubmit = isValidEmail(email.trim().toLowerCase());
 
     const validateEmailBeforeConfirm = () => {
         const trimmedEmail = email.trim().toLowerCase();
@@ -126,19 +127,19 @@ export default function ChangeEmailScreen() {
                         style={[
                             styles.button,
                             {
-                                backgroundColor: colors.primary,
+                                backgroundColor: canSubmit ? colors.primary : colors.border,
                                 shadowColor: '#6366F1', // indigo-500
                             },
                             loading && { opacity: 0.7 }
                         ]}
-                        disabled={loading}
+                        disabled={loading || !canSubmit}
                         onPress={() => {
                             if (validateEmailBeforeConfirm()) {
                                 setModalVisible(true);
                             }
                         }}
                     >
-                        <Text style={styles.buttonText}>
+                        <Text style={[styles.buttonText, { color: canSubmit ? "#FFFFFF" : colors.textSecondary }]}>
                             {loading ? 'Updating...' : 'Update Email'}
                         </Text>
                     </TouchableOpacity>

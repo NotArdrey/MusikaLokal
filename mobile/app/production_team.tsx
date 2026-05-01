@@ -288,6 +288,7 @@ export default function ProductionTeamScreen() {
       setCreating(false);
     }
   };
+  const isCreateTeamReady = newTeamName.trim().length > 0 && newTeamDescription.trim().length > 0;
 
   const openFireMemberModal = (member: TeamMember) => {
     setMemberToFire(member);
@@ -680,13 +681,13 @@ export default function ProductionTeamScreen() {
 
           <TouchableOpacity activeOpacity={1}
             onPress={handleCreateTeam}
-            disabled={creating}
-            style={[styles.submitBtn, { backgroundColor: colors.primary, opacity: creating ? 0.6 : 1 }]}
+            disabled={creating || !isCreateTeamReady}
+            style={[styles.submitBtn, { backgroundColor: isCreateTeamReady ? colors.primary : colors.border, opacity: creating ? 0.6 : 1 }]}
           >
             {creating ? (
               <ActivityIndicator size="small" color="#fff" />
             ) : (
-              <Text style={styles.submitBtnText}>Create Team</Text>
+              <Text style={[styles.submitBtnText, { color: isCreateTeamReady ? "#FFFFFF" : colors.textSecondary }]}>Create Team</Text>
             )}
           </TouchableOpacity>
           </View>

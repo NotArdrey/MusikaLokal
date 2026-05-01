@@ -102,6 +102,7 @@ export default function ForgetPasswordScreen() {
     setSuccessModalVisible(false);
     router.back();
   };
+  const canSubmitReset = validateEmail(email.trim());
 
   return (
     <>
@@ -141,7 +142,7 @@ export default function ForgetPasswordScreen() {
           <TouchableOpacity activeOpacity={1}
             style={[
               styles.button,
-              { backgroundColor: colors.primary },
+              { backgroundColor: canSubmitReset ? colors.primary : colors.border },
               loading && styles.buttonDisabled,
             ]}
             onPress={() => {
@@ -155,12 +156,12 @@ export default function ForgetPasswordScreen() {
               }
               setModalVisible(true);
             }}
-            disabled={loading}
+            disabled={loading || !canSubmitReset}
           >
             {loading ? (
               <ActivityIndicator color="white" />
             ) : (
-              <Text style={styles.buttonText}>Send Reset Link</Text>
+              <Text style={[styles.buttonText, { color: canSubmitReset ? "white" : colors.textSecondary }]}>Send Reset Link</Text>
             )}
           </TouchableOpacity>
         </View>

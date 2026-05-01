@@ -178,7 +178,7 @@ export default function SubmitReviewScreen() {
             <TouchableOpacity
               style={[
                 styles.submitButton,
-                { backgroundColor: colors.primary, opacity: selectedValue === 0 || submitting ? 0.5 : 1 }
+                { backgroundColor: selectedValue > 0 ? colors.primary : colors.border, opacity: submitting ? 0.5 : 1 }
               ]}
               onPress={() => {
                 if (selectedValue > 0 && !submitting) setModalVisible(true)
@@ -186,7 +186,7 @@ export default function SubmitReviewScreen() {
               disabled={selectedValue === 0 || submitting}
               activeOpacity={1}
             >
-              <Text style={styles.submitButtonText}>
+              <Text style={[styles.submitButtonText, { color: selectedValue > 0 ? "#FFFFFF" : colors.textSecondary }]}>
                 {submitting ? 'Submitting...' : 'Submit Review'}
               </Text>
             </TouchableOpacity>

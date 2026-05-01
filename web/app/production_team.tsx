@@ -216,6 +216,8 @@ export default function ProductionTeamScreen() {
       showAlert("error", "Error", e.message || "Failed to remove member");
     }
   };
+  const isCreateTeamReady = newTeamName.trim().length > 0;
+  const isAddMemberReady = memberEmail.trim().length > 0;
   const openTeamDetail = (team: Team) => {
     setSelectedTeam(team);
     fetchTeamMembers(team.id);
@@ -393,13 +395,13 @@ export default function ProductionTeamScreen() {
 
             <TouchableOpacity activeOpacity={1}
               onPress={handleAddMember}
-              disabled={addingMember}
-              style={[styles.submitBtn, { backgroundColor: colors.primary, opacity: addingMember ? 0.6 : 1 }]}
+              disabled={addingMember || !isAddMemberReady}
+              style={[styles.submitBtn, { backgroundColor: isAddMemberReady ? colors.primary : colors.border, opacity: addingMember ? 0.6 : 1 }]}
             >
               {addingMember ? (
                 <ActivityIndicator size="small" color="#fff" />
               ) : (
-                <Text style={styles.submitBtnText}>Add Member</Text>
+                <Text style={[styles.submitBtnText, { color: isAddMemberReady ? "#FFFFFF" : colors.textSecondary }]}>Add Member</Text>
               )}
             </TouchableOpacity>
           </View>
@@ -523,13 +525,13 @@ export default function ProductionTeamScreen() {
 
           <TouchableOpacity activeOpacity={1}
             onPress={handleCreateTeam}
-            disabled={creating}
-            style={[styles.submitBtn, { backgroundColor: colors.primary, opacity: creating ? 0.6 : 1 }]}
+            disabled={creating || !isCreateTeamReady}
+            style={[styles.submitBtn, { backgroundColor: isCreateTeamReady ? colors.primary : colors.border, opacity: creating ? 0.6 : 1 }]}
           >
             {creating ? (
               <ActivityIndicator size="small" color="#fff" />
             ) : (
-              <Text style={styles.submitBtnText}>Create Team</Text>
+              <Text style={[styles.submitBtnText, { color: isCreateTeamReady ? "#FFFFFF" : colors.textSecondary }]}>Create Team</Text>
             )}
           </TouchableOpacity>
         </View>

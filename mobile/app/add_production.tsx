@@ -189,11 +189,11 @@ export default function AddProductionScreen() {
           ) : null}
 
           <TouchableOpacity activeOpacity={1}
-            style={[styles.submitBtn, { backgroundColor: hasIncompleteRequiredFields ? colors.textSecondary : colors.primary, opacity: saving ? 0.65 : 1 }]}
+            style={[styles.submitBtn, { backgroundColor: hasIncompleteRequiredFields ? colors.border : colors.primary, opacity: saving ? 0.65 : 1 }]}
             onPress={handleSubmit}
             disabled={saving || hasIncompleteRequiredFields}
           >
-            {saving ? <ActivityIndicator color="#fff" /> : <Text style={styles.submitBtnText}>Create Production Team</Text>}
+            {saving ? <ActivityIndicator color="#fff" /> : <Text style={[styles.submitBtnText, { color: hasIncompleteRequiredFields ? colors.textSecondary : "#fff" }]}>Create Production Team</Text>}
           </TouchableOpacity>
         </View>
       </ScrollView>

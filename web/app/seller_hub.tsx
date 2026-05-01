@@ -147,6 +147,11 @@ export default function SellerHubScreen() {
     }
   };
 
+  const parsedProductPrice = Number.parseFloat(productPrice);
+  const isProductFormReady =
+    productTitle.trim().length > 0 &&
+    (!productPrice.trim() || Number.isFinite(parsedProductPrice));
+
   const handlePublish = async (productId: string) => {
     try {
       const { data } = await supabase.functions.invoke("manage-marketplace", {
@@ -370,8 +375,8 @@ export default function SellerHubScreen() {
                 </TouchableOpacity>
               ))}
             </View>
-            <TouchableOpacity activeOpacity={1} style={[styles.submitBtn, { backgroundColor: colors.primary, opacity: submitting ? 0.6 : 1 }]} onPress={handleAddProduct} disabled={submitting}>
-              {submitting ? <ActivityIndicator size="small" color="#fff" /> : <Text style={{ color: "#fff", fontWeight: "700" }}>Create Product</Text>}
+            <TouchableOpacity activeOpacity={1} style={[styles.submitBtn, { backgroundColor: isProductFormReady ? colors.primary : colors.border, opacity: submitting ? 0.6 : 1 }]} onPress={handleAddProduct} disabled={submitting || !isProductFormReady}>
+              {submitting ? <ActivityIndicator size="small" color="#fff" /> : <Text style={{ color: isProductFormReady ? "#fff" : colors.textSecondary, fontWeight: "700" }}>Create Product</Text>}
             </TouchableOpacity>
           </View>
         </View>

@@ -76,6 +76,8 @@ export default function CreatePlaylistScreen() {
     finally { setSubmitting(false); }
   };
 
+  const isSubmitReady = title.trim().length > 0;
+
   if (loading) return <View style={[styles.container, { backgroundColor: bg }]}><Header title={isEdit ? "Edit Playlist" : "Create Playlist"} onBackPress={() => router.back()} /><ActivityIndicator size="large" color={colors.primary} style={{ marginTop: 40 }} /></View>;
 
   return (
@@ -103,8 +105,8 @@ export default function CreatePlaylistScreen() {
               </TouchableOpacity>
             ))}
           </View>
-          <TouchableOpacity activeOpacity={1} style={[styles.submitBtn, { backgroundColor: colors.primary, opacity: submitting ? 0.6 : 1 }]} onPress={handleSubmit} disabled={submitting}>
-            {submitting ? <ActivityIndicator size="small" color="#fff" /> : <Text style={styles.submitText}>{isEdit ? "Update Playlist" : "Create Playlist"}</Text>}
+          <TouchableOpacity activeOpacity={1} style={[styles.submitBtn, { backgroundColor: isSubmitReady ? colors.primary : colors.border, opacity: submitting ? 0.6 : 1 }]} onPress={handleSubmit} disabled={submitting || !isSubmitReady}>
+            {submitting ? <ActivityIndicator size="small" color="#fff" /> : <Text style={[styles.submitText, { color: isSubmitReady ? "#FFFFFF" : colors.textSecondary }]}>{isEdit ? "Update Playlist" : "Create Playlist"}</Text>}
           </TouchableOpacity>
           <View style={{ height: 100 }} />
         </View>
