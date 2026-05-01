@@ -298,7 +298,7 @@ export default function DiscoverScreen() {
 		const rate = Number(item.rate || 0);
 
 		if (item.type === "Group" || item.type === "Artist") {
-			return "Inquire for rates";
+			return "";
 		}
 
 		if (hourly > 0) {
@@ -313,7 +313,7 @@ export default function DiscoverScreen() {
 			return `₱${rate.toLocaleString()}`;
 		}
 
-		return "Inquire for rates";
+		return "";
 	};
 
 	return (
@@ -591,9 +591,11 @@ export default function DiscoverScreen() {
 												</Text>
 											</View>
 
-											<Text style={[styles.cardPrice, { color: colors.primary }]}>
-												{getPriceLabel(item)}
-											</Text>
+											{getPriceLabel(item) ? (
+												<Text style={[styles.cardPrice, { color: colors.primary }]}>
+													{getPriceLabel(item)}
+												</Text>
+											) : null}
 										</View>
 									</TouchableOpacity>
 								</View>

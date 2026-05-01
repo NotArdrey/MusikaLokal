@@ -943,7 +943,7 @@ const GigApplyTab = ({
       <TouchableOpacity activeOpacity={1}
         style={[
           styles.primaryBtn,
-          { backgroundColor: colors.primary },
+          { backgroundColor: isSubmitDisabled ? colors.border : colors.primary },
         ]}
         onPress={() => {
           debugLog("🟡 SUBMIT APPLICATION BUTTON PRESSED - Validating...");
@@ -954,7 +954,7 @@ const GigApplyTab = ({
         {isSubmittingApplication ? (
           <ActivityIndicator color="#fff" />
         ) : (
-          <Text style={styles.primaryBtnText}>
+          <Text style={[styles.primaryBtnText, { color: isSubmitDisabled ? colors.textSecondary : "#FFFFFF" }]}>
             {hasExistingApplication
               ? existingApplicationStatus === "rejected"
                 ? "Application Declined"

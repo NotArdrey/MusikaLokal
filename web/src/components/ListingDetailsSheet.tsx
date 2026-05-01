@@ -2343,6 +2343,7 @@ const ListingDetailsSheet = forwardRef<
       userId={userId}
       pitchMessage={pitchMessage}
       setPitchMessage={setPitchMessage}
+      cvFile={cvFile}
       cvUrl={cvUrl}
       setCvFile={setCvFile}
       videoUrl={videoUrl}

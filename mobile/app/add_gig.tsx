@@ -421,6 +421,16 @@ export default function AddGigScreen() {
     return true;
   };
 
+  const isCurrentStepComplete =
+    step !== 1 ||
+    (gigName.trim().length > 0 &&
+      description.trim().length > 0 &&
+      address.trim().length > 0 &&
+      cost.trim().length > 0 &&
+      Number.parseFloat(cost) > 0 &&
+      images.length > 0 &&
+      getNormalizedEventSchedules().length > 0);
+
   const handleNext = async () => {
     if (!validateStep(step)) {
       return;
@@ -3051,13 +3061,13 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
             </TouchableOpacity>
             <TouchableOpacity
               onPress={handleNext}
-              disabled={creating}
+              disabled={creating || !isCurrentStepComplete}
               activeOpacity={1}
               style={[
                 styles.nextBtn,
                 {
                   flex: 1,
-                  backgroundColor: colors.primary,
+                  backgroundColor: isCurrentStepComplete ? colors.primary : colors.border,
                   shadowColor: colors.primary,
                   opacity: creating ? 0.7 : 1,
                 },
@@ -3066,7 +3076,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
               {creating ? (
                 <ActivityIndicator color="#fff" size="small" />
               ) : (
-                <Text style={styles.nextBtnText}>
+                <Text style={[styles.nextBtnText, { color: isCurrentStepComplete ? "#FFFFFF" : colors.textSecondary }]}>
                   {step === 3 ? "Create Gig" : "Next"}
                 </Text>
               )}

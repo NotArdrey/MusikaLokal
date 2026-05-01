@@ -23,6 +23,7 @@ interface GigApplyTabProps {
   userId: string | null;
   pitchMessage: string;
   setPitchMessage: (value: string) => void;
+  cvFile: any;
   cvUrl: string;
   setCvFile: (file: any) => void;
   videoUrl: string;
@@ -49,6 +50,7 @@ const GigApplyTab = ({
   userId,
   pitchMessage,
   setPitchMessage,
+  cvFile,
   cvUrl,
   setCvFile,
   videoUrl,
@@ -137,6 +139,25 @@ const GigApplyTab = ({
     group?.id,
     group?.requirements?.slots,
   ]);
+
+  const requiresGroupSelection =
+    group.requirements?.musician_type === "group" && !selectedGroupId;
+  const isPitchMissing = !pitchMessage.trim();
+  const isCvMissing = !cvFile && !cvUrl;
+  const isVideoMissing = !(videoUrl || "").trim();
+  const isTermsIncomplete = !isSystemTermsAccepted || (hasCustomContract && !isCustomContractAccepted);
+  const isFormIncomplete =
+    isPitchMissing ||
+    isCvMissing ||
+    isVideoMissing ||
+    requiresGroupSelection ||
+    isTermsIncomplete;
+  const isSubmitDisabled =
+    isSubmittingApplication ||
+    hasExistingApplication ||
+    isBlocked ||
+    groupAlreadyApplied ||
+    isFormIncomplete;
 
   return (
     <View style={styles.tabContent}>
@@ -547,34 +568,18 @@ const GigApplyTab = ({
       <TouchableOpacity activeOpacity={1}
         style={[
           styles.primaryBtn,
-          { backgroundColor: colors.primary },
-          (isSubmittingApplication ||
-            !pitchMessage.trim() ||
-            !videoUrl ||
-            groupAlreadyApplied ||
-            !isSystemTermsAccepted ||
-            (hasCustomContract && !isCustomContractAccepted) ||
-            (group.requirements?.musician_type === "group" && !selectedGroupId)) &&
-            { opacity: 0.5 },
+          { backgroundColor: isSubmitDisabled ? colors.border : colors.primary },
         ]}
         onPress={() => {
           debugLog("🟡 SUBMIT APPLICATION BUTTON PRESSED - Validating...");
           handleSubmitApplication();
         }}
-        disabled={
-          isSubmittingApplication ||
-          hasExistingApplication ||
-          isBlocked ||
-          groupAlreadyApplied ||
-          !isSystemTermsAccepted ||
-          (hasCustomContract && !isCustomContractAccepted) ||
-          (group.requirements?.musician_type === "group" && !selectedGroupId)
-        }
+        disabled={isSubmitDisabled}
       >
         {isSubmittingApplication ? (
           <ActivityIndicator color="#fff" />
         ) : (
-          <Text style={styles.primaryBtnText}>
+          <Text style={[styles.primaryBtnText, { color: isSubmitDisabled ? colors.textSecondary : "#FFFFFF" }]}>
             {hasExistingApplication
               ? existingApplicationStatus === "rejected"
                 ? "Application Declined"
@@ -584,8 +589,10 @@ const GigApplyTab = ({
                   : "Already Applied"
               : groupAlreadyApplied
                 ? "Group Already Applied"
-                : group.requirements?.musician_type === "group" && !selectedGroupId
+                : requiresGroupSelection
                   ? "Select a Group to Apply"
+                  : isFormIncomplete
+                    ? "Complete Required Fields"
                   : "Submit Application"}
           </Text>
         )}

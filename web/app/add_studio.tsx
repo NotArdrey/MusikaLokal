@@ -882,6 +882,44 @@ export default function AddStudioScreen() {
     return true;
   };
 
+  const hasValidStudioPricing =
+    studioType === "Both"
+      ? Number.parseFloat(rehearsalRate) > 0 && Number.parseFloat(recordingRate) > 0
+      : studioType === "Rehearsal"
+        ? Number.parseFloat(rehearsalRate) > 0
+        : Number.parseFloat(recordingRate) > 0;
+  const hasValidRecordingRules =
+    studioType !== "Recording" && studioType !== "Both"
+      ? true
+      : Boolean(parsePositiveInteger(recordingSongsPerBlock)) &&
+        Boolean(parsePositiveDecimal(recordingHoursPerBlock));
+  const haveValidPromotions = promotions.every((promo) => {
+    const discountValue = Number.parseFloat(promo.discount_value);
+    const minimumHoursValue = promo.minimum_booking_hours?.trim();
+    const minimumSpendValue = promo.minimum_spend?.trim();
+
+    return (
+      promo.name.trim().length > 0 &&
+      discountValue > 0 &&
+      (promo.discount_type !== "percentage" || discountValue <= 100) &&
+      (promo.is_permanent ||
+        (Boolean(promo.start_date) &&
+          Boolean(promo.end_date) &&
+          promo.end_date >= promo.start_date)) &&
+      (!minimumHoursValue || Number.parseFloat(minimumHoursValue) > 0) &&
+      (!minimumSpendValue || Number.parseFloat(minimumSpendValue) > 0)
+    );
+  });
+  const isCurrentStepComplete =
+    step !== 1 ||
+    (studioName.trim().length > 0 &&
+      description.trim().length > 0 &&
+      address.trim().length > 0 &&
+      hasValidStudioPricing &&
+      hasValidRecordingRules &&
+      images.length > 0 &&
+      haveValidPromotions);
+
   const handleNext = async () => {
     if (!validateStep(step)) {
       return;
@@ -5184,13 +5222,13 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
             </TouchableOpacity>
             <TouchableOpacity
               onPress={handleNext}
-              disabled={creating}
+              disabled={creating || !isCurrentStepComplete}
               activeOpacity={1}
               style={[
                 styles.nextBtn,
                 {
                   flex: 1,
-                  backgroundColor: colors.primary,
+                  backgroundColor: isCurrentStepComplete ? colors.primary : colors.border,
                   shadowColor: colors.primary,
                   opacity: creating ? 0.7 : 1,
                 },
@@ -5199,7 +5237,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
               {creating ? (
                 <ActivityIndicator color="#fff" size="small" />
               ) : (
-                <Text style={styles.nextBtnText}>
+                <Text style={[styles.nextBtnText, { color: isCurrentStepComplete ? "#FFFFFF" : colors.textSecondary }]}>
                   {step === 4 ? "List Studio" : "Next"}
                 </Text>
               )}

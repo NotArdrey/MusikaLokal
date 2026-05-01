@@ -164,7 +164,7 @@ const ListingCard: React.FC<ListingCardProps> = ({
       } else if (item.hourly_rate && item.hourly_rate !== "0") {
         nextPriceLabel = `₱${parseInt(item.hourly_rate).toLocaleString()} / hr`;
       } else {
-        nextPriceLabel = "Inquire for rates";
+        nextPriceLabel = "";
       }
     } else if (item.hourly_rate && item.hourly_rate !== "0") {
       nextPriceLabel = `₱${parseInt(item.hourly_rate).toLocaleString()} / hr`;
@@ -181,7 +181,7 @@ const ListingCard: React.FC<ListingCardProps> = ({
         nextPriceLabel = `₱${parseInt(item.rate).toLocaleString()}`;
       }
     } else {
-      nextPriceLabel = "Inquire for rates";
+      nextPriceLabel = "";
     }
 
     return {
@@ -1457,7 +1457,7 @@ const ListingCard: React.FC<ListingCardProps> = ({
           </View>
 
           {/* Hide entire price row for Groups */}
-          {!isGroup && (
+          {!isGroup && (priceLabel || secondaryPriceLabel || item.review_count > 0) && (
             <View
               style={[
                 styles.priceRow,
@@ -1469,9 +1469,11 @@ const ListingCard: React.FC<ListingCardProps> = ({
               ]}
             >
               <View style={{ flexDirection: "column" }}>
-                <Text style={[styles.price, { color: colors.primary }]}>
-                  {priceLabel}
-                </Text>
+                {priceLabel ? (
+                  <Text style={[styles.price, { color: colors.primary }]}>
+                    {priceLabel}
+                  </Text>
+                ) : null}
                 {secondaryPriceLabel && (
                   <Text
                     style={[

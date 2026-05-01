@@ -745,6 +745,15 @@ export default function EditGigScreen() {
     return true;
   };
 
+  const isFormComplete =
+    gigName.trim().length > 0 &&
+    description.trim().length > 0 &&
+    Boolean(address && latitude && longitude) &&
+    cost.trim().length > 0 &&
+    Number.parseFloat(cost) > 0 &&
+    images.length > 0 &&
+    getNormalizedEventSchedules().length > 0;
+
   const performSave = async () => {
     if (saving) return;
     setSaving(true);
@@ -2869,18 +2878,20 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                 {
                   backgroundColor: saving
                     ? colors.textSecondary
-                    : colors.primary,
+                    : isFormComplete
+                      ? colors.primary
+                      : colors.border,
                   shadowColor: colors.primary,
                 },
               ]}
               onPress={handleSave}
-              disabled={saving}
+              disabled={saving || !isFormComplete}
               activeOpacity={1}
             >
               {saving ? (
                 <ActivityIndicator size="small" color="#fff" />
               ) : (
-                <Text style={styles.saveButtonText}>
+                <Text style={[styles.saveButtonText, { color: isFormComplete ? "#FFFFFF" : colors.textSecondary }]}>
                   {isReapplyRequested && canReapplyPermit
                     ? "Save & Reapply"
                     : "Save Changes"}

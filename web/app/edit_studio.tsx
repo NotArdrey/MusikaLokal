@@ -1937,6 +1937,43 @@ export default function EditStudioScreen() {
     return true;
   };
 
+  const hasValidStudioPricing =
+    studioType === "Both"
+      ? Number.parseFloat(rehearsalRate) > 0 && Number.parseFloat(recordingRate) > 0
+      : studioType === "Rehearsal"
+        ? Number.parseFloat(rehearsalRate) > 0
+        : Number.parseFloat(recordingRate) > 0;
+  const hasValidRecordingRules =
+    studioType !== "Recording" && studioType !== "Both"
+      ? true
+      : Boolean(parsePositiveInteger(recordingSongsPerBlock)) &&
+        Boolean(parsePositiveDecimal(recordingHoursPerBlock));
+  const haveValidPromotions = promotions.every((promo) => {
+    const discountValue = Number.parseFloat(promo.discount_value);
+    const minimumHoursValue = promo.minimum_booking_hours?.trim();
+    const minimumSpendValue = promo.minimum_spend?.trim();
+
+    return (
+      promo.name.trim().length > 0 &&
+      discountValue > 0 &&
+      (promo.discount_type !== "percentage" || discountValue <= 100) &&
+      (promo.is_permanent ||
+        (Boolean(promo.start_date) &&
+          Boolean(promo.end_date) &&
+          promo.end_date >= promo.start_date)) &&
+      (!minimumHoursValue || Number.parseFloat(minimumHoursValue) > 0) &&
+      (!minimumSpendValue || Number.parseFloat(minimumSpendValue) > 0)
+    );
+  });
+  const isFormComplete =
+    studioName.trim().length > 0 &&
+    description.trim().length > 0 &&
+    Boolean(address && latitude && longitude) &&
+    hasValidStudioPricing &&
+    hasValidRecordingRules &&
+    selectedImages.length > 0 &&
+    haveValidPromotions;
+
   const convertTo24HourForSchedule = (time12: string): string => {
     const [time, modifier] = time12.split(" ");
     if (!modifier) return time;
@@ -6007,18 +6044,20 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                 {
                   backgroundColor: saving
                     ? colors.textSecondary
-                    : colors.primary,
+                    : isFormComplete
+                      ? colors.primary
+                      : colors.border,
                   shadowColor: colors.primary,
                 },
               ]}
               onPress={handleSave}
-              disabled={saving}
+              disabled={saving || !isFormComplete}
               activeOpacity={1}
             >
               {saving ? (
                 <ActivityIndicator size="small" color="#fff" />
               ) : (
-                <Text style={styles.saveButtonText}>Save Changes</Text>
+                <Text style={[styles.saveButtonText, { color: isFormComplete ? "#FFFFFF" : colors.textSecondary }]}>Save Changes</Text>
               )}
             </TouchableOpacity>
 
