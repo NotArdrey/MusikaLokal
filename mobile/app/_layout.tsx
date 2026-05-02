@@ -8,6 +8,8 @@ import {
 } from "@expo-google-fonts/poppins";
 import { BottomSheetModalProvider } from "@gorhom/bottom-sheet";
 import { PortalProvider } from "@gorhom/portal";
+import { useQueryClient } from "@tanstack/react-query";
+import { PersistQueryClientProvider } from "@tanstack/react-query-persist-client";
 import * as Linking from "expo-linking";
 import { router, Stack, useSegments } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
@@ -29,7 +31,15 @@ import {
   TopToastProvider,
   type TopToastType,
 } from "../src/context/TopToastContext";
+import {
+  persistQueryClientOptions,
+  queryClient,
+  resetPrivateQueryStateForAuthChange,
+  setupReactQueryFocusManager,
+} from "../src/data/queryClient";
+import { useGlobalRealtimeInvalidation } from "../src/data/realtime";
 import { ThemeProvider, useTheme } from "../src/context/ThemeContext";
+import { logLoadTime } from "../src/utils/loadTimeLogger";
 
 SplashScreen.preventAutoHideAsync();
 
@@ -74,6 +84,10 @@ export default function RootLayout() {
   });
 
   useEffect(() => {
+    setupReactQueryFocusManager();
+  }, []);
+
+  useEffect(() => {
     if (fontsLoaded) {
       SplashScreen.hideAsync();
     }
@@ -84,24 +98,53 @@ export default function RootLayout() {
   }
 
   return (
-    <GestureHandlerRootView style={{ flex: 1 }}>
-      <ThemeProvider>
-        <PortalProvider>
-          <TopToastProvider>
-            <AuthProvider>
-              <BottomSheetModalProvider>
-                <BottomOverlayProvider>
-                  <RadioPlayerProvider>
-                    <RootContent />
-                  </RadioPlayerProvider>
-                </BottomOverlayProvider>
-              </BottomSheetModalProvider>
-            </AuthProvider>
-          </TopToastProvider>
-        </PortalProvider>
-      </ThemeProvider>
-    </GestureHandlerRootView>
+    <PersistQueryClientProvider
+      client={queryClient}
+      persistOptions={persistQueryClientOptions}
+    >
+      <GestureHandlerRootView style={{ flex: 1 }}>
+        <ThemeProvider>
+          <PortalProvider>
+            <TopToastProvider>
+              <AuthProvider>
+                <QueryAuthLifecycle />
+                <BottomSheetModalProvider>
+                  <BottomOverlayProvider>
+                    <RadioPlayerProvider>
+                      <RootContent />
+                    </RadioPlayerProvider>
+                  </BottomOverlayProvider>
+                </BottomSheetModalProvider>
+              </AuthProvider>
+            </TopToastProvider>
+          </PortalProvider>
+        </ThemeProvider>
+      </GestureHandlerRootView>
+    </PersistQueryClientProvider>
   );
+}
+
+function QueryAuthLifecycle() {
+  const { session } = useAuth();
+  const activeUserId = session?.user?.id ?? null;
+  const queryClientInstance = useQueryClient();
+  const previousUserIdRef = useRef<string | null | undefined>(undefined);
+
+  useGlobalRealtimeInvalidation(queryClientInstance, activeUserId);
+
+  useEffect(() => {
+    if (previousUserIdRef.current === undefined) {
+      previousUserIdRef.current = activeUserId;
+      return;
+    }
+
+    if (previousUserIdRef.current !== activeUserId) {
+      previousUserIdRef.current = activeUserId;
+      void resetPrivateQueryStateForAuthChange();
+    }
+  }, [activeUserId]);
+
+  return null;
 }
 
 function RootContent() {
@@ -114,10 +157,26 @@ function RootContent() {
   } =
     useAuth();
   const segments = useSegments();
+  const routeName = segments.length > 0 ? `/${segments.join("/")}` : "/";
   const processedDeepLinksRef = useRef<Set<string>>(new Set());
   const shownNotificationToastIdsRef = useRef<Set<string>>(new Set());
   const notificationAppStateRef = useRef(AppState.currentState);
   const notificationBackgroundedAtRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    const startedAt = Date.now();
+    logLoadTime("Route", "enter", {
+      route: routeName,
+      startedAt: new Date(startedAt).toISOString(),
+    });
+
+    return () => {
+      logLoadTime("Route", "leave", {
+        durationMs: Date.now() - startedAt,
+        route: routeName,
+      });
+    };
+  }, [routeName]);
 
   const rememberShownNotificationToast = useCallback((notificationId: string) => {
     if (shownNotificationToastIdsRef.current.has(notificationId)) {

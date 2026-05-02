@@ -39,10 +39,12 @@ import {
 } from "../context/RadioPlayerContext";
 import { showTopToast } from "../context/TopToastContext";
 import { useTheme } from "../context/ThemeContext";
+import { useSearchResultsQuery } from "../data/hooks";
 import {
   buildSocialFollowKey,
   getListingSocialFollowTarget,
 } from "../utils/socialFollow";
+import { usePageLoadLogger } from "../utils/loadTimeLogger";
 import { NAVBAR_BOTTOM_OFFSET } from "./navbar";
 import ListingCard from "./ListingCard";
 import TrackedBottomSheetModal from "./TrackedBottomSheetModal";
@@ -94,56 +96,6 @@ const SORT_OPTIONS = [
 
 const PAGE_SIZE = 10;
 
-const getSearchResultTimestamp = (item: any) => {
-  const rawValue = item?.created_at;
-  if (!rawValue) return 0;
-
-  const timestamp = new Date(rawValue).getTime();
-  return Number.isFinite(timestamp) ? timestamp : 0;
-};
-
-const interleaveSearchResultsByType = (items: any[]) => {
-  if (!Array.isArray(items) || items.length <= 1) {
-    return items;
-  }
-
-  const buckets = new Map<string, any[]>();
-
-  items.forEach((item) => {
-    const typeKey = String(item?.type || "Unknown");
-    const bucket = buckets.get(typeKey);
-    if (bucket) {
-      bucket.push(item);
-      return;
-    }
-
-    buckets.set(typeKey, [item]);
-  });
-
-  const orderedTypes = Array.from(buckets.keys());
-  const output: any[] = [];
-
-  while (output.length < items.length) {
-    let addedItem = false;
-
-    for (const typeKey of orderedTypes) {
-      const bucket = buckets.get(typeKey);
-      if (!bucket || bucket.length === 0) {
-        continue;
-      }
-
-      output.push(bucket.shift());
-      addedItem = true;
-    }
-
-    if (!addedItem) {
-      break;
-    }
-  }
-
-  return output;
-};
-
 const getSearchResultKey = (item: any, index: number) => {
   const typeKey =
     typeof item?.type === "string" && item.type.length > 0 ? item.type : "item";
@@ -153,33 +105,6 @@ const getSearchResultKey = (item: any, index: number) => {
       : String(index);
 
   return `${typeKey}-${idKey}`;
-};
-
-const collectProfileValues = (rows: any[] | null | undefined, valueKey: string) => {
-  const valueMap = new Map<string, string[]>();
-
-  (rows || []).forEach((row: any) => {
-    const profileId = row?.profile_id;
-    const rawValue = row?.[valueKey];
-    if (typeof profileId !== "string" || typeof rawValue !== "string") {
-      return;
-    }
-
-    const nextValue = rawValue.trim();
-    if (!nextValue) {
-      return;
-    }
-
-    const existingValues = valueMap.get(profileId);
-    if (existingValues) {
-      existingValues.push(nextValue);
-      return;
-    }
-
-    valueMap.set(profileId, [nextValue]);
-  });
-
-  return valueMap;
 };
 
 interface SearchBottomSheetProps {
@@ -221,15 +146,10 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
     const [activeFilter, setActiveFilter] = useState("All");
     const [searchQuery, setSearchQuery] = useState("");
     const [data, setData] = useState<any[]>([]);
-    const [loading, setLoading] = useState(true);
+    const [isSheetOpen, setIsSheetOpen] = useState(false);
+    const [loading, setLoading] = useState(false);
     const [loadingMore, setLoadingMore] = useState(false);
-    const [currentPage, setCurrentPage] = useState(0);
-    const [hasMore, setHasMore] = useState(true);
-    const [spillover, setSpillover] = useState<any[]>([]);
-    const [refreshTrigger, setRefreshTrigger] = useState(0);
     const requestIdRef = useRef(0);
-    const dataRef = useRef<any[]>([]);
-    const spilloverRef = useRef<any[]>([]);
     const [followingKeys, setFollowingKeys] = useState<Set<string>>(new Set());
     const [followBusyByKey, setFollowBusyByKey] = useState<Record<string, boolean>>({});
 
@@ -255,16 +175,57 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
       return count;
     }, [TYPE_FILTERS.length, activeFilter, selectedGenre, minRating, priceRange, sortBy]);
 
-    useEffect(() => {
-      dataRef.current = data;
-    }, [data]);
+    const searchResultsQuery = useSearchResultsQuery({
+      activeFilter,
+      enabled: false,
+      isGuest,
+      isOwner,
+      minRating,
+      pageSize: PAGE_SIZE,
+      priceRange,
+      query: searchQuery,
+      selectedGenre,
+      sortBy,
+    });
+
+    const queriedResults = useMemo(
+      () =>
+        (searchResultsQuery.data?.pages || []).flatMap((page: any) =>
+          Array.isArray(page?.items) ? page.items : Array.isArray(page?.data) ? page.data : [],
+        ),
+      [searchResultsQuery.data],
+    );
 
     useEffect(() => {
-      spilloverRef.current = spillover;
-    }, [spillover]);
+      setData(queriedResults);
+      setLoading(searchResultsQuery.isLoading && queriedResults.length === 0);
+      setLoadingMore(searchResultsQuery.isFetchingNextPage);
+    }, [
+      queriedResults,
+      searchResultsQuery.isFetchingNextPage,
+      searchResultsQuery.isLoading,
+    ]);
 
     const visibleData = data;
-    const hasMoreResults = hasMore || spillover.length > 0;
+    const hasMoreResults = Boolean(searchResultsQuery.hasNextPage);
+
+    usePageLoadLogger({
+      counts: {
+        results: data.length,
+      },
+      details: {
+        activeFilter,
+        hasMore: hasMoreResults,
+        queryLength: searchQuery.trim().length,
+        selectedGenre,
+        sortBy,
+      },
+      loading,
+      page: "SearchBottomSheet",
+      queries: { searchResults: searchResultsQuery },
+      ready: !loading,
+      enabled: isSheetOpen,
+    });
 
     const renderBackdrop = useCallback(
       (props: any) => (
@@ -285,9 +246,24 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
     }, [ref]);
 
     const handleClose = useCallback(() => {
+      setIsSheetOpen(false);
+      setLoading(false);
+      setLoadingMore(false);
       Keyboard.dismiss();
       onClose?.();
     }, [onClose]);
+
+    const handleSheetChange = useCallback((index: number) => {
+      const nextOpen = index >= 0;
+      setIsSheetOpen(nextOpen);
+
+      if (!nextOpen) {
+        setLoading(false);
+        setLoadingMore(false);
+      } else if (data.length === 0) {
+        setLoading(true);
+      }
+    }, [data.length]);
 
     // Toggle filter panel with animation
     const toggleFilters = useCallback(() => {
@@ -306,499 +282,60 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
 
     // Search effect with filters
     const fetchSearchPage = useCallback(
-      async (page: number, mode: "reset" | "append") => {
+      async (mode: "reset" | "append") => {
         const isReset = mode === "reset";
         const requestId = ++requestIdRef.current;
 
         if (isReset) {
           setLoading(true);
-          setHasMore(true);
-          setCurrentPage(0);
-          setSpillover([]);
         } else {
           setLoadingMore(true);
         }
 
         try {
-          let results: any[] = [];
-          let tables: string[] = [];
-          const fetchedCountsByTable = new Map<string, number>();
-
-          if (isGuest) {
-            tables = ["groups_with_stats", "profiles"];
-          } else if (isOwner) {
-            if (activeFilter === "All") {
-              tables = ["groups_with_stats", "profiles", "production_teams"];
-            } else if (activeFilter === "Musician") {
-              tables = ["groups_with_stats", "profiles"];
-            } else if (activeFilter === "Production Team") {
-              tables = ["production_teams"];
-            }
-          } else {
-            if (activeFilter === "All") {
-              tables = ["groups_with_stats", "profiles", "studios_with_stats", "gigs_with_stats", "production_teams"];
-            } else if (activeFilter === "Musician") {
-              tables = ["groups_with_stats", "profiles"];
-            } else if (activeFilter === "Studio") {
-              tables = ["studios_with_stats"];
-            } else if (activeFilter === "Gig") {
-              tables = ["gigs_with_stats"];
-            } else if (activeFilter === "Production Team") {
-              tables = ["production_teams"];
-            }
-          }
-
-          for (const table of tables) {
-            const tablePageSize = PAGE_SIZE;
-
-            let query = supabase.from(table).select("*");
-
-            if (table === "profiles") {
-              query = query
-                .select(
-                  "id, full_name, avatar_url, address, created_at, role, show_gig_statuses",
-                )
-                .eq("role", "musician");
-            }
-
-            if (table === "production_teams") {
-              query = query.select("id, owner_id, name, description, logo_url, created_at, updated_at");
-            }
-
-            if (searchQuery.trim().length > 0) {
-              if (table === "profiles") {
-                query = query.or(
-                  `full_name.ilike.%${searchQuery}%,address.ilike.%${searchQuery}%`,
-                );
-              } else if (table === "production_teams") {
-                query = query.or(
-                  `name.ilike.%${searchQuery}%,description.ilike.%${searchQuery}%`,
-                );
-              } else {
-                query = query.or(
-                  `name.ilike.%${searchQuery}%,location.ilike.%${searchQuery}%`,
-                );
-              }
-            }
-
-            if (table === "gigs_with_stats") {
-              query = query.eq("status", "open");
-              query = query.eq("permit_status", "approved");
-            }
-
-            if (table === "studios_with_stats") {
-              query = query.eq("permit_status", "approved");
-            }
-
-            if (
-              selectedGenre !== "All" &&
-              (table === "groups_with_stats" || table === "gigs_with_stats")
-            ) {
-              query = query.ilike("genre", `%${selectedGenre}%`);
-            }
-
-            if (minRating > 0 && table !== "profiles" && table !== "production_teams") {
-              query = query.gte("rating", minRating);
-            }
-
-            if (priceRange !== "all" && table !== "profiles" && table !== "production_teams") {
-              const priceField = table.includes("studio")
-                ? "hourly_rate"
-                : table.includes("gig")
-                  ? "budget"
-                  : "rate";
-
-              if (priceRange === "low") {
-                query = query.lte(priceField, 5000);
-              } else if (priceRange === "mid") {
-                query = query.gte(priceField, 5000).lte(priceField, 15000);
-              } else if (priceRange === "high") {
-                query = query.gte(priceField, 15000);
-              }
-            }
-
-            if (sortBy === "rating" && table !== "profiles" && table !== "production_teams") {
-              query = query.order("rating", { ascending: false });
-            } else if (sortBy === "price_low" && table !== "profiles" && table !== "production_teams") {
-              const priceField = table.includes("studio")
-                ? "hourly_rate"
-                : table.includes("gig")
-                  ? "budget"
-                  : "rate";
-              query = query.order(priceField, {
-                ascending: true,
-                nullsFirst: false,
-              });
-            } else if (sortBy === "price_high" && table !== "profiles" && table !== "production_teams") {
-              const priceField = table.includes("studio")
-                ? "hourly_rate"
-                : table.includes("gig")
-                  ? "budget"
-                  : "rate";
-              query = query.order(priceField, {
-                ascending: false,
-                nullsFirst: false,
-              });
-            } else {
-              query = query.order("created_at", { ascending: false });
-            }
-
-            const from = page * tablePageSize;
-            const to = from + tablePageSize - 1;
-            const { data: qData } = await query.range(from, to);
-            const fetchedCount = qData?.length || 0;
-            fetchedCountsByTable.set(table, fetchedCount);
-
-            if (qData) {
-              let profileGenresById = new Map<string, string[]>();
-              let profileSkillsById = new Map<string, string[]>();
-              let profileStatsById = new Map<string, { rating: number; review_count: number; completion_rate: number | null }>();
-              let ownerAvatarById = new Map<string, string>();
-
-              if (table === "profiles" && qData.length > 0) {
-                const profileIds = qData
-                  .map((item: any) => item?.id)
-                  .filter((value: any): value is string => typeof value === "string" && value.length > 0);
-
-                if (profileIds.length > 0) {
-                  const [{ data: profileGenreRows }, { data: profileSkillRows }, { data: profileStatRows }] = await Promise.all([
-                    supabase
-                      .from("profile_genres")
-                      .select("profile_id, genre")
-                      .in("profile_id", profileIds),
-                    supabase
-                      .from("profile_skills")
-                      .select("profile_id, skill")
-                      .in("profile_id", profileIds),
-                    supabase
-                      .from("profiles_with_stats")
-                      .select("id, rating, review_count, completion_rate")
-                      .in("id", profileIds),
-                  ]);
-
-                  profileGenresById = collectProfileValues(profileGenreRows, "genre");
-                  profileSkillsById = collectProfileValues(profileSkillRows, "skill");
-                  profileStatsById = new Map(
-                    (profileStatRows || [])
-                      .filter((row: any) => typeof row?.id === "string")
-                      .map((row: any) => [
-                        row.id,
-                        {
-                          rating: Number(row?.rating || 0),
-                          review_count: Number(row?.review_count || 0),
-                          completion_rate: row?.completion_rate !== null &&
-                            row?.completion_rate !== undefined &&
-                            row?.completion_rate !== "" &&
-                            Number.isFinite(Number(row?.completion_rate))
-                            ? Number(row.completion_rate)
-                            : null,
-                        },
-                      ]),
-                  );
-                }
-              }
-
-              if (
-                ["groups_with_stats", "studios_with_stats", "gigs_with_stats", "production_teams"].includes(table) &&
-                qData.length > 0
-              ) {
-                const ownerIds = Array.from(
-                  new Set(
-                    qData
-                      .map((item: any) => item?.owner_id || item?.organizer_id)
-                      .filter((value: any): value is string => typeof value === "string" && value.length > 0),
-                  ),
-                );
-
-                if (ownerIds.length > 0) {
-                  const { data: ownerRows } = await supabase
-                    .from("profiles")
-                    .select("id, avatar_url")
-                    .in("id", ownerIds);
-
-                  (ownerRows || []).forEach((row: any) => {
-                    if (typeof row?.id === "string" && typeof row?.avatar_url === "string" && row.avatar_url.length > 0) {
-                      ownerAvatarById.set(row.id, row.avatar_url);
-                    }
-                  });
-                }
-              }
-
-              const type = table.includes("group")
-                ? "Group"
-                : table.includes("studio")
-                  ? "Studio"
-                  : table === "profiles"
-                    ? "Artist"
-                    : table === "production_teams"
-                      ? "Production"
-                      : "Gig";
-
-              const mapped = qData.map((item: any) => ({
-                ...item,
-                type,
-                social_follow_target_id:
-                  table === "groups_with_stats"
-                    ? item.id
-                    : table === "profiles"
-                    ? item.id
-                    : typeof item.owner_id === "string" && item.owner_id.length > 0
-                      ? item.owner_id
-                      : typeof item.organizer_id === "string" && item.organizer_id.length > 0
-                        ? item.organizer_id
-                        : null,
-                social_follow_target_type:
-                  table === "groups_with_stats" ? "group" : "profile",
-                studio_type:
-                  type === "Studio"
-                    ? item.type || item.studio_type || null
-                    : item.studio_type || null,
-                genres: table === "profiles" ? profileGenresById.get(item.id) || [] : item.genres,
-                skills: table === "profiles" ? profileSkillsById.get(item.id) || [] : item.skills,
-                rating:
-                  table === "profiles"
-                    ? profileStatsById.get(item.id)?.rating || 0
-                    : Number(item.rating || 0),
-                review_count:
-                  table === "profiles"
-                    ? profileStatsById.get(item.id)?.review_count || 0
-                    : Number(item.review_count || 0),
-                completion_rate:
-                  table === "profiles"
-                    ? profileStatsById.get(item.id)?.completion_rate ?? null
-                    : item.completion_rate,
-                name: item.name || item.full_name || item.title,
-                location: item.location || item.address || item.description,
-                image: item.images?.[0] || item.image || item.avatar_url || item.logo_url || item.cover_image_url,
-                owner_avatar_url:
-                  ownerAvatarById.get(item.owner_id || item.organizer_id) || null,
-                genre:
-                  item.genre ||
-                  (table === "profiles"
-                    ? (profileGenresById.get(item.id) || []).join(", ")
-                    : Array.isArray(item.genres)
-                      ? item.genres.join(", ")
-                      : ""),
-                rate: (item.rate || item.hourly_rate || item.budget || item.budget_range)?.toString(),
-                show_gig_statuses: item.show_gig_statuses,
-              }));
-
-              let filteredResults =
-                selectedGenre !== "All" && table === "profiles"
-                  ? mapped.filter((item: any) =>
-                      String(item.genre || "")
-                        .toLowerCase()
-                        .includes(selectedGenre.toLowerCase()),
-                    )
-                  : mapped;
-
-              if (minRating > 0 && table === "profiles") {
-                filteredResults = filteredResults.filter(
-                  (item: any) => Number(item.rating || 0) >= minRating,
-                );
-              }
-
-              results.push(...filteredResults);
-            }
-          }
-
-          const groupIds = Array.from(
-            new Set(
-              results
-                .filter((item) => item.type === "Group" && item.id)
-                .map((item) => item.id),
-            ),
-          );
-
-          if (groupIds.length > 0) {
-            const { data: groupVisibilityRows } = await supabase
-              .from("groups")
-              .select("id, open_group_applications")
-              .in("id", groupIds);
-
-            const visibilityMap = new Map<string, boolean>();
-            (groupVisibilityRows || []).forEach((row: any) => {
-              visibilityMap.set(row.id, row.open_group_applications === true);
-            });
-
-            results = results.map((item) =>
-              item.type === "Group"
-                ? {
-                    ...item,
-                    open_group_applications:
-                      visibilityMap.get(item.id) ??
-                      item.open_group_applications === true,
-                  }
-                : item,
-            );
-          }
-
-          // Fetch active promotions for studios
-          const studioIds = Array.from(
-            new Set(
-              results
-                .filter((item) => item.type === "Studio" && item.id)
-                .map((item) => item.id),
-            ),
-          );
-
-          if (studioIds.length > 0) {
-            const todayStr = new Date().toISOString().split("T")[0];
-            const { data: studioPromos } = await supabase
-              .from("studio_promotions")
-              .select("studio_id")
-              .in("studio_id", studioIds)
-              .eq("is_active", true)
-              .or(`is_permanent.eq.true,and(start_date.lte.${todayStr},end_date.gte.${todayStr})`);
-
-            if (studioPromos) {
-              const promoStudioIds = new Set(studioPromos.map((p: any) => p.studio_id));
-              results = results.map((item) =>
-                item.type === "Studio"
-                  ? { ...item, has_active_promotion: promoStudioIds.has(item.id) }
-                  : item,
-              );
-            }
-          }
-
-          if (sortBy === "rating") {
-            results.sort((a, b) => (b.rating || 0) - (a.rating || 0));
-          } else if (sortBy === "price_low") {
-            results.sort((a, b) => {
-              const aPrice = parseFloat(a.rate?.replace(/,/g, "") || "0");
-              const bPrice = parseFloat(b.rate?.replace(/,/g, "") || "0");
-              return aPrice - bPrice;
-            });
-          } else if (sortBy === "price_high") {
-            results.sort((a, b) => {
-              const aPrice = parseFloat(a.rate?.replace(/,/g, "") || "0");
-              const bPrice = parseFloat(b.rate?.replace(/,/g, "") || "0");
-              return bPrice - aPrice;
-            });
-          } else {
-            results.sort((a, b) => {
-              const timestampDelta =
-                getSearchResultTimestamp(b) - getSearchResultTimestamp(a);
-              if (timestampDelta !== 0) {
-                return timestampDelta;
-              }
-
-              return String(a.name || "").localeCompare(String(b.name || ""));
-            });
-          }
-
-          if (
-            sortBy === "newest" &&
-            results.some((item) => item.type === "Artist") &&
-            results.some((item) => item.type === "Group")
-          ) {
-            results = interleaveSearchResultsByType(results);
-          }
-
-          if (requestId !== requestIdRef.current) {
-            return;
-          }
-
-          const hasNextPage = tables.some(
-            (table) => (fetchedCountsByTable.get(table) || 0) === PAGE_SIZE,
-          );
-
-          const existingKeys = new Set<string>();
-          if (!isReset) {
-            dataRef.current.forEach((item: any, index: number) => {
-              existingKeys.add(getSearchResultKey(item, index));
-            });
-          }
-
-          const pooledMap = new Map<string, any>();
-          [...spilloverRef.current, ...results].forEach((item: any, index: number) => {
-            const key = getSearchResultKey(item, index);
-            if (existingKeys.has(key) || pooledMap.has(key)) {
-              return;
-            }
-            pooledMap.set(key, item);
-          });
-
-          const pooledResults = Array.from(pooledMap.values());
-          const nextChunk = pooledResults.slice(0, PAGE_SIZE);
-          const nextSpillover = pooledResults.slice(PAGE_SIZE);
-
-          setHasMore(hasNextPage);
-          setCurrentPage(page);
-          setSpillover(nextSpillover);
-
           if (isReset) {
-            setData(nextChunk);
-          } else {
-            setData((prev) => [...prev, ...nextChunk]);
+            await searchResultsQuery.refetch();
+          } else if (searchResultsQuery.hasNextPage) {
+            await searchResultsQuery.fetchNextPage();
           }
-        } catch (e) {
-          debugLog("Search error:", e);
         } finally {
           if (requestId === requestIdRef.current) {
-            if (isReset) {
-              setLoading(false);
-            } else {
-              setLoadingMore(false);
-            }
+            setLoading(false);
+            setLoadingMore(false);
           }
         }
       },
       [
-        activeFilter,
-        isGuest,
-        isOwner,
-        minRating,
-        priceRange,
-        searchQuery,
-        selectedGenre,
-        sortBy,
+        searchResultsQuery.fetchNextPage,
+        searchResultsQuery.hasNextPage,
+        searchResultsQuery.refetch,
       ],
     );
 
     useEffect(() => {
+      if (!isSheetOpen) {
+        return;
+      }
+
       const timeout = setTimeout(() => {
-        fetchSearchPage(0, "reset");
+        fetchSearchPage("reset");
       }, 300);
 
       return () => clearTimeout(timeout);
-    }, [fetchSearchPage, refreshTrigger]);
+    }, [
+      activeFilter,
+      fetchSearchPage,
+      isGuest,
+      isOwner,
+      isSheetOpen,
+      minRating,
+      priceRange,
+      searchQuery,
+      selectedGenre,
+      sortBy,
+    ]);
 
-    // Realtime Search Updates
-    useEffect(() => {
-      const channel = supabase.channel("public:search_updates");
-
-      const realtimeTables = [
-        "gigs",
-        "studios",
-        "groups",
-        "profiles",
-        "production_teams",
-        "production_team_members",
-        "studio_promotions",
-        "studio_date_overrides",
-        "profile_skills",
-        "profile_genres",
-        "group_media",
-        "studio_media",
-        "gig_media",
-        "reviews",
-      ];
-
-      realtimeTables.forEach((table) => {
-        channel.on(
-          "postgres_changes",
-          { event: "*", schema: "public", table },
-          () => setRefreshTrigger((prev) => prev + 1),
-        );
-      });
-
-      channel.subscribe();
-
-      return () => {
-        supabase.removeChannel(channel);
-      };
-    }, []);
+    // Search invalidation is handled by the shared RootLayout query channel.
 
     const handleItemPress = useCallback(
       (item: any) => {
@@ -1031,17 +568,8 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
     const handleLoadMore = useCallback(() => {
       if (loading || loadingMore || !hasMoreResults) return;
 
-      const buffered = spilloverRef.current;
-      if (buffered.length > 0) {
-        const nextChunk = buffered.slice(0, PAGE_SIZE);
-        const remaining = buffered.slice(PAGE_SIZE);
-        setData((prev) => [...prev, ...nextChunk]);
-        setSpillover(remaining);
-        return;
-      }
-
-      fetchSearchPage(currentPage + 1, "append");
-    }, [currentPage, fetchSearchPage, hasMoreResults, loading, loadingMore]);
+      void searchResultsQuery.fetchNextPage();
+    }, [hasMoreResults, loading, loadingMore, searchResultsQuery.fetchNextPage]);
 
     const listFooter = useMemo(() => {
       if (loadingMore) {
@@ -1491,6 +1019,7 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
         enableContentPanningGesture={false}
         enableOverDrag={false}
         backdropComponent={renderBackdrop}
+        onChange={handleSheetChange}
         onDismiss={handleClose}
         backgroundStyle={{
           backgroundColor: colors.background,

@@ -549,72 +549,6 @@ export default function AddGroupScreen() {
     else router.back();
   };
 
-  const handleAutoFillTestData = () => {
-    const minMembers =
-      PH_MUSIC_GROUP_TYPES.find((type) => type.id === groupType)?.minMembers || 2;
-
-    setGroupName((prev) => prev.trim() || "Test Session Group");
-    setSelectedGenres((prev) => (prev.length > 0 ? prev : ["OPM", "Pop"]));
-    setDescription(
-      (prev) =>
-        prev.trim() ||
-        "QA test profile for validating add/edit and booking/application flows.",
-    );
-    setAddress((prev) => prev.trim() || "Quezon City, Metro Manila");
-    setLatitude((prev) => prev ?? 14.676);
-    setLongitude((prev) => prev ?? 121.0437);
-    setImages((prev) =>
-      prev.length > 0
-        ? prev
-        : [
-          "https://images.unsplash.com/photo-1516280440614-37939bbacd81?w=1200&h=900&fit=crop",
-        ],
-    );
-    setThumbnailIndex(0);
-    setLeaderInstrument((prev) => prev.trim() || "Vocals");
-    setIsLeaderInstrumentFinalized(true);
-
-    setMembers((prev) => {
-      const leaderFromList = prev.find((member) =>
-        isGroupLeaderMember(member, currentUserId),
-      );
-      const fallbackLeader = prev[0];
-      const leader = leaderFromList || fallbackLeader;
-
-      const nextMembers: MemberDetail[] = [
-        {
-          name: leader?.name || currentUserName || "Test Leader",
-          instrument: leader?.instrument?.trim() || "Vocals",
-          role: "Leader",
-          user_id: leader?.user_id || currentUserId || undefined,
-          avatar_url: leader?.avatar_url,
-        },
-      ];
-
-      for (let index = 2; nextMembers.length < minMembers; index += 1) {
-        nextMembers.push({
-          name: `Test Member ${index}`,
-          instrument: index % 2 === 0 ? "Guitar" : "Drums",
-        });
-      }
-
-      setMemberInstrumentFinalization(
-        nextMembers.reduce<Record<number, boolean>>((acc, _member, memberIndex) => {
-          acc[memberIndex] = true;
-          return acc;
-        }, {}),
-      );
-
-      return nextMembers;
-    });
-
-    showAlert(
-      "success",
-      "Test Autofill Applied",
-      "Sample group values were filled for testing.",
-    );
-  };
-
   const createGroup = async () => {
     if (creating) return;
     setCreating(true);
@@ -1014,35 +948,6 @@ export default function AddGroupScreen() {
       <View style={[styles.flex1, { backgroundColor: colors.background }]}>
         <Header title="Create Group" />
 
-        <View style={{ paddingHorizontal: 20, paddingTop: 10 }}>
-          <TouchableOpacity activeOpacity={1}
-            onPress={handleAutoFillTestData}
-            style={{
-              alignSelf: "flex-start",
-              flexDirection: "row",
-              alignItems: "center",
-              gap: 8,
-              backgroundColor: isDark ? "rgba(59, 130, 246, 0.16)" : "#DBEAFE",
-              borderWidth: 1,
-              borderColor: isDark ? "rgba(96, 165, 250, 0.5)" : "#93C5FD",
-              borderRadius: 999,
-              paddingHorizontal: 14,
-              paddingVertical: 8,
-            }}
-          >
-            <Ionicons name="flask-outline" size={15} color={colors.primary} />
-            <Text
-              style={{
-                color: colors.primary,
-                fontFamily: "Poppins_600SemiBold",
-                fontSize: 12,
-              }}
-            >
-              Auto Fill Test Data
-            </Text>
-          </TouchableOpacity>
-        </View>
-
         {/* Enhanced Step Indicator (Fixed at top) */}
         <View style={styles.stepIndicatorContainer}>
           <View style={styles.stepIndicatorContent}>
@@ -1358,9 +1263,9 @@ export default function AddGroupScreen() {
                   <View
                     style={[
                       styles.inputWrapper,
+                      styles.memberSearchWrapper,
                       {
-                        backgroundColor: colors.inputBackground,
-                        borderColor: isDark ? "#374151" : "#E5E7EB",
+                        backgroundColor: isDark ? "#374151" : "#F3F4F6",
                       },
                     ]}
                   >
@@ -1368,7 +1273,8 @@ export default function AddGroupScreen() {
                       style={{
                         flexDirection: "row",
                         alignItems: "center",
-                        paddingHorizontal: 12,
+                        gap: 10,
+                        paddingHorizontal: 16,
                       }}
                     >
                       <Ionicons
@@ -1386,9 +1292,13 @@ export default function AddGroupScreen() {
                           {
                             color: colors.text,
                             flex: 1,
-                            height: 50,
+                            height: 48,
+                            fontFamily: "Poppins_500Medium",
+                            fontSize: 15,
+                            lineHeight: 20,
+                            includeFontPadding: false,
                             textAlign: "left",
-                            paddingVertical: 0,
+                            padding: 0,
                           },
                         ]}
                       />
@@ -2213,6 +2123,11 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     borderWidth: 1,
     overflow: "hidden",
+  },
+  memberSearchWrapper: {
+    borderWidth: 0,
+    borderRadius: 16,
+    height: 48,
   },
   textInput: {
     paddingHorizontal: 16,

@@ -577,10 +577,9 @@ export default function AiSuggestionsScreen() {
                 styles.genreSearchContainer,
                 {
                     backgroundColor: isDark ? '#374151' : '#F3F4F6',
-                    borderColor: colors.border,
                 }
             ]}>
-                <Ionicons name="search" size={18} color={colors.textSecondary} />
+                <Ionicons name="search" size={20} color={colors.textSecondary} />
                 <TextInput
                     style={[styles.genreSearchInput, { color: colors.text }]}
                     placeholder="Search genres..."
@@ -1244,17 +1243,19 @@ const styles = StyleSheet.create({
     genreSearchContainer: {
         flexDirection: 'row',
         alignItems: 'center',
-        paddingHorizontal: 12,
-        paddingVertical: 10,
-        borderRadius: 12,
-        borderWidth: 1,
+        paddingHorizontal: 16,
+        height: 48,
+        borderRadius: 16,
         marginBottom: 12,
-        gap: 8,
+        gap: 10,
     },
     genreSearchInput: {
         flex: 1,
-        fontSize: 14,
-        fontFamily: 'Poppins_400Regular',
+        height: 24,
+        fontSize: 15,
+        fontFamily: 'Poppins_500Medium',
+        lineHeight: 20,
+        includeFontPadding: false,
         padding: 0,
         margin: 0,
         textAlignVertical: 'center',

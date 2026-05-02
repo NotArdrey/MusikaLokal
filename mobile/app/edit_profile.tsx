@@ -671,28 +671,6 @@ export default function EditProfileScreen() {
     }
   }
 
-  const handleAutoFillTestData = () => {
-    setContactNumber((prev) => prev.trim() || "09171234567");
-    setLocation((prev) => prev.trim() || "Mandaluyong City, Metro Manila");
-    setBio(
-      (prev) =>
-        prev.trim() ||
-        "QA test musician profile used to validate booking and application experiences.",
-    );
-    setSelectedRoles((prev) =>
-      prev.length > 0 ? prev : [ROLES[0], ROLES[3]].filter(Boolean),
-    );
-    setSelectedGenres((prev) =>
-      prev.length > 0 ? prev : [GENRES[0], GENRES[1]].filter(Boolean),
-    );
-
-    showAlert(
-      "success",
-      "Test Autofill Applied",
-      "Sample profile values were filled for testing.",
-    );
-  };
-
   if (loading) {
     return (
       <View style={[styles.container, { backgroundColor: colors.background }]}>
@@ -730,36 +708,6 @@ export default function EditProfileScreen() {
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        <View style={{ marginBottom: 12 }}>
-          <TouchableOpacity
-            style={{
-              alignSelf: "flex-start",
-              flexDirection: "row",
-              alignItems: "center",
-              gap: 8,
-              backgroundColor: isDark ? "rgba(59, 130, 246, 0.16)" : "#DBEAFE",
-              borderWidth: 1,
-              borderColor: isDark ? "rgba(96, 165, 250, 0.5)" : "#93C5FD",
-              borderRadius: 999,
-              paddingHorizontal: 14,
-              paddingVertical: 8,
-            }}
-            onPress={handleAutoFillTestData}
-            activeOpacity={1}
-          >
-            <Ionicons name="flask-outline" size={15} color={colors.primary} />
-            <Text
-              style={{
-                color: colors.primary,
-                fontFamily: "Poppins_600SemiBold",
-                fontSize: 12,
-              }}
-            >
-              Auto Fill Test Data
-            </Text>
-          </TouchableOpacity>
-        </View>
-
         {/* Avatar */}
         <View style={styles.avatarContainer}>
           <View style={styles.avatarWrapper}>
@@ -885,20 +833,16 @@ export default function EditProfileScreen() {
             </View>
           )}
           {/* Search input */}
-          <TextInput
-            style={[
-              styles.searchInput,
-              {
-                backgroundColor: colors.inputBackground,
-                borderColor: colors.border,
-                color: colors.text,
-              },
-            ]}
-            value={roleSearch}
-            onChangeText={setRoleSearch}
-            placeholder="Search roles & instruments..."
-            placeholderTextColor={colors.textSecondary}
-          />
+          <View style={[styles.searchInputWrap, { backgroundColor: isDark ? "#374151" : "#F3F4F6" }]}>
+            <Ionicons name="search" size={20} color={colors.textSecondary} />
+            <TextInput
+              style={[styles.searchInput, { color: colors.text }]}
+              value={roleSearch}
+              onChangeText={setRoleSearch}
+              placeholder="Search roles & instruments..."
+              placeholderTextColor={colors.textSecondary}
+            />
+          </View>
           {/* Filtered chips */}
           <View style={styles.chipsCompact}>
             {ROLES.filter(
@@ -978,20 +922,16 @@ export default function EditProfileScreen() {
             </View>
           )}
           {/* Search input */}
-          <TextInput
-            style={[
-              styles.searchInput,
-              {
-                backgroundColor: colors.inputBackground,
-                borderColor: colors.border,
-                color: colors.text,
-              },
-            ]}
-            value={genreSearch}
-            onChangeText={setGenreSearch}
-            placeholder="Search genres..."
-            placeholderTextColor={colors.textSecondary}
-          />
+          <View style={[styles.searchInputWrap, { backgroundColor: isDark ? "#374151" : "#F3F4F6" }]}>
+            <Ionicons name="search" size={20} color={colors.textSecondary} />
+            <TextInput
+              style={[styles.searchInput, { color: colors.text }]}
+              value={genreSearch}
+              onChangeText={setGenreSearch}
+              placeholder="Search genres..."
+              placeholderTextColor={colors.textSecondary}
+            />
+          </View>
           {/* Filtered chips */}
           <View style={styles.chipsCompact}>
             {GENRES.filter(
@@ -1221,12 +1161,22 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   chipTextCompact: { fontSize: 12, fontFamily: "Poppins_500Medium" },
+  searchInputWrap: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    borderRadius: 16,
+    height: 48,
+    paddingHorizontal: 16,
+  },
   searchInput: {
-    borderWidth: 1,
-    borderRadius: 8,
-    padding: 10,
-    fontSize: 14,
-    fontFamily: "Poppins_400Regular",
+    flex: 1,
+    height: 24,
+    padding: 0,
+    fontSize: 15,
+    lineHeight: 20,
+    includeFontPadding: false,
+    fontFamily: "Poppins_500Medium",
     textAlign: "left",
     textAlignVertical: "center",
   },

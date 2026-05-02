@@ -198,12 +198,14 @@ const ConversationsList: React.FC<ConversationsListProps> = ({
                 />
                 <View style={styles.searchBarContainer}>
                     <TouchableOpacity
-                        style={[styles.searchBar, { backgroundColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.05)' }]}
+                        style={[styles.searchBar, { backgroundColor: isDark ? '#374151' : '#F3F4F6' }]}
                         onPress={() => setShowNewMessageModal(true)}
                         activeOpacity={1}
                     >
-                        <Ionicons name="search" size={17} color={colors.textSecondary} style={{ marginRight: 8 }} />
-                        <Text style={{ color: colors.textSecondary, fontSize: 15 }}>Search or start new chat…</Text>
+                        <Ionicons name="search" size={20} color={colors.textSecondary} />
+                        <Text style={[styles.searchBarText, { color: colors.textSecondary }]} numberOfLines={1}>
+                            Search or start new chat...
+                        </Text>
                     </TouchableOpacity>
                 </View>
             </View>
@@ -277,10 +279,18 @@ const styles = StyleSheet.create({
     searchBar: {
         flexDirection: 'row',
         alignItems: 'center',
-        height: 44,
-        borderRadius: 22,
+        gap: 10,
+        height: 48,
+        borderRadius: 16,
         paddingHorizontal: 16,
         marginBottom: 2,
+    },
+    searchBarText: {
+        flex: 1,
+        fontSize: 15,
+        fontFamily: 'Poppins_500Medium',
+        lineHeight: 20,
+        includeFontPadding: false,
     },
     loadingContainer: {
         flex: 1,

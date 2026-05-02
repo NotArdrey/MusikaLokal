@@ -201,8 +201,12 @@ const UserSearchModal: React.FC<UserSearchModalProps> = ({
                         autoFocus
                     />
                     {searchQuery.length > 0 && (
-                        <TouchableOpacity activeOpacity={1} onPress={() => setSearchQuery('')}>
-                            <Ionicons name="close-circle" size={20} color={colors.textSecondary} />
+                        <TouchableOpacity
+                            activeOpacity={1}
+                            onPress={() => setSearchQuery('')}
+                            hitSlop={{ top: 10, right: 10, bottom: 10, left: 10 }}
+                        >
+                            <Ionicons name="close-circle" size={18} color={colors.textSecondary} />
                         </TouchableOpacity>
                     )}
                 </View>
@@ -281,15 +285,20 @@ const styles = StyleSheet.create({
     searchContainer: {
         flexDirection: 'row',
         alignItems: 'center',
+        gap: 10,
         margin: 16,
-        paddingHorizontal: 12,
-        paddingVertical: 10,
-        borderRadius: 12,
+        paddingHorizontal: 16,
+        height: 48,
+        borderRadius: 16,
     },
     searchInput: {
         flex: 1,
-        marginLeft: 8,
-        fontSize: 16,
+        height: 24,
+        fontSize: 15,
+        fontFamily: 'Poppins_500Medium',
+        lineHeight: 20,
+        includeFontPadding: false,
+        padding: 0,
         textAlignVertical: 'center',
     },
     loadingContainer: {

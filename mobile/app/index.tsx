@@ -19,57 +19,6 @@ interface AlertState {
   forceModal: boolean;
 }
 
-type TempLoginRole = 'musician' | 'producer' | 'studio-owner' | 'venue-owner';
-
-type TempLoginOption = {
-  label: string;
-  details: string;
-  email: string;
-  expectedRole: TempLoginRole;
-  destinationLabel: string;
-};
-
-const TEMP_LOGIN_PASSWORD = 'pass123';
-const TEMP_LOGIN_OPTIONS: TempLoginOption[] = [
-  {
-    label: 'Login as Gabriel dela Cruz',
-    details: 'Musician | musician@test.com',
-    email: 'musician@test.com',
-    expectedRole: 'musician',
-    destinationLabel: 'My Group',
-  },
-  {
-    label: 'Login as Jonathan Santos',
-    details: 'Producer | producer1@test.com',
-    email: 'producer1@test.com',
-    expectedRole: 'producer',
-    destinationLabel: 'My Production',
-  },
-  {
-    label: 'Login as OneRoots Records',
-    details: 'Studio owner | studio@test.com',
-    email: 'studio@test.com',
-    expectedRole: 'studio-owner',
-    destinationLabel: 'My Studio',
-  },
-  {
-    label: 'Login as Marco Reyes',
-    details: 'Venue owner | manager@test.com',
-    email: 'manager@test.com',
-    expectedRole: 'venue-owner',
-    destinationLabel: 'My Venue',
-  },
-] as const;
-
-const formatTempRoleLabel = (role: string | null | undefined) => {
-  if (role === 'studio-owner') return 'Studio Owner';
-  if (role === 'venue-owner') return 'Venue Owner';
-  if (role === 'producer') return 'Producer';
-  if (role === 'musician') return 'Musician';
-  if (!role) return 'Unknown';
-  return role;
-};
-
 const isAdminRole = (role: unknown): boolean => {
   return typeof role === 'string' && role.toLowerCase() === 'admin';
 };
@@ -231,84 +180,6 @@ export default function LoginScreen() {
   const showLoginError = (title: string, message: string) => {
     setLoginMessage({ type: 'error', text: message });
     showAlert('error', title, message, [{ text: 'OK', style: 'default' }], true);
-  };
-
-  const openTemporaryLoginValidation = async (option: TempLoginOption) => {
-    try {
-      const { data: profile, error } = await supabase
-        .from('profiles')
-        .select('role, is_verified')
-        .eq('email', option.email)
-        .maybeSingle();
-
-      if (error) {
-        throw error;
-      }
-
-      if (!profile) {
-        showAlert(
-          'warning',
-          'Test Account Missing',
-          `${option.label} is not available in this environment.`,
-          [{ text: 'OK', style: 'default' }],
-        );
-        return;
-      }
-
-      const actualRole = typeof profile.role === 'string' ? profile.role.trim().toLowerCase() : null;
-      if (actualRole !== option.expectedRole) {
-        showAlert(
-          'warning',
-          'Test Account Mismatch',
-          `${option.label} is configured as ${formatTempRoleLabel(actualRole)} instead of ${formatTempRoleLabel(option.expectedRole)}.`,
-          [{ text: 'OK', style: 'default' }],
-        );
-        return;
-      }
-
-      const identityVerified = profile.is_verified === true;
-      const issues: string[] = [];
-
-      if (!identityVerified) {
-        issues.push('Identity verification is incomplete.');
-      }
-
-      const summary = [
-        option.label,
-        option.email,
-        '',
-        `Role: ${formatTempRoleLabel(actualRole)}`,
-        `Identity: ${identityVerified ? 'Verified' : 'Needs verification'}`,
-        `Expected destination: ${option.destinationLabel}`,
-      ].join('\n');
-
-      const message = issues.length > 0
-        ? `${summary}\n\nCurrent issues:\n- ${issues.join('\n- ')}\n\nContinue anyway?`
-        : `${summary}\n\nContinue with this test account?`;
-
-      showAlert(
-        issues.length > 0 ? 'warning' : 'info',
-        'Temporary Login Validation',
-        message,
-        [
-          { text: 'Cancel', style: 'cancel' },
-          {
-            text: issues.length > 0 ? 'Continue Anyway' : 'Continue',
-            onPress: () => {
-              void signInWithCredentials(option.email, TEMP_LOGIN_PASSWORD);
-            },
-            style: 'default',
-          },
-        ],
-      );
-    } catch (error) {
-      showAlert(
-        'error',
-        'Validation Error',
-        'Unable to validate this temporary login right now. Please try again.',
-        [{ text: 'OK', style: 'default' }],
-      );
-    }
   };
 
   // Check for Account Created success (New User)
@@ -519,15 +390,6 @@ export default function LoginScreen() {
     await signInWithCredentials(email, password);
   };
 
-  const handleTemporaryLogin = async (option: TempLoginOption) => {
-    setEmail(option.email);
-    setPassword(TEMP_LOGIN_PASSWORD);
-    setErrors({});
-    setLoginMessage(null);
-
-    await openTemporaryLoginValidation(option);
-  };
-
   const startVerification = async (userId: string) => {
     try {
       // Direct URL construction with unique reference to prevent stale sessions
@@ -681,33 +543,6 @@ export default function LoginScreen() {
               )}
             </TouchableOpacity>
 
-            <View style={styles.tempLoginSection}>
-              <Text style={[styles.tempLoginLabel, themeStyles.textSecondary]}>
-                Temporary test logins
-              </Text>
-              <View style={styles.tempLoginButtonList}>
-                {TEMP_LOGIN_OPTIONS.map((option) => (
-                  <TouchableOpacity
-                    key={option.email}
-                    onPress={() => handleTemporaryLogin(option)}
-                    disabled={loading}
-                    activeOpacity={1}
-                    style={[
-                      styles.tempLoginButton,
-                      { borderColor: colors.border, opacity: loading ? 0.6 : 1 },
-                    ]}
-                  >
-                    <Text style={[styles.tempLoginButtonText, themeStyles.primaryText]}>
-                      {option.label}
-                    </Text>
-                    <Text style={[styles.tempLoginButtonDetails, themeStyles.textSecondary]}>
-                      {option.details}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            </View>
-
             <TouchableOpacity
               onPress={handleContinueAsGuest}
               activeOpacity={1}
@@ -847,38 +682,6 @@ const styles = StyleSheet.create({
     fontFamily: 'Poppins_600SemiBold',
     color: 'white',
     fontSize: 16,
-  },
-  tempLoginSection: {
-    gap: 10,
-  },
-  tempLoginLabel: {
-    fontFamily: 'Poppins_500Medium',
-    fontSize: 12,
-    textAlign: 'center',
-    textTransform: 'uppercase',
-    letterSpacing: 1,
-  },
-  tempLoginButtonList: {
-    gap: 10,
-  },
-  tempLoginButton: {
-    minHeight: 48,
-    borderRadius: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    paddingHorizontal: 16,
-  },
-  tempLoginButtonText: {
-    fontFamily: 'Poppins_500Medium',
-    fontSize: 14,
-    textAlign: 'center',
-  },
-  tempLoginButtonDetails: {
-    fontFamily: 'Poppins_400Regular',
-    fontSize: 11,
-    marginTop: 2,
-    textAlign: 'center',
   },
   guestButton: {
     height: 52,

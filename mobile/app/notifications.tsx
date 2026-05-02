@@ -1,5 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
-import { router, useFocusEffect } from 'expo-router';
+import { useQueryClient } from '@tanstack/react-query';
+import { router } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
     ActivityIndicator,
@@ -16,7 +17,11 @@ import CustomAlert, { AlertType } from '../src/components/CustomAlert';
 import Header from '../src/components/header';
 import Navbar from '../src/components/navbar';
 import { useBottomBarClearance } from '../src/hooks/useBottomBarClearance';
+import { useAuth } from '../src/context/AuthContext';
 import { useTheme } from '../src/context/ThemeContext';
+import { useNotificationsQuery } from '../src/data/hooks';
+import { queryKeys } from '../src/data/queryKeys';
+import { usePageLoadLogger } from '../src/utils/loadTimeLogger';
 import {
     buildNotificationRouteMeta,
     resolveNotificationNavigationTarget,
@@ -25,11 +30,12 @@ import {
 
 export default function NotificationsScreen() {
     const { colors, isDark } = useTheme();
+    const { userId } = useAuth();
+    const queryClient = useQueryClient();
     const { contentBottomPadding } = useBottomBarClearance(24);
     const DEFAULT_NOTIFICATION_IMAGE = 'https://images.unsplash.com/photo-1598488035139-bdbb2231ce04?w=100&h=100&fit=crop';
     const KNOWN_IMAGE_BUCKETS = ['avatars', 'profile-images', 'group-images', 'studio-images', 'gig-images', 'documents'];
     const [notifications, setNotifications] = useState<any[]>([]);
-    const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
     const [processingTransferId, setProcessingTransferId] = useState<string | null>(null);
     const [alertVisible, setAlertVisible] = useState(false);
@@ -64,57 +70,18 @@ export default function NotificationsScreen() {
 
     const Alert = { alert: showAlertNative };
 
-    const fetchNotifications = useCallback(async () => {
-        try {
-            const { data: { user } } = await supabase.auth.getUser();
-            if (!user) return;
-
-            const { data, error } = await supabase.functions.invoke('manage-notifications', {
-                body: { action: 'fetch', userId: user.id }
-            });
-
-            if (error) throw error;
-            setNotifications(data || []);
-        } catch (e) {
-        } finally {
-            setLoading(false);
-            setRefreshing(false);
-        }
-    }, []);
-
-    useFocusEffect(
-        useCallback(() => {
-            fetchNotifications();
-        }, [fetchNotifications])
+    const notificationsQuery = useNotificationsQuery(userId, { limit: 30 });
+    const queriedNotifications = useMemo(
+        () =>
+            (notificationsQuery.data?.pages || []).flatMap((page: any) =>
+                Array.isArray(page?.items) ? page.items : Array.isArray(page?.data) ? page.data : [],
+            ),
+        [notificationsQuery.data],
     );
 
     useEffect(() => {
-        let isActive = true;
-        let activeChannel: ReturnType<typeof supabase.channel> | null = null;
-
-        const setupRealtime = async () => {
-            const { data: { user } } = await supabase.auth.getUser();
-            if (!user || !isActive) return;
-
-            activeChannel = supabase
-                .channel(`screen-notifications:${user.id}`)
-                .on(
-                    'postgres_changes',
-                    { event: '*', schema: 'public', table: 'notifications', filter: `user_id=eq.${user.id}` },
-                    () => fetchNotifications()
-                )
-                .subscribe();
-        };
-
-        setupRealtime();
-
-        return () => {
-            isActive = false;
-            if (activeChannel) {
-                supabase.removeChannel(activeChannel);
-            }
-        };
-    }, [fetchNotifications]);
+        setNotifications(queriedNotifications);
+    }, [queriedNotifications]);
 
     const resolveNotificationImage = useCallback((item: any) => {
         const rawCandidates = [
@@ -179,10 +146,11 @@ export default function NotificationsScreen() {
         return DEFAULT_NOTIFICATION_IMAGE;
     }, []);
 
-    const onRefresh = React.useCallback(() => {
+    const onRefresh = React.useCallback(async () => {
         setRefreshing(true);
-        fetchNotifications();
-    }, []);
+        await notificationsQuery.refetch();
+        setRefreshing(false);
+    }, [notificationsQuery]);
 
     const markAsRead = async (id: string, currentReadStatus: boolean) => {
         if (currentReadStatus) return; // Already read
@@ -191,12 +159,12 @@ export default function NotificationsScreen() {
         setNotifications(notifications.map(n => n.id === id ? { ...n, read: true } : n));
 
         try {
-            const { data: { user } } = await supabase.auth.getUser();
-            if (!user) return;
+            if (!userId) return;
 
             await supabase.functions.invoke('manage-notifications', {
-                body: { action: 'mark_read', userId: user.id, notificationId: id }
+                body: { action: 'mark_read', userId, notificationId: id }
             });
+            void queryClient.invalidateQueries({ queryKey: queryKeys.notifications.list(userId) });
         } catch (e) {
         }
     };
@@ -206,12 +174,12 @@ export default function NotificationsScreen() {
         setNotifications(notifications.map(n => ({ ...n, read: true })));
 
         try {
-            const { data: { user } } = await supabase.auth.getUser();
-            if (!user) return;
+            if (!userId) return;
 
             await supabase.functions.invoke('manage-notifications', {
-                body: { action: 'mark_read', userId: user.id, all: true }
+                body: { action: 'mark_read', userId, all: true }
             });
+            void queryClient.invalidateQueries({ queryKey: queryKeys.notifications.list(userId) });
         } catch (e) {
         }
     };
@@ -314,7 +282,7 @@ export default function NotificationsScreen() {
 
                             // Mark notification as processed/read
                             markAsRead(notification.id, false);
-                            fetchNotifications();
+                            void notificationsQuery.refetch();
 
                         } catch (e: any) {
                             console.error('Error accepting transfer:', e);
@@ -390,7 +358,7 @@ export default function NotificationsScreen() {
 
                             Alert.alert('Declined', 'Leadership transfer request has been declined.');
                             markAsRead(notification.id, false);
-                            fetchNotifications();
+                            void notificationsQuery.refetch();
 
                         } catch (e: any) {
                             console.error('Error declining transfer:', e);
@@ -486,8 +454,27 @@ export default function NotificationsScreen() {
     };
 
     const today = new Date().toDateString();
+    const loading = notificationsQuery.isLoading && notifications.length === 0;
     const todayNotifications = notifications.filter(n => new Date(n.created_at).toDateString() === today);
     const earlierNotifications = notifications.filter(n => new Date(n.created_at).toDateString() !== today);
+
+    usePageLoadLogger({
+        counts: {
+            earlier: earlierNotifications.length,
+            total: notifications.length,
+            today: todayNotifications.length,
+            unread: unreadCount,
+        },
+        details: {
+            hasNextPage: Boolean(notificationsQuery.hasNextPage),
+            userId: userId ? 'signed-in' : 'guest',
+        },
+        loading,
+        page: 'Notifications',
+        queries: { notifications: notificationsQuery },
+        ready: !loading,
+        refreshing,
+    });
 
     const sections = [
         { title: 'Today', data: todayNotifications },
@@ -635,6 +622,12 @@ export default function NotificationsScreen() {
                 refreshControl={
                     <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />
                 }
+                onEndReached={() => {
+                    if (notificationsQuery.hasNextPage && !notificationsQuery.isFetchingNextPage) {
+                        void notificationsQuery.fetchNextPage();
+                    }
+                }}
+                onEndReachedThreshold={0.35}
                 ListEmptyComponent={
                     !loading ? (
                         <View style={styles.emptyState}>
@@ -642,11 +635,17 @@ export default function NotificationsScreen() {
                                 <Ionicons name="notifications-outline" size={32} color={colors.textSecondary} />
                             </View>
                             <Text style={[styles.emptyTitle, { color: colors.text }]}>No Notifications</Text>
-                            <Text style={[styles.emptySubtitle, { color: colors.textSecondary }]}>We'll let you know when something update!</Text>
+                            <Text style={[styles.emptySubtitle, { color: colors.textSecondary }]}>We will let you know when something updates.</Text>
                         </View>
                     ) : null
                 }
-                ListFooterComponent={loading ? <ActivityIndicator style={{ marginTop: 20 }} color={colors.primary} /> : <View style={{ height: 24 }} />}
+                ListFooterComponent={
+                    loading || notificationsQuery.isFetchingNextPage ? (
+                        <ActivityIndicator style={{ marginTop: 20 }} color={colors.primary} />
+                    ) : (
+                        <View style={{ height: 24 }} />
+                    )
+                }
             />
 
             <View style={styles.navbarContainer}>

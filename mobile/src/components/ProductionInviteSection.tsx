@@ -118,8 +118,8 @@ export default function ProductionInviteSection({
       <Text style={[styles.sectionText, { color: colors.textSecondary }]}>Search for performers to invite after you save this production team. Accepted invites will add them to your production roster, and recipients can respond from Bookings &gt; Pending.</Text>
 
       <Text style={[styles.label, { color: colors.text }]}>Search Talent</Text>
-      <View style={[styles.searchInputWrap, { borderColor: colors.border, backgroundColor: colors.background }]}>
-        <Ionicons name="search-outline" size={18} color={colors.textSecondary} />
+      <View style={[styles.searchInputWrap, { backgroundColor: isDark ? "#374151" : "#F3F4F6" }]}>
+        <Ionicons name="search" size={20} color={colors.textSecondary} />
         <TextInput
           style={[styles.searchInput, { color: colors.text }]}
           value={searchQuery}
@@ -141,13 +141,21 @@ export default function ProductionInviteSection({
               style={[
                 styles.filterChip,
                 {
-                  borderColor: isActive ? colors.primary : colors.border,
-                  backgroundColor: isActive ? colors.primary : "transparent",
+                  backgroundColor: isActive
+                    ? colors.primary
+                    : isDark
+                      ? "#374151"
+                      : "#F3F4F6",
                   opacity: disabled ? 0.6 : 1,
                 },
               ]}
             >
-              <Text style={[styles.filterChipText, { color: isActive ? "#fff" : colors.textSecondary }]}>
+              <Text
+                style={[
+                  styles.filterChipText,
+                  { color: isActive ? "#fff" : isDark ? "#D1D5DB" : "#4B5563" },
+                ]}
+              >
                 {option.label}
               </Text>
             </TouchableOpacity>
@@ -273,20 +281,20 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 10,
-    borderWidth: 1,
-    borderRadius: 12,
+    borderRadius: 16,
     height: 48,
-    paddingHorizontal: 14,
+    paddingHorizontal: 16,
     paddingVertical: 0,
   },
   searchInput: {
     flex: 1,
-    height: "100%",
-    fontSize: 14,
+    height: 24,
+    fontSize: 15,
     lineHeight: 20,
-    paddingVertical: 0,
+    includeFontPadding: false,
+    padding: 0,
     textAlignVertical: "center",
-    fontFamily: "Poppins_400Regular",
+    fontFamily: "Poppins_500Medium",
   },
   filterRow: {
     flexDirection: "row",
@@ -295,14 +303,13 @@ const styles = StyleSheet.create({
     marginTop: 10,
   },
   filterChip: {
-    borderWidth: 1,
     borderRadius: 999,
-    paddingHorizontal: 12,
-    paddingVertical: 7,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
   },
   filterChipText: {
-    fontSize: 12,
-    fontFamily: "Poppins_600SemiBold",
+    fontSize: 13,
+    fontFamily: "Poppins_500Medium",
   },
   selectedList: {
     marginTop: 14,

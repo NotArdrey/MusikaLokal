@@ -23,6 +23,12 @@ const MIN_WITHDRAWAL_AMOUNT = 100;
 // Withdrawal fee (can be percentage or fixed)
 const WITHDRAWAL_FEE_PERCENTAGE = 0; // 0% fee for now
 const FIXED_WITHDRAWAL_FEE = 0; // No fixed fee
+const BOOKING_EARNING_REFERENCE_TYPES = new Set([
+  'booking',
+  'booking_payment',
+  'booking_downpayment',
+  'booking_balance',
+]);
 
 // Bank codes for PayMongo disbursements
 const BANK_CODES: Record<string, string> = {
@@ -305,6 +311,96 @@ serve(async (req: Request) => {
 
     const body: WithdrawalRequest = await req.json();
     const { action } = body;
+
+    // ============================================================
+    // GET WALLET SCREEN SUMMARY
+    // ============================================================
+    if (action === 'get_wallet_summary') {
+      const { data: profile, error: profileError } = await supabaseAdmin
+        .from('profiles')
+        .select('role')
+        .eq('id', user.id)
+        .single();
+
+      if (profileError) throw profileError;
+
+      let { data: wallet, error: walletError } = await supabaseAdmin
+        .from('wallets')
+        .select('*')
+        .eq('user_id', user.id)
+        .single();
+
+      if (walletError && walletError.code === 'PGRST116') {
+        const { data: newWallet, error: createError } = await supabaseAdmin
+          .from('wallets')
+          .insert([{ user_id: user.id, balance: 0 }])
+          .select()
+          .single();
+
+        if (createError) throw createError;
+        wallet = newWallet;
+      } else if (walletError) {
+        throw walletError;
+      }
+
+      const [
+        transactionsResult,
+        unpaidBookingsResult,
+        payoutMethodsResult,
+        withdrawalsResult,
+      ] = await Promise.all([
+        wallet?.id
+          ? supabaseAdmin
+              .from('wallet_transactions')
+              .select('*')
+              .eq('wallet_id', wallet.id)
+              .order('created_at', { ascending: false })
+              .limit(80)
+          : Promise.resolve({ data: [], error: null }),
+        supabaseAdmin
+          .from('studio_bookings')
+          .select('*, studio:studios(name, images)')
+          .eq('user_id', user.id)
+          .gt('remaining_balance', 0)
+          .in('status', ['pending', 'confirmed'])
+          .order('booking_date', { ascending: true })
+          .limit(30),
+        supabaseAdmin
+          .from('payout_methods')
+          .select('*')
+          .eq('user_id', user.id)
+          .order('is_default', { ascending: false }),
+        supabaseAdmin
+          .from('withdrawal_requests')
+          .select('*')
+          .eq('user_id', user.id)
+          .order('created_at', { ascending: false })
+          .limit(20),
+      ]);
+
+      if (transactionsResult.error) throw transactionsResult.error;
+      if (unpaidBookingsResult.error) throw unpaidBookingsResult.error;
+      if (payoutMethodsResult.error) throw payoutMethodsResult.error;
+      if (withdrawalsResult.error) throw withdrawalsResult.error;
+
+      const earningTransactions = (transactionsResult.data || []).filter((tx: any) =>
+        tx?.type === 'earning' &&
+        (BOOKING_EARNING_REFERENCE_TYPES.has(tx?.reference_type) || !tx?.reference_type)
+      );
+
+      return new Response(JSON.stringify({
+        success: true,
+        role: profile?.role || null,
+        wallet,
+        balance: wallet?.balance || 0,
+        transactions: earningTransactions,
+        unpaidBookings: unpaidBookingsResult.data || [],
+        payoutMethods: payoutMethodsResult.data || [],
+        withdrawals: withdrawalsResult.data || [],
+      }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      });
+    }
 
     // ============================================================
     // GET PAYOUT METHODS

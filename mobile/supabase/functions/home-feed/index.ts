@@ -658,6 +658,101 @@ const getFeaturedPayload = async (supabaseClient: any) => {
     };
 };
 
+const getMobileProfileSummary = async (supabaseClient: any, userId?: string | null) => {
+    if (!userId) {
+        return {
+            userName: "Guest",
+            hasGroups: false,
+        };
+    }
+
+    const [profileResult, groupCountResult] = await Promise.all([
+        supabaseClient
+            .from("profiles")
+            .select("full_name")
+            .eq("id", userId)
+            .maybeSingle(),
+        supabaseClient
+            .from("groups")
+            .select("id", { count: "exact", head: true })
+            .eq("owner_id", userId),
+    ]);
+
+    if (profileResult.error) {
+        console.error("home-feed mobile profile summary error:", profileResult.error);
+    }
+
+    if (groupCountResult.error) {
+        console.error("home-feed mobile group count error:", groupCountResult.error);
+    }
+
+    return {
+        userName: profileResult.data?.full_name
+            ? String(profileResult.data.full_name).split(" ")[0]
+            : "Guest",
+        hasGroups: (groupCountResult.count || 0) > 0,
+    };
+};
+
+const shuffleItems = <T,>(items: T[]): T[] => {
+    return [...items].sort(() => Math.random() - 0.5);
+};
+
+const getMobileHomePayload = async (
+    supabaseClient: any,
+    body: FeedRequestBody & { isGuest?: boolean; userRole?: string | null },
+    groqApiKey: string,
+) => {
+    const fetchedAt = Date.now();
+    const userId = body.userId || null;
+    const limit = Math.max(10, Math.min(Number(body.limit || 20), 30));
+
+    const [featuredPayload, profileSummary] = await Promise.all([
+        getFeaturedPayload(supabaseClient),
+        getMobileProfileSummary(supabaseClient, userId),
+    ]);
+
+    const candidates = await fetchCandidates(supabaseClient);
+    const randomRecommendations = shuffleItems(candidates).slice(0, limit);
+    let aiRecommendations: RecommendationItem[] = [];
+    let aiFeedProvider = "Normal Feed";
+    let aiFeedMessage = "";
+
+    if (userId) {
+        const recommendations = await getRecommendations(
+            supabaseClient,
+            userId,
+            "for-you",
+            groqApiKey,
+            limit,
+        );
+
+        aiRecommendations = recommendations.recommendations || [];
+        aiFeedProvider = recommendations.aiProvider || aiFeedProvider;
+        aiFeedMessage = recommendations.message || "";
+    }
+
+    const featured = aiRecommendations.length > 0
+        ? aiRecommendations.slice(0, 10)
+        : randomRecommendations.slice(0, 10);
+    const discover = aiRecommendations.length > 10
+        ? aiRecommendations.slice(10, 20)
+        : randomRecommendations.slice(10, 20);
+
+    return {
+        fetchedAt,
+        profile: profileSummary,
+        featured,
+        discover,
+        newArrivals: featuredPayload.newArrivals || [],
+        randomRecommendations,
+        aiRecommendations,
+        aiFeedProvider,
+        aiFeedMessage,
+        providerStatus: getGroqProviderStatus(),
+    };
+};
+
 serve(async (req: Request) => {
     if (req.method === "OPTIONS") {
         return new Response("ok", { headers: corsHeaders });
@@ -696,6 +791,15 @@ serve(async (req: Request) => {
                     status: 200,
                 },
             );
+        }
+
+        if (action === "mobile_home") {
+            const payload = await getMobileHomePayload(supabaseClient, body, groqApiKey);
+
+            return new Response(JSON.stringify(payload), {
+                headers: { ...corsHeaders, "Content-Type": "application/json" },
+                status: 200,
+            });
         }
 
         if (action === "for-you" || action === "skill-suggestions") {

@@ -462,8 +462,8 @@ export default function MarketplaceScreen() {
       </View>
 
       {/* Search */}
-      <View style={[styles.searchBar, { backgroundColor: colors.surface, borderColor: isDark ? "#334155" : "#E2E8F0" }]}>
-        <Ionicons name="search" size={18} color={colors.textSecondary} />
+      <View style={[styles.searchBar, { backgroundColor: isDark ? "#374151" : "#F3F4F6" }]}>
+        <Ionicons name="search" size={20} color={colors.textSecondary} />
         <TextInput
           style={[styles.searchInput, { color: colors.text }]}
           placeholder="Search listings..."
@@ -521,7 +521,13 @@ export default function MarketplaceScreen() {
               >
                 <View style={styles.productImageWrap}>
                   {getProductImage(product) ? (
-                    <CachedImage uri={getProductImage(product)} style={styles.productImage} />
+                    <CachedImage
+                      uri={getProductImage(product)}
+                      style={styles.productImage}
+                      width={Math.round(CARD_WIDTH)}
+                      height={Math.round(CARD_WIDTH)}
+                      priority="high"
+                    />
                   ) : (
                     <View style={[styles.productImagePlaceholder, { backgroundColor: colors.primary + "10" }]}>
                       <Ionicons name="bag-outline" size={28} color={colors.primary} />
@@ -619,7 +625,13 @@ export default function MarketplaceScreen() {
               onPress={() => router.push({ pathname: "/product_details", params: { product_id: product.id } })}
             >
               {getProductImage(product) ? (
-                <CachedImage uri={getProductImage(product)} style={styles.productThumb} />
+                <CachedImage
+                  uri={getProductImage(product)}
+                  style={styles.productThumb}
+                  width={56}
+                  height={56}
+                  priority="high"
+                />
               ) : (
                 <View style={[styles.productThumbPlaceholder, { backgroundColor: colors.primary + "10" }]}>
                   <Ionicons name="bag-outline" size={20} color={colors.primary} />
@@ -850,8 +862,8 @@ const styles = StyleSheet.create({
     includeFontPadding: false,
     textAlignVertical: "center",
   },
-  searchBar: { flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingVertical: 12, borderRadius: 16, borderWidth: 1, marginBottom: 8 },
-  searchInput: { flex: 1, marginLeft: 8, fontSize: moderateScale(14) },
+  searchBar: { flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 16, height: 48, borderRadius: 16, marginBottom: 8 },
+  searchInput: { flex: 1, height: 24, fontSize: moderateScale(15), fontFamily: "Poppins_500Medium", lineHeight: 20, includeFontPadding: false, padding: 0, textAlignVertical: "center" },
   categoryRow: { marginBottom: 12, maxHeight: 44 },
   categoryPill: { borderWidth: 1, borderRadius: 20, paddingHorizontal: 16, paddingVertical: 6, marginRight: 8 },
   modalCategoryRow: { gap: 8, paddingVertical: 4, paddingRight: 16 },

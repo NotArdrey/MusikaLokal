@@ -1609,6 +1609,141 @@ serve(async (req: Request) => {
         }
       }
 
+      if (params.includeScreenPayload === true) {
+        const loadPendingPermitListings = async () => {
+          if (userRole !== "studio-owner" && userRole !== "venue-owner") {
+            return [];
+          }
+
+          const permitTable = userRole === "studio-owner" ? "studios" : "gigs";
+          const permitOwnerField = userRole === "studio-owner" ? "owner_id" : "organizer_id";
+          const { data: permitRows, error: permitError } = await supabaseClient
+            .from(permitTable)
+            .select("id, name, permit_status, permit_rejection_reason, permit_resubmissions_used, permit_reviewed_at, created_at")
+            .eq(permitOwnerField, userId)
+            .in("permit_status", ["pending", "pending_review", "resubmitted", "rejected"])
+            .order("created_at", { ascending: false });
+
+          if (permitError) throw permitError;
+
+          return (permitRows || []).map((row: any) => ({
+            ...row,
+            entity_type: userRole === "studio-owner" ? "studio" : "gig",
+          }));
+        };
+
+        const connectionRequestSelect =
+          "id, created_at, sender_id, receiver_id, group_id, studio_id, message, status, event_details, attachment_url";
+        const loadOwnedGroupIds = async () => {
+          const { data: ownedGroups, error: ownedGroupsError } = await supabaseClient
+            .from("groups")
+            .select("id")
+            .eq("owner_id", userId);
+
+          if (ownedGroupsError) throw ownedGroupsError;
+
+          return Array.from(
+            new Set((ownedGroups || []).map((group: any) => group?.id).filter(Boolean)),
+          );
+        };
+
+        const [pendingPermitListings, ownedGroupIds] = await Promise.all([
+          loadPendingPermitListings(),
+          loadOwnedGroupIds(),
+        ]);
+
+        const requestResults = await Promise.all([
+          supabaseClient
+            .from("booking_requests")
+            .select(connectionRequestSelect)
+            .or(`sender_id.eq.${userId},receiver_id.eq.${userId}`)
+            .in("status", ["pending", "accepted", "approved", "connected", "rejected", "declined", "cancelled"])
+            .order("created_at", { ascending: false })
+            .limit(40),
+          ...(ownedGroupIds.length > 0
+            ? [
+                supabaseClient
+                  .from("booking_requests")
+                  .select(connectionRequestSelect)
+                  .in("group_id", ownedGroupIds)
+                  .in("status", ["pending", "accepted", "approved", "connected", "rejected", "declined", "cancelled"])
+                  .order("created_at", { ascending: false })
+                  .limit(40),
+              ]
+            : []),
+        ]);
+
+        const connectionRequestsById = new Map<string, any>();
+        requestResults.forEach((result) => {
+          if (result.error) throw result.error;
+          (result.data || []).forEach((request: any) => {
+            if (request?.id && !connectionRequestsById.has(request.id)) {
+              connectionRequestsById.set(request.id, request);
+            }
+          });
+        });
+
+        const connectionRequests = Array.from(connectionRequestsById.values()).sort(
+          (a: any, b: any) =>
+            new Date(b?.created_at || 0).getTime() - new Date(a?.created_at || 0).getTime(),
+        );
+
+        const connectionProfileIds = Array.from(
+          new Set(
+            connectionRequests
+              .flatMap((request: any) => [request.sender_id, request.receiver_id])
+              .filter(Boolean),
+          ),
+        );
+        const studioBookingIds = Array.from(
+          new Set(
+            [
+              ...categorized.Pending,
+              ...categorized.Upcoming,
+              ...categorized.Ongoing,
+              ...categorized.Review,
+            ]
+              .filter((item: any) => item?.type_id === "studio_booking")
+              .map((item: any) => item?.id)
+              .filter(Boolean),
+          ),
+        );
+
+        const [connectionRequestProfilesResult, lateAttendanceEventsResult] = await Promise.all([
+          connectionProfileIds.length > 0
+            ? supabaseClient
+                .from("profiles")
+                .select("id, full_name, avatar_url")
+                .in("id", connectionProfileIds)
+            : Promise.resolve({ data: [], error: null }),
+          studioBookingIds.length > 0
+            ? supabaseClient
+                .from("booking_attendance_events")
+                .select("booking_id, reporter_user_id, notes, created_at")
+                .in("booking_id", studioBookingIds)
+                .eq("event_type", "late")
+            : Promise.resolve({ data: [], error: null }),
+        ]);
+
+        if (connectionRequestProfilesResult.error) throw connectionRequestProfilesResult.error;
+        if (lateAttendanceEventsResult.error) throw lateAttendanceEventsResult.error;
+
+        return new Response(JSON.stringify({
+          ...categorized,
+          categorized,
+          role: userRole,
+          ownedGroupIds,
+          pendingPermitListings,
+          connectionRequests,
+          connectionRequestProfiles: connectionRequestProfilesResult.data || [],
+          lateAttendanceEvents: lateAttendanceEventsResult.data || [],
+          fetchedAt: Date.now(),
+        }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+
       return new Response(JSON.stringify(categorized), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
         status: 200,

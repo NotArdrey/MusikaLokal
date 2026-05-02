@@ -887,65 +887,6 @@ export default function EditGigScreen() {
     );
   };
 
-  const handleAutoFillTestData = () => {
-    const eventDateValue = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000)
-      .toISOString()
-      .split("T")[0];
-
-    setGigName((prev) => prev.trim() || "Test Gig Night (Edited)");
-    setDescription(
-      (prev) =>
-        prev.trim() ||
-        "Updated QA test listing used for edit flow and validation checks.",
-    );
-    setAddress((prev) => prev.trim() || "Taguig City, Metro Manila");
-    setLatitude((prev) => prev ?? 14.5176);
-    setLongitude((prev) => prev ?? 121.0509);
-    setCost((prev) => prev.trim() || "5500");
-    setEventDate((prev) => prev || eventDateValue);
-    setEventStartTime((prev) => prev || "07:00 PM");
-    setEventEndTime((prev) => prev || "10:00 PM");
-    setEventSchedules((prev) =>
-      prev.length > 0
-        ? prev
-        : [
-          {
-            date: eventDateValue,
-            start_time: "07:00 PM",
-            end_time: "10:00 PM",
-          },
-        ],
-    );
-    setImages((prev) =>
-      prev.length > 0
-        ? prev
-        : [
-          "https://images.unsplash.com/photo-1498038432885-c6f3f1b912ee?w=1200&h=900&fit=crop",
-        ],
-    );
-    setThumbnailIndex(0);
-    setRequiredGenres((prev) => (prev.length > 0 ? prev : ["Pop", "OPM"]));
-    setRequiredInstruments((prev) =>
-      prev.length > 0 ? prev : ["Vocals", "Guitar"],
-    );
-    setMusicianType("both");
-    setSoloSlotsNeeded((prev) => (prev > 0 ? prev : 1));
-    setDuoSlotsNeeded((prev) => (prev > 0 ? prev : 1));
-    setPreferredGroupTypes((prev) =>
-      prev.length > 0
-        ? prev
-        : PH_MUSIC_GROUP_TYPES.length > 0
-          ? [PH_MUSIC_GROUP_TYPES[0].id]
-          : [],
-    );
-
-    showAlert(
-      "success",
-      "Test Autofill Applied",
-      "Sample gig edit values were filled for testing.",
-    );
-  };
-
   const renderSectionHeader = (
     title: string,
     icon: string,
@@ -1335,35 +1276,6 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
       )}
       <View style={[styles.flex1, { backgroundColor: colors.background }]}>
         <Header title="Edit Gig" onBackPress={handleAttemptLeave} />
-
-        <View style={{ paddingHorizontal: 20, paddingTop: 10 }}>
-          <TouchableOpacity activeOpacity={1}
-            onPress={handleAutoFillTestData}
-            style={{
-              alignSelf: "flex-start",
-              flexDirection: "row",
-              alignItems: "center",
-              gap: 8,
-              backgroundColor: isDark ? "rgba(59, 130, 246, 0.16)" : "#DBEAFE",
-              borderWidth: 1,
-              borderColor: isDark ? "rgba(96, 165, 250, 0.5)" : "#93C5FD",
-              borderRadius: 999,
-              paddingHorizontal: 14,
-              paddingVertical: 8,
-            }}
-          >
-            <Ionicons name="flask-outline" size={15} color={colors.primary} />
-            <Text
-              style={{
-                color: colors.primary,
-                fontFamily: "Poppins_600SemiBold",
-                fontSize: 12,
-              }}
-            >
-              Auto Fill Test Data
-            </Text>
-          </TouchableOpacity>
-        </View>
 
         <ScrollView
           showsVerticalScrollIndicator={false}

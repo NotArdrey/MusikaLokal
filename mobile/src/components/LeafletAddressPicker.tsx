@@ -233,10 +233,10 @@ export default function LeafletAddressPicker({
                         <View
                             style={[
                                 styles.searchInputWrapper,
-                                { backgroundColor: colors.inputBackground, borderColor: colors.border },
+                                { backgroundColor: isDark ? "#374151" : "#F3F4F6" },
                             ]}
                         >
-                            <Ionicons name="search" size={18} color={colors.textSecondary} />
+                            <Ionicons name="search" size={20} color={colors.textSecondary} />
                             <TextInput
                                 style={[styles.searchInput, { color: colors.text }]}
                                 value={searchQuery}
@@ -351,16 +351,19 @@ const styles = StyleSheet.create({
         flex: 1,
         flexDirection: "row",
         alignItems: "center",
-        borderWidth: 1,
-        borderRadius: 10,
-        paddingHorizontal: 12,
-        gap: 8,
+        borderRadius: 16,
+        paddingHorizontal: 16,
+        height: 48,
+        gap: 10,
     },
     searchInput: {
         flex: 1,
-        fontSize: 14,
-        fontFamily: "Poppins_400Regular",
-        paddingVertical: 10,
+        height: 24,
+        fontSize: 15,
+        fontFamily: "Poppins_500Medium",
+        lineHeight: 20,
+        includeFontPadding: false,
+        padding: 0,
         textAlignVertical: "center",
     },
     locationBtn: {

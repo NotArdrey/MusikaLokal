@@ -2,6 +2,7 @@ import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { BlurView } from "expo-blur";
 import { LinearGradient } from "expo-linear-gradient";
+import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
@@ -28,12 +29,15 @@ import RecentlyViewedSheet from "../src/components/RecentlyViewedSheet";
 import SearchBottomSheet from "../src/components/SearchBottomSheet";
 import Skeleton from "../src/components/Skeleton";
 import { useBottomBarClearance } from "../src/hooks/useBottomBarClearance";
+import { useAuth } from "../src/context/AuthContext";
+import { useHomeDataQuery } from "../src/data/hooks";
 import { useTheme } from "../src/context/ThemeContext";
 import {
   getGroqModelInfo,
   rerankHomeFeedWithGroq,
 } from "../src/services/groqModelRouter";
 import { getScreenCacheKey, peekScreenCache, readScreenCache, writeScreenCache } from "../src/utils/screenCache";
+import { usePageLoadLogger } from "../src/utils/loadTimeLogger";
 
 const { width, height } = Dimensions.get("window");
 
@@ -54,9 +58,6 @@ const moderateScale = (size: number, factor = 0.3) => {
   const scaled = scale(size);
   return size + (scaled - size) * factor; // Reduced factor from 0.5 to 0.3 for less aggressive scaling
 };
-
-import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
-import { useAuth } from "../src/context/AuthContext";
 
 const debugLog = (..._args: unknown[]) => { };
 
@@ -417,7 +418,14 @@ export default function HomeScreen() {
   const [viewedNewArrivals, setViewedNewArrivals] = useState<Set<string>>(new Set());
   const [recentlyViewed, setRecentlyViewed] = useState<any[]>([]);
   const [userName, setUserName] = useState(() => initialHomeProfileSnapshot?.userName || "Guest");
+  const [hasGroups, setHasGroups] = useState(() => Boolean(initialHomeProfileSnapshot?.hasGroups));
   const [timeGreeting, setTimeGreeting] = useState("Hey");
+  const homeDataQuery = useHomeDataQuery({
+    enabled: isGuest || !userId || roleResolved,
+    isGuest,
+    userId,
+    userRole,
+  });
   const groqInfo = getGroqModelInfo();
   const groqModelLabel = groqInfo.modelLabel;
   const groqConfigured = groqInfo.configured;
@@ -487,8 +495,6 @@ export default function HomeScreen() {
     React.useRef<import("@gorhom/bottom-sheet").BottomSheetModal>(null);
   const restoreSearchAfterDetailsCloseRef = React.useRef(false);
   const restoreSearchAfterProductionCloseRef = React.useRef(false);
-  const homeRealtimeRefreshTimerRef =
-    React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const homeDataFetchInFlightRef = React.useRef(false);
   const hasHydratedHomeCacheRef = React.useRef(Boolean(initialHomeFeedSnapshot));
   const homeLlmRequestIdRef = React.useRef(0);
@@ -839,7 +845,7 @@ export default function HomeScreen() {
         );
 
       if (shouldRefreshHome) {
-        void fetchHomeData(isFirstLoad, { bypassCooldown: isFirstLoad });
+        void homeDataQuery.refetch();
       }
 
       if (shouldRefreshProfile) {
@@ -878,74 +884,20 @@ export default function HomeScreen() {
       };
 
       void restorePendingReopen();
-    }, [discover.length, featured.length, isGuest, loadViewedNewArrivals, params.reopenListingId, roleResolved, userId, userRole]),
+    }, [discover.length, featured.length, homeDataQuery.refetch, isGuest, loadViewedNewArrivals, params.reopenListingId, roleResolved, userId, userRole]),
   );
 
-  // Handler for realtime updates - defined before useEffect that uses it
-  const handleRealtimeUpdate = useCallback(() => {
-    debugLog("Realtime update received - refreshing home data...");
-    if (homeRealtimeRefreshTimerRef.current) return;
-
-    homeRealtimeRefreshTimerRef.current = setTimeout(() => {
-      homeRealtimeRefreshTimerRef.current = null;
-      // Silent refresh to keep UI stable during realtime bursts.
-      void fetchHomeData(false, { bypassCooldown: true });
-    }, 450);
-  }, [roleResolved, userId, userRole]);
-
-  // Realtime Updates
-  useEffect(() => {
-    const channel = supabase.channel("public:home_updates");
-
-    const realtimeTables = [
-      "gigs",
-      "studios",
-      "studio_types",
-      "studio_amenities",
-      "studio_instruments",
-      "studio_settings",
-      "studio_operating_hours",
-      "groups",
-      "profiles",
-      "gig_applications",
-      "studio_promotions",
-      "studio_date_overrides",
-      "profile_skills",
-      "profile_genres",
-      "group_media",
-      "studio_media",
-      "gig_media",
-      "reviews",
-    ];
-
-    realtimeTables.forEach((table) => {
-      channel.on(
-        "postgres_changes",
-        { event: "*", schema: "public", table },
-        () => handleRealtimeUpdate(),
-      );
-    });
-
-    channel.subscribe();
-
-    return () => {
-      if (homeRealtimeRefreshTimerRef.current) {
-        clearTimeout(homeRealtimeRefreshTimerRef.current);
-        homeRealtimeRefreshTimerRef.current = null;
-      }
-      supabase.removeChannel(channel);
-    };
-  }, [handleRealtimeUpdate]);
+  // Home realtime invalidation now runs through the shared query channel in RootLayout.
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     await Promise.all([
-      fetchHomeData(false, { bypassCooldown: true }),
+      homeDataQuery.refetch(),
       fetchUserProfile({ force: true }),
       fetchRecentlyViewed(),
     ]);
     setRefreshing(false);
-  }, [isGuest, roleResolved, userId, userRole]);
+  }, [homeDataQuery.refetch]);
 
   const setTimeBasedGreeting = () => {
     const hour = new Date().getHours();
@@ -954,7 +906,34 @@ export default function HomeScreen() {
     else setTimeGreeting("Good evening");
   };
 
-  const [hasGroups, setHasGroups] = useState(() => Boolean(initialHomeProfileSnapshot?.hasGroups));
+  useEffect(() => {
+    const payload = homeDataQuery.data as any;
+    if (!payload) return;
+
+    applyHomeFeedSnapshot({
+      fetchedAt: payload.fetchedAt || Date.now(),
+      featured: Array.isArray(payload.featured) ? payload.featured : [],
+      discover: Array.isArray(payload.discover) ? payload.discover : [],
+      newArrivals: Array.isArray(payload.newArrivals) ? payload.newArrivals : [],
+      randomRecommendations: Array.isArray(payload.randomRecommendations)
+        ? payload.randomRecommendations
+        : [],
+      aiRecommendations: Array.isArray(payload.aiRecommendations)
+        ? payload.aiRecommendations
+        : [],
+      aiFeedProvider: payload.aiFeedProvider || groqModelLabel,
+      aiFeedMessage: payload.aiFeedMessage || "",
+      aiRerankAt: payload.fetchedAt || Date.now(),
+    });
+
+    if (payload.profile) {
+      setUserName(payload.profile.userName || "Guest");
+      setHasGroups(Boolean(payload.profile.hasGroups));
+      lastProfileRefreshAtRef.current = payload.fetchedAt || Date.now();
+    }
+
+    setLoading(false);
+  }, [applyHomeFeedSnapshot, groqModelLabel, homeDataQuery.data]);
 
   const topItems = useMemo(() => {
     const combined = [...featured, ...discover];
@@ -988,6 +967,29 @@ export default function HomeScreen() {
     () => aiRecommendations.some((i: any) => i.similarity > 0.1),
     [aiRecommendations],
   );
+
+  usePageLoadLogger({
+    counts: {
+      aiRecommendations: aiRecommendations.length,
+      discover: discover.length,
+      featured: featured.length,
+      newArrivals: newArrivals.length,
+      randomRecommendations: randomRecommendations.length,
+      topItems: topItems.length,
+    },
+    details: {
+      aiProvider: aiFeedProvider || groqModelLabel,
+      hasGroups,
+      hasSimilarityMatches: hasAiSimilarityMatches,
+      role: userRole || "guest",
+      user: userId ? "signed-in" : "guest",
+    },
+    loading,
+    page: "Home",
+    queries: { mobileHome: homeDataQuery },
+    ready: !loading,
+    refreshing,
+  });
 
   const fetchUserProfile = async (options?: { force?: boolean }) => {
     if (
@@ -1876,13 +1878,10 @@ export default function HomeScreen() {
             onPress={openSearchSheet}
           >
             <View style={styles.modernSearchLeft}>
-              <View style={styles.modernSearchIconWrapper}>
-                <Ionicons name="search" size={20} color="#FFF" />
-              </View>
-              <View style={styles.modernSearchTexts}>
-                <Text style={styles.modernSearchPlaceholder}>{searchPlaceholder}</Text>
-                <Text style={styles.modernSearchSub}>Tap to explore by location or rate</Text>
-              </View>
+              <Ionicons name="search" size={20} color="#64748B" />
+              <Text style={styles.modernSearchPlaceholder} numberOfLines={1}>
+                {searchPlaceholder}
+              </Text>
             </View>
             <View style={styles.modernSearchFilterBtn}>
               <Ionicons name="options-outline" size={20} color="#0F172A" />
@@ -3415,15 +3414,11 @@ const styles = StyleSheet.create({
   modernSearchCard: {
     flexDirection: "row",
     alignItems: "center",
+    gap: 8,
     justifyContent: "space-between",
-    backgroundColor: "#1E293B",
-    borderRadius: 20,
-    padding: 12,
-    borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.08)",
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.3,
+    shadowOpacity: 0.18,
     shadowRadius: 16,
     elevation: 10,
   },
@@ -3431,39 +3426,27 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     flex: 1,
-  },
-  modernSearchIconWrapper: {
-    width: moderateScale(44),
-    height: moderateScale(44),
+    gap: 10,
+    height: moderateScale(48),
     borderRadius: 16,
-    backgroundColor: "#3B82F6",
-    alignItems: "center",
-    justifyContent: "center",
-    marginRight: 14,
-  },
-  modernSearchTexts: {
-    flex: 1,
-    justifyContent: "center",
+    paddingHorizontal: 16,
+    backgroundColor: "#F3F4F6",
   },
   modernSearchPlaceholder: {
-    color: "#F8FAFC",
-    fontFamily: "Poppins_600SemiBold",
-    fontSize: moderateScale(14),
-    marginBottom: 2,
-  },
-  modernSearchSub: {
-    color: "#94A3B8",
-    fontFamily: "Poppins_400Regular",
-    fontSize: moderateScale(12),
+    flex: 1,
+    color: "#4B5563",
+    fontFamily: "Poppins_500Medium",
+    fontSize: moderateScale(15),
+    lineHeight: 20,
+    includeFontPadding: false,
   },
   modernSearchFilterBtn: {
-    width: moderateScale(44),
-    height: moderateScale(44),
-    borderRadius: 14,
-    backgroundColor: "#F8FAFC",
+    width: moderateScale(48),
+    height: moderateScale(48),
+    borderRadius: 16,
+    backgroundColor: "#F3F4F6",
     alignItems: "center",
     justifyContent: "center",
-    marginLeft: 8,
   },
 
   // Section Commons

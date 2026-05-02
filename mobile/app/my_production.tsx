@@ -212,7 +212,14 @@ export default function MyProductionScreen() {
                 <View key={team.id} style={[styles.cardContainer, { backgroundColor: colors.surface, shadowColor: colors.primary }]}> 
                   <View style={styles.imageWrapper}>
                     {team.logo_url ? (
-                      <CachedImage uri={team.logo_url} style={styles.cardImage} />
+                      <CachedImage
+                        uri={team.logo_url}
+                        style={styles.cardImage}
+                        width={420}
+                        height={220}
+                        quality={68}
+                        priority="high"
+                      />
                     ) : (
                       <View style={[styles.cardImage, styles.imagePlaceholder, { backgroundColor: colors.primary + '12' }]}>
                         <Ionicons name="people-outline" size={42} color={colors.primary} />

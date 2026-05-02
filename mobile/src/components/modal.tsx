@@ -1,10 +1,10 @@
 import { Ionicons } from '@expo/vector-icons';
 import { BlurView } from 'expo-blur';
-import * as Linking from 'expo-linking';
 import React from 'react';
 import { ActivityIndicator, Modal as RNModal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useTheme } from '../context/ThemeContext';
 import CustomAlert from './CustomAlert';
+import InAppMediaViewer from './InAppMediaViewer';
 
 type CustomModalProps = {
   visible: boolean;
@@ -60,6 +60,7 @@ const CustomModal: React.FC<CustomModalProps> = ({
   const [feedbackVisible, setFeedbackVisible] = React.useState(false);
   const [feedbackMessage, setFeedbackMessage] = React.useState('');
   const [canInteract, setCanInteract] = React.useState(false);
+  const [mediaViewerUrl, setMediaViewerUrl] = React.useState<string | null>(null);
   const hasCustomContract = Boolean(contractUrl);
 
   React.useEffect(() => {
@@ -209,7 +210,7 @@ const CustomModal: React.FC<CustomModalProps> = ({
                   </TouchableOpacity>
                   <TouchableOpacity
                     activeOpacity={1}
-                    onPress={() => { if (contractUrl) Linking.openURL(contractUrl); }}
+                    onPress={() => setMediaViewerUrl(contractUrl || null)}
                     style={styles.inlineLinkButton}
                   >
                     <Ionicons name="document-text-outline" size={15} color={colors.primary} />
@@ -338,6 +339,12 @@ const CustomModal: React.FC<CustomModalProps> = ({
         message={feedbackMessage}
         forceModal
         onClose={() => setFeedbackVisible(false)}
+      />
+      <InAppMediaViewer
+        visible={!!mediaViewerUrl}
+        uri={mediaViewerUrl}
+        title="Custom Contract"
+        onClose={() => setMediaViewerUrl(null)}
       />
     </RNModal>
   );

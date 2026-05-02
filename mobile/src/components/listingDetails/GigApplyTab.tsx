@@ -1,5 +1,4 @@
 import { Ionicons } from "@expo/vector-icons";
-import * as Linking from "expo-linking";
 import React from "react";
 import {
     ActivityIndicator,
@@ -13,6 +12,7 @@ import {
 import { PH_MUSIC_GROUP_TYPES } from "../../constants/groupTypes";
 import { getGigApplicationDeadlineInfo } from "../../utils/gigApplication";
 import DocumentUploader from "../DocumentUploader";
+import InAppMediaViewer from "../InAppMediaViewer";
 import styles from "../ListingDetailsSheet.styles";
 import VideoUploader from "../VideoUploader";
 
@@ -102,6 +102,7 @@ const GigApplyTab = ({
 
   const [isSystemTermsAccepted, setIsSystemTermsAccepted] = React.useState(false);
   const [isCustomContractAccepted, setIsCustomContractAccepted] = React.useState(false);
+  const [mediaViewerUrl, setMediaViewerUrl] = React.useState<string | null>(null);
   const isGroupApplicationFlow = applicationContext === "group";
   const isProducerFlow = !isGroupApplicationFlow && userRole === "producer";
   const hasCustomContract = !isGroupApplicationFlow && Boolean(group?.contract_url);
@@ -253,61 +254,6 @@ const GigApplyTab = ({
     groupAlreadyApplied ||
     isFormIncomplete;
 
-  const handleAutoFillTestData = () => {
-    if (!pitchMessage.trim()) {
-      setPitchMessage(
-        isGroupApplicationFlow
-          ? "Hi! I would love to join and contribute consistently to your group."
-          : "Hi! I am a strong fit for this event and available for all required schedules.",
-      );
-    }
-
-    if (!videoUrl.trim()) {
-      setVideoUrl("https://www.youtube.com/watch?v=aqz-KE-bpKQ");
-    }
-
-    if (!cvFile && !cvUrl) {
-      setCvUrl(
-        "https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf",
-      );
-    }
-
-    const enabledSlotTypes = getEnabledSlotTypes();
-    if (
-      enabledSlotTypes.length > 0 &&
-      (!selectedSlotType || !enabledSlotTypes.includes(selectedSlotType))
-    ) {
-      setSelectedSlotType(enabledSlotTypes[0]);
-    }
-
-    if (
-      !isGroupApplicationFlow &&
-      isProducerFlow &&
-      !selectedProductionTeamId &&
-      productionTeams.length > 0
-    ) {
-      setSelectedProductionTeamId(productionTeams[0].id);
-    }
-
-    if (
-      !isGroupApplicationFlow &&
-      isProducerFlow &&
-      !selectedProductionRosterId &&
-      filteredProductionRoster.length > 0
-    ) {
-      setSelectedProductionRosterId(filteredProductionRoster[0].id);
-    }
-
-    if (
-      !isGroupApplicationFlow &&
-      musicianTypeRequired === "group" &&
-      !selectedGroupId &&
-      filteredGroups.length > 0
-    ) {
-      setSelectedGroupId(filteredGroups[0].id);
-    }
-  };
-
   return (
     <View style={styles.tabContent}>
       {isBlocked && (
@@ -338,34 +284,6 @@ const GigApplyTab = ({
           </View>
         </View>
       )}
-
-      <TouchableOpacity activeOpacity={1}
-        onPress={handleAutoFillTestData}
-        style={{
-          alignSelf: "flex-start",
-          flexDirection: "row",
-          alignItems: "center",
-          backgroundColor: isDark ? "rgba(59, 130, 246, 0.16)" : "#DBEAFE",
-          borderWidth: 1,
-          borderColor: isDark ? "rgba(96, 165, 250, 0.5)" : "#93C5FD",
-          borderRadius: 999,
-          paddingHorizontal: 14,
-          paddingVertical: 8,
-          marginBottom: 16,
-          gap: 8,
-        }}
-      >
-        <Ionicons name="flask-outline" size={15} color={colors.primary} />
-        <Text
-          style={{
-            color: colors.primary,
-            fontFamily: "Poppins_600SemiBold",
-            fontSize: 12,
-          }}
-        >
-          Auto Fill Test Data
-        </Text>
-      </TouchableOpacity>
 
       {!isGroupApplicationFlow && (() => {
         const canApplyAsSolo =
@@ -892,10 +810,12 @@ const GigApplyTab = ({
               <View style={{ flex: 1 }}>
                 <Text style={[gigApplyStyles.termsText, { color: colors.text }]}>
                   I have read and agree to{' '}
-                  <Text style={{ fontFamily: 'Poppins_600SemiBold' }}>{group?.name || 'the organizer'}'s</Text>
+                  <Text style={{ fontFamily: 'Poppins_600SemiBold' }}>
+                    {`${group?.name || 'the organizer'}'s`}
+                  </Text>
                   {' '}custom contract. *
                 </Text>
-                <TouchableOpacity activeOpacity={1} onPress={() => Linking.openURL(group.contract_url)} style={{ marginTop: 4 }}>
+                <TouchableOpacity activeOpacity={1} onPress={() => setMediaViewerUrl(group.contract_url)} style={{ marginTop: 4 }}>
                   <Text style={[gigApplyStyles.termsLink, { color: colors.primary }]}>View Custom Contract</Text>
                 </TouchableOpacity>
               </View>
@@ -913,7 +833,7 @@ const GigApplyTab = ({
               {isSystemTermsAccepted && <Text style={gigApplyStyles.checkboxTick}>✓</Text>}
             </View>
             <Text style={[gigApplyStyles.termsText, { color: colors.text }]}>
-              I agree to Musika Lokal's{' '}
+              {"I agree to Musika Lokal's "}
               <Text style={{ fontFamily: 'Poppins_600SemiBold', color: colors.primary }}>Terms and Conditions</Text>. *
             </Text>
           </TouchableOpacity>
@@ -976,6 +896,12 @@ const GigApplyTab = ({
           </Text>
         )}
       </TouchableOpacity>
+      <InAppMediaViewer
+        visible={!!mediaViewerUrl}
+        uri={mediaViewerUrl}
+        title="Custom Contract"
+        onClose={() => setMediaViewerUrl(null)}
+      />
     </View>
   );
 };

@@ -84,80 +84,6 @@ const BookingControls = ({
   const supportsSessionTypeSelection = normalizedStudioType === "Both";
   const hasSelectedSessionType = Boolean(selectedSessionType);
 
-  const handleAutoFillTestData = async () => {
-    if (supportsSessionTypeSelection && !selectedSessionType) {
-      setSelectedSessionType("Rehearsal");
-    }
-
-    const candidateDates = Object.keys(markedDates || {})
-      .filter(
-        (dateKey) =>
-          dateKey >= minSelectableDate && !markedDates?.[dateKey]?.disabled,
-      )
-      .sort();
-
-    if (!candidateDates.includes(minSelectableDate)) {
-      candidateDates.unshift(minSelectableDate);
-    }
-
-    let chosenDate: string | null = null;
-    let chosenSlots: string[] = [];
-
-    for (const dateKey of candidateDates.slice(0, 21)) {
-      const slots = await fetchAvailableSlots(dateKey);
-      if (Array.isArray(slots) && slots.length > 0) {
-        chosenDate = dateKey;
-        chosenSlots = slots;
-        break;
-      }
-    }
-
-    if (!chosenDate) return;
-
-    setSelectedDate(chosenDate);
-    setSelectedSlot(null);
-    setValidEndTimes([]);
-    setEndTime(null);
-    setDate(new Date(chosenDate));
-
-    const firstSlot = chosenSlots[0];
-    if (!firstSlot) return;
-
-    setSelectedSlot(firstSlot);
-
-    const [hours, minutes] = firstSlot.split(":");
-    const startDate = new Date(chosenDate);
-    startDate.setHours(parseInt(hours, 10), parseInt(minutes, 10));
-    setDate(startDate);
-
-    const availableHours = new Set(
-      chosenSlots.map((slot) => parseInt(slot.split(":")[0], 10)),
-    );
-
-    let maxDuration = 0;
-    let currentHour = parseInt(hours, 10);
-
-    for (let index = 0; index < 12; index += 1) {
-      if (index > 0 && !availableHours.has(currentHour)) break;
-      maxDuration += 1;
-      currentHour += 1;
-      if (currentHour >= 24) break;
-    }
-
-    const durations: string[] = [];
-    for (let durationValue = 1; durationValue <= maxDuration; durationValue += 1) {
-      durations.push(durationValue.toString());
-    }
-
-    setValidEndTimes(durations);
-
-    if (maxDuration > 0) {
-      const endDate = new Date(startDate);
-      endDate.setHours(startDate.getHours() + 1);
-      setEndTime(endDate);
-    }
-  };
-
   return (
     <View
       style={[
@@ -347,34 +273,6 @@ const BookingControls = ({
           </View>
         ) : null}
       </View>
-
-      <TouchableOpacity activeOpacity={1}
-        onPress={handleAutoFillTestData}
-        style={{
-          alignSelf: "flex-start",
-          flexDirection: "row",
-          alignItems: "center",
-          backgroundColor: isDark ? "rgba(59, 130, 246, 0.16)" : "#DBEAFE",
-          borderWidth: 1,
-          borderColor: isDark ? "rgba(96, 165, 250, 0.5)" : "#93C5FD",
-          borderRadius: 999,
-          paddingHorizontal: 14,
-          paddingVertical: 8,
-          marginBottom: 12,
-          gap: 8,
-        }}
-      >
-        <Ionicons name="flask-outline" size={15} color={colors.primary} />
-        <Text
-          style={{
-            color: colors.primary,
-            fontFamily: "Poppins_600SemiBold",
-            fontSize: 12,
-          }}
-        >
-          Auto Fill Test Data
-        </Text>
-      </TouchableOpacity>
 
       {supportsSessionTypeSelection && !hasSelectedSessionType ? (
         <View style={{ marginTop: 4 }}>

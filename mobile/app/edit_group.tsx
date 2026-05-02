@@ -915,70 +915,6 @@ export default function EditGroupScreen() {
     );
   };
 
-  const handleAutoFillTestData = () => {
-    const minMembers =
-      PH_MUSIC_GROUP_TYPES.find((type) => type.id === groupType)?.minMembers || 2;
-
-    setGroupName((prev) => prev.trim() || "Test Session Group (Edited)");
-    setSelectedGenres((prev) => (prev.length > 0 ? prev : ["OPM", "Pop"]));
-    setDescription(
-      (prev) =>
-        prev.trim() ||
-        "Updated QA test group profile used for edit validation and QA checks.",
-    );
-    setAddress((prev) => prev.trim() || "Manila, Metro Manila");
-    setLatitude((prev) => prev ?? 14.5995);
-    setLongitude((prev) => prev ?? 120.9842);
-    setImages((prev) =>
-      prev.length > 0
-        ? prev
-        : [
-          "https://images.unsplash.com/photo-1501386761578-eac5c94b800a?w=1200&h=900&fit=crop",
-        ],
-    );
-    setThumbnailIndex(0);
-
-    setMembers((prev) => {
-      const nextMembers =
-        prev.length > 0
-          ? prev.map((member, index) => ({
-            ...member,
-            instrument: member.instrument?.trim() || (index === 0 ? "Vocals" : "Guitar"),
-          }))
-          : [
-            {
-              name: "Test Leader",
-              instrument: "Vocals",
-              role: "Leader",
-              user_id: currentUserId || undefined,
-            },
-          ];
-
-      for (let index = nextMembers.length + 1; nextMembers.length < minMembers; index += 1) {
-        nextMembers.push({
-          name: `Test Member ${index}`,
-          instrument: index % 2 === 0 ? "Guitar" : "Drums",
-        });
-      }
-
-      setMemberInstrumentFinalization(
-        nextMembers.reduce<Record<number, boolean>>((acc, member, memberIndex) => {
-          acc[memberIndex] = Boolean(member.instrument?.trim());
-          return acc;
-        }, {}),
-      );
-
-      return nextMembers;
-    });
-    setIsLeaderInstrumentFinalized(true);
-
-    showAlert(
-      "success",
-      "Test Autofill Applied",
-      "Sample group edit values were filled for testing.",
-    );
-  };
-
   const searchMusicians = async (query: string) => {
     setSearchQuery(query);
     if (query.length < 2) {
@@ -1566,35 +1502,6 @@ export default function EditGroupScreen() {
       <View style={[styles.flex1, { backgroundColor: colors.background }]}>
         <Header title="Edit Group" onBackPress={handleAttemptLeave} />
 
-        <View style={{ paddingHorizontal: 20, paddingTop: 10 }}>
-          <TouchableOpacity activeOpacity={1}
-            onPress={handleAutoFillTestData}
-            style={{
-              alignSelf: "flex-start",
-              flexDirection: "row",
-              alignItems: "center",
-              gap: 8,
-              backgroundColor: isDark ? "rgba(59, 130, 246, 0.16)" : "#DBEAFE",
-              borderWidth: 1,
-              borderColor: isDark ? "rgba(96, 165, 250, 0.5)" : "#93C5FD",
-              borderRadius: 999,
-              paddingHorizontal: 14,
-              paddingVertical: 8,
-            }}
-          >
-            <Ionicons name="flask-outline" size={15} color={colors.primary} />
-            <Text
-              style={{
-                color: colors.primary,
-                fontFamily: "Poppins_600SemiBold",
-                fontSize: 12,
-              }}
-            >
-              Auto Fill Test Data
-            </Text>
-          </TouchableOpacity>
-        </View>
-
         <ScrollView
           showsVerticalScrollIndicator={false}
           contentContainerStyle={[
@@ -1767,7 +1674,12 @@ export default function EditGroupScreen() {
           <View style={styles.addMemberSection}>
             {/* Search Bar */}
             {!pendingMember && (
-              <View style={styles.searchContainer}>
+              <View
+                style={[
+                  styles.searchContainer,
+                  { backgroundColor: isDark ? "#374151" : "#F3F4F6" },
+                ]}
+              >
                 <Ionicons
                   name="search"
                   size={20}
@@ -1782,9 +1694,7 @@ export default function EditGroupScreen() {
                   style={[
                     styles.searchInput,
                     {
-                      backgroundColor: colors.inputBackground,
                       color: colors.text,
-                      borderColor: isDark ? "#374151" : "#E5E7EB",
                     },
                   ]}
                 />
@@ -2706,22 +2616,24 @@ const styles = StyleSheet.create({
   searchContainer: {
     flexDirection: "row",
     alignItems: "center",
+    gap: 10,
     marginBottom: 12,
     position: "relative",
+    borderRadius: 16,
+    height: 48,
+    paddingHorizontal: 16,
   },
   searchIcon: {
-    position: "absolute",
-    left: 12,
-    zIndex: 1,
   },
   searchInput: {
     flex: 1,
-    height: 48,
-    borderRadius: 8,
-    borderWidth: 1,
-    paddingLeft: 40,
-    paddingRight: 40,
-    fontFamily: "Poppins_400Regular",
+    height: 24,
+    padding: 0,
+    paddingRight: 28,
+    fontSize: 15,
+    lineHeight: 20,
+    includeFontPadding: false,
+    fontFamily: "Poppins_500Medium",
     textAlignVertical: "center",
   },
   searchSpinner: {

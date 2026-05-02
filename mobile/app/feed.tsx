@@ -2,7 +2,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect } from "@react-navigation/native";
 import { router } from "expo-router";
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Dimensions,
@@ -45,6 +45,7 @@ import {
   useRadioPlayerPresence,
 } from "../src/context/RadioPlayerContext";
 import { showTopToast } from "../src/context/TopToastContext";
+import { useFeedQuery } from "../src/data/hooks";
 import { useTheme } from "../src/context/ThemeContext";
 import { getGroupTypeLabel } from "../src/utils/groupMembers";
 import {
@@ -57,6 +58,7 @@ import {
   getGroqModelInfo,
   rerankHomeFeedWithGroq,
 } from "../src/services/groqModelRouter";
+import { usePageLoadLogger } from "../src/utils/loadTimeLogger";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const moderateScale = (size: number, factor = 0.3) => {
@@ -95,6 +97,12 @@ const createFeedCache = (provider: string): Record<FeedTab, FeedCacheEntry> => (
   following: createEmptyFeedCacheEntry(provider),
 });
 
+const normalizeAiFeedProvider = (provider: string) =>
+  provider.replace(/\s*\(Cached\)\s*$/i, "").trim();
+
+const normalizeAiFeedMessage = (message: string) =>
+  /loaded cached/i.test(message) ? "" : message;
+
 const logFeedInvokeError = (
   scope: string,
   error: any,
@@ -114,10 +122,60 @@ const logFeedInvokeError = (
   });
 };
 
-const FEED_PAGE_SIZE = 20;
+const FEED_PAGE_SIZE = 12;
 const AI_CARD_LIMIT = 20;
 const FEED_FOCUS_REFRESH_COOLDOWN_MS = 30000;
 const feedScreenCache = createFeedCache(getGroqModelInfo().modelLabel);
+const FEED_FALLBACK_IMAGES: Record<string, string[]> = {
+  Artist: [
+    "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=900&q=75",
+    "https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=900&q=75",
+    "https://images.unsplash.com/photo-1521572267360-ee0c2909d518?auto=format&fit=crop&w=900&q=75",
+  ],
+  Gig: [
+    "https://images.unsplash.com/photo-1514525253161-7a46d19cd819?auto=format&fit=crop&w=1000&q=75",
+    "https://images.unsplash.com/photo-1470229722913-7c0e2dbbafd3?auto=format&fit=crop&w=1000&q=75",
+    "https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?auto=format&fit=crop&w=1000&q=75",
+  ],
+  Group: [
+    "https://images.unsplash.com/photo-1521335629791-ce4aec67dd47?auto=format&fit=crop&w=1000&q=75",
+    "https://images.unsplash.com/photo-1506157786151-b8491531f063?auto=format&fit=crop&w=1000&q=75",
+    "https://images.unsplash.com/photo-1516280440614-37939bbacd81?auto=format&fit=crop&w=1000&q=75",
+  ],
+  Production: [
+    "https://images.unsplash.com/photo-1598488035139-bdbb2231ce04?auto=format&fit=crop&w=1000&q=75",
+    "https://images.unsplash.com/photo-1511379938547-c1f69419868d?auto=format&fit=crop&w=1000&q=75",
+    "https://images.unsplash.com/photo-1514320291840-2e0a9bf2a9ae?auto=format&fit=crop&w=1000&q=75",
+  ],
+  Studio: [
+    "https://images.unsplash.com/photo-1598488035139-bdbb2231ce04?auto=format&fit=crop&w=1000&q=75",
+    "https://images.unsplash.com/photo-1511379938547-c1f69419868d?auto=format&fit=crop&w=1000&q=75",
+    "https://images.unsplash.com/photo-1516280440614-37939bbacd81?auto=format&fit=crop&w=1000&q=75",
+  ],
+};
+
+const getFeedFallbackImage = (type: string, id?: string | null) => {
+  const images = FEED_FALLBACK_IMAGES[type] || FEED_FALLBACK_IMAGES.Group;
+  const seed = String(id || type || "").split("").reduce((sum, char) => sum + char.charCodeAt(0), 0);
+  return images[seed % images.length];
+};
+
+const ensureFeedCardImage = <T extends { id?: string | null; type?: string; image?: string | null; images?: string[] }>(item: T): T => {
+  const type = item.type || "Group";
+  const validImages = Array.isArray(item.images)
+    ? item.images.filter((image) => typeof image === "string" && image.trim().length > 0)
+    : [];
+  const primaryImage =
+    typeof item.image === "string" && item.image.trim().length > 0
+      ? item.image
+      : validImages[0] || getFeedFallbackImage(type, item.id);
+
+  return {
+    ...item,
+    image: primaryImage,
+    images: validImages.length > 0 ? validImages : [primaryImage],
+  };
+};
 const feedLastFetchAt: Record<FeedTab, number> = {
   for_you: 0,
   following: 0,
@@ -315,7 +373,7 @@ const normalizeFollowingEntity = (row: any, ownerAvatarById: Map<string, string>
       followed_type: "group" as const,
       id,
       name: group?.name || formatGroupTypeLabel(group?.group_type),
-      avatar_url: images[0] || ownerAvatarUrl || "",
+      avatar_url: images[0] || ownerAvatarUrl || getFeedFallbackImage("Group", id),
       group_type: group?.group_type || null,
       created_at: row?.created_at || null,
     };
@@ -335,7 +393,7 @@ const normalizeFollowingEntity = (row: any, ownerAvatarById: Map<string, string>
     followed_type: "profile" as const,
     id,
     name: followed?.full_name || "User",
-    avatar_url: resolveFeedMediaUrl(followed?.avatar_url || ""),
+    avatar_url: resolveFeedMediaUrl(followed?.avatar_url || "") || getFeedFallbackImage("Artist", id),
     role: followed?.role || "",
     created_at: row?.created_at || null,
   };
@@ -530,13 +588,65 @@ export default function FeedScreen() {
   const activeStationIdRef = React.useRef<string | null>(activeStation?.id || null);
   const activeTabRef = React.useRef<FeedTab>(tab);
   const feedCacheRef = React.useRef<Record<FeedTab, FeedCacheEntry>>(feedScreenCache);
+  const feedInFlightRef = React.useRef<Record<FeedTab, boolean>>({ for_you: false, following: false });
   const feedRequestIdRef = React.useRef<Record<FeedTab, number>>({ for_you: 0, following: 0 });
+  const followingKeysRef = React.useRef<Set<string>>(new Set());
   const hasFocusedFeedRef = React.useRef(false);
+  const previousTabRef = React.useRef<FeedTab>(tab);
   const [selectedListingId, setSelectedListingId] = useState<string | null>(null);
   const [selectedProductionTeamId, setSelectedProductionTeamId] = useState<string | null>(null);
   const [pendingReopenListingId, setPendingReopenListingId] = useState<string | null>(null);
 
   const [liveStations, setLiveStations] = useState<any[]>([]);
+
+  const forYouFeedQuery = useFeedQuery({
+    enabled: false,
+    feedTab: "for_you",
+    feedType: "public",
+    limit: FEED_PAGE_SIZE,
+    personalize: false,
+    userId,
+  });
+  const followingFeedQuery = useFeedQuery({
+    enabled: false,
+    feedTab: "following",
+    feedType: "following",
+    limit: FEED_PAGE_SIZE,
+    userId,
+  });
+  const forYouFeedQueryRef = React.useRef(forYouFeedQuery);
+  const followingFeedQueryRef = React.useRef(followingFeedQuery);
+
+  useEffect(() => {
+    forYouFeedQueryRef.current = forYouFeedQuery;
+    followingFeedQueryRef.current = followingFeedQuery;
+  }, [followingFeedQuery, forYouFeedQuery]);
+
+  useEffect(() => {
+    followingKeysRef.current = followingKeys;
+  }, [followingKeys]);
+
+  usePageLoadLogger({
+    counts: {
+      aiCards: aiCards.length,
+      followingEntities: followingEntities.length,
+      liveStations: liveStations.length,
+      posts: posts.length,
+    },
+    details: {
+      hasMore,
+      tab,
+      user: userId ? "signed-in" : "guest",
+    },
+    loading: loading || authLoading,
+    page: "Feed",
+    queries: {
+      followingFeed: followingFeedQuery,
+      forYouFeed: forYouFeedQuery,
+    },
+    ready: !authLoading && !loading,
+    refreshing,
+  });
 
   useEffect(() => {
     activeStationIdRef.current = activeStation?.id || null;
@@ -549,23 +659,73 @@ export default function FeedScreen() {
   const applyFeedSnapshot = useCallback((snapshot: FeedCacheEntry) => {
     setPosts(snapshot.posts);
     setAiCards(snapshot.aiCards);
-    setAiFeedMessage(snapshot.aiFeedMessage);
-    setAiFeedProvider(snapshot.aiFeedProvider || groqModelLabel);
+    setAiFeedMessage(normalizeAiFeedMessage(snapshot.aiFeedMessage || ""));
+    setAiFeedProvider(normalizeAiFeedProvider(snapshot.aiFeedProvider || groqModelLabel));
     setHasMore(snapshot.hasMore);
     setLoading(false);
     setRefreshing(false);
     setLoadingMore(false);
   }, [groqModelLabel]);
 
+  const buildFeedSnapshotFromPages = useCallback((feedTab: FeedTab, data: any): FeedCacheEntry | null => {
+    const pages = Array.isArray(data?.pages) ? data.pages : [];
+    if (pages.length === 0) {
+      return null;
+    }
+
+    const nextFollowingKeys = followingKeysRef.current;
+    const latestPage = pages[pages.length - 1] as any;
+    const nextPosts = pages
+      .flatMap((page: any) =>
+        Array.isArray(page?.items)
+          ? page.items
+          : Array.isArray(page?.data)
+            ? page.data
+            : [],
+      )
+      .map(normalizeFeedPost)
+      .map((post: any) => ({
+        ...post,
+        is_following:
+          post.is_following === true ||
+          nextFollowingKeys.has(buildSocialFollowKey("profile", post.author_id)),
+      }));
+    const cachedEntry = feedCacheRef.current[feedTab];
+
+    return {
+      posts: nextPosts,
+      aiCards: nextPosts.length > 0 || feedTab !== "for_you" ? [] : cachedEntry.aiCards,
+      aiFeedMessage: nextPosts.length > 0 || feedTab !== "for_you" ? "" : normalizeAiFeedMessage(cachedEntry.aiFeedMessage || ""),
+      aiFeedProvider:
+        nextPosts.length > 0 || feedTab !== "for_you"
+          ? groqModelLabel
+          : normalizeAiFeedProvider(cachedEntry.aiFeedProvider || groqModelLabel),
+      hasMore: Boolean(latestPage?.nextCursor),
+      loaded: true,
+    };
+  }, [groqModelLabel]);
+
   const hydrateCachedFeed = useCallback((feedTab: FeedTab) => {
     const cached = feedCacheRef.current[feedTab];
     if (!cached.loaded) {
-      return false;
+      const queryData =
+        feedTab === "following"
+          ? followingFeedQueryRef.current.data
+          : forYouFeedQueryRef.current.data;
+      const querySnapshot = buildFeedSnapshotFromPages(feedTab, queryData);
+
+      if (!querySnapshot) {
+        return false;
+      }
+
+      feedCacheRef.current[feedTab] = querySnapshot;
+      applyFeedSnapshot(querySnapshot);
+      return true;
     }
 
     applyFeedSnapshot(cached);
     return true;
-  }, [applyFeedSnapshot]);
+  }, [applyFeedSnapshot, buildFeedSnapshotFromPages]);
 
   const invalidateFeedCache = useCallback((feedTab: FeedTab) => {
     feedCacheRef.current[feedTab] = {
@@ -990,7 +1150,7 @@ export default function FeedScreen() {
         ...normalizedGigs,
         ...normalizedArtists,
         ...normalizedTeams,
-      ];
+      ].map(ensureFeedCardImage);
 
       if (allCandidates.length === 0) {
         return { cards: [], provider: "", message: "" };
@@ -1026,7 +1186,7 @@ export default function FeedScreen() {
 
       if (isGroqQuotaExhaustedMessage(llmResult.message)) {
         return {
-          cards: localRanked.slice(0, AI_CARD_LIMIT).map((item) => ({ ...item, __feedKind: "ai_card" })),
+          cards: localRanked.slice(0, AI_CARD_LIMIT).map((item) => ({ ...ensureFeedCardImage(item), __feedKind: "ai_card" })),
           provider: "Normal Feed",
           message: "Groq free-tier limit reached. Showing normal recommendation cards.",
         };
@@ -1044,14 +1204,14 @@ export default function FeedScreen() {
         return {
           cards: ensuredRecommendations
             .slice(0, AI_CARD_LIMIT)
-            .map((item: any) => ({ ...item, __feedKind: "ai_card" })),
+            .map((item: any) => ({ ...ensureFeedCardImage(item), __feedKind: "ai_card" })),
           provider: llmResult.aiProvider || groqModelLabel,
           message: llmResult.message || `Realtime For You cards reranked by ${groqModelLabel}.`,
         };
       }
 
       return {
-        cards: localRanked.slice(0, AI_CARD_LIMIT).map((item) => ({ ...item, __feedKind: "ai_card" })),
+        cards: localRanked.slice(0, AI_CARD_LIMIT).map((item) => ({ ...ensureFeedCardImage(item), __feedKind: "ai_card" })),
         provider: llmResult.aiProvider || "Local Ranker",
         message: llmResult.message || "Using local ranking for Feed cards.",
       };
@@ -1129,8 +1289,6 @@ export default function FeedScreen() {
       return;
     }
 
-    const requestId = ++feedRequestIdRef.current[feedTab];
-
     if (!session) {
       feedCacheRef.current = createFeedCache(groqModelLabel);
       setFollowingKeys(new Set());
@@ -1144,60 +1302,63 @@ export default function FeedScreen() {
       return;
     }
 
-    try {
-      const { data, error } = await supabase.functions.invoke("manage-social-feed", {
-        body: {
-          action: "get_feed",
-          feed_type: feedTab === "following" ? "following" : "public",
-          limit: FEED_PAGE_SIZE,
-          offset: append ? currentLength : 0,
-        },
-      });
+    if (feedInFlightRef.current[feedTab]) {
+      return;
+    }
 
-      if (error) {
-        logFeedInvokeError("manage-social-feed:get_feed", error, {
+    feedInFlightRef.current[feedTab] = true;
+    const requestId = ++feedRequestIdRef.current[feedTab];
+
+    try {
+      const currentForYouQuery = forYouFeedQueryRef.current;
+      const currentFollowingQuery = followingFeedQueryRef.current;
+      const refetchFeedPage =
+        feedTab === "following" ? currentFollowingQuery.refetch : currentForYouQuery.refetch;
+      const fetchNextFeedPage =
+        feedTab === "following"
+          ? currentFollowingQuery.fetchNextPage
+          : currentForYouQuery.fetchNextPage;
+      const queryResult = append
+        ? await fetchNextFeedPage()
+        : await refetchFeedPage();
+
+      if (queryResult.error) {
+        logFeedInvokeError("manage-social-feed:get_feed", queryResult.error, {
           action: "get_feed",
           feedTab,
           feedType: feedTab === "following" ? "following" : "public",
           append,
           currentLength,
         });
-        throw error;
+        throw queryResult.error;
       }
 
-      let nextFollowingKeys = new Set<string>();
-      try {
-        const followingGraph = await loadFollowingGraph();
-        nextFollowingKeys = followingGraph.keys;
-      } catch {
-        // Keep current follow state if follow-list lookup fails.
-      }
+      const nextFollowingKeys = followingKeysRef.current;
 
-      const page = Array.isArray(data?.data)
-        ? data.data
-            .map(normalizeFeedPost)
-            .map((post: any) => ({
-              ...post,
-              is_following: nextFollowingKeys.has(
-                buildSocialFollowKey("profile", post.author_id),
-              ),
-            }))
-        : [];
+      const pages = queryResult.data?.pages || [];
+      const latestPage = pages[pages.length - 1] as any;
+      const nextPosts = pages
+        .flatMap((page: any) =>
+          Array.isArray(page?.items)
+            ? page.items
+            : Array.isArray(page?.data)
+              ? page.data
+              : [],
+        )
+        .map(normalizeFeedPost)
+        .map((post: any) => ({
+          ...post,
+          is_following:
+            post.is_following === true ||
+            nextFollowingKeys.has(buildSocialFollowKey("profile", post.author_id)),
+        }));
       const cachedEntry = feedCacheRef.current[feedTab];
-      const nextPosts = append ? [...cachedEntry.posts, ...page] : page;
-      let nextAiCards = append ? cachedEntry.aiCards : [];
-      let nextAiFeedMessage = append ? cachedEntry.aiFeedMessage : "";
-      let nextAiFeedProvider = append
-        ? (cachedEntry.aiFeedProvider || groqModelLabel)
-        : groqModelLabel;
+      let nextAiCards = cachedEntry.aiCards;
+      let nextAiFeedMessage = normalizeAiFeedMessage(cachedEntry.aiFeedMessage || "");
+      let nextAiFeedProvider = normalizeAiFeedProvider(cachedEntry.aiFeedProvider || groqModelLabel);
 
       if (!append) {
-        if (feedTab === "for_you" && page.length === 0) {
-          const aiResult = await fetchAiCardsForYou();
-          nextAiCards = aiResult.cards;
-          nextAiFeedMessage = aiResult.message;
-          nextAiFeedProvider = aiResult.provider || groqModelLabel;
-        } else {
+        if (nextPosts.length > 0 || feedTab !== "for_you") {
           nextAiCards = [];
           nextAiFeedMessage = "";
           nextAiFeedProvider = groqModelLabel;
@@ -1213,7 +1374,7 @@ export default function FeedScreen() {
         aiCards: nextAiCards,
         aiFeedMessage: nextAiFeedMessage,
         aiFeedProvider: nextAiFeedProvider,
-        hasMore: page.length === FEED_PAGE_SIZE,
+        hasMore: Boolean(latestPage?.nextCursor),
         loaded: true,
       };
 
@@ -1222,6 +1383,37 @@ export default function FeedScreen() {
 
       if (activeTabRef.current === feedTab) {
         applyFeedSnapshot(nextSnapshot);
+      }
+
+      if (!append) {
+        void loadFollowingGraph().catch(() => {
+          // Follow metadata is nice-to-have; feed readiness should not wait on it.
+        });
+      }
+
+      if (!append && feedTab === "for_you" && nextPosts.length === 0) {
+        void fetchAiCardsForYou().then((aiResult) => {
+          if (requestId !== feedRequestIdRef.current[feedTab]) {
+            return;
+          }
+
+          const aiSnapshot: FeedCacheEntry = {
+            ...feedCacheRef.current[feedTab],
+            aiCards: aiResult.cards,
+            aiFeedMessage: normalizeAiFeedMessage(aiResult.message || ""),
+            aiFeedProvider: normalizeAiFeedProvider(aiResult.provider || groqModelLabel),
+            loaded: true,
+          };
+
+          feedCacheRef.current[feedTab] = aiSnapshot;
+          feedLastFetchAt[feedTab] = Date.now();
+
+          if (activeTabRef.current === feedTab) {
+            applyFeedSnapshot(aiSnapshot);
+          }
+        }).catch((aiError) => {
+          console.error("Feed AI cards error:", aiError);
+        });
       }
     } catch (e: any) {
       logFeedInvokeError("fetchFeed", e, {
@@ -1242,8 +1434,8 @@ export default function FeedScreen() {
           fallbackSnapshot = {
             posts: [],
             aiCards: aiResult.cards,
-            aiFeedMessage: aiResult.message || "Social feed is unavailable. Loading recommendation cards.",
-            aiFeedProvider: aiResult.provider || groqModelLabel,
+            aiFeedMessage: normalizeAiFeedMessage(aiResult.message || "Social feed is unavailable. Loading recommendation cards."),
+            aiFeedProvider: normalizeAiFeedProvider(aiResult.provider || groqModelLabel),
             hasMore: false,
             loaded: true,
           };
@@ -1276,13 +1468,21 @@ export default function FeedScreen() {
         applyFeedSnapshot(fallbackSnapshot);
       }
     } finally {
+      feedInFlightRef.current[feedTab] = false;
       if (requestId === feedRequestIdRef.current[feedTab] && activeTabRef.current === feedTab) {
         setLoading(false);
         setRefreshing(false);
         setLoadingMore(false);
       }
     }
-  }, [applyFeedSnapshot, authLoading, fetchAiCardsForYou, groqModelLabel, loadFollowingGraph, session]);
+  }, [
+    applyFeedSnapshot,
+    authLoading,
+    fetchAiCardsForYou,
+    groqModelLabel,
+    loadFollowingGraph,
+    session,
+  ]);
 
   // ── Radio station helpers ──────────────────────────────────────
   const fetchLiveStations = useCallback(async () => {
@@ -1491,6 +1691,12 @@ export default function FeedScreen() {
     if (authLoading || !hasFocusedFeedRef.current) {
       return;
     }
+
+    if (previousTabRef.current === tab) {
+      return;
+    }
+
+    previousTabRef.current = tab;
 
     if (!hydrateCachedFeed(tab)) {
       setLoading(true);
@@ -1775,25 +1981,7 @@ export default function FeedScreen() {
       const isFollowBusy = followKey ? followBusyByKey[followKey] === true : false;
 
       return (
-        <View style={[styles.aiCardContainer, { backgroundColor: isDark ? "#1E293B" : "#FFFFFF" }]}>
-          <View style={styles.aiCardHeader}>
-            <View style={[styles.aiChip, { backgroundColor: colors.primary + "22", borderColor: colors.primary + "44" }]}>
-              <Ionicons name="sparkles" size={12} color={colors.primary} />
-              <Text style={[styles.aiChipText, { color: colors.primary }]}>
-                {aiFeedProvider || "AI Feed"}
-              </Text>
-            </View>
-            <Text style={[styles.aiScoreText, { color: colors.textSecondary }]}>
-              {Math.round(Number(post?.similarity || 0) * 100)}% match
-            </Text>
-          </View>
-
-          {post?.aiReason ? (
-            <Text style={[styles.aiReasonText, { color: colors.textSecondary }]} numberOfLines={2}>
-              {post.aiReason}
-            </Text>
-          ) : null}
-
+        <View style={styles.aiCardContainer}>
           <ListingCard
             item={post}
             onPress={(item: any) => {
@@ -1806,12 +1994,17 @@ export default function FeedScreen() {
               openListingDetails(nextId);
             }}
             showGigSummary={false}
-            variant="vertical"
-            style={{ width: "100%", marginBottom: 0 }}
+            variant="feed"
+            style={[
+              styles.aiListingCard,
+              { borderColor: isDark ? "#334155" : "#EEF0F4" },
+            ]}
             actionSlot={
               canFollowSuggestion ? (
                 <TouchableOpacity
                   activeOpacity={1}
+                  accessibilityLabel={isFollowingSuggestion ? "Unfollow listing" : "Follow listing"}
+                  accessibilityRole="button"
                   disabled={isFollowBusy}
                   onPress={() => {
                     if (!followTarget) return;
@@ -1852,11 +2045,25 @@ export default function FeedScreen() {
       post.is_following || followingKeys.has(buildSocialFollowKey("profile", post.author_id)),
     );
     return (
-      <View style={[styles.postCard, { backgroundColor: cardBg }]}>
+      <View
+        style={[
+          styles.postCard,
+          {
+            backgroundColor: cardBg,
+            borderColor: isDark ? "#334155" : "#EEF0F4",
+          },
+        ]}
+      >
         {/* Author header */}
         <View style={styles.authorRow}>
           <TouchableOpacity activeOpacity={1} style={styles.avatarWrap}>
-            <CachedImage uri={post.author_avatar || "https://via.placeholder.com/40"} style={styles.authorAvatar} />
+            <CachedImage
+              uri={post.author_avatar || "https://via.placeholder.com/40"}
+              style={styles.authorAvatar}
+              width={40}
+              height={40}
+              priority="high"
+            />
           </TouchableOpacity>
           <View style={{ flex: 1, marginLeft: 10 }}>
             <Text style={[styles.authorName, { color: colors.text }]}>{post.author_name || "User"}</Text>
@@ -1881,11 +2088,24 @@ export default function FeedScreen() {
         {post.media && post.media.length > 0 && (
           <View style={styles.mediaContainer}>
             {post.media.length === 1 ? (
-              <CachedImage uri={post.media[0].url} style={styles.mediaSingle} />
+              <CachedImage
+                uri={post.media[0].url}
+                style={styles.mediaSingle}
+                width={Math.round(SCREEN_WIDTH - 60)}
+                height={280}
+                priority="high"
+              />
             ) : (
               <View style={styles.mediaGrid}>
                 {post.media.slice(0, 4).map((m: any, idx: number) => (
-                  <CachedImage key={idx} uri={m.url} style={[styles.mediaGridItem, { borderWidth: 1, borderColor: cardBg }]} />
+                  <CachedImage
+                    key={idx}
+                    uri={m.url}
+                    style={[styles.mediaGridItem, { borderWidth: 1, borderColor: cardBg }]}
+                    width={Math.round((SCREEN_WIDTH - 60) / 2)}
+                    height={180}
+                    priority={idx < 2 ? "high" : "normal"}
+                  />
                 ))}
               </View>
             )}
@@ -1950,18 +2170,27 @@ export default function FeedScreen() {
           <TouchableOpacity
             style={[
               styles.composerInput,
-              {
-                backgroundColor: isDark ? "#0F172A" : "#F1F5F9",
-                borderColor: isDark ? "#334155" : "#E2E8F0",
-              },
+              { backgroundColor: isDark ? "#374151" : "#F3F4F6" },
             ]}
             onPress={openSearchSheet}
             activeOpacity={1}
           >
-            <Ionicons name="search-outline" size={18} color={colors.textSecondary} />
-            <Text style={{ color: colors.textSecondary, fontSize: moderateScale(13), marginLeft: 8 }}>
+            <Ionicons name="search" size={20} color={colors.textSecondary} />
+            <Text style={[styles.composerSearchText, { color: colors.textSecondary }]} numberOfLines={1}>
               Search musicians, studios, gigs
             </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            activeOpacity={1}
+            onPress={openSearchSheet}
+            style={[
+              styles.composerFilterButton,
+              { backgroundColor: isDark ? "#374151" : "#F3F4F6" },
+            ]}
+            accessibilityRole="button"
+            accessibilityLabel="Open search filters"
+          >
+            <Ionicons name="options-outline" size={20} color={colors.textSecondary} />
           </TouchableOpacity>
         </View>
 
@@ -2120,7 +2349,7 @@ export default function FeedScreen() {
         contentContainerStyle={[styles.feedSkeletonContent, { paddingBottom: feedBottomSpacer + 20 }]}
       >
         <View style={[styles.feedSkeletonSearchWrap, { backgroundColor: cardBg }]}>
-          <Skeleton width="100%" height={38} borderRadius={20} />
+          <Skeleton width="100%" height={48} borderRadius={16} />
         </View>
 
         <View style={[styles.feedSkeletonRadioWrap, { backgroundColor: cardBg }]}>
@@ -2435,9 +2664,11 @@ const styles = StyleSheet.create({
   },
 
   /* Composer prompt */
-  composerRow: { flexDirection: "row", alignItems: "center", paddingHorizontal: 14, paddingVertical: 10, gap: 10 },
+  composerRow: { flexDirection: "row", alignItems: "center", paddingHorizontal: 14, paddingVertical: 10, gap: 8 },
   composerAvatar: { width: 36, height: 36, borderRadius: 18, alignItems: "center", justifyContent: "center" },
-  composerInput: { flex: 1, height: 38, borderRadius: 20, borderWidth: 1, paddingHorizontal: 14, justifyContent: "center", flexDirection: "row", alignItems: "center" },
+  composerInput: { flex: 1, height: 48, borderRadius: 16, paddingHorizontal: 16, justifyContent: "center", flexDirection: "row", alignItems: "center", gap: 10 },
+  composerSearchText: { flex: 1, fontSize: moderateScale(15), fontFamily: "Poppins_500Medium", lineHeight: 20, includeFontPadding: false },
+  composerFilterButton: { width: 48, height: 48, borderRadius: 16, alignItems: "center", justifyContent: "center" },
   composerMediaBtn: { padding: 4 },
 
   /* Tabs */
@@ -2470,15 +2701,10 @@ const styles = StyleSheet.create({
   aiCardContainer: {
     marginHorizontal: 16,
     marginTop: 4,
-    borderRadius: 22,
-    overflow: "hidden",
-    borderWidth: 1,
-    borderColor: "rgba(148,163,184,0.18)",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.06,
-    shadowRadius: 16,
-    elevation: 3,
+  },
+  aiListingCard: {
+    width: "100%",
+    marginBottom: 12,
   },
   aiCardHeader: {
     paddingHorizontal: 14,
@@ -2513,46 +2739,43 @@ const styles = StyleSheet.create({
     lineHeight: 18,
   },
   aiFollowBtn: {
-    height: 26,
-    minWidth: 76,
-    borderRadius: 8,
+    minHeight: 40,
+    borderRadius: 14,
     borderWidth: 1,
-    paddingHorizontal: 10,
+    paddingHorizontal: 14,
     alignItems: "center",
     justifyContent: "center",
-    alignSelf: "center",
+    alignSelf: "stretch",
   },
   aiFollowText: {
-    fontSize: moderateScale(10),
+    fontSize: moderateScale(12),
     fontWeight: "700",
-    textTransform: "uppercase",
   },
 
   /* Post card */
   postCard: {
     marginTop: 0,
     marginHorizontal: 16,
-    borderRadius: 16,
+    borderRadius: 22,
     shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 8,
-    elevation: 2,
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.035,
+    shadowRadius: 10,
+    elevation: 1,
     borderWidth: 1,
-    borderColor: 'rgba(0,0,0,0.05)',
   },
   authorRow: { flexDirection: "row", alignItems: "center", padding: 14, paddingBottom: 6 },
   avatarWrap: {},
   authorAvatar: { width: 40, height: 40, borderRadius: 20 },
   authorName: { fontSize: moderateScale(14), fontWeight: "700" },
   postTime: { fontSize: moderateScale(11) },
-  followBtn: { borderWidth: 1, borderRadius: 6, paddingHorizontal: 12, paddingVertical: 5 },
+  followBtn: { borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 6 },
   postBody: { fontSize: moderateScale(14), lineHeight: 22, paddingHorizontal: 14, paddingBottom: 10 },
 
   /* Media */
   mediaContainer: { marginHorizontal: 14, marginTop: 4, marginBottom: 8 },
-  mediaSingle: { width: "100%", height: 280, resizeMode: "cover", borderRadius: 12 },
-  mediaGrid: { flexDirection: "row", flexWrap: "wrap", borderRadius: 12, overflow: "hidden" },
+  mediaSingle: { width: "100%", height: 280, resizeMode: "cover", borderRadius: 16 },
+  mediaGrid: { flexDirection: "row", flexWrap: "wrap", borderRadius: 16, overflow: "hidden" },
   mediaGridItem: { width: "50%", height: 180 },
 
   /* Linked items */

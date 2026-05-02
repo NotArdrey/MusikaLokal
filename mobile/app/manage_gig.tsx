@@ -15,6 +15,7 @@ import {
 import { supabase } from "../lib/supabase";
 import CustomAlert, { AlertType } from "../src/components/CustomAlert";
 import Header from "../src/components/header";
+import InAppMediaViewer, { isInAppMediaUrl } from "../src/components/InAppMediaViewer";
 import Modal from "../src/components/modal";
 import Navbar from "../src/components/navbar";
 import { useBottomBarClearance } from "../src/hooks/useBottomBarClearance";
@@ -61,6 +62,8 @@ export default function GigDetailsScreen() {
     title: "",
     message: "",
   });
+  const [mediaViewerUrl, setMediaViewerUrl] = useState<string | null>(null);
+  const [mediaViewerTitle, setMediaViewerTitle] = useState("Media");
 
   const showAlert = (
     type: AlertType,
@@ -92,6 +95,28 @@ export default function GigDetailsScreen() {
       type = "warning";
     }
     showAlert(type, title || "Notice", message || "", buttons);
+  };
+
+  const openMediaOrExternal = async (url: string, title = "Media") => {
+    const normalizedUrl = String(url || "").trim();
+    if (!normalizedUrl) return;
+
+    if (isInAppMediaUrl(normalizedUrl)) {
+      setMediaViewerTitle(title);
+      setMediaViewerUrl(normalizedUrl);
+      return;
+    }
+
+    try {
+      const supported = await Linking.canOpenURL(normalizedUrl);
+      if (supported) {
+        await Linking.openURL(normalizedUrl);
+      } else {
+        Alert.alert("Error", "Unable to open link");
+      }
+    } catch (error) {
+      Alert.alert("Error", "Failed to open link");
+    }
   };
 
   const Alert = { alert: showAlertNative };
@@ -737,26 +762,7 @@ export default function GigDetailsScreen() {
                   </Text>
                   {gig?.contract_url ? (
                     <TouchableOpacity activeOpacity={1}
-                      onPress={async () => {
-                        try {
-                          const supported = await Linking.canOpenURL(
-                            gig.contract_url,
-                          );
-                          if (supported) {
-                            await Linking.openURL(gig.contract_url);
-                          } else {
-                            Alert.alert(
-                              "Error",
-                              "Unable to open contract document",
-                            );
-                          }
-                        } catch (error) {
-                          Alert.alert(
-                            "Error",
-                            "Failed to open contract document",
-                          );
-                        }
-                      }}
+                      onPress={() => openMediaOrExternal(gig.contract_url, "Contract")}
                       style={[
                         styles.contractCard,
                         {
@@ -1142,23 +1148,7 @@ export default function GigDetailsScreen() {
                       {/* Demo Video */}
                       {app.video_url && (
                         <TouchableOpacity activeOpacity={1}
-                          onPress={async () => {
-                            try {
-                              const supported = await Linking.canOpenURL(
-                                app.video_url,
-                              );
-                              if (supported) {
-                                await Linking.openURL(app.video_url);
-                              } else {
-                                Alert.alert(
-                                  "Error",
-                                  "Unable to open video link",
-                                );
-                              }
-                            } catch (error) {
-                              Alert.alert("Error", "Failed to open video");
-                            }
-                          }}
+                          onPress={() => openMediaOrExternal(app.video_url, "Demo Video")}
                           style={[
                             styles.mediaButton,
                             {
@@ -1199,26 +1189,7 @@ export default function GigDetailsScreen() {
                             CV / Resume
                           </Text>
                           <TouchableOpacity activeOpacity={1}
-                            onPress={async () => {
-                              try {
-                                const supported = await Linking.canOpenURL(
-                                  app.cv_url,
-                                );
-                                if (supported) {
-                                  await Linking.openURL(app.cv_url);
-                                } else {
-                                  Alert.alert(
-                                    "Error",
-                                    "Unable to open CV/Resume",
-                                  );
-                                }
-                              } catch (error) {
-                                Alert.alert(
-                                  "Error",
-                                  "Failed to open CV/Resume",
-                                );
-                              }
-                            }}
+                            onPress={() => openMediaOrExternal(app.cv_url, "CV / Resume")}
                             style={[
                               styles.cvButton,
                               {
@@ -1281,20 +1252,7 @@ export default function GigDetailsScreen() {
                                   return (
                                     <TouchableOpacity activeOpacity={1}
                                       key={idx}
-                                      onPress={async () => {
-                                        try {
-                                          const supported =
-                                            await Linking.canOpenURL(url);
-                                          if (supported) {
-                                            await Linking.openURL(url);
-                                          }
-                                        } catch (error) {
-                                          Alert.alert(
-                                            "Error",
-                                            "Failed to open link",
-                                          );
-                                        }
-                                      }}
+                                      onPress={() => openMediaOrExternal(url, isVideo ? "Portfolio Video" : "Portfolio Media")}
                                       style={[
                                         styles.portfolioGridItem,
                                         {
@@ -1412,20 +1370,7 @@ export default function GigDetailsScreen() {
                               .map((url: string, idx: number) => (
                                 <TouchableOpacity activeOpacity={1}
                                   key={idx}
-                                  onPress={async () => {
-                                    try {
-                                      const supported =
-                                        await Linking.canOpenURL(url);
-                                      if (supported) {
-                                        await Linking.openURL(url);
-                                      }
-                                    } catch (error) {
-                                      Alert.alert(
-                                        "Error",
-                                        "Failed to open link",
-                                      );
-                                    }
-                                  }}
+                                  onPress={() => openMediaOrExternal(url, "Portfolio Link")}
                                   style={[
                                     styles.portfolioLink,
                                     { backgroundColor: colors.inputBackground },
@@ -1663,6 +1608,12 @@ export default function GigDetailsScreen() {
         message={alertConfig.message}
         buttons={alertConfig.buttons}
         onClose={() => setAlertVisible(false)}
+      />
+      <InAppMediaViewer
+        visible={!!mediaViewerUrl}
+        uri={mediaViewerUrl}
+        title={mediaViewerTitle}
+        onClose={() => setMediaViewerUrl(null)}
       />
     </>
   );

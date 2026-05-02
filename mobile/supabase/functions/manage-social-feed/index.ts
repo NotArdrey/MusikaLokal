@@ -71,17 +71,25 @@ Deno.serve(async (req: Request) => {
 
     const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey);
 
-    const {
-      data: { user: authUser },
-      error: authErr,
-    } = await supabaseAdmin.auth.getUser(accessToken);
-
-    if (authErr || !authUser) {
-      return jsonResponse({ error: "Invalid token" }, 401);
-    }
-
-    const uid = authUser.id;
     const { action, ...params } = await req.json();
+    const isPublicLiteFeed =
+      action === "get_feed" &&
+      params?.feed_type !== "following" &&
+      params?.personalize === false;
+    let uid = "";
+
+    if (!isPublicLiteFeed) {
+      const {
+        data: { user: authUser },
+        error: authErr,
+      } = await supabaseAdmin.auth.getUser(accessToken);
+
+      if (authErr || !authUser) {
+        return jsonResponse({ error: "Invalid token" }, 401);
+      }
+
+      uid = authUser.id;
+    }
 
     // ── follow ──────────────────────────────────────────────────────
     if (action === "follow") {
@@ -356,64 +364,127 @@ Deno.serve(async (req: Request) => {
 
     // ── get_feed ────────────────────────────────────────────────────
     if (action === "get_feed") {
-      const { limit: lim, offset, feed_type } = params;
+      const feedStartedAt = performance.now();
+      const { limit: lim, offset, feed_type, cursor } = params;
       const pageSize = Math.min(Number(lim) || 20, 50);
       const pageOffset = Number(offset) || 0;
+      const shouldPersonalize = params?.personalize !== false && Boolean(uid);
+      const feedPostSelect =
+        "id, author_id, post_type, content, visibility, is_pinned, linked_playlist_id, linked_product_id, reaction_count, comment_count, share_count, created_at, updated_at, author:profiles!author_id(id, full_name, avatar_url, role), media:post_media(id, post_id, media_type, storage_path, mime_type, width, height, duration_seconds, display_order)";
+      const cursorCreatedAt =
+        typeof cursor === "string" && cursor.trim().length > 0
+          ? cursor.trim()
+          : null;
 
       let query;
+      let followingListMs = 0;
       if (feed_type === "following") {
         // Get posts from followed users
+        const followingListStartedAt = performance.now();
         const { data: following } = await supabaseAdmin
           .from("follows")
           .select("followed_id")
           .eq("follower_id", uid)
           .eq("followed_type", "profile");
+        followingListMs = Math.round(performance.now() - followingListStartedAt);
 
         const followedIds = (following || []).map((f: any) => f.followed_id);
         followedIds.push(uid); // Include own posts
 
         query = supabaseAdmin
           .from("feed_posts")
-          .select("*, author:profiles!author_id(id, full_name, avatar_url, role), media:post_media(*)")
+          .select(feedPostSelect)
           .in("author_id", followedIds)
           .eq("is_hidden", false)
-          .order("created_at", { ascending: false })
-          .range(pageOffset, pageOffset + pageSize - 1);
+          .order("created_at", { ascending: false });
       } else {
         // Public feed
         query = supabaseAdmin
           .from("feed_posts")
-          .select("*, author:profiles!author_id(id, full_name, avatar_url, role), media:post_media(*)")
+          .select(feedPostSelect)
           .eq("visibility", "public")
           .eq("is_hidden", false)
-          .order("created_at", { ascending: false })
-          .range(pageOffset, pageOffset + pageSize - 1);
+          .order("created_at", { ascending: false });
       }
 
+      if (cursorCreatedAt) {
+        query = query.lt("created_at", cursorCreatedAt).limit(pageSize + 1);
+      } else if (params.cursor !== undefined) {
+        query = query.limit(pageSize + 1);
+      } else {
+        query = query.range(pageOffset, pageOffset + pageSize - 1);
+      }
+
+      const postsStartedAt = performance.now();
       const { data, error } = await query;
       if (error) return jsonResponse({ error: error.message }, 500);
+      const postsMs = Math.round(performance.now() - postsStartedAt);
 
-      // Fetch user's reactions for these posts
-      const postIds = (data || []).map((p: any) => p.id);
-      const { data: userReactions } = postIds.length > 0
-        ? await supabaseAdmin
-            .from("post_reactions")
-            .select("post_id, reaction_type")
-            .eq("user_id", uid)
-            .in("post_id", postIds)
-        : { data: [] };
+      const rows = data || [];
+      const pageRows = params.cursor !== undefined ? rows.slice(0, pageSize) : rows;
+      const nextCursor =
+        params.cursor !== undefined && rows.length > pageSize
+          ? pageRows[pageRows.length - 1]?.created_at || null
+          : null;
+
+      const enrichmentStartedAt = performance.now();
+      // Fetch user's reactions and follow state for these posts
+      const postIds = pageRows.map((p: any) => p.id);
+      const authorIds = Array.from(
+        new Set(
+          pageRows
+            .map((p: any) => p?.author_id)
+            .filter((value: any): value is string => typeof value === "string" && value.length > 0),
+        ),
+      );
+
+      const [userReactionsResult, followingRowsResult] = await Promise.all([
+        shouldPersonalize && postIds.length > 0
+          ? supabaseAdmin
+              .from("post_reactions")
+              .select("post_id, reaction_type")
+              .eq("user_id", uid)
+              .in("post_id", postIds)
+          : Promise.resolve({ data: [] }),
+        shouldPersonalize && authorIds.length > 0
+          ? supabaseAdmin
+              .from("follows")
+              .select("followed_id")
+              .eq("follower_id", uid)
+              .eq("followed_type", "profile")
+              .in("followed_id", authorIds)
+          : Promise.resolve({ data: [] }),
+      ]);
 
       const reactionMap = new Map();
-      for (const r of userReactions || []) {
+      for (const r of userReactionsResult.data || []) {
         reactionMap.set(r.post_id, r.reaction_type);
       }
 
-      const enriched = (data || []).map((p: any) => ({
+      const followingAuthorIds = new Set(
+        (followingRowsResult.data || []).map((row: any) => row?.followed_id).filter(Boolean),
+      );
+      const enrichmentMs = Math.round(performance.now() - enrichmentStartedAt);
+
+      const enriched = pageRows.map((p: any) => ({
         ...p,
         user_reaction: reactionMap.get(p.id) || null,
+        is_following: followingAuthorIds.has(p.author_id),
+        social_follow_target_id: p.author_id || null,
+        social_follow_target_type: "profile",
       }));
 
-      return jsonResponse({ success: true, data: enriched });
+      console.info("[LoadTime][Edge:manage-social-feed:get_feed] stages", {
+        enrichmentMs,
+        feedType: feed_type || "public",
+        followingListMs,
+        pageSize,
+        postsMs,
+        returned: enriched.length,
+        totalMs: Math.round(performance.now() - feedStartedAt),
+      });
+
+      return jsonResponse({ success: true, data: enriched, items: enriched, nextCursor });
     }
 
     // ── get_post_details ────────────────────────────────────────────

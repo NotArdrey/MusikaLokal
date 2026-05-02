@@ -7040,8 +7040,8 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
   },
   gridItemWeb: {
-    width: "49%",
-    marginBottom: moderateScale(18),
+    width: "48%",
+    marginBottom: moderateScale(14),
   },
   centerContainer: {
     alignItems: "center",
@@ -7063,8 +7063,8 @@ const styles = StyleSheet.create({
     opacity: 0.7,
   },
   cardContainer: {
-    marginBottom: SCREEN_HEIGHT < 700 ? moderateScale(12) : moderateScale(16),
-    borderRadius: moderateScale(16),
+    marginBottom: SCREEN_HEIGHT < 700 ? moderateScale(10) : moderateScale(14),
+    borderRadius: moderateScale(14),
     borderWidth: 1,
     overflow: "hidden",
     backgroundColor: "#FFFFFF",
@@ -7084,16 +7084,16 @@ const styles = StyleSheet.create({
   },
   cardImage: {
     width: "100%",
-    height: SCREEN_HEIGHT < 700 ? verticalScale(130) : verticalScale(160),
-    borderTopLeftRadius: moderateScale(16),
-    borderTopRightRadius: moderateScale(16),
+    height: SCREEN_HEIGHT < 700 ? verticalScale(116) : verticalScale(144),
+    borderTopLeftRadius: moderateScale(14),
+    borderTopRightRadius: moderateScale(14),
   },
   typeBadge: {
     position: "absolute",
-    top: moderateScale(12),
-    left: scale(12),
-    paddingHorizontal: scale(16),
-    paddingVertical: moderateScale(6),
+    top: moderateScale(10),
+    left: scale(10),
+    paddingHorizontal: scale(12),
+    paddingVertical: moderateScale(5),
     borderRadius: moderateScale(9999),
     backgroundColor: "rgba(0,0,0,0.65)",
     backdropFilter: "blur(4px)",
@@ -7103,10 +7103,10 @@ const styles = StyleSheet.create({
   },
   topRightBadgeStack: {
     position: "absolute",
-    top: moderateScale(12),
-    right: scale(12),
+    top: moderateScale(10),
+    right: scale(10),
     alignItems: "flex-end",
-    gap: moderateScale(6),
+    gap: moderateScale(5),
     maxWidth: "44%",
   },
   stackedImageBadge: {
@@ -7123,10 +7123,10 @@ const styles = StyleSheet.create({
   },
   liveBadge: {
     position: "absolute",
-    top: moderateScale(12),
-    right: scale(12),
-    paddingHorizontal: scale(16),
-    paddingVertical: moderateScale(6),
+    top: moderateScale(10),
+    right: scale(10),
+    paddingHorizontal: scale(12),
+    paddingVertical: moderateScale(5),
     borderRadius: moderateScale(9999),
     backgroundColor: "#22C55E", // green-500
     flexDirection: "row",
@@ -7168,20 +7168,20 @@ const styles = StyleSheet.create({
     textTransform: "uppercase",
   },
   cardContent: {
-    padding: SCREEN_HEIGHT < 700 ? moderateScale(12) : moderateScale(16),
+    padding: SCREEN_HEIGHT < 700 ? moderateScale(10) : moderateScale(14),
   },
   cardHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "flex-start",
-    marginBottom: moderateScale(8),
+    marginBottom: moderateScale(6),
   },
   cardTitleContainer: {
     flex: 1,
     marginRight: scale(8),
   },
   cardTitle: {
-    fontSize: moderateScale(17),
+    fontSize: moderateScale(16),
     fontFamily: "Poppins_700Bold",
   },
   cardDate: {
@@ -7193,8 +7193,8 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    marginTop: moderateScale(8),
-    paddingTop: moderateScale(12),
+    marginTop: moderateScale(6),
+    paddingTop: moderateScale(10),
     borderTopWidth: 1,
   },
   statusContainer: {
@@ -7544,11 +7544,11 @@ const styles = StyleSheet.create({
   cardDetailRow: {
     flexDirection: "row",
     alignItems: "center",
-    marginTop: moderateScale(6),
-    gap: scale(6),
+    marginTop: moderateScale(5),
+    gap: scale(5),
   },
   cardDetailText: {
-    fontSize: moderateScale(12),
+    fontSize: moderateScale(11),
     fontFamily: "Poppins_400Regular",
     flex: 1,
   },

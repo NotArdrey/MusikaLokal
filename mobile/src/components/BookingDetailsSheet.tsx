@@ -26,6 +26,7 @@ import {
   resolveRecordingRule,
 } from "../utils/recordingRule";
 import CachedImage from "./CachedImage";
+import InAppMediaViewer, { isInAppMediaUrl } from "./InAppMediaViewer";
 import TrackedBottomSheetModal from "./TrackedBottomSheetModal";
 
 const debugLog = (..._args: unknown[]) => { };
@@ -64,6 +65,8 @@ const BookingDetailsSheet = forwardRef<
   const [loading, setLoading] = useState(false);
   const [studioDetails, setStudioDetails] = useState<any>(null);
   const [dateOverride, setDateOverride] = useState<any>(null);
+  const [mediaViewerUrl, setMediaViewerUrl] = useState<string | null>(null);
+  const [mediaViewerTitle, setMediaViewerTitle] = useState("Media");
 
   const snapPoints = useMemo(() => ["85%"], []);
   const renderBackdrop = useCallback(
@@ -266,6 +269,23 @@ const BookingDetailsSheet = forwardRef<
     return { dateLabel: normalized, timeLabel: "" };
   };
 
+  const openMediaOrExternal = async (url: string, label: string) => {
+    const normalizedUrl = String(url || "").trim();
+    if (!normalizedUrl) return;
+
+    if (isInAppMediaUrl(normalizedUrl)) {
+      setMediaViewerTitle(label);
+      setMediaViewerUrl(normalizedUrl);
+      return;
+    }
+
+    try {
+      await Linking.openURL(normalizedUrl);
+    } catch (error) {
+      Alert.alert("Unable to Open Link", `Could not open ${label}.`);
+    }
+  };
+
   if (!booking) return null;
 
   const toStartCase = (value: string) =>
@@ -307,13 +327,7 @@ const BookingDetailsSheet = forwardRef<
       : null;
 
     const openRequestAttachment = async (url: string, label: string) => {
-      if (!url) return;
-
-      try {
-        await Linking.openURL(url);
-      } catch (error) {
-        Alert.alert("Unable to Open Link", `Could not open ${label}.`);
-      }
+      await openMediaOrExternal(url, label);
     };
 
     const attachmentButtons = [
@@ -338,18 +352,19 @@ const BookingDetailsSheet = forwardRef<
     ].filter(Boolean) as Array<{ label: string; url: string }>;
 
     return (
-      <TrackedBottomSheetModal
-        ref={ref}
-        index={0}
-        snapPoints={snapPoints}
-        enableDynamicSizing={false}
-        enableContentPanningGesture={false}
-        enableOverDrag={false}
-        enablePanDownToClose={true}
-        backdropComponent={renderBackdrop}
-        backgroundStyle={{ backgroundColor: colors.background }}
-        handleIndicatorStyle={{ backgroundColor: isDark ? "#4B5563" : "#E5E7EB" }}
-      >
+      <>
+        <TrackedBottomSheetModal
+          ref={ref}
+          index={0}
+          snapPoints={snapPoints}
+          enableDynamicSizing={false}
+          enableContentPanningGesture={false}
+          enableOverDrag={false}
+          enablePanDownToClose={true}
+          backdropComponent={renderBackdrop}
+          backgroundStyle={{ backgroundColor: colors.background }}
+          handleIndicatorStyle={{ backgroundColor: isDark ? "#4B5563" : "#E5E7EB" }}
+        >
         <BottomSheetScrollView
           style={{ flex: 1 }}
           contentContainerStyle={styles.scrollContent}
@@ -541,7 +556,14 @@ const BookingDetailsSheet = forwardRef<
             </View>
           </View>
         </BottomSheetScrollView>
-      </TrackedBottomSheetModal>
+        </TrackedBottomSheetModal>
+        <InAppMediaViewer
+          visible={!!mediaViewerUrl}
+          uri={mediaViewerUrl}
+          title={mediaViewerTitle}
+          onClose={() => setMediaViewerUrl(null)}
+        />
+      </>
     );
   }
 
@@ -702,18 +724,19 @@ const BookingDetailsSheet = forwardRef<
   const applicationLabel = getApplicationDisplayLabel(booking);
 
   return (
-    <TrackedBottomSheetModal
-      ref={ref}
-      index={0}
-      snapPoints={snapPoints}
-      enableDynamicSizing={false}
-      enableContentPanningGesture={false}
-      enableOverDrag={false}
-      enablePanDownToClose={true}
-      backdropComponent={renderBackdrop}
-      backgroundStyle={{ backgroundColor: colors.background }}
-      handleIndicatorStyle={{ backgroundColor: isDark ? "#4B5563" : "#E5E7EB" }}
-    >
+    <>
+      <TrackedBottomSheetModal
+        ref={ref}
+        index={0}
+        snapPoints={snapPoints}
+        enableDynamicSizing={false}
+        enableContentPanningGesture={false}
+        enableOverDrag={false}
+        enablePanDownToClose={true}
+        backdropComponent={renderBackdrop}
+        backgroundStyle={{ backgroundColor: colors.background }}
+        handleIndicatorStyle={{ backgroundColor: isDark ? "#4B5563" : "#E5E7EB" }}
+      >
       <BottomSheetScrollView
         style={{ flex: 1 }}
         contentContainerStyle={styles.scrollContent}
@@ -984,7 +1007,7 @@ const BookingDetailsSheet = forwardRef<
                         Video / Demo
                       </Text>
                       <TouchableOpacity activeOpacity={1}
-                        onPress={() => Linking.openURL(booking.video_url)}
+                        onPress={() => openMediaOrExternal(booking.video_url, "Video / Demo")}
                       >
                         <Text
                           style={[
@@ -1017,7 +1040,7 @@ const BookingDetailsSheet = forwardRef<
                         CV / Resume
                       </Text>
                       <TouchableOpacity activeOpacity={1}
-                        onPress={() => Linking.openURL(booking.cv_url)}
+                        onPress={() => openMediaOrExternal(booking.cv_url, "CV / Resume")}
                       >
                         <Text
                           style={[
@@ -1791,7 +1814,14 @@ const BookingDetailsSheet = forwardRef<
           )}
         </View>
       </BottomSheetScrollView>
-    </TrackedBottomSheetModal>
+      </TrackedBottomSheetModal>
+      <InAppMediaViewer
+        visible={!!mediaViewerUrl}
+        uri={mediaViewerUrl}
+        title={mediaViewerTitle}
+        onClose={() => setMediaViewerUrl(null)}
+      />
+    </>
   );
 });
 

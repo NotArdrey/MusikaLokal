@@ -2,7 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as ExpoLinking from 'expo-linking';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router, useLocalSearchParams } from 'expo-router';
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
     ActivityIndicator,
     Dimensions,
@@ -22,7 +22,9 @@ import GroupLinkedPlaylistsSection from '../src/components/GroupLinkedPlaylistsS
 import Modal from '../src/components/modal';
 import ReportModal from '../src/components/ReportModal';
 import { useAuth } from '../src/context/AuthContext';
+import { useListingDetailsQuery } from '../src/data/hooks';
 import { useTheme } from '../src/context/ThemeContext';
+import { usePageLoadLogger } from '../src/utils/loadTimeLogger';
 import { getGroupMembersLabel, getGroupTypeLabel, isGroupLeaderMember } from '../src/utils/groupMembers';
 import { fetchGroupLinkedPlaylists } from '../src/utils/groupPlaylists';
 import {
@@ -30,7 +32,7 @@ import {
     openNavigationDirections,
 } from '../src/utils/navigation';
 
-const { width, height } = Dimensions.get('window');
+const { height } = Dimensions.get('window');
 const IMG_HEIGHT = height * 0.5;
 export default function GroupDetailsScreen() {
   const { id } = useLocalSearchParams();
@@ -57,9 +59,45 @@ export default function GroupDetailsScreen() {
     message: '',
   });
 
-  useEffect(() => {
-    fetchGroupDetails();
+  const groupId = useMemo(() => {
+    const routeId = Array.isArray(id) ? id[0] : id;
+    return routeId || 'bd9552d7-b827-449e-8c43-2a4439c2c62c';
   }, [id]);
+  const groupDetailsQuery = useListingDetailsQuery({
+    id: groupId,
+    type: 'group',
+    userId,
+  });
+
+  const applyGroupDetails = useCallback((nextGroup: any) => {
+    setGroup(nextGroup);
+    setIsFavorited(Boolean(nextGroup?.is_favorited));
+    setFavoriteCount(Number(nextGroup?.favorites_count || 0));
+  }, []);
+
+  useEffect(() => {
+    if (groupDetailsQuery.data) {
+      applyGroupDetails(groupDetailsQuery.data);
+    }
+  }, [applyGroupDetails, groupDetailsQuery.data]);
+
+  useEffect(() => {
+    setLoading(groupDetailsQuery.isLoading && !group);
+  }, [group, groupDetailsQuery.isLoading]);
+
+  usePageLoadLogger({
+    counts: {
+      playlists: groupPlaylists.length,
+    },
+    details: {
+      groupId: groupId ? 'present' : 'missing',
+      isFavorited,
+    },
+    loading: loading || groupDetailsQuery.isLoading || loadingGroupPlaylists,
+    page: 'GroupDetails',
+    queries: { groupDetails: groupDetailsQuery },
+    ready: !loading && Boolean(group),
+  });
 
   useEffect(() => {
     let isActive = true;
@@ -92,29 +130,6 @@ export default function GroupDetailsScreen() {
       isActive = false;
     };
   }, [group?.id]);
-
-  const fetchGroupDetails = async () => {
-    try {
-      const { data: { user } } = await supabase.auth.getUser();
-      const userId = user?.id;
-
-      // Ensure id is a string, not an array
-      const groupId = Array.isArray(id) ? id[0] : id;
-      const finalId = groupId || 'bd9552d7-b827-449e-8c43-2a4439c2c62c';
-
-      const { data, error } = await supabase.functions.invoke('manage-details', {
-        body: { action: 'fetch', type: 'group', id: finalId, userId }
-      });
-
-      if (error) throw error;
-      setGroup(data);
-      setIsFavorited(Boolean(data?.is_favorited));
-      setFavoriteCount(Number(data?.favorites_count || 0));
-    } catch (e) {
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const buildShareUrl = () => {
     if (!group?.id) {

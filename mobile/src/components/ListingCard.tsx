@@ -39,12 +39,50 @@ interface ListingCardProps {
   onPress: (item: any) => void;
   onInvite?: (item: any) => void;
   onChat?: (item: any) => void;
-  variant?: "horizontal" | "vertical";
+  variant?: "horizontal" | "vertical" | "feed";
   style?: any;
   hasGroups?: boolean;
   showGigSummary?: boolean;
   actionSlot?: React.ReactNode;
 }
+
+const LISTING_FALLBACK_IMAGES: Record<string, string[]> = {
+  Artist: [
+    "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=900&q=75",
+    "https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=900&q=75",
+    "https://images.unsplash.com/photo-1521572267360-ee0c2909d518?auto=format&fit=crop&w=900&q=75",
+  ],
+  Gig: [
+    "https://images.unsplash.com/photo-1514525253161-7a46d19cd819?auto=format&fit=crop&w=1000&q=75",
+    "https://images.unsplash.com/photo-1470229722913-7c0e2dbbafd3?auto=format&fit=crop&w=1000&q=75",
+    "https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?auto=format&fit=crop&w=1000&q=75",
+  ],
+  Group: [
+    "https://images.unsplash.com/photo-1521335629791-ce4aec67dd47?auto=format&fit=crop&w=1000&q=75",
+    "https://images.unsplash.com/photo-1506157786151-b8491531f063?auto=format&fit=crop&w=1000&q=75",
+    "https://images.unsplash.com/photo-1516280440614-37939bbacd81?auto=format&fit=crop&w=1000&q=75",
+  ],
+  Production: [
+    "https://images.unsplash.com/photo-1598488035139-bdbb2231ce04?auto=format&fit=crop&w=1000&q=75",
+    "https://images.unsplash.com/photo-1511379938547-c1f69419868d?auto=format&fit=crop&w=1000&q=75",
+    "https://images.unsplash.com/photo-1514320291840-2e0a9bf2a9ae?auto=format&fit=crop&w=1000&q=75",
+  ],
+  Studio: [
+    "https://images.unsplash.com/photo-1598488035139-bdbb2231ce04?auto=format&fit=crop&w=1000&q=75",
+    "https://images.unsplash.com/photo-1511379938547-c1f69419868d?auto=format&fit=crop&w=1000&q=75",
+    "https://images.unsplash.com/photo-1516280440614-37939bbacd81?auto=format&fit=crop&w=1000&q=75",
+  ],
+};
+
+const getListingFallbackImage = (type?: string, id?: string | number | null) => {
+  const normalizedType = typeof type === "string" && type.length > 0 ? type : "Group";
+  const images = LISTING_FALLBACK_IMAGES[normalizedType] || LISTING_FALLBACK_IMAGES.Group;
+  const seed = String(id || normalizedType)
+    .split("")
+    .reduce((sum, char) => sum + char.charCodeAt(0), 0);
+
+  return images[seed % images.length];
+};
 
 const ListingCard: React.FC<ListingCardProps> = ({
   item,
@@ -66,6 +104,7 @@ const ListingCard: React.FC<ListingCardProps> = ({
   const verticalWebScrollRef = useRef<ScrollView | null>(null);
   const horizontalPagerRef = useRef<any>(null);
   const verticalPagerRef = useRef<any>(null);
+  const isFeedVariant = variant === "feed";
 
   // Check if current user can invite (ONLY venue-owner viewing a musician/Group)
   const canInvite = useMemo(
@@ -388,6 +427,15 @@ const ListingCard: React.FC<ListingCardProps> = ({
     [item.open_group_applications, item.owner_id, item.type, userId, userRole],
   );
 
+  const viewActionLabel = useMemo(() => {
+    if (item.type === "Artist") return "View Musician";
+    if (item.type === "Group") return "View Group";
+    if (item.type === "Studio") return "View Studio";
+    if (item.type === "Gig") return "View Gig";
+    if (item.type === "Production") return "View Team";
+    return "View Details";
+  }, [item.type]);
+
   const gigSummary = useMemo(
     () => [
       { label: "Active", value: item.active_gigs || 0, color: "#10B981" },
@@ -418,8 +466,8 @@ const ListingCard: React.FC<ListingCardProps> = ({
       return item.avatar_url;
     }
 
-    return undefined;
-  }, [item.avatar_url, item.owner_avatar_url]);
+    return getListingFallbackImage(item.type, item.id || item.name);
+  }, [item.avatar_url, item.id, item.name, item.owner_avatar_url, item.type]);
   const hasMultipleImages = images.length > 1;
   const imageCacheVersion = useMemo(
     () => item.updated_at || item.created_at || item.id,
@@ -931,14 +979,19 @@ const ListingCard: React.FC<ListingCardProps> = ({
 
   // 2. STANDARD VERTICAL CARD (For Search / Lists)
   // Legacy Layout: Image Top, White Info Box Bottom
-  const imageHeight = 180;
+  const imageHeight = isFeedVariant ? 212 : 180;
 
   return (
     <Pressable
       onPress={() => onPress(item)}
       style={({ pressed }) => [
         styles.card,
-        { width: "100%", backgroundColor: isDark ? "#1F2937" : "#FFFFFF" },
+        isFeedVariant && styles.feedCard,
+        {
+          width: "100%",
+          backgroundColor: isDark ? "#1F2937" : "#FFFFFF",
+          borderColor: isFeedVariant ? (isDark ? "#334155" : "#EEF0F4") : undefined,
+        },
         style,
         { transform: [{ scale: pressed ? 0.99 : 1 }] },
       ]}
@@ -946,11 +999,12 @@ const ListingCard: React.FC<ListingCardProps> = ({
       <View
         style={[
           styles.cardContent,
+          isFeedVariant && styles.feedCardContent,
           { backgroundColor: isDark ? "#1F2937" : "#FFFFFF" },
         ]}
       >
         {/* Image Section */}
-        <View style={[styles.imageContainer, { height: imageHeight }]}>
+        <View style={[styles.imageContainer, isFeedVariant && styles.feedImageContainer, { height: imageHeight }]}>
           {hasMultipleImages ? (
             <View style={{ flex: 1 }}>
               {Platform.OS === "web" ? (
@@ -1041,8 +1095,16 @@ const ListingCard: React.FC<ListingCardProps> = ({
             />
           )}
 
+          {isFeedVariant && (
+            <LinearGradient
+              colors={["transparent", "rgba(15,23,42,0.34)"]}
+              style={styles.feedMediaGradient}
+              pointerEvents="none"
+            />
+          )}
+
           {/* Seasonal Rate Badges (Vertical) - Bottom Left Corner */}
-          {(item.has_seasonal_pricing ||
+          {!isFeedVariant && (item.has_seasonal_pricing ||
             (item.weekend_multiplier &&
               parseFloat(item.weekend_multiplier) > 1)) &&
             (item.type === "Studio" || item.hourly_rate) && (
@@ -1090,6 +1152,7 @@ const ListingCard: React.FC<ListingCardProps> = ({
             )}
 
           {/* Top Actions for Standard Card */}
+          {!isFeedVariant && (
           <View style={[styles.topActions]}>
             {/* Left: Warning + Deadline badges */}
             <View style={{ flexDirection: "column", gap: 6, flex: 1, alignItems: "flex-start" }}>
@@ -1159,25 +1222,48 @@ const ListingCard: React.FC<ListingCardProps> = ({
               </TouchableOpacity>
             </View>
           </View>
+          )}
         </View>
 
         {/* Info Section */}
-        <View style={styles.info}>
+        <View style={[styles.info, isFeedVariant && styles.feedInfo]}>
           {/* Type & Pax Badges (Moved from Image Overlay) */}
-          <View style={styles.metaHeaderRow}>
+          <View style={[styles.metaHeaderRow, isFeedVariant && styles.feedMetaHeaderRow]}>
             <View style={styles.metaHeaderLeft}>
               <View
                 style={[
                   styles.tagBadge,
-                  styles.tagBadgeSmall,
+                  isFeedVariant ? styles.feedStatusBadge : styles.tagBadgeSmall,
                   { backgroundColor: badgeColor },
                 ]}
               >
-                <Text style={[styles.tagText, { fontSize: 10 }]}>
+                <Text style={[styles.tagText, { fontSize: isFeedVariant ? 11 : 10 }]}>
                   {badgeLabel}
                 </Text>
               </View>
-              {showCompletionBadge && (
+              {isFeedVariant && gigDeadlineInfo && (
+                <View
+                  style={[
+                    styles.feedStatusBadge,
+                    {
+                      backgroundColor: gigDeadlineInfo.isPassed
+                        ? "#6B7280"
+                        : gigDeadlineInfo.isUrgent
+                          ? "#F59E0B"
+                          : "#10B981",
+                    },
+                  ]}
+                >
+                  <Text style={[styles.tagText, { fontSize: 11 }]}>
+                    {gigDeadlineInfo.isPassed
+                      ? "Closed"
+                      : gigDeadlineInfo.hoursLeft < 24
+                        ? `${gigDeadlineInfo.hoursLeft}h left`
+                        : `${Math.ceil(gigDeadlineInfo.hoursLeft / 24)}d left`}
+                  </Text>
+                </View>
+              )}
+              {!isFeedVariant && showCompletionBadge && (
                 <View
                   style={[
                     styles.tagBadge,
@@ -1190,7 +1276,7 @@ const ListingCard: React.FC<ListingCardProps> = ({
                   </Text>
                 </View>
               )}
-              {item.pax && (item.type === "Studio" || item.hourly_rate) && (
+              {!isFeedVariant && item.pax && (item.type === "Studio" || item.hourly_rate) && (
                 <View
                   style={[
                     styles.tagBadge,
@@ -1215,14 +1301,39 @@ const ListingCard: React.FC<ListingCardProps> = ({
 
             </View>
 
-            {actionSlot ? (
+            {isFeedVariant ? (
+              <TouchableOpacity
+                activeOpacity={1}
+                accessibilityLabel={isBookmarked ? "Remove saved listing" : "Save listing"}
+                accessibilityRole="button"
+                disabled={bookmarkBusy}
+                style={[
+                  styles.feedSaveBtn,
+                  {
+                    backgroundColor: isDark ? "#0F172A" : "#F8FAFC",
+                    borderColor: isDark ? "#334155" : "#E2E8F0",
+                  },
+                ]}
+                onPress={handleBookmarkAction}
+              >
+                {bookmarkBusy ? (
+                  <ActivityIndicator size="small" color={colors.primary} />
+                ) : (
+                  <Ionicons
+                    name={isBookmarked ? "bookmark" : "bookmark-outline"}
+                    size={20}
+                    color={isBookmarked ? colors.primary : colors.textSecondary}
+                  />
+                )}
+              </TouchableOpacity>
+            ) : actionSlot ? (
               <View style={styles.metaHeaderRight}>
                 {actionSlot}
               </View>
             ) : null}
           </View>
 
-          <View style={styles.metaBadgeFlow}>
+          <View style={[styles.metaBadgeFlow, isFeedVariant && styles.hidden]}>
               {/* Special Schedule Badge */}
               {item.has_special_dates &&
                 (item.type === "Studio" || item.hourly_rate) && (
@@ -1405,7 +1516,7 @@ const ListingCard: React.FC<ListingCardProps> = ({
           </View>
 
           <View>
-            <Text style={[styles.title, { color: colors.text }]}>
+            <Text style={[styles.title, { color: colors.text }]} numberOfLines={2}>
               {item.name}
             </Text>
             <View
@@ -1432,7 +1543,7 @@ const ListingCard: React.FC<ListingCardProps> = ({
               </Text>
             </View>
 
-            {shouldShowGigSummary && (
+            {!isFeedVariant && shouldShowGigSummary && (
               <View style={styles.gigSummaryRowVertical}>
                 {gigSummary.map((summary) => (
                   <View
@@ -1457,7 +1568,45 @@ const ListingCard: React.FC<ListingCardProps> = ({
           </View>
 
           {/* Hide entire price row for Groups */}
-          {!isGroup && (priceLabel || secondaryPriceLabel || item.review_count > 0) && (
+          {!isGroup && isFeedVariant && (priceLabel || secondaryPriceLabel) && (
+            <View style={styles.feedPriceBlock}>
+              {priceLabel ? (
+                <Text style={[styles.price, { color: colors.primary }]}>
+                  {priceLabel}
+                </Text>
+              ) : null}
+              {secondaryPriceLabel ? (
+                <Text style={[styles.price, { color: colors.primary, marginTop: 2 }]}>
+                  {secondaryPriceLabel}
+                </Text>
+              ) : null}
+            </View>
+          )}
+
+          {isFeedVariant && (
+            <View style={styles.feedActionsRow}>
+              <TouchableOpacity
+                activeOpacity={1}
+                accessibilityLabel={viewActionLabel}
+                accessibilityRole="button"
+                style={[
+                  styles.feedViewBtn,
+                  {
+                    backgroundColor: isDark ? "#111827" : "#FFFFFF",
+                    borderColor: isDark ? "#334155" : "#CBD5E1",
+                  },
+                ]}
+                onPress={() => onPress(item)}
+              >
+                <Text style={[styles.feedViewText, { color: colors.text }]}>
+                  {viewActionLabel}
+                </Text>
+              </TouchableOpacity>
+              {actionSlot ? <View style={styles.feedActionSlot}>{actionSlot}</View> : null}
+            </View>
+          )}
+
+          {!isFeedVariant && !isGroup && (priceLabel || secondaryPriceLabel || item.review_count > 0) && (
             <View
               style={[
                 styles.priceRow,
@@ -1495,7 +1644,7 @@ const ListingCard: React.FC<ListingCardProps> = ({
           )}
 
           {/* Instruments Display for Studios/Venues */}
-          {item.instruments &&
+          {!isFeedVariant && item.instruments &&
             Array.isArray(item.instruments) &&
             item.instruments.length > 0 && (
               <View
@@ -1550,10 +1699,22 @@ const styles = StyleSheet.create({
     shadowRadius: 18,
     elevation: 5,
   },
+  feedCard: {
+    marginBottom: 12,
+    borderRadius: 22,
+    borderColor: "#EEF0F4",
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.04,
+    shadowRadius: 12,
+    elevation: 2,
+  },
   cardContent: {
     borderRadius: 26,
     overflow: "hidden",
     position: "relative",
+  },
+  feedCardContent: {
+    borderRadius: 22,
   },
   // --- Immersive Styles ---
   immersiveTopRow: {
@@ -1657,9 +1818,21 @@ const styles = StyleSheet.create({
     backgroundColor: "#f3f4f6",
     position: "relative",
   },
+  feedImageContainer: {
+    borderTopLeftRadius: 22,
+    borderTopRightRadius: 22,
+    overflow: "hidden",
+  },
   image: {
     width: "100%",
     height: "100%",
+  },
+  feedMediaGradient: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 0,
+    height: 76,
   },
   pagerPage: {
     width: "100%",
@@ -1736,12 +1909,21 @@ const styles = StyleSheet.create({
     paddingBottom: 18,
     gap: 10,
   },
+  feedInfo: {
+    paddingHorizontal: 14,
+    paddingTop: 12,
+    paddingBottom: 14,
+    gap: 8,
+  },
   metaHeaderRow: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     gap: 10,
     marginBottom: 6,
+  },
+  feedMetaHeaderRow: {
+    marginBottom: 2,
   },
   metaHeaderLeft: {
     flexDirection: "row",
@@ -1763,6 +1945,24 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 6,
     flexWrap: "wrap",
+  },
+  hidden: {
+    display: "none",
+  },
+  feedStatusBadge: {
+    alignSelf: "center",
+    paddingHorizontal: 9,
+    paddingVertical: 4,
+    borderRadius: 8,
+    marginBottom: 0,
+  },
+  feedSaveBtn: {
+    width: 38,
+    height: 38,
+    borderRadius: 14,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
   },
   ratingInlineRow: {
     flexDirection: "row",
@@ -1800,6 +2000,30 @@ const styles = StyleSheet.create({
   price: {
     fontFamily: "Poppins_600SemiBold",
     fontSize: 15,
+  },
+  feedPriceBlock: {
+    marginTop: 0,
+  },
+  feedActionsRow: {
+    flexDirection: "row",
+    gap: 10,
+    marginTop: 4,
+  },
+  feedViewBtn: {
+    flex: 1,
+    minHeight: 40,
+    borderRadius: 14,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 12,
+  },
+  feedViewText: {
+    fontFamily: "Poppins_600SemiBold",
+    fontSize: 12,
+  },
+  feedActionSlot: {
+    flex: 1,
   },
   reviewCount: {
     fontFamily: "Poppins_400Regular",

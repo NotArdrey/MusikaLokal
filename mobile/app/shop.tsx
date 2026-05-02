@@ -82,8 +82,8 @@ export default function ShopScreen() {
       </View>
 
       {/* Search */}
-      <View style={[styles.searchBar, { backgroundColor: colors.surface, borderColor: isDark ? "#334155" : "#E2E8F0", marginHorizontal: 16, marginTop: 12 }]}>
-        <Ionicons name="search" size={18} color={colors.textSecondary} />
+      <View style={[styles.searchBar, { backgroundColor: isDark ? "#374151" : "#F3F4F6", marginHorizontal: 16, marginTop: 12 }]}>
+        <Ionicons name="search" size={20} color={colors.textSecondary} />
         <TextInput
           style={[styles.searchInput, { color: colors.text }]}
           placeholder="Search products..."
@@ -183,8 +183,8 @@ const styles = StyleSheet.create({
   introSubtitle: { fontSize: moderateScale(13), lineHeight: 20, marginTop: 6 },
   introAction: { alignSelf: "flex-start", flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 14, paddingVertical: 10, borderRadius: 999 },
   introActionText: { color: "#fff", fontSize: moderateScale(13), fontFamily: "Poppins_700Bold", includeFontPadding: false, textAlignVertical: "center" },
-  searchBar: { flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingVertical: 12, borderRadius: 16, borderWidth: 1 },
-  searchInput: { flex: 1, marginLeft: 8, fontSize: moderateScale(14) },
+  searchBar: { flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 16, height: 48, borderRadius: 16 },
+  searchInput: { flex: 1, height: 24, fontSize: moderateScale(15), fontFamily: "Poppins_500Medium", lineHeight: 20, includeFontPadding: false, padding: 0, textAlignVertical: "center" },
   categoryRow: { marginTop: 12, maxHeight: 44 },
   categoryPill: { borderWidth: 1, borderRadius: 20, paddingHorizontal: 16, paddingVertical: 6, marginRight: 8 },
   content: { flex: 1, paddingHorizontal: 16, paddingTop: 12 },

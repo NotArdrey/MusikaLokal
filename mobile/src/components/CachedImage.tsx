@@ -1,6 +1,6 @@
 import { Image as ExpoImage, ImageContentFit } from "expo-image";
 import React, { memo, useEffect, useMemo, useState } from "react";
-import { ImageStyle, StyleProp } from "react-native";
+import { ImageStyle, StyleProp, StyleSheet } from "react-native";
 import {
     optimizeSupabaseImageUrl,
     SupabaseTransformOptions,
@@ -14,6 +14,7 @@ interface CachedImageProps extends SupabaseTransformOptions {
   transition?: number;
   cachePolicy?: "none" | "disk" | "memory" | "memory-disk";
   disableRecyclingKey?: boolean;
+  priority?: "low" | "normal" | "high";
 }
 
 const DATE_ONLY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
@@ -54,7 +55,14 @@ const CachedImage = ({
   transition = 0,
   cachePolicy = "memory-disk",
   disableRecyclingKey = false,
+  priority = "normal",
 }: CachedImageProps) => {
+  const flattenedStyle = useMemo(() => StyleSheet.flatten(style) || {}, [style]);
+  const inferredWidth = typeof flattenedStyle.width === "number" ? flattenedStyle.width : undefined;
+  const inferredHeight = typeof flattenedStyle.height === "number" ? flattenedStyle.height : undefined;
+  const targetWidth = width || inferredWidth;
+  const targetHeight = height || inferredHeight;
+
   const primarySourceUri = useMemo(() => {
     return normalizeImageUriCandidate(uri);
   }, [uri]);
@@ -67,25 +75,25 @@ const CachedImage = ({
 
   const transformedPrimaryUri = useMemo(() => {
     return optimizeSupabaseImageUrl(primarySourceUri, {
-      width,
-      height,
+      width: targetWidth,
+      height: targetHeight,
       quality,
       resize,
       format,
       cacheVersion,
     });
-  }, [cacheVersion, format, height, primarySourceUri, quality, resize, width]);
+  }, [cacheVersion, format, primarySourceUri, quality, resize, targetHeight, targetWidth]);
 
   const transformedBackupUri = useMemo(() => {
     return optimizeSupabaseImageUrl(backupSourceUri, {
-      width,
-      height,
+      width: targetWidth,
+      height: targetHeight,
       quality,
       resize,
       format,
       cacheVersion,
     });
-  }, [backupSourceUri, cacheVersion, format, height, quality, resize, width]);
+  }, [backupSourceUri, cacheVersion, format, quality, resize, targetHeight, targetWidth]);
 
   const [resolvedUri, setResolvedUri] = useState<string | null>(transformedPrimaryUri || transformedBackupUri);
 
@@ -102,6 +110,9 @@ const CachedImage = ({
       contentFit={contentFit}
       transition={transition}
       cachePolicy={cachePolicy}
+      priority={priority}
+      allowDownscaling
+      enforceEarlyResizing
       recyclingKey={disableRecyclingKey ? undefined : resolvedUri}
       onError={() => {
         if (primarySourceUri && resolvedUri !== primarySourceUri) {

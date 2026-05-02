@@ -42,6 +42,7 @@ import { useListingSheetDerived } from "../hooks/useListingSheetDerived";
 import { useListingSheetEffects } from "../hooks/useListingSheetEffects";
 import { useProfileCompletion } from "../hooks/useProfileCompletion";
 import { submitListingRequest, uploadListingRequestDocument } from "../utils/listingRequests";
+import { usePageLoadLogger } from "../utils/loadTimeLogger";
 import CustomAlert from "./CustomAlert";
 import DocumentUploader from "./DocumentUploader";
 import ReportModal from "./ReportModal";
@@ -2501,6 +2502,7 @@ const ListingDetailsSheet = forwardRef<
   useListingSheetEffects({
     group,
     listingId,
+    userId,
     bookings,
     selectedTimeSlots,
     selectedSessionType,
@@ -2510,6 +2512,25 @@ const ListingDetailsSheet = forwardRef<
     fetchAvailableSlots,
     setReviews,
     setRelatedListings,
+  });
+
+  usePageLoadLogger({
+    counts: {
+      bookings: bookings.length,
+      existingBookings: existingBookings.length,
+      relatedListings: relatedListings.length,
+      reviews: reviews.length,
+      userGroups: userGroups.length,
+    },
+    details: {
+      listingId: listingId ? "present" : "missing",
+      type: group?.type || "unknown",
+      user: userId ? "signed-in" : "guest",
+    },
+    loading,
+    page: "ListingDetailsSheet",
+    ready: !loading && Boolean(group),
+    enabled: Boolean(listingId),
   });
 
   const renderBackdrop = React.useCallback(

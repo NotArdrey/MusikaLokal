@@ -1,7 +1,7 @@
 ﻿import { Ionicons } from '@expo/vector-icons';
 import * as ExpoLinking from 'expo-linking';
-import { useFocusEffect, useLocalSearchParams } from 'expo-router';
-import React, { useCallback, useMemo, useState } from 'react';
+import { useLocalSearchParams } from 'expo-router';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Image, Linking, Platform, RefreshControl, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { supabase } from '../lib/supabase';
 import CustomAlert, { AlertType } from '../src/components/CustomAlert';
@@ -12,7 +12,10 @@ import Navbar from '../src/components/navbar';
 import { useBottomBarClearance } from '../src/hooks/useBottomBarClearance';
 import { showTopToast } from '../src/context/TopToastContext';
 import { useTheme } from '../src/context/ThemeContext';
+import { useAuth } from '../src/context/AuthContext';
+import { useWalletSummaryQuery } from '../src/data/hooks';
 import { formatFriendlyDateTime } from '../src/utils/friendlyDateTime';
+import { usePageLoadLogger } from '../src/utils/loadTimeLogger';
 
 // Payout Method Type
 interface PayoutMethod {
@@ -45,19 +48,9 @@ interface WithdrawalErrorPayload {
   suggestion?: string;
 }
 
-const BOOKING_EARNING_REFERENCE_TYPES = new Set([
-  'booking',
-  'booking_payment',
-  'booking_downpayment',
-  'booking_balance',
-]);
-
-const isBookingEarningTransaction = (tx: any) =>
-  tx?.type === 'earning' &&
-  (BOOKING_EARNING_REFERENCE_TYPES.has(tx?.reference_type) || !tx?.reference_type);
-
 export default function WalletScreen() {
   const { colors, isDark } = useTheme();
+  const { userId } = useAuth();
   const { contentBottomPadding } = useBottomBarClearance(24);
   const params = useLocalSearchParams<{ refresh?: string }>();
   const walletRefreshKey = Array.isArray(params.refresh) ? params.refresh[0] : params.refresh;
@@ -110,6 +103,57 @@ export default function WalletScreen() {
     title: '',
     message: '',
   });
+  const walletSummaryQuery = useWalletSummaryQuery(userId);
+  const walletSummary = walletSummaryQuery.data as any;
+
+  usePageLoadLogger({
+    counts: {
+      payoutMethods: payoutMethods.length,
+      transactions: transactions.length,
+      unpaidBookings: unpaidBookings.length,
+      withdrawals: withdrawals.length,
+    },
+    details: {
+      balance,
+      role: userRole || 'unknown',
+      user: userId ? 'signed-in' : 'guest',
+    },
+    loading: loading || walletSummaryQuery.isLoading,
+    page: 'Wallet',
+    queries: { walletSummary: walletSummaryQuery },
+    ready: !loading && !walletSummaryQuery.isLoading,
+    refreshing,
+  });
+
+  useEffect(() => {
+    if (!walletSummary) {
+      if (!walletSummaryQuery.isLoading) {
+        setLoading(false);
+      }
+      return;
+    }
+
+    const nextPayoutMethods = Array.isArray(walletSummary.payoutMethods)
+      ? walletSummary.payoutMethods
+      : [];
+
+    setUserRole(walletSummary.role || null);
+    setBalance(Number(walletSummary.balance || walletSummary.wallet?.balance || 0));
+    setTransactions(Array.isArray(walletSummary.transactions) ? walletSummary.transactions : []);
+    setUnpaidBookings(Array.isArray(walletSummary.unpaidBookings) ? walletSummary.unpaidBookings : []);
+    setPayoutMethods(nextPayoutMethods);
+    setSelectedPayoutMethod((current) => {
+      if (current && nextPayoutMethods.some((method: PayoutMethod) => method.id === current.id)) {
+        return current;
+      }
+
+      return nextPayoutMethods.find((method: PayoutMethod) => method.is_default) || nextPayoutMethods[0] || null;
+    });
+    setWithdrawals(Array.isArray(walletSummary.withdrawals) ? walletSummary.withdrawals : []);
+    setLoading(false);
+    setRefreshing(false);
+  }, [walletSummary, walletSummaryQuery.isLoading]);
+
   const parsedTopUpAmount = Number(topUpAmount);
   const isTopUpReady = Number.isFinite(parsedTopUpAmount) && parsedTopUpAmount >= 50;
   const parsedWithdrawAmount = Number(withdrawAmount);
@@ -273,81 +317,17 @@ export default function WalletScreen() {
     Alert.alert(fallbackTitle, errorMessage);
   };
 
-  const fetchWallet = async () => {
+  const fetchWallet = useCallback(async () => {
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
-
-      // 0. Get User Profile (role)
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('role')
-        .eq('id', user.id)
-        .single();
-
-      if (profile) {
-        setUserRole(profile.role);
-      }
-
-      // 1. Get Wallet
-      let { data: wallet, error: walletError } = await supabase
-        .from('wallets')
-        .select('*')
-        .eq('user_id', user.id)
-        .single();
-
-      if (walletError && walletError.code === 'PGRST116') {
-        // Create wallet if doesn't exist
-        const { data: newWallet, error: createError } = await supabase
-          .from('wallets')
-          .insert([{ user_id: user.id, balance: 0 }])
-          .select()
-          .single();
-
-        if (createError) throw createError;
-        wallet = newWallet;
-      } else if (walletError) {
-        throw walletError;
-      }
-
-      setBalance(wallet?.balance || 0);
-
-      // 2. Get Transactions
-      if (wallet?.id) {
-        const { data: txs, error: txError } = await supabase
-          .from('wallet_transactions')
-          .select('*')
-          .eq('wallet_id', wallet.id)
-          .order('created_at', { ascending: false });
-
-        if (txError) throw txError;
-        setTransactions((txs || []).filter(isBookingEarningTransaction));
-      }
-
-      // 3. Get Unpaid Bookings (remaining balance > 0)
-      const { data: bookings, error: bookingsError } = await supabase
-        .from('studio_bookings')
-        .select('*, studio:studios(name, images)')
-        .eq('user_id', user.id)
-        .gt('remaining_balance', 0)
-        .in('status', ['pending', 'confirmed'])
-        .order('booking_date', { ascending: true });
-
-      if (!bookingsError && bookings) {
-        setUnpaidBookings(bookings);
-      }
-      // 4. Fetch Payout Methods
-      await fetchPayoutMethods();
-
-      // 7. Fetch Withdrawal History
-      await fetchWithdrawals();
-
-    } catch (e) {
+      setLoading(true);
+      await walletSummaryQuery.refetch();
+    } catch {
+      // Query state carries the error; keep the wallet screen usable.
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  };
+  }, [walletSummaryQuery.refetch]);
 
   // Fetch payout methods
   const fetchPayoutMethods = async () => {
@@ -494,43 +474,11 @@ export default function WalletScreen() {
     }
   };
 
-  useFocusEffect(
-    useCallback(() => {
-      fetchWallet();
-      let isActive = true;
-      let walletChannel: ReturnType<typeof supabase.channel> | null = null;
-
-      const setupWalletRealtime = async () => {
-        const { data: { user } } = await supabase.auth.getUser();
-        if (!isActive || !user) return;
-
-        walletChannel = supabase
-          .channel(`wallet-realtime-${user.id}`)
-          .on(
-            'postgres_changes',
-            {
-              event: '*',
-              schema: 'public',
-              table: 'wallets',
-              filter: `user_id=eq.${user.id}`,
-            },
-            () => {
-              fetchWallet();
-            },
-          )
-          .subscribe();
-      };
-
-      void setupWalletRealtime();
-
-      return () => {
-        isActive = false;
-        if (walletChannel) {
-          void supabase.removeChannel(walletChannel);
-        }
-      };
-    }, [walletRefreshKey])
-  );
+  useEffect(() => {
+    if (walletRefreshKey) {
+      void fetchWallet();
+    }
+  }, [fetchWallet, walletRefreshKey]);
 
   const onRefresh = () => {
     setRefreshing(true);

@@ -457,9 +457,10 @@ export default function MyVenueScreen() {
                                     <CachedImage
                                         uri={(gig.images && gig.images[0]) || 'https://images.unsplash.com/photo-1501281668745-f7f57925c3b4?w=800&fit=crop'}
                                         style={styles.cardImage}
-                                        width={800}
-                                        height={384}
-                                        quality={72}
+                                        width={420}
+                                        height={220}
+                                        quality={68}
+                                        priority="high"
                                         cacheVersion={gig.updated_at || gig.created_at || gig.id}
                                     />
                                     <View style={[styles.statusBadge, { backgroundColor: isDark ? 'rgba(0,0,0,0.6)' : 'rgba(255,255,255,0.9)' }]}>

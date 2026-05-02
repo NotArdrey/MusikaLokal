@@ -1,0 +1,245 @@
+import {
+  keepPreviousData,
+  useInfiniteQuery,
+  useQuery,
+} from "@tanstack/react-query";
+import { supabase } from "../../lib/supabase";
+import { invokeEdgeFunction } from "./api";
+import { queryKeys } from "./queryKeys";
+import { logLoadTime } from "../utils/loadTimeLogger";
+
+export type PaginatedResponse<T> = {
+  data?: T[];
+  items?: T[];
+  nextCursor?: string | null;
+  unreadCount?: number;
+  [key: string]: unknown;
+};
+
+export const useHomeDataQuery = (params: {
+  enabled?: boolean;
+  isGuest: boolean;
+  userId?: string | null;
+  userRole?: string | null;
+}) => {
+  return useQuery({
+    enabled: params.enabled ?? true,
+    meta: { persist: params.isGuest || !params.userId },
+    placeholderData: keepPreviousData,
+    queryFn: () =>
+      invokeEdgeFunction("home-feed", {
+        body: {
+          action: "mobile_home",
+          isGuest: params.isGuest,
+          userId: params.userId || null,
+          userRole: params.userRole || null,
+        },
+      }),
+    queryKey: queryKeys.home.mobile(params.userId, params.userRole, params.isGuest),
+    staleTime: 60_000,
+  });
+};
+
+export const useSearchResultsQuery = <TItem = any>(params: {
+  activeFilter: string;
+  enabled?: boolean;
+  isGuest: boolean;
+  isOwner: boolean;
+  minRating: number;
+  pageSize: number;
+  priceRange: string;
+  query: string;
+  selectedGenre: string;
+  sortBy: string;
+}) => {
+  const body = {
+    activeFilter: params.activeFilter,
+    isGuest: params.isGuest,
+    isOwner: params.isOwner,
+    limit: params.pageSize,
+    minRating: params.minRating,
+    priceRange: params.priceRange,
+    query: params.query,
+    selectedGenre: params.selectedGenre,
+    sortBy: params.sortBy,
+  };
+
+  return useInfiniteQuery({
+    enabled: params.enabled ?? true,
+    getNextPageParam: (lastPage: PaginatedResponse<TItem>) => lastPage.nextCursor || undefined,
+    initialPageParam: null as string | null,
+    meta: { persist: true },
+    placeholderData: keepPreviousData,
+    queryFn: ({ pageParam }) =>
+      invokeEdgeFunction<PaginatedResponse<TItem>>("search-content", {
+        body: {
+          ...body,
+          cursor: pageParam,
+        },
+      }),
+    queryKey: queryKeys.search.results(body),
+    staleTime: 60_000,
+  });
+};
+
+export const useNotificationsQuery = <TItem = any>(
+  userId: string | null | undefined,
+  options?: { enabled?: boolean; limit?: number },
+) => {
+  const limit = options?.limit ?? 30;
+
+  return useInfiniteQuery({
+    enabled: Boolean(userId) && (options?.enabled ?? true),
+    getNextPageParam: (lastPage: PaginatedResponse<TItem>) => lastPage.nextCursor || undefined,
+    initialPageParam: null as string | null,
+    queryFn: ({ pageParam }) =>
+      invokeEdgeFunction<PaginatedResponse<TItem>>("manage-notifications", {
+        body: {
+          action: "fetch",
+          cursor: pageParam,
+          limit,
+          userId,
+        },
+      }),
+    queryKey: queryKeys.notifications.list(userId),
+    staleTime: 30_000,
+  });
+};
+
+export const useWalletSummaryQuery = <TData = any>(
+  userId: string | null | undefined,
+  options?: { enabled?: boolean },
+) => {
+  return useQuery({
+    enabled: Boolean(userId) && (options?.enabled ?? true),
+    placeholderData: keepPreviousData,
+    queryFn: () =>
+      invokeEdgeFunction<TData>("withdrawals", {
+        body: { action: "get_wallet_summary" },
+      }),
+    queryKey: queryKeys.wallet.summary(userId),
+    staleTime: 30_000,
+  });
+};
+
+export const useBookingsSummaryQuery = <TData = any>(
+  userId: string | null | undefined,
+  options?: { enabled?: boolean },
+) => {
+  return useQuery({
+    enabled: Boolean(userId) && (options?.enabled ?? true),
+    placeholderData: keepPreviousData,
+    queryFn: () =>
+      invokeEdgeFunction<TData>("manage-bookings", {
+        body: { action: "fetch", includeScreenPayload: true, userId },
+      }),
+    queryKey: queryKeys.bookings.summary(userId),
+    staleTime: 30_000,
+  });
+};
+
+export const useListingDetailsQuery = <TData = any>(params: {
+  enabled?: boolean;
+  id: string | null | undefined;
+  type: string | null | undefined;
+  userId?: string | null;
+}) => {
+  return useQuery({
+    enabled: Boolean(params.id && params.type) && (params.enabled ?? true),
+    meta: { persist: !params.userId },
+    placeholderData: keepPreviousData,
+    queryFn: () =>
+      invokeEdgeFunction<TData>("manage-details", {
+        body: {
+          action: "fetch",
+          id: params.id,
+          type: String(params.type || "").toLowerCase(),
+          userId: params.userId || null,
+        },
+      }),
+    queryKey: queryKeys.details.listing(params.type, params.id, params.userId),
+    staleTime: 60_000,
+  });
+};
+
+export const useFeedQuery = <TItem = any>(params: {
+  enabled?: boolean;
+  feedTab: string;
+  feedType: string;
+  limit: number;
+  personalize?: boolean;
+  userId?: string | null;
+}) => {
+  const personalize = params.personalize ?? true;
+  const usePublicDirectRead = params.feedType === "public" && !personalize;
+
+  return useInfiniteQuery({
+    enabled: (params.feedType === "public" || Boolean(params.userId)) && (params.enabled ?? true),
+    getNextPageParam: (lastPage: PaginatedResponse<TItem>) => lastPage.nextCursor || undefined,
+    initialPageParam: null as string | null,
+    meta: { persist: params.feedType === "public" && !personalize },
+    placeholderData: keepPreviousData,
+    queryFn: async ({ pageParam }) => {
+      if (usePublicDirectRead) {
+        const startedAt = Date.now();
+        let query = supabase
+          .from("feed_posts")
+          .select(
+            "id, author_id, post_type, content, visibility, is_pinned, linked_playlist_id, linked_product_id, reaction_count, comment_count, share_count, created_at, updated_at, author:profiles!author_id(id, full_name, avatar_url, role), media:post_media(id, post_id, media_type, storage_path, mime_type, width, height, duration_seconds, display_order)",
+          )
+          .eq("visibility", "public")
+          .eq("is_hidden", false)
+          .order("created_at", { ascending: false })
+          .limit(params.limit + 1);
+
+        if (typeof pageParam === "string" && pageParam.trim().length > 0) {
+          query = query.lt("created_at", pageParam);
+        }
+
+        const { data, error } = await query;
+        const durationMs = Date.now() - startedAt;
+
+        if (error) {
+          logLoadTime("PostgREST:feed_posts", "failed", {
+            durationMs,
+            limit: params.limit,
+            message: error.message,
+          });
+          throw error;
+        }
+
+        const rows = data || [];
+        const items = rows.slice(0, params.limit) as TItem[];
+        const nextCursor =
+          rows.length > params.limit
+            ? (items[items.length - 1] as any)?.created_at || null
+            : null;
+
+        logLoadTime("PostgREST:feed_posts", "complete", {
+          cursor: pageParam ? "present" : undefined,
+          durationMs,
+          limit: params.limit,
+          returned: items.length,
+        });
+
+        return {
+          data: items,
+          items,
+          nextCursor,
+        } as PaginatedResponse<TItem>;
+      }
+
+      return invokeEdgeFunction<PaginatedResponse<TItem>>("manage-social-feed", {
+        body: {
+          action: "get_feed",
+          cursor: pageParam,
+          feed_type: params.feedType,
+          limit: params.limit,
+          personalize,
+        },
+      });
+    },
+    queryKey: queryKeys.feed.list(params.feedTab, params.userId, params.limit, personalize),
+    staleTime: 30_000,
+  });
+};

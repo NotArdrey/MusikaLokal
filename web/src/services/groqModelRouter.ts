@@ -1090,8 +1090,8 @@ export const rerankHomeFeedWithGroq = async (
     return {
       recommendations: cached.slice(0, safeLimit),
       aiPowered: true,
-      aiProvider: `${preferredProviderLabel} (Cached)`,
-      message: `Loaded cached ${preferredProviderLabel} Home feed rerank.`,
+      aiProvider: preferredProviderLabel,
+      message: "",
     };
   }
 

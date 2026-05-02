@@ -28,6 +28,7 @@ import { ConversationParticipant, Message, useChat, useGroupParticipants } from 
 import { resolveSupabaseMediaUrl } from '../utils/supabaseMedia';
 import BottomModal from './BottomModal';
 import CustomAlert, { AlertType } from './CustomAlert';
+import InAppMediaViewer, { isInAppMediaUrl } from './InAppMediaViewer';
 import ReportModal from './ReportModal';
 
 // Available reaction emojis
@@ -90,6 +91,8 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
     const [otherUserLastSeen, setOtherUserLastSeen] = useState<Date | null>(null);
     const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
     const [keyboardAvoidingResetKey, setKeyboardAvoidingResetKey] = useState(0);
+    const [mediaViewerUrl, setMediaViewerUrl] = useState<string | null>(null);
+    const [mediaViewerTitle, setMediaViewerTitle] = useState('Media');
     const presenceChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
 
     const showAlert = (type: AlertType, title: string, message: string, buttons?: any[]) => {
@@ -277,6 +280,21 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
         setShowReactionPicker(true);
     };
 
+    const openAttachment = (url: string | null | undefined, title = 'Attachment') => {
+        const normalizedUrl = String(url || '').trim();
+        if (!normalizedUrl) return;
+
+        if (isInAppMediaUrl(normalizedUrl)) {
+            setMediaViewerTitle(title);
+            setMediaViewerUrl(normalizedUrl);
+            return;
+        }
+
+        void Linking.openURL(normalizedUrl).catch(() => {
+            showAlert('error', 'Unable to Open', 'We could not open this attachment.');
+        });
+    };
+
     const handleSelectReaction = async (emoji: string) => {
         if (selectedMessageId) {
             const message = messages.find(m => m.id === selectedMessageId);
@@ -458,17 +476,22 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
                             ]}>
                                 {/* Image message */}
                                 {item.message_type === 'image' && item.attachment_url && (
-                                    <Image
-                                        source={{ uri: item.attachment_url }}
-                                        style={styles.messageImage}
-                                        resizeMode="cover"
-                                    />
+                                    <TouchableOpacity
+                                        activeOpacity={1}
+                                        onPress={() => openAttachment(item.attachment_url, 'Image')}
+                                    >
+                                        <Image
+                                            source={{ uri: item.attachment_url }}
+                                            style={styles.messageImage}
+                                            resizeMode="cover"
+                                        />
+                                    </TouchableOpacity>
                                 )}
                                 {/* File message */}
                                 {item.message_type === 'file' && item.attachment_url && (
                                     <TouchableOpacity
                                         style={[styles.fileBubble, { borderColor: isMe ? 'rgba(255,255,255,0.3)' : colors.border }]}
-                                        onPress={() => Linking.openURL(item.attachment_url!)}
+                                        onPress={() => openAttachment(item.attachment_url, 'Attachment')}
                                         activeOpacity={1}
                                     >
                                         <Ionicons name="document-attach" size={28} color={isMe ? '#FFF' : colors.primary} />
@@ -914,6 +937,13 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
                         </View>
                     </View>
             </BottomModal>
+
+            <InAppMediaViewer
+                visible={!!mediaViewerUrl}
+                uri={mediaViewerUrl}
+                title={mediaViewerTitle}
+                onClose={() => setMediaViewerUrl(null)}
+            />
 
             <CustomAlert
                 visible={alertVisible}

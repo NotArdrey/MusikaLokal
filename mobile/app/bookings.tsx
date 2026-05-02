@@ -1,4 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
+import { useQueryClient } from "@tanstack/react-query";
 import { useFocusEffect } from "@react-navigation/native";
 import { BlurView } from "expo-blur";
 import { CameraView, useCameraPermissions } from "expo-camera";
@@ -15,7 +16,6 @@ import {
     Text,
     TextInput,
     TouchableOpacity,
-    useWindowDimensions,
     View,
 } from "react-native";
 import { supabase } from "../lib/supabase";
@@ -24,6 +24,7 @@ import CachedImage from "../src/components/CachedImage";
 import CustomAlert, { AlertType } from "../src/components/CustomAlert";
 import GuestSignInGate from "../src/components/GuestSignInGate";
 import Header from "../src/components/header";
+import InAppMediaViewer, { isInAppMediaUrl } from "../src/components/InAppMediaViewer";
 import BookingActionModal from "../src/components/modal";
 import Navbar from "../src/components/navbar";
 import Skeleton from "../src/components/Skeleton";
@@ -31,9 +32,12 @@ import { useAuth } from "../src/context/AuthContext";
 import { useBottomOverlay } from "../src/context/BottomOverlayContext";
 import { showTopToast } from "../src/context/TopToastContext";
 import { useTheme } from "../src/context/ThemeContext";
+import { useBookingsSummaryQuery } from "../src/data/hooks";
+import { queryKeys } from "../src/data/queryKeys";
 import { createBookingCheckout } from "../src/services/paymongo";
 import { buildNotificationRouteMeta } from "../src/utils/notificationNavigation";
 import { formatFriendlyDateTime } from "../src/utils/friendlyDateTime";
+import { usePageLoadLogger } from "../src/utils/loadTimeLogger";
 import {
   formatRecordingHours,
   formatRecordingRuleShort,
@@ -501,6 +505,7 @@ export default function BookingsScreen() {
   const { colors, isDark } = useTheme();
   const { session, loading: authLoading, userId, isGuest } = useAuth();
   const { isBottomOverlayActive } = useBottomOverlay();
+  const queryClient = useQueryClient();
   const isAuthenticated = !!session;
   const params = useLocalSearchParams<{
     tab?: string;
@@ -514,7 +519,6 @@ export default function BookingsScreen() {
   const [cancellationReason, setCancellationReason] = useState("");
   const bookingDetailsRef =
     React.useRef<import("@gorhom/bottom-sheet").BottomSheetModal>(null);
-  const { width } = useWindowDimensions();
   const [modalMode, setModalMode] = useState<
     "confirm" | "cancel" | "decline" | "fire" | "complete" | "renew" | "clear_balance" | "late" | "late_confirm" | "report_access"
   >("confirm");
@@ -534,23 +538,35 @@ export default function BookingsScreen() {
   const [showScanModal, setShowScanModal] = useState(false);
   const [permission, requestPermission] = useCameraPermissions();
   const [scanned, setScanned] = useState(false);
+  const initialBookingsCacheRef = useRef<BookingsScreenCachePayload | null>(
+    userId ? bookingsScreenCache.get(userId) || null : null,
+  );
 
   // State for fetched data
-  const [data, setData] = useState<BookingsTabData>(() => createEmptyBookingsData());
-  const [pendingPermitStudios, setPendingPermitStudios] = useState<any[]>([]);
+  const [data, setData] = useState<BookingsTabData>(
+    () => initialBookingsCacheRef.current?.data || createEmptyBookingsData(),
+  );
+  const [pendingPermitStudios, setPendingPermitStudios] = useState<any[]>(
+    () => initialBookingsCacheRef.current?.pendingPermitStudios || [],
+  );
   const [permitDeleting, setPermitDeleting] = useState<string | null>(null);
 
   // Application data separated by status for musicians
-  const [applicationData, setApplicationData] = useState<ApplicationTabData>(() => createEmptyApplicationData());
+  const [applicationData, setApplicationData] = useState<ApplicationTabData>(
+    () => initialBookingsCacheRef.current?.applicationData || createEmptyApplicationData(),
+  );
 
   const [loading, setLoading] = useState(false);
-  const [userRole, setUserRole] = useState<string>("");
+  const [userRole, setUserRole] = useState<string>(
+    () => initialBookingsCacheRef.current?.userRole || "",
+  );
   const [currentTime, setCurrentTime] = useState<Date>(() => new Date());
   const [locallyReportedLateBookings, setLocallyReportedLateBookings] = useState<Record<string, boolean>>({});
   const [locallyReportedAccessIssueBookings, setLocallyReportedAccessIssueBookings] = useState<Record<string, boolean>>({});
   const [requestActionId, setRequestActionId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [activeFilter, setActiveFilter] = useState("All");
+  const [showActivityFilters, setShowActivityFilters] = useState(false);
   const [alertVisible, setAlertVisible] = useState(false);
   const [alertConfig, setAlertConfig] = useState<{
     type: AlertType;
@@ -561,6 +577,33 @@ export default function BookingsScreen() {
     type: "info",
     title: "",
     message: "",
+  });
+  const [mediaViewerUrl, setMediaViewerUrl] = useState<string | null>(null);
+  const [mediaViewerTitle, setMediaViewerTitle] = useState("Media");
+  const bookingsSummaryQuery = useBookingsSummaryQuery(userId, {
+    enabled: isAuthenticated && Boolean(userId),
+  });
+
+  usePageLoadLogger({
+    counts: {
+      activeMusicians: data.ActiveMusicians.length,
+      applicants: data.Applicants.length,
+      history: data.History.length,
+      ongoing: data.Ongoing.length,
+      pending: data.Pending.length,
+      pendingPermits: pendingPermitStudios.length,
+      review: data.Review.length,
+      upcoming: data.Upcoming.length,
+    },
+    details: {
+      activeTab,
+      role: userRole || "unknown",
+      viewMode,
+    },
+    loading: loading || authLoading || bookingsSummaryQuery.isLoading,
+    page: "Bookings",
+    queries: { bookingsSummary: bookingsSummaryQuery },
+    ready: !authLoading && !loading,
   });
 
   const showAlert = (
@@ -648,6 +691,15 @@ export default function BookingsScreen() {
     setLocallyReportedLateBookings({});
     setLocallyReportedAccessIssueBookings({});
   }, [userId]);
+
+  useEffect(() => {
+    if (!isAuthenticated || !userId || !bookingsSummaryQuery.data) return;
+
+    void fetchBookings(userId, {
+      showLoading: false,
+      summaryPayload: bookingsSummaryQuery.data,
+    });
+  }, [bookingsSummaryQuery.data, isAuthenticated, userId]);
 
   // Track if user went to payment page (to auto-refresh on return)
   const paymentInProgressRef = useRef(false);
@@ -758,7 +810,7 @@ export default function BookingsScreen() {
             pendingPaymentBookingId.current = null;
 
             // Refresh bookings
-            await fetchBookings(userId);
+            await bookingsSummaryQuery.refetch();
 
             if (paymentConfirmed) {
               // Downpayment ? stay on Pending (balance still due); full payment ? go to Upcoming
@@ -766,7 +818,7 @@ export default function BookingsScreen() {
             }
           } else if (userId) {
             // Even if not in payment flow, refresh when returning to app
-            fetchBookings(userId);
+            void bookingsSummaryQuery.refetch();
           }
         }
         appState.current = nextAppState;
@@ -776,242 +828,9 @@ export default function BookingsScreen() {
     return () => {
       subscription.remove();
     };
-  }, [userId]);
+  }, [bookingsSummaryQuery.refetch, userId]);
 
-  useEffect(() => {
-    if (!isAuthenticated || !userId) return;
-
-    let isDisposed = false;
-    let channel: any = null;
-    let realtimeRefreshTimer: ReturnType<typeof setTimeout> | null = null;
-    let needsRefreshAfterFlight = false;
-
-    const runRealtimeRefresh = async () => {
-      if (isDisposed || !userId) return;
-
-      if (autoRefreshInFlightRef.current) {
-        needsRefreshAfterFlight = true;
-        return;
-      }
-
-      autoRefreshInFlightRef.current = true;
-      try {
-        await fetchBookings(userId);
-      } finally {
-        autoRefreshInFlightRef.current = false;
-
-        if (needsRefreshAfterFlight && !isDisposed) {
-          needsRefreshAfterFlight = false;
-          queueRealtimeRefresh();
-        }
-      }
-    };
-
-    const queueRealtimeRefresh = () => {
-      if (isDisposed || !userId) return;
-      if (realtimeRefreshTimer) return;
-
-      realtimeRefreshTimer = setTimeout(async () => {
-        realtimeRefreshTimer = null;
-
-        if (isDisposed) return;
-        await runRealtimeRefresh();
-      }, 350);
-    };
-
-    const setupRealtime = async () => {
-      const { data: profileData } = await supabase
-        .from("profiles")
-        .select("role")
-        .eq("id", userId)
-        .maybeSingle();
-
-      if (isDisposed) return;
-
-      const role = profileData?.role || "";
-
-      let liveChannel = supabase
-        .channel(`bookings-live-${userId}`)
-        .on(
-          "postgres_changes",
-          {
-            event: "*",
-            schema: "public",
-            table: "notifications",
-            filter: `user_id=eq.${userId}`,
-          },
-          () => {
-            queueRealtimeRefresh();
-          },
-        )
-        .on(
-          "postgres_changes",
-          {
-            event: "*",
-            schema: "public",
-            table: "booking_requests",
-            filter: `sender_id=eq.${userId}`,
-          },
-          () => {
-            queueRealtimeRefresh();
-          },
-        )
-        .on(
-          "postgres_changes",
-          {
-            event: "*",
-            schema: "public",
-            table: "booking_requests",
-            filter: `receiver_id=eq.${userId}`,
-          },
-          () => {
-            queueRealtimeRefresh();
-          },
-        );
-
-      const { data: ownedGroups } = await supabase
-        .from("groups")
-        .select("id")
-        .eq("owner_id", userId);
-
-      (ownedGroups || []).forEach((group: any) => {
-        if (!group?.id) return;
-
-        liveChannel = liveChannel.on(
-          "postgres_changes",
-          {
-            event: "*",
-            schema: "public",
-            table: "booking_requests",
-            filter: `group_id=eq.${group.id}`,
-          },
-          () => {
-            queueRealtimeRefresh();
-          },
-        );
-      });
-
-      liveChannel = liveChannel.on(
-          "postgres_changes",
-          {
-            event: "*",
-            schema: "public",
-            table: "studio_bookings",
-            filter: `user_id=eq.${userId}`,
-          },
-          () => {
-            queueRealtimeRefresh();
-          },
-        )
-        .on(
-          "postgres_changes",
-          {
-            event: "*",
-            schema: "public",
-            table: "gig_applications",
-            filter: `applicant_id=eq.${userId}`,
-          },
-          () => {
-            queueRealtimeRefresh();
-          },
-        );
-
-      if (role === "studio-owner") {
-        liveChannel = liveChannel.on(
-          "postgres_changes",
-          {
-            event: "*",
-            schema: "public",
-            table: "studios",
-            filter: `owner_id=eq.${userId}`,
-          },
-          () => {
-            queueRealtimeRefresh();
-          },
-        );
-
-        const { data: ownerStudios } = await supabase
-          .from("studios")
-          .select("id")
-          .eq("owner_id", userId);
-
-        (ownerStudios || []).forEach((studio: any) => {
-          liveChannel = liveChannel.on(
-            "postgres_changes",
-            {
-              event: "*",
-              schema: "public",
-              table: "studio_bookings",
-              filter: `studio_id=eq.${studio.id}`,
-            },
-            () => {
-              queueRealtimeRefresh();
-            },
-          );
-        });
-      }
-
-      if (role === "venue-owner") {
-        liveChannel = liveChannel.on(
-          "postgres_changes",
-          {
-            event: "*",
-            schema: "public",
-            table: "gigs",
-            filter: `organizer_id=eq.${userId}`,
-          },
-          () => {
-            queueRealtimeRefresh();
-          },
-        );
-
-        const { data: ownerGigs } = await supabase
-          .from("gigs")
-          .select("id")
-          .eq("organizer_id", userId);
-
-        (ownerGigs || []).forEach((gig: any) => {
-          liveChannel = liveChannel.on(
-            "postgres_changes",
-            {
-              event: "*",
-              schema: "public",
-              table: "gig_applications",
-              filter: `gig_id=eq.${gig.id}`,
-            },
-            () => {
-              queueRealtimeRefresh();
-            },
-          );
-        });
-      }
-
-      channel = liveChannel.subscribe((status: string) => {
-        debugLog("?? Realtime status:", status);
-      });
-    };
-
-    setupRealtime();
-
-    return () => {
-      isDisposed = true;
-      if (realtimeRefreshTimer) {
-        clearTimeout(realtimeRefreshTimer);
-      }
-      if (channel) {
-        supabase.removeChannel(channel);
-      }
-    };
-  }, [isAuthenticated, userId]);
-
-  useEffect(() => {
-    if (isAuthenticated && userId) {
-      const cached = bookingsScreenCache.get(userId);
-      if (!cached) {
-        fetchBookings(userId);
-      }
-    }
-  }, [isAuthenticated, userId]);
+  // Bookings realtime is centralized in RootLayout and invalidates this query key.
 
   useFocusEffect(
     useCallback(() => {
@@ -1033,7 +852,10 @@ export default function BookingsScreen() {
         }
 
         if (!cacheIsFresh) {
-          fetchBookings(userId, { showLoading: !cached });
+          if (!cached) {
+            setLoading(true);
+          }
+          void bookingsSummaryQuery.refetch();
         }
 
         // Auto-refresh so bookings move between tabs based on real time/date
@@ -1042,7 +864,7 @@ export default function BookingsScreen() {
 
           autoRefreshInFlightRef.current = true;
           try {
-            await fetchBookings(userId, { showLoading: false });
+            await bookingsSummaryQuery.refetch();
           } finally {
             autoRefreshInFlightRef.current = false;
           }
@@ -1053,7 +875,7 @@ export default function BookingsScreen() {
         isActive = false;
         if (intervalId) clearInterval(intervalId);
       };
-    }, [isAuthenticated, userId]),
+    }, [bookingsSummaryQuery.refetch, isAuthenticated, userId]),
   );
 
   async function buildLocalStudioBookingsFallback(
@@ -1563,20 +1385,23 @@ export default function BookingsScreen() {
 
   async function fetchBookings(
     targetUserId: string,
-    options: { showLoading?: boolean } = {},
+    options: { showLoading?: boolean; summaryPayload?: any } = {},
   ) {
     try {
       if (options.showLoading !== false) {
         setLoading(true);
       }
       let nextPendingPermitStudios: any[] = [];
+      const screenPayload = options.summaryPayload || null;
 
       // Fetch user role first
-      const { data: profile } = await supabase
-        .from("profiles")
-        .select("role")
-        .eq("id", targetUserId)
-        .single();
+      const { data: profile } = screenPayload?.role
+        ? { data: { role: screenPayload.role } }
+        : await supabase
+            .from("profiles")
+            .select("role")
+            .eq("id", targetUserId)
+            .single();
 
       const role = profile?.role || "";
       if (role) {
@@ -1590,7 +1415,10 @@ export default function BookingsScreen() {
         }
       }
 
-      if (role === "studio-owner" || role === "venue-owner") {
+      if (Array.isArray(screenPayload?.pendingPermitListings)) {
+        nextPendingPermitStudios = screenPayload.pendingPermitListings;
+        setPendingPermitStudios(nextPendingPermitStudios);
+      } else if (role === "studio-owner" || role === "venue-owner") {
         const permitTable = role === "studio-owner" ? "studios" : "gigs";
         const permitOwnerField = role === "studio-owner" ? "owner_id" : "organizer_id";
 
@@ -1615,19 +1443,25 @@ export default function BookingsScreen() {
         setPendingPermitStudios([]);
       }
 
-      const { data: bookings, error } = await supabase.functions.invoke(
-        "manage-bookings",
-        {
-          body: { action: "fetch", userId: targetUserId },
-        },
-      );
+      const functionResult = screenPayload
+        ? { data: screenPayload, error: null }
+        : await supabase.functions.invoke(
+            "manage-bookings",
+            {
+              body: { action: "fetch", includeScreenPayload: true, userId: targetUserId },
+            },
+          );
+      const { data: bookings, error } = functionResult;
+      if (!screenPayload && bookings) {
+        queryClient.setQueryData(queryKeys.bookings.summary(targetUserId), bookings);
+      }
 
       const fallbackBookings =
         error && role !== "venue-owner"
           ? await buildLocalStudioBookingsFallback(targetUserId, role)
           : null;
 
-      let effectiveBookings = fallbackBookings || bookings;
+      let effectiveBookings = fallbackBookings || bookings?.categorized || bookings;
 
       if (role === "venue-owner") {
         const venueFallbackBookings = await buildLocalVenueOwnerGigApplicationsFallback(targetUserId);
@@ -1656,63 +1490,88 @@ export default function BookingsScreen() {
       try {
         const connectionRequestSelect =
           "id, created_at, sender_id, receiver_id, group_id, studio_id, message, status, event_details, attachment_url";
-        const { data: ownedGroups, error: ownedGroupsError } = await supabase
-          .from("groups")
-          .select("id")
-          .eq("owner_id", targetUserId);
+        const payloadConnectionRequests = Array.isArray(screenPayload?.connectionRequests)
+          ? screenPayload.connectionRequests
+          : null;
+        const payloadOwnedGroupIds = Array.isArray(screenPayload?.ownedGroupIds)
+          ? screenPayload.ownedGroupIds.filter(Boolean)
+          : null;
+        let ownedGroupIds = payloadOwnedGroupIds || [];
 
-        if (ownedGroupsError) {
-          debugLog("Error fetching owned groups for connection requests:", ownedGroupsError);
-        }
+        if (!payloadOwnedGroupIds) {
+          const { data: ownedGroups, error: ownedGroupsError } = await supabase
+            .from("groups")
+            .select("id")
+            .eq("owner_id", targetUserId);
 
-        const ownedGroupIds = Array.from(
-          new Set((ownedGroups || []).map((group: any) => group?.id).filter(Boolean)),
-        );
-        const ownedGroupIdSet = new Set(ownedGroupIds);
-
-        const requestResults = await Promise.all([
-          supabase
-            .from("booking_requests")
-            .select(connectionRequestSelect)
-            .or(`sender_id.eq.${targetUserId},receiver_id.eq.${targetUserId}`)
-            .in("status", VISIBLE_CONNECTION_REQUEST_STATUSES)
-            .order("created_at", { ascending: false }),
-          ...(ownedGroupIds.length > 0
-            ? [
-                supabase
-                  .from("booking_requests")
-                  .select(connectionRequestSelect)
-                  .in("group_id", ownedGroupIds)
-                  .in("status", VISIBLE_CONNECTION_REQUEST_STATUSES)
-                  .order("created_at", { ascending: false }),
-              ]
-            : []),
-        ]);
-
-        const requestRowsById = new Map<string, any>();
-        requestResults.forEach((result, index) => {
-          if (result.error) {
-            debugLog(
-              index === 0
-                ? "Error fetching connection requests:"
-                : "Error fetching group-owned connection requests:",
-              result.error,
-            );
-            return;
+          if (ownedGroupsError) {
+            debugLog("Error fetching owned groups for connection requests:", ownedGroupsError);
           }
 
-          (result.data || []).forEach((request: any) => {
+          ownedGroupIds = Array.from(
+            new Set((ownedGroups || []).map((group: any) => group?.id).filter(Boolean)),
+          );
+        }
+        const ownedGroupIdSet = new Set(ownedGroupIds);
+
+        let requestRows: any[] = [];
+        if (payloadConnectionRequests) {
+          const requestRowsById = new Map<string, any>();
+          payloadConnectionRequests.forEach((request: any) => {
             if (request?.id && !requestRowsById.has(request.id)) {
               requestRowsById.set(request.id, request);
             }
           });
-        });
+          requestRows = Array.from(requestRowsById.values()).sort(
+            (a: any, b: any) =>
+              new Date(b?.created_at || 0).getTime() -
+              new Date(a?.created_at || 0).getTime(),
+          );
+        } else {
+          const requestResults = await Promise.all([
+            supabase
+              .from("booking_requests")
+              .select(connectionRequestSelect)
+              .or(`sender_id.eq.${targetUserId},receiver_id.eq.${targetUserId}`)
+              .in("status", VISIBLE_CONNECTION_REQUEST_STATUSES)
+              .order("created_at", { ascending: false }),
+            ...(ownedGroupIds.length > 0
+              ? [
+                  supabase
+                    .from("booking_requests")
+                    .select(connectionRequestSelect)
+                    .in("group_id", ownedGroupIds)
+                    .in("status", VISIBLE_CONNECTION_REQUEST_STATUSES)
+                    .order("created_at", { ascending: false }),
+                ]
+              : []),
+          ]);
 
-        const requestRows = Array.from(requestRowsById.values()).sort(
-          (a: any, b: any) =>
-            new Date(b?.created_at || 0).getTime() -
-            new Date(a?.created_at || 0).getTime(),
-        );
+          const requestRowsById = new Map<string, any>();
+          requestResults.forEach((result, index) => {
+            if (result.error) {
+              debugLog(
+                index === 0
+                  ? "Error fetching connection requests:"
+                  : "Error fetching group-owned connection requests:",
+                result.error,
+              );
+              return;
+            }
+
+            (result.data || []).forEach((request: any) => {
+              if (request?.id && !requestRowsById.has(request.id)) {
+                requestRowsById.set(request.id, request);
+              }
+            });
+          });
+
+          requestRows = Array.from(requestRowsById.values()).sort(
+            (a: any, b: any) =>
+              new Date(b?.created_at || 0).getTime() -
+              new Date(a?.created_at || 0).getTime(),
+          );
+        }
 
         if (requestRows.length > 0) {
           const profileIds = [...new Set(
@@ -1723,7 +1582,17 @@ export default function BookingsScreen() {
 
           const profileMap = new Map<string, any>();
 
-          if (profileIds.length > 0) {
+          const payloadProfiles = Array.isArray(screenPayload?.connectionRequestProfiles)
+            ? screenPayload.connectionRequestProfiles
+            : null;
+
+          if (payloadProfiles) {
+            payloadProfiles.forEach((profile: any) => {
+              if (profile?.id) {
+                profileMap.set(profile.id, profile);
+              }
+            });
+          } else if (profileIds.length > 0) {
             const { data: profileRows, error: profileError } = await supabase
               .from("profiles")
               .select("id, full_name, avatar_url")
@@ -1866,11 +1735,17 @@ export default function BookingsScreen() {
         (role === "studio-owner" || role === "venue-owner" || role === "musician") &&
         studioBookingIds.length > 0
       ) {
-        const { data: lateEvents, error: lateEventsError } = await supabase
-          .from("booking_attendance_events")
-          .select("booking_id, reporter_user_id, notes, created_at")
-          .in("booking_id", studioBookingIds)
-          .eq("event_type", "late");
+        const payloadLateEvents = Array.isArray(screenPayload?.lateAttendanceEvents)
+          ? screenPayload.lateAttendanceEvents
+          : null;
+        const lateEventsResult = payloadLateEvents
+          ? { data: payloadLateEvents, error: null }
+          : await supabase
+              .from("booking_attendance_events")
+              .select("booking_id, reporter_user_id, notes, created_at")
+              .in("booking_id", studioBookingIds)
+              .eq("event_type", "late");
+        const { data: lateEvents, error: lateEventsError } = lateEventsResult;
 
         if (!lateEventsError) {
           (lateEvents || []).forEach((event: any) => {
@@ -2762,6 +2637,12 @@ export default function BookingsScreen() {
     (url: string | null | undefined, label: string) => {
       const normalizedUrl = String(url || "").trim();
       if (!normalizedUrl) return;
+
+      if (isInAppMediaUrl(normalizedUrl)) {
+        setMediaViewerTitle(label);
+        setMediaViewerUrl(normalizedUrl);
+        return;
+      }
 
       void Linking.openURL(normalizedUrl).catch(() => {
         showAlert(
@@ -3842,6 +3723,8 @@ export default function BookingsScreen() {
     showPaymentOptionModal ||
     showScanModal ||
     showRenewModal;
+  const isActivityFilterActive = activeFilter !== "All";
+  const shouldShowActivityFilters = showActivityFilters;
 
   // Render application tab for musicians
   const renderAppTab = (tab: ApplicationTab) => {
@@ -4020,76 +3903,127 @@ export default function BookingsScreen() {
         </View>
 
         <View style={styles.searchFilterContainer}>
-          <View
-            style={[
-              styles.searchInputContainer,
-              {
-                backgroundColor: colors.card,
-                borderColor: colors.border,
-              },
-            ]}
-          >
-            <Ionicons
-              name="search-outline"
-              size={moderateScale(18)}
-              color={colors.textSecondary}
-            />
-            <TextInput
-              value={searchQuery}
-              onChangeText={setSearchQuery}
-              placeholder={`Search ${String(activeListLabel).toLowerCase()}`}
-              placeholderTextColor={colors.textSecondary}
-              style={[styles.searchInput, { color: colors.text }]}
-            />
-            {searchQuery.length > 0 ? (
-              <TouchableOpacity
-                activeOpacity={1}
-                onPress={() => setSearchQuery("")}
-              >
-                <Ionicons
-                  name="close-circle"
-                  size={moderateScale(18)}
-                  color={colors.textSecondary}
-                />
-              </TouchableOpacity>
-            ) : null}
-          </View>
-
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.filterScrollContent}
-          >
-            {availableFilters.map((filterLabel) => {
-              const isActiveFilter = activeFilter === filterLabel;
-
-              return (
+          <View style={styles.searchFilterRow}>
+            <View
+              style={[
+                styles.searchInputContainer,
+                {
+                  backgroundColor: isDark ? "#374151" : "#F3F4F6",
+                },
+              ]}
+            >
+              <Ionicons
+                name="search"
+                size={moderateScale(20)}
+                color={colors.textSecondary}
+              />
+              <TextInput
+                value={searchQuery}
+                onChangeText={setSearchQuery}
+                placeholder={`Search ${String(activeListLabel).toLowerCase()}`}
+                placeholderTextColor={colors.textSecondary}
+                style={[styles.searchInput, { color: colors.text }]}
+              />
+              {searchQuery.length > 0 ? (
                 <TouchableOpacity
                   activeOpacity={1}
-                  key={filterLabel}
-                  onPress={() => setActiveFilter(filterLabel)}
-                  style={[
-                    styles.filterChip,
-                    {
-                      backgroundColor: isActiveFilter ? colors.primary : colors.card,
-                      borderColor: isActiveFilter ? colors.primary : colors.border,
-                    },
-                  ]}
+                  onPress={() => setSearchQuery("")}
+                  hitSlop={{ top: 8, right: 8, bottom: 8, left: 8 }}
                 >
-                  <Text
+                  <Ionicons
+                    name="close-circle"
+                    size={moderateScale(17)}
+                    color={colors.textSecondary}
+                  />
+                </TouchableOpacity>
+              ) : null}
+            </View>
+
+            <TouchableOpacity
+              activeOpacity={1}
+              onPress={() => setShowActivityFilters((value) => !value)}
+              style={[
+                styles.activityFilterButton,
+                {
+                  backgroundColor:
+                    showActivityFilters || isActivityFilterActive
+                      ? colors.primary
+                      : isDark
+                        ? "#374151"
+                        : "#F3F4F6",
+                },
+              ]}
+              accessibilityRole="button"
+              accessibilityLabel="Show activity filters"
+            >
+              <Ionicons
+                name="options-outline"
+                size={moderateScale(20)}
+                color={
+                  showActivityFilters || isActivityFilterActive
+                    ? "#FFFFFF"
+                    : colors.textSecondary
+                }
+              />
+              {isActivityFilterActive ? (
+                <View style={styles.activityFilterBadge}>
+                  <Text style={styles.activityFilterBadgeText}>1</Text>
+                </View>
+              ) : null}
+            </TouchableOpacity>
+          </View>
+
+          {shouldShowActivityFilters ? (
+            <ScrollView
+              horizontal
+              keyboardShouldPersistTaps="handled"
+              showsHorizontalScrollIndicator={false}
+              style={styles.filterScrollView}
+              contentContainerStyle={styles.filterScrollContent}
+            >
+              {availableFilters.map((filterLabel) => {
+                const isActiveFilter = activeFilter === filterLabel;
+
+                return (
+                  <TouchableOpacity
+                    activeOpacity={1}
+                    key={filterLabel}
+                    onPress={() => {
+                      setActiveFilter(filterLabel);
+                      if (filterLabel === "All") {
+                        setShowActivityFilters(false);
+                      }
+                    }}
                     style={[
-                      styles.filterChipText,
+                      styles.filterChip,
                       {
-                        color: isActiveFilter ? "#FFFFFF" : colors.textSecondary,
+                        backgroundColor: isActiveFilter
+                          ? colors.primary
+                          : isDark
+                            ? "#374151"
+                            : "#F3F4F6",
                       },
                     ]}
                   >
-                    {filterLabel}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
-          </ScrollView>
+                    <Text
+                      style={[
+                        styles.filterChipText,
+                        {
+                          color: isActiveFilter
+                            ? "#FFFFFF"
+                            : isDark
+                              ? "#D1D5DB"
+                              : "#4B5563",
+                        },
+                      ]}
+                    >
+                      {filterLabel}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+          ) : null}
         </View>
 
         <ScrollView
@@ -4943,7 +4877,7 @@ export default function BookingsScreen() {
                             {/* Video Link */}
                             {item.video_url && (
                               <TouchableOpacity activeOpacity={1}
-                                onPress={() => Linking.openURL(item.video_url)}
+                                onPress={() => openConnectionRequestLink(item.video_url, "Audition Video")}
                                 style={{
                                   flexDirection: "row",
                                   alignItems: "center",
@@ -4976,7 +4910,7 @@ export default function BookingsScreen() {
                             {/* CV Link */}
                             {item.cv_url && (
                               <TouchableOpacity activeOpacity={1}
-                                onPress={() => Linking.openURL(item.cv_url)}
+                                onPress={() => openConnectionRequestLink(item.cv_url, "CV / Resume")}
                                 style={{
                                   flexDirection: "row",
                                   alignItems: "center",
@@ -5697,9 +5631,7 @@ export default function BookingsScreen() {
                             <View style={{ marginTop: 8, gap: 8 }}>
                               {item.video_url && (
                                 <TouchableOpacity activeOpacity={1}
-                                  onPress={() =>
-                                    Linking.openURL(item.video_url)
-                                  }
+                                  onPress={() => openConnectionRequestLink(item.video_url, "Audition Video")}
                                   style={{
                                     flexDirection: "row",
                                     alignItems: "center",
@@ -7156,6 +7088,13 @@ export default function BookingsScreen() {
         onClose={() => setAlertVisible(false)}
       />
 
+      <InAppMediaViewer
+        visible={!!mediaViewerUrl}
+        uri={mediaViewerUrl}
+        title={mediaViewerTitle}
+        onClose={() => setMediaViewerUrl(null)}
+      />
+
       <BookingDetailsSheet
         ref={bookingDetailsRef}
         booking={selectedItem}
@@ -7395,37 +7334,78 @@ const styles = StyleSheet.create({
     fontFamily: "Poppins_600SemiBold",
   },
   searchFilterContainer: {
-    paddingHorizontal: scale(24),
-    paddingBottom: moderateScale(10),
-    gap: moderateScale(10),
+    paddingHorizontal: scale(16),
+    paddingBottom: moderateScale(6),
   },
-  searchInputContainer: {
-    borderWidth: 1,
-    borderRadius: moderateScale(12),
+  searchFilterRow: {
     flexDirection: "row",
     alignItems: "center",
-    paddingHorizontal: scale(12),
-    minHeight: moderateScale(44),
+    gap: scale(8),
+  },
+  searchInputContainer: {
+    borderWidth: 0,
+    borderRadius: moderateScale(16),
+    flexDirection: "row",
+    alignItems: "center",
+    flex: 1,
+    gap: scale(10),
+    paddingHorizontal: scale(16),
+    height: moderateScale(48),
   },
   searchInput: {
     flex: 1,
-    marginLeft: scale(8),
-    fontSize: moderateScale(13),
-    fontFamily: "Poppins_400Regular",
-    paddingVertical: moderateScale(8),
+    height: moderateScale(24),
+    fontSize: moderateScale(15),
+    fontFamily: "Poppins_500Medium",
+    lineHeight: moderateScale(20),
+    includeFontPadding: false,
+    padding: 0,
+    textAlignVertical: "center",
+  },
+  activityFilterButton: {
+    width: moderateScale(48),
+    height: moderateScale(48),
+    borderRadius: moderateScale(16),
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  activityFilterBadge: {
+    position: "absolute",
+    top: moderateScale(6),
+    right: moderateScale(6),
+    width: moderateScale(16),
+    height: moderateScale(16),
+    borderRadius: moderateScale(8),
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#EF4444",
+  },
+  activityFilterBadgeText: {
+    color: "#FFFFFF",
+    fontSize: moderateScale(10),
+    fontFamily: "Poppins_600SemiBold",
+    includeFontPadding: false,
+  },
+  filterScrollView: {
+    marginTop: moderateScale(8),
   },
   filterScrollContent: {
-    paddingRight: scale(8),
+    alignItems: "center",
+    paddingRight: scale(16),
   },
   filterChip: {
-    borderWidth: 1,
-    borderRadius: moderateScale(999),
-    paddingHorizontal: scale(12),
-    paddingVertical: moderateScale(7),
+    borderWidth: 0,
+    borderRadius: moderateScale(100),
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    minHeight: moderateScale(36),
+    paddingHorizontal: scale(14),
+    paddingVertical: moderateScale(8),
     marginRight: scale(8),
   },
   filterChipText: {
-    fontSize: moderateScale(11),
+    fontSize: moderateScale(13),
     fontFamily: "Poppins_500Medium",
   },
   scrollContent: {
@@ -7464,8 +7444,8 @@ const styles = StyleSheet.create({
     opacity: 0.7,
   },
   cardContainer: {
-    marginBottom: SCREEN_HEIGHT < 700 ? moderateScale(12) : moderateScale(16),
-    borderRadius: moderateScale(16),
+    marginBottom: SCREEN_HEIGHT < 700 ? moderateScale(10) : moderateScale(14),
+    borderRadius: moderateScale(14),
     borderWidth: 1,
     overflow: "hidden",
     backgroundColor: "#FFFFFF",
@@ -7478,16 +7458,16 @@ const styles = StyleSheet.create({
   },
   cardImage: {
     width: "100%",
-    height: SCREEN_HEIGHT < 700 ? verticalScale(110) : verticalScale(135),
-    borderTopLeftRadius: moderateScale(16),
-    borderTopRightRadius: moderateScale(16),
+    height: SCREEN_HEIGHT < 700 ? verticalScale(100) : verticalScale(122),
+    borderTopLeftRadius: moderateScale(14),
+    borderTopRightRadius: moderateScale(14),
   },
   typeBadge: {
     position: "absolute",
-    top: moderateScale(12),
-    left: scale(12),
-    paddingHorizontal: scale(16),
-    paddingVertical: moderateScale(6),
+    top: moderateScale(10),
+    left: scale(10),
+    paddingHorizontal: scale(12),
+    paddingVertical: moderateScale(5),
     borderRadius: moderateScale(9999),
     backgroundColor: "rgba(0,0,0,0.65)",
     backdropFilter: "blur(4px)",
@@ -7497,10 +7477,10 @@ const styles = StyleSheet.create({
   },
   topRightBadgeStack: {
     position: "absolute",
-    top: moderateScale(12),
-    right: scale(12),
+    top: moderateScale(10),
+    right: scale(10),
     alignItems: "flex-end",
-    gap: moderateScale(6),
+    gap: moderateScale(5),
     maxWidth: "44%",
   },
   stackedImageBadge: {
@@ -7517,10 +7497,10 @@ const styles = StyleSheet.create({
   },
   liveBadge: {
     position: "absolute",
-    top: moderateScale(12),
-    right: scale(12),
-    paddingHorizontal: scale(16),
-    paddingVertical: moderateScale(6),
+    top: moderateScale(10),
+    right: scale(10),
+    paddingHorizontal: scale(12),
+    paddingVertical: moderateScale(5),
     borderRadius: moderateScale(9999),
     backgroundColor: "#22C55E", // green-500
     flexDirection: "row",
@@ -7562,20 +7542,20 @@ const styles = StyleSheet.create({
     textTransform: "uppercase",
   },
   cardContent: {
-    padding: SCREEN_HEIGHT < 700 ? moderateScale(12) : moderateScale(16),
+    padding: SCREEN_HEIGHT < 700 ? moderateScale(10) : moderateScale(14),
   },
   cardHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "flex-start",
-    marginBottom: moderateScale(8),
+    marginBottom: moderateScale(6),
   },
   cardTitleContainer: {
     flex: 1,
     marginRight: scale(8),
   },
   cardTitle: {
-    fontSize: moderateScale(15),
+    fontSize: moderateScale(14),
     fontFamily: "Poppins_700Bold",
   },
   cardDate: {
@@ -7587,8 +7567,8 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    marginTop: moderateScale(8),
-    paddingTop: moderateScale(12),
+    marginTop: moderateScale(6),
+    paddingTop: moderateScale(10),
     borderTopWidth: 1,
   },
   statusContainer: {
@@ -7938,13 +7918,13 @@ const styles = StyleSheet.create({
   cardDetailRow: {
     flexDirection: "row",
     alignItems: "center",
-    minHeight: moderateScale(16),
-    marginTop: moderateScale(6),
-    gap: scale(6),
+    minHeight: moderateScale(15),
+    marginTop: moderateScale(5),
+    gap: scale(5),
   },
   cardDetailText: {
-    fontSize: moderateScale(12),
-    lineHeight: moderateScale(16),
+    fontSize: moderateScale(11),
+    lineHeight: moderateScale(15),
     fontFamily: "Poppins_400Regular",
     flex: 1,
   },

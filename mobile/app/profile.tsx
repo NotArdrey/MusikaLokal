@@ -2314,10 +2314,10 @@ export default function ProfileScreen() {
                 <View
                   style={[
                     styles.gigSearchWrap,
-                    { backgroundColor: isDark ? "#1E293B" : "#F9FAFB", borderColor: colors.border },
+                    { backgroundColor: isDark ? "#374151" : "#F3F4F6" },
                   ]}
                 >
-                  <Ionicons name="search-outline" size={16} color={colors.textSecondary} />
+                  <Ionicons name="search" size={20} color={colors.textSecondary} />
                   <TextInput
                     value={gigSearchQuery}
                     onChangeText={setGigSearchQuery}
@@ -3376,19 +3376,21 @@ const styles = StyleSheet.create({
   },
   gigSearchWrap: {
     width: "100%",
-    borderWidth: 1,
-    borderRadius: 12,
-    paddingHorizontal: 10,
-    height: 44,
+    borderRadius: 16,
+    paddingHorizontal: 16,
+    height: 48,
     flexDirection: "row",
     alignItems: "center",
-    gap: 8,
+    gap: 10,
   },
   gigSearchInput: {
     flex: 1,
-    fontFamily: "Poppins_400Regular",
-    fontSize: 13,
-    paddingVertical: 0,
+    height: 24,
+    fontFamily: "Poppins_500Medium",
+    fontSize: 15,
+    lineHeight: 20,
+    includeFontPadding: false,
+    padding: 0,
     textAlignVertical: "center",
   },
   gigTimelineBlock: {

@@ -16,6 +16,7 @@ import { supabase } from "../lib/supabase";
 import BottomModal from "../src/components/BottomModal";
 import CustomAlert, { AlertType } from "../src/components/CustomAlert";
 import Header from "../src/components/header";
+import InAppMediaViewer, { isInAppMediaUrl } from "../src/components/InAppMediaViewer";
 import Modal from "../src/components/modal";
 import Navbar from "../src/components/navbar";
 import { useBottomBarClearance } from "../src/hooks/useBottomBarClearance";
@@ -89,6 +90,8 @@ export default function StudioDetailsScreen() {
     title: "",
     message: "",
   });
+  const [mediaViewerUrl, setMediaViewerUrl] = useState<string | null>(null);
+  const [mediaViewerTitle, setMediaViewerTitle] = useState("Media");
 
   const showAlert = (
     type: AlertType,
@@ -124,6 +127,28 @@ export default function StudioDetailsScreen() {
   };
 
   const Alert = { alert: showAlertNative };
+
+  const openMediaOrExternal = async (url: string, title = "File") => {
+    const normalizedUrl = String(url || "").trim();
+    if (!normalizedUrl) return;
+
+    if (isInAppMediaUrl(normalizedUrl)) {
+      setMediaViewerTitle(title);
+      setMediaViewerUrl(normalizedUrl);
+      return;
+    }
+
+    try {
+      const supported = await Linking.canOpenURL(normalizedUrl);
+      if (supported) {
+        await Linking.openURL(normalizedUrl);
+      } else {
+        Alert.alert("Error", "Unable to open link");
+      }
+    } catch (error) {
+      Alert.alert("Error", "Failed to open link");
+    }
+  };
 
   const handleNavigateToStudio = async () => {
     try {
@@ -848,26 +873,7 @@ export default function StudioDetailsScreen() {
                   </Text>
                   {studio?.contract_url ? (
                     <TouchableOpacity activeOpacity={1}
-                      onPress={async () => {
-                        try {
-                          const supported = await Linking.canOpenURL(
-                            studio.contract_url,
-                          );
-                          if (supported) {
-                            await Linking.openURL(studio.contract_url);
-                          } else {
-                            Alert.alert(
-                              "Error",
-                              "Unable to open contract document",
-                            );
-                          }
-                        } catch (error) {
-                          Alert.alert(
-                            "Error",
-                            "Failed to open contract document",
-                          );
-                        }
-                      }}
+                      onPress={() => openMediaOrExternal(studio.contract_url, "Contract")}
                       style={[
                         styles.contractCard,
                         {
@@ -1910,6 +1916,12 @@ export default function StudioDetailsScreen() {
         message={alertConfig.message}
         buttons={alertConfig.buttons}
         onClose={() => setAlertVisible(false)}
+      />
+      <InAppMediaViewer
+        visible={!!mediaViewerUrl}
+        uri={mediaViewerUrl}
+        title={mediaViewerTitle}
+        onClose={() => setMediaViewerUrl(null)}
       />
 
       {/* Partial Approval Modal for Multi-Slot Bookings */}

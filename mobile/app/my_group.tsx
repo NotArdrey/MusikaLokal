@@ -395,9 +395,10 @@ export default function MyGroupScreen() {
                                         <CachedImage
                                             uri={(group.images && group.images[0]) || 'https://images.unsplash.com/photo-1511735111819-9a3f7709049c?w=800&fit=crop'}
                                             style={styles.cardImage}
-                                            width={800}
-                                            height={384}
-                                            quality={72}
+                                            width={420}
+                                            height={220}
+                                            quality={68}
+                                            priority="high"
                                             cacheVersion={group.updated_at || group.created_at || group.id}
                                         />
                                         <View style={[styles.activeBadge, { backgroundColor: isDark ? 'rgba(0,0,0,0.6)' : 'rgba(255,255,255,0.9)' }]}>
