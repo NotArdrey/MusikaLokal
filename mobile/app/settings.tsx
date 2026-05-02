@@ -313,6 +313,7 @@ export default function SettingsScreen() {
         title="Log Out"
         message="Are you sure you want to log out of your account?"
         buttonText="Log Out"
+        danger
         onConfirm={handleLogout}
       />
     </>

@@ -1651,6 +1651,7 @@ export default function GigDetailsScreen() {
         title={modalTitle}
         message={modalMessage}
         buttonText={modalButtonText}
+        danger={modalButtonText === "Decline"}
       />
       <CustomAlert
         visible={alertVisible}

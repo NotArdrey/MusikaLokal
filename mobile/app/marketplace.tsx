@@ -5,7 +5,6 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Dimensions,
-  Modal,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -15,6 +14,7 @@ import {
   View,
 } from "react-native";
 import { supabase } from "../lib/supabase";
+import BottomModal from "../src/components/BottomModal";
 import CachedImage from "../src/components/CachedImage";
 import Header from "../src/components/header";
 import ImageUploader from "../src/components/ImageUploader";
@@ -728,16 +728,13 @@ export default function MarketplaceScreen() {
       </ScrollView>
 
       {/* Add Product Modal */}
-      <Modal
+      <BottomModal
         visible={showAddProduct}
-        transparent
-        animationType="slide"
-        onRequestClose={() => {
+        onClose={() => {
           setShowAddProduct(false);
           resetCreateListingForm();
         }}
       >
-        <View style={styles.modalOverlay}>
           <View style={[styles.modalBox, { backgroundColor: colors.surface }]}>
             <View style={styles.modalHeader}>
               <Text style={[styles.sectionTitle, { color: colors.text }]}>{editingProductId ? "Edit Listing" : "Create Listing"}</Text>
@@ -827,8 +824,7 @@ export default function MarketplaceScreen() {
               </TouchableOpacity>
             </ScrollView>
           </View>
-        </View>
-      </Modal>
+      </BottomModal>
 
       {alert && <CustomAlert visible type={alert.type} title={alert.title} message={alert.message} buttons={alert.buttons} onClose={() => setAlert(null)} />}
       <Navbar />

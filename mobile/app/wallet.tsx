@@ -2,9 +2,10 @@
 import * as ExpoLinking from 'expo-linking';
 import { useFocusEffect, useLocalSearchParams } from 'expo-router';
 import React, { useCallback, useMemo, useState } from 'react';
-import { ActivityIndicator, Image, KeyboardAvoidingView, Linking, Platform, RefreshControl, Modal as RNModal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Image, Linking, Platform, RefreshControl, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { supabase } from '../lib/supabase';
 import CustomAlert, { AlertType } from '../src/components/CustomAlert';
+import BottomModal from '../src/components/BottomModal';
 import Header from '../src/components/header';
 import CustomModal from '../src/components/modal';
 import Navbar from '../src/components/navbar';
@@ -1108,16 +1109,11 @@ export default function WalletScreen() {
       </View>
 
       {/* Top-Up Modal */}
-      <RNModal
+      <BottomModal
         visible={topUpModalVisible}
-        animationType="slide"
-        transparent={true}
-        onRequestClose={() => setTopUpModalVisible(false)}
+        onClose={() => setTopUpModalVisible(false)}
+        keyboardAvoiding
       >
-        <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          style={styles.modalOverlay}
-        >
           <View style={[styles.withdrawModal, { backgroundColor: colors.background }]}>
             <View style={styles.withdrawModalHeader}>
               <View>
@@ -1192,20 +1188,14 @@ export default function WalletScreen() {
               }
             </TouchableOpacity>
           </View>
-        </KeyboardAvoidingView>
-      </RNModal>
+      </BottomModal>
 
       {/* Withdraw Modal */}
-      <RNModal
+      <BottomModal
         visible={withdrawModalVisible}
-        animationType="slide"
-        transparent={true}
-        onRequestClose={() => setWithdrawModalVisible(false)}
+        onClose={() => setWithdrawModalVisible(false)}
+        keyboardAvoiding
       >
-        <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          style={styles.modalOverlay}
-        >
           <View style={[styles.withdrawModal, { backgroundColor: colors.background }]}>
             {/* Header */}
             <View style={styles.withdrawModalHeader}>
@@ -1472,20 +1462,14 @@ export default function WalletScreen() {
               )}
             </TouchableOpacity>
           </View>
-        </KeyboardAvoidingView>
-      </RNModal>
+      </BottomModal>
 
       {/* Add Payout Method Modal */}
-      <RNModal
+      <BottomModal
         visible={addPayoutModalVisible}
-        animationType="slide"
-        transparent={true}
-        onRequestClose={() => setAddPayoutModalVisible(false)}
+        onClose={() => setAddPayoutModalVisible(false)}
+        keyboardAvoiding
       >
-        <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          style={styles.modalOverlay}
-        >
           <View style={[styles.addPayoutModal, { backgroundColor: colors.background }]}>
             <View style={styles.withdrawModalHeader}>
               <Text style={[styles.withdrawModalTitle, { color: colors.text }]}>Add Payout Method</Text>
@@ -1592,8 +1576,7 @@ export default function WalletScreen() {
               )}
             </TouchableOpacity>
           </View>
-        </KeyboardAvoidingView>
-      </RNModal>
+      </BottomModal>
 
       <CustomModal
         visible={withdrawing}

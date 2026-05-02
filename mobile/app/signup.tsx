@@ -7,10 +7,11 @@ import * as Linking from 'expo-linking';
 import { router, useLocalSearchParams } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
 import React, { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Image, KeyboardAvoidingView, Modal as RNModal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Image, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { WebView } from 'react-native-webview';
 import { supabase } from '../lib/supabase';
+import BottomModal from '../src/components/BottomModal';
 import CustomAlert, { AlertType } from '../src/components/CustomAlert';
 import { showTopToast } from '../src/context/TopToastContext';
 import { useTheme } from '../src/context/ThemeContext';
@@ -1234,21 +1235,11 @@ export default function SignupScreen() {
                 {loading ? <ActivityIndicator color="white" /> : <Text style={[styles.nextButtonText, { color: isDetailsStepReady ? "white" : colors.textSecondary }]}>Next</Text>}
             </TouchableOpacity>
 
-            <RNModal
+            <BottomModal
                 visible={documentModalVisible}
-                transparent
-                animationType="slide"
-                presentationStyle="overFullScreen"
-                statusBarTranslucent
-                navigationBarTranslucent
-                onRequestClose={() => setDocumentModalVisible(false)}
+                onClose={() => setDocumentModalVisible(false)}
+                closeOnBackdropPress
             >
-                <View style={styles.documentModalOverlay}>
-                    <TouchableOpacity
-                        activeOpacity={1}
-                        style={styles.documentModalBackdrop}
-                        onPress={() => setDocumentModalVisible(false)}
-                    />
                     <View style={[styles.documentModalSheet, safeModalPadding, { backgroundColor: colors.card }]}>
                         <View style={styles.documentModalHeader}>
                             <View style={styles.documentModalHeaderCopy}>
@@ -1293,8 +1284,7 @@ export default function SignupScreen() {
                             })}
                         </ScrollView>
                     </View>
-                </View>
-            </RNModal>
+            </BottomModal>
         </View>
     );
 

@@ -81,8 +81,7 @@ const CustomModal: React.FC<CustomModalProps> = ({
     return () => clearTimeout(timeout);
   }, [visible]);
 
-  const isConfirmDisabled =
-    !canInteract ||
+  const hasUnmetConfirmRequirement =
     confirmDisabled ||
     (requireTermsAcceptance && !isTermsAccepted) ||
     (hasCustomContract && !isContractAccepted);
@@ -267,7 +266,7 @@ const CustomModal: React.FC<CustomModalProps> = ({
                     styles.confirmButton,
                     {
                       backgroundColor: danger ? '#EF4444' : colors.primary,
-                      opacity: isConfirmDisabled ? 0.6 : 1
+                      opacity: hasUnmetConfirmRequirement ? 0.6 : 1
                     }
                   ]}
                   disabled={!canInteract}

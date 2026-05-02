@@ -2,7 +2,6 @@ import { Ionicons } from '@expo/vector-icons';
 import React, { useState } from 'react';
 import {
     ActivityIndicator,
-    Modal,
     Pressable,
     ScrollView,
     StyleSheet,
@@ -13,6 +12,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../context/ThemeContext';
+import BottomModal from './BottomModal';
 import CustomAlert from './CustomAlert';
 
 export const REPORT_REASONS_BY_TYPE: Record<string, string[]> = {
@@ -150,14 +150,12 @@ export default function ReportModal({
     const accent = colors.primary;
 
     return (
-        <Modal
+        <BottomModal
             visible={visible}
-            transparent
-            animationType="slide"
-            onRequestClose={handleClose}
-            statusBarTranslucent
+            onClose={handleClose}
+            backdropColor={overlayBg}
+            closeOnBackdropPress
         >
-            <Pressable style={[styles.overlay, { backgroundColor: overlayBg }]} onPress={handleClose}>
                 <Pressable
                     style={[
                         styles.sheet,
@@ -205,11 +203,11 @@ export default function ReportModal({
                             {/* Sub-heading */}
                             <Text style={[styles.subheading, { color: colors.textSecondary }]}>
                                 {targetName
-                                    ? `What's wrong with ${targetName}?`
-                                    : "What's the issue?"}
+                                    ? `What is wrong with ${targetName}?`
+                                    : "What is the issue?"}
                             </Text>
                             <Text style={[styles.subheadingNote, { color: colors.textSecondary }]}>
-                                Your report is anonymous. We won't share your identity with anyone.
+                                Your report is anonymous. We will not share your identity with anyone.
                             </Text>
 
                             {/* Reasons List */}
@@ -324,7 +322,6 @@ export default function ReportModal({
                         </>
                     )}
                 </Pressable>
-            </Pressable>
             <CustomAlert
                 visible={feedbackVisible}
                 type="warning"
@@ -333,7 +330,7 @@ export default function ReportModal({
                 forceModal
                 onClose={() => setFeedbackVisible(false)}
             />
-        </Modal>
+        </BottomModal>
     );
 }
 

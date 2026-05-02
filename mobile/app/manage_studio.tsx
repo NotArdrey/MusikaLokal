@@ -5,7 +5,6 @@ import {
     ActivityIndicator,
     Image,
     Linking,
-    Modal as RNModal,
     ScrollView,
     StyleSheet,
     Text,
@@ -14,6 +13,7 @@ import {
 } from "react-native";
 import { Calendar } from "react-native-calendars";
 import { supabase } from "../lib/supabase";
+import BottomModal from "../src/components/BottomModal";
 import CustomAlert, { AlertType } from "../src/components/CustomAlert";
 import Header from "../src/components/header";
 import Modal from "../src/components/modal";
@@ -1895,6 +1895,7 @@ export default function StudioDetailsScreen() {
         title={modalTitle}
         message={modalMessage}
         buttonText={modalButtonText}
+        danger={modalButtonText === "Decline"}
         showInput={showReasonInput}
         inputValue={cancellationReason}
         onInputChange={(text) => {
@@ -1912,17 +1913,14 @@ export default function StudioDetailsScreen() {
       />
 
       {/* Partial Approval Modal for Multi-Slot Bookings */}
-      <RNModal
+      <BottomModal
         visible={partialModalVisible}
-        transparent={true}
-        animationType="slide"
-        onRequestClose={() => {
+        onClose={() => {
           setPartialModalVisible(false);
           setSelectedBookingForPartial(null);
           setSelectedSlots({});
         }}
       >
-        <View style={styles.partialModalOverlay}>
           <View
             style={[
               styles.partialModalContainer,
@@ -2099,8 +2097,7 @@ export default function StudioDetailsScreen() {
               </Text>
             </TouchableOpacity>
           </View>
-        </View>
-      </RNModal>
+      </BottomModal>
     </>
   );
 }

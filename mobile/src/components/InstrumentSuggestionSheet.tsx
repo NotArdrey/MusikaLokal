@@ -4,7 +4,6 @@ import {
     ActivityIndicator,
     Dimensions,
     Image,
-    Modal,
     ScrollView,
     StyleSheet,
     Text,
@@ -13,6 +12,7 @@ import {
 } from 'react-native';
 import { supabase } from '../../lib/supabase';
 import { useTheme } from '../context/ThemeContext';
+import BottomModal from './BottomModal';
 import {
     EXPERIENCE_OPTIONS,
     ExperienceLevel,
@@ -448,13 +448,10 @@ export default function InstrumentSuggestionSheet({
     );
 
     return (
-        <Modal
+        <BottomModal
             visible={visible}
-            animationType="slide"
-            transparent={true}
-            onRequestClose={onClose}
+            onClose={onClose}
         >
-            <View style={styles.overlay}>
                 <View style={[styles.container, { backgroundColor: colors.background }]}>
                     {/* Header */}
                     <View style={[styles.header, { borderBottomColor: colors.border }]}>
@@ -485,8 +482,7 @@ export default function InstrumentSuggestionSheet({
                     {/* Content */}
                     {step === 'preferences' ? renderPreferencesStep() : renderResultsStep()}
                 </View>
-            </View>
-        </Modal>
+        </BottomModal>
     );
 }
 

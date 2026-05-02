@@ -3,7 +3,6 @@ import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import React, { useCallback, useState } from "react";
 import {
   ActivityIndicator,
-  Modal as RNModal,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -13,6 +12,7 @@ import {
   View,
 } from "react-native";
 import { supabase } from "../lib/supabase";
+import BottomModal from "../src/components/BottomModal";
 import CachedImage from "../src/components/CachedImage";
 import CustomAlert, { AlertType } from "../src/components/CustomAlert";
 import Header from "../src/components/header";
@@ -97,18 +97,11 @@ export default function ProductionTeamScreen() {
     children: React.ReactNode;
     scrollable?: boolean;
   }) => (
-    <RNModal
+    <BottomModal
       visible={visible}
-      transparent
-      animationType="slide"
-      onRequestClose={onClose}
+      onClose={onClose}
+      closeOnBackdropPress
     >
-      <View style={styles.sheetOverlay}>
-        <TouchableOpacity
-          activeOpacity={1}
-          onPress={onClose}
-          style={styles.sheetBackdrop}
-        />
         <View
           style={[
             styles.sheetContainer,
@@ -155,8 +148,7 @@ export default function ProductionTeamScreen() {
             <View style={styles.sheetBodyContent}>{children}</View>
           )}
         </View>
-      </View>
-    </RNModal>
+    </BottomModal>
   );
 
   const fetchTeams = useCallback(async () => {

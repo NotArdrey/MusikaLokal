@@ -5,7 +5,6 @@ import React, { useCallback, useState } from "react";
 import {
   ActivityIndicator,
   Dimensions,
-  Modal,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -15,6 +14,7 @@ import {
   View,
 } from "react-native";
 import { supabase } from "../lib/supabase";
+import BottomModal from "../src/components/BottomModal";
 import CachedImage from "../src/components/CachedImage";
 import GuestSignInGate from "../src/components/GuestSignInGate";
 import Header from "../src/components/header";
@@ -304,8 +304,7 @@ export default function SellerHubScreen() {
       </ScrollView>
 
       {/* Add Product Modal */}
-      <Modal visible={showAddProduct} transparent animationType="slide" onRequestClose={() => setShowAddProduct(false)}>
-        <View style={styles.modalOverlay}>
+      <BottomModal visible={showAddProduct} onClose={() => setShowAddProduct(false)}>
           <View style={[styles.modalBox, { backgroundColor: colors.surface }]}>
             <View style={styles.modalHeader}>
               <Text style={[styles.sectionTitle, { color: colors.text }]}>Add Product</Text>
@@ -377,8 +376,7 @@ export default function SellerHubScreen() {
             {adding ? <ActivityIndicator color="#fff" /> : <Text style={[styles.submitBtnText, { color: isProductFormReady ? "#FFFFFF" : colors.textSecondary }]}>Create Product</Text>}
           </TouchableOpacity>
           </View>
-        </View>
-      </Modal>
+      </BottomModal>
 
       {alert && <CustomAlert visible type={alert.type} title={alert.title} message={alert.message} onClose={() => setAlert(null)} />}
       

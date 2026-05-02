@@ -6,7 +6,6 @@ import {
     BackHandler,
     Image,
     Keyboard,
-    Modal as RNModal,
     ScrollView,
     StyleSheet,
     Text,
@@ -14,6 +13,7 @@ import {
     TouchableOpacity,
     View
 } from "react-native";
+import BottomModal from "../src/components/BottomModal";
 import CustomAlert, { AlertType } from "../src/components/CustomAlert";
 import PlaylistSelectionSection from "../src/components/PlaylistSelectionSection";
 import Header from "../src/components/header";
@@ -2386,19 +2386,10 @@ export default function EditGroupScreen() {
       />
 
       {/* Leadership Transfer Modal */}
-      <RNModal
+      <BottomModal
         visible={transferModalVisible}
-        animationType="slide"
-        transparent={true}
-        onRequestClose={() => setTransferModalVisible(false)}
+        onClose={() => setTransferModalVisible(false)}
       >
-        <View
-          style={{
-            flex: 1,
-            backgroundColor: "rgba(0,0,0,0.5)",
-            justifyContent: "flex-end",
-          }}
-        >
           <View
             style={[
               styles.transferModalContent,
@@ -2556,29 +2547,14 @@ export default function EditGroupScreen() {
               </TouchableOpacity>
             </View>
           </View>
-        </View>
-      </RNModal>
+      </BottomModal>
 
-      <RNModal
+      <BottomModal
         visible={groupTypeModalVisible}
-        transparent
-        animationType="slide"
-        presentationStyle="overFullScreen"
-        statusBarTranslucent
-        onRequestClose={() => setGroupTypeModalVisible(false)}
+        onClose={() => setGroupTypeModalVisible(false)}
+        backdropColor="rgba(0,0,0,0.58)"
+        closeOnBackdropPress
       >
-        <View
-          style={{
-            flex: 1,
-            backgroundColor: "rgba(0,0,0,0.58)",
-            justifyContent: "flex-end",
-          }}
-        >
-          <TouchableOpacity
-            style={{ flex: 1 }}
-            activeOpacity={1}
-            onPress={() => setGroupTypeModalVisible(false)}
-          />
           <View style={{
             backgroundColor: colors.card,
             borderTopLeftRadius: 24,
@@ -2630,8 +2606,7 @@ export default function EditGroupScreen() {
               ))}
             </ScrollView>
           </View>
-        </View>
-      </RNModal>
+      </BottomModal>
     </>
   );
 }

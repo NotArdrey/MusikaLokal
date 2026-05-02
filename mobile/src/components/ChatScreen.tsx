@@ -26,6 +26,7 @@ import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 import { ConversationParticipant, Message, useChat, useGroupParticipants } from '../hooks/useChat';
 import { resolveSupabaseMediaUrl } from '../utils/supabaseMedia';
+import BottomModal from './BottomModal';
 import CustomAlert, { AlertType } from './CustomAlert';
 import ReportModal from './ReportModal';
 
@@ -790,16 +791,12 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
             </View>
 
             {/* Options Bottom Sheet */}
-            <Modal
+            <BottomModal
                 visible={showOptions}
-                transparent
-                animationType="slide"
-                onRequestClose={() => setShowOptions(false)}
+                onClose={() => setShowOptions(false)}
+                backdropColor="rgba(0,0,0,0.45)"
+                closeOnBackdropPress
             >
-                <Pressable
-                    style={[styles.modalOverlay, styles.dimOverlay]}
-                    onPress={() => setShowOptions(false)}
-                >
                     <View style={[styles.optionsSheet, { backgroundColor: isDark ? '#1E2530' : '#FFFFFF' }]}>
                         <View style={styles.attachmentPickerHandle} />
                         <Text style={[styles.optionsSheetTitle, { color: colors.text }]}>
@@ -839,8 +836,7 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
                             <Text style={[styles.optionCancelText, { color: colors.textSecondary }]}>Cancel</Text>
                         </TouchableOpacity>
                     </View>
-                </Pressable>
-            </Modal>
+            </BottomModal>
 
             {/* Report Modal */}
             <ReportModal
@@ -889,16 +885,12 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
             </Modal>
 
             {/* Attachment Picker Modal */}
-            <Modal
+            <BottomModal
                 visible={showAttachmentPicker}
-                transparent
-                animationType="slide"
-                onRequestClose={() => setShowAttachmentPicker(false)}
+                onClose={() => setShowAttachmentPicker(false)}
+                backdropColor="rgba(0,0,0,0.45)"
+                closeOnBackdropPress
             >
-                <Pressable
-                    style={[styles.modalOverlay, styles.dimOverlay]}
-                    onPress={() => setShowAttachmentPicker(false)}
-                >
                     <View style={[
                         styles.attachmentPicker,
                         { backgroundColor: isDark ? '#1F2937' : '#FFFFFF' }
@@ -921,8 +913,7 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
                             </TouchableOpacity>
                         </View>
                     </View>
-                </Pressable>
-            </Modal>
+            </BottomModal>
 
             <CustomAlert
                 visible={alertVisible}
@@ -1279,10 +1270,6 @@ const styles = StyleSheet.create({
     },
     // Options bottom sheet
     optionsSheet: {
-        position: 'absolute',
-        bottom: 0,
-        left: 0,
-        right: 0,
         borderTopLeftRadius: 24,
         borderTopRightRadius: 24,
         paddingHorizontal: 16,
@@ -1330,10 +1317,6 @@ const styles = StyleSheet.create({
     },
     // Attachment picker styles
     attachmentPicker: {
-        position: 'absolute',
-        bottom: 0,
-        left: 0,
-        right: 0,
         borderTopLeftRadius: 20,
         borderTopRightRadius: 20,
         paddingBottom: 40,

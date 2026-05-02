@@ -215,6 +215,7 @@ export default function AccountDetailsScreen() {
         title="Close Account"
         message="Are you sure you want to close your account? This action cannot be undone and you will lose all your data."
         buttonText="Close Account"
+        danger
         onConfirm={() => {
           setModalVisible(false);
           // Add close account logic

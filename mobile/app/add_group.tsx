@@ -6,7 +6,6 @@ import {
     Image,
     Keyboard,
     KeyboardAvoidingView,
-  Modal as RNModal,
     Platform,
     ScrollView,
     StyleSheet,
@@ -16,6 +15,7 @@ import {
     View
 } from "react-native";
 import { supabase } from "../lib/supabase";
+import BottomModal from "../src/components/BottomModal";
 import CustomAlert, { AlertType } from "../src/components/CustomAlert";
 import Header from "../src/components/header";
 import PlaylistSelectionSection from "../src/components/PlaylistSelectionSection";
@@ -1334,7 +1334,7 @@ export default function AddGroupScreen() {
             {step === 2 && (
               <View>
                 <Text style={[styles.sectionTitle, { color: colors.text }]}>
-                  Who's in the {isDuoGroupType(groupType) ? "duo" : "band"}?
+                  Who is in the {isDuoGroupType(groupType) ? "duo" : "band"}?
                 </Text>
                 <Text
                   style={{
@@ -2068,26 +2068,12 @@ export default function AddGroupScreen() {
         onClose={() => setAlertVisible(false)}
       />
 
-      <RNModal
+      <BottomModal
         visible={groupTypeModalVisible}
-        transparent
-        animationType="slide"
-        presentationStyle="overFullScreen"
-        statusBarTranslucent
-        onRequestClose={() => setGroupTypeModalVisible(false)}
+        onClose={() => setGroupTypeModalVisible(false)}
+        backdropColor="rgba(0,0,0,0.58)"
+        closeOnBackdropPress
       >
-        <View
-          style={{
-            flex: 1,
-            backgroundColor: "rgba(0,0,0,0.58)",
-            justifyContent: "flex-end",
-          }}
-        >
-          <TouchableOpacity
-            style={{ flex: 1 }}
-            activeOpacity={1}
-            onPress={() => setGroupTypeModalVisible(false)}
-          />
           <View style={{
             backgroundColor: colors.card,
             borderTopLeftRadius: 24,
@@ -2142,8 +2128,7 @@ export default function AddGroupScreen() {
               ))}
             </ScrollView>
           </View>
-        </View>
-      </RNModal>
+      </BottomModal>
     </>
   );
 }

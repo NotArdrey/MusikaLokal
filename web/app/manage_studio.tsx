@@ -1903,6 +1903,7 @@ export default function StudioDetailsScreen() {
         title={modalTitle}
         message={modalMessage}
         buttonText={modalButtonText}
+        danger={modalButtonText === "Decline"}
         showInput={showReasonInput}
         inputValue={cancellationReason}
         onInputChange={(text) => {

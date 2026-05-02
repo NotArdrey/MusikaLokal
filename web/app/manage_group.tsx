@@ -1051,6 +1051,7 @@ export default function GroupDetailsScreen() {
         title={modalTitle}
         message={modalMessage}
         buttonText={modalButtonText}
+        danger={modalButtonText === "Reject"}
         onConfirm={() => {
           if (modalAction) {
             modalAction();

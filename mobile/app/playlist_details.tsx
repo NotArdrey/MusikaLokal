@@ -6,7 +6,6 @@ import {
   ActivityIndicator,
   Dimensions,
   Linking,
-  Modal,
   Platform,
   ScrollView,
   StyleSheet,
@@ -16,6 +15,7 @@ import {
   View,
 } from "react-native";
 import { supabase } from "../lib/supabase";
+import BottomModal from "../src/components/BottomModal";
 import CachedImage from "../src/components/CachedImage";
 import Header from "../src/components/header";
 import Navbar from "../src/components/navbar";
@@ -1055,8 +1055,7 @@ export default function PlaylistDetailsScreen() {
       )}
 
       {/* Add Track Modal */}
-      <Modal visible={addTrackVisible} transparent animationType="slide" onRequestClose={resetAddTrackForm}>
-        <View style={styles.modalOverlay}>
+      <BottomModal visible={addTrackVisible} onClose={resetAddTrackForm}>
           <View style={[styles.modalSheet, { backgroundColor: colors.card || colors.background, borderColor: colors.border }]}>
             <Text style={[styles.modalTitle, { color: colors.text }]}>{isEditingTrack ? "Edit Track" : "Add Track"}</Text>
 
@@ -1120,8 +1119,7 @@ export default function PlaylistDetailsScreen() {
               </TouchableOpacity>
             </View>
           </View>
-        </View>
-      </Modal>
+      </BottomModal>
 
       <Navbar />
     </View>
