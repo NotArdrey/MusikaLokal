@@ -44,26 +44,6 @@ function jsonResponse(payload: unknown, status = 200) {
   });
 }
 
-function extractUserIdFromJwt(authHeader: string): string | null {
-  const token = authHeader.replace(/^Bearer\s+/i, "").trim();
-  if (!token) return null;
-
-  const parts = token.split(".");
-  if (parts.length !== 3) return null;
-
-  try {
-    const normalizedPayload = parts[1]
-      .replace(/-/g, "+")
-      .replace(/_/g, "/");
-    const paddedPayload = normalizedPayload + "=".repeat((4 - (normalizedPayload.length % 4)) % 4);
-    const payload = JSON.parse(atob(paddedPayload));
-    const sub = String(payload?.sub || "").trim();
-    return sub || null;
-  } catch {
-    return null;
-  }
-}
-
 async function getAuthenticatedUserId(
   authHeader: string,
   supabaseUrl: string,
@@ -71,9 +51,6 @@ async function getAuthenticatedUserId(
 ) {
   const token = authHeader.replace(/^Bearer\s+/i, "");
   if (!token) return null;
-
-  const userIdFromJwt = extractUserIdFromJwt(authHeader);
-  if (userIdFromJwt) return userIdFromJwt;
 
   const authClient = createClient(supabaseUrl, anonKey, {
     global: {

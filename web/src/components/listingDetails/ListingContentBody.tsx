@@ -8,7 +8,9 @@ interface ListingContentBodyProps {
   activeTab: string;
   showTabs: boolean;
   renderGroupAbout: () => React.ReactNode;
+  renderGroupApply: () => React.ReactNode;
   renderGroupTimeline: () => React.ReactNode;
+  renderConnectionTab: () => React.ReactNode;
   renderReviews: () => React.ReactNode;
   renderStudioGigVenueAbout: () => React.ReactNode;
   renderStudioSetup: () => React.ReactNode;
@@ -24,7 +26,9 @@ const ListingContentBody = ({
   activeTab,
   showTabs,
   renderGroupAbout,
+  renderGroupApply,
   renderGroupTimeline,
+  renderConnectionTab,
   renderReviews,
   renderStudioGigVenueAbout,
   renderStudioSetup,
@@ -36,6 +40,8 @@ const ListingContentBody = ({
     {(group.type === "Group" || group.type === "Artist" || !group.type) && (
       <>
         {(activeTab === "About" || !showTabs) && renderGroupAbout()}
+        {activeTab === "Connect" && renderConnectionTab()}
+        {group.type === "Group" && activeTab === "Apply" && renderGroupApply()}
         {activeTab === "Timeline" && renderGroupTimeline()}
         {activeTab === "Review" && renderReviews()}
       </>
@@ -45,6 +51,7 @@ const ListingContentBody = ({
       <>
         {activeTab === "About" && renderStudioGigVenueAbout()}
         {group.type === "Gig" && activeTab === "About" && renderGigInfo()}
+        {activeTab === "Connect" && renderConnectionTab()}
         {activeTab === "Setup" && renderStudioSetup()}
         {activeTab === "Specs" && renderStudioSetup()}
         {activeTab === "Book" && renderStudioBook()}

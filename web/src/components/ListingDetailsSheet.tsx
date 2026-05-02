@@ -7,7 +7,7 @@ import {
 } from "@gorhom/bottom-sheet";
 import { BlurView } from "expo-blur";
 import * as ExpoLinking from "expo-linking";
-import { router } from "expo-router";
+import { router, useFocusEffect } from "expo-router";
 import React, {
     forwardRef,
     useCallback,
@@ -46,6 +46,7 @@ import { submitListingRequest, uploadListingRequestDocument } from "../utils/lis
 import CustomAlert from "./CustomAlert";
 import DocumentUploader from "./DocumentUploader";
 import ReportModal from "./ReportModal";
+import VideoUploader from "./VideoUploader";
 import BookingControls from "./listingDetails/BookingControls";
 import GigApplyTab from "./listingDetails/GigApplyTab";
 import GigInfoTab from "./listingDetails/GigInfoTab";
@@ -64,6 +65,22 @@ import StudioSetupTab from "./listingDetails/StudioSetupTab";
 import Modal from "./modal";
 
 const debugLog = (..._args: unknown[]) => { };
+
+const logFunctionInvokeError = (
+  functionName: string,
+  error: any,
+  body: Record<string, unknown>,
+) => {
+  console.error(`${functionName} failed`, {
+    message: error?.message,
+    status: error?.status || error?.context?.status,
+    code: error?.code,
+    details: error?.details,
+    hint: error?.hint,
+    context: error?.context,
+    body,
+  });
+};
 
 const { width, height } = Dimensions.get("window");
 const IMG_HEIGHT = height < 700 ? height * 0.3 : height * 0.35;
@@ -204,7 +221,10 @@ const ListingDetailsSheet = forwardRef<
   const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
   const [productionTeams, setProductionTeams] = useState<any[]>([]);
   const [loadingProductionTeams, setLoadingProductionTeams] = useState(false);
+  const [hasLoadedProductionTeams, setHasLoadedProductionTeams] = useState(false);
   const [selectedProductionTeamId, setSelectedProductionTeamId] = useState<string | null>(null);
+  const [productionRoster, setProductionRoster] = useState<any[]>([]);
+  const [selectedProductionRosterId, setSelectedProductionRosterId] = useState<string | null>(null);
   const [selectedSlotType, setSelectedSlotType] = useState<
     "solo" | "duo" | "band" | null
   >(null);
@@ -248,6 +268,7 @@ const ListingDetailsSheet = forwardRef<
     currentUserId,
     checkingVenue,
   } = useCurrentUserVenueRole();
+  const activeUserId = userId || currentUserId;
   const selectedProductionTeam = useMemo(
     () => productionTeams.find((team: any) => team.id === selectedProductionTeamId) || null,
     [productionTeams, selectedProductionTeamId],
@@ -261,7 +282,26 @@ const ListingDetailsSheet = forwardRef<
       { id: "band", name: "Band" },
     ] as const).filter(({ id }) => (slots?.[id]?.needed || 0) > 0);
   }, [group?.requirements?.slots]);
+  const filteredRequestRoster = useMemo(
+    () =>
+      productionRoster.filter((entry: any) => {
+        if (selectedSlotType === "solo") return entry.entity_kind === "musician";
+        if (selectedSlotType === "duo") {
+          return entry.group_type === "duo" || entry.group?.group_type === "duo" || entry.entity_kind === "duo";
+        }
+        if (selectedSlotType === "band") {
+          return entry.group_type === "band" || entry.group?.group_type === "band" || entry.entity_kind === "group";
+        }
+
+        return true;
+      }),
+    [productionRoster, selectedSlotType],
+  );
   const listingCompletionRate = useMemo(() => {
+    if (group?.completion_rate === null || group?.completion_rate === undefined || group?.completion_rate === "") {
+      return null;
+    }
+
     const parsed = Number(group?.completion_rate);
     if (!Number.isFinite(parsed)) {
       return null;
@@ -269,6 +309,18 @@ const ListingDetailsSheet = forwardRef<
 
     return Math.max(0, Math.min(100, Math.round(parsed)));
   }, [group?.completion_rate]);
+  const selectedProductionRosterEntry = useMemo(
+    () => filteredRequestRoster.find((entry: any) => entry.id === selectedProductionRosterId) || null,
+    [filteredRequestRoster, selectedProductionRosterId],
+  );
+
+  useEffect(() => {
+    setSelectedProductionRosterId((current) =>
+      current && filteredRequestRoster.some((entry: any) => entry.id === current)
+        ? current
+        : null,
+    );
+  }, [filteredRequestRoster]);
 
   // Review State
   const [reviews, setReviews] = useState<any[]>([]);
@@ -400,7 +452,7 @@ const ListingDetailsSheet = forwardRef<
         (group.type === "Studio" || group.type === "Venue")
       ) {
         debugLog(
-          "📅 Sheet opened - refreshing studio availability and bookings...",
+          "?? Sheet opened - refreshing studio availability and bookings...",
         );
         try {
           // Fetch fresh operating hours from database
@@ -422,7 +474,7 @@ const ListingDetailsSheet = forwardRef<
           let freshDateOverrides = group.dateOverrides;
 
           if (!hoursError && operatingHours) {
-            debugLog("📅 Fresh operating hours fetched:", operatingHours.length);
+            debugLog("?? Fresh operating hours fetched:", operatingHours.length);
             const dayNames = [
               "Sunday",
               "Monday",
@@ -449,7 +501,7 @@ const ListingDetailsSheet = forwardRef<
           }
 
           if (!overridesError && dateOverrides) {
-            debugLog("📅 Fresh date overrides fetched:", dateOverrides.length);
+            debugLog("?? Fresh date overrides fetched:", dateOverrides.length);
             freshDateOverrides = dateOverrides;
             // Update group state with fresh date overrides
             setGroup((prev: any) => prev ? { ...prev, dateOverrides: freshDateOverrides } : prev);
@@ -524,7 +576,7 @@ const ListingDetailsSheet = forwardRef<
     message: string,
     options?: { requireTerms?: boolean; contractUrl?: string | null; contractName?: string },
   ) => {
-    debugLog("🔵 handleConfirm called");
+    debugLog("?? handleConfirm called");
 
     // System Lock Check - Block if user has unpaid balance
     if (isSystemLocked) {
@@ -738,7 +790,7 @@ const ListingDetailsSheet = forwardRef<
 
     try {
       setIsProcessingPayment(true);
-      debugLog("💳 Creating PayMongo checkout session...", {
+      debugLog("?? Creating PayMongo checkout session...", {
         paymentType,
         payAmount,
         remainingBalance,
@@ -775,7 +827,7 @@ const ListingDetailsSheet = forwardRef<
         });
 
       if (paymentError) {
-        console.error("❌ Payment error:", paymentError);
+        console.error("? Payment error:", paymentError);
         setIsProcessingPayment(false);
         setShowPaymentOptionModal(false);
         showSheetAlert(
@@ -798,7 +850,7 @@ const ListingDetailsSheet = forwardRef<
       }
 
       if (paymentData?.checkout_url) {
-        debugLog("✅ Checkout URL:", paymentData.checkout_url);
+        debugLog("? Checkout URL:", paymentData.checkout_url);
 
         // Clear form
         setBookings([]);
@@ -843,7 +895,7 @@ const ListingDetailsSheet = forwardRef<
         }, 100);
       }
     } catch (payErr: any) {
-      console.error("❌ Payment initiation error:", payErr);
+      console.error("? Payment initiation error:", payErr);
       showSheetAlert(
         "warning",
         "Payment Pending",
@@ -866,9 +918,93 @@ const ListingDetailsSheet = forwardRef<
     }
   };
 
-  // Check if user has already applied to this gig
+  // Check if user has already applied to this gig or group listing
   const checkExistingApplication = async () => {
-    if (!userId || !listingId || !group || group.type !== "Gig") return;
+    if (!userId || !listingId || !group) return;
+
+    if (group.type === "Group") {
+      try {
+        const { data, error } = await supabase
+          .from("notifications")
+          .select("id, created_at")
+          .eq("user_id", userId)
+          .eq("title", "Group Application Submitted")
+          .contains("meta", { group_listing_id: listingId })
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (error) {
+          console.error("Error checking existing group application:", error);
+          return;
+        }
+
+        if (data) {
+          setHasExistingApplication(true);
+          setExistingApplicationStatus("pending");
+        } else {
+          setHasExistingApplication(false);
+          setExistingApplicationStatus(null);
+        }
+      } catch (err) {
+        console.error("Error checking group application:", err);
+      }
+
+      return;
+    }
+
+    if (group.type !== "Gig") return;
+
+    if (userRole === "producer") {
+      if (!selectedProductionTeamId) {
+        setHasExistingApplication(false);
+        setExistingApplicationStatus(null);
+        setCvUrl("");
+        return;
+      }
+
+      try {
+        const body = {
+          action: "check_existing_production_application",
+          userId,
+          gigId: listingId,
+          teamId: selectedProductionTeamId,
+        };
+        const { data, error } = await supabase.functions.invoke(
+          "gig-applications",
+          { body },
+        );
+
+        if (error) {
+          logFunctionInvokeError("gig-applications", error, body);
+          return;
+        }
+
+        const application = data?.application || null;
+
+        if (application) {
+          setHasExistingApplication(true);
+          setExistingApplicationStatus(application.status || "pending");
+          setSelectedProductionRosterId(application.production_roster_id || null);
+          if (
+            application.slot_type === "solo" ||
+            application.slot_type === "duo" ||
+            application.slot_type === "band"
+          ) {
+            setSelectedSlotType(application.slot_type);
+          }
+          if (application.cv_url) setCvUrl(application.cv_url);
+        } else {
+          setHasExistingApplication(false);
+          setExistingApplicationStatus(null);
+          setCvUrl("");
+        }
+      } catch (err) {
+        console.error("Error checking production application:", err);
+      }
+
+      return;
+    }
 
     try {
       // Check for any existing application to this specific gig
@@ -886,7 +1022,7 @@ const ListingDetailsSheet = forwardRef<
       }
 
       if (data) {
-        debugLog("📋 User has already applied to this gig:", data);
+        debugLog("?? User has already applied to this gig:", data);
         setHasExistingApplication(true);
         setExistingApplicationStatus(data.status);
         if (data.cv_url) setCvUrl(data.cv_url);
@@ -897,6 +1033,38 @@ const ListingDetailsSheet = forwardRef<
       }
     } catch (err) {
       console.error("Error checking application:", err);
+    }
+  };
+
+  const fetchProductionTeamRoster = async (teamId: string) => {
+    if (!teamId) {
+      setProductionRoster([]);
+      setSelectedProductionRosterId(null);
+      return;
+    }
+
+    try {
+      const body = { action: "list_team_roster", teamId };
+      const { data, error } = await supabase.functions.invoke("manage-production", {
+        body,
+      });
+
+      if (error) {
+        logFunctionInvokeError("manage-production", error, body);
+        throw error;
+      }
+
+      const rosterEntries = data?.roster || [];
+      setProductionRoster(rosterEntries);
+      setSelectedProductionRosterId((current) =>
+        current && rosterEntries.some((entry: any) => entry.id === current)
+          ? current
+          : null,
+      );
+    } catch (err) {
+      console.error("Error fetching production roster:", err);
+      setProductionRoster([]);
+      setSelectedProductionRosterId(null);
     }
   };
 
@@ -959,7 +1127,7 @@ const ListingDetailsSheet = forwardRef<
         (g, idx, arr) => arr.findIndex((x) => x.id === g.id) === idx,
       );
 
-      debugLog("📋 Fetched groups (owned + member):", uniqueGroups.length);
+      debugLog("?? Fetched groups (owned + member):", uniqueGroups.length);
       setUserGroups(uniqueGroups);
     } catch (err) {
       console.error("Error fetching groups:", err);
@@ -968,18 +1136,31 @@ const ListingDetailsSheet = forwardRef<
     }
   };
 
-  const fetchProductionTeams = async () => {
-    if (!userId || userRole !== "producer") {
+  const fetchProductionTeams = useCallback(async () => {
+    const resolvedUserRole = userRole || currentUserRole;
+
+    if (!activeUserId || resolvedUserRole !== "producer") {
+      setProductionTeams([]);
+      setSelectedProductionTeamId(null);
+      setProductionRoster([]);
+      setSelectedProductionRosterId(null);
+      setLoadingProductionTeams(false);
+      setHasLoadedProductionTeams(false);
       return;
     }
 
+    setHasLoadedProductionTeams(false);
     setLoadingProductionTeams(true);
     try {
+      const body = { action: "list_my_teams" };
       const { data, error } = await supabase.functions.invoke("manage-production", {
-        body: { action: "list_my_teams" },
+        body,
       });
 
-      if (error) throw error;
+      if (error) {
+        logFunctionInvokeError("manage-production", error, body);
+        throw error;
+      }
 
       const teams = data?.teams || [];
       setProductionTeams(teams);
@@ -989,14 +1170,18 @@ const ListingDetailsSheet = forwardRef<
         }
         return teams[0]?.id || null;
       });
+      setHasLoadedProductionTeams(true);
     } catch (err) {
       console.error("Error fetching production teams:", err);
       setProductionTeams([]);
       setSelectedProductionTeamId(null);
+      setProductionRoster([]);
+      setSelectedProductionRosterId(null);
+      setHasLoadedProductionTeams(true);
     } finally {
       setLoadingProductionTeams(false);
     }
-  };
+  }, [activeUserId, currentUserRole, userRole]);
 
   const fetchOwnedVenues = async () => {
     if (!currentUserId || currentUserRole !== "venue-owner") {
@@ -1059,7 +1244,7 @@ const ListingDetailsSheet = forwardRef<
       }
 
       if (data && data.applicant_id !== userId) {
-        debugLog("⚠️ Group already applied by another member:", data);
+        debugLog("?? Group already applied by another member:", data);
         setGroupAlreadyApplied(true);
         setGroupApplicationBy(
           (data.profiles as any)?.full_name || "Another member",
@@ -1105,7 +1290,7 @@ const ListingDetailsSheet = forwardRef<
       }
 
       if (data) {
-        debugLog("📋 User has an unpaid booking for this studio:", data);
+        debugLog("?? User has an unpaid booking for this studio:", data);
         setHasExistingStudioBooking(true);
         setExistingStudioBookingStatus("unpaid");
       } else {
@@ -1159,11 +1344,15 @@ const ListingDetailsSheet = forwardRef<
 
   const { handleSubmitApplication } = useApplicationSubmissionAction({
     userId,
+    userRole,
     listingId,
     group,
     groupAlreadyApplied,
     groupApplicationBy,
     selectedGroupId,
+    selectedProductionTeamId,
+    selectedProductionRosterId,
+    productionRoster,
     selectedSlotType,
     pitchMessage,
     cvFile,
@@ -1172,11 +1361,7 @@ const ListingDetailsSheet = forwardRef<
     userGroups,
     setAlertConfig,
     setAlertVisible,
-    setConfirmTitle,
-    setConfirmMessage,
-    setConfirmAction,
-    setConfirmRequireTerms,
-    setModalVisible,
+    requestConfirmation: handleConfirm,
     setIsSubmittingApplication,
     setHasExistingApplication,
     setExistingApplicationStatus,
@@ -1230,6 +1415,12 @@ const ListingDetailsSheet = forwardRef<
       setSelectedGroupId(null);
       setSelectedSlotType(null);
       setUserGroups([]);
+      setProductionTeams([]);
+      setLoadingProductionTeams(false);
+      setHasLoadedProductionTeams(false);
+      setSelectedProductionTeamId(null);
+      setProductionRoster([]);
+      setSelectedProductionRosterId(null);
       // Reset venue selection state
       setSelectedVenueId(null);
       setUserVenues([]);
@@ -1243,27 +1434,66 @@ const ListingDetailsSheet = forwardRef<
     }
   }, [listingId]);
 
-  // Check for existing application when group data is loaded
+  // Check for existing application when listing data is loaded
   useEffect(() => {
-    if (group && userId && group.type === "Gig") {
-      if (userRole !== "producer") {
+    if (group && userId && (group.type === "Gig" || group.type === "Group")) {
+      if (group.type === "Group") {
         checkExistingApplication();
       }
-      fetchUserGroups();
+      if (group.type === "Gig") {
+        if (userRole !== "producer") {
+          checkExistingApplication();
+        }
+      }
+      if (group.type === "Gig" && userRole !== "producer") {
+        fetchUserGroups();
+      }
     }
   }, [group, userId, userRole]);
 
   useEffect(() => {
-    if (userRole === "producer") {
+    const resolvedUserRole = userRole || currentUserRole;
+
+    if (resolvedUserRole === "producer") {
       fetchProductionTeams();
+      return;
     }
-  }, [userRole, userId]);
+
+    setProductionTeams([]);
+    setSelectedProductionTeamId(null);
+    setProductionRoster([]);
+    setSelectedProductionRosterId(null);
+    setLoadingProductionTeams(false);
+    setHasLoadedProductionTeams(false);
+  }, [currentUserRole, fetchProductionTeams, userId, userRole]);
+
+  useFocusEffect(
+    useCallback(() => {
+      const resolvedUserRole = userRole || currentUserRole;
+      if (resolvedUserRole === "producer" && activeUserId) {
+        void fetchProductionTeams();
+      }
+    }, [activeUserId, currentUserRole, fetchProductionTeams, userRole]),
+  );
 
   useEffect(() => {
     if (currentUserRole === "venue-owner") {
       fetchOwnedVenues();
     }
   }, [currentUserRole, currentUserId]);
+
+  useEffect(() => {
+    if (group?.type !== "Gig" || userRole !== "producer") return;
+
+    if (selectedProductionTeamId) {
+      fetchProductionTeamRoster(selectedProductionTeamId);
+    } else {
+      setProductionRoster([]);
+      setSelectedProductionRosterId(null);
+    }
+
+    checkExistingApplication();
+  }, [group?.id, userId, userRole, selectedProductionTeamId]);
 
   // Check for existing studio booking when group data is loaded
   useEffect(() => {
@@ -1282,6 +1512,12 @@ const ListingDetailsSheet = forwardRef<
 
   // Check if selected group has already applied (group-level deduplication)
   useEffect(() => {
+    if (userRole === "producer") {
+      setGroupAlreadyApplied(false);
+      setGroupApplicationBy(null);
+      return;
+    }
+
     if (selectedGroupId) {
       checkGroupApplication(selectedGroupId);
     } else {
@@ -1292,7 +1528,7 @@ const ListingDetailsSheet = forwardRef<
 
   // Debug effect to monitor application state changes
   useEffect(() => {
-    debugLog("📝 Application State Updated:");
+    debugLog("?? Application State Updated:");
     debugLog("  - pitchMessage:", pitchMessage);
     debugLog("  - videoUrl:", videoUrl);
     debugLog("  - isSubmittingApplication:", isSubmittingApplication);
@@ -1300,7 +1536,7 @@ const ListingDetailsSheet = forwardRef<
 
   // Debug effect to monitor userId changes
   useEffect(() => {
-    debugLog("👤 userId changed:", userId);
+    debugLog("?? userId changed:", userId);
   }, [userId]);
 
   const fetchGroupDetails = async () => {
@@ -1312,9 +1548,9 @@ const ListingDetailsSheet = forwardRef<
       } = await supabase.auth.getUser();
       debugLog("User:", user?.id);
 
-      let data = null;
+      let data: any = null;
       let type = "Group";
-      let ownerId = null;
+      let ownerId: string | null = null;
 
       // Try Group
       const { data: groupData } = await supabase
@@ -1376,6 +1612,8 @@ const ListingDetailsSheet = forwardRef<
           name: data.name || data.full_name,
         });
 
+        let resolvedOpenGroupApplications: boolean | null = null;
+
         const normalizeImageArray = (value: any): string[] => {
           if (Array.isArray(value)) {
             return value
@@ -1414,12 +1652,32 @@ const ListingDetailsSheet = forwardRef<
         let resolvedImages = normalizeImageArray(data.images);
 
         if (type === "Group") {
-          const { data: mediaRows, error: mediaError } = await supabase
-            .from("group_media")
-            .select("media_url, sort_order")
-            .eq("group_id", data.id)
-            .eq("media_type", "image")
-            .order("sort_order", { ascending: true });
+          const [
+            mediaRowsResult,
+            groupSettingsResult,
+            groupMembersResult,
+          ] = await Promise.all([
+            supabase
+              .from("group_media")
+              .select("media_url, sort_order")
+              .eq("group_id", data.id)
+              .eq("media_type", "image")
+              .order("sort_order", { ascending: true }),
+            supabase
+              .from("groups")
+              .select("open_group_applications")
+              .eq("id", data.id)
+              .single(),
+            supabase
+              .from("group_members")
+              .select("user_id, role, profiles:user_id(full_name, avatar_url)")
+              .eq("group_id", data.id),
+          ]);
+
+          const mediaRows = mediaRowsResult.data;
+          const mediaError = mediaRowsResult.error;
+          const groupSettings = groupSettingsResult.data;
+          const groupSettingsError = groupSettingsResult.error;
 
           if (!mediaError && Array.isArray(mediaRows)) {
             const groupMediaImages = mediaRows
@@ -1432,7 +1690,28 @@ const ListingDetailsSheet = forwardRef<
               resolvedImages = groupMediaImages;
             }
           } else if (mediaError) {
-            debugLog("⚠️ group_media fetch failed, using fallback images:", mediaError);
+            debugLog("?? group_media fetch failed, using fallback images:", mediaError);
+          }
+
+          if (!groupSettingsError && groupSettings) {
+            resolvedOpenGroupApplications =
+              groupSettings.open_group_applications === true;
+          }
+
+          if (!groupMembersResult.error && Array.isArray(groupMembersResult.data) && groupMembersResult.data.length > 0) {
+            const legacyMembers: any[] = Array.isArray(data.members) ? data.members : [];
+            const linkedMembers = groupMembersResult.data.map((row: any) => {
+              const legacy = legacyMembers.find((member: any) => member?.user_id && member.user_id === row.user_id);
+              return {
+                user_id: row.user_id,
+                name: row.profiles?.full_name || "Member",
+                avatar_url: row.profiles?.avatar_url || null,
+                instrument: legacy?.instrument || row.role || "Member",
+                role: row.role === "owner" || row.user_id === data.owner_id ? "Leader" : "Member",
+              };
+            });
+            linkedMembers.sort((a: any, b: any) => (a.role === "Leader" ? -1 : 1) - (b.role === "Leader" ? -1 : 1));
+            data = { ...data, members: linkedMembers };
           }
         }
         // Fetch owner profile separately
@@ -1463,6 +1742,8 @@ const ListingDetailsSheet = forwardRef<
           images: resolvedImages.length > 0 ? resolvedImages : (data.avatar_url ? [data.avatar_url] : []),
           location: data.location || data.address, // Handle profile address
           genre: data.genre || (data.genres ? data.genres.join(", ") : ""),
+          owner_id: data.owner_id || ownerId,
+          organizer_id: data.organizer_id || null,
           owner_name:
             ownerProfile?.full_name || data.name || data.full_name || "Unknown", // Use data.full_name if ownerProfile fails (self-managed)
           owner_avatar: ownerProfile?.avatar_url || data.avatar_url,
@@ -1475,11 +1756,15 @@ const ListingDetailsSheet = forwardRef<
           review_count: data.review_count || 0,
           rating: data.rating || 0,
           studio_type: normalizedStudioType,
+          open_group_applications:
+            typeof data.open_group_applications === "boolean"
+              ? data.open_group_applications
+              : resolvedOpenGroupApplications ?? true,
         };
 
         // If studio or venue, fetch availability from operating hours
         if (type === "Studio" || type === "Venue") {
-          debugLog("📅 Fetching studio availability data...");
+          debugLog("?? Fetching studio availability data...");
           const [
             operatingHoursResult,
             dateOverridesResult,
@@ -1519,7 +1804,7 @@ const ListingDetailsSheet = forwardRef<
           normalizedData.promotions = studioPromotionsResult.data || [];
 
           if (!hoursError && operatingHours) {
-            debugLog("📅 Operating hours fetched:", operatingHours);
+            debugLog("?? Operating hours fetched:", operatingHours);
             // Convert operating hours to availability format - now supports multiple slots per day
             const dayNames = [
               "Sunday",
@@ -1543,16 +1828,16 @@ const ListingDetailsSheet = forwardRef<
               };
             });
             normalizedData.availability = availability;
-            debugLog("📅 Converted availability:", availability);
+            debugLog("?? Converted availability:", availability);
           } else if (!data.availability) {
             debugLog(
-              "⚠️ No operating hours found, checking availability column...",
+              "?? No operating hours found, checking availability column...",
             );
             // Fallback: check if availability exists in the data (JSONB column)
             if (data.availability) {
               normalizedData.availability = data.availability;
               debugLog(
-                "📅 Using availability from JSONB column:",
+                "?? Using availability from JSONB column:",
                 data.availability,
               );
             }
@@ -1560,15 +1845,15 @@ const ListingDetailsSheet = forwardRef<
 
           // Store date overrides for use in availability processing
           if (!overridesError && dateOverrides && dateOverrides.length > 0) {
-            debugLog("📅 Date overrides fetched:", dateOverrides);
+            debugLog("?? Date overrides fetched:", dateOverrides);
             normalizedData.dateOverrides = dateOverrides;
           }
 
           if (!settingsError && studioSettings) {
-            debugLog("⚙️ Studio settings fetched:", studioSettings);
+            debugLog("?? Studio settings fetched:", studioSettings);
             normalizedData.settings = studioSettings;
           } else {
-            debugLog("⚠️ No studio settings found, using defaults");
+            debugLog("?? No studio settings found, using defaults");
             normalizedData.settings = {
               lead_time_hours: 24,
               weekend_multiplier: 1.0,
@@ -1602,14 +1887,14 @@ const ListingDetailsSheet = forwardRef<
 
           // Process availability (Availability + Bookings + Date Overrides)
           if (normalizedData.availability) {
-            debugLog("📅 Processing availability for calendar...");
+            debugLog("?? Processing availability for calendar...");
             processAvailability(
               normalizedData.availability,
               fetchedBookings,
               normalizedData.dateOverrides,
             );
           } else {
-            debugLog("⚠️ No availability data to process");
+            debugLog("?? No availability data to process");
           }
         } else {
           setExistingBookings([]);
@@ -1634,7 +1919,7 @@ const ListingDetailsSheet = forwardRef<
     // Safeguard against undefined or non-array dbBookings
     const safeDbBookings = Array.isArray(dbBookings) ? dbBookings : [];
 
-    debugLog("📅 processAvailability called with:", {
+    debugLog("?? processAvailability called with:", {
       availability,
       dbBookingsCount: safeDbBookings.length,
       dateOverridesCount: dateOverrides?.length || 0,
@@ -1664,7 +1949,7 @@ const ListingDetailsSheet = forwardRef<
       if (dayIndex !== -1) {
         availabilityMap[dayIndex] = daySchedule;
         debugLog(
-          `📅 Mapped ${daySchedule.day} (index ${dayIndex}) with ${daySchedule.slots?.length || 0} slots`,
+          `?? Mapped ${daySchedule.day} (index ${dayIndex}) with ${daySchedule.slots?.length || 0} slots`,
         );
       }
     });
@@ -1679,13 +1964,13 @@ const ListingDetailsSheet = forwardRef<
         }
         dateOverrideMap[dateStr].push(override);
         debugLog(
-          `📅 Mapped date override for ${dateStr}: open=${override.is_open}, ${override.open_time} - ${override.close_time}`,
+          `?? Mapped date override for ${dateStr}: open=${override.is_open}, ${override.open_time} - ${override.close_time}`,
         );
       });
     }
 
-    debugLog("📅 Availability map:", availabilityMap);
-    debugLog("📅 Date override map:", dateOverrideMap);
+    debugLog("?? Availability map:", availabilityMap);
+    debugLog("?? Date override map:", dateOverrideMap);
 
     // Loop next 90 days to ensure coverage
     for (let i = 0; i < 90; i++) {
@@ -1703,7 +1988,7 @@ const ListingDetailsSheet = forwardRef<
         // Use date override instead of weekly schedule
         daySchedule = getDateOverrideSchedule(dateStr, date, dateOverrideRows);
         if (daySchedule) {
-          debugLog(`📅 Using date override for ${dateStr}:`, daySchedule);
+          debugLog(`?? Using date override for ${dateStr}:`, daySchedule);
         }
       } else {
         // Use weekly schedule
@@ -1755,7 +2040,7 @@ const ListingDetailsSheet = forwardRef<
           const bEnd = new Date(`${b.booking_date}T${b.end_time}`);
 
           if (isNaN(bStart.getTime()) || isNaN(bEnd.getTime())) {
-            debugLog("⚠️ Invalid booking times in processAvailability:", b);
+            debugLog("?? Invalid booking times in processAvailability:", b);
             return;
           }
 
@@ -1825,8 +2110,8 @@ const ListingDetailsSheet = forwardRef<
       }
     }
 
-    debugLog("📅 Marked dates count:", Object.keys(marked).length);
-    debugLog("📅 Sample marked dates:", Object.keys(marked).slice(0, 5));
+    debugLog("?? Marked dates count:", Object.keys(marked).length);
+    debugLog("?? Sample marked dates:", Object.keys(marked).slice(0, 5));
     setMarkedDates(marked);
 
     if (selectedDate && marked[selectedDate]?.disabled) {
@@ -1840,12 +2125,12 @@ const ListingDetailsSheet = forwardRef<
   };
 
   const fetchAvailableSlots = async (dateStr: string): Promise<string[]> => {
-    debugLog("🕐 fetchAvailableSlots called for date:", dateStr);
-    debugLog("🕐 group.availability:", group?.availability);
-    debugLog("🕐 group.dateOverrides:", group?.dateOverrides);
+    debugLog("?? fetchAvailableSlots called for date:", dateStr);
+    debugLog("?? group.availability:", group?.availability);
+    debugLog("?? group.dateOverrides:", group?.dateOverrides);
 
     if (!group?.availability) {
-      debugLog("⚠️ No availability data in group");
+      debugLog("?? No availability data in group");
       setAvailableSlots([]);
       return [];
     }
@@ -1860,7 +2145,7 @@ const ListingDetailsSheet = forwardRef<
       "friday",
       "saturday",
     ][selectedDate.getDay()];
-    debugLog("🕐 Looking for day:", dayName);
+    debugLog("?? Looking for day:", dayName);
 
     // Check if there's a specific date override for this date
     let daySchedule: any = null;
@@ -1870,11 +2155,11 @@ const ListingDetailsSheet = forwardRef<
         (o: any) => o.override_date === dateStr,
       );
       if (dateOverrideRows.length > 0) {
-        debugLog("🕐 Found date override:", dateOverrideRows);
+        debugLog("?? Found date override:", dateOverrideRows);
         daySchedule = getDateOverrideSchedule(dateStr, selectedDate, dateOverrideRows);
         if (!daySchedule) {
           // Date is closed
-          debugLog("⚠️ Date override marks this date as closed");
+          debugLog("?? Date override marks this date as closed");
           setAvailableSlots([]);
           return [];
         }
@@ -1888,10 +2173,10 @@ const ListingDetailsSheet = forwardRef<
       );
     }
 
-    debugLog("🕐 Found day schedule:", daySchedule);
+    debugLog("?? Found day schedule:", daySchedule);
 
     if (!daySchedule || !daySchedule.slots) {
-      debugLog("⚠️ No slots for this day");
+      debugLog("?? No slots for this day");
       setAvailableSlots([]);
       return [];
     }
@@ -1910,7 +2195,7 @@ const ListingDetailsSheet = forwardRef<
       return bookingDateStr === dateStr;
     });
     debugLog(
-      "🕐 Day bookings:",
+      "?? Day bookings:",
       dayBookings.length,
       dayBookings.map((b: any) => ({
         date: b.booking_date,
@@ -1934,7 +2219,7 @@ const ListingDetailsSheet = forwardRef<
       const bEnd = new Date(`${b.booking_date}T${b.end_time}`);
 
       if (isNaN(bStart.getTime()) || isNaN(bEnd.getTime())) {
-        debugLog("⚠️ Invalid booking times:", b);
+        debugLog("?? Invalid booking times:", b);
         return;
       }
 
@@ -1986,10 +2271,10 @@ const ListingDetailsSheet = forwardRef<
       }
     });
 
-    debugLog("🕐 Blocked times (including cart):", Array.from(blockedTimes));
+    debugLog("?? Blocked times (including cart):", Array.from(blockedTimes));
 
     daySchedule.slots.forEach((slot: any) => {
-      debugLog("🕐 Processing slot:", slot);
+      debugLog("?? Processing slot:", slot);
       const start = new Date(`${dateStr}T${slot.start}`);
       const end = new Date(`${dateStr}T${slot.end}`);
 
@@ -2016,7 +2301,7 @@ const ListingDetailsSheet = forwardRef<
     });
 
     const uniqueSlots = Array.from(slotsSet).sort();
-    debugLog("🕐 Generated slots:", uniqueSlots);
+    debugLog("?? Generated slots:", uniqueSlots);
     setAvailableSlots(uniqueSlots);
     return uniqueSlots;
   };
@@ -2132,7 +2417,7 @@ const ListingDetailsSheet = forwardRef<
     recordingRate,
     hasDualPricing,
     displayRate,
-    showTabs,
+    showTabs: hasDefaultTabs,
   } = useListingSheetDerived(group);
 
   const effectiveDisplayRate = useMemo(() => {
@@ -2187,10 +2472,84 @@ const ListingDetailsSheet = forwardRef<
     : group?.owner_id || group?.organizer_id || null;
   const isOwnListing = !!userId && !!listingOwnerId && listingOwnerId === userId;
   const showReportButton = !!group && !isOwnListing && !isGuest;
+  const isGroupListing = group?.type === "Group";
+  const effectiveUserRole = userRole || currentUserRole;
+  const hasStructuredConnectionTab =
+    effectiveUserRole === "producer" &&
+    (group?.type === "Group" || group?.type === "Artist" || group?.type === "Venue");
+  const hasGroupConnectContent =
+    group?.type === "Group" &&
+    (effectiveUserRole === "venue-owner" ||
+      (effectiveUserRole === "musician" && !!group?.requirements?.audition) ||
+      hasStructuredConnectionTab);
+  const shouldShowConnectTab = hasStructuredConnectionTab || hasGroupConnectContent;
+  const canApplyToGroup =
+    isGroupListing &&
+    group?.open_group_applications === true &&
+    !!userId &&
+    effectiveUserRole === "musician" &&
+    group?.owner_id !== userId;
+
+  useEffect(() => {
+    if (activeTab === "Connect" && effectiveUserRole === "producer" && activeUserId) {
+      void fetchProductionTeams();
+    }
+  }, [activeTab, activeUserId, effectiveUserRole, fetchProductionTeams]);
+
+  const tabsToRender = useMemo(() => {
+    const baseTabs = Array.isArray(labels.tabs) ? [...labels.tabs] : [];
+
+    if (!baseTabs.includes("Review")) {
+      baseTabs.push("Review");
+    }
+
+    if (shouldShowConnectTab && !baseTabs.includes("Connect")) {
+      const reviewTabIndex = baseTabs.indexOf("Review");
+      if (reviewTabIndex === -1) {
+        baseTabs.push("Connect");
+      } else {
+        baseTabs.splice(reviewTabIndex, 0, "Connect");
+      }
+    }
+
+    if (!isGroupListing) {
+      return baseTabs;
+    }
+
+    const withoutApply = baseTabs.filter((tab) => tab !== "Apply");
+    if (!canApplyToGroup) {
+      return withoutApply;
+    }
+
+    if (withoutApply.includes("Apply")) {
+      return withoutApply;
+    }
+
+    const reviewTabIndex = withoutApply.indexOf("Review");
+    if (reviewTabIndex === -1) {
+      return [...withoutApply, "Apply"];
+    }
+
+    const nextTabs = [...withoutApply];
+    nextTabs.splice(reviewTabIndex, 0, "Apply");
+    return nextTabs;
+  }, [canApplyToGroup, isGroupListing, labels.tabs, shouldShowConnectTab]);
+
+  const showTabs = hasDefaultTabs && tabsToRender.length > 0;
+
+  useEffect(() => {
+    if (!tabsToRender.length) {
+      return;
+    }
+
+    if (!tabsToRender.includes(activeTab)) {
+      setActiveTab(tabsToRender[0]);
+    }
+  }, [activeTab, tabsToRender]);
 
   const renderTabs = () => (
     <View style={[styles.tabsContainer, { borderBottomColor: colors.border }]}>
-      {labels.tabs.map((tab) => (
+      {tabsToRender.map((tab) => (
         <TouchableOpacity activeOpacity={1}
           key={tab}
           style={[
@@ -2340,12 +2699,15 @@ const ListingDetailsSheet = forwardRef<
       colors={colors}
       isDark={isDark}
       group={group}
+      applicationContext="gig"
       userId={userId}
+      userRole={userRole}
       pitchMessage={pitchMessage}
       setPitchMessage={setPitchMessage}
       cvFile={cvFile}
       cvUrl={cvUrl}
       setCvFile={setCvFile}
+      setCvUrl={setCvUrl}
       videoUrl={videoUrl}
       setVideoUrl={setVideoUrl}
       isSubmittingApplication={isSubmittingApplication}
@@ -2356,6 +2718,52 @@ const ListingDetailsSheet = forwardRef<
       userGroups={userGroups}
       selectedGroupId={selectedGroupId}
       setSelectedGroupId={setSelectedGroupId}
+      productionTeams={productionTeams}
+      loadingProductionTeams={loadingProductionTeams}
+      selectedProductionTeamId={selectedProductionTeamId}
+      setSelectedProductionTeamId={setSelectedProductionTeamId}
+      productionRoster={productionRoster}
+      selectedProductionRosterId={selectedProductionRosterId}
+      setSelectedProductionRosterId={setSelectedProductionRosterId}
+      selectedSlotType={selectedSlotType}
+      setSelectedSlotType={setSelectedSlotType}
+      groupAlreadyApplied={groupAlreadyApplied}
+      groupApplicationBy={groupApplicationBy}
+      handleSubmitApplication={handleSubmitApplication}
+    />
+  );
+
+  const renderGroupApply = () => (
+    <GigApplyTab
+      colors={colors}
+      isDark={isDark}
+      group={group}
+      applicationContext="group"
+      userId={userId}
+      userRole={userRole}
+      pitchMessage={pitchMessage}
+      setPitchMessage={setPitchMessage}
+      cvFile={cvFile}
+      cvUrl={cvUrl}
+      setCvFile={setCvFile}
+      setCvUrl={setCvUrl}
+      videoUrl={videoUrl}
+      setVideoUrl={setVideoUrl}
+      isSubmittingApplication={isSubmittingApplication}
+      hasExistingApplication={hasExistingApplication}
+      existingApplicationStatus={existingApplicationStatus}
+      isBlocked={isBlocked}
+      blockReason={blockReason}
+      userGroups={userGroups}
+      selectedGroupId={selectedGroupId}
+      setSelectedGroupId={setSelectedGroupId}
+      productionTeams={productionTeams}
+      loadingProductionTeams={loadingProductionTeams}
+      selectedProductionTeamId={selectedProductionTeamId}
+      setSelectedProductionTeamId={setSelectedProductionTeamId}
+      productionRoster={productionRoster}
+      selectedProductionRosterId={selectedProductionRosterId}
+      setSelectedProductionRosterId={setSelectedProductionRosterId}
       selectedSlotType={selectedSlotType}
       setSelectedSlotType={setSelectedSlotType}
       groupAlreadyApplied={groupAlreadyApplied}
@@ -2447,6 +2855,7 @@ const ListingDetailsSheet = forwardRef<
       requestKind: "invite" | "application";
       contextLabel?: string;
       requireSlotSelection?: boolean;
+      requireRosterSelection?: boolean;
       extraMeta?: Record<string, unknown> | null;
     }) => {
       if (listingRequestInFlightRef.current || isSendingRequest) {
@@ -2487,13 +2896,31 @@ const ListingDetailsSheet = forwardRef<
       }
 
       if (request.requestKind === "application" && !normalizedVideoUrl) {
-        showSheetAlert("error", "Video Required", "Add a video or reel link before sending this application.");
+        showSheetAlert("error", "Video Required", "Upload a video or reel before sending this application.");
         return;
       }
 
       if (request.requireSlotSelection && requestSlotOptions.length > 0 && !selectedSlotType) {
         showSheetAlert("error", "Preferred Slot Required", "Choose the slot you want to fill before sending this application.");
         return;
+      }
+
+      if (request.requireRosterSelection) {
+        if (!filteredRequestRoster.length) {
+          showSheetAlert(
+            "error",
+            "Featured Performer Required",
+            selectedProductionTeam
+              ? `Add a matching roster entry to ${selectedProductionTeam.name} before sending this application.`
+              : "Add a matching roster entry before sending this application.",
+          );
+          return;
+        }
+
+        if (!selectedProductionRosterEntry) {
+          showSheetAlert("error", "Featured Performer Required", "Choose which performer this application is for before sending it.");
+          return;
+        }
       }
 
       listingRequestInFlightRef.current = true;
@@ -2529,6 +2956,13 @@ const ListingDetailsSheet = forwardRef<
           video_url: request.requestKind === "application" ? normalizedVideoUrl : null,
           contract_url: request.requestKind === "invite" ? uploadedDocumentUrl : null,
           slot_type: selectedSlotType || null,
+          roster_entry_id: selectedProductionRosterEntry?.id || null,
+          roster_entry_name:
+            selectedProductionRosterEntry?.display_name ||
+            selectedProductionRosterEntry?.group?.name ||
+            selectedProductionRosterEntry?.full_name ||
+            null,
+          roster_entry_kind: selectedProductionRosterEntry?.entity_kind || null,
         };
 
         await submitListingRequest({
@@ -2590,7 +3024,10 @@ const ListingDetailsSheet = forwardRef<
       requestDocumentUrl,
       requestPitchMessage,
       requestVideoUrl,
+      filteredRequestRoster,
       isSendingRequest,
+      selectedProductionRosterEntry,
+      selectedProductionTeam,
       requestSlotOptions.length,
       selectedSlotType,
       showSheetAlert,
@@ -2656,6 +3093,7 @@ const ListingDetailsSheet = forwardRef<
       requestKind: "application",
       contextLabel: "Application Context",
       requireSlotSelection: true,
+      requireRosterSelection: true,
       extraMeta: { request_kind: "application" },
     });
   }, [createListingRequest, group, selectedProductionTeam, showSheetAlert]);
@@ -2703,98 +3141,144 @@ const ListingDetailsSheet = forwardRef<
   );
 
   const renderConnectionPanel = () => {
+    const renderProductionTeamSelector = () => {
+      if (loadingProductionTeams || !hasLoadedProductionTeams) {
+        return (
+          <View style={{ paddingVertical: 12, alignItems: "center" }}>
+            <ActivityIndicator color={colors.primary} />
+          </View>
+        );
+      }
+
+      if (productionTeams.length > 0) {
+        return renderRequestSelectorChips(
+          productionTeams,
+          selectedProductionTeamId,
+          setSelectedProductionTeamId,
+          "people-outline",
+        );
+      }
+
+      return (
+        <TouchableOpacity
+          activeOpacity={1}
+          onPress={() => router.push("/my_production" as any)}
+          style={[styles.primaryBtn, { backgroundColor: colors.primary, marginTop: 12 }]}
+        >
+          <Text style={styles.primaryBtnText}>Manage Production Teams</Text>
+        </TouchableOpacity>
+      );
+    };
+
     const renderStructuredRequestFields = (options: {
       requestKind: "invite" | "application";
       pitchPlaceholder: string;
       contextLabel: string;
       contextPlaceholder: string;
       showSlotSelector?: boolean;
-    }) => (
-      <>
-        <Text style={[styles.label, { color: colors.textSecondary, marginTop: 14 }]}>Pitch / Intro *</Text>
+      showRosterSelector?: boolean;
+    }) => {
+      const rosterChipItems = filteredRequestRoster.map((entry: any) => ({
+        id: entry.id,
+        name: entry.display_name || entry.group?.name || entry.full_name || "Roster Entry",
+      }));
 
-        <DocumentUploader
-          label={options.requestKind === "invite" ? "Upload Contract *" : "Upload CV/Resume *"}
-          onFileSelect={(file) => {
-            setRequestDocumentFile(file);
-            setRequestDocumentUrl("");
-          }}
-          existingUrl={requestDocumentUrl || undefined}
-        />
+      return (
+        <>
+          <Text style={[styles.label, { color: colors.textSecondary, marginTop: 14 }]}>Pitch / Intro *</Text>
+          <View style={[styles.inputWrapper, { backgroundColor: isDark ? "#374151" : "#F9FAFB", marginTop: 8, height: 110 }]}>
+            <TextInput
+              style={[styles.input, { color: colors.text, height: "100%" }]}
+              placeholder={options.pitchPlaceholder}
+              placeholderTextColor={colors.textSecondary}
+              multiline
+              textAlignVertical="top"
+              value={requestPitchMessage}
+              onChangeText={setRequestPitchMessage}
+            />
+          </View>
 
-        {options.requestKind === "application" ? (
-          <>
-            <Text style={[styles.label, { color: colors.textSecondary, marginTop: 14 }]}>Video / Reel Link *</Text>
-            <View style={[styles.inputWrapper, { backgroundColor: isDark ? "#374151" : "#F9FAFB", marginTop: 8 }]}> 
-              <TextInput
-                style={[styles.input, { color: colors.text }]}
-                placeholder="Paste a YouTube, Drive, or portfolio video link"
-                placeholderTextColor={colors.textSecondary}
-                value={requestVideoUrl}
-                onChangeText={setRequestVideoUrl}
-                autoCapitalize="none"
-                autoCorrect={false}
-              />
-            </View>
-          </>
-        ) : null}
-        <View style={[styles.inputWrapper, { backgroundColor: isDark ? "#374151" : "#F9FAFB", marginTop: 8, height: 110 }]}> 
-          <TextInput
-            style={[styles.input, { color: colors.text, height: "100%" }]}
-            placeholder={options.pitchPlaceholder}
-            placeholderTextColor={colors.textSecondary}
-            multiline
-            textAlignVertical="top"
-            value={requestPitchMessage}
-            onChangeText={setRequestPitchMessage}
+          {options.showSlotSelector && requestSlotOptions.length > 0 ? (
+            <>
+              <Text style={[styles.label, { color: colors.textSecondary, marginTop: 14 }]}>Preferred Slot *</Text>
+              {renderRequestSelectorChips(
+                requestSlotOptions.map((slot) => ({ id: slot.id, name: slot.name })),
+                selectedSlotType,
+                (value) => setSelectedSlotType(value as "solo" | "duo" | "band"),
+                "albums-outline",
+              )}
+            </>
+          ) : null}
+
+          {options.showRosterSelector && selectedProductionTeam ? (
+            <>
+              <Text style={[styles.label, { color: colors.textSecondary, marginTop: 14 }]}>Featured Performer *</Text>
+              {rosterChipItems.length > 0 ? (
+                renderRequestSelectorChips(
+                  rosterChipItems,
+                  selectedProductionRosterId,
+                  setSelectedProductionRosterId,
+                  "person-outline",
+                )
+              ) : (
+                <Text style={[styles.description, { color: colors.textSecondary, marginTop: 8 }]}>Add a matching roster entry to {selectedProductionTeam.name} before you can send this application.</Text>
+              )}
+            </>
+          ) : null}
+
+          <DocumentUploader
+            label={options.requestKind === "invite" ? "Upload Contract *" : "Upload CV/Resume *"}
+            onFileSelect={(file) => {
+              setRequestDocumentFile(file);
+              setRequestDocumentUrl("");
+            }}
+            existingUrl={requestDocumentUrl || undefined}
           />
-        </View>
 
-        {options.showSlotSelector && requestSlotOptions.length > 0 ? (
-          <>
-            <Text style={[styles.label, { color: colors.textSecondary, marginTop: 14 }]}>Preferred Slot *</Text>
-            {renderRequestSelectorChips(
-              requestSlotOptions.map((slot) => ({ id: slot.id, name: slot.name })),
-              selectedSlotType,
-              (value) => setSelectedSlotType(value as "solo" | "duo" | "band"),
-              "albums-outline",
-            )}
-          </>
-        ) : null}
+          {options.requestKind === "application" ? (
+            <>
+              <Text style={[styles.label, { color: colors.textSecondary, marginTop: 14 }]}>Upload Video / Reel *</Text>
+              <View style={{ marginTop: 8 }}>
+                <VideoUploader
+                  videoUrl={requestVideoUrl || null}
+                  onVideoChange={(url) => setRequestVideoUrl(url || "")}
+                  userId={activeUserId || ""}
+                  bucketName="documents"
+                  folder="performance-videos"
+                  maxSizeMB={50}
+                />
+              </View>
+            </>
+          ) : null}
 
-        <Text style={[styles.label, { color: colors.textSecondary, marginTop: 14 }]}>{options.contextLabel} *</Text>
-        <View style={[styles.inputWrapper, { backgroundColor: isDark ? "#374151" : "#F9FAFB", marginTop: 8, height: 96 }]}> 
-          <TextInput
-            style={[styles.input, { color: colors.text, height: "100%" }]}
-            placeholder={options.contextPlaceholder}
-            placeholderTextColor={colors.textSecondary}
-            multiline
-            textAlignVertical="top"
-            value={requestApplicationContext}
-            onChangeText={setRequestApplicationContext}
-          />
-        </View>
-      </>
-    );
+          <Text style={[styles.label, { color: colors.textSecondary, marginTop: 14 }]}>{options.contextLabel} *</Text>
+          <View style={[styles.inputWrapper, { backgroundColor: isDark ? "#374151" : "#F9FAFB", marginTop: 8, height: 96 }]}>
+            <TextInput
+              style={[styles.input, { color: colors.text, height: "100%" }]}
+              placeholder={options.contextPlaceholder}
+              placeholderTextColor={colors.textSecondary}
+              multiline
+              textAlignVertical="top"
+              value={requestApplicationContext}
+              onChangeText={setRequestApplicationContext}
+            />
+          </View>
+        </>
+      );
+    };
+
+    const effectiveProducerRole = userRole || currentUserRole;
 
     if (group?.type === "Group" || group?.type === "Artist") {
-      if (currentUserRole !== "producer") {
+      if (effectiveProducerRole !== "producer") {
         return null;
       }
 
       return (
-        <View style={[styles.section, { marginBottom: 0 }]}> 
+        <View style={[styles.section, { marginBottom: 0 }]}>
           <Text style={[styles.sectionTitle, { color: colors.text }]}>Invite To Your Team</Text>
           <Text style={[styles.description, { color: colors.textSecondary }]}>Select one of your production teams and send an invite with a pitch, details, and the required contract.</Text>
-          {productionTeams.length > 0 ? renderRequestSelectorChips(productionTeams, selectedProductionTeamId, setSelectedProductionTeamId, "people-outline") : (
-            <TouchableOpacity
-              activeOpacity={1}
-              onPress={() => router.push("/my_production" as any)}
-              style={[styles.primaryBtn, { backgroundColor: colors.primary, marginTop: 12 }]}
-            >
-              <Text style={styles.primaryBtnText}>Create Production Team</Text>
-            </TouchableOpacity>
-          )}
+          {renderProductionTeamSelector()}
           {renderStructuredRequestFields({
             requestKind: "invite",
             pitchPlaceholder: `Tell ${group?.name || "this musician"} what your team needs and why they are a fit.`,
@@ -2807,32 +3291,30 @@ const ListingDetailsSheet = forwardRef<
             disabled={isSendingRequest || loadingProductionTeams}
             style={[styles.primaryBtn, { backgroundColor: colors.primary, marginTop: 12 }]}
           >
-            {isSendingRequest ? <ActivityIndicator color="#FFF" /> : <Text style={styles.primaryBtnText}>Send Team Invite</Text>}
+            {isSendingRequest ? (
+              <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8 }}>
+                <ActivityIndicator color="#FFF" />
+                <Text style={styles.primaryBtnText}>Sending Invite...</Text>
+              </View>
+            ) : <Text style={styles.primaryBtnText}>Send Team Invite</Text>}
           </TouchableOpacity>
         </View>
       );
     }
 
-    if (group?.type === "Venue" && currentUserRole === "producer") {
+    if (group?.type === "Venue" && effectiveProducerRole === "producer") {
       return (
-        <View style={[styles.section, { marginBottom: 0 }]}> 
+        <View style={[styles.section, { marginBottom: 0 }]}>
           <Text style={[styles.sectionTitle, { color: colors.text }]}>Apply As Production Team</Text>
           <Text style={[styles.description, { color: colors.textSecondary }]}>Choose a team and send an application with a pitch, selected slot, CV, and video.</Text>
-          {productionTeams.length > 0 ? renderRequestSelectorChips(productionTeams, selectedProductionTeamId, setSelectedProductionTeamId, "people-outline") : (
-            <TouchableOpacity
-              activeOpacity={1}
-              onPress={() => router.push("/my_production" as any)}
-              style={[styles.primaryBtn, { backgroundColor: colors.primary, marginTop: 12 }]}
-            >
-              <Text style={styles.primaryBtnText}>Create Production Team</Text>
-            </TouchableOpacity>
-          )}
+          {renderProductionTeamSelector()}
           {renderStructuredRequestFields({
             requestKind: "application",
             pitchPlaceholder: `Tell ${group?.name || "this venue"} how your team can help and what you bring.`,
             contextLabel: "Application Context",
             contextPlaceholder: "Add event context, availability, technical strengths, or other production notes.",
             showSlotSelector: true,
+            showRosterSelector: true,
           })}
           <TouchableOpacity
             activeOpacity={1}
@@ -2840,7 +3322,12 @@ const ListingDetailsSheet = forwardRef<
             disabled={isSendingRequest || loadingProductionTeams}
             style={[styles.primaryBtn, { backgroundColor: colors.primary, marginTop: 12 }]}
           >
-            {isSendingRequest ? <ActivityIndicator color="#FFF" /> : <Text style={styles.primaryBtnText}>Send Venue Application</Text>}
+            {isSendingRequest ? (
+              <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8 }}>
+                <ActivityIndicator color="#FFF" />
+                <Text style={styles.primaryBtnText}>Sending Application...</Text>
+              </View>
+            ) : <Text style={styles.primaryBtnText}>Send Venue Application</Text>}
           </TouchableOpacity>
         </View>
       );
@@ -2848,7 +3335,6 @@ const ListingDetailsSheet = forwardRef<
 
     return null;
   };
-
   // Group: About Tab
   const renderGroupAbout = () => (
     <GroupAboutTab
@@ -2861,7 +3347,6 @@ const ListingDetailsSheet = forwardRef<
       completionRate={listingCompletionRate}
       sheetRef={ref}
       listingId={listingId}
-      connectionPanel={renderConnectionPanel()}
     />
   );
 
@@ -2886,7 +3371,7 @@ const ListingDetailsSheet = forwardRef<
   );
 
   const handleSendBookingRequest = useBookingRequestAction({
-    currentUserRole,
+    currentUserRole: effectiveUserRole,
     userVenues,
     selectedVenueId,
     requestMessage,
@@ -2897,29 +3382,45 @@ const ListingDetailsSheet = forwardRef<
     handleConfirm,
     setIsSendingRequest,
     setRequestMessage,
-    closeSheet: dismissSelf,
+    closeSheet: () => {
+      if (ref && "current" in ref && ref.current) {
+        (ref as any).current.dismiss();
+      }
+    },
   });
 
-  // Group: Connect Tab
-  const renderGroupConnect = () => (
-    <GroupConnectTab
-      currentUserRole={currentUserRole}
-      userVenues={userVenues}
-      colors={colors}
-      isDark={isDark}
-      styles={styles}
-      selectedVenueId={selectedVenueId}
-      setSelectedVenueId={setSelectedVenueId}
-      checkingVenue={checkingVenue}
-      requestMessage={requestMessage}
-      setRequestMessage={setRequestMessage}
-      handleSendBookingRequest={handleSendBookingRequest}
-      isSendingRequest={isSendingRequest}
-      renderBookingControls={renderBookingControls}
-      group={group}
-      handleConfirm={handleConfirm}
-    />
-  );
+  const renderConnectionTab = () => {
+    const connectionPanel = hasStructuredConnectionTab ? renderConnectionPanel() : null;
+
+    if (group?.type === "Group") {
+      return (
+        <GroupConnectTab
+          currentUserRole={effectiveUserRole}
+          userVenues={userVenues}
+          colors={colors}
+          isDark={isDark}
+          styles={styles}
+          selectedVenueId={selectedVenueId}
+          setSelectedVenueId={setSelectedVenueId}
+          checkingVenue={checkingVenue}
+          requestMessage={requestMessage}
+          setRequestMessage={setRequestMessage}
+          handleSendBookingRequest={handleSendBookingRequest}
+          isSendingRequest={isSendingRequest}
+          renderBookingControls={renderBookingControls}
+          group={group}
+          handleConfirm={handleConfirm}
+          connectionPanel={connectionPanel}
+        />
+      );
+    }
+
+    if (!connectionPanel) {
+      return null;
+    }
+
+    return <View style={styles.tabContent}>{connectionPanel}</View>;
+  };
 
   const renderStudioGigVenueAbout = () => (
     <StudioGigVenueAboutTab
@@ -2935,14 +3436,13 @@ const ListingDetailsSheet = forwardRef<
       currentUserId={currentUserId}
       completionRate={listingCompletionRate}
       handleProfileNavigation={handleProfileNavigation}
-      connectionPanel={renderConnectionPanel()}
     />
   );
 
   const sheetContent = loading ? (
-    <View style={[styles.loadingContainer, { backgroundColor: colors.background }]}> 
-      <View style={[styles.loadingShell, { backgroundColor: colors.card, borderColor: colors.border }]}> 
-        <View style={[styles.loadingHeroSkeleton, { backgroundColor: colors.inputBackground }]}> 
+    <View style={[styles.loadingContainer, { backgroundColor: colors.background }]}>
+      <View style={[styles.loadingShell, { backgroundColor: colors.card, borderColor: colors.border }]}>
+        <View style={[styles.loadingHeroSkeleton, { backgroundColor: colors.inputBackground }]}>
           <View style={[styles.loadingHeroBadge, { backgroundColor: isDark ? "rgba(255,255,255,0.12)" : "#E5E7EB" }]} />
           <View style={styles.loadingHeroActionRow}>
             <View style={[styles.loadingHeroAction, { backgroundColor: isDark ? "rgba(255,255,255,0.16)" : "#D1D5DB" }]} />
@@ -2998,7 +3498,9 @@ const ListingDetailsSheet = forwardRef<
         activeTab={activeTab}
         showTabs={showTabs}
         renderGroupAbout={renderGroupAbout}
+        renderGroupApply={renderGroupApply}
         renderGroupTimeline={renderGroupTimeline}
+        renderConnectionTab={renderConnectionTab}
         renderReviews={renderReviews}
         renderStudioGigVenueAbout={renderStudioGigVenueAbout}
         renderStudioSetup={renderStudioSetup}
@@ -3045,9 +3547,9 @@ const ListingDetailsSheet = forwardRef<
           onRequestClose={dismissSelf}
         >
           <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center', padding: 40 }}>
-            <TouchableOpacity 
-               style={StyleSheet.absoluteFillObject} 
-               activeOpacity={1} 
+            <TouchableOpacity
+               style={StyleSheet.absoluteFillObject}
+               activeOpacity={1}
                onPress={dismissSelf}
             />
             <View style={{ width: '100%', maxWidth: 800, maxHeight: '100%', backgroundColor: colors.background, borderRadius: 24, overflow: 'hidden', shadowColor: '#000', shadowOpacity: 0.3, shadowRadius: 24, elevation: 10 }}>
@@ -3129,14 +3631,14 @@ const ListingDetailsSheet = forwardRef<
       <Modal
         visible={modalVisible}
         onClose={() => {
-          debugLog("🔴 Modal closed without confirmation");
+          debugLog("?? Modal closed without confirmation");
           setConfirmRequireTerms(false);
           setConfirmContractUrl(null);
           setConfirmContractName(undefined);
           setModalVisible(false);
         }}
         onConfirm={() => {
-          debugLog("🟢 Modal CONFIRMED - executing action");
+          debugLog("?? Modal CONFIRMED - executing action");
           debugLog("confirmAction:", confirmAction);
           setConfirmRequireTerms(false);
           setConfirmContractUrl(null);
@@ -3144,9 +3646,9 @@ const ListingDetailsSheet = forwardRef<
           setModalVisible(false);
           try {
             confirmAction();
-            debugLog("✅ confirmAction executed successfully");
+            debugLog("? confirmAction executed successfully");
           } catch (error) {
-            console.error("❌ Error executing confirmAction:", error);
+            console.error("? Error executing confirmAction:", error);
           }
         }}
         title={confirmTitle}
@@ -3211,7 +3713,7 @@ const ListingDetailsSheet = forwardRef<
                   { color: colors.textSecondary },
                 ]}
               >
-                Total booking amount: ₱{paymentModalTotalAmount.toLocaleString()}
+                Total booking amount: ?{paymentModalTotalAmount.toLocaleString()}
               </Text>
               <Text style={[styles.paymentOptionHint, { color: colors.textSecondary }]}>
                 Full payment settles the booking. Downpayment leaves the other half in Pending as Balance Due.
@@ -3255,7 +3757,7 @@ const ListingDetailsSheet = forwardRef<
                         { color: colors.primary },
                       ]}
                     >
-                      ₱{paymentModalTotalAmount.toLocaleString()}
+                      ?{paymentModalTotalAmount.toLocaleString()}
                     </Text>
                   </View>
                 </View>
@@ -3307,7 +3809,7 @@ const ListingDetailsSheet = forwardRef<
                         { color: colors.primary },
                       ]}
                     >
-                      ₱
+                      ?
                       {paymentModalHalfAmount.toLocaleString()}
                     </Text>
                   </View>
@@ -3318,7 +3820,7 @@ const ListingDetailsSheet = forwardRef<
                     { color: colors.textSecondary },
                   ]}
                 >
-                  Pay half today. Remaining balance: ₱
+                  Pay half today. Remaining balance: ?
                   {paymentModalHalfAmount.toLocaleString()} shown in Pending.
                 </Text>
               </TouchableOpacity>
@@ -3333,7 +3835,7 @@ const ListingDetailsSheet = forwardRef<
                   ]}
                 >
                   <Text style={styles.paymentOptionConfirmText}>
-                    Pay ₱
+                    Pay ?
                     {(selectedPaymentType === "downpayment"
                       ? paymentModalHalfAmount
                       : paymentModalTotalAmount
@@ -4230,7 +4732,3 @@ const styles = StyleSheet.create({
 });
 
 export default ListingDetailsSheet;
-
-
-
-

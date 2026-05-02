@@ -16,9 +16,11 @@ import { supabase } from "../lib/supabase";
 import CachedImage from "../src/components/CachedImage";
 import CustomAlert, { AlertType } from "../src/components/CustomAlert";
 import Header from "../src/components/header";
+import Modal from "../src/components/modal";
 import Navbar from "../src/components/navbar";
 import Skeleton from "../src/components/Skeleton";
-import { useRequireAuth } from "../src/context/AuthContext";
+import { useBottomBarClearance } from "../src/hooks/useBottomBarClearance";
+import { useAuth, useRequireAuth } from "../src/context/AuthContext";
 import { useTheme } from "../src/context/ThemeContext";
 
 interface Team {
@@ -38,11 +40,30 @@ interface TeamMember {
   avatar_url: string | null;
 }
 
+const logFunctionInvokeError = (
+  functionName: string,
+  error: any,
+  body: Record<string, unknown>,
+) => {
+  console.warn(`${functionName} failed`, {
+    message: error?.message,
+    status: error?.status || error?.context?.status,
+    code: error?.code,
+    details: error?.details,
+    hint: error?.hint,
+    context: error?.context,
+    body,
+  });
+};
+
 export default function ProductionTeamScreen() {
   const { colors, isDark } = useTheme();
+  const { contentBottomPadding } = useBottomBarClearance(24);
   const { isAuthenticated, loading: authLoading, userId } = useRequireAuth();
+  const { userRole } = useAuth();
   const params = useLocalSearchParams<{ teamId?: string }>();
   const routeTeamId = Array.isArray(params.teamId) ? params.teamId[0] : params.teamId;
+  const isProducer = userRole === "producer";
 
   const [teams, setTeams] = useState<Team[]>([]);
   const [loading, setLoading] = useState(true);
@@ -56,14 +77,13 @@ export default function ProductionTeamScreen() {
 
   // Team detail view
   const [selectedTeam, setSelectedTeam] = useState<Team | null>(null);
+  const [activeTab, setActiveTab] = useState<"About" | "Members" | "Reviews">("About");
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
   const [loadingMembers, setLoadingMembers] = useState(false);
-
-  // Add member modal
-  const [addMemberModalVisible, setAddMemberModalVisible] = useState(false);
-  const [memberEmail, setMemberEmail] = useState("");
-  const [memberRole, setMemberRole] = useState<"member" | "manager">("member");
-  const [addingMember, setAddingMember] = useState(false);
+  const [fireModalVisible, setFireModalVisible] = useState(false);
+  const [memberToFire, setMemberToFire] = useState<TeamMember | null>(null);
+  const [fireReason, setFireReason] = useState("");
+  const [firingMember, setFiringMember] = useState(false);
 
   // Alert
   const [alertVisible, setAlertVisible] = useState(false);
@@ -78,13 +98,104 @@ export default function ProductionTeamScreen() {
     setAlertVisible(true);
   };
 
+  const invokeProduction = useCallback(async (body: Record<string, unknown>) => {
+    const { data, error } = await supabase.functions.invoke("manage-production", {
+      body,
+    });
+
+    if (error) {
+      logFunctionInvokeError("manage-production", error, body);
+      throw error;
+    }
+
+    if (data?.error) {
+      throw new Error(data.error);
+    }
+
+    return data;
+  }, []);
+
+  const renderSheetModal = ({
+    visible,
+    onClose,
+    title,
+    subtitle,
+    children,
+    scrollable = false,
+  }: {
+    visible: boolean;
+    onClose: () => void;
+    title: string;
+    subtitle?: string;
+    children: React.ReactNode;
+    scrollable?: boolean;
+  }) => (
+    <RNModal
+      visible={visible}
+      transparent
+      animationType="slide"
+      onRequestClose={onClose}
+    >
+      <View style={styles.sheetOverlay}>
+        <TouchableOpacity
+          activeOpacity={1}
+          onPress={onClose}
+          style={styles.sheetBackdrop}
+        />
+        <View
+          style={[
+            styles.sheetContainer,
+            { backgroundColor: colors.background, borderColor: colors.border },
+          ]}
+        >
+          <View
+            style={[
+              styles.sheetHandle,
+              { backgroundColor: isDark ? "#4B5563" : "#E5E7EB" },
+            ]}
+          />
+          <View style={[styles.sheetHeader, { borderBottomColor: colors.border }]}>
+            <View style={styles.sheetHeaderCopy}>
+              {subtitle ? (
+                <Text style={[styles.sheetEyebrow, { color: colors.textSecondary }]}>
+                  {subtitle}
+                </Text>
+              ) : null}
+              <Text style={[styles.sheetTitle, { color: colors.text }]}>{title}</Text>
+            </View>
+            <TouchableOpacity
+              activeOpacity={1}
+              onPress={onClose}
+              style={[
+                styles.sheetCloseButton,
+                { backgroundColor: colors.card, borderColor: colors.border },
+              ]}
+            >
+              <Ionicons name="close" size={18} color={colors.text} />
+            </TouchableOpacity>
+          </View>
+
+          {scrollable ? (
+            <ScrollView
+              style={styles.sheetBody}
+              contentContainerStyle={styles.sheetBodyContent}
+              showsVerticalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
+            >
+              {children}
+            </ScrollView>
+          ) : (
+            <View style={styles.sheetBodyContent}>{children}</View>
+          )}
+        </View>
+      </View>
+    </RNModal>
+  );
+
   const fetchTeams = useCallback(async () => {
     if (!userId) return;
     try {
-      const { data, error } = await supabase.functions.invoke("manage-production", {
-        body: { action: "list_my_teams" },
-      });
-      if (error) throw error;
+      const data = await invokeProduction({ action: "list_my_teams" });
       setTeams(data?.teams || []);
     } catch (e: any) {
       showAlert("error", "Error", e.message || "Failed to fetch teams");
@@ -92,7 +203,7 @@ export default function ProductionTeamScreen() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [userId]);
+  }, [invokeProduction, userId]);
 
   const fetchTeamMembers = useCallback(async (teamId: string) => {
     setLoadingMembers(true);
@@ -145,6 +256,7 @@ export default function ProductionTeamScreen() {
         ...data,
         member_role: data.owner_id === userId ? "owner" : membershipData?.role || "viewer",
       });
+      setActiveTab("About");
       await fetchTeamMembers(teamId);
     } catch (e: any) {
       showAlert("error", "Error", e.message || "Failed to fetch team");
@@ -159,30 +271,37 @@ export default function ProductionTeamScreen() {
       if (!authLoading && isAuthenticated) {
         setLoading(true);
         if (routeTeamId) {
-          void fetchTeamById(routeTeamId);
+          fetchTeamById(routeTeamId);
         } else {
           fetchTeams();
         }
       }
-    }, [authLoading, fetchTeamById, fetchTeams, isAuthenticated, routeTeamId])
+    }, [authLoading, isAuthenticated, fetchTeamById, fetchTeams, routeTeamId])
   );
 
   const handleCreateTeam = async () => {
+    if (!isProducer) {
+      showAlert("warning", "Production Only", "Only production users can create a production team.");
+      return;
+    }
+
     if (!newTeamName.trim()) {
       showAlert("warning", "Required", "Team name is required");
       return;
     }
+
+    if (!newTeamDescription.trim()) {
+      showAlert("warning", "Required", "Description is required");
+      return;
+    }
+
     setCreating(true);
     try {
-      const { data, error } = await supabase.functions.invoke("manage-production", {
-        body: {
-          action: "create_production_team",
-          name: newTeamName.trim(),
-          description: newTeamDescription.trim() || null,
-        },
+      await invokeProduction({
+        action: "create_production_team",
+        name: newTeamName.trim(),
+        description: newTeamDescription.trim(),
       });
-      if (error) throw error;
-      if (data?.error) throw new Error(data.error);
 
       setCreateModalVisible(false);
       setNewTeamName("");
@@ -195,72 +314,58 @@ export default function ProductionTeamScreen() {
       setCreating(false);
     }
   };
+  const isCreateTeamReady = newTeamName.trim().length > 0 && newTeamDescription.trim().length > 0;
 
-  const handleAddMember = async () => {
-    if (!memberEmail.trim() || !selectedTeam) {
-      showAlert("warning", "Required", "Email is required");
-      return;
-    }
-    setAddingMember(true);
-    try {
-      // Look up user by email
-      const { data: profileData, error: profileErr } = await supabase
-        .from("profiles")
-        .select("id")
-        .eq("email", memberEmail.trim().toLowerCase())
-        .maybeSingle();
-
-      if (profileErr) throw profileErr;
-      if (!profileData) {
-        showAlert("warning", "Not Found", "No user found with that email");
-        setAddingMember(false);
-        return;
-      }
-
-      const { data, error } = await supabase.functions.invoke("manage-production", {
-        body: {
-          action: "add_team_member",
-          team_id: selectedTeam.id,
-          user_id: profileData.id,
-          role: memberRole,
-        },
-      });
-      if (error) throw error;
-      if (data?.error) throw new Error(data.error);
-
-      setAddMemberModalVisible(false);
-      setMemberEmail("");
-      setMemberRole("member");
-      showAlert("success", "Success", "Member added!");
-      fetchTeamMembers(selectedTeam.id);
-    } catch (e: any) {
-      showAlert("error", "Error", e.message || "Failed to add member");
-    } finally {
-      setAddingMember(false);
-    }
+  const openFireMemberModal = (member: TeamMember) => {
+    setMemberToFire(member);
+    setFireReason("");
+    setFireModalVisible(true);
   };
 
-  const handleRemoveMember = async (memberUserId: string) => {
-    if (!selectedTeam) return;
+  const closeFireMemberModal = () => {
+    if (firingMember) return;
+    setFireModalVisible(false);
+    setMemberToFire(null);
+    setFireReason("");
+  };
+
+  const handleRemoveMember = async () => {
+    if (!selectedTeam || !memberToFire || firingMember) return;
+    const reason = fireReason.trim();
+    if (!reason) {
+      showAlert("warning", "Reason Required", "Please provide a reason before firing this member.");
+      return;
+    }
+
+    setFiringMember(true);
     try {
-      const { data, error } = await supabase.functions.invoke("manage-production", {
-        body: {
-          action: "remove_team_member",
-          team_id: selectedTeam.id,
-          user_id: memberUserId,
-        },
+      const data = await invokeProduction({
+        action: "remove_team_member",
+        team_id: selectedTeam.id,
+        user_id: memberToFire.user_id,
+        reason,
       });
-      if (error) throw error;
-      if (data?.error) throw new Error(data.error);
-      showAlert("success", "Removed", "Member removed from team");
+      const firedMemberName = memberToFire.full_name || "Member";
+      setFireModalVisible(false);
+      setMemberToFire(null);
+      setFireReason("");
+      showAlert(
+        data?.notification_sent === false ? "warning" : "success",
+        "Member Fired",
+        data?.notification_sent === false
+          ? `${firedMemberName} was removed, but the notification could not be sent.`
+          : `${firedMemberName} was removed and notified.`,
+      );
       fetchTeamMembers(selectedTeam.id);
     } catch (e: any) {
       showAlert("error", "Error", e.message || "Failed to remove member");
+    } finally {
+      setFiringMember(false);
     }
   };
-  const isCreateTeamReady = newTeamName.trim().length > 0;
-  const isAddMemberReady = memberEmail.trim().length > 0;
+
   const openTeamDetail = (team: Team) => {
+    setActiveTab("About");
     setSelectedTeam(team);
     fetchTeamMembers(team.id);
   };
@@ -271,8 +376,12 @@ export default function ProductionTeamScreen() {
       return;
     }
 
+    setActiveTab("About");
     setSelectedTeam(null);
     setTeamMembers([]);
+    setFireModalVisible(false);
+    setMemberToFire(null);
+    setFireReason("");
   };
 
   const statusColor = (role: string) => {
@@ -286,178 +395,186 @@ export default function ProductionTeamScreen() {
     }
   };
 
-  // ── Team Detail View ──
+  // Team detail view
   if (selectedTeam) {
+    const tabs: Array<"About" | "Members" | "Reviews"> = ["About", "Members", "Reviews"];
     const canManage =
       selectedTeam.member_role === "owner" ||
       selectedTeam.member_role === "manager";
 
     return (
-      <View style={[styles.flex1, { backgroundColor: colors.background }]}>
-        <Header title={selectedTeam.name} />
-        <ScrollView contentContainerStyle={styles.scrollContent}>
-          {/* Team Info */}
-          <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
-            {selectedTeam.logo_url ? (
-              <CachedImage
-                uri={selectedTeam.logo_url}
-                style={styles.teamLogo}
-              />
-            ) : (
-              <View style={[styles.teamLogoPlaceholder, { backgroundColor: colors.border }]}>
-                <Ionicons name="people" size={32} color={colors.textSecondary} />
-              </View>
-            )}
-            <Text style={[styles.teamName, { color: colors.text }]}>
-              {selectedTeam.name}
-            </Text>
-            {selectedTeam.description ? (
-              <Text style={[styles.teamDesc, { color: colors.textSecondary }]}>
-                {selectedTeam.description}
-              </Text>
-            ) : null}
-            <View style={styles.roleBadgeRow}>
-              <View style={[styles.roleBadge, { backgroundColor: statusColor(selectedTeam.member_role) + "22" }]}>
-                <Text style={[styles.roleBadgeText, { color: statusColor(selectedTeam.member_role) }]}>
-                  {selectedTeam.member_role.toUpperCase()}
-                </Text>
-              </View>
-            </View>
-          </View>
+      <>
+        <View style={[styles.flex1, { backgroundColor: colors.background }]}>
+          <Header title="Manage Production" onBackPress={closeTeamDetail} />
 
-          {/* Members */}
-          <View style={styles.sectionHeader}>
-            <Text style={[styles.sectionTitle, { color: colors.text }]}>Members</Text>
-            {canManage && (
-              <TouchableOpacity activeOpacity={1}
-                onPress={() => setAddMemberModalVisible(true)}
-                style={[styles.addBtn, { backgroundColor: colors.primary }]}
-              >
-                <Ionicons name="person-add" size={16} color="#fff" />
-                <Text style={styles.addBtnText}>Add</Text>
-              </TouchableOpacity>
-            )}
-          </View>
-
-          {loadingMembers ? (
-            <View style={styles.loadingContainer}>
-              <Skeleton width="100%" height={56} borderRadius={12} />
-              <Skeleton width="100%" height={56} borderRadius={12} style={{ marginTop: 8 }} />
-            </View>
-          ) : teamMembers.length === 0 ? (
-            <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
-              No members found
-            </Text>
-          ) : (
-            teamMembers.map((member) => (
-              <View
-                key={member.user_id}
-                style={[styles.memberCard, { backgroundColor: colors.card, borderColor: colors.border }]}
-              >
-                <View style={styles.memberRow}>
-                  {member.avatar_url ? (
-                    <CachedImage uri={member.avatar_url} style={styles.avatar} />
-                  ) : (
-                    <View style={[styles.avatarPlaceholder, { backgroundColor: colors.border }]}>
-                      <Ionicons name="person" size={18} color={colors.textSecondary} />
-                    </View>
-                  )}
-                  <View style={styles.memberInfo}>
-                    <Text style={[styles.memberName, { color: colors.text }]}>
-                      {member.full_name}
-                    </Text>
-                    <Text style={[styles.memberRole, { color: statusColor(member.role) }]}>
-                      {member.role}
-                    </Text>
-                  </View>
-                  {canManage && member.role !== "owner" && member.user_id !== userId && (
-                    <TouchableOpacity activeOpacity={1}
-                      onPress={() => handleRemoveMember(member.user_id)}
-                      style={styles.removeBtn}
-                    >
-                      <Ionicons name="close-circle" size={22} color="#EF4444" />
-                    </TouchableOpacity>
-                  )}
-                </View>
-              </View>
-            ))
-          )}
-
-          {/* Back button */}
-          <TouchableOpacity activeOpacity={1}
-            style={[styles.backBtn, { borderColor: colors.border }]}
-            onPress={closeTeamDetail}
+          <ScrollView
+            showsVerticalScrollIndicator={false}
+            contentContainerStyle={[styles.detailScrollContent, { paddingBottom: contentBottomPadding }]}
           >
-            <Text style={[styles.backBtnText, { color: colors.text }]}>Back to Teams</Text>
-          </TouchableOpacity>
-        </ScrollView>
+          <View style={styles.headerContainer}>
+            <View
+              style={[
+                styles.headerImageContainer,
+                {
+                  shadowColor: colors.primary,
+                },
+              ]}
+            >
+              {selectedTeam.logo_url ? (
+                <CachedImage uri={selectedTeam.logo_url} style={styles.headerImage} />
+              ) : (
+                <View style={[styles.headerImage, styles.headerImagePlaceholder, { backgroundColor: colors.border }]}>
+                  <Ionicons name="people-outline" size={44} color={colors.textSecondary} />
+                </View>
+              )}
+            </View>
 
-        {/* Add Member Modal */}
-        <RNModal
-          visible={addMemberModalVisible}
-          transparent
-          animationType="fade"
-          onRequestClose={() => setAddMemberModalVisible(false)}
-        >
-          <View style={{ flex: 1, justifyContent: "center", alignItems: "center", backgroundColor: "rgba(0,0,0,0.5)" }}>
-            <View style={{ backgroundColor: colors.card, borderRadius: 16, padding: 20, width: "88%", maxWidth: 420 }}>
-              <Text style={{ fontFamily: "Poppins_600SemiBold", fontSize: 17, color: colors.text, marginBottom: 14 }}>Add Team Member</Text>
-          <View style={styles.modalContent}>
-            <Text style={[styles.inputLabel, { color: colors.text }]}>Member Email</Text>
-            <TextInput
-              style={[styles.input, { color: colors.text, borderColor: colors.border, backgroundColor: colors.card }]}
-              value={memberEmail}
-              onChangeText={setMemberEmail}
-              placeholder="user@example.com"
-              placeholderTextColor={colors.textSecondary}
-              autoCapitalize="none"
-              keyboardType="email-address"
-            />
+            <Text style={[styles.headerTitle, { color: colors.text }]}>{selectedTeam.name}</Text>
+            <Text style={[styles.headerSubTitle, { color: colors.textSecondary }]}>
+              {selectedTeam.member_role.toUpperCase()} - Production Team
+            </Text>
+          </View>
 
-            <Text style={[styles.inputLabel, { color: colors.text, marginTop: 12 }]}>Role</Text>
-            <View style={styles.roleSelector}>
-              {(["member", "manager"] as const).map((r) => (
-                <TouchableOpacity activeOpacity={1}
-                  key={r}
-                  onPress={() => setMemberRole(r)}
+          <View style={[styles.tabsContainer, { backgroundColor: colors.inputBackground }]}>
+            {tabs.map((tab) => (
+              <TouchableOpacity
+                activeOpacity={1}
+                key={tab}
+                onPress={() => setActiveTab(tab)}
+                style={[
+                  styles.tab,
+                  {
+                    backgroundColor: activeTab === tab ? colors.surface : "transparent",
+                    shadowColor: "#000",
+                    shadowOffset: { width: 0, height: activeTab === tab ? 2 : 0 },
+                    shadowOpacity: activeTab === tab ? 0.05 : 0,
+                    shadowRadius: 4,
+                    elevation: activeTab === tab ? 2 : 0,
+                  },
+                ]}
+              >
+                <Text
                   style={[
-                    styles.roleOption,
+                    styles.tabText,
                     {
-                      backgroundColor: memberRole === r ? colors.primary : colors.card,
-                      borderColor: memberRole === r ? colors.primary : colors.border,
+                      fontFamily: activeTab === tab ? "Poppins_600SemiBold" : "Poppins_500Medium",
+                      color: activeTab === tab ? colors.primary : colors.textSecondary,
                     },
                   ]}
                 >
-                  <Text
-                    style={[
-                      styles.roleOptionText,
-                      { color: memberRole === r ? "#fff" : colors.text },
-                    ]}
-                  >
-                    {r.charAt(0).toUpperCase() + r.slice(1)}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-
-            <TouchableOpacity activeOpacity={1}
-              onPress={handleAddMember}
-              disabled={addingMember || !isAddMemberReady}
-              style={[styles.submitBtn, { backgroundColor: isAddMemberReady ? colors.primary : colors.border, opacity: addingMember ? 0.6 : 1 }]}
-            >
-              {addingMember ? (
-                <ActivityIndicator size="small" color="#fff" />
-              ) : (
-                <Text style={[styles.submitBtnText, { color: isAddMemberReady ? "#FFFFFF" : colors.textSecondary }]}>Add Member</Text>
-              )}
-            </TouchableOpacity>
-          </View>
-              <TouchableOpacity activeOpacity={1} onPress={() => setAddMemberModalVisible(false)} style={{ marginTop: 8, alignItems: "center" }}>
-                <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_500Medium" }}>Close</Text>
+                  {tab}
+                </Text>
               </TouchableOpacity>
-            </View>
+            ))}
           </View>
-        </RNModal>
+
+          <View style={styles.contentContainer}>
+            {activeTab === "About" && (
+              <View style={styles.aboutContainer}>
+                <Text style={[styles.aboutText, { color: colors.textSecondary }]}>
+                  {selectedTeam.description || "No description available."}
+                </Text>
+
+                <View style={styles.statsRow}>
+                  <View style={[styles.infoCard, { backgroundColor: colors.surface }]}>
+                    <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>Members</Text>
+                    <Text style={[styles.infoValue, { color: colors.text }]}>
+                      {loadingMembers ? "-" : teamMembers.length}
+                    </Text>
+                  </View>
+                  <View style={[styles.infoCard, { backgroundColor: colors.surface }]}>
+                    <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>Role</Text>
+                    <Text style={[styles.infoValue, { color: colors.text }]}>
+                      {selectedTeam.member_role}
+                    </Text>
+                  </View>
+                </View>
+              </View>
+            )}
+
+            {activeTab === "Members" && (
+              <>
+                <View style={styles.sectionHeader}>
+                  <Text style={[styles.sectionTitle, { color: colors.text }]}>Members</Text>
+                </View>
+
+                {loadingMembers ? (
+                  <View style={styles.loadingContainer}>
+                    <Skeleton width="100%" height={56} borderRadius={12} />
+                    <Skeleton width="100%" height={56} borderRadius={12} style={{ marginTop: 8 }} />
+                  </View>
+                ) : teamMembers.length === 0 ? (
+                  <Text style={[styles.emptyText, { color: colors.textSecondary }]}>No members found</Text>
+                ) : (
+                  teamMembers.map((member) => (
+                    <View
+                      key={member.user_id}
+                      style={[styles.memberCard, { backgroundColor: colors.card, borderColor: colors.border }]}
+                    >
+                      <View style={styles.memberRow}>
+                        {member.avatar_url ? (
+                          <CachedImage uri={member.avatar_url} style={styles.avatar} />
+                        ) : (
+                          <View style={[styles.avatarPlaceholder, { backgroundColor: colors.border }]}>
+                            <Ionicons name="person" size={18} color={colors.textSecondary} />
+                          </View>
+                        )}
+                        <View style={styles.memberInfo}>
+                          <Text style={[styles.memberName, { color: colors.text }]}>{member.full_name}</Text>
+                          <Text style={[styles.memberRole, { color: statusColor(member.role) }]}>{member.role}</Text>
+                        </View>
+                        {canManage && member.role !== "owner" && member.user_id !== userId && (
+                          <TouchableOpacity
+                            activeOpacity={1}
+                            onPress={() => openFireMemberModal(member)}
+                            style={styles.removeBtn}
+                          >
+                            <Ionicons name="close-circle" size={22} color="#EF4444" />
+                          </TouchableOpacity>
+                        )}
+                      </View>
+                    </View>
+                  ))
+                )}
+              </>
+            )}
+
+            {activeTab === "Reviews" && (
+              <View style={[styles.reviewCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+                <Ionicons name="chatbubble-ellipses-outline" size={24} color={colors.primary} />
+                <Text style={[styles.reviewTitle, { color: colors.text }]}>No reviews yet</Text>
+                <Text style={[styles.reviewDescription, { color: colors.textSecondary }]}>
+                  Production team reviews will appear here once this section is available.
+                </Text>
+              </View>
+            )}
+          </View>
+
+          </ScrollView>
+          <Navbar />
+        </View>
+
+        <Modal
+          visible={fireModalVisible}
+          onClose={closeFireMemberModal}
+          title="Fire Member"
+          message={
+            firingMember
+              ? "Removing member and sending notification..."
+              : `Tell ${memberToFire?.full_name || "this member"} why they are being removed from ${selectedTeam.name}. This reason will be sent to their notifications.`
+          }
+          buttonText={firingMember ? "Firing..." : "Fire Member"}
+          onConfirm={handleRemoveMember}
+          danger
+          showInput
+          inputPlaceholder="Reason for firing"
+          inputValue={fireReason}
+          onInputChange={setFireReason}
+          confirmDisabled={!fireReason.trim() || firingMember}
+          loading={firingMember}
+          loadingMessage="Removing member and sending notification..."
+        />
+
         <CustomAlert
           visible={alertVisible}
           type={alertConfig.type}
@@ -465,17 +582,16 @@ export default function ProductionTeamScreen() {
           message={alertConfig.message}
           onClose={() => setAlertVisible(false)}
         />
-        <Navbar />
-      </View>
+      </>
     );
   }
 
   // ── Teams List View ──
   return (
     <View style={[styles.flex1, { backgroundColor: colors.background }]}>
-      <Header title="My Production" />
+      <Header title={routeTeamId ? "Manage Production" : "Production Teams"} onBackPress={routeTeamId ? () => router.back() : undefined} />
       <ScrollView
-        contentContainerStyle={styles.scrollContent}
+        contentContainerStyle={[styles.scrollContent, { paddingBottom: contentBottomPadding }]}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
@@ -494,9 +610,11 @@ export default function ProductionTeamScreen() {
         ) : teams.length === 0 ? (
           <View style={styles.emptyContainer}>
             <Ionicons name="people-outline" size={56} color={colors.textSecondary} />
-            <Text style={[styles.emptyTitle, { color: colors.text }]}>No production teams yet</Text>
+            <Text style={[styles.emptyTitle, { color: colors.text }]}>{isProducer ? "No Production Teams" : "No Teams Yet"}</Text>
             <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
-              Create a production team to manage members and rosters.
+              {isProducer
+                ? "Create a production team to manage members and rosters."
+                : "Only production users can create a production team, but you can still open shared team links."}
             </Text>
           </View>
         ) : (
@@ -531,37 +649,50 @@ export default function ProductionTeamScreen() {
         )}
       </ScrollView>
 
-      {/* FAB to create team */}
-      <TouchableOpacity activeOpacity={1}
-        style={[styles.fab, { backgroundColor: colors.primary }]}
-        onPress={() => setCreateModalVisible(true)}
-      >
-        <Ionicons name="add" size={28} color="#fff" />
-      </TouchableOpacity>
+      {isProducer ? (
+        <TouchableOpacity activeOpacity={1}
+          style={[styles.fab, { backgroundColor: colors.primary }]}
+          onPress={() => setCreateModalVisible(true)}
+        >
+          <Ionicons name="add" size={28} color="#fff" />
+        </TouchableOpacity>
+      ) : null}
 
       {/* Create Team Modal */}
-      <RNModal
-        visible={createModalVisible}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setCreateModalVisible(false)}
-      >
-        <View style={{ flex: 1, justifyContent: "center", alignItems: "center", backgroundColor: "rgba(0,0,0,0.5)" }}>
-          <View style={{ backgroundColor: colors.card, borderRadius: 16, padding: 20, width: "88%", maxWidth: 420 }}>
-            <Text style={{ fontFamily: "Poppins_600SemiBold", fontSize: 17, color: colors.text, marginBottom: 14 }}>Create Production Team</Text>
-        <View style={styles.modalContent}>
+      {renderSheetModal({
+        visible: createModalVisible,
+        onClose: () => setCreateModalVisible(false),
+        title: "Create Production Team",
+        subtitle: "Production Team",
+        children: (
+          <View style={styles.modalContent}>
           <Text style={[styles.inputLabel, { color: colors.text }]}>Team Name *</Text>
           <TextInput
-            style={[styles.input, { color: colors.text, borderColor: colors.border, backgroundColor: colors.card }]}
+            style={[
+              styles.input,
+              {
+                color: colors.text,
+                borderColor: colors.border,
+                backgroundColor: colors.card,
+              },
+            ]}
             value={newTeamName}
             onChangeText={setNewTeamName}
             placeholder="e.g. Events Pro Team"
             placeholderTextColor={colors.textSecondary}
           />
 
-          <Text style={[styles.inputLabel, { color: colors.text, marginTop: 12 }]}>Description</Text>
+          <Text style={[styles.inputLabel, { color: colors.text, marginTop: 12 }]}>Description *</Text>
           <TextInput
-            style={[styles.input, styles.textArea, { color: colors.text, borderColor: colors.border, backgroundColor: colors.card }]}
+            style={[
+              styles.input,
+              styles.textArea,
+              {
+                color: colors.text,
+                borderColor: colors.border,
+                backgroundColor: colors.card,
+              },
+            ]}
             value={newTeamDescription}
             onChangeText={setNewTeamDescription}
             placeholder="Brief description of the team..."
@@ -581,13 +712,9 @@ export default function ProductionTeamScreen() {
               <Text style={[styles.submitBtnText, { color: isCreateTeamReady ? "#FFFFFF" : colors.textSecondary }]}>Create Team</Text>
             )}
           </TouchableOpacity>
-        </View>
-            <TouchableOpacity activeOpacity={1} onPress={() => setCreateModalVisible(false)} style={{ marginTop: 8, alignItems: "center" }}>
-              <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_500Medium" }}>Close</Text>
-            </TouchableOpacity>
           </View>
-        </View>
-      </RNModal>
+        ),
+      })}
 
       <CustomAlert
         visible={alertVisible}
@@ -603,7 +730,8 @@ export default function ProductionTeamScreen() {
 
 const styles = StyleSheet.create({
   flex1: { flex: 1 },
-  scrollContent: { paddingHorizontal: 16, paddingTop: 16, paddingBottom: 180 },
+  scrollContent: { paddingHorizontal: 24, paddingTop: 16, paddingBottom: 180 },
+  detailScrollContent: { paddingBottom: 180 },
   loadingContainer: { marginTop: 8 },
   emptyContainer: { alignItems: "center", paddingTop: 60 },
   emptyTitle: { fontFamily: "Poppins_600SemiBold", fontSize: 18, marginTop: 16 },
@@ -619,22 +747,96 @@ const styles = StyleSheet.create({
   teamCardMeta: { flexDirection: "row", marginTop: 2 },
 
   // Team detail
-  card: { borderRadius: 14, borderWidth: 1, padding: 20, alignItems: "center", marginBottom: 20 },
-  teamLogo: { width: 72, height: 72, borderRadius: 36, marginBottom: 12 },
-  teamLogoPlaceholder: { width: 72, height: 72, borderRadius: 36, alignItems: "center", justifyContent: "center", marginBottom: 12 },
-  teamName: { fontFamily: "Poppins_600SemiBold", fontSize: 20 },
-  teamDesc: { fontFamily: "Poppins_400Regular", fontSize: 14, textAlign: "center", marginTop: 4 },
-  roleBadgeRow: { marginTop: 8 },
-  roleBadge: { paddingHorizontal: 12, paddingVertical: 4, borderRadius: 12 },
-  roleBadgeText: { fontFamily: "Poppins_600SemiBold", fontSize: 11 },
+  headerContainer: {
+    paddingHorizontal: 24,
+    marginTop: 16,
+    alignItems: "center",
+  },
+  headerImageContainer: {
+    width: "100%",
+    height: 192,
+    borderRadius: 24,
+    overflow: "hidden",
+    marginBottom: 16,
+    elevation: 10,
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.2,
+    shadowRadius: 16,
+  },
+  headerImage: {
+    width: "100%",
+    height: "100%",
+  },
+  headerImagePlaceholder: {
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  headerTitle: {
+    fontSize: 24,
+    textAlign: "center",
+    fontFamily: "Poppins_600SemiBold",
+  },
+  headerSubTitle: {
+    textAlign: "center",
+    marginTop: 4,
+    fontFamily: "Poppins_400Regular",
+    fontSize: 14,
+  },
   roleBadgeSmall: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 8 },
   roleBadgeSmallText: { fontFamily: "Poppins_500Medium", fontSize: 11 },
+  tabsContainer: {
+    marginHorizontal: 24,
+    marginTop: 24,
+    padding: 4,
+    borderRadius: 16,
+    flexDirection: "row",
+  },
+  tab: {
+    flex: 1,
+    paddingVertical: 10,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  tabText: {
+    fontSize: 13,
+  },
+  contentContainer: {
+    paddingHorizontal: 24,
+    marginTop: 24,
+  },
+  aboutContainer: {
+    gap: 24,
+  },
+  aboutText: {
+    fontSize: 16,
+    lineHeight: 24,
+    fontFamily: "Poppins_400Regular",
+  },
+  statsRow: {
+    flexDirection: "row",
+    gap: 16,
+  },
+  infoCard: {
+    flex: 1,
+    borderRadius: 16,
+    padding: 16,
+  },
+  infoLabel: {
+    fontSize: 12,
+    textTransform: "uppercase",
+    letterSpacing: 1,
+    marginBottom: 4,
+    fontFamily: "Poppins_600SemiBold",
+  },
+  infoValue: {
+    fontSize: 18,
+    fontFamily: "Poppins_700Bold",
+  },
 
   // Members
   sectionHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 12 },
   sectionTitle: { fontFamily: "Poppins_600SemiBold", fontSize: 16 },
-  addBtn: { flexDirection: "row", alignItems: "center", paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8, gap: 4 },
-  addBtnText: { color: "#fff", fontFamily: "Poppins_500Medium", fontSize: 13 },
   memberCard: { borderRadius: 12, borderWidth: 1, padding: 12, marginBottom: 8 },
   memberRow: { flexDirection: "row", alignItems: "center" },
   avatar: { width: 36, height: 36, borderRadius: 18 },
@@ -645,8 +847,25 @@ const styles = StyleSheet.create({
   removeBtn: { padding: 4 },
 
   // Buttons
-  teamActionBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", padding: 14, borderRadius: 12, marginTop: 20, gap: 8 },
-  teamActionBtnText: { color: "#fff", fontFamily: "Poppins_600SemiBold", fontSize: 15 },
+  reviewCard: {
+    borderRadius: 16,
+    borderWidth: 1,
+    paddingHorizontal: 18,
+    paddingVertical: 24,
+    alignItems: "center",
+  },
+  reviewTitle: {
+    marginTop: 10,
+    fontFamily: "Poppins_600SemiBold",
+    fontSize: 16,
+  },
+  reviewDescription: {
+    marginTop: 6,
+    textAlign: "center",
+    fontFamily: "Poppins_400Regular",
+    fontSize: 13,
+    lineHeight: 20,
+  },
   backBtn: { alignItems: "center", padding: 14, borderRadius: 12, borderWidth: 1, marginTop: 10 },
   backBtnText: { fontFamily: "Poppins_500Medium", fontSize: 14 },
 
@@ -654,16 +873,70 @@ const styles = StyleSheet.create({
   fab: { position: "absolute", bottom: 100, right: 20, width: 56, height: 56, borderRadius: 28, alignItems: "center", justifyContent: "center", elevation: 4, shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.25, shadowRadius: 4 },
 
   // Modal
+  sheetOverlay: {
+    flex: 1,
+    justifyContent: "flex-end",
+    backgroundColor: "rgba(0,0,0,0.5)",
+  },
+  sheetBackdrop: { flex: 1 },
+  sheetContainer: {
+    maxHeight: "88%",
+    borderTopLeftRadius: 32,
+    borderTopRightRadius: 32,
+    borderWidth: 1,
+    borderBottomWidth: 0,
+    overflow: "hidden",
+  },
+  sheetHandle: {
+    width: 40,
+    height: 5,
+    borderRadius: 999,
+    alignSelf: "center",
+    marginTop: 10,
+    marginBottom: 10,
+  },
+  sheetHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 20,
+    paddingBottom: 14,
+    borderBottomWidth: 1,
+  },
+  sheetHeaderCopy: {
+    flex: 1,
+    paddingRight: 16,
+  },
+  sheetEyebrow: {
+    fontFamily: "Poppins_500Medium",
+    fontSize: 11,
+    textTransform: "uppercase",
+    letterSpacing: 0.6,
+    marginBottom: 2,
+  },
+  sheetTitle: {
+    fontFamily: "Poppins_600SemiBold",
+    fontSize: 18,
+  },
+  sheetCloseButton: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+  },
+  sheetBody: {
+    flexGrow: 0,
+  },
+  sheetBodyContent: {
+    paddingHorizontal: 20,
+    paddingTop: 16,
+    paddingBottom: 24,
+  },
   modalContent: { paddingHorizontal: 4 },
   inputLabel: { fontFamily: "Poppins_500Medium", fontSize: 13, marginBottom: 6 },
   input: { borderWidth: 1, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 10, fontFamily: "Poppins_400Regular", fontSize: 14 },
   textArea: { minHeight: 80, textAlignVertical: "top" },
-  roleSelector: { flexDirection: "row", gap: 10 },
-  roleOption: { flex: 1, paddingVertical: 10, borderRadius: 10, borderWidth: 1, alignItems: "center" },
-  roleOptionText: { fontFamily: "Poppins_500Medium", fontSize: 13 },
   submitBtn: { marginTop: 20, paddingVertical: 14, borderRadius: 12, alignItems: "center" },
   submitBtnText: { color: "#fff", fontFamily: "Poppins_600SemiBold", fontSize: 15 },
 });
-
-
-

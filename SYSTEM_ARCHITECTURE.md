@@ -109,7 +109,7 @@ MusikaLokal uses React Context plus screen-local state rather than Redux, Zustan
 Current provider stacks:
 
 - Mobile in [mobile/app/_layout.tsx](mobile/app/_layout.tsx): `ThemeProvider -> TopToastProvider -> AuthProvider -> PortalProvider -> BottomSheetModalProvider -> BottomOverlayProvider -> RadioPlayerProvider`
-- Expo web in [web/app/_layout.tsx](web/app/_layout.tsx): `ThemeProvider -> AuthProvider -> BottomSheetModalProvider`
+- Expo web in [web/app/_layout.tsx](web/app/_layout.tsx): `ThemeProvider -> PortalProvider -> TopToastProvider -> AuthProvider -> BottomSheetModalProvider`
 - Vite web in [web/web-app/src/App.tsx](web/web-app/src/App.tsx): `BrowserRouter -> ThemeProvider -> AuthProvider`
 
 Important implications:
@@ -212,23 +212,28 @@ Primary shell components:
 - [web/app](web/app)
 - [web/app/admin](web/app/admin)
 
-The Expo web shell is desktop-oriented and shares many concepts with mobile, but it is no longer a full route mirror.
+The Expo web shell is desktop-oriented and shares many concepts with mobile. Mobile remains the product standard, and the Expo web shell now mirrors the production-team and producer application process flow while keeping web-specific layout chrome.
 
 Current route coverage includes:
 
 - Phase 1 core flows such as auth, account, discovery, bookings, manage, profile, notifications, wallet, and payment handling
-- selected newer routes such as `deal_details`, `production_team`, `create_playlist`, `playlist_details`, `station_details`, `post_details`, `seller_hub`, `shop`, `orders`, and `product_details`
+- selected newer routes such as `deal_details`, `production_team`, `my_production`, `add_production`, `edit_production`, `create_playlist`, `playlist_details`, `create_station`, `station_details`, `feed`, `post_details`, `marketplace`, `seller_hub`, `shop`, `orders`, and `product_details`
 - admin routes under [web/app/admin](web/app/admin) including `index`, `permits`, `users`, `reports`, `audit`, `deals`, `posts`, and `products`
 
 Important differences from mobile:
 
-- there is no `/feed` route in [web/app](web/app)
-- there is no `/marketplace` route in [web/app](web/app)
-- there is no `/create_station` route in [web/app](web/app)
-- the Expo web root layout does not mount `TopToastProvider`, `PortalProvider`, `BottomOverlayProvider`, or `RadioPlayerProvider`
+- the Expo web root layout mounts toast, portal, auth, and bottom-sheet providers, but it still does not mount the mobile `BottomOverlayProvider` or `RadioPlayerProvider`
 - the sidebar home target in [web/src/components/SidebarNav.web.tsx](web/src/components/SidebarNav.web.tsx) remains `/home`
 
-Architecturally, that means the Expo web shell supports core desktop workflows, selected Phase 2 detail and management screens, and the broadest admin UI, but it does not ship the full mobile social-feed and radio runtime stack.
+Architecturally, that means the Expo web shell supports core desktop workflows, selected Phase 2 detail and management screens, mobile-aligned production workflows, and the broadest admin UI, but it does not ship the full mobile radio runtime stack.
+
+#### Expo web production parity
+
+Producer-facing web routes now follow the mobile process flow:
+
+- [web/app/my_production.tsx](web/app/my_production.tsx), [web/app/add_production.tsx](web/app/add_production.tsx), [web/app/edit_production.tsx](web/app/edit_production.tsx), and [web/app/production_team.tsx](web/app/production_team.tsx) use the same team creation, editing, invite, roster, and member-management flow as mobile.
+- [web/src/components/ListingDetailsSheet.tsx](web/src/components/ListingDetailsSheet.tsx) uses the mobile-standard producer gig application path: producers select a production team, choose a roster performer matching the gig slot, upload a CV and reel, and submit through the `gig-applications` production action.
+- The web listing Connect tab now mirrors mobile for production-team invites to artists/groups and roster-aware production applications to venues.
 
 ### 5.3 Vite Web SPA
 
@@ -299,6 +304,7 @@ Representative function groups in [mobile/supabase/functions](mobile/supabase/fu
 Phase 2 feature routers:
 
 - `manage-producer-network`: retired compatibility endpoint for older clients
+- `manage-production`: production team creation, editing, membership, invites, and roster actions
 - `manage-deals`: production teams and commercial deal workflows
 - `manage-social-feed`: posts, follows, reactions, comments, and moderation flows
 - `manage-playlists`: playlists, playlist items, stations, and station slots
@@ -309,6 +315,8 @@ Admin-oriented functions in [web/supabase/functions](web/supabase/functions):
 - `permit-management`
 - `admin-users-management`
 - `admin-reports-management`
+
+The web Supabase workspace mirrors the mobile `manage-production` action router for production-team parity, including `update_production_team`, `list_team_roster`, `add_team_roster_profile`, `add_team_roster_group`, and `remove_team_roster_entry`. The `gig-applications` router also exposes the shared producer application actions used by both mobile and Expo web.
 
 ### Edge Function design pattern
 
@@ -473,13 +481,13 @@ This is the role where direct hiring and producer-mediated hiring converge into 
 Primary pages:
 
 - Mobile: [mobile/app/my_production.tsx](mobile/app/my_production.tsx), [mobile/app/add_production.tsx](mobile/app/add_production.tsx), [mobile/app/edit_production.tsx](mobile/app/edit_production.tsx), [mobile/app/production_team.tsx](mobile/app/production_team.tsx), [mobile/app/bookings.tsx](mobile/app/bookings.tsx), [mobile/app/deal_details.tsx](mobile/app/deal_details.tsx), [mobile/app/chat.tsx](mobile/app/chat.tsx), [mobile/app/notifications.tsx](mobile/app/notifications.tsx)
-- Expo web: [web/app/my_production.tsx](web/app/my_production.tsx), [web/app/production_team.tsx](web/app/production_team.tsx), [web/app/bookings.tsx](web/app/bookings.tsx), [web/app/deal_details.tsx](web/app/deal_details.tsx), [web/app/chat.tsx](web/app/chat.tsx)
+- Expo web: [web/app/my_production.tsx](web/app/my_production.tsx), [web/app/add_production.tsx](web/app/add_production.tsx), [web/app/edit_production.tsx](web/app/edit_production.tsx), [web/app/production_team.tsx](web/app/production_team.tsx), [web/app/bookings.tsx](web/app/bookings.tsx), [web/app/deal_details.tsx](web/app/deal_details.tsx), [web/app/chat.tsx](web/app/chat.tsx), [web/app/notifications.tsx](web/app/notifications.tsx)
 - Vite: no dedicated producer dashboard currently exists in [web/web-app/src/pages](web/web-app/src/pages)
 
 How producers interact with other user types:
 
-- with musicians: production-team connection requests move through [mobile/app/bookings.tsx](mobile/app/bookings.tsx), [mobile/app/chat.tsx](mobile/app/chat.tsx), and notifications
-- with venue owners: producers represent a production team in venue-facing opportunities, then track approvals and negotiation in [mobile/app/bookings.tsx](mobile/app/bookings.tsx) and [mobile/app/deal_details.tsx](mobile/app/deal_details.tsx)
+- with musicians: production-team connection requests move through [mobile/app/bookings.tsx](mobile/app/bookings.tsx), [web/app/bookings.tsx](web/app/bookings.tsx), chat, and notifications
+- with venue owners: producers represent a production team in venue-facing opportunities, select a roster performer for production-routed gig or venue applications, then track approvals and negotiation in [mobile/app/bookings.tsx](mobile/app/bookings.tsx), [web/app/bookings.tsx](web/app/bookings.tsx), and the deal pages
 - with studio owners: when the relationship becomes a recording or commercial deal, the producer-side workflow also lands in the deal pages
 
 This role acts as the coordination layer between talent discovery and venue-facing commercial work.
