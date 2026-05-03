@@ -11,16 +11,38 @@ import { PortalProvider } from "@gorhom/portal";
 import * as Linking from "expo-linking";
 import { router, Stack, useSegments } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
-import { useEffect, useRef } from "react";
-import { Platform, View, useWindowDimensions } from "react-native";
+import { useCallback, useEffect, useRef } from "react";
+import { AppState, Platform, View, useWindowDimensions } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import "../global.css";
+import { prepareRealtimeAuth, supabase } from "../lib/supabase";
 import SidebarNav from "../src/components/SidebarNav";
 import { AuthProvider, useAuth } from "../src/context/AuthContext";
 import { ThemeProvider, useTheme } from "../src/context/ThemeContext";
 import { TopToastProvider } from "../src/context/TopToastContext";
+import { emitToast, toastBus, type ToastType } from "../src/events/toastBus";
 
 SplashScreen.preventAutoHideAsync();
+
+const NOTIFICATION_TOAST_BACKFILL_LIMIT = 12;
+const NOTIFICATION_TOAST_BACKFILL_SKEW_MS = 15000;
+const NOTIFICATION_TOAST_RECONNECT_DELAY_MS = 1500;
+const NOTIFICATION_TOAST_DEBUG_LOGS = __DEV__;
+
+type IncomingNotificationToastRecord = {
+  id?: string | null;
+  title?: string | null;
+  message?: string | null;
+  type?: string | null;
+  created_at?: string | null;
+  read?: boolean | null;
+};
+
+const logNotificationToastDebug = (...args: unknown[]) => {
+  if (__DEV__ && NOTIFICATION_TOAST_DEBUG_LOGS) {
+    console.log("[notification-toast]", ...args);
+  }
+};
 
 export default function RootLayout() {
   const [fontsLoaded] = useFonts({
@@ -71,6 +93,298 @@ function RootContent() {
     useAuth();
   const segments = useSegments();
   const processedDeepLinksRef = useRef<Set<string>>(new Set());
+  const notificationAppStateRef = useRef(AppState.currentState);
+  const notificationBackgroundedAtRef = useRef<number | null>(null);
+
+  const showNotificationToastFromRecord = useCallback(
+    (
+      incomingRecord: IncomingNotificationToastRecord | null | undefined,
+      source: string,
+    ) => {
+      const nextNotification = incomingRecord || {};
+      const notificationId = String(nextNotification.id || "").trim();
+      if (!notificationId) {
+        logNotificationToastDebug("Skipping notification toast with missing id", {
+          source,
+          nextNotification,
+        });
+        return false;
+      }
+
+      const message = String(nextNotification.message || "").trim();
+      if (!message) {
+        logNotificationToastDebug("Skipping notification toast with empty message", {
+          source,
+          notificationId,
+        });
+        return false;
+      }
+
+      const normalizedType = String(nextNotification.type || "info").toLowerCase();
+      let toastType: ToastType = "info";
+      if (
+        normalizedType === "success" ||
+        normalizedType === "error" ||
+        normalizedType === "warning" ||
+        normalizedType === "info"
+      ) {
+        toastType = normalizedType;
+      }
+
+      const emitted = emitToast({
+        dedupeKey: `notification:${notificationId}`,
+        id: notificationId,
+        type: toastType,
+        title: String(nextNotification.title || "").trim() || "Notification",
+        message,
+        source,
+      });
+
+      logNotificationToastDebug("Displayed notification toast", {
+        source,
+        notificationId,
+        toastType,
+        emitted,
+      });
+      return emitted;
+    },
+    [],
+  );
+
+  const backfillRecentNotificationToasts = useCallback(
+    async (userId: string, sinceMs: number, reason: string) => {
+      const queryFloorIso = new Date(
+        Math.max(0, sinceMs - NOTIFICATION_TOAST_BACKFILL_SKEW_MS),
+      ).toISOString();
+
+      const { data, error } = await supabase
+        .from("notifications")
+        .select("id, title, message, type, created_at, read")
+        .eq("user_id", userId)
+        .eq("read", false)
+        .gte("created_at", queryFloorIso)
+        .order("created_at", { ascending: true })
+        .limit(NOTIFICATION_TOAST_BACKFILL_LIMIT);
+
+      if (error) {
+        console.warn("[notification-toast] Failed to backfill recent notifications", {
+          reason,
+          message: error.message,
+        });
+        return;
+      }
+
+      for (const notification of data || []) {
+        showNotificationToastFromRecord(notification, `backfill:${reason}`);
+      }
+
+      logNotificationToastDebug("Backfilled recent notifications", {
+        reason,
+        count: data?.length ?? 0,
+        queryFloorIso,
+      });
+    },
+    [showNotificationToastFromRecord],
+  );
+
+  useEffect(() => {
+    toastBus.clearDedupe();
+    notificationBackgroundedAtRef.current = null;
+    notificationAppStateRef.current = AppState.currentState;
+  }, [session?.user?.id]);
+
+  useEffect(() => {
+    const activeUserId = session?.user?.id;
+    if (!activeUserId) return;
+
+    let isDisposed = false;
+    let activeChannel: ReturnType<typeof supabase.channel> | null = null;
+    let activeChannelStatus = "INITIAL";
+    let activeChannelGeneration = 0;
+    let connectAttemptGeneration = 0;
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const isNotificationAppActive = () =>
+      notificationAppStateRef.current === "active";
+
+    const clearReconnectTimer = () => {
+      if (reconnectTimer) {
+        clearTimeout(reconnectTimer);
+        reconnectTimer = null;
+      }
+    };
+
+    const disposeChannel = async (reason: string) => {
+      if (activeChannel) {
+        const channelToDispose = activeChannel;
+        activeChannel = null;
+        activeChannelGeneration += 1;
+
+        try {
+          await supabase.removeChannel(channelToDispose);
+        } catch {
+          // Reconnect logic handles stale channels.
+        }
+      }
+
+      logNotificationToastDebug("Disposed notification toast channel", {
+        reason,
+        activeUserId,
+      });
+      activeChannelStatus = "CLOSED";
+    };
+
+    const scheduleReconnect = (reason: string) => {
+      if (isDisposed || reconnectTimer || !isNotificationAppActive()) return;
+
+      reconnectTimer = setTimeout(() => {
+        reconnectTimer = null;
+        if (!isDisposed) {
+          void connectChannel(`retry:${reason}`);
+        }
+      }, NOTIFICATION_TOAST_RECONNECT_DELAY_MS);
+    };
+
+    const connectChannel = async (reason: string) => {
+      clearReconnectTimer();
+      const connectAttempt = ++connectAttemptGeneration;
+      await disposeChannel(`connect:${reason}`);
+
+      if (isDisposed || connectAttempt !== connectAttemptGeneration) {
+        return;
+      }
+
+      if (isDisposed || !isNotificationAppActive()) {
+        logNotificationToastDebug("Skipping notification toast connect while app inactive", {
+          reason,
+          activeUserId,
+          appState: notificationAppStateRef.current,
+        });
+        return;
+      }
+
+      const realtimeAuthReady = await prepareRealtimeAuth();
+      if (isDisposed || connectAttempt !== connectAttemptGeneration) {
+        return;
+      }
+
+      if (!realtimeAuthReady) {
+        console.warn("[notification-toast] Realtime auth unavailable; retrying", {
+          reason,
+          activeUserId,
+        });
+        scheduleReconnect("auth-unavailable");
+        return;
+      }
+
+      activeChannelStatus = "CONNECTING";
+      const channelGeneration = ++activeChannelGeneration;
+
+      activeChannel = supabase
+        .channel(`web-notification-toast:${activeUserId}`)
+        .on(
+          "postgres_changes",
+          {
+            event: "INSERT",
+            schema: "public",
+            table: "notifications",
+            filter: `user_id=eq.${activeUserId}`,
+          },
+          (payload) => {
+            if (isDisposed || channelGeneration !== activeChannelGeneration) {
+              return;
+            }
+
+            const nextRecord =
+              (payload as { new?: IncomingNotificationToastRecord })?.new ?? null;
+
+            logNotificationToastDebug("Received notification realtime payload", {
+              reason,
+              notification: nextRecord,
+            });
+
+            showNotificationToastFromRecord(nextRecord, "realtime");
+          },
+        )
+        .subscribe((status) => {
+          if (isDisposed || channelGeneration !== activeChannelGeneration) {
+            return;
+          }
+
+          activeChannelStatus = status;
+          logNotificationToastDebug("Notification toast channel status", {
+            reason,
+            status,
+            activeUserId,
+          });
+
+          if (status === "SUBSCRIBED") {
+            clearReconnectTimer();
+            return;
+          }
+
+          if (status === "CLOSED") {
+            scheduleReconnect("closed");
+            return;
+          }
+
+          if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+            console.warn("[notification-toast] Realtime channel unavailable", {
+              reason,
+              status,
+              activeUserId,
+            });
+            scheduleReconnect(status.toLowerCase());
+          }
+        });
+    };
+
+    void connectChannel("initial");
+
+    const appStateSub = AppState.addEventListener("change", (nextState) => {
+      const previousState = notificationAppStateRef.current;
+      notificationAppStateRef.current = nextState;
+
+      if (previousState === nextState) {
+        return;
+      }
+
+      if (previousState === "active" && nextState !== "active") {
+        notificationBackgroundedAtRef.current = Date.now();
+        clearReconnectTimer();
+        void disposeChannel(`app-state:${nextState}`);
+        return;
+      }
+
+      if (nextState === "active") {
+        const backgroundedAt = notificationBackgroundedAtRef.current;
+        notificationBackgroundedAtRef.current = null;
+
+        if (activeChannelStatus !== "SUBSCRIBED") {
+          void connectChannel("foreground");
+        }
+
+        if (backgroundedAt) {
+          void backfillRecentNotificationToasts(
+            activeUserId,
+            backgroundedAt,
+            "foreground",
+          );
+        }
+      }
+    });
+
+    return () => {
+      isDisposed = true;
+      clearReconnectTimer();
+      appStateSub.remove();
+      void disposeChannel("cleanup");
+    };
+  }, [
+    backfillRecentNotificationToasts,
+    session?.user?.id,
+    showNotificationToastFromRecord,
+  ]);
 
   // Handle global identity gate
   useEffect(() => {

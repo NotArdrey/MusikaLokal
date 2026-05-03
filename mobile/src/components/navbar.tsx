@@ -1,31 +1,40 @@
-﻿import { Ionicons } from '@expo/vector-icons';
+import { Ionicons } from '@expo/vector-icons';
 import { BlurView } from 'expo-blur';
 import { router, usePathname } from 'expo-router';
-import { memo, useEffect, useMemo, useState } from 'react';
-import { Platform, StyleSheet, TouchableOpacity, View } from 'react-native';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Animated as RNAnimated, Easing, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../context/AuthContext';
-import { useBottomOverlay } from '../context/BottomOverlayContext';
 import { useTheme } from '../context/ThemeContext';
 import { resolveRoleManageRoute } from '../utils/roleRouting';
 
 export const NAVBAR_BOTTOM_OFFSET = 24;
-export const NAVBAR_HEIGHT = 84;
+export const NAVBAR_HEIGHT = 72;
 export const NAVBAR_CLEARANCE = NAVBAR_BOTTOM_OFFSET + NAVBAR_HEIGHT + 16;
 export const NAVBAR_WIDTH = '90%' as const;
 export const NAVBAR_MAX_WIDTH = 400;
 
 const NAVBAR_DEBUG_LOGS = false;
+const NAVBAR_MOTION_MS = 220;
+const NAVBAR_LAYER = 50;
+const NAVBAR_SURFACE_ELEVATION = 16;
+const AnimatedTouchableOpacity = RNAnimated.createAnimatedComponent(TouchableOpacity);
+
 const GLOBAL_NAVBAR_ROUTES = new Set([
     '/account_details',
     '/add_gig',
     '/add_group',
     '/add_production',
     '/add_studio',
+    '/add_duo',
     '/ai_suggestions',
     '/bookings',
+    '/change_email',
+    '/change_password',
+    '/chat',
     '/create_playlist',
     '/create_station',
+    '/discover',
     '/edit_gig',
     '/edit_group',
     '/edit_profile',
@@ -46,6 +55,8 @@ const GLOBAL_NAVBAR_ROUTES = new Set([
     '/my_venue',
     '/notification_settings',
     '/notifications',
+    '/orders',
+    '/payment-result',
     '/playlist_details',
     '/post_details',
     '/privacy_policy',
@@ -53,11 +64,67 @@ const GLOBAL_NAVBAR_ROUTES = new Set([
     '/product_details',
     '/profile',
     '/settings',
+    '/seller_hub',
+    '/shop',
     '/station_details',
     '/submit_review',
     '/terms_and_conditions',
     '/to_review',
     '/wallet',
+]);
+
+const GLOBAL_NAVBAR_ROUTE_NAMES = new Set([
+    'account_details',
+    'activity',
+    'add_duo',
+    'add_gig',
+    'add_group',
+    'add_production',
+    'add_studio',
+    'ai_suggestions',
+    'bookings',
+    'change_email',
+    'change_password',
+    'chat',
+    'create_playlist',
+    'create_station',
+    'discover',
+    'edit_gig',
+    'edit_group',
+    'edit_profile',
+    'edit_production',
+    'edit_studio',
+    'feed',
+    'help_support',
+    'home',
+    'identity_verification',
+    'manage',
+    'manage_gig',
+    'manage_group',
+    'manage_studio',
+    'marketplace',
+    'my_group',
+    'my_production',
+    'my_studio',
+    'my_venue',
+    'notification_settings',
+    'notifications',
+    'orders',
+    'payment-result',
+    'playlist_details',
+    'post_details',
+    'privacy_policy',
+    'production_team',
+    'product_details',
+    'profile',
+    'seller_hub',
+    'settings',
+    'shop',
+    'station_details',
+    'submit_review',
+    'terms_and_conditions',
+    'to_review',
+    'wallet',
 ]);
 
 const logNavbarDebug = (event: string, payload: Record<string, unknown>) => {
@@ -70,14 +137,118 @@ type NavbarProps = {
     forceVisible?: boolean;
 };
 
-function Navbar({ global = false, forceVisible = false }: NavbarProps) {
+type NavIconProps = {
+    active: boolean;
+    color: string;
+    icon: string;
+    progress: RNAnimated.Value;
+};
+
+function NavIcon({ active, color, icon, progress }: NavIconProps) {
+    const iconScale = progress.interpolate({
+        inputRange: [0, 1],
+        outputRange: [1, 1.06],
+    });
+
+    return (
+        <RNAnimated.View style={{ transform: [{ scale: iconScale }] }}>
+            <Ionicons
+                name={active ? icon as any : `${icon}-outline` as any}
+                size={21}
+                color={color}
+            />
+        </RNAnimated.View>
+    );
+}
+
+type NavItem = {
+    id: string;
+    icon: string;
+    label: string;
+    route: string;
+};
+
+type NavTabProps = {
+    active: boolean;
+    colors: ReturnType<typeof useTheme>['colors'];
+    isDark: boolean;
+    item: NavItem;
+    onPress: (item: NavItem) => void;
+};
+
+function NavTab({ active, colors, isDark, item, onPress }: NavTabProps) {
+    const progress = useRef(new RNAnimated.Value(active ? 1 : 0)).current;
+
+    useEffect(() => {
+        RNAnimated.timing(progress, {
+            toValue: active ? 1 : 0,
+            duration: NAVBAR_MOTION_MS,
+            easing: Easing.out(Easing.cubic),
+            useNativeDriver: true,
+        }).start();
+    }, [active, progress]);
+
+    const tabScale = progress.interpolate({
+        inputRange: [0, 1],
+        outputRange: [0.98, 1],
+    });
+    const iconColor = active ? colors.primary : colors.textSecondary;
+
+    return (
+        <AnimatedTouchableOpacity
+            activeOpacity={0.82}
+            key={item.id}
+            testID={`nav-${item.id}`}
+            accessibilityRole="button"
+            accessibilityLabel={item.label}
+            accessibilityState={{ selected: active }}
+            style={[
+                styles.tabButton,
+                { transform: [{ scale: tabScale }] },
+                active ? [
+                    styles.activeTabButton,
+                    {
+                        backgroundColor: isDark ? 'rgba(99, 102, 241, 0.18)' : colors.primaryLight,
+                        borderColor: isDark ? 'rgba(129, 140, 248, 0.32)' : 'rgba(79, 70, 229, 0.16)',
+                    },
+                ] : null,
+            ]}
+            onPress={() => onPress(item)}
+        >
+            <NavIcon
+                active={active}
+                color={iconColor}
+                icon={item.icon}
+                progress={progress}
+            />
+            {active ? (
+                <Text
+                    numberOfLines={1}
+                    style={[styles.activeLabel, { color: colors.primary }]}
+                >
+                    {item.label}
+                </Text>
+            ) : null}
+        </AnimatedTouchableOpacity>
+    );
+}
+
+export function Navbar(_props: NavbarProps) {
+    return null;
+}
+
+export function GlobalNavbar({ forceVisible = false }: Pick<NavbarProps, 'forceVisible'>) {
     const { colors, isDark } = useTheme();
     const { isGuest, roleResolved, session, userRole } = useAuth();
-    const { isBottomOverlayActive } = useBottomOverlay();
     const insets = useSafeAreaInsets();
     const pathname = usePathname();
     const [manageRoute, setManageRoute] = useState('/manage'); // Fallback
-    const shouldRenderGlobalNavbar = global && (forceVisible || GLOBAL_NAVBAR_ROUTES.has(pathname));
+    const [optimisticActiveTab, setOptimisticActiveTab] = useState<string | null>(null);
+    const pendingNavigationFrameRef = useRef<number | null>(null);
+    const routeName = pathname.replace(/^\/+/, '').split('/')[0] || '';
+    const shouldRenderGlobalNavbar = forceVisible
+        || GLOBAL_NAVBAR_ROUTES.has(pathname)
+        || GLOBAL_NAVBAR_ROUTE_NAMES.has(routeName);
 
     useEffect(() => {
         if (isGuest || !session?.user?.id) {
@@ -97,7 +268,7 @@ function Navbar({ global = false, forceVisible = false }: NavbarProps) {
         if (pathname.includes('feed') || pathname.includes('home')) return 'home';
         if (pathname.includes('marketplace') || pathname.includes('shop') || pathname.includes('seller_hub') || pathname.includes('orders') || pathname.includes('product_details')) return 'marketplace';
         if (pathname.includes('ai_suggestions')) return 'ai';
-        if (pathname.includes('bookings') || pathname.includes('chat') || pathname.includes('notification') || pathname.includes('submit_review') || pathname.includes('to_review')) return 'activity';
+        if (pathname.includes('bookings') || pathname.includes('chat') || pathname.includes('notification') || pathname.includes('payment-result') || pathname.includes('submit_review') || pathname.includes('to_review')) return 'activity';
         if (
             pathname.includes('profile') ||
             pathname.includes('settings') ||
@@ -154,139 +325,166 @@ function Navbar({ global = false, forceVisible = false }: NavbarProps) {
         },
         [isGuest, manageRoute],
     );
+    const displayedActiveTab = optimisticActiveTab ?? activeTab;
+
+    useEffect(() => {
+        setOptimisticActiveTab(null);
+    }, [pathname]);
+
+    useEffect(() => {
+        return () => {
+            if (pendingNavigationFrameRef.current !== null) {
+                cancelAnimationFrame(pendingNavigationFrameRef.current);
+            }
+        };
+    }, []);
+
+    const handleNavPress = useCallback((item: NavItem) => {
+        if (!item.route) {
+            return;
+        }
+
+        if (displayedActiveTab !== item.id) {
+            setOptimisticActiveTab(item.id);
+        }
+
+        if (pathname !== item.route) {
+            if (pendingNavigationFrameRef.current !== null) {
+                cancelAnimationFrame(pendingNavigationFrameRef.current);
+            }
+
+            pendingNavigationFrameRef.current = requestAnimationFrame(() => {
+                pendingNavigationFrameRef.current = null;
+                router.navigate(item.route as any);
+            });
+        }
+    }, [displayedActiveTab, pathname]);
 
     useEffect(() => {
         logNavbarDebug('state', {
             activeTab,
             bottomOffset: NAVBAR_BOTTOM_OFFSET + insets.bottom,
+            displayedActiveTab,
             forceVisible,
-            global,
-            isBottomOverlayActive,
+            global: true,
             manageRoute,
+            optimisticActiveTab,
             pathname,
             pointerEvents: 'auto',
             visible: shouldRenderGlobalNavbar,
         });
-    }, [activeTab, forceVisible, global, insets.bottom, isBottomOverlayActive, manageRoute, pathname, shouldRenderGlobalNavbar]);
+    }, [activeTab, displayedActiveTab, forceVisible, insets.bottom, manageRoute, optimisticActiveTab, pathname, shouldRenderGlobalNavbar]);
 
-    if (isGuest || !global || !shouldRenderGlobalNavbar) {
+    if (isGuest || !shouldRenderGlobalNavbar) {
         return null;
     }
 
     return (
-        <View
+        <RNAnimated.View
+            collapsable={false}
             pointerEvents="auto"
             style={[
-                styles.navbarWrapper,
+                styles.globalNavbarHost,
                 { bottom: NAVBAR_BOTTOM_OFFSET + insets.bottom },
-                isBottomOverlayActive ? styles.navbarOverlayActive : null,
             ]}
         >
-            <BlurView
-                intensity={Platform.OS === 'ios' ? 80 : 100}
-                tint={isDark ? "systemMaterialDark" : "systemMaterialLight"}
-                style={[
-                    styles.blurContainer,
-                    {
-                        backgroundColor: isDark ? 'rgba(15, 23, 42, 0.85)' : 'rgba(255, 255, 255, 0.85)',
-                        borderColor: colors.border
-                    }
-                ]}
-            >
-                <View style={styles.container}>
-                    {navItems.map((item) => {
-                        const isActive = activeTab === item.id;
-                        return (
-                            <TouchableOpacity activeOpacity={1}
-                                key={item.id}
-                                testID={`nav-${item.id}`}
-                                accessibilityRole="button"
-                                accessibilityLabel={`nav-${item.id}`}
-                                style={[
-                                    styles.tabButton,
-                                    isActive && { backgroundColor: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.05)' }
-                                ]}
-                                onPress={() => {
-                                    if (item.route && pathname !== item.route) {
-                                        router.navigate(item.route as any);
-                                    }
-                                }}
-                            >
-                                <View style={styles.iconWrapper}>
-                                    <Ionicons
-                                        name={isActive ? item.icon as any : `${item.icon}-outline` as any}
-                                        size={22}
-                                        color={isActive ? colors.primary : colors.textSecondary}
-                                    />
-                                    {isActive && <View style={[styles.activeDot, { backgroundColor: colors.primary }]} />}
-                                </View>
-                            </TouchableOpacity>
-                        );
-                    })}
-                </View>
-            </BlurView>
-        </View>
+            <View collapsable={false} style={styles.navbarSurface}>
+                <BlurView
+                    intensity={Platform.OS === 'ios' ? 80 : 100}
+                    tint={isDark ? "systemMaterialDark" : "systemMaterialLight"}
+                    style={[
+                        styles.blurContainer,
+                        {
+                            backgroundColor: isDark ? 'rgba(15, 23, 42, 0.85)' : 'rgba(255, 255, 255, 0.85)',
+                            borderColor: colors.border
+                        }
+                    ]}
+                >
+                    <View style={styles.container}>
+                        {navItems.map((item) => {
+                            const isActive = displayedActiveTab === item.id;
+                            return (
+                                <NavTab
+                                    active={isActive}
+                                    colors={colors}
+                                    isDark={isDark}
+                                    item={item}
+                                    key={item.id}
+                                    onPress={handleNavPress}
+                                />
+                            );
+                        })}
+                    </View>
+                </BlurView>
+            </View>
+        </RNAnimated.View>
     );
 }
 
 export default memo(Navbar);
 
 const styles = StyleSheet.create({
-    navbarWrapper: {
+    globalNavbarHost: {
         position: 'absolute',
+        left: 0,
+        right: 0,
         bottom: 24,
+        zIndex: NAVBAR_LAYER,
+        elevation: NAVBAR_LAYER,
+        overflow: 'visible',
+    },
+    navbarSurface: {
         alignSelf: 'center',
         width: NAVBAR_WIDTH,
         maxWidth: NAVBAR_MAX_WIDTH,
-        zIndex: 1200,
-        borderRadius: 24,
+        borderRadius: 22,
         shadowColor: "#000",
         shadowOffset: {
             width: 0,
-            height: 10,
+            height: 8,
         },
-        shadowOpacity: 0.15,
-        shadowRadius: 20,
-        elevation: 1200,
-        overflow: 'hidden', // Ensure blur respects border radius
-    },
-    navbarOverlayActive: {
-        opacity: 0.98,
+        shadowOpacity: 0.14,
+        shadowRadius: 18,
+        elevation: NAVBAR_SURFACE_ELEVATION,
+        overflow: 'visible',
     },
     blurContainer: {
-        borderRadius: 24,
+        borderRadius: 22,
         overflow: 'hidden',
         borderWidth: 1,
     },
     container: {
         flexDirection: 'row',
-        justifyContent: 'space-around', // Equal spacing
+        justifyContent: 'space-between',
         alignItems: 'center',
-        paddingVertical: 12,
+        paddingVertical: 9,
         paddingHorizontal: 8,
+        gap: 3,
     },
     tabButton: {
+        minWidth: 40,
+        height: 48,
+        flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
-        padding: 10,
+        paddingHorizontal: 10,
         borderRadius: 16,
+        borderWidth: 1,
+        borderColor: 'transparent',
     },
-    iconWrapper: {
-        alignItems: 'center',
-        justifyContent: 'center',
-        position: 'relative',
+    activeTabButton: {
+        minWidth: 84,
+        maxWidth: 108,
+        paddingHorizontal: 12,
+        gap: 6,
     },
-    activeDot: {
-        position: 'absolute',
-        bottom: -8,
-        width: 4,
-        height: 4,
-        borderRadius: 2,
+    activeLabel: {
+        flexShrink: 1,
+        fontSize: 11,
+        lineHeight: 14,
+        fontFamily: 'Poppins_600SemiBold',
+        includeFontPadding: false,
+        textAlignVertical: 'center',
     },
-    label: {
-        fontSize: 10,
-        marginTop: 4,
-        fontFamily: 'Poppins_500Medium',
-    }
 });
 

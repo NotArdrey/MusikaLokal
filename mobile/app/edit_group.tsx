@@ -2298,6 +2298,7 @@ export default function EditGroupScreen() {
       {/* Leadership Transfer Modal */}
       <BottomModal
         visible={transferModalVisible}
+        overlayLabel="EditGroupTransferLeadershipModal"
         onClose={() => setTransferModalVisible(false)}
       >
           <View
@@ -2461,6 +2462,7 @@ export default function EditGroupScreen() {
 
       <BottomModal
         visible={groupTypeModalVisible}
+        overlayLabel="EditGroupTypeModal"
         onClose={() => setGroupTypeModalVisible(false)}
         backdropColor="rgba(0,0,0,0.58)"
         closeOnBackdropPress

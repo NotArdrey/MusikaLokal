@@ -20,7 +20,7 @@ import Header from "../src/components/header";
 import Navbar from "../src/components/navbar";
 import CustomAlert, { AlertType } from "../src/components/CustomAlert";
 import { useAuth } from "../src/context/AuthContext";
-import { showTopToast } from "../src/context/TopToastContext";
+import { emitToast } from "../src/events/toastBus";
 import { useTheme } from "../src/context/ThemeContext";
 
 const moderateScale = (size: number, factor = 0.3) => {
@@ -83,12 +83,12 @@ export default function PostDetailsScreen() {
 
   const handleDeleteComment = async (commentId: string) => {
     const { data } = await supabase.functions.invoke("manage-social-feed", { body: { action: "delete_comment", comment_id: commentId } });
-    if (data?.success) { showTopToast({ type: "info", title: "Deleted", message: "Comment deleted." }); fetchPost(); }
+    if (data?.success) { emitToast({ type: "info", title: "Deleted", message: "Comment deleted." }); fetchPost(); }
   };
 
   const handleDeletePost = async () => {
     const { data } = await supabase.functions.invoke("manage-social-feed", { body: { action: "delete_post", post_id: post.id } });
-    if (data?.success) { showTopToast({ type: "info", title: "Deleted", message: "Post deleted." }); router.back(); }
+    if (data?.success) { emitToast({ type: "info", title: "Deleted", message: "Post deleted." }); router.back(); }
   };
 
   if (loading) return <View style={[styles.container, { backgroundColor: bg }]}><Header title="Post" onBackPress={() => router.back()} /><ActivityIndicator size="large" color={colors.primary} style={{ marginTop: 40 }} /><Navbar /></View>;

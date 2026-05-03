@@ -152,6 +152,7 @@ export default function ReportModal({
     return (
         <BottomModal
             visible={visible}
+            overlayLabel="ReportModal"
             onClose={handleClose}
             backdropColor={overlayBg}
             closeOnBackdropPress

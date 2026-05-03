@@ -370,6 +370,20 @@ const getFreshAccessToken = async (): Promise<string | null> => {
     return null;
 };
 
+export const prepareRealtimeAuth = async (): Promise<boolean> => {
+    try {
+        const token = await getFreshAccessToken();
+        if (!token) {
+            return false;
+        }
+
+        supabase.realtime.setAuth(token);
+        return true;
+    } catch {
+        return false;
+    }
+};
+
 const normalizeFunctionsError = (
     rawError: any,
     fallbackMessage: string,

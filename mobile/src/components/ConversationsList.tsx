@@ -13,8 +13,9 @@ import {
 } from 'react-native';
 import { DEFAULT_AVATAR } from '../constants/Images';
 import { useTheme } from '../context/ThemeContext';
+import { emitToast } from '../events/toastBus';
 import { useBottomBarClearance } from '../hooks/useBottomBarClearance';
-import { Conversation, useConversations } from '../hooks/useChat';
+import { Conversation, isConversationMuted, useConversations } from '../hooks/useChat';
 import Header from './header';
 import UserSearchModal from './UserSearchModal';
 
@@ -31,7 +32,7 @@ const ConversationsList: React.FC<ConversationsListProps> = ({
 }) => {
     const { colors, isDark } = useTheme();
     const { contentBottomPadding } = useBottomBarClearance();
-    const { conversations, loading, refetch } = useConversations(currentUserId);
+    const { conversations, loading, refetch, toggleConversationMute } = useConversations(currentUserId);
     const [showNewMessageModal, setShowNewMessageModal] = useState(false);
 
     const handleSelectUserForNewMessage = (user: { id: string; full_name: string; avatar_url: string | null }) => {
@@ -64,10 +65,36 @@ const ConversationsList: React.FC<ConversationsListProps> = ({
         }
     };
 
+    const handleToggleMute = async (conversation: Conversation) => {
+        const nextMuted = !isConversationMuted(conversation);
+
+        try {
+            await toggleConversationMute(conversation.id, nextMuted);
+            emitToast({
+                dedupeKey: `conversation-mute:${conversation.id}:${nextMuted}`,
+                title: nextMuted ? 'Chat muted' : 'Chat unmuted',
+                message: nextMuted
+                    ? 'New messages stay in your list without pop-up alerts.'
+                    : 'New messages can show pop-up alerts again.',
+                type: 'info',
+                source: 'chat-mute',
+            });
+        } catch (err: any) {
+            emitToast({
+                dedupeKey: `conversation-mute-error:${conversation.id}`,
+                title: 'Mute failed',
+                message: err?.message || 'Could not update this chat.',
+                type: 'error',
+                source: 'chat-mute',
+            });
+        }
+    };
+
     const renderConversation = ({ item }: { item: Conversation }) => {
         const isGroup = item.is_group;
         const otherUser = item.other_participant;
         const lastMessage = item.last_message;
+        const muted = isConversationMuted(item);
         const hasUnread = (item.unread_count || 0) > 0;
         const isLastMessageFromMe = !!lastMessage && lastMessage.sender_id === currentUserId;
         const isLastMessageSeen = !isGroup && isLastMessageFromMe && !!lastMessage?.read_at;
@@ -104,6 +131,13 @@ const ConversationsList: React.FC<ConversationsListProps> = ({
                     hasUnread && { backgroundColor: isDark ? 'rgba(99,102,241,0.06)' : 'rgba(99,102,241,0.04)' },
                 ]}
                 onPress={() => onSelectConversation(item)}
+                onLongPress={() => {
+                    void handleToggleMute(item);
+                }}
+                delayLongPress={260}
+                accessibilityRole="button"
+                accessibilityLabel={`${displayName || 'Chat'}${muted ? ', muted' : ''}`}
+                accessibilityHint="Open chat. Long press to mute or unmute notifications."
                 activeOpacity={1}
             >
                 {/* Avatar */}
@@ -140,6 +174,14 @@ const ConversationsList: React.FC<ConversationsListProps> = ({
                             >
                                 {displayName || 'Chat'}
                             </Text>
+                            {muted && (
+                                <Ionicons
+                                    name="notifications-off-outline"
+                                    size={14}
+                                    color={colors.textSecondary}
+                                    style={styles.mutedIcon}
+                                />
+                            )}
                         </View>
                         <Text style={[styles.conversationTime, { color: hasUnread ? colors.primary : colors.textSecondary, fontWeight: hasUnread ? '700' : '400' }]}>
                             {lastMessage ? formatTime(lastMessage.created_at) : ''}
@@ -376,6 +418,9 @@ const styles = StyleSheet.create({
     conversationName: {
         fontSize: 15.5,
         flex: 1,
+    },
+    mutedIcon: {
+        marginLeft: 6,
     },
     conversationTime: {
         fontSize: 12,

@@ -17,7 +17,7 @@ import Navbar from "../src/components/navbar";
 import CustomAlert, { AlertType } from "../src/components/CustomAlert";
 import { useBottomBarClearance } from "../src/hooks/useBottomBarClearance";
 import { useAuth } from "../src/context/AuthContext";
-import { showTopToast } from "../src/context/TopToastContext";
+import { emitToast } from "../src/events/toastBus";
 import { useTheme } from "../src/context/ThemeContext";
 import {
   ensurePlaylistAudioPassesCopyrightScreening,
@@ -350,7 +350,7 @@ export default function CreatePlaylistScreen() {
           }
         }
 
-        showTopToast({
+        emitToast({
           type: "success",
           title: isEditing ? "Updated" : "Created",
           message: isEditing ? "Playlist updated." : "Playlist created!",

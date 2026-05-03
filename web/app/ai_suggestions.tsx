@@ -496,14 +496,16 @@ export default function AiSuggestionsScreen() {
                                             }
                                         ]}
                                     >
-                                        <Ionicons
-                                            name={isSelected ? "checkmark-circle" : "ellipse-outline"}
-                                            size={14}
-                                            color={isSelected ? '#FFFFFF' : textSecondary}
-                                        />
+                                        <View style={styles.chipIconSlot}>
+                                            <Ionicons
+                                                name={isSelected ? "checkmark-circle" : "ellipse-outline"}
+                                                size={14}
+                                                color={isSelected ? '#FFFFFF' : textSecondary}
+                                            />
+                                        </View>
                                         <Text style={[
                                             styles.chipText,
-                                            { color: isSelected ? '#FFFFFF' : textPrimary, marginLeft: 4 }
+                                            { color: isSelected ? '#FFFFFF' : textPrimary }
                                         ]}>
                                             {role}
                                         </Text>
@@ -592,7 +594,9 @@ export default function AiSuggestionsScreen() {
                             ]}
                         >
                             {isFromProfile && isSelected && (
-                                <Ionicons name="star" size={10} color="#FFFFFF" style={{ marginRight: 4 }} />
+                                <View style={styles.chipIconSlot}>
+                                    <Ionicons name="star" size={11} color="#FFFFFF" />
+                                </View>
                             )}
                             <Text style={[
                                 styles.chipText,
@@ -1290,14 +1294,25 @@ const styles = StyleSheet.create({
     chip: {
         flexDirection: 'row',
         alignItems: 'center',
+        justifyContent: 'center',
+        gap: 4,
         paddingHorizontal: 14,
         paddingVertical: 8,
         borderRadius: 20,
         borderWidth: 1,
     },
+    chipIconSlot: {
+        width: 14,
+        height: 14,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
     chipText: {
         fontSize: 13,
+        lineHeight: 17,
         fontFamily: 'Poppins_500Medium',
+        includeFontPadding: false,
+        textAlignVertical: 'center',
     },
     selectorContainer: {
         marginBottom: 24,
@@ -1359,28 +1374,38 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
         gap: 8,
-        padding: 16,
+        minHeight: 54,
+        paddingHorizontal: 16,
+        paddingVertical: 0,
         borderRadius: 12,
         marginTop: 8,
     },
     primaryButtonText: {
         color: '#FFFFFF',
         fontSize: 16,
+        lineHeight: 20,
         fontFamily: 'Poppins_600SemiBold',
+        includeFontPadding: false,
+        textAlignVertical: 'center',
     },
     secondaryButton: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
         gap: 8,
-        padding: 14,
+        minHeight: 50,
+        paddingHorizontal: 14,
+        paddingVertical: 0,
         borderRadius: 12,
         borderWidth: 2,
         marginTop: 16,
     },
     secondaryButtonText: {
         fontSize: 14,
+        lineHeight: 18,
         fontFamily: 'Poppins_600SemiBold',
+        includeFontPadding: false,
+        textAlignVertical: 'center',
     },
     backButton: {
         flexDirection: 'row',
@@ -1875,10 +1900,12 @@ const styles = StyleSheet.create({
     followupFab: {
         flexDirection: 'row',
         alignItems: 'center',
+        justifyContent: 'center',
         gap: 6,
         borderRadius: 20,
+        minHeight: 40,
         paddingHorizontal: 14,
-        paddingVertical: 11,
+        paddingVertical: 0,
         shadowColor: '#0F172A',
         shadowOffset: { width: 0, height: 4 },
         shadowOpacity: 0.18,
@@ -1888,7 +1915,10 @@ const styles = StyleSheet.create({
     followupFabText: {
         color: '#FFFFFF',
         fontSize: 12,
+        lineHeight: 16,
         fontFamily: 'Poppins_600SemiBold',
+        includeFontPadding: false,
+        textAlignVertical: 'center',
     },
 });
 

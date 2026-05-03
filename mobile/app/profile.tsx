@@ -1,5 +1,11 @@
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import {
+  BottomSheetBackdrop,
+  BottomSheetModal,
+  BottomSheetScrollView,
+  useBottomSheetSpringConfigs,
+} from "@gorhom/bottom-sheet";
 import { ResizeMode, Video } from "expo-av";
 import * as FileSystem from "expo-file-system/legacy";
 import * as ImagePicker from "expo-image-picker";
@@ -8,8 +14,10 @@ import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  BackHandler,
   Dimensions,
   Image,
+  InteractionManager,
   Modal,
   ScrollView,
   StyleSheet,
@@ -19,6 +27,15 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { Gesture, GestureDetector } from "react-native-gesture-handler";
+import Animated, {
+  interpolate,
+  runOnJS,
+  useAnimatedStyle,
+  useSharedValue,
+  withSpring,
+} from "react-native-reanimated";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { supabase, supabaseAnonKey, supabaseUrl } from "../lib/supabase";
 import CustomAlert, { AlertType } from "../src/components/CustomAlert";
 import ReportModal from "../src/components/ReportModal";
@@ -27,6 +44,10 @@ import GuestSignInGate from "../src/components/GuestSignInGate";
 import Header from "../src/components/header";
 import Navbar from "../src/components/navbar";
 import Skeleton from "../src/components/Skeleton";
+import SlidingTabBar from "../src/components/SlidingTabBar";
+import type { SlidingTabItem } from "../src/components/SlidingTabBar";
+import SmoothTabTransition from "../src/components/SmoothTabTransition";
+import TrackedBottomSheetModal from "../src/components/TrackedBottomSheetModal";
 import { DEFAULT_AVATAR } from "../src/constants/Images";
 import { useAuth } from "../src/context/AuthContext";
 import {
@@ -34,11 +55,17 @@ import {
   useRadioPlayerPlayback,
   useRadioPlayerPresence,
 } from "../src/context/RadioPlayerContext";
+import {
+  useBottomOverlayRegistration,
+  useBottomOverlayVisibility,
+} from "../src/context/BottomOverlayContext";
 import CachedImage from "../src/components/CachedImage";
-import { showTopToast } from "../src/context/TopToastContext";
+import { emitToast } from "../src/events/toastBus";
 import { useTheme } from "../src/context/ThemeContext";
 import { screenUploadsWithAi } from "../src/services/uploadSafetyScreen";
 import { buildSocialFollowKey } from "../src/utils/socialFollow";
+import { getSmoothTabIndex, setSmoothTab } from "../src/utils/smoothTabs";
+import { bottomSheetSpringConfig, motion } from "../src/utils/motion";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const PROFILE_CONTENT_HORIZONTAL_PADDING = 24;
@@ -47,6 +74,11 @@ const NUM_COLUMNS = 3;
 const SECTION_SIDE_MARGIN = 16;
 const GRID_PADDING = 16;
 const DRAWER_WIDTH = Math.min(SCREEN_WIDTH * 0.78, 320);
+const DRAWER_NAVIGATION_DELAY_MS = 260;
+const DRAWER_BACKDROP_OPEN_GUARD_MS = 360;
+const DRAWER_EDGE_GESTURE_HEADER_CLEARANCE = 96;
+const DRAWER_CLOSE_FALLBACK_MS = 520;
+const DRAWER_SPRING_CONFIG = motion.spring.overlay;
 const KNOWN_PROFILE_MEDIA_BUCKETS = [
   "avatars",
   "images",
@@ -135,7 +167,12 @@ type ProfileConnectionItem = {
 
 const normalizeFollowerProfile = (row: any): ProfileConnectionItem | null => {
   const follower = row?.follower || row;
-  const id = typeof follower?.id === "string" ? follower.id.trim() : "";
+  const id =
+    typeof follower?.id === "string" && follower.id.trim().length > 0
+      ? follower.id.trim()
+      : typeof row?.follower_id === "string"
+        ? row.follower_id.trim()
+        : "";
 
   if (!id) {
     return null;
@@ -156,7 +193,12 @@ const normalizeFollowerProfile = (row: any): ProfileConnectionItem | null => {
 const normalizeFollowingProfile = (row: any): ProfileConnectionItem | null => {
   const followedType = row?.followed_type === "group" ? "group" : "profile";
   const followed = followedType === "group" ? row?.followed_group : row?.followed;
-  const id = typeof followed?.id === "string" ? followed.id.trim() : "";
+  const id =
+    typeof followed?.id === "string" && followed.id.trim().length > 0
+      ? followed.id.trim()
+      : typeof row?.followed_id === "string"
+        ? row.followed_id.trim()
+        : "";
 
   if (!id) {
     return null;
@@ -186,6 +228,120 @@ const normalizeFollowingProfile = (row: any): ProfileConnectionItem | null => {
           : null,
     target_type: followedType,
   };
+};
+
+const uniqueConnectionItems = (items: ProfileConnectionItem[]) => {
+  const seenKeys = new Set<string>();
+
+  return items.filter((item) => {
+    const key = `${item.target_type}:${item.id}`;
+    if (!item.id || seenKeys.has(key)) {
+      return false;
+    }
+
+    seenKeys.add(key);
+    return true;
+  });
+};
+
+const fetchProfileFollowersDirect = async (targetId: string): Promise<ProfileConnectionItem[]> => {
+  const { data: followRows, error } = await supabase
+    .from("follows")
+    .select("id, follower_id, followed_id, followed_type, created_at")
+    .eq("followed_id", targetId)
+    .eq("followed_type", "profile")
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    throw error;
+  }
+
+  const followerIds = Array.from(
+    new Set(
+      (followRows || [])
+        .map((row: any) => row?.follower_id)
+        .filter((value: any): value is string => typeof value === "string" && value.trim().length > 0),
+    ),
+  );
+
+  const { data: profiles } = followerIds.length > 0
+    ? await supabase
+        .from("profiles")
+        .select("id, full_name, avatar_url, role")
+        .in("id", followerIds)
+    : { data: [] };
+
+  const profileById = new Map((profiles || []).map((profile: any) => [profile.id, profile]));
+
+  return uniqueConnectionItems(
+    (followRows || [])
+      .map((row: any) => normalizeFollowerProfile({
+        ...row,
+        follower: profileById.get(row?.follower_id) || null,
+      }))
+      .filter((item: ProfileConnectionItem | null): item is ProfileConnectionItem => Boolean(item)),
+  );
+};
+
+const fetchProfileFollowingDirect = async (targetId: string): Promise<ProfileConnectionItem[]> => {
+  const { data: followRows, error } = await supabase
+    .from("follows")
+    .select("id, followed_id, followed_type, created_at")
+    .eq("follower_id", targetId)
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    throw error;
+  }
+
+  const followedProfileIds = Array.from(
+    new Set(
+      (followRows || [])
+        .filter((row: any) => row?.followed_type !== "group")
+        .map((row: any) => row?.followed_id)
+        .filter((value: any): value is string => typeof value === "string" && value.trim().length > 0),
+    ),
+  );
+  const followedGroupIds = Array.from(
+    new Set(
+      (followRows || [])
+        .filter((row: any) => row?.followed_type === "group")
+        .map((row: any) => row?.followed_id)
+        .filter((value: any): value is string => typeof value === "string" && value.trim().length > 0),
+    ),
+  );
+
+  const [{ data: followedProfiles }, { data: followedGroups }] = await Promise.all([
+    followedProfileIds.length > 0
+      ? supabase
+          .from("profiles")
+          .select("id, full_name, avatar_url, role")
+          .in("id", followedProfileIds)
+      : Promise.resolve({ data: [] }),
+    followedGroupIds.length > 0
+      ? supabase
+          .from("groups_with_stats")
+          .select("id, name, images, group_type, genre, location, owner_id")
+          .in("id", followedGroupIds)
+      : Promise.resolve({ data: [] }),
+  ]);
+
+  const profileById = new Map((followedProfiles || []).map((profile: any) => [profile.id, profile]));
+  const groupById = new Map((followedGroups || []).map((group: any) => [group.id, group]));
+
+  return uniqueConnectionItems(
+    (followRows || [])
+      .map((row: any) => {
+        const followedType = row?.followed_type === "group" ? "group" : "profile";
+        return normalizeFollowingProfile({
+          ...row,
+          followed_type: followedType,
+          followed: followedType === "profile" ? profileById.get(row?.followed_id) || null : null,
+          followed_group: followedType === "group" ? groupById.get(row?.followed_id) || null : null,
+        });
+      })
+      .filter((item: ProfileConnectionItem | null): item is ProfileConnectionItem => Boolean(item)),
+  );
 };
 
 type ProfileScreenCachePayload = {
@@ -635,6 +791,7 @@ export default function ProfileScreen() {
   const { activeStation } = useRadioPlayerPresence();
   const { isPlaying } = useRadioPlayerPlayback();
   const { togglePlayPause, tuneIn } = useRadioPlayerActions();
+  const insets = useSafeAreaInsets();
   const params = useLocalSearchParams<{
     userId?: string;
     returnToHome?: string;
@@ -660,6 +817,12 @@ export default function ProfileScreen() {
   const [supportsGigVisibilityPreference, setSupportsGigVisibilityPreference] = useState(true);
   const [activeTab, setActiveTab] = useState<"about" | "gigs" | "bookmarks" | "playlists">("about");
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [isDrawerMounted, setIsDrawerMounted] = useState(false);
+  const [isDrawerTouchable, setIsDrawerTouchable] = useState(false);
+  const drawerProgress = useSharedValue(0);
+  const drawerGestureStartProgress = useSharedValue(1);
+  const drawerOpenedAtRef = useRef(0);
+  const drawerCloseFallbackRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [bookmarkFilter, setBookmarkFilter] = useState<"all" | "studios" | "gigs" | "musicians">("all");
   const [userPlaylists, setUserPlaylists] = useState<any[]>([]);
   const [loadingPlaylists, setLoadingPlaylists] = useState(false);
@@ -676,24 +839,217 @@ export default function ProfileScreen() {
   const [profileFollowing, setProfileFollowing] = useState<ProfileConnectionItem[]>([]);
   const [loadingProfileFollowers, setLoadingProfileFollowers] = useState(false);
   const [followListModal, setFollowListModal] = useState<"followers" | "following" | null>(null);
+  const followListSheetRef = useRef<BottomSheetModal>(null);
+  const followListSnapPoints = useMemo(() => ["48%", "78%"], []);
+  const followListAnimationConfigs = useBottomSheetSpringConfigs(bottomSheetSpringConfig);
   const profileFetchInFlightRef = useRef(false);
   const canManageStations = !isGuest && userRole === "admin";
+  const { registerOverlay: registerDrawerOverlay, unregisterOverlay: unregisterDrawerOverlay } =
+    useBottomOverlayRegistration("ProfileDrawer");
+  const drawerEdgeGestureStyle = useMemo(
+    () => [
+      styles.drawerEdgeGestureArea,
+      { top: insets.top + DRAWER_EDGE_GESTURE_HEADER_CLEARANCE },
+    ],
+    [insets.top],
+  );
+
+  const clearDrawerCloseFallback = useCallback(() => {
+    if (!drawerCloseFallbackRef.current) {
+      return;
+    }
+
+    clearTimeout(drawerCloseFallbackRef.current);
+    drawerCloseFallbackRef.current = null;
+  }, []);
+
+  const enableDrawerBackdrop = useCallback(() => {
+    setIsDrawerTouchable(true);
+  }, []);
+
+  const finishCloseDrawer = useCallback(() => {
+    clearDrawerCloseFallback();
+    setIsDrawerTouchable(false);
+    setIsMenuOpen(false);
+    setIsDrawerMounted(false);
+    unregisterDrawerOverlay();
+  }, [clearDrawerCloseFallback, unregisterDrawerOverlay]);
+
+  const scheduleDrawerCloseFallback = useCallback(() => {
+    clearDrawerCloseFallback();
+    unregisterDrawerOverlay();
+    drawerCloseFallbackRef.current = setTimeout(() => {
+      drawerCloseFallbackRef.current = null;
+      finishCloseDrawer();
+    }, DRAWER_CLOSE_FALLBACK_MS);
+  }, [clearDrawerCloseFallback, finishCloseDrawer, unregisterDrawerOverlay]);
+
+  const markDrawerOpen = useCallback(() => {
+    setIsMenuOpen(true);
+    setIsDrawerTouchable(false);
+    clearDrawerCloseFallback();
+  }, [clearDrawerCloseFallback]);
+
+  const startDrawerGestureOpen = useCallback(() => {
+    clearDrawerCloseFallback();
+    drawerOpenedAtRef.current = Date.now();
+    registerDrawerOverlay();
+    setIsDrawerTouchable(false);
+    setIsMenuOpen(false);
+    setIsDrawerMounted(true);
+  }, [clearDrawerCloseFallback, registerDrawerOverlay]);
+
+  const animateDrawerOpen = useCallback(() => {
+    drawerProgress.value = withSpring(1, DRAWER_SPRING_CONFIG, (finished) => {
+      if (finished) {
+        runOnJS(enableDrawerBackdrop)();
+      }
+    });
+  }, [drawerProgress, enableDrawerBackdrop]);
+
+  const animateDrawerClosed = useCallback(() => {
+    setIsDrawerTouchable(false);
+    setIsMenuOpen(false);
+    scheduleDrawerCloseFallback();
+    drawerProgress.value = withSpring(0, DRAWER_SPRING_CONFIG, (finished) => {
+      if (finished) {
+        runOnJS(finishCloseDrawer)();
+      }
+    });
+  }, [drawerProgress, finishCloseDrawer, scheduleDrawerCloseFallback]);
 
   const openDrawer = useCallback((_source: string = "unknown") => {
     if (isMenuOpen) {
       return;
     }
 
+    clearDrawerCloseFallback();
+    drawerProgress.value = 0;
+    drawerOpenedAtRef.current = Date.now();
+    registerDrawerOverlay();
+    setIsDrawerTouchable(false);
+    setIsDrawerMounted(true);
     setIsMenuOpen(true);
-  }, [isMenuOpen]);
+    animateDrawerOpen();
+  }, [animateDrawerOpen, clearDrawerCloseFallback, drawerProgress, isMenuOpen, registerDrawerOverlay]);
 
-  const closeDrawer = useCallback((_source: string = "unknown") => {
-    if (!isMenuOpen) {
+  const closeDrawer = useCallback((source: string = "unknown") => {
+    if (!isMenuOpen && !isDrawerMounted) {
       return;
     }
 
-    setIsMenuOpen(false);
-  }, [isMenuOpen]);
+    if (
+      source === "drawer-backdrop" &&
+      (!isDrawerTouchable || Date.now() - drawerOpenedAtRef.current < DRAWER_BACKDROP_OPEN_GUARD_MS)
+    ) {
+      return;
+    }
+
+    animateDrawerClosed();
+  }, [animateDrawerClosed, isDrawerMounted, isDrawerTouchable, isMenuOpen]);
+
+  useEffect(() => {
+    if (!isDrawerMounted) {
+      return;
+    }
+
+    const subscription = BackHandler.addEventListener("hardwareBackPress", () => {
+      closeDrawer("hardware-back");
+      return true;
+    });
+
+    return () => {
+      subscription.remove();
+    };
+  }, [closeDrawer, isDrawerMounted]);
+
+  useEffect(() => {
+    return () => {
+      clearDrawerCloseFallback();
+      unregisterDrawerOverlay();
+    };
+  }, [clearDrawerCloseFallback, unregisterDrawerOverlay]);
+
+  const drawerPanGesture = useMemo(
+    () =>
+      Gesture.Pan()
+        .activeOffsetX([-10, 10])
+        .failOffsetY([-18, 18])
+        .onBegin(() => {
+          drawerGestureStartProgress.value = drawerProgress.value;
+        })
+        .onUpdate((event) => {
+          const draggedProgress = drawerGestureStartProgress.value - event.translationX / DRAWER_WIDTH;
+          drawerProgress.value = Math.min(1, Math.max(0, draggedProgress));
+        })
+        .onEnd((event) => {
+          const shouldClose =
+            drawerProgress.value < 0.68 ||
+            event.translationX > DRAWER_WIDTH * 0.28 ||
+            event.velocityX > 650;
+
+          if (shouldClose) {
+            runOnJS(scheduleDrawerCloseFallback)();
+            drawerProgress.value = withSpring(0, DRAWER_SPRING_CONFIG, (finished) => {
+              if (finished) {
+                runOnJS(finishCloseDrawer)();
+              }
+            });
+          } else {
+            drawerProgress.value = withSpring(1, DRAWER_SPRING_CONFIG, (finished) => {
+              if (finished) {
+                runOnJS(enableDrawerBackdrop)();
+              }
+            });
+          }
+        }),
+    [drawerGestureStartProgress, drawerProgress, enableDrawerBackdrop, finishCloseDrawer, scheduleDrawerCloseFallback],
+  );
+
+  const drawerEdgeGesture = useMemo(
+    () =>
+      Gesture.Pan()
+        .activeOffsetX([-10, 10])
+        .failOffsetY([-18, 18])
+        .onBegin(() => {
+          drawerProgress.value = 0;
+          runOnJS(startDrawerGestureOpen)();
+        })
+        .onUpdate((event) => {
+          drawerProgress.value = Math.min(1, Math.max(0, -event.translationX / DRAWER_WIDTH));
+        })
+        .onEnd((event) => {
+          const shouldOpen =
+            drawerProgress.value > 0.34 ||
+            event.translationX < -DRAWER_WIDTH * 0.22 ||
+            event.velocityX < -650;
+
+          if (shouldOpen) {
+            runOnJS(markDrawerOpen)();
+            drawerProgress.value = withSpring(1, DRAWER_SPRING_CONFIG, (finished) => {
+              if (finished) {
+                runOnJS(enableDrawerBackdrop)();
+              }
+            });
+          } else {
+            runOnJS(scheduleDrawerCloseFallback)();
+            drawerProgress.value = withSpring(0, DRAWER_SPRING_CONFIG, (finished) => {
+              if (finished) {
+                runOnJS(finishCloseDrawer)();
+              }
+            });
+          }
+        }),
+    [drawerProgress, enableDrawerBackdrop, finishCloseDrawer, markDrawerOpen, scheduleDrawerCloseFallback, startDrawerGestureOpen],
+  );
+
+  const drawerAnimatedStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: (1 - drawerProgress.value) * DRAWER_WIDTH }],
+  }));
+
+  const drawerScrimAnimatedStyle = useAnimatedStyle(() => ({
+    opacity: interpolate(drawerProgress.value, [0, 1], [0, 1]),
+  }));
 
   const isMissingShowGigStatusesColumnError = (error: any) => {
     const message = String(error?.message || "").toLowerCase();
@@ -1280,17 +1636,21 @@ export default function ProfileScreen() {
           if (!followingError && Array.isArray(followingResponse?.data)) {
             nextProfileFollowingCount = followingResponse.data.length;
             setProfileFollowingCount(nextProfileFollowingCount);
-            const seenFollowingKeys = new Set<string>();
-            nextProfileFollowing = followingResponse.data
-              .map(normalizeFollowingProfile)
-              .filter((item: ProfileConnectionItem | null): item is ProfileConnectionItem => {
-                const key = item ? `${item.target_type}:${item.id}` : "";
-                if (!item || seenFollowingKeys.has(key)) {
-                  return false;
-                }
-                seenFollowingKeys.add(key);
-                return true;
-              });
+            nextProfileFollowing = uniqueConnectionItems(
+              followingResponse.data
+                .map(normalizeFollowingProfile)
+                .filter((item: ProfileConnectionItem | null): item is ProfileConnectionItem => Boolean(item)),
+            );
+
+            if (followingResponse.data.length > 0 && nextProfileFollowing.length === 0) {
+              nextProfileFollowing = await fetchProfileFollowingDirect(targetId);
+            }
+
+            setProfileFollowing(nextProfileFollowing);
+          } else {
+            nextProfileFollowing = await fetchProfileFollowingDirect(targetId);
+            nextProfileFollowingCount = Math.max(nextProfileFollowingCount, nextProfileFollowing.length);
+            setProfileFollowingCount(nextProfileFollowingCount);
             setProfileFollowing(nextProfileFollowing);
           }
 
@@ -1306,19 +1666,27 @@ export default function ProfileScreen() {
           );
 
           if (followersError) {
-            throw followersError;
+            nextProfileFollowers = await fetchProfileFollowersDirect(targetId);
+          } else {
+            const seenFollowerIds = new Set<string>();
+            nextProfileFollowers = (Array.isArray(followersResponse?.data) ? followersResponse.data : [])
+              .map(normalizeFollowerProfile)
+              .filter((item: ProfileConnectionItem | null): item is ProfileConnectionItem => {
+                if (!item || seenFollowerIds.has(item.id)) {
+                  return false;
+                }
+                seenFollowerIds.add(item.id);
+                return true;
+              });
           }
 
-          const seenFollowerIds = new Set<string>();
-          nextProfileFollowers = (Array.isArray(followersResponse?.data) ? followersResponse.data : [])
-            .map(normalizeFollowerProfile)
-            .filter((item: ProfileConnectionItem | null): item is ProfileConnectionItem => {
-              if (!item || seenFollowerIds.has(item.id)) {
-                return false;
-              }
-              seenFollowerIds.add(item.id);
-              return true;
-            });
+          if (
+            Array.isArray(followersResponse?.data) &&
+            followersResponse.data.length > 0 &&
+            nextProfileFollowers.length === 0
+          ) {
+            nextProfileFollowers = await fetchProfileFollowersDirect(targetId);
+          }
 
           setProfileFollowers(nextProfileFollowers);
           nextProfileFollowerCount = Math.max(nextProfileFollowerCount, nextProfileFollowers.length);
@@ -1379,7 +1747,17 @@ export default function ProfileScreen() {
         }
 
         if (!cacheIsFresh) {
-          fetchProfile({ showLoading: !cached });
+          let isActive = true;
+          const focusTask = InteractionManager.runAfterInteractions(() => {
+            if (isActive) {
+              void fetchProfile({ showLoading: !cached });
+            }
+          });
+
+          return () => {
+            isActive = false;
+            focusTask.cancel();
+          };
         }
       }
     }, [authLoading, currentUserId, fetchProfile, normalizedParamUserId]),
@@ -1399,6 +1777,7 @@ export default function ProfileScreen() {
   const [alertVisible, setAlertVisible] = useState(false);
   const [pendingAlert, setPendingAlert] = useState<ProfileAlertConfig | null>(null);
   const [showReportModal, setShowReportModal] = useState(false);
+  useBottomOverlayVisibility(mediaModalVisible || uploading, "ProfileMediaOrUploadModal");
   const uploadingRef = useRef(false);
   const [alertConfig, setAlertConfig] = useState<ProfileAlertConfig>({
     type: "info",
@@ -1902,7 +2281,7 @@ export default function ProfileScreen() {
   const openFollowListItem = (item: ProfileConnectionItem) => {
     if (!item.id) return;
 
-    setFollowListModal(null);
+    followListSheetRef.current?.dismiss();
 
     if (item.target_type === "group") {
       router.push({
@@ -2006,7 +2385,7 @@ export default function ProfileScreen() {
         void fetchStation(targetUserId);
       }
 
-      showTopToast({
+      emitToast({
         type: "success",
         title: "Playlist Deleted",
         message: `${playlistTitle || "Playlist"} was removed.`,
@@ -2108,6 +2487,50 @@ export default function ProfileScreen() {
     void loadProfileFollowState();
   }, [loadProfileFollowState]);
 
+  const refreshProfileFollowLists = useCallback(async () => {
+    const targetId = viewedProfileId || currentUserId || normalizedParamUserId || "";
+    if (!targetId || isGuest) {
+      setProfileFollowers([]);
+      setProfileFollowing([]);
+      setProfileFollowerCount(0);
+      setProfileFollowingCount(0);
+      return;
+    }
+
+    setLoadingProfileFollowers(true);
+
+    try {
+      const [followers, following] = await Promise.all([
+        fetchProfileFollowersDirect(targetId),
+        fetchProfileFollowingDirect(targetId),
+      ]);
+
+      setProfileFollowers(followers);
+      setProfileFollowing(following);
+      setProfileFollowerCount((prev) => Math.max(prev, followers.length));
+      setProfileFollowingCount((prev) => Math.max(prev, following.length));
+    } catch {
+      // Keep already loaded counts and cached rows if the list refresh fails.
+    } finally {
+      setLoadingProfileFollowers(false);
+    }
+  }, [currentUserId, isGuest, normalizedParamUserId, viewedProfileId]);
+
+  const openFollowListModal = useCallback((nextModal: "followers" | "following") => {
+    setFollowListModal(nextModal);
+    void refreshProfileFollowLists();
+  }, [refreshProfileFollowLists]);
+
+  const closeFollowListModal = useCallback(() => {
+    followListSheetRef.current?.dismiss();
+  }, []);
+
+  useEffect(() => {
+    if (followListModal) {
+      requestAnimationFrame(() => followListSheetRef.current?.present());
+    }
+  }, [followListModal]);
+
   const handleProfileFollowToggle = useCallback(async () => {
     if (!canFollowProfile || !viewedProfileId || isProfileFollowBusy) {
       return;
@@ -2132,7 +2555,7 @@ export default function ProfileScreen() {
         throw error;
       }
 
-      showTopToast({
+      emitToast({
         type: "success",
         title: wasFollowing ? "Unfollowed" : "Following",
         message: "",
@@ -2141,7 +2564,7 @@ export default function ProfileScreen() {
     } catch (error: any) {
       setIsProfileFollowing(wasFollowing);
       setProfileFollowerCount(previousFollowerCount);
-      showTopToast({
+      emitToast({
         type: "error",
         title: "Follow failed",
         message: error?.message || "Please try again.",
@@ -2186,6 +2609,55 @@ export default function ProfileScreen() {
     : followListModal === "following"
       ? "Not following anyone yet."
       : "No followers yet.";
+  const profileTabOrder = useMemo(
+    () => [
+      "about",
+      ...(profile?.role === "musician" && profile?.show_gig_statuses !== false ? ["gigs"] : []),
+      ...(isOwner && !isGuest ? ["bookmarks"] : []),
+      "playlists",
+    ] as ("about" | "gigs" | "bookmarks" | "playlists")[],
+    [isGuest, isOwner, profile?.role, profile?.show_gig_statuses],
+  );
+  const profileTabs = useMemo<SlidingTabItem<"about" | "gigs" | "bookmarks" | "playlists">[]>(
+    () =>
+      profileTabOrder.map((key) => {
+        if (key === "gigs") {
+          return {
+            key,
+            icon: "mic-outline",
+            activeIcon: "mic",
+            accessibilityLabel: "Gigs",
+          };
+        }
+
+        if (key === "bookmarks") {
+          return {
+            key,
+            icon: "bookmark-outline",
+            activeIcon: "bookmark",
+            accessibilityLabel: "Bookmarks",
+          };
+        }
+
+        if (key === "playlists") {
+          return {
+            key,
+            icon: "musical-notes-outline",
+            activeIcon: "musical-notes",
+            accessibilityLabel: "Playlists",
+          };
+        }
+
+        return {
+          key,
+          icon: "grid-outline",
+          activeIcon: "grid",
+          accessibilityLabel: "About",
+        };
+      }),
+    [profileTabOrder],
+  );
+  const profileActiveTabIndex = getSmoothTabIndex(profileTabOrder, activeTab);
 
   const openStationScreen = () => {
     if (hasStation && userStation?.id) {
@@ -2472,7 +2944,7 @@ export default function ProfileScreen() {
               <TouchableOpacity
                 activeOpacity={0.8}
                 accessibilityRole="button"
-                onPress={() => setFollowListModal("followers")}
+                onPress={() => openFollowListModal("followers")}
                 style={styles.statItem}
               >
                 <Text style={[styles.statValue, { color: colors.text }]}>
@@ -2487,7 +2959,7 @@ export default function ProfileScreen() {
               <TouchableOpacity
                 activeOpacity={0.8}
                 accessibilityRole="button"
-                onPress={() => setFollowListModal("following")}
+                onPress={() => openFollowListModal("following")}
                 style={styles.statItem}
               >
                 <Text style={[styles.statValue, { color: colors.text }]}>
@@ -2502,31 +2974,24 @@ export default function ProfileScreen() {
             </View>
 
             {/* TAB NAVIGATION */}
-            <View style={[styles.tabContainer, { borderBottomColor: isDark ? "rgba(255,255,255,0.1)" : "rgba(0,0,0,0.06)" }]}>
-              <TouchableOpacity activeOpacity={1} onPress={() => setActiveTab("about")} style={[styles.tabButton, activeTab === "about" && { borderBottomColor: colors.text, borderBottomWidth: 2 }]}>
-                <Ionicons name={activeTab === "about" ? "grid" : "grid-outline"} size={22} color={activeTab === "about" ? colors.text : colors.textSecondary} />
-              </TouchableOpacity>
-              
-              {profile?.role === "musician" && profile?.show_gig_statuses !== false && (
-                <TouchableOpacity activeOpacity={1} onPress={() => setActiveTab("gigs")} style={[styles.tabButton, activeTab === "gigs" && { borderBottomColor: colors.text, borderBottomWidth: 2 }]}>
-                  <Ionicons name={activeTab === "gigs" ? "mic" : "mic-outline"} size={22} color={activeTab === "gigs" ? colors.text : colors.textSecondary} />
-                </TouchableOpacity>
-              )}
-              
-              {isOwner && !isGuest && (
-                <TouchableOpacity activeOpacity={1} onPress={() => setActiveTab("bookmarks")} style={[styles.tabButton, activeTab === "bookmarks" && { borderBottomColor: colors.text, borderBottomWidth: 2 }]}>
-                  <Ionicons name={activeTab === "bookmarks" ? "bookmark" : "bookmark-outline"} size={22} color={activeTab === "bookmarks" ? colors.text : colors.textSecondary} />
-                </TouchableOpacity>
-              )}
+            <SlidingTabBar
+              activeKey={activeTab}
+              borderColor={isDark ? "rgba(255,255,255,0.1)" : "rgba(0,0,0,0.06)"}
+              iconSize={22}
+              indicatorWidthRatio={0.22}
+              onChange={(nextTab) => setSmoothTab(setActiveTab, nextTab)}
+              showTopBorder
+              tabs={profileTabs}
+            />
 
-              <TouchableOpacity activeOpacity={1} onPress={() => setActiveTab("playlists")} style={[styles.tabButton, activeTab === "playlists" && { borderBottomColor: colors.text, borderBottomWidth: 2 }]}>
-                <Ionicons name={activeTab === "playlists" ? "musical-notes" : "musical-notes-outline"} size={22} color={activeTab === "playlists" ? colors.text : colors.textSecondary} />
-              </TouchableOpacity>
-            </View>
-
-            {/* TAB CONTENT: GIGS */}
-            {activeTab === "gigs" && profile?.role === "musician" && profile?.show_gig_statuses !== false && (
-              <View style={styles.gigTimelineSection}>
+            <SmoothTabTransition
+              activeKey={activeTab}
+              activeIndex={profileActiveTabIndex}
+              style={styles.profileTabTransition}
+            >
+              {/* TAB CONTENT: GIGS */}
+              {activeTab === "gigs" && profile?.role === "musician" && profile?.show_gig_statuses !== false && (
+                <View style={styles.gigTimelineSection}>
                 <View
                   style={[
                     styles.gigSearchWrap,
@@ -2600,11 +3065,11 @@ export default function ProfileScreen() {
                   </View>
                 ))}
               </View>
-            )}
+              )}
 
-            {/* TAB CONTENT: BOOKMARKS */}
-            {activeTab === "bookmarks" && isOwner && !isGuest && (
-              <View style={styles.bookmarkSection}>
+              {/* TAB CONTENT: BOOKMARKS */}
+              {activeTab === "bookmarks" && isOwner && !isGuest && (
+                <View style={styles.bookmarkSection}>
                 {loadingBookmarks ? (
                   <View style={[styles.bookmarkEmptyState, { borderColor: colors.border, backgroundColor: isDark ? "#1F2937" : "#F9FAFB" }]}>
                     <Text style={[styles.bookmarkEmptyText, { color: colors.textSecondary }]}>Loading saved bookmarks...</Text>
@@ -2687,11 +3152,11 @@ export default function ProfileScreen() {
                   </>
                 )}
               </View>
-            )}
+              )}
 
-            {/* TAB CONTENT: PLAYLISTS */}
-            {activeTab === "playlists" && (
-              <View style={{ paddingHorizontal: 16, paddingTop: 16 }}>
+              {/* TAB CONTENT: PLAYLISTS */}
+              {activeTab === "playlists" && (
+                <View style={{ paddingHorizontal: 16, paddingTop: 16 }}>
                 <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 10 }}>
                   <View style={{ flexDirection: "row", alignItems: "center", gap: 8, flexShrink: 1 }}>
                     <Text style={{ fontSize: 13, fontFamily: "Poppins_600SemiBold", color: colors.textSecondary, textTransform: "uppercase", letterSpacing: 0.5 }}>
@@ -3134,11 +3599,11 @@ export default function ProfileScreen() {
                   </View>
                 )}
               </View>
-            )}
+              )}
 
-            {/* TAB CONTENT: ABOUT/MEDIA */}
-            {activeTab === "about" && (
-              <View>
+              {/* TAB CONTENT: ABOUT/MEDIA */}
+              {activeTab === "about" && (
+                <View style={styles.profileTabContent}>
                 <View
                   style={[
                     styles.mediaSectionTikTok,
@@ -3226,7 +3691,8 @@ export default function ProfileScreen() {
                   </View>
                 </View>
               </View>
-            )}
+              )}
+            </SmoothTabTransition>
 
           </View>
 
@@ -3235,6 +3701,7 @@ export default function ProfileScreen() {
             visible={mediaModalVisible}
             transparent={true}
             animationType="fade"
+            hardwareAccelerated
             onRequestClose={() => setMediaModalVisible(false)}
           >
             <View style={styles.modalContainer}>
@@ -3267,6 +3734,7 @@ export default function ProfileScreen() {
             visible={uploading}
             transparent={true}
             animationType="fade"
+            hardwareAccelerated
             statusBarTranslucent
           >
             <View style={styles.uploadLoadingOverlay}>
@@ -3282,25 +3750,44 @@ export default function ProfileScreen() {
             </View>
           </Modal>
         </ScrollView>
-        <Navbar />
+        {!isDrawerMounted ? <Navbar /> : null}
+        {isOwner && !isDrawerMounted ? (
+          <GestureDetector gesture={drawerEdgeGesture}>
+            <View style={drawerEdgeGestureStyle} />
+          </GestureDetector>
+        ) : null}
       </View>
+
       <Modal
-        visible={isMenuOpen}
-        transparent={true}
-        animationType="fade"
+        visible={isDrawerMounted}
+        transparent
         statusBarTranslucent
-        onRequestClose={() => closeDrawer("modal-request-close")}
-        onShow={() => {
-        }}
+        navigationBarTranslucent
+        hardwareAccelerated
+        animationType="none"
+        onRequestClose={() => closeDrawer("hardware-back")}
       >
-        <View style={styles.drawerOverlay}>
-          <TouchableOpacity activeOpacity={1} style={styles.drawerBackdrop} onPress={() => closeDrawer("drawer-backdrop")} />
-          <View
-            style={[
-              styles.drawerContent,
-              { backgroundColor: colors.background, borderLeftColor: colors.border },
-            ]}
-          >
+        {isDrawerMounted ? (
+          <View style={styles.drawerOverlay}>
+          <Animated.View
+            pointerEvents="none"
+            style={[styles.drawerScrim, drawerScrimAnimatedStyle]}
+          />
+          <View pointerEvents="auto" style={styles.drawerBackdrop}>
+            <TouchableOpacity
+              activeOpacity={1}
+              style={styles.drawerBackdropTouchTarget}
+              onPress={() => closeDrawer("drawer-backdrop")}
+            />
+          </View>
+          <GestureDetector gesture={drawerPanGesture}>
+            <Animated.View
+              style={[
+                styles.drawerContent,
+                { backgroundColor: colors.background, borderLeftColor: colors.border },
+                drawerAnimatedStyle,
+              ]}
+            >
             {/* Drawer top — avatar + name */}
             <View style={[styles.drawerTop, { borderBottomColor: colors.border }]}>
               <View style={styles.drawerAvatar}>
@@ -3339,7 +3826,7 @@ export default function ProfileScreen() {
                       key={item.label}
                       onPress={() => {
                         closeDrawer(`menu-item:${item.route}`);
-                        setTimeout(() => router.push(item.route as any), 250);
+                        setTimeout(() => router.push(item.route as any), DRAWER_NAVIGATION_DELAY_MS);
                       }}
                       style={[styles.drawerMenuItem, { borderBottomColor: isDark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.05)" }]}
                     >
@@ -3353,111 +3840,122 @@ export default function ProfileScreen() {
                 ) : null}
               </View>
             </ScrollView>
+            </Animated.View>
+          </GestureDetector>
           </View>
-        </View>
+        ) : null}
       </Modal>
 
-      <Modal
-        visible={followListModal !== null}
-        transparent={true}
-        animationType="slide"
-        statusBarTranslucent
-        onRequestClose={() => setFollowListModal(null)}
-      >
-        <View style={styles.followModalOverlay}>
-          <TouchableOpacity
-            activeOpacity={1}
-            style={styles.followModalBackdrop}
-            onPress={() => setFollowListModal(null)}
+      <TrackedBottomSheetModal
+        ref={followListSheetRef}
+        overlayLabel="ProfileFollowListSheet"
+        index={0}
+        snapPoints={followListSnapPoints}
+        animationConfigs={followListAnimationConfigs}
+        animateOnMount
+        enableDynamicSizing={false}
+        enableOverDrag={false}
+        enablePanDownToClose
+        backdropComponent={(props) => (
+          <BottomSheetBackdrop
+            {...props}
+            appearsOnIndex={0}
+            disappearsOnIndex={-1}
+            opacity={0.4}
           />
-          <View
-            style={[
-              styles.followModalSheet,
-              { backgroundColor: colors.background, borderColor: colors.border },
-            ]}
-          >
-            <View style={[styles.followModalHandle, { backgroundColor: colors.border }]} />
-            <View style={styles.followModalHeader}>
-              <View>
-                <Text style={[styles.followModalTitle, { color: colors.text }]}>
-                  {followListTitle}
-                </Text>
-                <Text style={[styles.followModalCount, { color: colors.textSecondary }]}>
-                  {followListCount} {followListCount === 1 ? "user" : "users"}
-                </Text>
-              </View>
-              <TouchableOpacity
-                activeOpacity={1}
-                onPress={() => setFollowListModal(null)}
-                style={[styles.followModalCloseBtn, { backgroundColor: isDark ? "#111827" : "#F8FAFC" }]}
-              >
-                <Ionicons name="close" size={20} color={colors.textSecondary} />
-              </TouchableOpacity>
+        )}
+        onDismiss={() => setFollowListModal(null)}
+        backgroundStyle={{
+          backgroundColor: colors.background,
+          borderRadius: 32,
+        }}
+        handleIndicatorStyle={{
+          backgroundColor: isDark ? "#4B5563" : "#E5E7EB",
+          width: 40,
+          marginTop: 10,
+        }}
+      >
+        <View style={styles.followModalSheetContent}>
+          <View style={styles.followModalHeader}>
+            <View>
+              <Text style={[styles.followModalTitle, { color: colors.text }]}>
+                {followListTitle}
+              </Text>
+              <Text style={[styles.followModalCount, { color: colors.textSecondary }]}>
+                {followListCount} {followListCount === 1 ? "user" : "users"}
+              </Text>
             </View>
-
-            {loadingProfileFollowers ? (
-              <View style={styles.followModalState}>
-                <ActivityIndicator size="small" color={colors.primary} />
-                <Text style={[styles.followersEmptyText, { color: colors.textSecondary }]}>
-                  Loading {followListTitle.toLowerCase()}...
-                </Text>
-              </View>
-            ) : followListItems.length > 0 ? (
-              <ScrollView
-                showsVerticalScrollIndicator={false}
-                contentContainerStyle={styles.followModalList}
-              >
-                {followListItems.map((item) => (
-                  <TouchableOpacity
-                    key={`${item.target_type}-${item.id}`}
-                    activeOpacity={1}
-                    onPress={() => openFollowListItem(item)}
-                    style={[
-                      styles.followerRow,
-                      { backgroundColor: colors.surface, borderColor: colors.border },
-                    ]}
-                  >
-                    <View style={[styles.followerAvatar, { backgroundColor: isDark ? "#1E293B" : "#EEF2FF" }]}>
-                      {item.avatar_url ? (
-                        <CachedImage
-                          uri={item.avatar_url}
-                          style={styles.followerAvatarImage}
-                          contentFit="cover"
-                          transition={120}
-                          width={88}
-                          height={88}
-                          disableRecyclingKey
-                        />
-                      ) : (
-                        <Ionicons
-                          name={item.target_type === "group" ? "people" : "person"}
-                          size={20}
-                          color={colors.textSecondary}
-                        />
-                      )}
-                    </View>
-                    <View style={styles.followerInfo}>
-                      <Text style={[styles.followerName, { color: colors.text }]} numberOfLines={1}>
-                        {item.full_name}
-                      </Text>
-                      <Text style={[styles.followerRole, { color: colors.textSecondary }]} numberOfLines={1}>
-                        {formatFollowerRole(item.role)}
-                      </Text>
-                    </View>
-                    <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
-                  </TouchableOpacity>
-                ))}
-              </ScrollView>
-            ) : (
-              <View style={styles.followModalState}>
-                <Text style={[styles.followersEmptyText, { color: colors.textSecondary }]}>
-                  {followListEmptyText}
-                </Text>
-              </View>
-            )}
+            <TouchableOpacity
+              activeOpacity={0.85}
+              onPress={closeFollowListModal}
+              style={[styles.followModalCloseBtn, { backgroundColor: isDark ? "#111827" : "#F8FAFC" }]}
+            >
+              <Ionicons name="close" size={20} color={colors.textSecondary} />
+            </TouchableOpacity>
           </View>
+
+          {loadingProfileFollowers ? (
+            <View style={styles.followModalState}>
+              <ActivityIndicator size="small" color={colors.primary} />
+              <Text style={[styles.followersEmptyText, { color: colors.textSecondary }]}>
+                Loading {followListTitle.toLowerCase()}...
+              </Text>
+            </View>
+          ) : followListItems.length > 0 ? (
+            <BottomSheetScrollView
+              showsVerticalScrollIndicator={false}
+              contentContainerStyle={styles.followModalList}
+            >
+              {followListItems.map((item) => (
+                <TouchableOpacity
+                  key={`${item.target_type}-${item.id}`}
+                  activeOpacity={0.86}
+                  onPress={() => openFollowListItem(item)}
+                  style={[
+                    styles.followerRow,
+                    { backgroundColor: colors.surface, borderColor: colors.border },
+                  ]}
+                >
+                  <View style={[styles.followerAvatar, { backgroundColor: isDark ? "#1E293B" : "#EEF2FF" }]}>
+                    {item.avatar_url ? (
+                      <CachedImage
+                        uri={item.avatar_url}
+                        style={styles.followerAvatarImage}
+                        contentFit="cover"
+                        transition={120}
+                        width={88}
+                        height={88}
+                        disableRecyclingKey
+                      />
+                    ) : (
+                      <Ionicons
+                        name={item.target_type === "group" ? "people" : "person"}
+                        size={20}
+                        color={colors.textSecondary}
+                      />
+                    )}
+                  </View>
+                  <View style={styles.followerInfo}>
+                    <Text style={[styles.followerName, { color: colors.text }]} numberOfLines={1}>
+                      {item.full_name}
+                    </Text>
+                    <Text style={[styles.followerRole, { color: colors.textSecondary }]} numberOfLines={1}>
+                      {formatFollowerRole(item.role)}
+                    </Text>
+                  </View>
+                  <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
+                </TouchableOpacity>
+              ))}
+            </BottomSheetScrollView>
+          ) : (
+            <View style={styles.followModalState}>
+              <Text style={[styles.followersEmptyText, { color: colors.textSecondary }]}>
+                {followListEmptyText}
+              </Text>
+            </View>
+          )}
         </View>
-      </Modal>
+      </TrackedBottomSheetModal>
 
       <CustomAlert
         visible={alertVisible}
@@ -3730,36 +4228,17 @@ const styles = StyleSheet.create({
     fontSize: 11,
     marginTop: 1,
   },
-  followModalOverlay: {
+  followModalSheetContent: {
     flex: 1,
-    justifyContent: "flex-end",
-    backgroundColor: "rgba(15,23,42,0.44)",
-  },
-  followModalBackdrop: {
-    ...StyleSheet.absoluteFillObject,
-  },
-  followModalSheet: {
-    maxHeight: "78%",
-    minHeight: 260,
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    borderWidth: 1,
-    paddingTop: 10,
     paddingHorizontal: 16,
+    paddingTop: 14,
     paddingBottom: 24,
-  },
-  followModalHandle: {
-    width: 42,
-    height: 4,
-    borderRadius: 2,
-    alignSelf: "center",
-    marginBottom: 14,
   },
   followModalHeader: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    marginBottom: 14,
+    marginBottom: 16,
   },
   followModalTitle: {
     fontFamily: "Poppins_700Bold",
@@ -3779,10 +4258,11 @@ const styles = StyleSheet.create({
   },
   followModalList: {
     gap: 8,
-    paddingBottom: 12,
+    paddingBottom: 28,
   },
   followModalState: {
-    minHeight: 150,
+    flex: 1,
+    minHeight: 190,
     alignItems: "center",
     justifyContent: "center",
     gap: 8,
@@ -3816,6 +4296,12 @@ const styles = StyleSheet.create({
   tabText: {
     fontSize: 12,
     marginTop: 4,
+  },
+  profileTabContent: {
+    width: "100%",
+  },
+  profileTabTransition: {
+    width: "100%",
   },
   gigTimelineSection: {
     width: "100%",
@@ -4003,6 +4489,7 @@ const styles = StyleSheet.create({
   mediaSectionTikTok: {
     width: "100%",
     alignSelf: "stretch",
+    alignItems: "flex-start",
     marginTop: 8,
     marginBottom: 0,
     marginHorizontal: 0,
@@ -4142,6 +4629,8 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     flexWrap: "wrap",
     justifyContent: "flex-start",
+    alignItems: "flex-start",
+    alignContent: "flex-start",
     gap: TIKTOK_GRID_GAP,
     paddingHorizontal: 0,
     paddingBottom: 40, // some bottom padding
@@ -4318,8 +4807,20 @@ const styles = StyleSheet.create({
   },
   // Drawer styles
   drawerOverlay: {
-    flex: 1,
-    backgroundColor: "rgba(0,0,0,0.42)",
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "transparent",
+    zIndex: 20000,
+    elevation: 20000,
+  },
+  drawerEdgeGestureArea: {
+    position: "absolute",
+    top: 0,
+    right: 0,
+    bottom: 0,
+    width: 28,
+    zIndex: 900,
+    elevation: 900,
+    backgroundColor: "transparent",
   },
   drawerScrim: {
     ...StyleSheet.absoluteFillObject,
@@ -4328,7 +4829,10 @@ const styles = StyleSheet.create({
   },
   drawerBackdrop: {
     ...StyleSheet.absoluteFillObject,
-    zIndex: 1,
+    zIndex: 2,
+  },
+  drawerBackdropTouchTarget: {
+    ...StyleSheet.absoluteFillObject,
   },
   drawerContent: {
     width: DRAWER_WIDTH,
@@ -4337,7 +4841,7 @@ const styles = StyleSheet.create({
     top: 0,
     right: 0,
     bottom: 0,
-    zIndex: 2,
+    zIndex: 3,
     shadowColor: "#000",
     shadowOffset: { width: -4, height: 0 },
     shadowOpacity: 0.18,

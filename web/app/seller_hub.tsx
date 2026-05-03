@@ -1,4 +1,4 @@
-﻿import { Ionicons } from "@expo/vector-icons";
+import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect } from "@react-navigation/native";
 import { router } from "expo-router";
 import React, { useCallback, useState } from "react";
@@ -22,8 +22,9 @@ import CachedImage from "../src/components/CachedImage";
 import GuestSignInGate from "../src/components/GuestSignInGate";
 import Header from "../src/components/header";
 import CustomAlert, { AlertType } from "../src/components/CustomAlert";
+import SmoothTabTransition from "../src/components/SmoothTabTransition";
 import { useAuth } from "../src/context/AuthContext";
-import { showTopToast } from "../src/context/TopToastContext";
+import { emitToast } from "../src/events/toastBus";
 import { useTheme } from "../src/context/ThemeContext";
 
 const moderateScale = (size: number, factor = 0.3) => {
@@ -130,7 +131,7 @@ export default function SellerHubScreen() {
       });
 
       if (data?.success) {
-        showTopToast({ type: "success", title: "Product Created", message: "Your product has been created as a draft." });
+        emitToast({ type: "success", title: "Product Created", message: "Your product has been created as a draft." });
         setShowAddProduct(false);
         setProductTitle("");
         setProductDescription("");
@@ -158,7 +159,7 @@ export default function SellerHubScreen() {
         body: { action: "publish_product", product_id: productId },
       });
       if (data?.success) {
-        showTopToast({ type: "success", title: "Published", message: "Product is now live." });
+        emitToast({ type: "success", title: "Published", message: "Product is now live." });
         fetchData();
       }
     } catch (e: any) {
@@ -179,7 +180,7 @@ export default function SellerHubScreen() {
 
   const statGrid = [
     { label: "Total Orders", value: stats?.total_orders || 0, icon: "receipt-outline" as const, color: "#3b82f6" },
-    { label: "Revenue", value: `₱${Number(stats?.total_revenue || 0).toLocaleString()}`, icon: "cash-outline" as const, color: "#22c55e" },
+    { label: "Revenue", value: `?${Number(stats?.total_revenue || 0).toLocaleString()}`, icon: "cash-outline" as const, color: "#22c55e" },
     { label: "Active Products", value: stats?.active_products || 0, icon: "cube-outline" as const, color: "#8b5cf6" },
     { label: "Pending Orders", value: stats?.pending_orders || 0, icon: "time-outline" as const, color: "#eab308" },
   ];
@@ -237,7 +238,7 @@ export default function SellerHubScreen() {
             )}
             <View style={{ flex: 1, marginLeft: 12 }}>
               <Text style={{ color: colors.text, fontSize: 14, fontWeight: "600" }} numberOfLines={1}>{item.title}</Text>
-              <Text style={{ color: colors.primary, fontSize: 13, fontWeight: "700", marginTop: 2 }}>₱{Number(item.price || 0).toLocaleString()}</Text>
+              <Text style={{ color: colors.primary, fontSize: 13, fontWeight: "700", marginTop: 2 }}>?{Number(item.price || 0).toLocaleString()}</Text>
             </View>
             <View style={{ alignItems: "flex-end" }}>
               <View style={[styles.statusBadge, { backgroundColor: item.status === "active" ? "#22c55e20" : "#f59e0b20" }]}> 
@@ -281,9 +282,9 @@ export default function SellerHubScreen() {
             </View>
           </View>
           <Text style={{ color: colors.textSecondary, fontSize: 12, marginTop: 4 }}>
-            {(item.buyer_name || "Buyer") + " • " + new Date(item.created_at).toLocaleDateString()}
+            {(item.buyer_name || "Buyer") + " � " + new Date(item.created_at).toLocaleDateString()}
           </Text>
-          <Text style={{ color: colors.text, fontSize: 14, fontWeight: "700", marginTop: 6 }}>₱{Number(item.total_amount || item.total || 0).toLocaleString()}</Text>
+          <Text style={{ color: colors.text, fontSize: 14, fontWeight: "700", marginTop: 6 }}>?{Number(item.total_amount || item.total || 0).toLocaleString()}</Text>
         </TouchableOpacity>
       )}
       ListEmptyComponent={
@@ -334,7 +335,9 @@ export default function SellerHubScreen() {
           </View>
 
           <View style={[styles.panelBody, { borderColor: panelBorder, backgroundColor: panelBg }]}>
-            {loading ? <ActivityIndicator size="large" color={colors.primary} style={{ marginTop: 48 }} /> : tab === "dashboard" ? renderDashboard() : tab === "products" ? renderProducts() : renderOrders()}
+            <SmoothTabTransition activeKey={tab}>
+              {loading ? <ActivityIndicator size="large" color={colors.primary} style={{ marginTop: 48 }} /> : tab === "dashboard" ? renderDashboard() : tab === "products" ? renderProducts() : renderOrders()}
+            </SmoothTabTransition>
           </View>
         </View>
       </View>
@@ -357,7 +360,7 @@ export default function SellerHubScreen() {
               placeholderTextColor={colors.textSecondary}
               multiline
             />
-            <Text style={{ color: colors.text, fontSize: 13, fontWeight: "600", marginBottom: 4, marginTop: 10 }}>Price (₱)</Text>
+            <Text style={{ color: colors.text, fontSize: 13, fontWeight: "600", marginBottom: 4, marginTop: 10 }}>Price (?)</Text>
             <TextInput style={[styles.input, { color: colors.text, borderColor: borderCol }]} value={productPrice} onChangeText={setProductPrice} placeholder="0.00" placeholderTextColor={colors.textSecondary} keyboardType="decimal-pad" />
             <Text style={{ color: colors.text, fontSize: 13, fontWeight: "600", marginBottom: 4, marginTop: 10 }}>Category</Text>
             <TextInput

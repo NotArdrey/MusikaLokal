@@ -20,7 +20,7 @@ import Navbar from "../src/components/navbar";
 import Skeleton from "../src/components/Skeleton";
 import CustomAlert, { AlertType } from "../src/components/CustomAlert";
 import { useAuth } from "../src/context/AuthContext";
-import { showTopToast } from "../src/context/TopToastContext";
+import { emitToast } from "../src/events/toastBus";
 import { useTheme } from "../src/context/ThemeContext";
 import { formatFriendlyDateTime } from "../src/utils/friendlyDateTime";
 
@@ -172,7 +172,7 @@ export default function PostDetailsScreen() {
         body: { action: "delete_comment", comment_id: commentId },
       });
       if (data?.success) {
-        showTopToast({ type: "info", title: "Deleted", message: "Comment deleted." });
+        emitToast({ type: "info", title: "Deleted", message: "Comment deleted." });
         fetchPost();
       }
     } catch (e: any) {
@@ -186,7 +186,7 @@ export default function PostDetailsScreen() {
         body: { action: "delete_post", post_id: post.id },
       });
       if (data?.success) {
-        showTopToast({ type: "info", title: "Deleted", message: "Post deleted." });
+        emitToast({ type: "info", title: "Deleted", message: "Post deleted." });
         router.back();
       }
     } catch (e: any) {
@@ -200,7 +200,7 @@ export default function PostDetailsScreen() {
         body: { action: "report_post", post_id: post.id, reason: "inappropriate" },
       });
       if (data?.success) {
-        showTopToast({ type: "info", title: "Reported", message: "Post has been reported for review." });
+        emitToast({ type: "info", title: "Reported", message: "Post has been reported for review." });
       } else {
         setAlert({ type: "warning", title: "Info", message: data?.error || "Already reported" });
       }

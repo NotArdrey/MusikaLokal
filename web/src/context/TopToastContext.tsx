@@ -1,5 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import { Portal } from "@gorhom/portal";
+import { BlurView } from "expo-blur";
+import * as Haptics from "expo-haptics";
 import React, {
   createContext,
   useCallback,
@@ -9,39 +11,39 @@ import React, {
   useRef,
   useState,
 } from "react";
-import { Animated, Pressable, StyleSheet, Text, View } from "react-native";
+import {
+  Animated,
+  PanResponder,
+  Platform,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+} from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import {
+  emitToast,
+  toastBus,
+  type ToastEvent,
+  type ToastPayload,
+  type ToastType,
+} from "../events/toastBus";
 import { useTheme } from "./ThemeContext";
 
-export type TopToastType = "success" | "error" | "warning" | "info";
-
-export interface TopToastPayload {
-  title?: string;
-  message: string;
-  type?: TopToastType;
-  duration?: number;
-}
-
-interface ActiveToast {
-  title: string;
-  message: string;
-  type: TopToastType;
-  duration: number;
-}
+export type TopToastType = ToastType;
+export type TopToastPayload = ToastPayload;
 
 interface TopToastContextValue {
-  showToast: (payload: TopToastPayload) => void;
+  showToast: (payload: TopToastPayload) => boolean;
   hideToast: () => void;
 }
 
 const DEFAULT_DURATION_BY_TYPE: Record<TopToastType, number> = {
-  success: 1800,
-  info: 2400,
-  warning: 2800,
-  error: 3200,
+  success: 2600,
+  info: 3200,
+  warning: 3800,
+  error: 4400,
 };
-
-const HIDDEN_OFFSET = -140;
 
 const defaultTitleByType: Record<TopToastType, string> = {
   success: "Success",
@@ -66,164 +68,101 @@ const toastTypeConfig: Record<
   success: {
     icon: "checkmark-circle",
     accent: "#10B981",
-    lightBackground: "#ECFDF5",
-    darkBackground: "rgba(16, 185, 129, 0.16)",
+    lightBackground: "rgba(236, 253, 245, 0.92)",
+    darkBackground: "rgba(6, 78, 59, 0.78)",
     lightBorder: "#A7F3D0",
-    darkBorder: "rgba(16, 185, 129, 0.4)",
+    darkBorder: "rgba(52, 211, 153, 0.42)",
     lightIconBg: "rgba(16, 185, 129, 0.14)",
-    darkIconBg: "rgba(16, 185, 129, 0.22)",
+    darkIconBg: "rgba(52, 211, 153, 0.18)",
   },
   error: {
     icon: "close-circle",
     accent: "#EF4444",
-    lightBackground: "#FEF2F2",
-    darkBackground: "rgba(239, 68, 68, 0.16)",
+    lightBackground: "rgba(254, 242, 242, 0.94)",
+    darkBackground: "rgba(127, 29, 29, 0.78)",
     lightBorder: "#FECACA",
-    darkBorder: "rgba(239, 68, 68, 0.4)",
+    darkBorder: "rgba(248, 113, 113, 0.42)",
     lightIconBg: "rgba(239, 68, 68, 0.14)",
-    darkIconBg: "rgba(239, 68, 68, 0.22)",
+    darkIconBg: "rgba(248, 113, 113, 0.18)",
   },
   warning: {
     icon: "warning",
     accent: "#F59E0B",
-    lightBackground: "#FFFBEB",
-    darkBackground: "rgba(245, 158, 11, 0.16)",
+    lightBackground: "rgba(255, 251, 235, 0.94)",
+    darkBackground: "rgba(120, 53, 15, 0.76)",
     lightBorder: "#FDE68A",
-    darkBorder: "rgba(245, 158, 11, 0.4)",
+    darkBorder: "rgba(251, 191, 36, 0.44)",
     lightIconBg: "rgba(245, 158, 11, 0.14)",
-    darkIconBg: "rgba(245, 158, 11, 0.22)",
+    darkIconBg: "rgba(251, 191, 36, 0.18)",
   },
   info: {
     icon: "information-circle",
     accent: "#3B82F6",
-    lightBackground: "#EFF6FF",
-    darkBackground: "rgba(59, 130, 246, 0.16)",
+    lightBackground: "rgba(239, 246, 255, 0.94)",
+    darkBackground: "rgba(30, 58, 138, 0.76)",
     lightBorder: "#BFDBFE",
-    darkBorder: "rgba(59, 130, 246, 0.4)",
+    darkBorder: "rgba(96, 165, 250, 0.42)",
     lightIconBg: "rgba(59, 130, 246, 0.14)",
-    darkIconBg: "rgba(59, 130, 246, 0.22)",
+    darkIconBg: "rgba(96, 165, 250, 0.18)",
   },
 };
 
 const TopToastContext = createContext<TopToastContextValue | undefined>(undefined);
 
-let externalShowToast: ((payload: TopToastPayload) => void) | null = null;
-let pendingToastPayload: TopToastPayload | null = null;
+const MAX_VISIBLE_TOASTS = 4;
+const ENTRY_OFFSET = -28;
+const SWIPE_DISMISS_DISTANCE = 88;
+const OFFSCREEN_DISTANCE = 420;
 
-export const showTopToast = (payload: TopToastPayload) => {
-  if (externalShowToast) {
-    externalShowToast(payload);
+const triggerToastHaptic = (type: TopToastType) => {
+  if (Platform.OS === "web") {
     return;
   }
 
-  pendingToastPayload = payload;
+  if (type === "info") {
+    void Haptics.selectionAsync().catch(() => undefined);
+    return;
+  }
+
+  const hapticType =
+    type === "success"
+      ? Haptics.NotificationFeedbackType.Success
+      : type === "error"
+        ? Haptics.NotificationFeedbackType.Error
+        : Haptics.NotificationFeedbackType.Warning;
+
+  void Haptics.notificationAsync(hapticType).catch(() => undefined);
 };
 
 export function TopToastProvider({ children }: { children: React.ReactNode }) {
   const { colors, isDark } = useTheme();
   const insets = useSafeAreaInsets();
+  const [toasts, setToasts] = useState<ToastEvent[]>([]);
 
-  const [activeToast, setActiveToast] = useState<ActiveToast | null>(null);
-  const translateY = useRef(new Animated.Value(HIDDEN_OFFSET)).current;
-  const opacity = useRef(new Animated.Value(0)).current;
-  const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const clearHideTimer = useCallback(() => {
-    if (hideTimerRef.current) {
-      clearTimeout(hideTimerRef.current);
-      hideTimerRef.current = null;
-    }
+  const dismissToast = useCallback((id: string) => {
+    setToasts((currentToasts) => currentToasts.filter((toast) => toast.id !== id));
   }, []);
 
   const hideToast = useCallback(() => {
-    clearHideTimer();
-
-    Animated.parallel([
-      Animated.timing(translateY, {
-        toValue: HIDDEN_OFFSET,
-        duration: 220,
-        useNativeDriver: true,
-      }),
-      Animated.timing(opacity, {
-        toValue: 0,
-        duration: 180,
-        useNativeDriver: true,
-      }),
-    ]).start(({ finished }) => {
-      if (finished) {
-        setActiveToast(null);
-      }
-    });
-  }, [clearHideTimer, opacity, translateY]);
-
-  const showToast = useCallback(
-    (payload: TopToastPayload) => {
-      const normalizedMessage = payload.message?.trim();
-      if (!normalizedMessage) return;
-
-      const type = payload.type ?? "info";
-      const duration = Math.max(
-        payload.duration ?? DEFAULT_DURATION_BY_TYPE[type],
-        1200,
-      );
-      const title = payload.title?.trim() || defaultTitleByType[type];
-
-      clearHideTimer();
-      setActiveToast({
-        title,
-        message: normalizedMessage,
-        type,
-        duration,
-      });
-
-      translateY.setValue(HIDDEN_OFFSET);
-      opacity.setValue(0);
-
-      Animated.parallel([
-        Animated.timing(translateY, {
-          toValue: 0,
-          duration: 260,
-          useNativeDriver: true,
-        }),
-        Animated.timing(opacity, {
-          toValue: 1,
-          duration: 220,
-          useNativeDriver: true,
-        }),
-      ]).start();
-
-      hideTimerRef.current = setTimeout(() => {
-        hideToast();
-      }, duration);
-    },
-    [clearHideTimer, hideToast, opacity, translateY],
-  );
+    setToasts([]);
+  }, []);
 
   useEffect(() => {
-    externalShowToast = showToast;
-
-    if (pendingToastPayload) {
-      const queuedToast = pendingToastPayload;
-      pendingToastPayload = null;
-      showToast(queuedToast);
-    }
-
-    return () => {
-      if (externalShowToast === showToast) {
-        externalShowToast = null;
-      }
-    };
-  }, [showToast]);
-
-  useEffect(() => clearHideTimer, [clearHideTimer]);
+    return toastBus.subscribe((event) => {
+      triggerToastHaptic(event.type);
+      setToasts((currentToasts) => [
+        event,
+        ...currentToasts.filter((toast) => toast.id !== event.id),
+      ].slice(0, MAX_VISIBLE_TOASTS));
+    });
+  }, []);
 
   const value = useMemo<TopToastContextValue>(
-    () => ({ showToast, hideToast }),
-    [hideToast, showToast],
+    () => ({ showToast: emitToast, hideToast }),
+    [hideToast],
   );
 
-  const topOffset = Math.max(insets.top, 12);
-  const config = activeToast ? toastTypeConfig[activeToast.type] : null;
+  const topOffset = Math.max(insets.top + 8, 16);
 
   return (
     <TopToastContext.Provider value={value}>
@@ -231,65 +170,226 @@ export function TopToastProvider({ children }: { children: React.ReactNode }) {
 
       <Portal name="top-toast">
         <View pointerEvents="box-none" style={StyleSheet.absoluteFillObject}>
-          {activeToast && config ? (
-            <Animated.View
-              pointerEvents="box-none"
-              style={[
-                styles.toast,
-                {
-                  top: topOffset,
-                  transform: [{ translateY }],
-                  opacity,
-                  backgroundColor: isDark
-                    ? config.darkBackground
-                    : config.lightBackground,
-                  borderColor: isDark ? config.darkBorder : config.lightBorder,
-                },
-              ]}
-            >
-              <Pressable
-                onPress={hideToast}
-                style={styles.touchableArea}
-                accessibilityRole="alert"
-                accessibilityLabel={`${activeToast.title}. ${activeToast.message}`}
-              >
-                <View
-                  style={[
-                    styles.iconWrap,
-                    {
-                      backgroundColor: isDark
-                        ? config.darkIconBg
-                        : config.lightIconBg,
-                    },
-                  ]}
-                >
-                  <Ionicons name={config.icon as any} size={18} color={config.accent} />
-                </View>
-
-                <View style={styles.textContainer}>
-                  <Text style={[styles.title, { color: colors.text }]}>
-                    {activeToast.title}
-                  </Text>
-                  <Text
-                    style={[styles.message, { color: colors.textSecondary }]}
-                    numberOfLines={3}
-                  >
-                    {activeToast.message}
-                  </Text>
-                </View>
-
-                <Ionicons
-                  name="close"
-                  size={16}
-                  color={colors.textSecondary}
-                  style={styles.closeIcon}
-                />
-              </Pressable>
-            </Animated.View>
-          ) : null}
+          <View pointerEvents="box-none" style={[styles.toastStack, { top: topOffset }]}>
+            {toasts.map((toast, index) => (
+              <ToastCard
+                colors={colors}
+                index={index}
+                isDark={isDark}
+                key={toast.id}
+                onDismiss={dismissToast}
+                toast={toast}
+              />
+            ))}
+          </View>
         </View>
       </Portal>
     </TopToastContext.Provider>
+  );
+}
+
+function ToastCard({
+  colors,
+  index,
+  isDark,
+  onDismiss,
+  toast,
+}: {
+  colors: ReturnType<typeof useTheme>["colors"];
+  index: number;
+  isDark: boolean;
+  onDismiss: (id: string) => void;
+  toast: ToastEvent;
+}) {
+  const translateY = useRef(new Animated.Value(ENTRY_OFFSET)).current;
+  const opacity = useRef(new Animated.Value(0)).current;
+  const dragX = useRef(new Animated.Value(0)).current;
+  const progress = useRef(new Animated.Value(1)).current;
+  const exitStartedRef = useRef(false);
+  const config = toastTypeConfig[toast.type];
+  const duration = Math.max(toast.duration ?? DEFAULT_DURATION_BY_TYPE[toast.type], 1200);
+  const title = toast.title?.trim() || defaultTitleByType[toast.type];
+
+  const finishDismiss = useCallback(
+    (direction = 0) => {
+      if (exitStartedRef.current) {
+        return;
+      }
+
+      exitStartedRef.current = true;
+      progress.stopAnimation();
+
+      Animated.parallel([
+        Animated.timing(opacity, {
+          toValue: 0,
+          duration: 170,
+          useNativeDriver: true,
+        }),
+        Animated.timing(translateY, {
+          toValue: -16,
+          duration: 170,
+          useNativeDriver: true,
+        }),
+        Animated.timing(dragX, {
+          toValue: direction === 0 ? 0 : direction * OFFSCREEN_DISTANCE,
+          duration: 190,
+          useNativeDriver: true,
+        }),
+      ]).start(() => onDismiss(toast.id));
+    },
+    [dragX, onDismiss, opacity, progress, toast.id, translateY],
+  );
+
+  const panResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onMoveShouldSetPanResponder: (_, gestureState) => {
+          return Math.abs(gestureState.dx) > 8 && Math.abs(gestureState.dx) > Math.abs(gestureState.dy);
+        },
+        onPanResponderMove: (_, gestureState) => {
+          dragX.setValue(gestureState.dx);
+        },
+        onPanResponderRelease: (_, gestureState) => {
+          if (Math.abs(gestureState.dx) >= SWIPE_DISMISS_DISTANCE) {
+            finishDismiss(gestureState.dx > 0 ? 1 : -1);
+            return;
+          }
+
+          Animated.spring(dragX, {
+            toValue: 0,
+            tension: 120,
+            friction: 14,
+            useNativeDriver: true,
+          }).start();
+        },
+        onPanResponderTerminate: () => {
+          Animated.spring(dragX, {
+            toValue: 0,
+            tension: 120,
+            friction: 14,
+            useNativeDriver: true,
+          }).start();
+        },
+      }),
+    [dragX, finishDismiss],
+  );
+
+  useEffect(() => {
+    Animated.parallel([
+      Animated.spring(translateY, {
+        toValue: 0,
+        tension: 130,
+        friction: 16,
+        useNativeDriver: true,
+      }),
+      Animated.timing(opacity, {
+        toValue: 1,
+        duration: 180,
+        useNativeDriver: true,
+      }),
+      Animated.timing(progress, {
+        toValue: 0,
+        duration,
+        useNativeDriver: false,
+      }),
+    ]).start(({ finished }) => {
+      if (finished) {
+        finishDismiss();
+      }
+    });
+
+    return () => {
+      progress.stopAnimation();
+    };
+  }, [duration, finishDismiss, opacity, progress, translateY]);
+
+  const progressWidth = progress.interpolate({
+    inputRange: [0, 1],
+    outputRange: ["0%", "100%"],
+  });
+
+  return (
+    <Animated.View
+      pointerEvents="box-none"
+      style={[
+        styles.toast,
+        {
+          opacity,
+          zIndex: 99999 - index,
+          transform: [
+            { translateX: dragX },
+            { translateY },
+            { scale: index === 0 ? 1 : 0.985 },
+          ],
+        },
+      ]}
+      {...panResponder.panHandlers}
+    >
+      <BlurView
+        intensity={isDark ? 38 : 28}
+        tint={isDark ? "dark" : "light"}
+        style={StyleSheet.absoluteFillObject}
+      />
+      <View
+        style={[
+          StyleSheet.absoluteFillObject,
+          {
+            backgroundColor: isDark ? config.darkBackground : config.lightBackground,
+            borderColor: isDark ? config.darkBorder : config.lightBorder,
+          },
+          styles.toastBackdrop,
+        ]}
+      />
+
+      <Pressable
+        accessibilityLabel={`${title}. ${toast.message}`}
+        accessibilityRole="alert"
+        onPress={() => finishDismiss()}
+        style={styles.touchableArea}
+      >
+        <View
+          style={[
+            styles.iconWrap,
+            {
+              backgroundColor: isDark ? config.darkIconBg : config.lightIconBg,
+            },
+          ]}
+        >
+          <Ionicons name={config.icon as any} size={18} color={config.accent} />
+        </View>
+
+        <View style={styles.textContainer}>
+          <Text style={[styles.title, { color: colors.text }]} numberOfLines={1}>
+            {title}
+          </Text>
+          <Text
+            style={[styles.message, { color: colors.textSecondary }]}
+            numberOfLines={3}
+          >
+            {toast.message}
+          </Text>
+        </View>
+
+        <Ionicons
+          name="close"
+          size={16}
+          color={colors.textSecondary}
+          style={styles.closeIcon}
+        />
+      </Pressable>
+
+      <View style={[styles.progressTrack, { backgroundColor: isDark ? "rgba(255,255,255,0.08)" : "rgba(15,23,42,0.06)" }]}>
+        <Animated.View
+          style={[
+            styles.progressFill,
+            {
+              backgroundColor: config.accent,
+              width: progressWidth,
+            },
+          ]}
+        />
+      </View>
+    </Animated.View>
   );
 }
 
@@ -303,30 +403,39 @@ export function useTopToast() {
 }
 
 const styles = StyleSheet.create({
-  toast: {
+  toastStack: {
     position: "absolute",
     left: 14,
     right: 14,
-    minHeight: 70,
-    borderRadius: 16,
-    borderWidth: 1,
+    gap: 8,
     zIndex: 99999,
+  },
+  toast: {
+    minHeight: 72,
+    borderRadius: 18,
+    borderWidth: 1,
+    overflow: "hidden",
     shadowColor: "#000",
-    shadowOffset: { width: 0, height: 8 },
+    shadowOffset: { width: 0, height: 10 },
     shadowOpacity: 0.18,
-    shadowRadius: 18,
+    shadowRadius: 20,
     elevation: 12,
+  },
+  toastBackdrop: {
+    borderWidth: 1,
+    borderRadius: 18,
   },
   touchableArea: {
     paddingHorizontal: 14,
-    paddingVertical: 12,
+    paddingBottom: 13,
+    paddingTop: 12,
     flexDirection: "row",
     alignItems: "flex-start",
   },
   iconWrap: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
+    width: 30,
+    height: 30,
+    borderRadius: 15,
     alignItems: "center",
     justifyContent: "center",
     marginTop: 1,
@@ -348,6 +457,16 @@ const styles = StyleSheet.create({
   },
   closeIcon: {
     opacity: 0.85,
-    marginTop: 3,
+    marginTop: 4,
+  },
+  progressTrack: {
+    bottom: 0,
+    height: 2,
+    left: 0,
+    position: "absolute",
+    right: 0,
+  },
+  progressFill: {
+    height: "100%",
   },
 });

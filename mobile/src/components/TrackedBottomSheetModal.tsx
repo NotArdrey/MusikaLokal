@@ -2,6 +2,7 @@ import { BottomSheetModal, type BottomSheetModalProps } from "@gorhom/bottom-she
 import React, {
   forwardRef,
   useCallback,
+  useEffect,
   useImperativeHandle,
   useRef,
 } from "react";
@@ -24,68 +25,139 @@ const logTrackedBottomSheetDebug = (
   }
 };
 
-const TrackedBottomSheetModal = forwardRef<BottomSheetModal, BottomSheetModalProps>(
-  function TrackedBottomSheetModal({ onAnimate, onChange, onDismiss, ...props }, ref) {
+type TrackedBottomSheetModalProps = BottomSheetModalProps & {
+  overlayLabel?: string;
+  overlayReleaseFallbackMs?: number;
+};
+
+const DEFAULT_OVERLAY_RELEASE_FALLBACK_MS = 500;
+
+const TrackedBottomSheetModal = forwardRef<BottomSheetModal, TrackedBottomSheetModalProps>(
+  function TrackedBottomSheetModal({
+    onAnimate,
+    onChange,
+    onDismiss,
+    overlayLabel = "TrackedBottomSheetModal",
+    overlayReleaseFallbackMs = DEFAULT_OVERLAY_RELEASE_FALLBACK_MS,
+    ...props
+  }, ref) {
     const modalRef = useRef<BottomSheetModal>(null);
     const isClosingRef = useRef(false);
     const isOpenCommandedRef = useRef(false);
+    const lifecycleTokenRef = useRef(0);
+    const releaseFallbackRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const debugSheetIdRef = useRef(createTrackedBottomSheetDebugId());
     const debugSheetId = debugSheetIdRef.current;
-    const { registerOverlay, unregisterOverlay } = useBottomOverlayRegistration();
+    const { registerOverlay, unregisterOverlay } = useBottomOverlayRegistration(overlayLabel);
+
+    const clearReleaseFallback = useCallback(() => {
+      if (!releaseFallbackRef.current) {
+        return;
+      }
+
+      clearTimeout(releaseFallbackRef.current);
+      releaseFallbackRef.current = null;
+    }, []);
+
+    const markOverlayOpen = useCallback((source: string) => {
+      lifecycleTokenRef.current += 1;
+      clearReleaseFallback();
+      isClosingRef.current = false;
+      isOpenCommandedRef.current = true;
+      logTrackedBottomSheetDebug(debugSheetId, "overlay:open", {
+        label: overlayLabel,
+        source,
+        token: lifecycleTokenRef.current,
+      });
+      registerOverlay();
+    }, [clearReleaseFallback, debugSheetId, overlayLabel, registerOverlay]);
+
+    const releaseOverlay = useCallback((source: string) => {
+      lifecycleTokenRef.current += 1;
+      clearReleaseFallback();
+      isClosingRef.current = false;
+      isOpenCommandedRef.current = false;
+      logTrackedBottomSheetDebug(debugSheetId, "overlay:release", {
+        label: overlayLabel,
+        source,
+        token: lifecycleTokenRef.current,
+      });
+      unregisterOverlay(`bottom-sheet:${overlayLabel}:${source}`);
+    }, [clearReleaseFallback, debugSheetId, overlayLabel, unregisterOverlay]);
+
+    const scheduleOverlayReleaseFallback = useCallback((source: string) => {
+      clearReleaseFallback();
+      const scheduledToken = lifecycleTokenRef.current;
+
+      releaseFallbackRef.current = setTimeout(() => {
+        releaseFallbackRef.current = null;
+
+        if (lifecycleTokenRef.current !== scheduledToken || !isClosingRef.current) {
+          return;
+        }
+
+        releaseOverlay(`fallback:${source}`);
+      }, overlayReleaseFallbackMs);
+    }, [clearReleaseFallback, overlayReleaseFallbackMs, releaseOverlay]);
+
+    const markOverlayClosing = useCallback((source: string) => {
+      isClosingRef.current = true;
+      isOpenCommandedRef.current = false;
+      logTrackedBottomSheetDebug(debugSheetId, "overlay:closing", {
+        label: overlayLabel,
+        source,
+        token: lifecycleTokenRef.current,
+      });
+      scheduleOverlayReleaseFallback(source);
+    }, [debugSheetId, overlayLabel, scheduleOverlayReleaseFallback]);
+
+    useEffect(() => {
+      return () => {
+        clearReleaseFallback();
+      };
+    }, [clearReleaseFallback]);
 
     useImperativeHandle(ref, () => ({
       present: (...args: any[]) => {
         logTrackedBottomSheetDebug(debugSheetId, "present", {
           argsLength: args.length,
         });
-        isClosingRef.current = false;
-        isOpenCommandedRef.current = true;
-        registerOverlay();
+        markOverlayOpen("present");
         modalRef.current?.present(...args);
       },
       dismiss: (...args: any[]) => {
         logTrackedBottomSheetDebug(debugSheetId, "dismiss", {
           argsLength: args.length,
         });
-        isClosingRef.current = true;
-        isOpenCommandedRef.current = false;
-        unregisterOverlay();
+        markOverlayClosing("dismiss");
         modalRef.current?.dismiss(...args);
       },
       close: (...args: any[]) => {
         logTrackedBottomSheetDebug(debugSheetId, "close", {
           argsLength: args.length,
         });
-        isClosingRef.current = true;
-        isOpenCommandedRef.current = false;
-        unregisterOverlay();
+        markOverlayClosing("close");
         (modalRef.current as any)?.close?.(...args);
       },
       forceClose: (...args: any[]) => {
         logTrackedBottomSheetDebug(debugSheetId, "forceClose", {
           argsLength: args.length,
         });
-        isClosingRef.current = true;
-        isOpenCommandedRef.current = false;
-        unregisterOverlay();
+        markOverlayClosing("forceClose");
         (modalRef.current as any)?.forceClose?.(...args);
       },
       expand: (...args: any[]) => {
         logTrackedBottomSheetDebug(debugSheetId, "expand", {
           argsLength: args.length,
         });
-        isClosingRef.current = false;
-        isOpenCommandedRef.current = true;
-        registerOverlay();
+        markOverlayOpen("expand");
         (modalRef.current as any)?.expand?.(...args);
       },
       collapse: (...args: any[]) => {
         logTrackedBottomSheetDebug(debugSheetId, "collapse", {
           argsLength: args.length,
         });
-        isClosingRef.current = false;
-        isOpenCommandedRef.current = true;
-        registerOverlay();
+        markOverlayOpen("collapse");
         (modalRef.current as any)?.collapse?.(...args);
       },
       snapToIndex: (...args: any[]) => {
@@ -95,13 +167,9 @@ const TrackedBottomSheetModal = forwardRef<BottomSheetModal, BottomSheetModalPro
           index: typeof index === "number" ? index : null,
         });
         if (typeof index === "number" && index >= 0) {
-          isClosingRef.current = false;
-          isOpenCommandedRef.current = true;
-          registerOverlay();
+          markOverlayOpen(`snapToIndex:${index}`);
         } else if (typeof index === "number" && index < 0) {
-          isClosingRef.current = true;
-          isOpenCommandedRef.current = false;
-          unregisterOverlay();
+          markOverlayClosing(`snapToIndex:${index}`);
         }
         (modalRef.current as any)?.snapToIndex?.(...args);
       },
@@ -109,30 +177,24 @@ const TrackedBottomSheetModal = forwardRef<BottomSheetModal, BottomSheetModalPro
         logTrackedBottomSheetDebug(debugSheetId, "snapToPosition", {
           argsLength: args.length,
         });
-        isClosingRef.current = false;
-        isOpenCommandedRef.current = true;
-        registerOverlay();
+        markOverlayOpen("snapToPosition");
         (modalRef.current as any)?.snapToPosition?.(...args);
       },
       minimize: (...args: any[]) => {
         logTrackedBottomSheetDebug(debugSheetId, "minimize", {
           argsLength: args.length,
         });
-        isClosingRef.current = false;
-        isOpenCommandedRef.current = true;
-        registerOverlay();
+        markOverlayOpen("minimize");
         (modalRef.current as any)?.minimize?.(...args);
       },
       restore: (...args: any[]) => {
         logTrackedBottomSheetDebug(debugSheetId, "restore", {
           argsLength: args.length,
         });
-        isClosingRef.current = false;
-        isOpenCommandedRef.current = true;
-        registerOverlay();
+        markOverlayOpen("restore");
         (modalRef.current as any)?.restore?.(...args);
       },
-    }) as BottomSheetModal, [debugSheetId, registerOverlay, unregisterOverlay]);
+    }) as BottomSheetModal, [debugSheetId, markOverlayClosing, markOverlayOpen]);
 
     const handleAnimate = useCallback((
       fromIndex: number,
@@ -147,28 +209,22 @@ const TrackedBottomSheetModal = forwardRef<BottomSheetModal, BottomSheetModalPro
         toPosition,
       });
       if (typeof toIndex === "number" && toIndex >= 0) {
-        if (isClosingRef.current) {
+        if (!isClosingRef.current && isOpenCommandedRef.current) {
+          markOverlayOpen(`animate:${toIndex}`);
+        } else if (isClosingRef.current) {
           logTrackedBottomSheetDebug(debugSheetId, "onAnimate:ignoreWhileClosing", {
             toIndex,
           });
-          return;
-        }
-
-        if (!isOpenCommandedRef.current) {
+        } else {
           logTrackedBottomSheetDebug(debugSheetId, "onAnimate:ignoreUnexpectedOpen", {
             toIndex,
           });
-          return;
         }
-
-        registerOverlay();
       } else if (typeof toIndex === "number" && toIndex < 0) {
-        isClosingRef.current = true;
-        isOpenCommandedRef.current = false;
-        unregisterOverlay();
+        markOverlayClosing(`animate:${toIndex}`);
       }
       onAnimate?.(fromIndex, toIndex, fromPosition, toPosition);
-    }, [debugSheetId, onAnimate, registerOverlay, unregisterOverlay]);
+    }, [debugSheetId, markOverlayClosing, markOverlayOpen, onAnimate]);
 
     const handleChange = useCallback((index: number, position: number, type: number) => {
       logTrackedBottomSheetDebug(debugSheetId, "onChange", {
@@ -177,38 +233,30 @@ const TrackedBottomSheetModal = forwardRef<BottomSheetModal, BottomSheetModalPro
         type,
       });
       if (typeof index === "number" && index >= 0) {
-        if (isClosingRef.current) {
+        if (!isClosingRef.current && isOpenCommandedRef.current) {
+          markOverlayOpen(`change:${index}`);
+        } else if (isClosingRef.current) {
           logTrackedBottomSheetDebug(debugSheetId, "onChange:ignoreWhileClosing", {
             index,
             type,
           });
-          return;
-        }
-
-        if (!isOpenCommandedRef.current) {
+        } else {
           logTrackedBottomSheetDebug(debugSheetId, "onChange:ignoreUnexpectedOpen", {
             index,
             type,
           });
-          return;
         }
-
-        registerOverlay();
       } else if (typeof index === "number" && index < 0) {
-        isClosingRef.current = true;
-        isOpenCommandedRef.current = false;
-        unregisterOverlay();
+        markOverlayClosing(`change:${index}`);
       }
       onChange?.(index, position, type);
-    }, [debugSheetId, onChange, registerOverlay, unregisterOverlay]);
+    }, [debugSheetId, markOverlayClosing, markOverlayOpen, onChange]);
 
     const handleDismiss = useCallback(() => {
       logTrackedBottomSheetDebug(debugSheetId, "onDismiss", {});
-      isClosingRef.current = false;
-      isOpenCommandedRef.current = false;
-      unregisterOverlay();
+      releaseOverlay("dismiss");
       onDismiss?.();
-    }, [debugSheetId, onDismiss, unregisterOverlay]);
+    }, [debugSheetId, onDismiss, releaseOverlay]);
 
     return (
       <BottomSheetModal

@@ -16,6 +16,7 @@ import CustomAlert, { AlertType } from "../src/components/CustomAlert";
 import Header from "../src/components/header";
 import Modal from "../src/components/modal";
 import Navbar from "../src/components/navbar";
+import SmoothTabTransition from "../src/components/SmoothTabTransition";
 import { useAuth } from "../src/context/AuthContext";
 import { useTheme } from "../src/context/ThemeContext";
 import { getGroupMembersLabel, isGroupLeaderMember } from "../src/utils/groupMembers";
@@ -590,7 +591,7 @@ export default function GroupDetailsScreen() {
             ))}
           </View>
 
-          <View style={styles.contentContainer}>
+          <SmoothTabTransition activeKey={activeTab} style={styles.contentContainer}>
             {activeTab === "About" && (
               <View style={styles.aboutContainer}>
                 <View>
@@ -1040,7 +1041,7 @@ export default function GroupDetailsScreen() {
                 )}
               </View>
             )}
-          </View>
+          </SmoothTabTransition>
         </ScrollView>
 
         <Navbar />

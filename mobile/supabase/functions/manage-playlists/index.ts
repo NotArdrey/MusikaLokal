@@ -647,7 +647,7 @@ async function getEligibleStationSource(
       throw error;
     }
 
-    const positionByPlaylistId = new Map(
+    const positionByPlaylistId = new Map<string, number>(
       (links || []).map((link: any) => [link.playlist_id, Number(link.position || 0)]),
     );
     playlists = (data || []).sort((left: any, right: any) => {
@@ -856,29 +856,144 @@ function getStationLiveSlotState(station: any, slots: any[]) {
   };
 }
 
-async function enrichStationSlots(supabaseAdmin: any, slots: any[], itemLimit?: number) {
-  const enrichedSlots = [];
+function getUniqueStringValues(values: unknown[]) {
+  return Array.from(new Set(
+    values
+      .map((value) => (typeof value === "string" ? value.trim() : ""))
+      .filter((value) => value.length > 0),
+  ));
+}
 
-  for (const slot of (slots || [])) {
-    if (slot.playlist?.id) {
-      let itemsQuery = supabaseAdmin
-        .from("playlist_items")
-        .select("*, teaser:playlist_teaser_assets!teaser_asset_id(*)")
-        .eq("playlist_id", slot.playlist.id)
-        .order("position");
+function createGroupedRowMap(rows: any[], keyName: string, orderedKeys: string[]) {
+  const grouped = new Map<string, any[]>(
+    orderedKeys.map((key) => [key, []]),
+  );
 
-      if (typeof itemLimit === "number") {
-        itemsQuery = itemsQuery.limit(itemLimit);
-      }
+  for (const row of rows || []) {
+    const key = typeof row?.[keyName] === "string" ? row[keyName] : "";
+    if (!key) continue;
 
-      const { data: items } = await itemsQuery;
-      slot.playlist.items = items || [];
-    }
-
-    enrichedSlots.push(slot);
+    const current = grouped.get(key) || [];
+    current.push(row);
+    grouped.set(key, current);
   }
 
-  return enrichedSlots;
+  return grouped;
+}
+
+async function attachPlaylistItemsToSlots(supabaseAdmin: any, slots: any[], itemLimit?: number) {
+  const playlistIds = getUniqueStringValues(
+    (slots || []).map((slot: any) => slot?.playlist?.id),
+  );
+
+  if (playlistIds.length === 0) {
+    return (slots || []).map((slot: any) => {
+      if (slot?.playlist) {
+        slot.playlist.items = [];
+      }
+      return slot;
+    });
+  }
+
+  const { data: items, error } = await supabaseAdmin
+    .from("playlist_items")
+    .select("*, teaser:playlist_teaser_assets!teaser_asset_id(*)")
+    .in("playlist_id", playlistIds)
+    .order("playlist_id", { ascending: true })
+    .order("position", { ascending: true });
+
+  if (error) {
+    console.warn("Unable to load playlist items for station slots:", error);
+  }
+
+  const itemsByPlaylistId = new Map<string, any[]>(
+    playlistIds.map((playlistId) => [playlistId, []]),
+  );
+
+  for (const item of items || []) {
+    const playlistId = typeof item?.playlist_id === "string" ? item.playlist_id : "";
+    if (!playlistId) continue;
+
+    const current = itemsByPlaylistId.get(playlistId) || [];
+    if (typeof itemLimit === "number" && current.length >= itemLimit) {
+      continue;
+    }
+
+    current.push(item);
+    itemsByPlaylistId.set(playlistId, current);
+  }
+
+  return (slots || []).map((slot: any) => {
+    if (slot?.playlist?.id) {
+      slot.playlist.items = itemsByPlaylistId.get(slot.playlist.id) || [];
+    }
+    return slot;
+  });
+}
+
+async function fetchStationSlotsByStation(supabaseAdmin: any, stationIds: string[], options: { includeItems?: boolean; itemLimit?: number } = {}) {
+  const uniqueStationIds = getUniqueStringValues(stationIds);
+  if (uniqueStationIds.length === 0) {
+    return new Map<string, any[]>();
+  }
+
+  const { data: slots, error } = await supabaseAdmin
+    .from("station_playlist_slots")
+    .select("*, playlist:playlists!playlist_id(id, title, cover_image_url, track_count)")
+    .in("station_id", uniqueStationIds)
+    .order("station_id", { ascending: true })
+    .order("position", { ascending: true });
+
+  if (error) {
+    throw error;
+  }
+
+  const enrichedSlots = options.includeItems
+    ? await attachPlaylistItemsToSlots(supabaseAdmin, slots || [], options.itemLimit)
+    : (slots || []).map((slot: any) => {
+        if (slot?.playlist) {
+          slot.playlist.items = [];
+        }
+        return slot;
+      });
+
+  return createGroupedRowMap(enrichedSlots, "station_id", uniqueStationIds);
+}
+
+async function enrichStationSlots(supabaseAdmin: any, slots: any[], itemLimit?: number) {
+  return attachPlaylistItemsToSlots(supabaseAdmin, slots || [], itemLimit);
+}
+
+async function fetchStationSlotSummariesByStation(supabaseAdmin: any, stationIds: string[]) {
+  const uniqueStationIds = getUniqueStringValues(stationIds);
+  if (uniqueStationIds.length === 0) {
+    return new Map<string, any[]>();
+  }
+
+  const { data: slots, error } = await supabaseAdmin
+    .from("station_playlist_slots")
+    .select("id, station_id, playlist_id, is_active, position, starts_at, ends_at, created_at")
+    .in("station_id", uniqueStationIds)
+    .order("station_id", { ascending: true })
+    .order("position", { ascending: true });
+
+  if (error) {
+    throw error;
+  }
+
+  return createGroupedRowMap(slots || [], "station_id", uniqueStationIds);
+}
+
+function attachStationSlotSummary(station: any, slots: any[]) {
+  const liveSlotState = getStationLiveSlotState(station, slots || []);
+  station.slot_count = (slots || []).length;
+  station.slot_playlist_ids = (slots || []).map((slot: any) => slot.playlist_id);
+  station.live_slot_count = liveSlotState.liveSlots.length;
+  station.live_slot_playlist_ids = liveSlotState.liveSlots.map((slot: any) => slot.playlist_id);
+  station.rotation_interval_minutes = liveSlotState.rotationIntervalMinutes;
+  station.concurrent_slot_limit = liveSlotState.concurrentSlotLimit;
+  station.live_anchor_at = liveSlotState.liveAnchorAt;
+  return station;
 }
 
 function decorateStationWithLiveRotation(station: any, enrichedSlots: any[]) {
@@ -1635,13 +1750,8 @@ Deno.serve(async (req: Request) => {
 
       if (stErr || !station) return jsonResponse({ error: "Station not found" }, 404);
 
-      const { data: slots } = await supabaseAdmin
-        .from("station_playlist_slots")
-        .select("*, playlist:playlists!playlist_id(id, title, cover_image_url, track_count)")
-        .eq("station_id", station_id)
-        .order("position");
-
-      const enrichedSlots = await enrichStationSlots(supabaseAdmin, slots || []);
+      const slotsByStationId = await fetchStationSlotsByStation(supabaseAdmin, [station_id], { includeItems: true });
+      const enrichedSlots = slotsByStationId.get(station_id) || [];
 
       return jsonResponse({
         success: true,
@@ -1670,25 +1780,16 @@ Deno.serve(async (req: Request) => {
 
       if (error) return jsonResponse({ error: error.message }, 500);
 
-      for (const st of (stations || [])) {
-        const { data: slots, count, error: slotsError } = await supabaseAdmin
-          .from("station_playlist_slots")
-          .select("id, playlist_id, is_active, position, starts_at, ends_at, created_at", { count: "exact" })
-          .eq("station_id", st.id);
+      const stationRows = stations || [];
+      const slotsByStationId = await fetchStationSlotSummariesByStation(
+        supabaseAdmin,
+        stationRows.map((st: any) => st.id),
+      );
 
-        if (slotsError) return jsonResponse({ error: slotsError.message }, 500);
-
-        const liveSlotState = getStationLiveSlotState(st, slots || []);
-        st.slot_count = count || 0;
-        st.slot_playlist_ids = (slots || []).map((slot: any) => slot.playlist_id);
-        st.live_slot_count = liveSlotState.liveSlots.length;
-        st.live_slot_playlist_ids = liveSlotState.liveSlots.map((slot: any) => slot.playlist_id);
-        st.rotation_interval_minutes = liveSlotState.rotationIntervalMinutes;
-        st.concurrent_slot_limit = liveSlotState.concurrentSlotLimit;
-        st.live_anchor_at = liveSlotState.liveAnchorAt;
-      }
-
-      return jsonResponse({ success: true, data: stations || [] });
+      return jsonResponse({
+        success: true,
+        data: stationRows.map((st: any) => attachStationSlotSummary(st, slotsByStationId.get(st.id) || [])),
+      });
     }
 
     if (action === "list_user_stations") {
@@ -1710,31 +1811,21 @@ Deno.serve(async (req: Request) => {
       const { data: stations, error } = await query;
       if (error) return jsonResponse({ error: error.message }, 500);
 
-      // Attach slot count and slot playlist IDs for profile-card rendering
-      if (stations && stations.length > 0) {
-        for (const st of stations) {
-          const { data: slots, count } = await supabaseAdmin
-            .from("station_playlist_slots")
-            .select("id, playlist_id, is_active, position, starts_at, ends_at, created_at", { count: "exact" })
-            .eq("station_id", st.id);
+      const stationRows = stations || [];
+      const slotsByStationId = await fetchStationSlotSummariesByStation(
+        supabaseAdmin,
+        stationRows.map((st: any) => st.id),
+      );
 
-          const liveSlotState = getStationLiveSlotState(st, slots || []);
-          st.slot_count = count || 0;
-          st.slot_playlist_ids = (slots || []).map((s: any) => s.playlist_id);
-          st.live_slot_count = liveSlotState.liveSlots.length;
-          st.live_slot_playlist_ids = liveSlotState.liveSlots.map((slot: any) => slot.playlist_id);
-          st.rotation_interval_minutes = liveSlotState.rotationIntervalMinutes;
-          st.concurrent_slot_limit = liveSlotState.concurrentSlotLimit;
-          st.live_anchor_at = liveSlotState.liveAnchorAt;
-        }
-      }
-
-      return jsonResponse({ success: true, data: stations });
+      return jsonResponse({
+        success: true,
+        data: stationRows.map((st: any) => attachStationSlotSummary(st, slotsByStationId.get(st.id) || [])),
+      });
     }
 
     // ── browse_stations ─────────────────────────────────────────────
     if (action === "browse_stations") {
-      const { genre, featured_only, limit: lim } = params;
+      const { genre, featured_only, include_items, limit: lim } = params;
       let query = supabaseAdmin
         .from("stations")
         .select("*, creator:profiles!creator_id(id, full_name, avatar_url), managed_profile:profiles!managed_profile_id(id, full_name, avatar_url), managed_group:groups!managed_group_id(id, name, group_type, genre)")
@@ -1748,18 +1839,18 @@ Deno.serve(async (req: Request) => {
       const { data, error } = await query;
       if (error) return jsonResponse({ error: error.message }, 500);
 
-      // Enrich each station with slots + teaser data for feed playback
-      const enriched = [];
-      for (const st of (data || [])) {
-        const { data: slots } = await supabaseAdmin
-          .from("station_playlist_slots")
-          .select("*, playlist:playlists!playlist_id(id, title, cover_image_url, track_count)")
-          .eq("station_id", st.id)
-          .order("position");
+      const stationRows = data || [];
+      const shouldIncludeItems = include_items === true;
+      const slotsByStationId = await fetchStationSlotsByStation(
+        supabaseAdmin,
+        stationRows.map((st: any) => st.id),
+        { includeItems: shouldIncludeItems, itemLimit: 3 },
+      );
 
-        const enrichedSlots = await enrichStationSlots(supabaseAdmin, slots || [], 3);
-        enriched.push(decorateStationWithLiveRotation(st, enrichedSlots));
-      }
+      const enriched = stationRows.map((st: any) => ({
+        ...decorateStationWithLiveRotation(st, slotsByStationId.get(st.id) || []),
+        __queueReady: shouldIncludeItems,
+      }));
 
       return jsonResponse({ success: true, data: enriched });
     }

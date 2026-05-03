@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router, useFocusEffect, usePathname } from "expo-router";
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
-import { Modal, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { InteractionManager, Modal, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import Animated, { interpolateColor, useAnimatedProps, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { supabase } from '../../lib/supabase';
@@ -166,8 +166,20 @@ function Header({ title, transparent, onBackPress, leftComponent, rightComponent
 
     useFocusEffect(
         useCallback(() => {
-            checkUnreadNotifications();
-            checkUnreadChats();
+            let isActive = true;
+            const focusTask = InteractionManager.runAfterInteractions(() => {
+                if (!isActive) {
+                    return;
+                }
+
+                void checkUnreadNotifications();
+                void checkUnreadChats();
+            });
+
+            return () => {
+                isActive = false;
+                focusTask.cancel();
+            };
         }, [checkUnreadNotifications, checkUnreadChats])
     );
 
@@ -381,6 +393,7 @@ function Header({ title, transparent, onBackPress, leftComponent, rightComponent
                 visible={guestMenuVisible}
                 transparent
                 animationType="fade"
+                hardwareAccelerated
                 statusBarTranslucent
                 onRequestClose={closeGuestMenu}
             >

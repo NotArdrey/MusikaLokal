@@ -1,8 +1,15 @@
 import { Ionicons } from '@expo/vector-icons';
-import { BlurView } from 'expo-blur';
 import React from 'react';
 import { ActivityIndicator, Modal as RNModal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import Animated, {
+  interpolate,
+  runOnJS,
+  useAnimatedStyle,
+  useSharedValue,
+  withTiming,
+} from 'react-native-reanimated';
 import { useTheme } from '../context/ThemeContext';
+import { motion } from '../utils/motion';
 import CustomAlert from './CustomAlert';
 import InAppMediaViewer from './InAppMediaViewer';
 
@@ -68,6 +75,9 @@ const CustomModal: React.FC<CustomModalProps> = ({
   const [canInteract, setCanInteract] = React.useState(false);
   const [mediaViewerUrl, setMediaViewerUrl] = React.useState<string | null>(null);
   const hasCustomContract = Boolean(contractUrl);
+  const [rendered, setRendered] = React.useState(visible);
+  const modalProgress = useSharedValue(visible ? 1 : 0);
+  const wasVisibleRef = React.useRef(visible);
 
   React.useEffect(() => {
     if (!visible) {
@@ -83,10 +93,55 @@ const CustomModal: React.FC<CustomModalProps> = ({
     setCanInteract(false);
     const timeout = setTimeout(() => {
       setCanInteract(true);
-    }, 250);
+    }, 180);
 
     return () => clearTimeout(timeout);
   }, [visible]);
+
+  const finishDismiss = React.useCallback(() => {
+    setRendered(false);
+  }, []);
+
+  React.useEffect(() => {
+    const wasVisible = wasVisibleRef.current;
+    wasVisibleRef.current = visible;
+
+    if (visible) {
+      if (!rendered) {
+        setRendered(true);
+        modalProgress.value = 0;
+      }
+
+      if (!wasVisible) {
+        modalProgress.value = withTiming(1, {
+          duration: 220,
+          easing: motion.easing.standard,
+        });
+      }
+      return;
+    }
+
+    if (!rendered) {
+      return;
+    }
+
+    modalProgress.value = withTiming(0, {
+      duration: 180,
+      easing: motion.easing.exit,
+    }, (finished) => {
+      if (finished) {
+        runOnJS(finishDismiss)();
+      }
+    });
+  }, [finishDismiss, modalProgress, rendered, visible]);
+
+  const overlayAnimatedStyle = useAnimatedStyle(() => ({
+    opacity: interpolate(modalProgress.value, [0, 1], [0, 1]),
+  }));
+
+  const modalAnimatedStyle = useAnimatedStyle(() => ({
+    opacity: interpolate(modalProgress.value, [0, 1], [0, 1]),
+  }));
 
   const hasEmptyRequiredInput = showInput && !normalizeVisibleInput(inputValue);
 
@@ -143,19 +198,26 @@ const CustomModal: React.FC<CustomModalProps> = ({
     </View>
   );
 
+  if (!rendered) {
+    return null;
+  }
+
   return (
     <RNModal
-      animationType="fade"
+      animationType="none"
       transparent
       statusBarTranslucent
       navigationBarTranslucent
-      visible={visible}
+      presentationStyle="overFullScreen"
+      hardwareAccelerated
+      visible={rendered}
       onRequestClose={onClose}
     >
-      <BlurView intensity={60} tint="dark" style={styles.overlay}>
-        <View
+      <Animated.View style={[styles.overlay, overlayAnimatedStyle]}>
+        <Animated.View
           style={[
             styles.modalContainer,
+            modalAnimatedStyle,
             {
               backgroundColor: colors.card,
               shadowColor: '#000',
@@ -163,7 +225,7 @@ const CustomModal: React.FC<CustomModalProps> = ({
               shadowOpacity: 0.25,
               shadowRadius: 10,
               elevation: 10
-            }
+            },
           ]}
         >
           {loading ? (
@@ -296,14 +358,16 @@ const CustomModal: React.FC<CustomModalProps> = ({
               </View>
             </>
           )}
-        </View>
-      </BlurView>
+        </Animated.View>
+      </Animated.View>
 
       <RNModal
         animationType="slide"
         transparent
         statusBarTranslucent
         navigationBarTranslucent
+        presentationStyle="overFullScreen"
+        hardwareAccelerated
         visible={showTermsContent}
         onRequestClose={() => setShowTermsContent(false)}
       >
@@ -364,6 +428,8 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+    padding: 24,
+    backgroundColor: 'rgba(15,23,42,0.62)',
   },
   modalContainer: {
     width: '86%',

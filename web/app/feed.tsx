@@ -20,8 +20,9 @@ import CustomAlert, { AlertType } from "../src/components/CustomAlert";
 import Header from "../src/components/header";
 import { normalizeVisibleInput } from "../src/components/modal";
 import Navbar from "../src/components/navbar";
+import SmoothTabTransition from "../src/components/SmoothTabTransition";
 import { useAuth } from "../src/context/AuthContext";
-import { showTopToast } from "../src/context/TopToastContext";
+import { emitToast } from "../src/events/toastBus";
 import { useTheme } from "../src/context/ThemeContext";
 
 type FeedTab = "for_you" | "following";
@@ -243,7 +244,7 @@ export default function FeedScreen() {
       if (error) throw error;
 
       if (data?.success) {
-        showTopToast({ type: "success", title: "Posted!", message: "Your post is live." });
+        emitToast({ type: "success", title: "Posted!", message: "Your post is live." });
         setPostBody("");
         fetchFeed(tab);
         return;
@@ -343,15 +344,16 @@ export default function FeedScreen() {
     <View style={[styles.container, { backgroundColor: bg }]}>
       <Header title="Feed" onBackPress={() => router.back()} />
 
-      <FlatList
-        data={posts}
-        keyExtractor={(item) => item.id}
-        renderItem={renderPost}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={colors.primary} />}
-        onEndReached={loadMore}
-        onEndReachedThreshold={0.35}
-        contentContainerStyle={[styles.listContent, isWebDesktop && styles.listContentWeb]}
-        ListHeaderComponent={
+      <SmoothTabTransition activeKey={tab} style={{ flex: 1 }}>
+        <FlatList
+          data={posts}
+          keyExtractor={(item) => item.id}
+          renderItem={renderPost}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={colors.primary} />}
+          onEndReached={loadMore}
+          onEndReachedThreshold={0.35}
+          contentContainerStyle={[styles.listContent, isWebDesktop && styles.listContentWeb]}
+          ListHeaderComponent={
           <View style={[styles.headerBlock, { width: contentWidth }]}>
             <View style={styles.tabRow}>
               {[
@@ -444,10 +446,11 @@ export default function FeedScreen() {
             </View>
           )
         }
-        ListFooterComponent={
-          loadingMore ? <ActivityIndicator size="small" color={colors.primary} style={styles.footerLoader} /> : <View style={{ height: 80 }} />
-        }
-      />
+          ListFooterComponent={
+            loadingMore ? <ActivityIndicator size="small" color={colors.primary} style={styles.footerLoader} /> : <View style={{ height: 80 }} />
+          }
+        />
+      </SmoothTabTransition>
 
       {alert && <CustomAlert visible type={alert.type} title={alert.title} message={alert.message} onClose={() => setAlert(null)} />}
       <Navbar />

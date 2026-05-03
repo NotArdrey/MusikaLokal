@@ -3,7 +3,7 @@ import {
   BottomSheetBackdrop,
   BottomSheetModal,
   BottomSheetScrollView,
-  useBottomSheetTimingConfigs,
+  useBottomSheetSpringConfigs,
 } from "@gorhom/bottom-sheet";
 import { LinearGradient } from "expo-linear-gradient";
 import { router } from "expo-router";
@@ -19,16 +19,19 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import { Easing } from "react-native-reanimated";
 import { supabase } from "../../lib/supabase";
 import { useAuth } from "../context/AuthContext";
 import { useTheme } from "../context/ThemeContext";
 import { useBottomBarClearance } from "../hooks/useBottomBarClearance";
 import { submitListingRequest, uploadListingRequestDocument } from "../utils/listingRequests";
+import { bottomSheetSpringConfig } from "../utils/motion";
+import { getSmoothTabIndex, setSmoothTab } from "../utils/smoothTabs";
 import CachedImage from "./CachedImage";
 import CustomAlert, { AlertType } from "./CustomAlert";
 import DocumentUploader from "./DocumentUploader";
 import Modal from "./modal";
+import SlidingTabBar from "./SlidingTabBar";
+import SmoothTabTransition from "./SmoothTabTransition";
 import TrackedBottomSheetModal from "./TrackedBottomSheetModal";
 import VideoUploader from "./VideoUploader";
 
@@ -107,10 +110,7 @@ const ProductionTeamDetailsSheet = forwardRef<
   const { userId } = useAuth();
   const { contentBottomPadding } = useBottomBarClearance(24);
   const snapPoints = useMemo(() => ["86%"], []);
-  const animationConfigs = useBottomSheetTimingConfigs({
-    duration: 260,
-    easing: Easing.out(Easing.cubic),
-  });
+  const animationConfigs = useBottomSheetSpringConfigs(bottomSheetSpringConfig);
 
   const [loading, setLoading] = useState(false);
   const [team, setTeam] = useState<ProductionTeamRecord | null>(null);
@@ -471,6 +471,7 @@ const ProductionTeamDetailsSheet = forwardRef<
     [canShowConnectTab],
   );
   const showTabs = tabsToRender.length > 1;
+  const activeTabIndex = getSmoothTabIndex(tabsToRender, activeTab);
   const primaryActionLabel =
     membershipRole === "owner" || membershipRole === "manager"
       ? "Open Team Workspace"
@@ -710,33 +711,16 @@ const ProductionTeamDetailsSheet = forwardRef<
   ]);
 
   const renderTabs = () => (
-    <View style={[styles.tabsContainer, { borderBottomColor: colors.border }]}> 
-      {tabsToRender.map((tab) => (
-        <TouchableOpacity
-          key={tab}
-          activeOpacity={1}
-          style={[
-            styles.tab,
-            activeTab === tab && {
-              borderBottomColor: colors.primary,
-              borderBottomWidth: 2,
-            },
-          ]}
-          onPress={() => setActiveTab(tab)}
-        >
-          <Text
-            style={[
-              styles.tabText,
-              activeTab === tab
-                ? { color: colors.primary, fontFamily: "Poppins_600SemiBold" }
-                : { color: colors.textSecondary },
-            ]}
-          >
-            {tab}
-          </Text>
-        </TouchableOpacity>
-      ))}
-    </View>
+    <SlidingTabBar
+      activeColor={colors.primary}
+      activeKey={activeTab}
+      borderColor={colors.border}
+      indicatorColor={colors.primary}
+      indicatorWidthRatio={0.34}
+      onChange={(tab) => setSmoothTab(setActiveTab, tab)}
+      tabs={tabsToRender.map((tab) => ({ key: tab, label: tab }))}
+      textStyle={styles.tabText}
+    />
   );
 
   const renderApplyAsOptions = () => {
@@ -1046,6 +1030,7 @@ const ProductionTeamDetailsSheet = forwardRef<
     <>
       <TrackedBottomSheetModal
         ref={ref}
+        overlayLabel="ProductionTeamDetailsSheet"
         index={0}
         snapPoints={snapPoints}
         animationConfigs={animationConfigs}
@@ -1153,13 +1138,18 @@ const ProductionTeamDetailsSheet = forwardRef<
             </View>
 
             {showTabs ? renderTabs() : null}
-            <View style={styles.contentBody}>
+            <SmoothTabTransition
+              activeKey={activeTab}
+              activeIndex={activeTabIndex}
+              slideDistance={28}
+              style={styles.contentBody}
+            >
               {activeTab === "Connect"
                 ? renderConnectContent()
                 : activeTab === "Review"
                   ? renderReviewContent()
                   : renderAboutContent()}
-            </View>
+            </SmoothTabTransition>
           </BottomSheetScrollView>
         )}
       </TrackedBottomSheetModal>

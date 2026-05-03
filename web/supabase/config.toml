@@ -36,6 +36,8 @@ verify_jwt = false
 verify_jwt = false
 [functions.home-feed]
 verify_jwt = false
+[functions.manage-playlists]
+verify_jwt = false
 [functions.search-content]
 verify_jwt = false
 [functions.instrument-suggestions]

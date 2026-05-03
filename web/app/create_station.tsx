@@ -18,7 +18,7 @@ import CustomAlert, { AlertType } from "../src/components/CustomAlert";
 import Header from "../src/components/header";
 import Navbar from "../src/components/navbar";
 import { useAuth } from "../src/context/AuthContext";
-import { showTopToast } from "../src/context/TopToastContext";
+import { emitToast } from "../src/events/toastBus";
 import { useTheme } from "../src/context/ThemeContext";
 
 const moderateScale = (size: number, factor = 0.3) => {
@@ -120,7 +120,7 @@ export default function CreateStationScreen() {
       if (error) throw error;
 
       if (data?.success) {
-        showTopToast({
+        emitToast({
           type: "success",
           title: isEditing ? "Updated" : "Created",
           message: isEditing ? "Station updated." : "Station created!",

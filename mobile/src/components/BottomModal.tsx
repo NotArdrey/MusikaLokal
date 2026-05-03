@@ -1,7 +1,5 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import {
-  Animated,
-  Easing,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -11,6 +9,15 @@ import {
   View,
   ViewStyle,
 } from "react-native";
+import Animated, {
+  interpolate,
+  runOnJS,
+  useAnimatedStyle,
+  useSharedValue,
+  withTiming,
+} from "react-native-reanimated";
+import { useBottomOverlayRegistration } from "../context/BottomOverlayContext";
+import { motion } from "../utils/motion";
 
 type BottomModalProps = {
   visible: boolean;
@@ -22,12 +29,11 @@ type BottomModalProps = {
   keyboardAvoiding?: boolean;
   keyboardVerticalOffset?: number;
   navigationBarTranslucent?: boolean;
+  overlayLabel?: string;
   statusBarTranslucent?: boolean;
 };
 
-const OPEN_TRANSLATE_Y = 0;
-const CLOSED_TRANSLATE_Y = 48;
-const ANIMATION_DURATION = 220;
+const CLOSED_TRANSLATE_Y = 54;
 
 export default function BottomModal({
   visible,
@@ -39,94 +45,98 @@ export default function BottomModal({
   keyboardAvoiding = false,
   keyboardVerticalOffset = 0,
   navigationBarTranslucent = true,
+  overlayLabel = "BottomModal",
   statusBarTranslucent = true,
 }: BottomModalProps) {
   const [rendered, setRendered] = useState(visible);
-  const openFrameRef = useRef<number | null>(null);
-  const animationTokenRef = useRef(0);
-  const backdropOpacity = useRef(new Animated.Value(visible ? 1 : 0)).current;
-  const sheetTranslateY = useRef(
-    new Animated.Value(visible ? OPEN_TRANSLATE_Y : CLOSED_TRANSLATE_Y),
-  ).current;
+  const progress = useSharedValue(visible ? 1 : 0);
+  const dismissFallbackRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const dismissTokenRef = React.useRef(0);
+  const wasVisibleRef = React.useRef(visible);
+  const { registerOverlay, unregisterOverlay } = useBottomOverlayRegistration(overlayLabel);
 
-  useEffect(() => {
-    animationTokenRef.current += 1;
-    const animationToken = animationTokenRef.current;
-
-    if (openFrameRef.current !== null) {
-      cancelAnimationFrame(openFrameRef.current);
-      openFrameRef.current = null;
-    }
-
-    backdropOpacity.stopAnimation();
-    sheetTranslateY.stopAnimation();
-
-    if (visible) {
-      backdropOpacity.setValue(0);
-      sheetTranslateY.setValue(CLOSED_TRANSLATE_Y);
-      setRendered(true);
-
-      openFrameRef.current = requestAnimationFrame(() => {
-        openFrameRef.current = null;
-
-        if (animationTokenRef.current !== animationToken) {
-          return;
-        }
-
-        Animated.parallel([
-          Animated.timing(backdropOpacity, {
-            toValue: 1,
-            duration: ANIMATION_DURATION,
-            easing: Easing.out(Easing.cubic),
-            useNativeDriver: true,
-          }),
-          Animated.timing(sheetTranslateY, {
-            toValue: OPEN_TRANSLATE_Y,
-            duration: ANIMATION_DURATION,
-            easing: Easing.out(Easing.cubic),
-            useNativeDriver: true,
-          }),
-        ]).start();
-      });
-
-      return () => {
-        if (openFrameRef.current !== null) {
-          cancelAnimationFrame(openFrameRef.current);
-          openFrameRef.current = null;
-        }
-      };
-    }
-
-    if (!rendered) {
+  const clearDismissFallback = useCallback(() => {
+    if (!dismissFallbackRef.current) {
       return;
     }
 
-    Animated.parallel([
-      Animated.timing(backdropOpacity, {
-        toValue: 0,
-        duration: 160,
-        easing: Easing.in(Easing.cubic),
-        useNativeDriver: true,
-      }),
-      Animated.timing(sheetTranslateY, {
-        toValue: CLOSED_TRANSLATE_Y,
-        duration: 160,
-        easing: Easing.in(Easing.cubic),
-        useNativeDriver: true,
-      }),
-    ]).start(({ finished }) => {
-      if (finished && animationTokenRef.current === animationToken) {
-        setRendered(false);
+    clearTimeout(dismissFallbackRef.current);
+    dismissFallbackRef.current = null;
+  }, []);
+
+  React.useLayoutEffect(() => {
+    if (visible) {
+      dismissTokenRef.current += 1;
+      clearDismissFallback();
+      registerOverlay();
+    }
+  }, [clearDismissFallback, registerOverlay, visible]);
+
+  useEffect(() => {
+    return clearDismissFallback;
+  }, [clearDismissFallback]);
+
+  const finishDismiss = useCallback((dismissToken: number) => {
+    if (dismissTokenRef.current !== dismissToken) {
+      return;
+    }
+
+    dismissTokenRef.current += 1;
+    clearDismissFallback();
+    setRendered(false);
+    unregisterOverlay(`bottom-modal-dismiss:${overlayLabel}`);
+  }, [clearDismissFallback, overlayLabel, unregisterOverlay]);
+
+  useEffect(() => {
+    const wasVisible = wasVisibleRef.current;
+    wasVisibleRef.current = visible;
+
+    if (visible) {
+      if (!rendered) {
+        setRendered(true);
+        progress.value = 0;
+      }
+
+      if (!wasVisible) {
+        progress.value = withTiming(1, {
+          duration: 240,
+          easing: motion.easing.standard,
+        });
+      }
+      return;
+    }
+
+    if (!rendered) {
+      unregisterOverlay(`bottom-modal-hidden:${overlayLabel}`);
+      return;
+    }
+
+    const dismissToken = dismissTokenRef.current + 1;
+    dismissTokenRef.current = dismissToken;
+    clearDismissFallback();
+    progress.value = withTiming(0, {
+      duration: 200,
+      easing: motion.easing.exit,
+    }, (finished) => {
+      if (finished) {
+        runOnJS(finishDismiss)(dismissToken);
       }
     });
 
-    return () => {
-      if (openFrameRef.current !== null) {
-        cancelAnimationFrame(openFrameRef.current);
-        openFrameRef.current = null;
-      }
-    };
-  }, [backdropOpacity, rendered, sheetTranslateY, visible]);
+    dismissFallbackRef.current = setTimeout(() => {
+      finishDismiss(dismissToken);
+    }, 260);
+  }, [clearDismissFallback, finishDismiss, overlayLabel, progress, rendered, unregisterOverlay, visible]);
+
+  const backdropAnimatedStyle = useAnimatedStyle(() => ({
+    opacity: interpolate(progress.value, [0, 1], [0, 1]),
+  }));
+
+  const sheetAnimatedStyle = useAnimatedStyle(() => ({
+    transform: [
+      { translateY: interpolate(progress.value, [0, 1], [CLOSED_TRANSLATE_Y, 0]) },
+    ],
+  }));
 
   if (!rendered) {
     return null;
@@ -138,7 +148,7 @@ export default function BottomModal({
         style={[
           styles.sheetHost,
           contentContainerStyle,
-          { transform: [{ translateY: sheetTranslateY }] },
+          sheetAnimatedStyle,
         ]}
       >
         {children}
@@ -154,6 +164,7 @@ export default function BottomModal({
       statusBarTranslucent={statusBarTranslucent}
       navigationBarTranslucent={navigationBarTranslucent}
       presentationStyle="overFullScreen"
+      hardwareAccelerated
       onRequestClose={onClose}
     >
       <View style={styles.root}>
@@ -161,7 +172,8 @@ export default function BottomModal({
           pointerEvents="none"
           style={[
             StyleSheet.absoluteFillObject,
-            { backgroundColor: backdropColor, opacity: backdropOpacity },
+            { backgroundColor: backdropColor },
+            backdropAnimatedStyle,
           ]}
         />
         {closeOnBackdropPress ? (
@@ -187,6 +199,8 @@ export default function BottomModal({
 const styles = StyleSheet.create({
   root: {
     flex: 1,
+    zIndex: 20000,
+    elevation: 20000,
   },
   keyboardHost: {
     flex: 1,

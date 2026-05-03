@@ -18,7 +18,7 @@ import Header from "../src/components/header";
 import Navbar from "../src/components/navbar";
 import CustomAlert, { AlertType } from "../src/components/CustomAlert";
 import { useAuth } from "../src/context/AuthContext";
-import { showTopToast } from "../src/context/TopToastContext";
+import { emitToast } from "../src/events/toastBus";
 import { useTheme } from "../src/context/ThemeContext";
 
 const moderateScale = (size: number, factor = 0.3) => {
@@ -69,7 +69,7 @@ export default function CreatePlaylistScreen() {
       if (isEdit) body.playlist_id = edit_id;
       const { data } = await supabase.functions.invoke("manage-playlists", { body });
       if (data?.success) {
-        showTopToast({ type: "success", title: isEdit ? "Updated" : "Created", message: `Playlist ${isEdit ? "updated" : "created"}.` });
+        emitToast({ type: "success", title: isEdit ? "Updated" : "Created", message: `Playlist ${isEdit ? "updated" : "created"}.` });
         router.back();
       } else { setAlert({ type: "error", title: "Error", message: data?.error || "Failed." }); }
     } catch (e: any) { setAlert({ type: "error", title: "Error", message: e.message }); }

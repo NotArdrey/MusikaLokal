@@ -5,6 +5,7 @@ import React, { useCallback, useState } from "react";
 import {
   ActivityIndicator,
   Dimensions,
+  InteractionManager,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -20,11 +21,14 @@ import GuestSignInGate from "../src/components/GuestSignInGate";
 import Header from "../src/components/header";
 import Navbar from "../src/components/navbar";
 import Skeleton from "../src/components/Skeleton";
+import SlidingTabBar from "../src/components/SlidingTabBar";
+import SmoothTabTransition from "../src/components/SmoothTabTransition";
 import CustomAlert, { AlertType } from "../src/components/CustomAlert";
 import { useAuth } from "../src/context/AuthContext";
-import { showTopToast } from "../src/context/TopToastContext";
+import { emitToast } from "../src/events/toastBus";
 import { useTheme } from "../src/context/ThemeContext";
 import { formatFriendlyDateTime } from "../src/utils/friendlyDateTime";
+import { getSmoothTabIndex, setSmoothTab } from "../src/utils/smoothTabs";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const moderateScale = (size: number, factor = 0.3) => {
@@ -33,6 +37,12 @@ const moderateScale = (size: number, factor = 0.3) => {
 };
 
 type SellerTab = "products" | "orders" | "dashboard";
+const SELLER_TAB_ORDER: readonly SellerTab[] = ["dashboard", "products", "orders"];
+const SELLER_TABS = [
+  { key: "dashboard", label: "Dashboard" },
+  { key: "products", label: "Products" },
+  { key: "orders", label: "Orders" },
+] as const;
 
 export default function SellerHubScreen() {
   const { colors, isDark } = useTheme();
@@ -75,7 +85,19 @@ export default function SellerHubScreen() {
     }
   }, [session]);
 
-  useFocusEffect(useCallback(() => { fetchData(); }, [fetchData]));
+  useFocusEffect(useCallback(() => {
+    let isActive = true;
+    const focusTask = InteractionManager.runAfterInteractions(() => {
+      if (isActive) {
+        void fetchData();
+      }
+    });
+
+    return () => {
+      isActive = false;
+      focusTask.cancel();
+    };
+  }, [fetchData]));
 
   const onRefresh = () => { setRefreshing(true); fetchData(); };
 
@@ -107,7 +129,7 @@ export default function SellerHubScreen() {
         },
       });
       if (data?.success) {
-        showTopToast({ type: "success", title: "Product Created", message: "Your product has been created as a draft." });
+        emitToast({ type: "success", title: "Product Created", message: "Your product has been created as a draft." });
         setShowAddProduct(false);
         setNewTitle(""); setNewDescription(""); setNewPrice(""); setNewCategory("");
         fetchData();
@@ -132,7 +154,7 @@ export default function SellerHubScreen() {
         body: { action: "publish_product", product_id: productId },
       });
       if (data?.success) {
-        showTopToast({ type: "success", title: "Published", message: "Product is now live." });
+        emitToast({ type: "success", title: "Published", message: "Product is now live." });
         fetchData();
       }
     } catch (e: any) {
@@ -155,24 +177,26 @@ export default function SellerHubScreen() {
       <Header title="Seller Hub" onBackPress={() => router.back()} />
 
       {/* Tabs */}
-      <View style={[styles.tabRow, { borderBottomWidth: 1, borderBottomColor: isDark ? "#334155" : "#E2E8F0" }]}>
-        {(["dashboard", "products", "orders"] as SellerTab[]).map((t) => (
-          <TouchableOpacity activeOpacity={1}
-            key={t}
-            style={[styles.tab, tab === t && { borderBottomColor: colors.primary, borderBottomWidth: 2, borderBottomLeftRadius: 1, borderBottomRightRadius: 1 }]}
-            onPress={() => setTab(t)}
-          >
-            <Text style={[styles.tabText, { color: tab === t ? colors.primary : colors.textSecondary }]}>
-              {t === "dashboard" ? "Dashboard" : t === "products" ? "Products" : "Orders"}
-            </Text>
-          </TouchableOpacity>
-        ))}
-      </View>
+      <SlidingTabBar
+        activeColor={colors.primary}
+        activeKey={tab}
+        borderColor={isDark ? "#334155" : "#E2E8F0"}
+        indicatorColor={colors.primary}
+        indicatorWidthRatio={0.32}
+        onChange={(nextTab) => setSmoothTab(setTab, nextTab)}
+        tabs={SELLER_TABS}
+        textStyle={styles.tabText}
+      />
 
       <ScrollView
         style={styles.content}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
       >
+        <SmoothTabTransition
+          activeKey={tab}
+          activeIndex={getSmoothTabIndex(SELLER_TAB_ORDER, tab)}
+          renderOutgoing={false}
+        >
         {loading ? (
           [1, 2, 3].map((i) => <Skeleton key={i} width={SCREEN_WIDTH - 32} height={100} style={{ marginBottom: 12, borderRadius: 12 }} />)
         ) : (
@@ -299,12 +323,13 @@ export default function SellerHubScreen() {
             )}
           </>
         )}
+        </SmoothTabTransition>
 
         <View style={{ height: 100 }} />
       </ScrollView>
 
       {/* Add Product Modal */}
-      <BottomModal visible={showAddProduct} onClose={() => setShowAddProduct(false)}>
+      <BottomModal visible={showAddProduct} overlayLabel="SellerHubAddProductModal" onClose={() => setShowAddProduct(false)}>
           <View style={[styles.modalBox, { backgroundColor: colors.surface }]}>
             <View style={styles.modalHeader}>
               <Text style={[styles.sectionTitle, { color: colors.text }]}>Add Product</Text>

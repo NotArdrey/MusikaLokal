@@ -26,7 +26,7 @@ type RevenueTrendBucket = {
   startMs: number;
   endMs: number;
   gross: number;
-  payoutDeductions: number;
+  providerEarnings: number;
   refunds: number;
 };
 
@@ -343,7 +343,7 @@ function buildRevenueTrendBuckets(
       startMs,
       endMs,
       gross: 0,
-      payoutDeductions: 0,
+      providerEarnings: 0,
       refunds: 0,
     });
   }
@@ -790,6 +790,7 @@ serve(async (req: Request) => {
         incidentRows,
         bookingRows,
         withdrawalRows,
+        walletTransactionRows,
       ] = await Promise.all([
         safeCount(client.from("profiles").select("id", { count: "exact", head: true }), queryHealthTracker),
         safeCount(client.from("studios").select("id", { count: "exact", head: true }), queryHealthTracker),
@@ -905,13 +906,19 @@ serve(async (req: Request) => {
         safeRows(
           client
             .from("studio_bookings")
-            .select("id, booking_date, start_time, created_at, paid_at, payment_status, payment_amount, final_price"),
+            .select("id, booking_date, start_time, created_at, paid_at, payment_status, payment_amount, final_price, checkout_session_id, payment_intent_id"),
           queryHealthTracker,
         ),
         safeRows(
           client
             .from("withdrawal_requests")
             .select("id, status, amount, net_amount, created_at, reference_number, notes, payout_account_name"),
+          queryHealthTracker,
+        ),
+        safeRows(
+          client
+            .from("wallet_transactions")
+            .select("id, amount, type, reference_type, is_credit, status, created_at, reference_id"),
           queryHealthTracker,
         ),
       ]);
@@ -940,6 +947,7 @@ serve(async (req: Request) => {
       let refundedBookingRevenue = 0;
       let paidPaymentEvents = 0;
       let failedPaymentEvents = 0;
+      let paymongoLinkedPaymentEvents = 0;
 
       const bookingSlotCounter = new Map<string, number>();
 
@@ -965,6 +973,9 @@ serve(async (req: Request) => {
 
         if (["paid", "partial"].includes(paymentStatus)) {
           paidPaymentEvents += 1;
+          if (booking?.checkout_session_id || booking?.payment_intent_id) {
+            paymongoLinkedPaymentEvents += 1;
+          }
         }
 
         if (paymentStatus === "failed") {
@@ -986,33 +997,57 @@ serve(async (req: Request) => {
       }
 
       let pendingPayouts = 0;
-      let completedPayoutsInRange = 0;
       for (const withdrawal of withdrawalRows as any[]) {
         const status = String(withdrawal?.status || "").trim().toLowerCase();
         const amount = toNumber(withdrawal?.net_amount) || toNumber(withdrawal?.amount);
-        const withdrawalTsMs = toTimestampMs(withdrawal?.created_at);
-        const trendBucket = findRevenueTrendBucket(withdrawalTsMs, revenueTrendBuckets);
 
         if (["pending", "processing"].includes(status)) {
           pendingPayouts += amount;
         }
+      }
 
-        if (status === "completed" && isInRange(withdrawal?.created_at, rangeStartMs)) {
-          completedPayoutsInRange += amount;
-          if (trendBucket) trendBucket.payoutDeductions += amount;
+      let providerEarningsInRange = 0;
+      const bookingEarningReferenceTypes = new Set([
+        "",
+        "booking",
+        "booking_payment",
+        "booking_downpayment",
+        "booking_balance",
+      ]);
+
+      for (const transaction of walletTransactionRows as any[]) {
+        if (!isInRange(transaction?.created_at, rangeStartMs)) continue;
+
+        const type = String(transaction?.type || "").trim().toLowerCase();
+        const status = String(transaction?.status || "").trim().toLowerCase();
+        const referenceType = String(transaction?.reference_type || "").trim().toLowerCase();
+        const isCredit = transaction?.is_credit !== false;
+
+        if (
+          type === "earning" &&
+          status === "completed" &&
+          isCredit &&
+          bookingEarningReferenceTypes.has(referenceType)
+        ) {
+          const amount = toNumber(transaction?.amount);
+          providerEarningsInRange += amount;
+
+          const transactionTsMs = toTimestampMs(transaction?.created_at);
+          const trendBucket = findRevenueTrendBucket(transactionTsMs, revenueTrendBuckets);
+          if (trendBucket) trendBucket.providerEarnings += amount;
         }
       }
 
       const grossRevenue = roundTo(grossBookingRevenue, 2);
       const netRevenue = roundTo(
-        Math.max(grossRevenue - completedPayoutsInRange - refundedBookingRevenue, 0),
+        Math.max(grossRevenue - providerEarningsInRange - refundedBookingRevenue, 0),
         2,
       );
 
       const revenueTrend = revenueTrendBuckets.map((bucket) => {
         const gross = roundTo(bucket.gross, 2);
         const net = roundTo(
-          Math.max(bucket.gross - bucket.refunds - bucket.payoutDeductions, 0),
+          Math.max(bucket.gross - bucket.refunds - bucket.providerEarnings, 0),
           2,
         );
 
@@ -1170,6 +1205,9 @@ serve(async (req: Request) => {
         ? roundTo((paidPaymentEvents / paymentAttempts) * 100, 1)
         : 100;
       const paymongoHealthy = paymentAttempts === 0 ? true : paymongoSuccessRate >= 60;
+      const paymongoLinkedPaymentRate = paidPaymentEvents > 0
+        ? roundTo((paymongoLinkedPaymentEvents / paidPaymentEvents) * 100, 1)
+        : 100;
 
       const avgReportResolutionHours = reportResolutionCount > 0
         ? roundTo(reportResolutionTotalHours / reportResolutionCount, 2)
@@ -1182,6 +1220,7 @@ serve(async (req: Request) => {
       const apiHealthy = dbHealthy && authMetricsHealthy;
 
       const responsePayload = {
+        generatedAt: new Date(nowMs).toISOString(),
         dateRange,
         rangeStart: rangeStartIso,
         totalUsers,
@@ -1203,10 +1242,16 @@ serve(async (req: Request) => {
         newSignups24h,
         grossRevenue,
         netRevenue,
+        providerEarnings: roundTo(providerEarningsInRange, 2),
         pendingPayouts: roundTo(pendingPayouts, 2),
         avgReportResolutionHours,
         avgIncidentResolutionHours,
         paymongoSuccessRate,
+        paymentAttempts,
+        paidPaymentEvents,
+        failedPaymentEvents,
+        paymongoLinkedPaymentEvents,
+        paymongoLinkedPaymentRate,
         dbHealthy,
         apiHealthy,
         paymongoHealthy,

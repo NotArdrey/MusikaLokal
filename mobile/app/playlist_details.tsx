@@ -25,7 +25,7 @@ import { resolveRadioMediaUrl } from "../src/audio/radioTrackPlayer";
 import CustomAlert, { AlertType } from "../src/components/CustomAlert";
 import { useBottomBarClearance } from "../src/hooks/useBottomBarClearance";
 import { useAuth } from "../src/context/AuthContext";
-import { showTopToast } from "../src/context/TopToastContext";
+import { emitToast } from "../src/events/toastBus";
 import { useTheme } from "../src/context/ThemeContext";
 import {
   pickPlaylistAudioFile,
@@ -531,7 +531,7 @@ export default function PlaylistDetailsScreen() {
       }
 
       if (data?.success) {
-        showTopToast({ type: "info", title: "Removed", message: "Track removed from playlist." });
+        emitToast({ type: "info", title: "Removed", message: "Track removed from playlist." });
         fetchPlaylist();
         return;
       }
@@ -555,7 +555,7 @@ export default function PlaylistDetailsScreen() {
       }
 
       if (data?.success) {
-        showTopToast({ type: "info", title: "Deleted", message: "Playlist deleted." });
+        emitToast({ type: "info", title: "Deleted", message: "Playlist deleted." });
         router.back();
         return;
       }
@@ -654,7 +654,7 @@ export default function PlaylistDetailsScreen() {
           action: itemBody.action,
           returnedId: data?.data?.id || null,
         });
-        showTopToast({
+        emitToast({
           type: "success",
           title: editingTrackId ? "Track Updated" : "Track Added",
           message: editingTrackId ? "Track changes saved." : "Track added to playlist.",
@@ -1055,7 +1055,7 @@ export default function PlaylistDetailsScreen() {
       )}
 
       {/* Add Track Modal */}
-      <BottomModal visible={addTrackVisible} onClose={resetAddTrackForm}>
+      <BottomModal visible={addTrackVisible} overlayLabel="PlaylistAddTrackModal" onClose={resetAddTrackForm}>
           <View style={[styles.modalSheet, { backgroundColor: colors.card || colors.background, borderColor: colors.border }]}>
             <Text style={[styles.modalTitle, { color: colors.text }]}>{isEditingTrack ? "Edit Track" : "Add Track"}</Text>
 

@@ -1,9 +1,16 @@
 import { Ionicons } from "@expo/vector-icons";
-import { BlurView } from "expo-blur";
-import React, { useEffect, useMemo } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Modal, StyleSheet, Text, TouchableOpacity, View } from "react-native";
-import { useTopToast } from "../context/TopToastContext";
+import Animated, {
+  interpolate,
+  runOnJS,
+  useAnimatedStyle,
+  useSharedValue,
+  withTiming,
+} from "react-native-reanimated";
+import { emitToast } from "../events/toastBus";
 import { useTheme } from "../context/ThemeContext";
+import { motion } from "../utils/motion";
 
 export type AlertType = "error" | "success" | "warning" | "info";
 
@@ -60,8 +67,9 @@ export default function CustomAlert({
   onClose,
 }: CustomAlertProps) {
   const { colors, isDark } = useTheme();
-  const { showToast } = useTopToast();
   const config = alertConfig[type];
+  const [rendered, setRendered] = useState(visible);
+  const progress = useSharedValue(visible ? 1 : 0);
   const hasStructuredMessage = useMemo(() => {
     return message.includes("\n") || message.includes("•") || message.includes("- ");
   }, [message]);
@@ -87,16 +95,57 @@ export default function CustomAlert({
   useEffect(() => {
     if (!visible || !shouldUseTopToast) return;
 
-    showToast({
+    emitToast({
       type,
       title,
       message,
     });
 
     onClose();
-  }, [message, onClose, shouldUseTopToast, showToast, title, type, visible]);
+  }, [message, onClose, shouldUseTopToast, title, type, visible]);
+
+  const finishDismiss = useCallback(() => {
+    setRendered(false);
+  }, []);
+
+  useEffect(() => {
+    if (shouldUseTopToast) {
+      return;
+    }
+
+    if (visible) {
+      setRendered(true);
+      progress.value = 0;
+      progress.value = withTiming(1, {
+        duration: 220,
+        easing: motion.easing.standard,
+      });
+      return;
+    }
+
+    progress.value = withTiming(0, {
+      duration: 180,
+      easing: motion.easing.exit,
+    }, (finished) => {
+      if (finished) {
+        runOnJS(finishDismiss)();
+      }
+    });
+  }, [finishDismiss, progress, shouldUseTopToast, visible]);
+
+  const overlayAnimatedStyle = useAnimatedStyle(() => ({
+    opacity: interpolate(progress.value, [0, 1], [0, 1]),
+  }));
+
+  const modalAnimatedStyle = useAnimatedStyle(() => ({
+    opacity: interpolate(progress.value, [0, 1], [0, 1]),
+  }));
 
   if (shouldUseTopToast) {
+    return null;
+  }
+
+  if (!rendered) {
     return null;
   }
 
@@ -136,14 +185,17 @@ export default function CustomAlert({
       transparent
       statusBarTranslucent
       navigationBarTranslucent
-      visible={visible}
-      animationType="fade"
+      presentationStyle="overFullScreen"
+      hardwareAccelerated
+      visible={rendered}
+      animationType="none"
       onRequestClose={onClose}
     >
-      <BlurView intensity={60} tint="dark" style={styles.overlay}>
-        <View
+      <Animated.View style={[styles.overlay, overlayAnimatedStyle]}>
+        <Animated.View
           style={[
             styles.container,
+            modalAnimatedStyle,
             {
               backgroundColor: isDark ? "#1F2937" : "#FFFFFF",
             },
@@ -206,8 +258,8 @@ export default function CustomAlert({
               );
             })}
           </View>
-        </View>
-      </BlurView>
+        </Animated.View>
+      </Animated.View>
     </Modal>
   );
 }
@@ -218,6 +270,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     padding: 24,
+    backgroundColor: 'rgba(15,23,42,0.62)',
   },
   container: {
     width: '100%',

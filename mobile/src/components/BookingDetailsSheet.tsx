@@ -355,6 +355,7 @@ const BookingDetailsSheet = forwardRef<
       <>
         <TrackedBottomSheetModal
           ref={ref}
+          overlayLabel="BookingRequestDetailsSheet"
           index={0}
           snapPoints={snapPoints}
           enableDynamicSizing={false}
@@ -546,11 +547,6 @@ const BookingDetailsSheet = forwardRef<
                 ]}
                 onPress={() => (ref as any)?.current?.dismiss()}
               >
-                <Ionicons
-                  name="close-circle-outline"
-                  size={20}
-                  color="#EF4444"
-                />
                 <Text style={styles.cancelBtnText}>Close</Text>
               </TouchableOpacity>
             </View>
@@ -727,6 +723,7 @@ const BookingDetailsSheet = forwardRef<
     <>
       <TrackedBottomSheetModal
         ref={ref}
+        overlayLabel="BookingDetailsSheet"
         index={0}
         snapPoints={snapPoints}
         enableDynamicSizing={false}
@@ -1733,11 +1730,6 @@ const BookingDetailsSheet = forwardRef<
                     ]}
                     onPress={() => (ref as any)?.current?.dismiss()}
                   >
-                    <Ionicons
-                      name="close-circle-outline"
-                      size={20}
-                      color="#EF4444"
-                    />
                     <Text style={styles.cancelBtnText}>Close</Text>
                   </TouchableOpacity>
                 ) : null}
@@ -1750,11 +1742,6 @@ const BookingDetailsSheet = forwardRef<
                       (ref as any)?.current?.dismiss();
                     }}
                   >
-                    <Ionicons
-                      name="checkmark-circle"
-                      size={20}
-                      color="#FFFFFF"
-                    />
                     <Text style={styles.actionBtnText}>
                       {isGig ? "Accept Application" : "Confirm Booking"}
                     </Text>
@@ -1779,7 +1766,6 @@ const BookingDetailsSheet = forwardRef<
                       (ref as any)?.current?.dismiss();
                     }}
                   >
-                    <Ionicons name="star-outline" size={20} color="#FFFFFF" />
                     <Text style={styles.actionBtnText}>Leave Review</Text>
                   </TouchableOpacity>
                 )}
@@ -1799,11 +1785,6 @@ const BookingDetailsSheet = forwardRef<
                         (ref as any)?.current?.dismiss();
                       }}
                     >
-                      <Ionicons
-                        name="close-circle-outline"
-                        size={20}
-                        color="#EF4444"
-                      />
                       <Text style={[styles.cancelBtnText]}>
                         {isGig ? "Decline Application" : "Cancel Booking"}
                       </Text>
@@ -2001,7 +1982,8 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     gap: scale(8),
-    paddingVertical: moderateScale(16),
+    minHeight: moderateScale(52),
+    paddingVertical: 0,
     borderRadius: moderateScale(12),
   },
   confirmBtn: {
@@ -2018,18 +2000,28 @@ const styles = StyleSheet.create({
   actionBtnText: {
     color: "#FFFFFF",
     fontSize: moderateScale(16),
+    lineHeight: moderateScale(20),
     fontFamily: "Poppins_600SemiBold",
     textAlign: "center",
+    includeFontPadding: false,
+    textAlignVertical: "center",
   },
   cancelBtnText: {
     color: "#EF4444",
     fontSize: moderateScale(16),
+    lineHeight: moderateScale(20),
     fontFamily: "Poppins_600SemiBold",
     textAlign: "center",
+    includeFontPadding: false,
+    textAlignVertical: "center",
   },
   viewStudioBtnText: {
     fontSize: moderateScale(16),
+    lineHeight: moderateScale(20),
     fontFamily: "Poppins_600SemiBold",
+    includeFontPadding: false,
+    textAlign: "center",
+    textAlignVertical: "center",
   },
 });
 

@@ -13,7 +13,7 @@ import type { DateData } from 'react-native-calendars';
 import { WebView } from 'react-native-webview';
 import { supabase } from '../lib/supabase';
 import CustomAlert, { AlertType } from '../src/components/CustomAlert';
-import { showTopToast } from '../src/context/TopToastContext';
+import { emitToast } from '../src/events/toastBus';
 import { useTheme } from '../src/context/ThemeContext';
 
 type OnboardingStep = 'details' | 'verification' | 'email_verification';
@@ -235,7 +235,7 @@ export default function SignupScreen() {
         const type = resolveAlertType(normalizedTitle);
 
         if ((type === 'success' || type === 'info') && isSimpleTopToastButtons(buttons)) {
-            showTopToast({
+            emitToast({
                 type,
                 title: normalizedTitle,
                 message: normalizedMessage.trim() ? normalizedMessage : normalizedTitle,

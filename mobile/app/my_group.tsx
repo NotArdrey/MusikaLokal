@@ -1,12 +1,13 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import React, { useCallback, useState } from 'react';
-import { RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { InteractionManager, RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { supabase } from '../lib/supabase';
 import CachedImage from '../src/components/CachedImage';
 import CustomAlert, { AlertType } from '../src/components/CustomAlert';
 import Header from '../src/components/header';
 import Modal from '../src/components/modal';
+import MusicianWorkspaceTabs from '../src/components/MusicianWorkspaceTabs';
 import Navbar from '../src/components/navbar';
 import Skeleton from '../src/components/Skeleton';
 import { useBottomBarClearance } from '../src/hooks/useBottomBarClearance';
@@ -211,12 +212,19 @@ export default function MyGroupScreen() {
         useCallback(() => {
             if (!isAuthenticated || !userId) return;
 
-            fetchGroups();
+            let isActive = true;
+            const focusTask = InteractionManager.runAfterInteractions(() => {
+                if (isActive) {
+                    void fetchGroups();
+                }
+            });
             const refreshInterval = setInterval(() => {
                 fetchGroups();
             }, 30000);
 
             return () => {
+                isActive = false;
+                focusTask.cancel();
                 clearInterval(refreshInterval);
             };
         }, [isAuthenticated, userId, refreshKey, isMusicianView])
@@ -336,28 +344,7 @@ export default function MyGroupScreen() {
                     refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
                 >
                         {isMusicianView && (
-                            <View style={[styles.pageTabsWrap, { borderColor: colors.border, backgroundColor: colors.surface }]}>
-                                {[{ key: 'group', label: 'My Group', route: '/my_group' }, { key: 'producer', label: 'My Producer', route: '/my_production' }, { key: 'venue', label: 'My Venue', route: '/my_venue' }].map((tab) => {
-                                    const isActive = tab.key === 'group';
-                                    return (
-                                        <TouchableOpacity
-                                            activeOpacity={1}
-                                            key={tab.key}
-                                            onPress={() => {
-                                                if (!isActive) {
-                                                    router.replace(tab.route as any);
-                                                }
-                                            }}
-                                            style={[
-                                                styles.pageTabBtn,
-                                                isActive && { backgroundColor: colors.primary + '14', borderColor: colors.primary },
-                                            ]}
-                                        >
-                                            <Text style={[styles.pageTabText, { color: isActive ? colors.primary : colors.textSecondary }]}>{tab.label}</Text>
-                                        </TouchableOpacity>
-                                    );
-                                })}
-                            </View>
+                            <MusicianWorkspaceTabs activeKey="group" />
                         )}
 
                         {loading ? (

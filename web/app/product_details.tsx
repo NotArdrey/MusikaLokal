@@ -19,7 +19,7 @@ import Navbar from "../src/components/navbar";
 import ReportModal from "../src/components/ReportModal";
 import CustomAlert, { AlertType } from "../src/components/CustomAlert";
 import { useAuth } from "../src/context/AuthContext";
-import { showTopToast } from "../src/context/TopToastContext";
+import { emitToast } from "../src/events/toastBus";
 import { useTheme } from "../src/context/ThemeContext";
 
 const moderateScale = (size: number, factor = 0.3) => {
@@ -79,7 +79,7 @@ export default function ProductDetailsScreen() {
       const items = [{ product_id: product.id, variant_id: selectedVariant?.id || null, quantity: 1 }];
       const { data } = await supabase.functions.invoke("manage-marketplace", { body: { action: "create_order", items } });
       if (data?.success) {
-        showTopToast({ type: "success", title: "Ordered", message: "Order placed successfully!" });
+        emitToast({ type: "success", title: "Ordered", message: "Order placed successfully!" });
         router.push("/orders");
       } else { setAlert({ type: "error", title: "Error", message: data?.error || "Failed to place order." }); }
     } catch (e: any) { setAlert({ type: "error", title: "Error", message: e.message }); }

@@ -14,12 +14,12 @@ import * as Linking from "expo-linking";
 import { router, Stack, useSegments } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import { useCallback, useEffect, useRef } from "react";
-import { AppState, LogBox, View } from "react-native";
+import { AppState, LogBox, Platform, View } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import "../global.css";
 import { prepareRealtimeAuth, supabase } from "../lib/supabase";
 import { AuthProvider, useAuth } from "../src/context/AuthContext";
-import Navbar from "../src/components/navbar";
+import { GlobalNavbar } from "../src/components/navbar";
 import { BottomOverlayProvider } from "../src/context/BottomOverlayContext";
 import { usePushNotifications } from "../src/hooks/usePushNotifications";
 import {
@@ -27,10 +27,9 @@ import {
   RadioPlayerProvider,
 } from "../src/context/RadioPlayerContext";
 import {
-  showTopToast,
   TopToastProvider,
-  type TopToastType,
 } from "../src/context/TopToastContext";
+import { emitToast, toastBus, type ToastType } from "../src/events/toastBus";
 import {
   persistQueryClientOptions,
   queryClient,
@@ -51,11 +50,8 @@ LogBox.ignoreLogs([
   "Unable to activate keep awake",
 ]);
 
-const NOTIFICATION_TOAST_DEDUPE_LIMIT = 120;
 const NOTIFICATION_TOAST_BACKFILL_LIMIT = 12;
 const NOTIFICATION_TOAST_BACKFILL_SKEW_MS = 15000;
-const NOTIFICATION_TOAST_POLL_INTERVAL_MS = 6000;
-const NOTIFICATION_TOAST_POLL_LOOKBACK_MS = 45000;
 const NOTIFICATION_TOAST_RECONNECT_DELAY_MS = 1500;
 const NOTIFICATION_TOAST_DEBUG_LOGS = __DEV__;
 
@@ -108,13 +104,13 @@ export default function RootLayout() {
             <TopToastProvider>
               <AuthProvider>
                 <QueryAuthLifecycle />
-                <BottomSheetModalProvider>
-                  <BottomOverlayProvider>
+                <BottomOverlayProvider>
+                  <BottomSheetModalProvider>
                     <RadioPlayerProvider>
                       <RootContent />
                     </RadioPlayerProvider>
-                  </BottomOverlayProvider>
-                </BottomSheetModalProvider>
+                  </BottomSheetModalProvider>
+                </BottomOverlayProvider>
               </AuthProvider>
             </TopToastProvider>
           </PortalProvider>
@@ -159,7 +155,6 @@ function RootContent() {
   const segments = useSegments();
   const routeName = segments.length > 0 ? `/${segments.join("/")}` : "/";
   const processedDeepLinksRef = useRef<Set<string>>(new Set());
-  const shownNotificationToastIdsRef = useRef<Set<string>>(new Set());
   const notificationAppStateRef = useRef(AppState.currentState);
   const notificationBackgroundedAtRef = useRef<number | null>(null);
 
@@ -177,22 +172,6 @@ function RootContent() {
       });
     };
   }, [routeName]);
-
-  const rememberShownNotificationToast = useCallback((notificationId: string) => {
-    if (shownNotificationToastIdsRef.current.has(notificationId)) {
-      return false;
-    }
-
-    shownNotificationToastIdsRef.current.add(notificationId);
-    if (shownNotificationToastIdsRef.current.size > NOTIFICATION_TOAST_DEDUPE_LIMIT) {
-      const oldestId = shownNotificationToastIdsRef.current.values().next().value;
-      if (oldestId) {
-        shownNotificationToastIdsRef.current.delete(oldestId);
-      }
-    }
-
-    return true;
-  }, []);
 
   const showNotificationToastFromRecord = useCallback(
     (
@@ -218,16 +197,8 @@ function RootContent() {
         return false;
       }
 
-      if (!rememberShownNotificationToast(notificationId)) {
-        logNotificationToastDebug("Skipping duplicate notification toast", {
-          source,
-          notificationId,
-        });
-        return false;
-      }
-
       const normalizedType = String(nextNotification.type || "info").toLowerCase();
-      let toastType: TopToastType = "info";
+      let toastType: ToastType = "info";
       if (
         normalizedType === "success" ||
         normalizedType === "error" ||
@@ -237,20 +208,24 @@ function RootContent() {
         toastType = normalizedType;
       }
 
-      showTopToast({
+      const emitted = emitToast({
+        dedupeKey: `notification:${notificationId}`,
+        id: notificationId,
         type: toastType,
         title: String(nextNotification.title || "").trim() || "Notification",
         message,
+        source,
       });
 
       logNotificationToastDebug("Displayed notification toast", {
         source,
         notificationId,
         toastType,
+        emitted,
       });
-      return true;
+      return emitted;
     },
-    [rememberShownNotificationToast],
+    [],
   );
 
   const showNotificationToastFromPush = useCallback(
@@ -339,7 +314,7 @@ function RootContent() {
   );
 
   useEffect(() => {
-    shownNotificationToastIdsRef.current.clear();
+    toastBus.clearDedupe();
     notificationBackgroundedAtRef.current = null;
     notificationAppStateRef.current = AppState.currentState;
   }, [session?.user?.id]);
@@ -354,9 +329,6 @@ function RootContent() {
     let activeChannelGeneration = 0;
     let connectAttemptGeneration = 0;
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-    let pollTimer: ReturnType<typeof setInterval> | null = null;
-    let isPollingRecentNotifications = false;
-    let latestSubscribeStartedAt = Date.now();
 
     const isNotificationAppActive = () =>
       notificationAppStateRef.current === "active";
@@ -366,51 +338,6 @@ function RootContent() {
         clearTimeout(reconnectTimer);
         reconnectTimer = null;
       }
-    };
-
-    const clearPollTimer = () => {
-      if (pollTimer) {
-        clearInterval(pollTimer);
-        pollTimer = null;
-      }
-    };
-
-    const pollRecentNotifications = async (reason: string) => {
-      if (
-        isDisposed ||
-        isPollingRecentNotifications ||
-        !isNotificationAppActive()
-      ) {
-        return;
-      }
-
-      isPollingRecentNotifications = true;
-
-      try {
-        await backfillRecentNotificationToasts(
-          activeUserId,
-          Date.now() - NOTIFICATION_TOAST_POLL_LOOKBACK_MS,
-          `poll:${reason}`,
-        );
-      } finally {
-        isPollingRecentNotifications = false;
-      }
-    };
-
-    const startPollTimer = (reason: string) => {
-      if (isDisposed || pollTimer || !isNotificationAppActive()) return;
-
-      logNotificationToastDebug("Starting notification toast poll fallback", {
-        reason,
-        activeUserId,
-        intervalMs: NOTIFICATION_TOAST_POLL_INTERVAL_MS,
-        lookbackMs: NOTIFICATION_TOAST_POLL_LOOKBACK_MS,
-      });
-
-      void pollRecentNotifications(reason);
-      pollTimer = setInterval(() => {
-        void pollRecentNotifications("interval");
-      }, NOTIFICATION_TOAST_POLL_INTERVAL_MS);
     };
 
     const disposeChannel = async (reason: string) => {
@@ -476,7 +403,6 @@ function RootContent() {
         return;
       }
 
-      latestSubscribeStartedAt = Date.now();
       activeChannelStatus = "CONNECTING";
       const channelGeneration = ++activeChannelGeneration;
 
@@ -523,11 +449,6 @@ function RootContent() {
 
           if (status === "SUBSCRIBED") {
             clearReconnectTimer();
-            void backfillRecentNotificationToasts(
-              activeUserId,
-              latestSubscribeStartedAt,
-              reason,
-            );
             return;
           }
 
@@ -553,7 +474,6 @@ function RootContent() {
     };
 
     void connectChannel("initial");
-    startPollTimer("initial");
 
     const appStateSub = AppState.addEventListener("change", (nextState) => {
       const previousState = notificationAppStateRef.current;
@@ -566,7 +486,6 @@ function RootContent() {
       if (previousState === "active" && nextState !== "active") {
         notificationBackgroundedAtRef.current = Date.now();
         clearReconnectTimer();
-        clearPollTimer();
         void disposeChannel(`app-state:${nextState}`);
         return;
       }
@@ -578,8 +497,6 @@ function RootContent() {
         if (activeChannelStatus !== "SUBSCRIBED") {
           void connectChannel("foreground");
         }
-
-        startPollTimer("foreground");
 
         if (backgroundedAt) {
           void backfillRecentNotificationToasts(
@@ -594,7 +511,6 @@ function RootContent() {
     return () => {
       isDisposed = true;
       clearReconnectTimer();
-      clearPollTimer();
       appStateSub.remove();
       void disposeChannel("cleanup");
     };
@@ -708,22 +624,25 @@ function RootContent() {
 
         const normalizedStatus = String(status || "").toLowerCase();
         if (normalizedStatus === "success" || normalizedStatus === "paid" || normalizedStatus === "completed") {
-          showTopToast({
+          emitToast({
             type: "success",
             title: "Payment Successful",
             message: "Your payment was confirmed.",
+            source: "deep-link",
           });
         } else if (normalizedStatus === "cancelled" || normalizedStatus === "canceled") {
-          showTopToast({
+          emitToast({
             type: "warning",
             title: "Payment Cancelled",
             message: "The payment was cancelled before completion.",
+            source: "deep-link",
           });
         } else if (normalizedStatus === "failed" || normalizedStatus === "error") {
-          showTopToast({
+          emitToast({
             type: "error",
             title: "Payment Failed",
             message: "The payment did not go through. Please try again.",
+            source: "deep-link",
           });
         }
 
@@ -752,13 +671,14 @@ function RootContent() {
         screenOptions={{
           headerShown: false,
           contentStyle: { backgroundColor: colors.background }, // Also ensure stack content has background
-          animation: "fade",
+          animation: Platform.OS === "ios" ? "simple_push" : "fade_from_bottom",
+          animationDuration: 240,
           freezeOnBlur: true,
         }}
       />
 
-      <Navbar global />
       <GlobalRadioMiniPlayer />
+      <GlobalNavbar />
     </View>
   );
 }

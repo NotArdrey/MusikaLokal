@@ -1,6 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect } from "@react-navigation/native";
-import { BlurView } from "expo-blur";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import * as ExpoLinking from "expo-linking";
 import { router, useLocalSearchParams } from "expo-router";
@@ -27,6 +26,7 @@ import Header from "../src/components/header";
 import InAppMediaViewer, { isInAppMediaUrl } from "../src/components/InAppMediaViewer";
 import BookingActionModal, { normalizeVisibleInput } from "../src/components/modal";
 import Navbar from "../src/components/navbar";
+import SmoothTabTransition from "../src/components/SmoothTabTransition";
 import { useAuth } from "../src/context/AuthContext";
 import { useTheme } from "../src/context/ThemeContext";
 import { createBookingCheckout } from "../src/services/paymongo";
@@ -147,6 +147,20 @@ const formatBookingCardDateTime = (value: unknown) => {
   const raw = String(value ?? "").trim();
   if (!raw) return "TBA";
   return formatFriendlyDateTime(raw, { fallback: raw });
+};
+
+const formatApplicationReceivedDateTime = (item: any) => {
+  const raw =
+    toNonEmptyString(item?.submitted_at) ||
+    toNonEmptyString(item?.received_at) ||
+    toNonEmptyString(item?.created_at);
+
+  if (!raw) return null;
+
+  return formatFriendlyDateTime(raw, {
+    fallback: raw,
+    forceIncludeTime: true,
+  });
 };
 
 const extractConnectionRequestDetails = (eventDetails: any, attachmentUrl: unknown) => {
@@ -3887,6 +3901,7 @@ export default function BookingsScreen() {
             isWebDesktop && styles.scrollContentWeb,
           ]}
         >
+          <SmoothTabTransition activeKey={`${activeTab}-${activeAppTab}`}>
           {!loading &&
             ((userRole === "studio-owner" && activeTab === "Pending") ||
               (userRole === "venue-owner" && activeTab === "Applicants")) &&
@@ -4469,6 +4484,8 @@ export default function BookingsScreen() {
                 const applicationLabel = getApplicationDisplayLabel(item);
                 const applicationIcon = applicationLabel === "Solo Artist" ? "person-outline" : "people-outline";
                 const applicationTypeBadge = `${applicationLabel} Application`;
+                const applicationReceivedAt = formatApplicationReceivedDateTime(item);
+                const applicationReceivedLabel = isMusicianView ? "Submitted" : "Received";
 
                 return (
                   <View
@@ -4581,6 +4598,23 @@ export default function BookingsScreen() {
                                   numberOfLines={1}
                                 >
                                   {item.location}
+                                </Text>
+                              </View>
+                            )}
+
+                            {/* Received / Submitted Time */}
+                            {applicationReceivedAt && (
+                              <View style={styles.cardDetailRow}>
+                                <Ionicons
+                                  name="time-outline"
+                                  size={14}
+                                  color={colors.textSecondary}
+                                />
+                                <Text
+                                  style={[styles.cardDetailText, { color: colors.textSecondary }]}
+                                  numberOfLines={1}
+                                >
+                                  {`${applicationReceivedLabel} ${applicationReceivedAt}`}
                                 </Text>
                               </View>
                             )}
@@ -6465,6 +6499,7 @@ export default function BookingsScreen() {
             })}
             </View>
           )}
+          </SmoothTabTransition>
         </ScrollView>
 
         <View style={styles.navbarPosition}>
@@ -6796,10 +6831,12 @@ export default function BookingsScreen() {
         transparent
         statusBarTranslucent
         navigationBarTranslucent
+        presentationStyle="overFullScreen"
+        hardwareAccelerated
         animationType="fade"
         onRequestClose={() => setShowPaymentOptionModal(false)}
       >
-        <BlurView intensity={60} tint="dark" style={styles.modalOverlay}>
+        <View style={styles.modalOverlay}>
           <View
             style={[
               styles.paymentOptionContainer,
@@ -6958,7 +6995,7 @@ export default function BookingsScreen() {
               <Text style={{ color: colors.textSecondary, fontFamily: 'Poppins_500Medium' }}>Cancel</Text>
             </TouchableOpacity>
           </View>
-        </BlurView>
+        </View>
       </RNModal>
 
       {/* Scanner Modal (Studio Owner) */}
@@ -7304,6 +7341,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
     padding: 20,
+    backgroundColor: "rgba(15,23,42,0.58)",
   },
   qrContainer: {
     width: "100%",

@@ -17,7 +17,7 @@ import Navbar from "../src/components/navbar";
 import CustomAlert, { AlertType } from "../src/components/CustomAlert";
 import { useBottomBarClearance } from "../src/hooks/useBottomBarClearance";
 import { useAuth } from "../src/context/AuthContext";
-import { showTopToast } from "../src/context/TopToastContext";
+import { emitToast } from "../src/events/toastBus";
 import { useTheme } from "../src/context/ThemeContext";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
@@ -102,7 +102,7 @@ export default function CreateStationScreen() {
       const { data } = await supabase.functions.invoke("manage-playlists", { body });
 
       if (data?.success) {
-        showTopToast({
+        emitToast({
           type: "success",
           title: isEditing ? "Updated" : "Created",
           message: isEditing ? "Station updated." : "Station created!",

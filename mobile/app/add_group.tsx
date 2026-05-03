@@ -1983,6 +1983,7 @@ export default function AddGroupScreen() {
 
       <BottomModal
         visible={groupTypeModalVisible}
+        overlayLabel="AddGroupTypeModal"
         onClose={() => setGroupTypeModalVisible(false)}
         backdropColor="rgba(0,0,0,0.58)"
         closeOnBackdropPress

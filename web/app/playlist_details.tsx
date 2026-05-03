@@ -20,7 +20,7 @@ import Navbar from "../src/components/navbar";
 import ReportModal from "../src/components/ReportModal";
 import CustomAlert, { AlertType } from "../src/components/CustomAlert";
 import { useAuth } from "../src/context/AuthContext";
-import { showTopToast } from "../src/context/TopToastContext";
+import { emitToast } from "../src/events/toastBus";
 import { useTheme } from "../src/context/ThemeContext";
 
 const moderateScale = (size: number, factor = 0.3) => {
@@ -66,17 +66,17 @@ export default function PlaylistDetailsScreen() {
 
   const handleDelete = async () => {
     const { data } = await supabase.functions.invoke("manage-playlists", { body: { action: "delete_playlist", playlist_id: playlist.id } });
-    if (data?.success) { showTopToast({ type: "info", title: "Deleted", message: "Playlist deleted." }); router.back(); }
+    if (data?.success) { emitToast({ type: "info", title: "Deleted", message: "Playlist deleted." }); router.back(); }
   };
 
   const handleRemoveItem = async (itemId: string) => {
     const { data } = await supabase.functions.invoke("manage-playlists", { body: { action: "remove_playlist_item", item_id: itemId, playlist_id: playlist?.id } });
-    if (data?.success) { setItems((prev) => prev.filter((i) => i.id !== itemId)); showTopToast({ type: "info", title: "Removed", message: "Item removed." }); }
+    if (data?.success) { setItems((prev) => prev.filter((i) => i.id !== itemId)); emitToast({ type: "info", title: "Removed", message: "Item removed." }); }
   };
 
   const handlePlayTeaser = async (assetId: string) => {
     await supabase.functions.invoke("manage-playlists", { body: { action: "record_play_event", playlist_id: playlist.id, play_type: "teaser" } });
-    showTopToast({ type: "info", title: "Playing", message: "Teaser playing..." });
+    emitToast({ type: "info", title: "Playing", message: "Teaser playing..." });
   };
 
   const openReportModal = () => {

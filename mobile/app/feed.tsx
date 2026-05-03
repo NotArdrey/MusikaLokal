@@ -34,10 +34,12 @@ import Navbar, {
 import ProductionTeamDetailsSheet from "../src/components/ProductionTeamDetailsSheet";
 import SearchBottomSheet from "../src/components/SearchBottomSheet";
 import Skeleton from "../src/components/Skeleton";
+import SlidingTabBar from "../src/components/SlidingTabBar";
+import SmoothTabTransition from "../src/components/SmoothTabTransition";
 import CustomAlert, { AlertType } from "../src/components/CustomAlert";
 import { isTrackPlayerAvailable } from "../src/audio/safeTrackPlayer";
 import { useAuth } from "../src/context/AuthContext";
-import { useBottomOverlay } from "../src/context/BottomOverlayContext";
+import { useBottomOverlay, useBottomOverlayVisibility } from "../src/context/BottomOverlayContext";
 import {
   RADIO_MINI_PLAYER_HEIGHT,
   RADIO_MINI_PLAYER_STACK_GAP,
@@ -45,7 +47,7 @@ import {
   useRadioPlayerPlayback,
   useRadioPlayerPresence,
 } from "../src/context/RadioPlayerContext";
-import { showTopToast } from "../src/context/TopToastContext";
+import { emitToast } from "../src/events/toastBus";
 import { useFeedQuery } from "../src/data/hooks";
 import { useTheme } from "../src/context/ThemeContext";
 import { getGroupTypeLabel } from "../src/utils/groupMembers";
@@ -60,6 +62,7 @@ import {
   rerankHomeFeedWithGroq,
 } from "../src/services/groqModelRouter";
 import { usePageLoadLogger } from "../src/utils/loadTimeLogger";
+import { getSmoothTabIndex, setSmoothTab } from "../src/utils/smoothTabs";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const moderateScale = (size: number, factor = 0.3) => {
@@ -68,36 +71,11 @@ const moderateScale = (size: number, factor = 0.3) => {
 };
 
 type FeedTab = "for_you" | "following";
-
-type ForYouTabIconProps = {
-  active: boolean;
-  primaryColor: string;
-  mutedColor: string;
-};
-
-function ForYouTabIcon({ active, primaryColor, mutedColor }: ForYouTabIconProps) {
-  const iconColor = active ? primaryColor : mutedColor;
-
-  return (
-    <View
-      style={[
-        styles.forYouTabIcon,
-        {
-          borderColor: active ? primaryColor : mutedColor,
-          backgroundColor: active ? `${primaryColor}18` : "transparent",
-        },
-      ]}
-    >
-      <View style={[styles.forYouTabIconCenter, { backgroundColor: iconColor }]} />
-      <Ionicons
-        name={active ? "sparkles" : "sparkles-outline"}
-        size={12}
-        color={iconColor}
-        style={styles.forYouTabIconSparkle}
-      />
-    </View>
-  );
-}
+const FEED_TAB_ORDER: readonly FeedTab[] = ["for_you", "following"];
+const FEED_TABS = [
+  { key: "for_you", label: "For You" },
+  { key: "following", label: "Following" },
+] as const;
 
 type FeedAiCardsResult = {
   cards: any[];
@@ -112,6 +90,11 @@ type FeedCacheEntry = {
   aiFeedProvider: string;
   hasMore: boolean;
   loaded: boolean;
+};
+
+type LiveStationsCacheEntry = {
+  stations: any[];
+  fetchedAt: number;
 };
 
 const createEmptyFeedCacheEntry = (provider: string): FeedCacheEntry => ({
@@ -156,7 +139,9 @@ const logFeedInvokeError = (
 const FEED_PAGE_SIZE = 12;
 const AI_CARD_LIMIT = 20;
 const FEED_FOCUS_REFRESH_COOLDOWN_MS = 30000;
+const LIVE_STATIONS_FOCUS_REFRESH_COOLDOWN_MS = 30000;
 const feedScreenCache = createFeedCache(getGroqModelInfo().modelLabel);
+const liveStationsScreenCache = new Map<string, LiveStationsCacheEntry>();
 const FEED_FALLBACK_IMAGES: Record<string, string[]> = {
   Artist: [
     "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=900&q=75",
@@ -611,6 +596,7 @@ export default function FeedScreen() {
   const [postBody, setPostBody] = useState("");
   const [postVisibility, setPostVisibility] = useState<"public" | "followers">("public");
   const [creating, setCreating] = useState(false);
+  useBottomOverlayVisibility(showCreate, "FeedCreatePostModal");
 
   const [alert, setAlert] = useState<{ type: AlertType; title: string; message: string } | null>(null);
   const searchSheetRef = React.useRef<import("@gorhom/bottom-sheet").BottomSheetModal>(null);
@@ -629,6 +615,7 @@ export default function FeedScreen() {
   const [pendingReopenListingId, setPendingReopenListingId] = useState<string | null>(null);
 
   const [liveStations, setLiveStations] = useState<any[]>([]);
+  const [isLiveStationsLoading, setIsLiveStationsLoading] = useState(true);
 
   const forYouFeedQuery = useFeedQuery({
     enabled: false,
@@ -697,6 +684,10 @@ export default function FeedScreen() {
     setRefreshing(false);
     setLoadingMore(false);
   }, [groqModelLabel]);
+
+  const isEmptyForYouSnapshot = useCallback((snapshot: FeedCacheEntry) => (
+    snapshot.posts.length === 0 && snapshot.aiCards.length === 0
+  ), []);
 
   const buildFeedSnapshotFromPages = useCallback((feedTab: FeedTab, data: any): FeedCacheEntry | null => {
     const pages = Array.isArray(data?.pages) ? data.pages : [];
@@ -877,7 +868,7 @@ export default function FeedScreen() {
       await tuneIn(station);
     } catch (error: any) {
       console.error("Feed live station playback error:", error);
-      showTopToast({
+      emitToast({
         type: "error",
         title: "Playback Error",
         message: typeof error?.message === "string"
@@ -1253,8 +1244,6 @@ export default function FeedScreen() {
         provider: "Normal Feed",
         message: error?.message || "Unable to load recommendation cards right now.",
       };
-    } finally {
-      setIsAiCardsLoading(false);
     }
   }, [groqModelLabel, session, userId]);
 
@@ -1408,9 +1397,16 @@ export default function FeedScreen() {
         hasMore: Boolean(latestPage?.nextCursor),
         loaded: true,
       };
+      const shouldLoadForYouRecommendations = !append && feedTab === "for_you" && nextPosts.length === 0;
 
       feedCacheRef.current[feedTab] = nextSnapshot;
       feedLastFetchAt[feedTab] = Date.now();
+
+      if (shouldLoadForYouRecommendations && activeTabRef.current === feedTab) {
+        setIsAiCardsLoading(true);
+      } else if (activeTabRef.current === feedTab) {
+        setIsAiCardsLoading(false);
+      }
 
       if (activeTabRef.current === feedTab) {
         applyFeedSnapshot(nextSnapshot);
@@ -1422,7 +1418,7 @@ export default function FeedScreen() {
         });
       }
 
-      if (!append && feedTab === "for_you" && nextPosts.length === 0) {
+      if (shouldLoadForYouRecommendations) {
         void fetchAiCardsForYou().then((aiResult) => {
           if (requestId !== feedRequestIdRef.current[feedTab]) {
             return;
@@ -1441,9 +1437,13 @@ export default function FeedScreen() {
 
           if (activeTabRef.current === feedTab) {
             applyFeedSnapshot(aiSnapshot);
+            setIsAiCardsLoading(false);
           }
         }).catch((aiError) => {
           console.error("Feed AI cards error:", aiError);
+          if (requestId === feedRequestIdRef.current[feedTab] && activeTabRef.current === feedTab) {
+            setIsAiCardsLoading(false);
+          }
         });
       }
     } catch (e: any) {
@@ -1497,6 +1497,7 @@ export default function FeedScreen() {
 
       if (activeTabRef.current === feedTab) {
         applyFeedSnapshot(fallbackSnapshot);
+        setIsAiCardsLoading(false);
       }
     } finally {
       feedInFlightRef.current[feedTab] = false;
@@ -1516,7 +1517,30 @@ export default function FeedScreen() {
   ]);
 
   // ── Radio station helpers ──────────────────────────────────────
-  const fetchLiveStations = useCallback(async () => {
+  const fetchLiveStations = useCallback(async (options: { force?: boolean } = {}) => {
+    const cacheKey = userId || "guest";
+    const cached = liveStationsScreenCache.get(cacheKey);
+
+    if (
+      !options.force &&
+      cached &&
+      Date.now() - cached.fetchedAt < LIVE_STATIONS_FOCUS_REFRESH_COOLDOWN_MS
+    ) {
+      setLiveStations(cached.stations);
+      setIsLiveStationsLoading(false);
+
+      const nextActiveStation = cached.stations.find((station: any) => station.id === activeStationIdRef.current);
+      if (nextActiveStation) {
+        syncStationData(nextActiveStation);
+      }
+      return;
+    }
+
+    if (cached) {
+      setLiveStations(cached.stations);
+    }
+    setIsLiveStationsLoading(!cached);
+
     try {
       const { data, error } = await supabase.functions.invoke("manage-playlists", {
         body: { action: "browse_stations", limit: 10 },
@@ -1669,13 +1693,21 @@ export default function FeedScreen() {
         };
       });
 
+      liveStationsScreenCache.set(cacheKey, {
+        stations: enrichedStations,
+        fetchedAt: Date.now(),
+      });
       setLiveStations(enrichedStations);
       const nextActiveStation = enrichedStations.find((station: any) => station.id === activeStationIdRef.current);
       if (nextActiveStation) {
         syncStationData(nextActiveStation);
       }
     } catch (_) {
-      setLiveStations([]);
+      if (!cached) {
+        setLiveStations([]);
+      }
+    } finally {
+      setIsLiveStationsLoading(false);
     }
   }, [syncStationData, userId]);
 
@@ -1688,22 +1720,55 @@ export default function FeedScreen() {
     clearBottomOverlays();
     const currentTab = activeTabRef.current;
     const hydrated = hydrateCachedFeed(currentTab);
+    const hydratedSnapshot = feedCacheRef.current[currentTab];
+    const isHydratedEmptyForYou =
+      currentTab === "for_you" &&
+      hydrated &&
+      isEmptyForYouSnapshot(hydratedSnapshot);
     const shouldRefreshFeed =
       !hydrated ||
+      isHydratedEmptyForYou ||
       Date.now() - feedLastFetchAt[currentTab] >= FEED_FOCUS_REFRESH_COOLDOWN_MS;
+    const shouldHoldForYouEmptyState =
+      currentTab === "for_you" &&
+      shouldRefreshFeed &&
+      (!hydrated || isEmptyForYouSnapshot(hydratedSnapshot));
 
     if (!hydrated) {
       setLoading(true);
     }
 
-    if (shouldRefreshFeed) {
-      void fetchFeed(currentTab);
-    } else {
+    if (shouldHoldForYouEmptyState) {
+      setIsAiCardsLoading(true);
+    }
+
+    if (!shouldRefreshFeed) {
       setLoading(false);
       setRefreshing(false);
     }
 
-    void fetchLiveStations();
+    const liveStationsCacheKey = userId || "guest";
+    const cachedLiveStations = liveStationsScreenCache.get(liveStationsCacheKey);
+    const shouldRefreshLiveStations =
+      !cachedLiveStations ||
+      Date.now() - cachedLiveStations.fetchedAt >= LIVE_STATIONS_FOCUS_REFRESH_COOLDOWN_MS;
+
+    if (cachedLiveStations) {
+      setLiveStations(cachedLiveStations.stations);
+      setIsLiveStationsLoading(false);
+    } else {
+      setIsLiveStationsLoading(true);
+    }
+
+    const focusRefreshTask = InteractionManager.runAfterInteractions(() => {
+      if (shouldRefreshFeed) {
+        void fetchFeed(currentTab);
+      }
+
+      if (shouldRefreshLiveStations) {
+        void fetchLiveStations();
+      }
+    });
 
     const restorePendingReopen = async () => {
       const storedListingId = await AsyncStorage.getItem("pending_reopen_listing_id");
@@ -1716,7 +1781,11 @@ export default function FeedScreen() {
     };
 
     void restorePendingReopen();
-  }, [authLoading, clearBottomOverlays, fetchFeed, fetchLiveStations, hydrateCachedFeed]));
+
+    return () => {
+      focusRefreshTask.cancel();
+    };
+  }, [authLoading, clearBottomOverlays, fetchFeed, fetchLiveStations, hydrateCachedFeed, isEmptyForYouSnapshot, userId]));
 
   useEffect(() => {
     if (authLoading || !hasFocusedFeedRef.current) {
@@ -1729,11 +1798,32 @@ export default function FeedScreen() {
 
     previousTabRef.current = tab;
 
-    if (!hydrateCachedFeed(tab)) {
-      setLoading(true);
-      void fetchFeed(tab);
+    const hydrated = hydrateCachedFeed(tab);
+    const hydratedSnapshot = feedCacheRef.current[tab];
+    const isHydratedEmptyForYou =
+      tab === "for_you" &&
+      hydrated &&
+      isEmptyForYouSnapshot(hydratedSnapshot);
+    const shouldRefreshTabFeed =
+      !hydrated ||
+      isHydratedEmptyForYou ||
+      Date.now() - feedLastFetchAt[tab] >= FEED_FOCUS_REFRESH_COOLDOWN_MS;
+
+    if (tab === "for_you" && shouldRefreshTabFeed && (!hydrated || isEmptyForYouSnapshot(hydratedSnapshot))) {
+      setIsAiCardsLoading(true);
     }
-  }, [authLoading, fetchFeed, hydrateCachedFeed, tab]);
+
+    if (!hydrated) {
+      setLoading(true);
+    }
+
+    if (shouldRefreshTabFeed) {
+      void fetchFeed(tab);
+    } else {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, [authLoading, fetchFeed, hydrateCachedFeed, isEmptyForYouSnapshot, tab]);
 
   const onRefresh = () => {
     if (authLoading) {
@@ -1741,8 +1831,11 @@ export default function FeedScreen() {
     }
 
     setRefreshing(true);
+    if (tab === "for_you" && feedItems.length === 0) {
+      setIsAiCardsLoading(true);
+    }
     void fetchFeed(tab);
-    void fetchLiveStations();
+    void fetchLiveStations({ force: true });
   };
 
   const loadMore = () => {
@@ -1779,7 +1872,7 @@ export default function FeedScreen() {
       }
 
       if (data?.success) {
-        showTopToast({ type: "success", title: "Posted!", message: "Your post is live." });
+        emitToast({ type: "success", title: "Posted!", message: "Your post is live." });
         setShowCreate(false);
         setPostBody("");
         void fetchFeed(activeTabRef.current);
@@ -1841,7 +1934,7 @@ export default function FeedScreen() {
         throw error;
       }
 
-      showTopToast({ type: "success", title: isFollowing ? "Unfollowed" : "Following", message: "" });
+      emitToast({ type: "success", title: isFollowing ? "Unfollowed" : "Following", message: "" });
 
       const nextIsFollowing = !isFollowing;
       setFollowingKeys((prev) => {
@@ -1873,7 +1966,7 @@ export default function FeedScreen() {
       }
     } catch (e: any) {
       console.error("Follow error:", e);
-      showTopToast({
+      emitToast({
         type: "error",
         title: "Follow failed",
         message: e?.message || "Please try again.",
@@ -2195,6 +2288,9 @@ export default function FeedScreen() {
 
   const renderHeader = () => {
     const cardBg = isDark ? "#1E293B" : "#FFFFFF";
+    const skeletonBorder = isDark ? "#334155" : "#E2E8F0";
+    const showRadioStationSkeleton = isLiveStationsLoading && liveStations.length === 0;
+
     return (
       <>
         {/* ── Search bar trigger ── */}
@@ -2227,7 +2323,26 @@ export default function FeedScreen() {
         </View>
 
         {/* Live Radio Section */}
-        {liveStations.length > 0 && (
+        {showRadioStationSkeleton ? (
+          <View style={[styles.feedSkeletonRadioWrap, { backgroundColor: cardBg }]}>
+            <Skeleton width={164} height={18} style={{ marginLeft: 14, marginBottom: 10 }} />
+            <View style={styles.feedSkeletonRadioRow}>
+              {[1, 2, 3].map((item) => (
+                <View
+                  key={`header-radio-skeleton-${item}`}
+                  style={[styles.feedSkeletonRadioCard, { backgroundColor: isDark ? "#0F172A" : "#F8FAFC", borderColor: skeletonBorder }]}
+                >
+                  <Skeleton width="100%" height={110} borderRadius={0} />
+                  <View style={{ padding: 12 }}>
+                    <Skeleton width="86%" height={14} style={{ marginBottom: 6 }} />
+                    <Skeleton width="54%" height={12} style={{ marginBottom: 10 }} />
+                    <Skeleton width="100%" height={32} borderRadius={10} style={{ marginTop: 4 }} />
+                  </View>
+                </View>
+              ))}
+            </View>
+          </View>
+        ) : liveStations.length > 0 ? (
           <View style={{ paddingVertical: 10, backgroundColor: cardBg }}>
             <View style={{ flexDirection: "row", alignItems: "center", paddingHorizontal: 14, marginBottom: 10, flexWrap: "wrap", gap: 6 }}>
               <Ionicons name="radio" size={18} color="#ef4444" />
@@ -2341,30 +2456,19 @@ export default function FeedScreen() {
               })}
             </ScrollView>
           </View>
-        )}
+        ) : null}
 
         {/* ── Feed tabs ── */}
-        <View style={[styles.tabRow, { backgroundColor: cardBg, borderBottomColor: isDark ? "#334155" : "#E2E8F0" }]}>
-          {(["for_you", "following"] as FeedTab[]).map((t) => (
-            <TouchableOpacity activeOpacity={1} key={t} style={[styles.tab, tab === t && { borderBottomColor: colors.primary, borderBottomWidth: 2 }]} onPress={() => setTab(t)}>
-              {t === "for_you" ? (
-                <ForYouTabIcon
-                  active={tab === t}
-                  primaryColor={colors.primary}
-                  mutedColor={colors.textSecondary}
-                />
-              ) : (
-                <Ionicons
-                  name="people-outline"
-                  size={18}
-                  color={tab === t ? colors.primary : colors.textSecondary}
-                  style={{ marginRight: 6 }}
-                />
-              )}
-              <Text style={[styles.tabText, { color: tab === t ? colors.primary : colors.textSecondary }]}>{t === "for_you" ? "For You" : "Following"}</Text>
-            </TouchableOpacity>
-          ))}
-        </View>
+        <SlidingTabBar
+          activeKey={tab}
+          backgroundColor={cardBg}
+          borderColor={isDark ? "#334155" : "#E2E8F0"}
+          indicatorWidthRatio={0.28}
+          onChange={(nextTab) => setSmoothTab(setTab, nextTab)}
+          tabs={FEED_TABS}
+          textStyle={styles.tabText}
+        />
+        <View style={[styles.feedTabBottomSpacer, { backgroundColor: cardBg }]} />
 
       </>
     );
@@ -2414,6 +2518,7 @@ export default function FeedScreen() {
             <Skeleton width={110} height={18} borderRadius={8} />
           </View>
         </View>
+        <View style={[styles.feedTabBottomSpacer, { backgroundColor: cardBg }]} />
 
         {[1, 2, 3].map((item) => (
           <View
@@ -2474,6 +2579,7 @@ export default function FeedScreen() {
   }, [aiCards, followingEntities, loading, posts, tab]);
 
   const isShowingAiCards = tab === "for_you" && posts.length === 0 && aiCards.length > 0;
+  const showRecommendationLoadingState = tab === "for_you" && isAiCardsLoading;
   const radioPlayerBottom = NAVBAR_BOTTOM_OFFSET + NAVBAR_HEIGHT + RADIO_MINI_PLAYER_STACK_GAP + insets.bottom;
   const hasRadioMiniPlayer = Boolean(activeStation);
   const feedBottomSpacer = hasRadioMiniPlayer
@@ -2491,77 +2597,84 @@ export default function FeedScreen() {
   }
 
   return (
-    <View style={[styles.container, { backgroundColor: isDark ? "#0F172A" : "#F0F2F5" }]}>
+    <View style={[styles.container, { backgroundColor: isDark ? "#0F172A" : "#FFFFFF" }]}>
       <Header title="MusikaLokal" />
       {showInitialFeedSkeleton ? (
         renderFeedSkeleton()
       ) : (
-        <FlatList
-          data={feedItems}
-          keyExtractor={(item, index) => `${item.id || "row"}-${item.__feedKind || "post"}-${index}`}
-          renderItem={renderPost}
-          ListHeaderComponent={renderHeader()}
-          ListEmptyComponent={
-            isAiCardsLoading ? (
-              <View style={{ paddingHorizontal: 16, paddingTop: 8 }}>
-                {[1, 2].map((i) => <Skeleton key={i} width={SCREEN_WIDTH - 32} height={180} style={{ marginBottom: 10, borderRadius: 12 }} />)}
-              </View>
-            ) : (
-              <View style={[styles.emptyStateContainer, { backgroundColor: isDark ? "#1E293B" : "#FFFFFF" }]}>
-                <View style={[styles.emptyIconCircle, { backgroundColor: isDark ? "#1E293B" : colors.primary + "10" }]}>
-                  <Ionicons
-                    name={tab === "following" ? "people-outline" : "sparkles-outline"}
-                    size={48}
-                    color={colors.primary}
-                  />
+        <SmoothTabTransition
+          activeKey={tab}
+          activeIndex={getSmoothTabIndex(FEED_TAB_ORDER, tab)}
+          renderOutgoing={false}
+          style={{ flex: 1 }}
+        >
+          <FlatList
+            data={feedItems}
+            keyExtractor={(item, index) => `${item.id || "row"}-${item.__feedKind || "post"}-${index}`}
+            renderItem={renderPost}
+            ListHeaderComponent={renderHeader()}
+            ListEmptyComponent={
+              showRecommendationLoadingState ? (
+                <View style={{ paddingHorizontal: 16, paddingTop: 8 }}>
+                  {[1, 2].map((i) => <Skeleton key={i} width={SCREEN_WIDTH - 32} height={180} style={{ marginBottom: 10, borderRadius: 12 }} />)}
                 </View>
-                <Text style={[styles.emptyTitle, { color: colors.text }]}>
-                  {tab === "following"
-                    ? "Your Following Feed is Empty"
-                    : "No posts or recommendations yet"}
-                </Text>
-                <Text style={[styles.emptySubtitle, { color: colors.textSecondary }]}>
-                  {tab === "following"
-                    ? "Follow musicians, groups, and duos to see their updates here. Followed profiles and groups will also appear until they have posts."
-                    : "Explore musicians, groups, studios, and gigs to help shape your For You feed."}
-                </Text>
+              ) : (
+                <View style={[styles.emptyStateContainer, { backgroundColor: isDark ? "#1E293B" : "#FFFFFF" }]}>
+                  <View style={[styles.emptyIconCircle, { backgroundColor: isDark ? "#1E293B" : colors.primary + "10" }]}>
+                    <Ionicons
+                      name={tab === "following" ? "people-outline" : "sparkles-outline"}
+                      size={48}
+                      color={colors.primary}
+                    />
+                  </View>
+                  <Text style={[styles.emptyTitle, { color: colors.text }]}>
+                    {tab === "following"
+                      ? "Your Following Feed is Empty"
+                      : "No posts or recommendations yet"}
+                  </Text>
+                  <Text style={[styles.emptySubtitle, { color: colors.textSecondary }]}>
+                    {tab === "following"
+                      ? "Follow musicians, groups, and duos to see their updates here. Followed profiles and groups will also appear until they have posts."
+                      : "Explore musicians, groups, studios, and gigs to help shape your For You feed."}
+                  </Text>
 
-                {tab === "following" ? (
-                  <TouchableOpacity activeOpacity={1}
-                    style={[styles.emptyActionBtn, { backgroundColor: colors.primary, marginTop: 16 }]}
-                    onPress={openSearchSheet}
-                  >
-                    <Ionicons name="search" size={18} color="#fff" />
-                    <Text style={styles.emptyActionBtnText}>Find Musicians</Text>
-                  </TouchableOpacity>
-                ) : (
-                  <TouchableOpacity activeOpacity={1}
-                    style={[styles.emptyActionBtn, { backgroundColor: colors.primary, marginTop: 16 }]}
-                    onPress={openSearchSheet}
-                  >
-                    <Ionicons name="search" size={18} color="#fff" />
-                    <Text style={styles.emptyActionBtnText}>Explore Feed</Text>
-                  </TouchableOpacity>
-                )}
-              </View>
-            )
-          }
-          ListFooterComponent={
-            <>
-              {loadingMore && <ActivityIndicator style={{ marginVertical: 20 }} color={colors.primary} />}
-              <View style={{ height: feedBottomSpacer }} />
-            </>
-          }
-          onEndReached={loadMore}
-          onEndReachedThreshold={0.3}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
-          ItemSeparatorComponent={() => <View style={{ height: isShowingAiCards ? 10 : 8 }} />}
-          contentContainerStyle={{ paddingBottom: 20 }}
-        />
+                  {tab === "following" ? (
+                    <TouchableOpacity activeOpacity={1}
+                      style={[styles.emptyActionBtn, { backgroundColor: colors.primary, marginTop: 16 }]}
+                      onPress={openSearchSheet}
+                    >
+                      <Ionicons name="search" size={18} color="#fff" />
+                      <Text style={styles.emptyActionBtnText}>Find Musicians</Text>
+                    </TouchableOpacity>
+                  ) : (
+                    <TouchableOpacity activeOpacity={1}
+                      style={[styles.emptyActionBtn, { backgroundColor: colors.primary, marginTop: 16 }]}
+                      onPress={openSearchSheet}
+                    >
+                      <Ionicons name="search" size={18} color="#fff" />
+                      <Text style={styles.emptyActionBtnText}>Explore Feed</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+              )
+            }
+            ListFooterComponent={
+              <>
+                {loadingMore && <ActivityIndicator style={{ marginVertical: 20 }} color={colors.primary} />}
+                <View style={{ height: feedBottomSpacer }} />
+              </>
+            }
+            onEndReached={loadMore}
+            onEndReachedThreshold={0.3}
+            refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
+            ItemSeparatorComponent={() => <View style={{ height: isShowingAiCards ? 10 : 8 }} />}
+            contentContainerStyle={{ paddingBottom: 20 }}
+          />
+        </SmoothTabTransition>
       )}
 
       {/* Create Post Modal */}
-      <Modal visible={showCreate} transparent animationType="slide" onRequestClose={() => setShowCreate(false)}>
+      <Modal visible={showCreate} transparent animationType="slide" hardwareAccelerated onRequestClose={() => setShowCreate(false)}>
         <View style={styles.modalOverlay}>
           <View style={[styles.modalBox, { backgroundColor: colors.surface }]}>
             <View style={styles.modalHeader}>
@@ -2663,6 +2776,9 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     paddingVertical: 12,
   },
+  feedTabBottomSpacer: {
+    height: 12,
+  },
   feedSkeletonPostCard: {
     marginHorizontal: 16,
     marginTop: 8,
@@ -2718,26 +2834,6 @@ const styles = StyleSheet.create({
   tabRow: { flexDirection: "row", borderBottomWidth: 1, marginTop: 6 },
   tab: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", paddingVertical: 12 },
   tabText: { fontSize: moderateScale(13), fontWeight: "600" },
-  forYouTabIcon: {
-    width: 22,
-    height: 22,
-    marginRight: 6,
-    borderRadius: 11,
-    borderWidth: 1.5,
-    alignItems: "center",
-    justifyContent: "center",
-    position: "relative",
-  },
-  forYouTabIconCenter: {
-    width: 5,
-    height: 5,
-    borderRadius: 2.5,
-  },
-  forYouTabIconSparkle: {
-    position: "absolute",
-    top: -4,
-    right: -5,
-  },
 
   aiCardContainer: {
     marginHorizontal: 16,
@@ -2790,7 +2886,10 @@ const styles = StyleSheet.create({
   },
   aiFollowText: {
     fontSize: moderateScale(12),
+    lineHeight: moderateScale(16),
     fontWeight: "700",
+    includeFontPadding: false,
+    textAlignVertical: "center",
   },
 
   /* Post card */

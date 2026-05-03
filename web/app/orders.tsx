@@ -17,6 +17,7 @@ import {
 import { supabase } from "../lib/supabase";
 import GuestSignInGate from "../src/components/GuestSignInGate";
 import Header from "../src/components/header";
+import SmoothTabTransition from "../src/components/SmoothTabTransition";
 import { useAuth } from "../src/context/AuthContext";
 import { useTheme } from "../src/context/ThemeContext";
 
@@ -192,16 +193,18 @@ export default function OrdersScreen() {
             contentContainerStyle={{ paddingBottom: 100, paddingHorizontal: 14, paddingTop: 10 }}
             refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
           >
-            {loading ? (
-              <ActivityIndicator size="large" color={colors.primary} style={{ marginTop: 42 }} />
-            ) : activeOrders.length > 0 ? (
-              activeOrders.map((order) => renderOrder(order, tab === "sales"))
-            ) : (
-              <View style={styles.emptyWrap}>
-                <Ionicons name="cube-outline" size={48} color={isDark ? "#334155" : "#CBD5E1"} />
-                <Text style={[styles.emptyText, { color: colors.textSecondary }]}>{tab === "my_orders" ? "No orders yet" : "No sales yet"}</Text>
-              </View>
-            )}
+            <SmoothTabTransition activeKey={tab}>
+              {loading ? (
+                <ActivityIndicator size="large" color={colors.primary} style={{ marginTop: 42 }} />
+              ) : activeOrders.length > 0 ? (
+                activeOrders.map((order) => renderOrder(order, tab === "sales"))
+              ) : (
+                <View style={styles.emptyWrap}>
+                  <Ionicons name="cube-outline" size={48} color={isDark ? "#334155" : "#CBD5E1"} />
+                  <Text style={[styles.emptyText, { color: colors.textSecondary }]}>{tab === "my_orders" ? "No orders yet" : "No sales yet"}</Text>
+                </View>
+              )}
+            </SmoothTabTransition>
           </ScrollView>
         </View>
       </View>

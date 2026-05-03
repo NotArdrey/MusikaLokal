@@ -1,9 +1,10 @@
-﻿
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Animated,
+  Easing,
   Platform,
   ScrollView,
   StyleSheet,
@@ -103,7 +104,18 @@ const adminTabRoutes: Record<Tab, string> = {
 
 const DASHBOARD_CACHE_TTL_MS = 30_000;
 
+type DashboardDateRange = '7d' | '30d' | 'all';
+type RevenueFilter = 'gross' | 'net';
+type IncidentTypeFilter = 'all' | 'booking' | 'profile';
+
+const DASHBOARD_DATE_RANGE_LABELS: Record<DashboardDateRange, string> = {
+  '7d': 'Last 7 Days',
+  '30d': 'Last 30 Days',
+  all: 'All Time',
+};
+
 interface DashboardMetrics {
+  generatedAt: string | null;
   totalUsers: number;
   totalStudios: number;
   totalGigs: number;
@@ -123,10 +135,17 @@ interface DashboardMetrics {
   newSignups24h: number;
   grossRevenue: number;
   netRevenue: number;
+  providerEarnings: number;
   pendingPayouts: number;
   avgReportResolutionHours: number;
   avgIncidentResolutionHours: number;
   paymongoSuccessRate: number;
+  paymentMetricsAvailable: boolean;
+  paymentAttempts: number;
+  paidPaymentEvents: number;
+  failedPaymentEvents: number;
+  paymongoLinkedPaymentEvents: number;
+  paymongoLinkedPaymentRate: number;
   dbHealthy: boolean;
   apiHealthy: boolean;
   paymongoHealthy: boolean;
@@ -157,6 +176,7 @@ interface DashboardMetrics {
 }
 
 const defaultMetrics: DashboardMetrics = {
+  generatedAt: null,
   totalUsers: 0,
   totalStudios: 0,
   totalGigs: 0,
@@ -176,10 +196,17 @@ const defaultMetrics: DashboardMetrics = {
   newSignups24h: 0,
   grossRevenue: 0,
   netRevenue: 0,
+  providerEarnings: 0,
   pendingPayouts: 0,
   avgReportResolutionHours: 0,
   avgIncidentResolutionHours: 0,
   paymongoSuccessRate: 0,
+  paymentMetricsAvailable: false,
+  paymentAttempts: 0,
+  paidPaymentEvents: 0,
+  failedPaymentEvents: 0,
+  paymongoLinkedPaymentEvents: 0,
+  paymongoLinkedPaymentRate: 0,
   dbHealthy: false,
   apiHealthy: false,
   paymongoHealthy: false,
@@ -214,6 +241,24 @@ const formatPercent = (value?: number | null) => {
   return `${safeValue.toFixed(1)}%`;
 };
 
+const formatMetricCount = (value?: number | null) => {
+  const safeValue = Math.max(0, Math.round(Number(value || 0)));
+  return safeValue.toLocaleString('en-PH');
+};
+
+const formatMetricTimestamp = (value?: string | null) => {
+  if (!value) return null;
+
+  const timestamp = new Date(value);
+  if (Number.isNaN(timestamp.getTime())) return null;
+
+  return timestamp.toLocaleTimeString('en-PH', {
+    hour: 'numeric',
+    minute: '2-digit',
+    second: '2-digit',
+  });
+};
+
 const getErrorMessage = async (error: unknown, fallback: string) => {
   if (!error) return fallback;
 
@@ -239,6 +284,194 @@ const getErrorMessage = async (error: unknown, fallback: string) => {
 
   return baseMessage;
 };
+
+const useToggleProgress = (isActive: boolean, duration = 220) => {
+  const progress = useRef(new Animated.Value(isActive ? 1 : 0)).current;
+
+  useEffect(() => {
+    Animated.timing(progress, {
+      toValue: isActive ? 1 : 0,
+      duration,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: false,
+    }).start();
+  }, [duration, isActive, progress]);
+
+  return progress;
+};
+
+function SmoothFilterChip({
+  isActive,
+  label,
+  onPress,
+  activeColor,
+  inactiveBackground,
+  inactiveBorder,
+  inactiveText,
+}: {
+  isActive: boolean;
+  label: string;
+  onPress: () => void;
+  activeColor: string;
+  inactiveBackground: string;
+  inactiveBorder: string;
+  inactiveText: string;
+}) {
+  const progress = useToggleProgress(isActive);
+  const backgroundColor = progress.interpolate({
+    inputRange: [0, 1],
+    outputRange: [inactiveBackground, activeColor],
+  });
+  const borderColor = progress.interpolate({
+    inputRange: [0, 1],
+    outputRange: [inactiveBorder, activeColor],
+  });
+  const color = progress.interpolate({
+    inputRange: [0, 1],
+    outputRange: [inactiveText, '#FFFFFF'],
+  });
+
+  return (
+    <TouchableOpacity activeOpacity={0.88} disabled={isActive} onPress={onPress} style={styles.filterTouchable}>
+      <Animated.View style={[styles.filterChip, { backgroundColor, borderColor }]}>
+        <Animated.Text style={[styles.filterChipText, { color }]}>{label}</Animated.Text>
+      </Animated.View>
+    </TouchableOpacity>
+  );
+}
+
+function SmoothSegmentButton({
+  isActive,
+  label,
+  onPress,
+  activeColor,
+  inactiveText,
+  textTransform,
+}: {
+  isActive: boolean;
+  label: string;
+  onPress: () => void;
+  activeColor: string;
+  inactiveText: string;
+  textTransform?: 'capitalize' | 'none';
+}) {
+  const progress = useToggleProgress(isActive, 200);
+  const backgroundColor = progress.interpolate({
+    inputRange: [0, 1],
+    outputRange: ['rgba(0, 0, 0, 0)', activeColor],
+  });
+  const color = progress.interpolate({
+    inputRange: [0, 1],
+    outputRange: [inactiveText, '#FFFFFF'],
+  });
+
+  return (
+    <TouchableOpacity activeOpacity={0.88} disabled={isActive} onPress={onPress}>
+      <Animated.View style={[styles.segmentButton, { backgroundColor }]}>
+        <Animated.Text style={[styles.segmentButtonText, { color, textTransform: textTransform || 'none' }]}>
+          {label}
+        </Animated.Text>
+      </Animated.View>
+    </TouchableOpacity>
+  );
+}
+
+function AnimatedRevenueBar({
+  height,
+  revenueFilter,
+  grossColor,
+  netColor,
+}: {
+  height: number;
+  revenueFilter: RevenueFilter;
+  grossColor: string;
+  netColor: string;
+}) {
+  const heightAnim = useRef(new Animated.Value(height)).current;
+  const colorAnim = useRef(new Animated.Value(revenueFilter === 'gross' ? 0 : 1)).current;
+
+  useEffect(() => {
+    Animated.timing(heightAnim, {
+      toValue: height,
+      duration: 320,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: false,
+    }).start();
+  }, [height, heightAnim]);
+
+  useEffect(() => {
+    Animated.timing(colorAnim, {
+      toValue: revenueFilter === 'gross' ? 0 : 1,
+      duration: 220,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: false,
+    }).start();
+  }, [colorAnim, revenueFilter]);
+
+  const backgroundColor = colorAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [grossColor, netColor],
+  });
+
+  return <Animated.View style={[styles.revenueBarFill, { height: heightAnim, backgroundColor }]} />;
+}
+
+function AnimatedProgressFill({ percent, color }: { percent: number; color: string }) {
+  const widthAnim = useRef(new Animated.Value(percent)).current;
+
+  useEffect(() => {
+    Animated.timing(widthAnim, {
+      toValue: percent,
+      duration: 320,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: false,
+    }).start();
+  }, [percent, widthAnim]);
+
+  const width = widthAnim.interpolate({
+    inputRange: [0, 100],
+    outputRange: ['0%', '100%'],
+  });
+
+  return <Animated.View style={{ width, height: '100%', backgroundColor: color }} />;
+}
+
+function AnimatedMetricText({
+  value,
+  formatter,
+  style,
+}: {
+  value: number;
+  formatter: (value: number) => string;
+  style: any;
+}) {
+  const valueAnim = useRef(new Animated.Value(value)).current;
+  const formatterRef = useRef(formatter);
+  const [displayValue, setDisplayValue] = useState(formatter(value));
+
+  useEffect(() => {
+    formatterRef.current = formatter;
+  }, [formatter]);
+
+  useEffect(() => {
+    const listenerId = valueAnim.addListener(({ value: nextValue }) => {
+      setDisplayValue(formatterRef.current(nextValue));
+    });
+
+    return () => valueAnim.removeListener(listenerId);
+  }, [valueAnim]);
+
+  useEffect(() => {
+    Animated.timing(valueAnim, {
+      toValue: value,
+      duration: 520,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: false,
+    }).start();
+  }, [value, valueAnim]);
+
+  return <Text style={style}>{displayValue}</Text>;
+}
 
 const styles = StyleSheet.create({
   actionCenterPanel: {
@@ -271,6 +504,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 12,
+  },
+  badgeInline: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
   },
   badgeText: {
     color: '#FFFFFF',
@@ -328,6 +566,9 @@ const styles = StyleSheet.create({
     flexDirection: Platform.OS === 'web' ? 'row' : 'column',
     gap: 12,
   },
+  dashboardMetricsStack: {
+    gap: 12,
+  },
   emptyText: {
     fontSize: 13,
     fontFamily: 'Poppins_400Regular',
@@ -345,6 +586,9 @@ const styles = StyleSheet.create({
     fontFamily: 'Poppins_500Medium',
     textTransform: 'capitalize',
   },
+  filterTouchable: {
+    borderRadius: 999,
+  },
   flex1: {
     flex: 1,
   },
@@ -361,6 +605,24 @@ const styles = StyleSheet.create({
   legendText: {
     fontSize: 12,
     fontFamily: 'Poppins_400Regular',
+  },
+  liveStatusDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  liveStatusPill: {
+    minHeight: 34,
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+  },
+  liveStatusText: {
+    fontSize: 11,
+    fontFamily: 'Poppins_600SemiBold',
   },
   loadingText: {
     marginTop: 12,
@@ -461,6 +723,20 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontFamily: 'Poppins_400Regular',
   },
+  segmentButton: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  segmentButtonText: {
+    fontSize: 11,
+    fontFamily: 'Poppins_500Medium',
+  },
+  segmentControl: {
+    flexDirection: 'row',
+    borderRadius: 8,
+    borderWidth: 1,
+    overflow: 'hidden',
+  },
   sectionGap: {
     gap: 12,
   },
@@ -507,7 +783,7 @@ const styles = StyleSheet.create({
   },
 });
 
-const tabItems: Array<{ key: Tab; label: string; icon: string }> = [
+const tabItems: { key: Tab; label: string; icon: string }[] = [
   { key: 'dashboard', label: 'Dashboard', icon: 'stats-chart-outline' },
   { key: 'users', label: 'Users', icon: 'people-outline' },
   { key: 'reports', label: 'Reports', icon: 'shield-checkmark-outline' },
@@ -521,14 +797,17 @@ export default function AdminDashboardPage() {
   const { session, loading, isGuest, isAdmin, roleResolved } = useAuth();
   const { width } = useWindowDimensions();
   const hasHydratedDashboardRef = useRef(false);
+  const latestMetricsRequestRef = useRef(0);
+  const dashboardContentOpacity = useRef(new Animated.Value(1)).current;
 
   const [initializingDashboard, setInitializingDashboard] = useState(false);
+  const [dashboardRefreshing, setDashboardRefreshing] = useState(false);
   const [metrics, setMetrics] = useState<DashboardMetrics>(defaultMetrics);
-  const [dashboardDateRange, setDashboardDateRange] = useState<'7d' | '30d' | 'all'>('30d');
+  const [dashboardDateRange, setDashboardDateRange] = useState<DashboardDateRange>('30d');
   const [globalSearch, setGlobalSearch] = useState('');
   const [dashboardSearchQuery, setDashboardSearchQuery] = useState('');
-  const [revenueFilter, setRevenueFilter] = useState<'gross' | 'net'>('net');
-  const [incidentTypeFilter, setIncidentTypeFilter] = useState<'all' | 'booking' | 'profile'>('all');
+  const [revenueFilter, setRevenueFilter] = useState<RevenueFilter>('net');
+  const [incidentTypeFilter, setIncidentTypeFilter] = useState<IncidentTypeFilter>('all');
   const [alertState, setAlertState] = useState<{
     visible: boolean;
     type: AlertType;
@@ -568,12 +847,25 @@ export default function AdminDashboardPage() {
     return () => clearTimeout(timer);
   }, [globalSearch]);
 
+  useEffect(() => {
+    Animated.timing(dashboardContentOpacity, {
+      toValue: dashboardRefreshing ? 0.72 : 1,
+      duration: dashboardRefreshing ? 120 : 260,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start();
+  }, [dashboardContentOpacity, dashboardRefreshing]);
+
   const fetchMetrics = useCallback(async (filters?: {
-    dateRange?: '7d' | '30d' | 'all';
+    dateRange?: DashboardDateRange;
     searchQuery?: string;
   }) => {
-    const dateRange = filters?.dateRange || '30d';
+    const dateRange: DashboardDateRange = filters?.dateRange || '30d';
     const searchQuery = String(filters?.searchQuery || '').trim();
+    const cacheKey = getAdminPageCacheKey('dashboard', {
+      dateRange,
+      searchQuery,
+    });
 
     const { data, error } = await supabase.functions.invoke<any>('permit-management', {
       body: {
@@ -615,6 +907,7 @@ export default function AdminDashboardPage() {
       : [];
 
     const nextMetrics: DashboardMetrics = {
+      generatedAt: typeof data?.generatedAt === 'string' ? data.generatedAt : new Date().toISOString(),
       totalUsers: Number(data?.totalUsers || 0),
       totalStudios: Number(data?.totalStudios || 0),
       totalGigs: Number(data?.totalGigs || 0),
@@ -634,10 +927,17 @@ export default function AdminDashboardPage() {
       newSignups24h: Number(data?.newSignups24h || 0),
       grossRevenue: Number(data?.grossRevenue || 0),
       netRevenue: Number(data?.netRevenue || 0),
+      providerEarnings: Number(data?.providerEarnings || 0),
       pendingPayouts: Number(data?.pendingPayouts || 0),
       avgReportResolutionHours: Number(data?.avgReportResolutionHours || 0),
       avgIncidentResolutionHours: Number(data?.avgIncidentResolutionHours || 0),
       paymongoSuccessRate: Number(data?.paymongoSuccessRate || 0),
+      paymentMetricsAvailable: Object.prototype.hasOwnProperty.call(data || {}, 'paymentAttempts'),
+      paymentAttempts: Number(data?.paymentAttempts || 0),
+      paidPaymentEvents: Number(data?.paidPaymentEvents || 0),
+      failedPaymentEvents: Number(data?.failedPaymentEvents || 0),
+      paymongoLinkedPaymentEvents: Number(data?.paymongoLinkedPaymentEvents || 0),
+      paymongoLinkedPaymentRate: Number(data?.paymongoLinkedPaymentRate ?? 100),
       dbHealthy: Boolean(data?.dbHealthy),
       apiHealthy: Boolean(data?.apiHealthy),
       paymongoHealthy: Boolean(data?.paymongoHealthy),
@@ -653,18 +953,22 @@ export default function AdminDashboardPage() {
       },
     };
 
-    setMetrics(nextMetrics);
-    writeAdminPageCache(dashboardCacheKey, nextMetrics);
-  }, [dashboardCacheKey]);
+    writeAdminPageCache(cacheKey, nextMetrics);
+    return nextMetrics;
+  }, []);
 
   useEffect(() => {
     if (loading || !roleResolved || !session || isGuest || !isAdmin) {
+      latestMetricsRequestRef.current += 1;
       setInitializingDashboard(false);
+      setDashboardRefreshing(false);
       hasHydratedDashboardRef.current = false;
       return;
     }
 
     let isMounted = true;
+    const requestId = latestMetricsRequestRef.current + 1;
+    latestMetricsRequestRef.current = requestId;
     const cachedMetrics = readAdminPageCache<DashboardMetrics>(
       dashboardCacheKey,
       DASHBOARD_CACHE_TTL_MS,
@@ -674,26 +978,33 @@ export default function AdminDashboardPage() {
       setMetrics(cachedMetrics);
       setInitializingDashboard(false);
       hasHydratedDashboardRef.current = true;
+      setDashboardRefreshing(true);
     } else if (!hasHydratedDashboardRef.current) {
       setInitializingDashboard(true);
+      setDashboardRefreshing(false);
     } else {
       setInitializingDashboard(false);
+      setDashboardRefreshing(true);
     }
 
     void (async () => {
       try {
-        await fetchMetrics({
+        const nextMetrics = await fetchMetrics({
           dateRange: dashboardDateRange,
           searchQuery: dashboardSearchQuery,
         });
+        if (isMounted && latestMetricsRequestRef.current === requestId) {
+          setMetrics(nextMetrics);
+        }
       } catch (error) {
-        if (!cachedMetrics) {
+        if (isMounted && latestMetricsRequestRef.current === requestId && !cachedMetrics) {
           const message = await getErrorMessage(error, 'Unable to load admin metrics.');
           showAlert('error', 'Admin dashboard unavailable', message);
         }
       } finally {
-        if (isMounted) {
+        if (isMounted && latestMetricsRequestRef.current === requestId) {
           setInitializingDashboard(false);
+          setDashboardRefreshing(false);
           hasHydratedDashboardRef.current = true;
         }
       }
@@ -742,10 +1053,18 @@ export default function AdminDashboardPage() {
   }, [revenueTrendRows]);
 
   const dashboardDateRangeLabel = useMemo(() => {
-    if (dashboardDateRange === '7d') return 'Last 7 Days';
-    if (dashboardDateRange === '30d') return 'Last 30 Days';
-    return 'All Time';
+    return DASHBOARD_DATE_RANGE_LABELS[dashboardDateRange];
   }, [dashboardDateRange]);
+
+  const metricsUpdatedLabel = useMemo(() => {
+    return formatMetricTimestamp(metrics.generatedAt);
+  }, [metrics.generatedAt]);
+
+  const liveStatusLabel = dashboardRefreshing
+    ? 'Syncing live data'
+    : metricsUpdatedLabel
+      ? `Live DB | ${metricsUpdatedLabel}`
+      : 'Live DB';
 
   if (loading || !roleResolved || initializingDashboard) {
     return (
@@ -820,22 +1139,36 @@ export default function AdminDashboardPage() {
               />
             </View>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }} style={{ flexGrow: 0 }}>
-              {(['7d', '30d', 'all'] as const).map((r) => {
-                const isActive = dashboardDateRange === r;
-                const labels = { '7d': 'Last 7 Days', '30d': 'Last 30 Days', 'all': 'All Time' };
-                return (
-                  <TouchableOpacity activeOpacity={1}
-                    key={r}
-                    onPress={() => setDashboardDateRange(r)}
-                    style={[styles.filterChip, { backgroundColor: isActive ? colors.primary : colors.card, borderColor: isActive ? colors.primary : colors.border }]}
-                  >
-                    <Text style={[styles.filterChipText, { color: isActive ? '#fff' : colors.textSecondary }]}>{labels[r]}</Text>
-                  </TouchableOpacity>
-                );
-              })}
+              {(Object.keys(DASHBOARD_DATE_RANGE_LABELS) as DashboardDateRange[]).map((range) => (
+                <SmoothFilterChip
+                  key={range}
+                  isActive={dashboardDateRange === range}
+                  label={DASHBOARD_DATE_RANGE_LABELS[range]}
+                  onPress={() => setDashboardDateRange(range)}
+                  activeColor={colors.primary}
+                  inactiveBackground={colors.card}
+                  inactiveBorder={colors.border}
+                  inactiveText={colors.textSecondary}
+                />
+              ))}
             </ScrollView>
+            <View
+              style={[
+                styles.liveStatusPill,
+                {
+                  backgroundColor: isDark ? '#0F172A' : '#FFFFFF',
+                  borderColor: colors.border,
+                },
+              ]}
+            >
+              <View style={[styles.liveStatusDot, { backgroundColor: dashboardRefreshing ? colors.primary : '#10b981' }]} />
+              <Text style={[styles.liveStatusText, { color: dashboardRefreshing ? colors.primary : colors.textSecondary }]}>
+                {liveStatusLabel}
+              </Text>
+            </View>
           </View>
 
+          <Animated.View style={[styles.dashboardMetricsStack, { opacity: dashboardContentOpacity }]}>
           {dashboardSearchQuery.length >= 2 && (
             <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
               <Text style={[styles.cardTitle, { color: colors.text }]}>Search Matches ({dashboardDateRangeLabel})</Text>
@@ -854,12 +1187,37 @@ export default function AdminDashboardPage() {
                 <Ionicons name="people-outline" size={20} color={colors.primary} />
               </View>
               <View style={styles.pulseRow}>
-                <Text style={[styles.pulseValueMain, { color: colors.text }]}>{metrics.totalUsers}</Text>
+                <AnimatedMetricText
+                  value={metrics.totalUsers}
+                  formatter={formatMetricCount}
+                  style={[styles.pulseValueMain, { color: colors.text }]}
+                />
               </View>
               <View style={{ flexDirection: 'row', gap: 8, marginTop: 12 }}>
-                <View style={styles.badgeGreen}><Text style={styles.badgeTextGreen}>+{metrics.newSignups24h} new signups (24h)</Text></View>
+                <View style={[styles.badgeGreen, styles.badgeInline]}>
+                  <Text style={styles.badgeTextGreen}>+</Text>
+                  <AnimatedMetricText
+                    value={metrics.newSignups24h}
+                    formatter={formatMetricCount}
+                    style={styles.badgeTextGreen}
+                  />
+                  <Text style={styles.badgeTextGreen}>new signups (24h)</Text>
+                </View>
               </View>
-              <Text style={[styles.pulseSubtitle, { color: colors.textSecondary, marginTop: 8 }]}>DAU: {metrics.dau} | MAU: {metrics.mau}</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3, marginTop: 8 }}>
+                <Text style={[styles.pulseSubtitle, { color: colors.textSecondary, marginTop: 0 }]}>DAU:</Text>
+                <AnimatedMetricText
+                  value={metrics.dau}
+                  formatter={formatMetricCount}
+                  style={[styles.pulseSubtitle, { color: colors.textSecondary, marginTop: 0 }]}
+                />
+                <Text style={[styles.pulseSubtitle, { color: colors.textSecondary, marginTop: 0 }]}>| MAU:</Text>
+                <AnimatedMetricText
+                  value={metrics.mau}
+                  formatter={formatMetricCount}
+                  style={[styles.pulseSubtitle, { color: colors.textSecondary, marginTop: 0 }]}
+                />
+              </View>
             </View>
 
             <View style={[styles.pulseCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
@@ -868,10 +1226,15 @@ export default function AdminDashboardPage() {
                 <Ionicons name="wallet-outline" size={20} color={colors.primary} />
               </View>
               <View style={styles.pulseRow}>
-                <Text style={[styles.pulseValueMain, { color: '#10b981' }]}>{formatCurrency(selectedRevenueValue)}</Text>
+                <AnimatedMetricText
+                  value={selectedRevenueValue}
+                  formatter={formatCurrency}
+                  style={[styles.pulseValueMain, { color: '#10b981' }]}
+                />
               </View>
-              <Text style={[styles.pulseSubtitle, { color: colors.textSecondary, marginTop: 12 }]}>Pending Payouts: {formatCurrency(metrics.pendingPayouts)}</Text>
-              <Text style={[styles.pulseSubtitle, { color: colors.textSecondary, marginTop: 2 }]}>Gross: {formatCurrency(metrics.grossRevenue)} | Net: {formatCurrency(metrics.netRevenue)}</Text>
+              <Text style={[styles.pulseSubtitle, { color: colors.textSecondary, marginTop: 12 }]}>Provider earnings: {formatCurrency(metrics.providerEarnings)}</Text>
+              <Text style={[styles.pulseSubtitle, { color: colors.textSecondary, marginTop: 2 }]}>Pending payouts: {formatCurrency(metrics.pendingPayouts)}</Text>
+              <Text style={[styles.pulseSubtitle, { color: colors.textSecondary, marginTop: 2 }]}>Gross: {formatCurrency(metrics.grossRevenue)} | Platform net: {formatCurrency(metrics.netRevenue)}</Text>
             </View>
 
             <View style={[styles.pulseCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
@@ -893,8 +1256,19 @@ export default function AdminDashboardPage() {
                 </View>
                 <View style={styles.legendItem}>
                   <View style={[styles.legendDot, { backgroundColor: metrics.paymongoHealthy ? '#10b981' : '#f59e0b' }]} />
-                  <Text style={[styles.legendText, { color: colors.textSecondary }]}>PayMongo health: {formatPercent(metrics.paymongoSuccessRate)}</Text>
+                  <Text style={[styles.legendText, { color: colors.textSecondary }]}>
+                    Payment success: {formatPercent(metrics.paymongoSuccessRate)}
+                    {metrics.paymentMetricsAvailable ? ` (${formatMetricCount(metrics.paymentAttempts)} events)` : ''}
+                  </Text>
                 </View>
+                {metrics.paymentMetricsAvailable && (
+                  <View style={styles.legendItem}>
+                    <View style={[styles.legendDot, { backgroundColor: metrics.paymongoLinkedPaymentRate >= 90 ? '#10b981' : '#f59e0b' }]} />
+                    <Text style={[styles.legendText, { color: colors.textSecondary }]}>
+                      PayMongo-linked: {formatMetricCount(metrics.paymongoLinkedPaymentEvents)}/{formatMetricCount(metrics.paidPaymentEvents)}
+                    </Text>
+                  </View>
+                )}
               </View>
               <Text style={[styles.pulseSubtitle, { color: colors.textSecondary, marginTop: 8 }]}>Avg report resolve: {formatHours(metrics.avgReportResolutionHours)}</Text>
             </View>
@@ -905,19 +1279,31 @@ export default function AdminDashboardPage() {
               <View style={[styles.pulseHeader, { marginBottom: 12, flexWrap: 'wrap', gap: 10 }]}>
                 <View>
                   <Text style={[styles.panelTitle, { color: colors.text }]}>Revenue Growth</Text>
-                  <Text style={[styles.panelSubtitle, { color: colors.textSecondary, marginBottom: 0 }]}>{dashboardDateRangeLabel} real payment aggregates</Text>
+                  <Text style={[styles.panelSubtitle, { color: colors.textSecondary, marginBottom: 0 }]}>{dashboardDateRangeLabel} gross vs platform net</Text>
                 </View>
-                <View style={{ flexDirection: 'row', borderRadius: 8, borderWidth: 1, borderColor: colors.border, overflow: 'hidden' }}>
-                  <TouchableOpacity activeOpacity={1} onPress={() => setRevenueFilter('gross')} style={{ paddingHorizontal: 12, paddingVertical: 6, backgroundColor: revenueFilter === 'gross' ? colors.primary : 'transparent' }}>
-                    <Text style={{ fontSize: 11, color: revenueFilter === 'gross' ? '#fff' : colors.textSecondary }}>Gross</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity activeOpacity={1} onPress={() => setRevenueFilter('net')} style={{ paddingHorizontal: 12, paddingVertical: 6, backgroundColor: revenueFilter === 'net' ? colors.primary : 'transparent' }}>
-                    <Text style={{ fontSize: 11, color: revenueFilter === 'net' ? '#fff' : colors.textSecondary }}>Net</Text>
-                  </TouchableOpacity>
+                <View style={[styles.segmentControl, { borderColor: colors.border }]}>
+                  <SmoothSegmentButton
+                    isActive={revenueFilter === 'gross'}
+                    label="Gross"
+                    onPress={() => setRevenueFilter('gross')}
+                    activeColor={colors.primary}
+                    inactiveText={colors.textSecondary}
+                  />
+                  <SmoothSegmentButton
+                    isActive={revenueFilter === 'net'}
+                    label="Platform Net"
+                    onPress={() => setRevenueFilter('net')}
+                    activeColor={colors.primary}
+                    inactiveText={colors.textSecondary}
+                  />
                 </View>
               </View>
 
-              <Text style={[styles.pulseValueMain, { color: '#10b981', marginBottom: 12 }]}>{formatCurrency(selectedRevenueValue)}</Text>
+              <AnimatedMetricText
+                value={selectedRevenueValue}
+                formatter={formatCurrency}
+                style={[styles.pulseValueMain, { color: '#10b981', marginBottom: 12 }]}
+              />
 
               <View style={styles.revenueTrendContainer}>
                 {revenueTrendRows.length === 0 ? (
@@ -926,12 +1312,16 @@ export default function AdminDashboardPage() {
                   <View style={styles.revenueBarsRow}>
                     {revenueTrendRows.map((point: any, index: number) => {
                       const barHeight = Math.max(8, Math.round((point.value / revenueTrendMax) * 96));
-                      const barColor = revenueFilter === 'gross' ? colors.primary : '#0ea5e9';
 
                       return (
                         <View key={`${point.label}-${index}`} style={styles.revenueBarColumn}>
                           <View style={[styles.revenueBarTrack, { backgroundColor: isDark ? '#1E293B' : '#E2E8F0' }]}>
-                            <View style={[styles.revenueBarFill, { height: barHeight, backgroundColor: barColor }]} />
+                            <AnimatedRevenueBar
+                              height={barHeight}
+                              revenueFilter={revenueFilter}
+                              grossColor={colors.primary}
+                              netColor="#0ea5e9"
+                            />
                           </View>
                           <Text numberOfLines={1} style={[styles.revenueBarLabel, { color: colors.textSecondary }]}>{point.label}</Text>
                         </View>
@@ -947,7 +1337,7 @@ export default function AdminDashboardPage() {
                 </View>
                 <View style={styles.legendItem}>
                   <View style={[styles.legendDot, { backgroundColor: '#0ea5e9' }]} />
-                  <Text style={[styles.legendText, { color: colors.textSecondary }]}>Net: {formatCurrency(metrics.netRevenue)}</Text>
+                  <Text style={[styles.legendText, { color: colors.textSecondary }]}>Platform net: {formatCurrency(metrics.netRevenue)}</Text>
                 </View>
               </View>
             </View>
@@ -961,15 +1351,17 @@ export default function AdminDashboardPage() {
                   <Text style={[styles.panelTitle, { color: colors.text, marginBottom: 0 }]}>Incident Resolution</Text>
                   <Text style={[styles.panelSubtitle, { color: colors.textSecondary, marginBottom: 0 }]}>Open: {metrics.openIncidentsInRange} | Resolved: {metrics.resolvedIncidentsInRange} | Avg: {formatHours(metrics.avgIncidentResolutionHours)}</Text>
                 </View>
-                <View style={{ flexDirection: 'row', borderRadius: 8, borderWidth: 1, borderColor: colors.border, overflow: 'hidden' }}>
-                  {(['all', 'booking', 'profile'] as const).map((typeKey) => (
-                    <TouchableOpacity activeOpacity={1}
+                <View style={[styles.segmentControl, { borderColor: colors.border }]}>
+                  {(['all', 'booking', 'profile'] as IncidentTypeFilter[]).map((typeKey) => (
+                    <SmoothSegmentButton
                       key={typeKey}
+                      isActive={incidentTypeFilter === typeKey}
+                      label={typeKey}
                       onPress={() => setIncidentTypeFilter(typeKey)}
-                      style={{ paddingHorizontal: 12, paddingVertical: 6, backgroundColor: incidentTypeFilter === typeKey ? colors.primary : 'transparent' }}
-                    >
-                      <Text style={{ fontSize: 11, color: incidentTypeFilter === typeKey ? '#fff' : colors.textSecondary, textTransform: 'capitalize' }}>{typeKey}</Text>
-                    </TouchableOpacity>
+                      activeColor={colors.primary}
+                      inactiveText={colors.textSecondary}
+                      textTransform="capitalize"
+                    />
                   ))}
                 </View>
               </View>
@@ -1019,7 +1411,7 @@ export default function AdminDashboardPage() {
                           </View>
                         </View>
                         <View style={{ height: 8, backgroundColor: isDark ? '#334155' : '#E2E8F0', borderRadius: 4, overflow: 'hidden' }}>
-                          <View style={{ width: `${widthPercent}%`, height: '100%', backgroundColor: badgeColor }} />
+                          <AnimatedProgressFill percent={widthPercent} color={badgeColor} />
                         </View>
                       </View>
                     );
@@ -1030,6 +1422,7 @@ export default function AdminDashboardPage() {
               </View>
             </View>
           </View>
+          </Animated.View>
         </View>
       </ScrollView>
 

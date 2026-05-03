@@ -1,5 +1,4 @@
 import { Ionicons } from '@expo/vector-icons';
-import { BlurView } from 'expo-blur';
 import React, { useState } from 'react';
 import {
     ActivityIndicator,
@@ -144,9 +143,11 @@ export default function ConflictResolutionModal({
       transparent={true}
       statusBarTranslucent
       navigationBarTranslucent
+      presentationStyle="overFullScreen"
+      hardwareAccelerated
       onRequestClose={onClose}
     >
-      <BlurView intensity={60} tint="dark" style={styles.overlay}>
+      <View style={styles.overlay}>
         <View
           style={[
             styles.modalContainer,
@@ -402,7 +403,7 @@ export default function ConflictResolutionModal({
             </TouchableOpacity>
           </View>
         </View>
-      </BlurView>
+      </View>
     </Modal>
   );
 }
@@ -413,6 +414,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     padding: 20,
+    backgroundColor: 'rgba(15,23,42,0.58)',
   },
   modalContainer: {
     width: '100%',

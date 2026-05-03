@@ -450,6 +450,7 @@ export default function InstrumentSuggestionSheet({
     return (
         <BottomModal
             visible={visible}
+            overlayLabel="InstrumentSuggestionSheet"
             onClose={onClose}
         >
                 <View style={[styles.container, { backgroundColor: colors.background }]}>

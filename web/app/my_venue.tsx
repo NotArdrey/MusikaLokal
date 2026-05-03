@@ -330,32 +330,23 @@ export default function MyVenueScreen() {
                                     const isApproved = normalizedPermitStatus === 'approved';
                                     const isResubmitted = normalizedPermitStatus === 'resubmitted';
 
-                                    const permitStatusLabel =
-                                        isApproved
-                                            ? 'Approved'
-                                            : isRejected
-                                                ? 'Rejected'
-                                                : isResubmitted
-                                                    ? 'Resubmitted'
-                                                    : 'Pending Review';
+                                    const permitStatusLabel = isRejected
+                                        ? 'Rejected'
+                                        : isResubmitted
+                                            ? 'Resubmitted'
+                                            : 'Pending Review';
 
-                                    const permitBadgeBackground =
-                                        isApproved
-                                            ? (isDark ? 'rgba(22,163,74,0.22)' : '#DCFCE7')
-                                            : isRejected
-                                                ? (isDark ? 'rgba(220,38,38,0.22)' : '#FEE2E2')
-                                                : isResubmitted
-                                                    ? (isDark ? 'rgba(37,99,235,0.22)' : '#DBEAFE')
-                                                    : (isDark ? 'rgba(245,158,11,0.22)' : '#FEF3C7');
+                                    const permitBadgeBackground = isRejected
+                                        ? (isDark ? 'rgba(220,38,38,0.22)' : '#FEE2E2')
+                                        : isResubmitted
+                                            ? (isDark ? 'rgba(37,99,235,0.22)' : '#DBEAFE')
+                                            : (isDark ? 'rgba(245,158,11,0.22)' : '#FEF3C7');
 
-                                    const permitBadgeColor =
-                                        isApproved
-                                            ? '#16A34A'
-                                            : isRejected
-                                                ? '#DC2626'
-                                                : isResubmitted
-                                                    ? '#2563EB'
-                                                    : '#B45309';
+                                    const permitBadgeColor = isRejected
+                                        ? '#DC2626'
+                                        : isResubmitted
+                                            ? '#2563EB'
+                                            : '#B45309';
 
                                     return (
                                     <View key={gig.id} style={[styles.gridItem, isWebDesktop && styles.gridItemWeb]}>
@@ -394,9 +385,11 @@ export default function MyVenueScreen() {
                                                     {gig.description}
                                                 </Text>
 
-                                                <View style={[styles.permitStatusChip, { backgroundColor: permitBadgeBackground }]}>
-                                                    <Text style={[styles.permitStatusChipText, { color: permitBadgeColor }]}>Permit: {permitStatusLabel}</Text>
-                                                </View>
+                                                {!isApproved && (
+                                                    <View style={[styles.permitStatusChip, { backgroundColor: permitBadgeBackground }]}>
+                                                        <Text style={[styles.permitStatusChipText, { color: permitBadgeColor }]}>Permit: {permitStatusLabel}</Text>
+                                                    </View>
+                                                )}
 
                                                 {isRejected && !!gig.permit_rejection_reason && (
                                                     <Text style={styles.rejectionReasonText} numberOfLines={3}>

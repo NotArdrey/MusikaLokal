@@ -1,9 +1,11 @@
 import { Ionicons } from '@expo/vector-icons';
 import * as DocumentPicker from 'expo-document-picker';
+import * as Haptics from 'expo-haptics';
 import { router } from 'expo-router';
 import React, { useEffect, useRef, useState } from 'react';
 import {
     ActivityIndicator,
+    Animated,
     FlatList,
     Image,
     KeyboardAvoidingView,
@@ -21,7 +23,15 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
-import { ConversationParticipant, Message, useChat, useGroupParticipants } from '../hooks/useChat';
+import { emitToast } from '../events/toastBus';
+import {
+    ConversationParticipant,
+    Message,
+    isConversationMuted,
+    setConversationMute,
+    useChat,
+    useGroupParticipants,
+} from '../hooks/useChat';
 import CustomAlert, { AlertType } from './CustomAlert';
 import InAppMediaViewer, { isInAppMediaUrl } from './InAppMediaViewer';
 import { normalizeVisibleInput } from './modal';
@@ -29,6 +39,8 @@ import ReportModal from './ReportModal';
 
 // Available reaction emojis
 const REACTION_EMOJIS = ['❤️', '😂', '😮', '😢', '😡', '👍'];
+const SEND_SCROLL_DELAY_MS = 16;
+const SEND_CONTROL_PRESS_SCALE = 0.9;
 
 interface ChatScreenProps {
     conversationId: string;
@@ -44,6 +56,9 @@ interface ChatScreenProps {
     groupId?: string | null;
     groupName?: string;
     groupAvatar?: string | null;
+    isMuted?: boolean;
+    mutedUntil?: string | null;
+    onMuteChange?: (isMuted: boolean, mutedUntil: string | null) => void;
     onBack?: () => void;
 }
 
@@ -55,12 +70,15 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
     groupId,
     groupName,
     groupAvatar,
+    isMuted = false,
+    mutedUntil = null,
+    onMuteChange,
     onBack,
 }) => {
     const { colors, isDark } = useTheme();
     const { isGuest } = useAuth();
     const insets = useSafeAreaInsets();
-    const { messages, loading, sendMessage, markAsRead, addReaction, removeReaction } = useChat(conversationId, currentUserId);
+    const { messages, loading, sendMessage, retryMessage, markAsRead, addReaction, removeReaction } = useChat(conversationId, currentUserId);
     const { participants } = useGroupParticipants(isGroupChat ? conversationId : null);
     const [text, setText] = useState('');
     const flatListRef = useRef<FlatList>(null);
@@ -83,13 +101,50 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
     const [mediaViewerTitle, setMediaViewerTitle] = useState('Media');
     const [showReportModal, setShowReportModal] = useState(false);
     const [showOptions, setShowOptions] = useState(false);
+    const [chatMuted, setChatMuted] = useState(isMuted);
+    const [chatMutedUntil, setChatMutedUntil] = useState<string | null>(mutedUntil);
+    const [updatingMute, setUpdatingMute] = useState(false);
     const [otherUserOnline, setOtherUserOnline] = useState(false);
     const [otherUserLastSeen, setOtherUserLastSeen] = useState<Date | null>(null);
     const presenceChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
+    const latestScrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const sendControlScale = useRef(new Animated.Value(1)).current;
+    const normalizedText = React.useMemo(() => normalizeVisibleInput(text), [text]);
+    const hasMessageText = normalizedText.length > 0;
 
     const showAlert = (type: AlertType, title: string, message: string, buttons?: any[]) => {
         setAlertConfig({ type, title, message, buttons });
         setAlertVisible(true);
+    };
+
+    useEffect(() => {
+        setChatMuted(isMuted);
+        setChatMutedUntil(mutedUntil);
+    }, [isMuted, mutedUntil]);
+
+    const triggerSendFeedback = () => {
+        if (Platform.OS === 'web') return;
+        void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => undefined);
+    };
+
+    const triggerSendErrorFeedback = () => {
+        if (Platform.OS === 'web') return;
+        void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error).catch(() => undefined);
+    };
+
+    const animateSendControl = () => {
+        sendControlScale.stopAnimation();
+        sendControlScale.setValue(SEND_CONTROL_PRESS_SCALE);
+        Animated.spring(sendControlScale, {
+            toValue: 1,
+            friction: 5,
+            tension: 130,
+            useNativeDriver: true,
+        }).start();
+    };
+
+    const handleTextChange = (nextText: string) => {
+        setText(nextText);
     };
 
     // Real-time presence tracking for 1-on-1 chats (global user presence)
@@ -165,6 +220,39 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
         }
     };
 
+    const effectiveMuted = isConversationMuted({
+        is_muted: chatMuted,
+        muted_until: chatMutedUntil,
+    });
+
+    const handleToggleMute = async () => {
+        if (updatingMute) return;
+
+        const nextMuted = !effectiveMuted;
+        setUpdatingMute(true);
+
+        try {
+            const muteState = await setConversationMute(conversationId, nextMuted);
+            setChatMuted(muteState.is_muted);
+            setChatMutedUntil(muteState.muted_until);
+            onMuteChange?.(muteState.is_muted, muteState.muted_until);
+            setShowOptions(false);
+            emitToast({
+                dedupeKey: `conversation-mute:${conversationId}:${nextMuted}`,
+                title: nextMuted ? 'Chat muted' : 'Chat unmuted',
+                message: nextMuted
+                    ? 'New messages stay in your list without pop-up alerts.'
+                    : 'New messages can show pop-up alerts again.',
+                type: 'info',
+                source: 'chat-mute',
+            });
+        } catch (e: any) {
+            showAlert('error', 'Mute Failed', e?.message || 'Could not update this chat.');
+        } finally {
+            setUpdatingMute(false);
+        }
+    };
+
     const handleOpenReport = () => {
         setShowOptions(false);
         if (isGuest) {
@@ -197,31 +285,66 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
         markAsRead();
     }, [messages.length, markAsRead]);
 
+    useEffect(() => {
+        return () => {
+            if (latestScrollTimerRef.current) {
+                clearTimeout(latestScrollTimerRef.current);
+            }
+        };
+    }, []);
+
+    const scrollToLatestMessage = React.useCallback((animated = true) => {
+        if (latestScrollTimerRef.current) {
+            clearTimeout(latestScrollTimerRef.current);
+        }
+
+        latestScrollTimerRef.current = setTimeout(() => {
+            latestScrollTimerRef.current = null;
+            flatListRef.current?.scrollToEnd({ animated });
+        }, SEND_SCROLL_DELAY_MS);
+    }, []);
+
     // Auto-scroll to bottom on new messages
     useEffect(() => {
         if (messages.length > 0) {
-            setTimeout(() => {
-                flatListRef.current?.scrollToEnd({ animated: true });
-            }, 100);
+            scrollToLatestMessage();
         }
-    }, [messages.length]);
-
-    const scrollToLatestMessage = () => {
-        setTimeout(() => {
-            flatListRef.current?.scrollToEnd({ animated: true });
-        }, 40);
-    };
+    }, [messages.length, scrollToLatestMessage]);
 
     const handleSend = () => {
-        const messageText = normalizeVisibleInput(text);
+        const messageText = normalizedText;
         if (!messageText) return;
+        animateSendControl();
         setText('');
-        void sendMessage(messageText);
+        triggerSendFeedback();
+        void sendMessage(messageText).then(({ error }) => {
+            if (error) {
+                triggerSendErrorFeedback();
+            }
+        });
         scrollToLatestMessage();
     };
 
     const handleQuickLike = () => {
-        void sendMessage('👍');
+        animateSendControl();
+        triggerSendFeedback();
+        void sendMessage('👍').then(({ error }) => {
+            if (error) {
+                triggerSendErrorFeedback();
+            }
+        });
+        scrollToLatestMessage();
+    };
+
+    const handleRetryMessage = (message: Message) => {
+        if (message.sender_id !== currentUserId || message.local_status !== 'failed') return;
+        animateSendControl();
+        triggerSendFeedback();
+        void retryMessage(message.id).then(({ error }) => {
+            if (error) {
+                triggerSendErrorFeedback();
+            }
+        });
         scrollToLatestMessage();
     };
 
@@ -337,6 +460,12 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
         return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     };
 
+    const getMessageFooterText = (message: Message) => {
+        if (message.local_status === 'failed') return 'Tap to retry';
+        if (message.local_status === 'sending') return 'Sending';
+        return formatTime(message.created_at);
+    };
+
     const formatDate = (dateString: string) => {
         const date = new Date(dateString);
         const today = new Date();
@@ -411,6 +540,7 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
                             </Text>
                         )}
                         <Pressable
+                            onPress={isMe && item.local_status === 'failed' ? () => handleRetryMessage(item) : undefined}
                             onLongPress={() => handleLongPress(item.id)}
                             delayLongPress={300}
                         >
@@ -468,7 +598,7 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
                                         { color: isMe ? 'rgba(255,255,255,0.7)' : colors.textSecondary },
                                         item.message_type === 'image' && { color: '#FFF', textShadowColor: 'rgba(0,0,0,0.5)', textShadowRadius: 2 },
                                     ]}>
-                                        {formatTime(item.created_at)}
+                                        {getMessageFooterText(item)}
                                     </Text>
                                     {isMe && (
                                         <Ionicons
@@ -568,13 +698,18 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
     // Get display info based on chat type
     const displayName = isGroupChat ? groupName : otherUser?.full_name;
     const displayAvatar = isGroupChat ? groupAvatar : otherUser?.avatar_url;
-    const displaySubtitle = isGroupChat
+    const baseDisplaySubtitle = isGroupChat
         ? `${participants.length} member${participants.length !== 1 ? 's' : ''}`
         : otherUserOnline
             ? 'Active now'
             : otherUserLastSeen
                 ? formatLastSeen(otherUserLastSeen)
                 : null;
+    const displaySubtitle = effectiveMuted
+        ? baseDisplaySubtitle
+            ? `Muted - ${baseDisplaySubtitle}`
+            : 'Muted'
+        : baseDisplaySubtitle;
     const reportTargetName = isGroupChat ? (groupName || 'this group') : (otherUser?.full_name || 'this user');
     const reportTitle = isGroupChat ? 'Report Group' : 'Report User';
 
@@ -635,7 +770,7 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
                         {displaySubtitle !== null && (
                             <Text style={[
                                 styles.headerStatus,
-                                { color: !isGroupChat && otherUserOnline ? '#10B981' : colors.textSecondary },
+                                { color: !effectiveMuted && !isGroupChat && otherUserOnline ? '#10B981' : colors.textSecondary },
                             ]}>
                                 {displaySubtitle}
                             </Text>
@@ -684,6 +819,29 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
                             <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
                         </TouchableOpacity>
                         )}
+                        <TouchableOpacity activeOpacity={1}
+                            style={[styles.optionRow, { borderBottomColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)' }]}
+                            onPress={handleToggleMute}
+                            disabled={updatingMute}
+                            accessibilityRole="button"
+                            accessibilityLabel={effectiveMuted ? 'Unmute notifications' : 'Mute notifications'}
+                        >
+                            <View style={[styles.optionIconWrap, { backgroundColor: isDark ? 'rgba(99,102,241,0.15)' : 'rgba(99,102,241,0.1)' }]}>
+                                <Ionicons
+                                    name={effectiveMuted ? 'notifications-outline' : 'notifications-off-outline'}
+                                    size={20}
+                                    color={colors.primary}
+                                />
+                            </View>
+                            <Text style={[styles.optionLabel, { color: colors.text }]}>
+                                {effectiveMuted ? 'Unmute Notifications' : 'Mute Notifications'}
+                            </Text>
+                            {updatingMute ? (
+                                <ActivityIndicator size="small" color={colors.primary} />
+                            ) : (
+                                <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
+                            )}
+                        </TouchableOpacity>
                         {!isGuest && (
                         <TouchableOpacity activeOpacity={1}
                             style={[styles.optionRow, { borderBottomColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)' }]}
@@ -744,8 +902,11 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
                         keyExtractor={(item) => item.id}
                         renderItem={renderMessage}
                         contentContainerStyle={styles.messagesList}
-                        onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: false })}
+                        initialNumToRender={18}
+                        maxToRenderPerBatch={24}
+                        windowSize={10}
                         showsVerticalScrollIndicator={false}
+                        keyboardShouldPersistTaps="handled"
                     />
                 )}
 
@@ -759,8 +920,17 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
                         borderTopWidth: StyleSheet.hairlineWidth,
                     },
                 ]}>
-                    <TouchableOpacity style={styles.inputAction} onPress={() => setShowAttachmentPicker(true)} activeOpacity={1}>
-                        <Ionicons name="add-circle" size={30} color={colors.primary} />
+                    <TouchableOpacity
+                        style={[styles.inputAction, uploading && styles.inputActionDisabled]}
+                        onPress={() => setShowAttachmentPicker(true)}
+                        disabled={uploading}
+                        activeOpacity={1}
+                    >
+                        {uploading ? (
+                            <ActivityIndicator size="small" color={colors.primary} />
+                        ) : (
+                            <Ionicons name="add-circle" size={30} color={colors.primary} />
+                        )}
                     </TouchableOpacity>
 
                     <View style={[
@@ -770,7 +940,7 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
                         <TextInput
                             style={[styles.input, { color: colors.text }]}
                             value={text}
-                            onChangeText={setText}
+                            onChangeText={handleTextChange}
                             placeholder="Message…"
                             placeholderTextColor={colors.textSecondary}
                             multiline
@@ -778,20 +948,22 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
                         />
                     </View>
 
-                    {normalizeVisibleInput(text).length > 0 ? (
-                        <TouchableOpacity
-                            onPress={handleSend}
-                            disabled={!normalizeVisibleInput(text)}
-                            style={[styles.sendButton, { backgroundColor: colors.primary }]}
-                            activeOpacity={1}
-                        >
-                            <Ionicons name="send" size={19} color="#FFF" style={{ marginLeft: 2 }} />
-                        </TouchableOpacity>
-                    ) : (
-                        <TouchableOpacity style={styles.thumbsUpButton} onPress={handleQuickLike} activeOpacity={1}>
-                            <Ionicons name="thumbs-up" size={28} color={colors.primary} />
-                        </TouchableOpacity>
-                    )}
+                    <Animated.View style={[styles.sendControlWrap, { transform: [{ scale: sendControlScale }] }]}>
+                        {hasMessageText ? (
+                            <TouchableOpacity
+                                onPress={handleSend}
+                                disabled={!hasMessageText}
+                                style={[styles.sendButton, { backgroundColor: colors.primary }]}
+                                activeOpacity={1}
+                            >
+                                <Ionicons name="send" size={19} color="#FFF" style={{ marginLeft: 2 }} />
+                            </TouchableOpacity>
+                        ) : (
+                            <TouchableOpacity style={styles.thumbsUpButton} onPress={handleQuickLike} activeOpacity={1}>
+                                <Ionicons name="thumbs-up" size={28} color={colors.primary} />
+                            </TouchableOpacity>
+                        )}
+                    </Animated.View>
                 </View>
             </KeyboardAvoidingView>
 
@@ -1079,6 +1251,9 @@ const styles = StyleSheet.create({
     inputAction: {
         paddingBottom: 6,
     },
+    inputActionDisabled: {
+        opacity: 0.7,
+    },
     textInputWrapper: {
         flex: 1,
         flexDirection: 'row',
@@ -1103,8 +1278,17 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         marginBottom: 0,
     },
+    sendControlWrap: {
+        width: 40,
+        height: 40,
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
     thumbsUpButton: {
-        paddingBottom: 6,
+        width: 40,
+        height: 40,
+        justifyContent: 'center',
+        alignItems: 'center',
     },
     // Reaction styles
     reactionsContainer: {

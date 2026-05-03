@@ -3,9 +3,8 @@ import {
     BottomSheetBackdrop,
     BottomSheetModal,
     BottomSheetScrollView,
-    useBottomSheetTimingConfigs,
+    useBottomSheetSpringConfigs,
 } from "@gorhom/bottom-sheet";
-import { BlurView } from "expo-blur";
 import * as ExpoLinking from "expo-linking";
 import { router, useFocusEffect } from "expo-router";
 import React, {
@@ -30,9 +29,9 @@ import {
     TouchableOpacity,
     View
 } from "react-native";
-import { Easing } from "react-native-reanimated";
 import { supabase } from "../../lib/supabase";
 import { useAuth } from "../context/AuthContext";
+import { useBottomOverlayVisibility } from "../context/BottomOverlayContext";
 import { useTheme } from "../context/ThemeContext";
 import { useApplicationSubmissionAction } from "../hooks/useApplicationSubmissionAction";
 import { useBottomBarClearance } from "../hooks/useBottomBarClearance";
@@ -41,11 +40,15 @@ import { useCurrentUserVenueRole } from "../hooks/useCurrentUserVenueRole";
 import { useListingSheetDerived } from "../hooks/useListingSheetDerived";
 import { useListingSheetEffects } from "../hooks/useListingSheetEffects";
 import { useProfileCompletion } from "../hooks/useProfileCompletion";
+import { emitFavoriteChanged } from "../utils/favoriteEvents";
 import { submitListingRequest, uploadListingRequestDocument } from "../utils/listingRequests";
 import { usePageLoadLogger } from "../utils/loadTimeLogger";
+import { bottomSheetSpringConfig } from "../utils/motion";
+import { getSmoothTabIndex, setSmoothTab } from "../utils/smoothTabs";
 import CustomAlert from "./CustomAlert";
 import DocumentUploader from "./DocumentUploader";
 import ReportModal from "./ReportModal";
+import SlidingTabBar from "./SlidingTabBar";
 import VideoUploader from "./VideoUploader";
 import BookingControls from "./listingDetails/BookingControls";
 import GigApplyTab from "./listingDetails/GigApplyTab";
@@ -407,6 +410,7 @@ const ListingDetailsSheet = forwardRef<
   >("full");
   const [paymentBookingData, setPaymentBookingData] = useState<any>(null);
   const [isProcessingPayment, setIsProcessingPayment] = useState(false);
+  useBottomOverlayVisibility(showPaymentOptionModal, "ListingPaymentOptionModal");
 
   // Auto-calculate duration (only if validEndTimes is empty to avoid overwrite loop)
   useEffect(() => {
@@ -714,8 +718,17 @@ const ListingDetailsSheet = forwardRef<
       if (totalFavoriteResult.error) throw totalFavoriteResult.error;
       if (userFavoriteResult.error) throw userFavoriteResult.error;
 
-      setFavoriteCount(totalFavoriteResult.count || 0);
-      setIsFavorited((userFavoriteResult.count || 0) > 0);
+      const nextFavoriteCount = totalFavoriteResult.count || 0;
+      const nextIsFavorited = (userFavoriteResult.count || 0) > 0;
+
+      setFavoriteCount(nextFavoriteCount);
+      setIsFavorited(nextIsFavorited);
+      emitFavoriteChanged({
+        favoriteCount: nextFavoriteCount,
+        id: targetId,
+        isFavorited: nextIsFavorited,
+        targetType,
+      });
     },
     [],
   );
@@ -1462,10 +1475,7 @@ const ListingDetailsSheet = forwardRef<
 
   // Fixed sheet height
   const snapPoints = useMemo(() => ["90%"], []);
-  const animationConfigs = useBottomSheetTimingConfigs({
-    duration: 260,
-    easing: Easing.out(Easing.cubic),
-  });
+  const animationConfigs = useBottomSheetSpringConfigs(bottomSheetSpringConfig);
   const scrollContentStyle = useMemo(
     () => [styles.scrollContent, { paddingBottom: contentBottomPadding }],
     [contentBottomPadding],
@@ -1558,7 +1568,17 @@ const ListingDetailsSheet = forwardRef<
     useCallback(() => {
       const resolvedUserRole = userRole || currentUserRole;
       if (resolvedUserRole === "producer" && activeUserId) {
-        void fetchProductionTeams();
+        let isActive = true;
+        const focusTask = InteractionManager.runAfterInteractions(() => {
+          if (isActive) {
+            void fetchProductionTeams();
+          }
+        });
+
+        return () => {
+          isActive = false;
+          focusTask.cancel();
+        };
       }
     }, [activeUserId, currentUserRole, fetchProductionTeams, userRole]),
   );
@@ -2450,6 +2470,12 @@ const ListingDetailsSheet = forwardRef<
 
     setIsFavorited(optimisticState);
     setFavoriteCount(optimisticCount);
+    emitFavoriteChanged({
+      favoriteCount: optimisticCount,
+      id: group.id,
+      isFavorited: optimisticState,
+      targetType,
+    });
 
     try {
       const { data, error } = await supabase.functions.invoke("manage-details", {
@@ -2471,7 +2497,14 @@ const ListingDetailsSheet = forwardRef<
       setIsFavorited(resolvedFavorited);
 
       if (typeof data?.favorites_count === "number") {
-        setFavoriteCount(Math.max(0, data.favorites_count));
+        const resolvedFavoriteCount = Math.max(0, data.favorites_count);
+        setFavoriteCount(resolvedFavoriteCount);
+        emitFavoriteChanged({
+          favoriteCount: resolvedFavoriteCount,
+          id: group.id,
+          isFavorited: resolvedFavorited,
+          targetType,
+        });
       } else {
         await syncFavoriteMetadata(targetType, group.id, userId);
       }
@@ -2491,6 +2524,12 @@ const ListingDetailsSheet = forwardRef<
     } catch (e: any) {
       setIsFavorited(previousState);
       setFavoriteCount(previousCount);
+      emitFavoriteChanged({
+        favoriteCount: previousCount,
+        id: group.id,
+        isFavorited: previousState,
+        targetType,
+      });
       showSheetAlert(
         "error",
         "Bookmark Failed",
@@ -2598,10 +2637,11 @@ const ListingDetailsSheet = forwardRef<
 
   const isGroupListing = group?.type === "Group";
   const effectiveUserRole = userRole || currentUserRole;
+  const isMusicianUser = effectiveUserRole === "musician";
   const hasStructuredConnectionTab =
     !isGuest &&
     effectiveUserRole === "producer" &&
-    (group?.type === "Group" || group?.type === "Artist" || group?.type === "Venue");
+    (group?.type === "Group" || group?.type === "Artist");
   const hasGroupConnectContent =
     !isGuest &&
     group?.type === "Group" &&
@@ -2630,24 +2670,28 @@ const ListingDetailsSheet = forwardRef<
       baseTabs.push("Review");
     }
 
+    const roleFilteredTabs = isMusicianUser
+      ? baseTabs
+      : baseTabs.filter((tab) => !["Apply", "Book"].includes(tab));
+
     if (isGuest) {
-      return baseTabs.filter((tab) => !["Apply", "Connect", "Book"].includes(tab));
+      return roleFilteredTabs.filter((tab) => tab !== "Connect");
     }
 
-    if (shouldShowConnectTab && !baseTabs.includes("Connect")) {
-      const reviewTabIndex = baseTabs.indexOf("Review");
+    if (shouldShowConnectTab && !roleFilteredTabs.includes("Connect")) {
+      const reviewTabIndex = roleFilteredTabs.indexOf("Review");
       if (reviewTabIndex === -1) {
-        baseTabs.push("Connect");
+        roleFilteredTabs.push("Connect");
       } else {
-        baseTabs.splice(reviewTabIndex, 0, "Connect");
+        roleFilteredTabs.splice(reviewTabIndex, 0, "Connect");
       }
     }
 
     if (!isGroupListing) {
-      return baseTabs;
+      return roleFilteredTabs;
     }
 
-    const withoutApply = baseTabs.filter((tab) => tab !== "Apply");
+    const withoutApply = roleFilteredTabs.filter((tab) => tab !== "Apply");
     if (!canApplyToGroup) {
       return withoutApply;
     }
@@ -2664,9 +2708,13 @@ const ListingDetailsSheet = forwardRef<
     const nextTabs = [...withoutApply];
     nextTabs.splice(reviewTabIndex, 0, "Apply");
     return nextTabs;
-  }, [canApplyToGroup, isGroupListing, isGuest, labels.tabs, shouldShowConnectTab]);
+  }, [canApplyToGroup, isGroupListing, isGuest, isMusicianUser, labels.tabs, shouldShowConnectTab]);
 
   const showTabs = hasDefaultTabs && tabsToRender.length > 0;
+  const visibleActiveTab = tabsToRender.includes(activeTab)
+    ? activeTab
+    : tabsToRender[0] || "About";
+  const activeTabIndex = getSmoothTabIndex(tabsToRender, visibleActiveTab);
 
   useEffect(() => {
     if (!tabsToRender.length) {
@@ -2679,32 +2727,16 @@ const ListingDetailsSheet = forwardRef<
   }, [activeTab, tabsToRender]);
 
   const renderTabs = () => (
-    <View style={[styles.tabsContainer, { borderBottomColor: colors.border }]}>
-      {tabsToRender.map((tab) => (
-        <TouchableOpacity activeOpacity={1}
-          key={tab}
-          style={[
-            styles.tab,
-            activeTab === tab && {
-              borderBottomColor: colors.primary,
-              borderBottomWidth: 2,
-            },
-          ]}
-          onPress={() => setActiveTab(tab)}
-        >
-          <Text
-            style={[
-              styles.tabText,
-              activeTab === tab
-                ? { color: colors.primary, fontFamily: "Poppins_600SemiBold" }
-                : { color: colors.textSecondary },
-            ]}
-          >
-            {tab}
-          </Text>
-        </TouchableOpacity>
-      ))}
-    </View>
+    <SlidingTabBar
+      activeColor={colors.primary}
+      activeKey={visibleActiveTab}
+      borderColor={colors.border}
+      indicatorColor={colors.primary}
+      indicatorWidthRatio={0.34}
+      onChange={(tab) => setSmoothTab(setActiveTab, tab)}
+      tabs={tabsToRender.map((tab) => ({ key: tab, label: tab }))}
+      textStyle={styles.tabText}
+    />
   );
 
   const renderBookingControls = () => (
@@ -3589,6 +3621,7 @@ const ListingDetailsSheet = forwardRef<
     <>
       <TrackedBottomSheetModal
         ref={ref}
+        overlayLabel="ListingDetailsSheet"
         index={0}
         snapPoints={snapPoints}
         animationConfigs={animationConfigs}
@@ -3644,7 +3677,8 @@ const ListingDetailsSheet = forwardRef<
               styles={styles}
               colors={colors}
               group={group}
-              activeTab={activeTab}
+              activeTab={visibleActiveTab}
+              activeTabIndex={activeTabIndex}
               showTabs={showTabs}
               renderGroupAbout={renderGroupAbout}
               renderGroupApply={renderGroupApply}
@@ -3757,6 +3791,8 @@ const ListingDetailsSheet = forwardRef<
         transparent
         statusBarTranslucent
         navigationBarTranslucent
+        presentationStyle="overFullScreen"
+        hardwareAccelerated
         animationType="fade"
         onRequestClose={() => {
           if (!isProcessingPayment) {
@@ -3765,7 +3801,7 @@ const ListingDetailsSheet = forwardRef<
           }
         }}
       >
-        <BlurView intensity={60} tint="dark" style={styles.paymentModalOverlay}>
+        <View style={styles.paymentModalOverlay}>
           {isProcessingPayment ? (
             // Loading Screen while PayMongo processes
             <View
@@ -3958,7 +3994,7 @@ const ListingDetailsSheet = forwardRef<
               </TouchableOpacity>
             </View>
           )}
-        </BlurView>
+        </View>
       </RNModal>
     </>
   );
@@ -4291,6 +4327,18 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     borderRadius: 8,
     borderWidth: 1,
+  },
+  amenityChip: {
+    minWidth: 124,
+    maxWidth: "100%",
+    minHeight: 44,
+    paddingHorizontal: 14,
+    paddingVertical: 0,
+    borderRadius: 14,
+    borderWidth: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "flex-start",
   },
   // Forms
   inputContainer: {
@@ -4633,6 +4681,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
     paddingHorizontal: 20,
+    backgroundColor: "rgba(15,23,42,0.62)",
   },
   paymentLoadingContainer: {
     borderRadius: 20,

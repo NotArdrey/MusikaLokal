@@ -1,8 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
-import { BlurView } from 'expo-blur';
 import * as Linking from 'expo-linking';
 import React from 'react';
-import { ActivityIndicator, Modal as RNModal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Animated, Easing, Modal as RNModal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useTheme } from '../context/ThemeContext';
 import CustomAlert from './CustomAlert';
 
@@ -68,6 +67,9 @@ const CustomModal: React.FC<CustomModalProps> = ({
   const [feedbackVisible, setFeedbackVisible] = React.useState(false);
   const [feedbackMessage, setFeedbackMessage] = React.useState('');
   const hasCustomContract = Boolean(contractUrl);
+  const [rendered, setRendered] = React.useState(visible);
+  const wasVisibleRef = React.useRef(visible);
+  const modalProgress = React.useRef(new Animated.Value(visible ? 1 : 0)).current;
 
   React.useEffect(() => {
     if (!visible) {
@@ -78,6 +80,49 @@ const CustomModal: React.FC<CustomModalProps> = ({
       setFeedbackMessage('');
     }
   }, [visible]);
+
+  React.useEffect(() => {
+    const wasVisible = wasVisibleRef.current;
+    wasVisibleRef.current = visible;
+
+    if (visible) {
+      if (!rendered) {
+        modalProgress.stopAnimation();
+        setRendered(true);
+        modalProgress.setValue(0);
+      }
+
+      if (wasVisible) {
+        return;
+      }
+
+      Animated.timing(modalProgress, {
+        toValue: 1,
+        duration: 220,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }).start();
+      return;
+    }
+
+    if (!rendered) {
+      return;
+    }
+
+    modalProgress.stopAnimation();
+    Animated.timing(modalProgress, {
+      toValue: 0,
+      duration: 180,
+      easing: Easing.in(Easing.cubic),
+      useNativeDriver: true,
+    }).start(({ finished }) => {
+      if (finished) {
+        setRendered(false);
+      }
+    });
+
+    return;
+  }, [modalProgress, rendered, visible]);
 
   const hasEmptyRequiredInput = showInput && !normalizeVisibleInput(inputValue);
 
@@ -134,17 +179,23 @@ const CustomModal: React.FC<CustomModalProps> = ({
     </View>
   );
 
+  if (!rendered) {
+    return null;
+  }
+
   return (
     <RNModal
-      animationType="fade"
+      animationType="none"
       transparent
       statusBarTranslucent
       navigationBarTranslucent
-      visible={visible}
+      presentationStyle="overFullScreen"
+      hardwareAccelerated
+      visible={rendered}
       onRequestClose={onClose}
     >
-      <BlurView intensity={60} tint="dark" style={styles.overlay}>
-        <View
+      <View style={styles.overlay}>
+        <Animated.View
           style={[
             styles.modalContainer,
             {
@@ -154,7 +205,10 @@ const CustomModal: React.FC<CustomModalProps> = ({
               shadowOpacity: 0.25,
               shadowRadius: 10,
               elevation: 10
-            }
+            },
+            {
+              opacity: modalProgress,
+            },
           ]}
         >
           {loading ? (
@@ -291,14 +345,16 @@ const CustomModal: React.FC<CustomModalProps> = ({
               </View>
             </>
           )}
-        </View>
-      </BlurView>
+        </Animated.View>
+      </View>
 
       <RNModal
         animationType="slide"
         transparent
         statusBarTranslucent
         navigationBarTranslucent
+        presentationStyle="overFullScreen"
+        hardwareAccelerated
         visible={showTermsContent}
         onRequestClose={() => setShowTermsContent(false)}
       >
@@ -354,6 +410,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     paddingHorizontal: IS_WEB ? 16 : 0,
+    backgroundColor: 'rgba(15,23,42,0.58)',
   },
   modalContainer: {
     width: IS_WEB ? '92%' : '86%',

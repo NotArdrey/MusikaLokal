@@ -1,4 +1,4 @@
-﻿import { Ionicons } from '@expo/vector-icons';
+import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import React, { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
@@ -10,7 +10,7 @@ import Navbar from '../src/components/navbar';
 import ProductionInviteSection from '../src/components/ProductionInviteSection';
 import { useBottomBarClearance } from '../src/hooks/useBottomBarClearance';
 import { useAuth, useRequireAuth } from '../src/context/AuthContext';
-import { showTopToast } from '../src/context/TopToastContext';
+import { emitToast } from '../src/events/toastBus';
 import { useTheme } from '../src/context/ThemeContext';
 import { ProductionInviteTarget, sendProductionTeamInvites } from '../src/utils/productionTeamInvites';
 
@@ -112,7 +112,7 @@ export default function AddProductionScreen() {
           : `${inviteSummary.sentCount} invite(s) sent.`
         : null;
 
-      showTopToast({
+      emitToast({
         type: 'success',
         title: 'Production Team Created',
         message: inviteMessageSummary

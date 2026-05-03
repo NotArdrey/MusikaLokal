@@ -14,10 +14,11 @@ import {
 } from "react-native";
 import { PH_MUSIC_GROUP_TYPES } from "../constants/groupTypes";
 import { useAuth } from "../context/AuthContext";
-import { showTopToast } from "../context/TopToastContext";
+import { emitToast } from "../events/toastBus";
 import { useTheme } from "../context/ThemeContext";
 import { supabase } from "../../lib/supabase";
 import { getGigApplicationDeadlineInfo } from "../utils/gigApplication";
+import { addFavoriteChangedListener, emitFavoriteChanged } from "../utils/favoriteEvents";
 import CachedImage from "./CachedImage";
 import PagerView from "./PagerView";
 
@@ -45,6 +46,44 @@ interface ListingCardProps {
   showGigSummary?: boolean;
   actionSlot?: React.ReactNode;
 }
+
+type PriceDisplayItem = {
+  key: string;
+  amount: string;
+  unit?: string;
+  label?: string;
+};
+
+const PESO_SIGN = "\u20B1";
+
+const getPositiveInteger = (value: unknown) => {
+  if (value === null || value === undefined || value === "") return 0;
+  const parsed = parseInt(String(value), 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+};
+
+const buildPriceItem = (
+  key: string,
+  value: unknown,
+  unit?: string,
+  label?: string,
+): PriceDisplayItem | null => {
+  const amount = getPositiveInteger(value);
+  if (amount <= 0) return null;
+
+  return {
+    key,
+    amount: `${PESO_SIGN}${amount.toLocaleString()}`,
+    unit,
+    label,
+  };
+};
+
+const formatPriceDisplayLabel = (priceItem: PriceDisplayItem) => {
+  const unit = priceItem.unit ? priceItem.unit.replace("/", " / ") : "";
+  const label = priceItem.label ? ` (${priceItem.label})` : "";
+  return `${priceItem.amount}${unit}${label}`;
+};
 
 const LISTING_FALLBACK_IMAGES: Record<string, string[]> = {
   Artist: [
@@ -119,6 +158,28 @@ const ListingCard: React.FC<ListingCardProps> = ({
     [item?.type],
   );
 
+  useEffect(() => {
+    if (typeof item?.is_favorited === "boolean") {
+      setIsBookmarked(item.is_favorited);
+    }
+  }, [item?.id, item?.is_favorited]);
+
+  useEffect(() => {
+    if (!favoriteTargetType || !item?.id) return;
+
+    const subscription = addFavoriteChangedListener((payload) => {
+      if (payload.targetType !== favoriteTargetType || payload.id !== item.id) {
+        return;
+      }
+
+      setIsBookmarked(payload.isFavorited);
+    });
+
+    return () => {
+      subscription.remove();
+    };
+  }, [favoriteTargetType, item?.id]);
+
   // Group Warning Logic
   const showGroupWarning = useMemo(
     () =>
@@ -171,18 +232,13 @@ const ListingCard: React.FC<ListingCardProps> = ({
 
   // Determine "Price/Rate" Label - handle dynamic pricing for studios
   // Skip pricing for Groups
-  const { priceLabel, secondaryPriceLabel, isGroup } = useMemo(() => {
+  const { priceLabel, secondaryPriceLabel, priceItems, isGroup } = useMemo(() => {
+    const nextPriceItems: PriceDisplayItem[] = [];
     let nextPriceLabel = "";
     let nextSecondaryPriceLabel = "";
     const nextIsGroup = item.type === "Group";
-    const rehearsalRateValue =
-      item.rehearsal_rate && item.rehearsal_rate !== "0"
-        ? parseInt(item.rehearsal_rate)
-        : 0;
-    const recordingRateValue =
-      item.recording_rate && item.recording_rate !== "0"
-        ? parseInt(item.recording_rate)
-        : 0;
+    const rehearsalRateValue = getPositiveInteger(item.rehearsal_rate);
+    const recordingRateValue = getPositiveInteger(item.recording_rate);
     const isRecordingOnlyStudio =
       item.type === "Studio" && item.studio_type === "Recording";
     const isRehearsalOnlyStudio =
@@ -190,9 +246,7 @@ const ListingCard: React.FC<ListingCardProps> = ({
     const hasRehearsalRate = rehearsalRateValue > 0 && !isRecordingOnlyStudio;
     const hasRecordingRate = recordingRateValue > 0 && !isRehearsalOnlyStudio;
 
-    if (nextIsGroup) {
-      nextPriceLabel = "";
-    } else if (item.type === "Studio") {
+    if (!nextIsGroup && item.type === "Studio") {
       if (hasRehearsalRate && hasRecordingRate) {
         nextPriceLabel = `₱${rehearsalRateValue.toLocaleString()} / hr (Rehearsal)`;
         nextSecondaryPriceLabel = `₱${recordingRateValue.toLocaleString()} / song (Recording)`;
@@ -223,12 +277,102 @@ const ListingCard: React.FC<ListingCardProps> = ({
       nextPriceLabel = "";
     }
 
+    if (!nextIsGroup && item.type === "Studio") {
+      if (hasRehearsalRate && hasRecordingRate) {
+        nextPriceItems.push(
+          buildPriceItem("rehearsal", rehearsalRateValue, "/hr", "Rehearsal")!,
+          buildPriceItem("recording", recordingRateValue, "/song", "Recording")!,
+        );
+      } else if (hasRehearsalRate) {
+        nextPriceItems.push(
+          buildPriceItem("rehearsal", rehearsalRateValue, "/hr", "Rehearsal")!,
+        );
+      } else if (hasRecordingRate) {
+        nextPriceItems.push(
+          buildPriceItem("recording", recordingRateValue, "/song", "Recording")!,
+        );
+      } else {
+        const hourlyPrice = buildPriceItem("hourly", item.hourly_rate, "/hr");
+        if (hourlyPrice) nextPriceItems.push(hourlyPrice);
+      }
+    } else if (!nextIsGroup) {
+      const hourlyPrice = buildPriceItem("hourly", item.hourly_rate, "/hr");
+      const rehearsalPrice = buildPriceItem("rehearsal", item.rehearsal_rate, "/hr", "Rehearsal");
+      const recordingPrice = buildPriceItem("recording", item.recording_rate, "/song", "Recording");
+      const budgetPrice = buildPriceItem("budget", item.budget, undefined, "Budget");
+      const numericRatePrice = buildPriceItem("rate", item.rate, undefined, "Rate");
+
+      if (hourlyPrice) {
+        nextPriceItems.push(hourlyPrice);
+      } else if (rehearsalPrice) {
+        nextPriceItems.push(rehearsalPrice);
+      } else if (recordingPrice) {
+        nextPriceItems.push(recordingPrice);
+      } else if (budgetPrice) {
+        nextPriceItems.push(budgetPrice);
+      } else if (typeof item.rate === "string" && item.rate.trim() && item.rate !== "0") {
+        const rawRate = item.rate.trim();
+        nextPriceItems.push({
+          key: "rate",
+          amount: rawRate.startsWith(PESO_SIGN) ? rawRate : `${PESO_SIGN}${rawRate}`,
+          label: "Rate",
+        });
+      } else if (numericRatePrice) {
+        nextPriceItems.push(numericRatePrice);
+      }
+    }
+
     return {
-      priceLabel: nextPriceLabel,
-      secondaryPriceLabel: nextSecondaryPriceLabel,
+      priceLabel: nextPriceItems[0] ? formatPriceDisplayLabel(nextPriceItems[0]) : nextPriceLabel,
+      secondaryPriceLabel: nextPriceItems[1]
+        ? formatPriceDisplayLabel(nextPriceItems[1])
+        : nextSecondaryPriceLabel,
+      priceItems: nextPriceItems,
       isGroup: nextIsGroup,
     };
   }, [item]);
+
+  const renderPriceItems = useCallback(
+    (compact = false) => (
+      <View style={[styles.priceList, compact && styles.feedPriceList]}>
+        {priceItems.map((priceItem) => (
+          <View key={priceItem.key} style={styles.priceItemRow}>
+            <View
+              style={[
+                styles.priceChip,
+                {
+                  backgroundColor: isDark
+                    ? "rgba(139,92,246,0.16)"
+                    : "rgba(124,58,237,0.09)",
+                  borderColor: isDark
+                    ? "rgba(167,139,250,0.26)"
+                    : "rgba(124,58,237,0.16)",
+                },
+              ]}
+            >
+              <Text style={[styles.priceAmount, { color: colors.primary }]}>
+                {priceItem.amount}
+              </Text>
+              {priceItem.unit ? (
+                <Text style={[styles.priceUnit, { color: colors.textSecondary }]}>
+                  {priceItem.unit}
+                </Text>
+              ) : null}
+            </View>
+            {priceItem.label ? (
+              <Text
+                style={[styles.priceLabelText, { color: colors.textSecondary }]}
+                numberOfLines={1}
+              >
+                {priceItem.label}
+              </Text>
+            ) : null}
+          </View>
+        ))}
+      </View>
+    ),
+    [colors.primary, colors.textSecondary, isDark, priceItems],
+  );
 
   // Determine Badge Color & Label
   const { badgeLabel, badgeColor } = useMemo(() => {
@@ -333,7 +477,7 @@ const ListingCard: React.FC<ListingCardProps> = ({
       }
 
       if (!favoriteTargetType || !item?.id) {
-        showTopToast({
+        emitToast({
           type: "info",
           title: "Bookmark unavailable",
           message: "Bookmarking is currently available for artists, groups, studios, and gigs.",
@@ -342,7 +486,7 @@ const ListingCard: React.FC<ListingCardProps> = ({
       }
 
       if (!userId) {
-        showTopToast({
+        emitToast({
           type: "warning",
           title: "Login required",
           message: "Please sign in to bookmark listings.",
@@ -368,14 +512,26 @@ const ListingCard: React.FC<ListingCardProps> = ({
 
         if (error) throw error;
 
-        setIsBookmarked(
+        const resolvedFavorited =
           typeof data?.is_favorited === "boolean"
             ? data.is_favorited
-            : optimisticState,
-        );
+            : optimisticState;
+
+        setIsBookmarked(resolvedFavorited);
+        emitFavoriteChanged({
+          id: item.id,
+          isFavorited: resolvedFavorited,
+          targetType: favoriteTargetType,
+          favoriteCount: typeof data?.favorites_count === "number" ? data.favorites_count : undefined,
+        });
       } catch (error: any) {
         setIsBookmarked(previousState);
-        showTopToast({
+        emitFavoriteChanged({
+          id: item.id,
+          isFavorited: previousState,
+          targetType: favoriteTargetType,
+        });
+        emitToast({
           type: "error",
           title: "Bookmark failed",
           message: error?.message || "Unable to update bookmark right now.",
@@ -1568,18 +1724,9 @@ const ListingCard: React.FC<ListingCardProps> = ({
           </View>
 
           {/* Hide entire price row for Groups */}
-          {!isGroup && isFeedVariant && (priceLabel || secondaryPriceLabel) && (
+          {!isGroup && isFeedVariant && priceItems.length > 0 && (
             <View style={styles.feedPriceBlock}>
-              {priceLabel ? (
-                <Text style={[styles.price, { color: colors.primary }]}>
-                  {priceLabel}
-                </Text>
-              ) : null}
-              {secondaryPriceLabel ? (
-                <Text style={[styles.price, { color: colors.primary, marginTop: 2 }]}>
-                  {secondaryPriceLabel}
-                </Text>
-              ) : null}
+              {renderPriceItems(true)}
             </View>
           )}
 
@@ -1606,7 +1753,7 @@ const ListingCard: React.FC<ListingCardProps> = ({
             </View>
           )}
 
-          {!isFeedVariant && !isGroup && (priceLabel || secondaryPriceLabel || item.review_count > 0) && (
+          {!isFeedVariant && !isGroup && (priceItems.length > 0 || item.review_count > 0) && (
             <View
               style={[
                 styles.priceRow,
@@ -1617,23 +1764,7 @@ const ListingCard: React.FC<ListingCardProps> = ({
                 },
               ]}
             >
-              <View style={{ flexDirection: "column" }}>
-                {priceLabel ? (
-                  <Text style={[styles.price, { color: colors.primary }]}>
-                    {priceLabel}
-                  </Text>
-                ) : null}
-                {secondaryPriceLabel && (
-                  <Text
-                    style={[
-                      styles.price,
-                      { color: colors.primary, marginTop: 2 },
-                    ]}
-                  >
-                    {secondaryPriceLabel}
-                  </Text>
-                )}
-              </View>
+              {priceItems.length > 0 ? renderPriceItems() : null}
               <View style={{ flex: 1 }} />
               {item.review_count > 0 && (
                 <Text style={styles.reviewCount}>
@@ -1990,8 +2121,8 @@ const styles = StyleSheet.create({
   },
   priceRow: {
     flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
+    alignItems: "flex-start",
+    gap: 8,
     marginTop: 12,
     paddingTop: 12,
     borderTopWidth: 1,
@@ -2000,6 +2131,50 @@ const styles = StyleSheet.create({
   price: {
     fontFamily: "Poppins_600SemiBold",
     fontSize: 15,
+  },
+  priceList: {
+    flexShrink: 1,
+    gap: 6,
+  },
+  feedPriceList: {
+    gap: 7,
+  },
+  priceItemRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    flexWrap: "wrap",
+    gap: 8,
+    minHeight: 30,
+  },
+  priceChip: {
+    minHeight: 28,
+    borderRadius: 8,
+    borderWidth: 1,
+    paddingHorizontal: 9,
+    paddingVertical: 4,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  priceAmount: {
+    fontFamily: "Poppins_700Bold",
+    fontSize: 15,
+    lineHeight: 18,
+    includeFontPadding: false,
+    textAlignVertical: "center",
+  },
+  priceUnit: {
+    fontFamily: "Poppins_500Medium",
+    fontSize: 11,
+    lineHeight: 14,
+    includeFontPadding: false,
+    textAlignVertical: "center",
+    marginLeft: 2,
+  },
+  priceLabelText: {
+    fontFamily: "Poppins_500Medium",
+    fontSize: 12,
+    flexShrink: 1,
   },
   feedPriceBlock: {
     marginTop: 0,
@@ -2021,6 +2196,9 @@ const styles = StyleSheet.create({
   feedViewText: {
     fontFamily: "Poppins_600SemiBold",
     fontSize: 12,
+    lineHeight: 16,
+    includeFontPadding: false,
+    textAlignVertical: "center",
   },
   feedActionSlot: {
     flex: 1,

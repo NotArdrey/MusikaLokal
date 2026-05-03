@@ -33,9 +33,9 @@ const ensureNotificationHandler = () => {
 
   notifications.setNotificationHandler({
     handleNotification: async () => ({
-      shouldShowBanner: true,
-      shouldShowList: true,
-      shouldPlaySound: true,
+      shouldShowBanner: false,
+      shouldShowList: false,
+      shouldPlaySound: false,
       shouldSetBadge: false,
       priority: 'max',
     }),

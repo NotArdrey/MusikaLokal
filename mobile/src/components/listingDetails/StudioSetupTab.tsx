@@ -34,6 +34,18 @@ const StudioSetupTab = ({ group, colors, isDark, styles }: StudioSetupTabProps) 
   }
 
   const title = group.type === "Venue" ? "Venue Specs" : "Studio Amenities";
+  const getAmenityIcon = (tag: string) => {
+    const lower = tag.toLowerCase();
+
+    if (lower.includes("wifi") || lower.includes("wi-fi")) return "wifi";
+    if (lower.includes("parking")) return "car-outline";
+    if (lower.includes("air") || lower.includes("ac")) return "snow-outline";
+    if (lower.includes("restroom") || lower.includes("toilet")) return "male-female-outline";
+    if (lower.includes("coffee") || lower.includes("drink")) return "cafe-outline";
+    if (lower.includes("stage")) return "easel-outline";
+
+    return "checkmark-circle";
+  };
 
   return (
     <View style={styles.tabContent}>
@@ -45,27 +57,32 @@ const StudioSetupTab = ({ group, colors, isDark, styles }: StudioSetupTabProps) 
               <View
                 key={`${tag}-${index}`}
                 style={[
-                  styles.tag,
+                  styles.amenityChip || styles.tag,
                   {
                     borderColor: colors.primary,
                     backgroundColor: isDark
-                      ? "rgba(124, 58, 237, 0.1)"
-                      : "rgba(124, 58, 237, 0.05)",
+                      ? "rgba(99, 102, 241, 0.14)"
+                      : "rgba(99, 102, 241, 0.08)",
                   },
                 ]}
               >
                 <Ionicons
-                  name="checkmark-circle"
-                  size={14}
+                  name={getAmenityIcon(tag) as any}
+                  size={16}
                   color={colors.primary}
-                  style={{ marginRight: 4 }}
+                  style={{ marginRight: 8 }}
                 />
                 <Text
                   style={{
                     color: colors.text,
                     fontSize: 13,
-                    fontFamily: "Poppins_500Medium",
+                    lineHeight: 18,
+                    fontFamily: "Poppins_600SemiBold",
+                    flexShrink: 1,
+                    includeFontPadding: false,
+                    textAlignVertical: "center",
                   }}
+                  numberOfLines={1}
                 >
                   {tag}
                 </Text>

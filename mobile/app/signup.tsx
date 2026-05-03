@@ -15,7 +15,7 @@ import { WebView } from 'react-native-webview';
 import { supabase } from '../lib/supabase';
 import BottomModal from '../src/components/BottomModal';
 import CustomAlert, { AlertType } from '../src/components/CustomAlert';
-import { showTopToast } from '../src/context/TopToastContext';
+import { emitToast } from '../src/events/toastBus';
 import { useTheme } from '../src/context/ThemeContext';
 
 type OnboardingStep = 'details' | 'verification' | 'email_verification';
@@ -268,7 +268,7 @@ export default function SignupScreen() {
         const type = resolveAlertType(normalizedTitle);
 
         if ((type === 'success' || type === 'info') && isSimpleTopToastButtons(buttons)) {
-            showTopToast({
+            emitToast({
                 type,
                 title: normalizedTitle,
                 message: normalizedMessage.trim() ? normalizedMessage : normalizedTitle,
@@ -1632,6 +1632,7 @@ export default function SignupScreen() {
 
             <BottomModal
                 visible={documentModalVisible}
+                overlayLabel="SignupDocumentTypeModal"
                 onClose={() => setDocumentModalVisible(false)}
                 closeOnBackdropPress
             >
@@ -1932,6 +1933,7 @@ export default function SignupScreen() {
 
                     <BottomModal
                         visible={manualExpirationCalendarVisible}
+                        overlayLabel="SignupManualExpirationCalendarModal"
                         onClose={() => setManualExpirationCalendarVisible(false)}
                         closeOnBackdropPress
                     >

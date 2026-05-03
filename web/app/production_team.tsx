@@ -19,6 +19,7 @@ import Header from "../src/components/header";
 import Modal, { normalizeVisibleInput } from "../src/components/modal";
 import Navbar from "../src/components/navbar";
 import Skeleton from "../src/components/Skeleton";
+import SmoothTabTransition from "../src/components/SmoothTabTransition";
 import { useBottomBarClearance } from "../src/hooks/useBottomBarClearance";
 import { useAuth, useRequireAuth } from "../src/context/AuthContext";
 import { useTheme } from "../src/context/ThemeContext";
@@ -472,7 +473,7 @@ export default function ProductionTeamScreen() {
             ))}
           </View>
 
-          <View style={styles.contentContainer}>
+          <SmoothTabTransition activeKey={activeTab} style={styles.contentContainer}>
             {activeTab === "About" && (
               <View style={styles.aboutContainer}>
                 <Text style={[styles.aboutText, { color: colors.textSecondary }]}>
@@ -552,7 +553,7 @@ export default function ProductionTeamScreen() {
                 </Text>
               </View>
             )}
-          </View>
+          </SmoothTabTransition>
 
           </ScrollView>
           <Navbar />

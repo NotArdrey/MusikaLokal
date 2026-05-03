@@ -3315,16 +3315,18 @@ const styles = StyleSheet.create({
   experienceLevelContainer: {
     flexDirection: "row",
     flexWrap: "wrap",
-    gap: 8,
+    justifyContent: "space-between",
+    rowGap: 12,
   },
   experienceButton: {
+    width: "48%",
+    minHeight: 56,
     paddingVertical: 12,
     paddingHorizontal: 16,
     borderRadius: 12,
     borderWidth: 1,
-    flex: 1,
-    minWidth: "45%",
     alignItems: "center",
+    justifyContent: "center",
   },
   experienceButtonText: {
     fontSize: 13,

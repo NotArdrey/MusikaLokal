@@ -1,7 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useQueryClient } from "@tanstack/react-query";
 import { useFocusEffect } from "@react-navigation/native";
-import { BlurView } from "expo-blur";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import * as ExpoLinking from "expo-linking";
 import { router, useLocalSearchParams } from "expo-router";
@@ -9,6 +8,7 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
     AppState,
     Dimensions,
+    InteractionManager,
     Linking,
     Modal as RNModal,
     ScrollView,
@@ -28,9 +28,10 @@ import InAppMediaViewer, { isInAppMediaUrl } from "../src/components/InAppMediaV
 import BookingActionModal, { normalizeVisibleInput } from "../src/components/modal";
 import Navbar from "../src/components/navbar";
 import Skeleton from "../src/components/Skeleton";
+import SmoothTabTransition from "../src/components/SmoothTabTransition";
 import { useAuth } from "../src/context/AuthContext";
-import { useBottomOverlay } from "../src/context/BottomOverlayContext";
-import { showTopToast } from "../src/context/TopToastContext";
+import { useBottomOverlay, useBottomOverlayVisibility } from "../src/context/BottomOverlayContext";
+import { emitToast } from "../src/events/toastBus";
 import { useTheme } from "../src/context/ThemeContext";
 import { useBookingsSummaryQuery } from "../src/data/hooks";
 import { queryKeys } from "../src/data/queryKeys";
@@ -38,6 +39,7 @@ import { createBookingCheckout } from "../src/services/paymongo";
 import { buildNotificationRouteMeta } from "../src/utils/notificationNavigation";
 import { formatFriendlyDateTime } from "../src/utils/friendlyDateTime";
 import { usePageLoadLogger } from "../src/utils/loadTimeLogger";
+import { getSmoothTabIndex, setSmoothTab } from "../src/utils/smoothTabs";
 import {
   formatRecordingHours,
   formatRecordingRuleShort,
@@ -153,6 +155,20 @@ const formatBookingCardDateTime = (value: unknown) => {
   const raw = String(value ?? "").trim();
   if (!raw) return "TBA";
   return formatFriendlyDateTime(raw, { fallback: raw });
+};
+
+const formatApplicationReceivedDateTime = (item: any) => {
+  const raw =
+    toNonEmptyString(item?.submitted_at) ||
+    toNonEmptyString(item?.received_at) ||
+    toNonEmptyString(item?.created_at);
+
+  if (!raw) return null;
+
+  return formatFriendlyDateTime(raw, {
+    fallback: raw,
+    forceIncludeTime: true,
+  });
 };
 
 const extractConnectionRequestDetails = (eventDetails: any, attachmentUrl: unknown) => {
@@ -538,6 +554,7 @@ export default function BookingsScreen() {
   const [showScanModal, setShowScanModal] = useState(false);
   const [permission, requestPermission] = useCameraPermissions();
   const [scanned, setScanned] = useState(false);
+  useBottomOverlayVisibility(showPaymentOptionModal || showScanModal, "BookingsPaymentOrScanModal");
   const initialBookingsCacheRef = useRef<BookingsScreenCachePayload | null>(
     userId ? bookingsScreenCache.get(userId) || null : null,
   );
@@ -658,7 +675,7 @@ export default function BookingsScreen() {
     const type = resolveAlertType(normalizedTitle);
 
     if ((type === "success" || type === "info") && isSimpleTopToastButtons(buttons)) {
-      showTopToast({
+      emitToast({
         type,
         title: normalizedTitle,
         message: normalizedMessage.trim() ? normalizedMessage : normalizedTitle,
@@ -836,6 +853,7 @@ export default function BookingsScreen() {
     useCallback(() => {
       let isActive = true;
       let intervalId: ReturnType<typeof setInterval> | null = null;
+      let focusRefreshTask: ReturnType<typeof InteractionManager.runAfterInteractions> | null = null;
 
       if (isAuthenticated && userId) {
         const cached = bookingsScreenCache.get(userId);
@@ -855,7 +873,11 @@ export default function BookingsScreen() {
           if (!cached) {
             setLoading(true);
           }
-          void bookingsSummaryQuery.refetch();
+          focusRefreshTask = InteractionManager.runAfterInteractions(() => {
+            if (isActive) {
+              void bookingsSummaryQuery.refetch();
+            }
+          });
         }
 
         // Auto-refresh so bookings move between tabs based on real time/date
@@ -873,6 +895,7 @@ export default function BookingsScreen() {
 
       return () => {
         isActive = false;
+        focusRefreshTask?.cancel();
         if (intervalId) clearInterval(intervalId);
       };
     }, [bookingsSummaryQuery.refetch, isAuthenticated, userId]),
@@ -3641,6 +3664,21 @@ export default function BookingsScreen() {
       : userRole === "venue-owner" && activeTab === "Review"
         ? "History"
       : activeTab;
+  const bookingTabOrder = React.useMemo<readonly Tab[]>(
+    () =>
+      userRole === "venue-owner"
+        ? (["Applicants", "Active Musicians", "Review"] as const)
+        : (["Pending", "Upcoming", "Ongoing", "Review", "History"] as const),
+    [userRole],
+  );
+  const applicationTabOrder = React.useMemo<readonly ApplicationTab[]>(
+    () => ["Applied", "Accepted", "Completed"] as const,
+    [],
+  );
+  const bookingTransitionIndex =
+    userRole === "musician" && viewMode === "applications"
+      ? getSmoothTabIndex(applicationTabOrder, activeAppTab)
+      : getSmoothTabIndex(bookingTabOrder, activeTab);
 
   const sortedCurrentItems = React.useMemo(
     () =>
@@ -3733,7 +3771,7 @@ export default function BookingsScreen() {
     return (
       <TouchableOpacity activeOpacity={1}
         key={tab}
-        onPress={() => setActiveAppTab(tab)}
+        onPress={() => setSmoothTab(setActiveAppTab, tab)}
         style={[
           styles.tabButton,
           {
@@ -3777,7 +3815,7 @@ export default function BookingsScreen() {
     return (
       <TouchableOpacity activeOpacity={1}
         key={tab}
-        onPress={() => setActiveTab(tab === "History" ? "Review" : tab as Tab)}
+        onPress={() => setSmoothTab(setActiveTab, tab === "History" ? "Review" : tab as Tab)}
         style={[
           styles.tabButton,
           {
@@ -3839,7 +3877,7 @@ export default function BookingsScreen() {
     return (
       <TouchableOpacity activeOpacity={1}
         key={tab}
-        onPress={() => setActiveTab(tab)}
+        onPress={() => setSmoothTab(setActiveTab, tab)}
         style={[
           styles.tabButton,
           {
@@ -4030,6 +4068,11 @@ export default function BookingsScreen() {
           showsVerticalScrollIndicator={false}
           contentContainerStyle={styles.scrollContent}
         >
+          <SmoothTabTransition
+            activeKey={`${activeTab}-${activeAppTab}-${activeFilter}`}
+            activeIndex={bookingTransitionIndex}
+            renderOutgoing={false}
+          >
           {!loading &&
             ((userRole === "studio-owner" && activeTab === "Pending") ||
               (userRole === "venue-owner" && activeTab === "Applicants")) &&
@@ -4187,11 +4230,6 @@ export default function BookingsScreen() {
                                 ]}
                               >
                                 <View style={styles.detailsButtonLabelContainer}>
-                                  <Ionicons
-                                    name="refresh-outline"
-                                    size={moderateScale(14)}
-                                    color="#EA580C"
-                                  />
                                   <Text
                                     style={[
                                       styles.outlineButtonText,
@@ -4224,11 +4262,6 @@ export default function BookingsScreen() {
                               ]}
                             >
                               <View style={styles.detailsButtonLabelContainer}>
-                                <Ionicons
-                                  name="trash-outline"
-                                  size={moderateScale(14)}
-                                  color="#DC2626"
-                                />
                                 <Text
                                   style={[
                                     styles.outlineButtonText,
@@ -4469,7 +4502,6 @@ export default function BookingsScreen() {
                               }}
                               style={[styles.attachmentChip, { borderColor: colors.border, backgroundColor: colors.card }]}
                             >
-                              <Ionicons name="document-attach-outline" size={16} color={colors.textSecondary} />
                               <Text style={[styles.attachmentChipText, { color: colors.textSecondary }]}>
                                 Contract
                               </Text>
@@ -4484,7 +4516,6 @@ export default function BookingsScreen() {
                               }}
                               style={[styles.attachmentChip, { borderColor: colors.border, backgroundColor: colors.card }]}
                             >
-                              <Ionicons name="document-text-outline" size={16} color={colors.textSecondary} />
                               <Text style={[styles.attachmentChipText, { color: colors.textSecondary }]}>
                                 CV
                               </Text>
@@ -4499,7 +4530,6 @@ export default function BookingsScreen() {
                               }}
                               style={[styles.attachmentChip, { borderColor: colors.border, backgroundColor: colors.card }]}
                             >
-                              <Ionicons name="play-circle-outline" size={16} color={colors.textSecondary} />
                               <Text style={[styles.attachmentChipText, { color: colors.textSecondary }]}>
                                 Video
                               </Text>
@@ -4587,7 +4617,6 @@ export default function BookingsScreen() {
                             ]}
                           >
                             <View style={styles.detailsButtonLabelContainer}>
-                              <Ionicons name="eye-outline" size={16} color={colors.textSecondary} />
                               <Text style={[styles.outlineButtonText, { color: colors.textSecondary }]}>
                                 View
                               </Text>
@@ -4613,7 +4642,6 @@ export default function BookingsScreen() {
                               ]}
                             >
                               <View style={styles.detailsButtonLabelContainer}>
-                                <Ionicons name="close-outline" size={16} color="#EF4444" />
                                 <Text style={[styles.outlineButtonText, { color: "#EF4444", fontFamily: "Poppins_600SemiBold" }]}>
                                   Decline
                                 </Text>
@@ -4640,7 +4668,6 @@ export default function BookingsScreen() {
                               },
                             ]}
                           >
-                            <Ionicons name="checkmark-outline" size={16} color="#fff" />
                             <Text style={[styles.actionButtonText, { color: "#fff" }]}>
                               Accept
                             </Text>
@@ -4665,6 +4692,8 @@ export default function BookingsScreen() {
                 const applicationLabel = getApplicationDisplayLabel(item);
                 const applicationIcon = applicationLabel === "Solo Artist" ? "person-outline" : "people-outline";
                 const applicationTypeBadge = `${applicationLabel} Application`;
+                const applicationReceivedAt = formatApplicationReceivedDateTime(item);
+                const applicationReceivedLabel = isMusicianView ? "Submitted" : "Received";
 
                 return (
                   <View
@@ -4778,6 +4807,23 @@ export default function BookingsScreen() {
                               </View>
                             )}
 
+                            {/* Received / Submitted Time */}
+                            {applicationReceivedAt && (
+                              <View style={styles.cardDetailRow}>
+                                <Ionicons
+                                  name="time-outline"
+                                  size={14}
+                                  color={colors.textSecondary}
+                                />
+                                <Text
+                                  style={[styles.cardDetailText, { color: colors.textSecondary }]}
+                                  numberOfLines={1}
+                                >
+                                  {`${applicationReceivedLabel} ${applicationReceivedAt}`}
+                                </Text>
+                              </View>
+                            )}
+
                             {/* Date */}
                             {item.date && item.date !== "TBA" && (
                               <View style={styles.cardDetailRow}>
@@ -4837,11 +4883,6 @@ export default function BookingsScreen() {
                                   },
                                 ]}
                               >
-                                <Ionicons
-                                  name="play-circle"
-                                  size={16}
-                                  color="#3B82F6"
-                                />
                                 <Text
                                   style={[styles.attachmentChipText, { color: "#3B82F6" }]}
                                 >
@@ -4864,11 +4905,6 @@ export default function BookingsScreen() {
                                   },
                                 ]}
                               >
-                                <Ionicons
-                                  name="document-text"
-                                  size={16}
-                                  color="#8B5CF6"
-                                />
                                 <Text
                                   style={[styles.attachmentChipText, { color: "#8B5CF6" }]}
                                 >
@@ -4969,11 +5005,6 @@ export default function BookingsScreen() {
                                 gap: 6,
                               }}
                             >
-                              <Ionicons
-                                name="eye-outline"
-                                size={16}
-                                color={colors.textSecondary}
-                              />
                               <Text
                                 style={{
                                   color: colors.textSecondary,
@@ -4999,11 +5030,6 @@ export default function BookingsScreen() {
                                     ]}
                                   >
                                     <View style={styles.detailsButtonLabelContainer}>
-                                      <Ionicons
-                                        name="eye-outline"
-                                        size={16}
-                                        color={colors.textSecondary}
-                                      />
                                       <Text style={[styles.outlineButtonText, { color: colors.textSecondary }]}>
                                         View
                                       </Text>
@@ -5070,11 +5096,6 @@ export default function BookingsScreen() {
                                     gap: 6,
                                   }}
                                 >
-                                  <Ionicons
-                                    name="eye-outline"
-                                    size={16}
-                                    color={colors.textSecondary}
-                                  />
                                   <Text
                                     style={{
                                       color: colors.textSecondary,
@@ -5123,14 +5144,9 @@ export default function BookingsScreen() {
                                       flex: 1,
                                       borderColor: colors.border,
                                     },
-                                  ]}
-                                >
+                                ]}
+                              >
                                   <View style={styles.detailsButtonLabelContainer}>
-                                    <Ionicons
-                                      name="eye-outline"
-                                      size={16}
-                                      color={colors.textSecondary}
-                                    />
                                     <Text style={[styles.outlineButtonText, { color: colors.textSecondary }]}>
                                       View
                                     </Text>
@@ -5252,11 +5268,6 @@ export default function BookingsScreen() {
                                     gap: 6,
                                   }}
                                 >
-                                  <Ionicons
-                                    name="star-outline"
-                                    size={16}
-                                    color={colors.primary}
-                                  />
                                   <Text
                                     style={{
                                       color: colors.primary,
@@ -5283,11 +5294,6 @@ export default function BookingsScreen() {
                                     gap: 6,
                                   }}
                                 >
-                                  <Ionicons
-                                    name="refresh"
-                                    size={16}
-                                    color="white"
-                                  />
                                   <Text
                                     style={{
                                       color: "white",
@@ -5550,11 +5556,6 @@ export default function BookingsScreen() {
                                     borderRadius: 8,
                                   }}
                                 >
-                                  <Ionicons
-                                    name="play-circle"
-                                    size={20}
-                                    color="#3B82F6"
-                                  />
                                   <Text
                                     style={{
                                       fontSize: 12,
@@ -6216,7 +6217,6 @@ export default function BookingsScreen() {
                                     },
                                   ]}
                                 >
-                                  <Ionicons name="card-outline" size={16} color="white" />
                                   <Text
                                     style={[
                                       styles.actionButtonText,
@@ -6281,11 +6281,6 @@ export default function BookingsScreen() {
                                 gap: 6,
                               }}
                             >
-                              <Ionicons
-                                name="eye-outline"
-                                size={16}
-                                color={colors.textSecondary}
-                              />
                               <Text
                                 style={{
                                   color: colors.textSecondary,
@@ -6549,12 +6544,6 @@ export default function BookingsScreen() {
                                         },
                                       ]}
                                     >
-                                      <Ionicons
-                                        name="card-outline"
-                                        size={18}
-                                        color="white"
-                                        style={{ marginRight: 8 }}
-                                      />
                                       <Text
                                         style={[
                                           styles.actionButtonText,
@@ -6584,12 +6573,6 @@ export default function BookingsScreen() {
                                         },
                                       ]}
                                     >
-                                      <Ionicons
-                                        name="checkmark-circle-outline"
-                                        size={18}
-                                        color="white"
-                                        style={{ marginRight: 8 }}
-                                      />
                                       <Text
                                         style={[
                                           styles.actionButtonText,
@@ -6693,6 +6676,7 @@ export default function BookingsScreen() {
               );
             })
           )}
+          </SmoothTabTransition>
         </ScrollView>
 
         {!shouldHideNavbar ? (
@@ -7019,10 +7003,12 @@ export default function BookingsScreen() {
         transparent
         statusBarTranslucent
         navigationBarTranslucent
+        presentationStyle="overFullScreen"
+        hardwareAccelerated
         animationType="fade"
         onRequestClose={() => setShowPaymentOptionModal(false)}
       >
-        <BlurView intensity={60} tint="dark" style={styles.modalOverlay}>
+        <View style={styles.modalOverlay}>
           <View
             style={[
               styles.paymentOptionContainer,
@@ -7181,13 +7167,15 @@ export default function BookingsScreen() {
               <Text style={{ color: colors.textSecondary, fontFamily: 'Poppins_500Medium' }}>Cancel</Text>
             </TouchableOpacity>
           </View>
-        </BlurView>
+        </View>
       </RNModal>
 
       {/* Scanner Modal (Studio Owner) */}
       <RNModal
         visible={showScanModal}
         animationType="slide"
+        hardwareAccelerated
+        statusBarTranslucent
         onRequestClose={() => setShowScanModal(false)}
       >
         <View style={{ flex: 1, backgroundColor: "black" }}>
@@ -7234,7 +7222,10 @@ const styles = StyleSheet.create({
   },
   tabText: {
     fontSize: moderateScale(12),
+    lineHeight: moderateScale(16),
     fontFamily: "Poppins_600SemiBold",
+    includeFontPadding: false,
+    textAlignVertical: "center",
   },
   searchFilterContainer: {
     paddingHorizontal: scale(16),
@@ -7309,7 +7300,10 @@ const styles = StyleSheet.create({
   },
   filterChipText: {
     fontSize: moderateScale(13),
+    lineHeight: moderateScale(17),
     fontFamily: "Poppins_500Medium",
+    includeFontPadding: false,
+    textAlignVertical: "center",
   },
   scrollContent: {
     paddingBottom:
@@ -7396,7 +7390,10 @@ const styles = StyleSheet.create({
   typeBadgeText: {
     color: "white",
     fontSize: moderateScale(10),
+    lineHeight: moderateScale(13),
     fontFamily: "Poppins_600SemiBold",
+    includeFontPadding: false,
+    textAlignVertical: "center",
   },
   liveBadge: {
     position: "absolute",
@@ -7572,6 +7569,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
     padding: 20,
+    backgroundColor: "rgba(15,23,42,0.62)",
   },
   qrContainer: {
     width: "100%",
@@ -7636,19 +7634,24 @@ const styles = StyleSheet.create({
 
   actionButton: {
     paddingHorizontal: scale(12),
-    paddingVertical: moderateScale(8),
+    paddingVertical: 0,
+    minHeight: moderateScale(44),
     borderRadius: moderateScale(100),
     alignItems: "center",
     justifyContent: "center",
   },
   actionButtonText: {
     fontSize: moderateScale(12),
+    lineHeight: moderateScale(16),
     fontFamily: "Poppins_600SemiBold",
     textAlign: "center",
+    includeFontPadding: false,
+    textAlignVertical: "center",
   },
   outlineButton: {
     paddingHorizontal: scale(12),
-    paddingVertical: moderateScale(8),
+    paddingVertical: 0,
+    minHeight: moderateScale(44),
     borderRadius: moderateScale(100),
     borderWidth: 1.5,
     alignItems: "center",
@@ -7656,14 +7659,18 @@ const styles = StyleSheet.create({
   },
   outlineButtonText: {
     fontSize: moderateScale(12),
+    lineHeight: moderateScale(16),
     fontFamily: "Poppins_500Medium",
     textAlign: "center",
+    includeFontPadding: false,
+    textAlignVertical: "center",
   },
   detailsButtonLabelContainer: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
     gap: scale(8),
+    minHeight: moderateScale(16),
   },
   lateReportBadge: {
     flexDirection: "row",
@@ -7694,15 +7701,19 @@ const styles = StyleSheet.create({
   },
   cancelButton: {
     paddingHorizontal: scale(12),
-    paddingVertical: moderateScale(8),
+    paddingVertical: 0,
+    minHeight: moderateScale(44),
     borderRadius: moderateScale(100),
     alignItems: "center",
     justifyContent: "center",
   },
   cancelButtonText: {
     fontSize: moderateScale(12),
+    lineHeight: moderateScale(16),
     fontFamily: "Poppins_600SemiBold",
     textAlign: "center",
+    includeFontPadding: false,
+    textAlignVertical: "center",
   },
   navbarPosition: {
     position: "absolute",
@@ -7811,7 +7822,8 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    paddingVertical: 16,
+    minHeight: 52,
+    paddingVertical: 0,
     borderRadius: 16,
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 4 },
@@ -7822,7 +7834,11 @@ const styles = StyleSheet.create({
   paymentOptionConfirmText: {
     color: "white",
     fontSize: 16,
+    lineHeight: 20,
     fontFamily: "Poppins_600SemiBold",
+    includeFontPadding: false,
+    textAlign: "center",
+    textAlignVertical: "center",
   },
   // New detail styles for cards
   cardDetailRow: {
@@ -7865,12 +7881,15 @@ const styles = StyleSheet.create({
     gap: scale(4),
     borderWidth: 1,
     paddingHorizontal: scale(10),
-    paddingVertical: moderateScale(6),
+    paddingVertical: 0,
     borderRadius: moderateScale(100),
   },
   attachmentChipText: {
     fontSize: moderateScale(11),
+    lineHeight: moderateScale(15),
     fontFamily: "Poppins_600SemiBold",
+    includeFontPadding: false,
+    textAlignVertical: "center",
   },
 });
 

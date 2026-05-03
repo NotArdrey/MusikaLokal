@@ -1,6 +1,7 @@
 ﻿import { RealtimeChannel } from '@supabase/supabase-js';
 import { useCallback, useEffect, useState } from 'react';
 import { supabase } from '../../lib/supabase';
+import { emitToast } from '../events/toastBus';
 import { getScreenCacheKey, readScreenCache, writeScreenCache } from '../utils/screenCache';
 
 const createUuidV4 = () =>
@@ -44,11 +45,13 @@ export interface Message {
 
 export interface ConversationParticipant {
     id: string;
+    conversation_id: string;
     user_id: string;
     role: 'owner' | 'admin' | 'member';
     joined_at: string;
     last_read_at: string | null;
     is_muted: boolean;
+    muted_until: string | null;
     profile?: {
         id: string;
         full_name: string;
@@ -76,10 +79,13 @@ export interface Conversation {
         avatar_url: string | null;
     };
     // For group chats
+    current_participant?: ConversationParticipant | null;
     participants?: ConversationParticipant[];
     participant_count?: number;
     last_message?: Message | null;
     unread_count?: number;
+    is_muted?: boolean;
+    muted_until?: string | null;
 }
 
 type SenderProfile = NonNullable<Message['sender']>;
@@ -107,6 +113,92 @@ const toTimestamp = (value: string | null | undefined) => {
     return Number.isFinite(timestamp) ? timestamp : 0;
 };
 
+export const isConversationMuted = (
+    value: Pick<Conversation, 'is_muted' | 'muted_until'> | Pick<ConversationParticipant, 'is_muted' | 'muted_until'> | null | undefined,
+) => {
+    if (!value?.is_muted) return false;
+    if (!value.muted_until) return true;
+    const mutedUntil = toTimestamp(value.muted_until);
+    return mutedUntil === 0 || mutedUntil > Date.now();
+};
+
+const normalizeProfile = <T,>(profile: T | T[] | null | undefined): T | undefined => {
+    if (Array.isArray(profile)) {
+        return profile[0];
+    }
+
+    return profile || undefined;
+};
+
+const getMessagePreviewText = (message: Message) => {
+    if (message.message_type === 'image') return 'Sent a photo';
+    if (message.message_type === 'file') return 'Sent a file';
+    if (message.message_type === 'system') return message.content || 'System message';
+    return message.content || 'Sent a message';
+};
+
+const getConversationToastTitle = (conversation: Conversation, message: Message) => {
+    const sender = message.sender || senderProfileCache.get(message.sender_id);
+
+    if (conversation.is_group) {
+        const groupName = conversation.group_name || 'Group chat';
+        return sender?.full_name ? `${sender.full_name} in ${groupName}` : groupName;
+    }
+
+    return conversation.other_participant?.full_name || sender?.full_name || 'New message';
+};
+
+const emitIncomingMessageToast = (
+    conversation: Conversation,
+    message: Message,
+    currentUserId: string,
+) => {
+    if (message.sender_id === currentUserId || isConversationMuted(conversation)) {
+        return;
+    }
+
+    emitToast({
+        id: `message-${message.id}`,
+        dedupeKey: `message:${message.id}`,
+        title: getConversationToastTitle(conversation, message),
+        message: getMessagePreviewText(message),
+        type: 'info',
+        source: 'chat-message',
+    });
+};
+
+export type ConversationMuteState = {
+    conversation_id: string;
+    user_id: string;
+    is_muted: boolean;
+    muted_until: string | null;
+};
+
+export const setConversationMute = async (
+    conversationId: string,
+    muted: boolean,
+    mutedUntil: string | null = null,
+): Promise<ConversationMuteState> => {
+    const { data, error } = await supabase.rpc('set_conversation_mute', {
+        p_conversation_id: conversationId,
+        p_muted: muted,
+        p_muted_until: muted ? mutedUntil : null,
+    });
+
+    if (error) {
+        throw error;
+    }
+
+    const row = Array.isArray(data) ? data[0] : data;
+
+    return {
+        conversation_id: row?.conversation_id || conversationId,
+        user_id: row?.user_id || '',
+        is_muted: Boolean(row?.is_muted ?? muted),
+        muted_until: row?.muted_until ?? null,
+    };
+};
+
 const sortMessagesChronologically = (messages: Message[]) => {
     return [...messages].sort((left, right) => {
         return toTimestamp(left.created_at) - toTimestamp(right.created_at);
@@ -132,6 +224,18 @@ const upsertMessage = (messages: Message[], nextMessage: Message) => {
     };
 
     return sortMessagesChronologically(nextMessages);
+};
+
+const mergeFetchedMessages = (currentMessages: Message[], fetchedMessages: Message[]) => {
+    const fetchedMessageIds = new Set(fetchedMessages.map((message) => message.id));
+    const localUnresolvedMessages = currentMessages.filter((message) => {
+        return (
+            (message.local_status === 'sending' || message.local_status === 'failed') &&
+            !fetchedMessageIds.has(message.id)
+        );
+    });
+
+    return sortMessagesChronologically([...fetchedMessages, ...localUnresolvedMessages]);
 };
 
 const buildConversationListCacheKey = (currentUserId: string) => {
@@ -386,7 +490,7 @@ export function useConversations(currentUserId: string | null) {
             // Fetch conversations where user is a participant
             const { data: participations, error: partError } = await supabase
                 .from('conversation_participants')
-                .select('conversation_id')
+                .select('conversation_id, is_muted, muted_until')
                 .eq('user_id', currentUserId);
 
             if (partError) throw partError;
@@ -509,10 +613,7 @@ export function useConversations(currentUserId: string | null) {
                 current.push(participant);
                 participantsByConversationId.set(participant.conversation_id, current);
 
-                const profile = Array.isArray(participant.profile)
-                    ? participant.profile[0]
-                    : participant.profile;
-                cacheSenderProfile(profile || null);
+                cacheSenderProfile(normalizeProfile(participant.profile) || null);
             }
 
             const unreadCountByConversationId = new Map<string, number>();
@@ -536,28 +637,38 @@ export function useConversations(currentUserId: string | null) {
             // Process 1-on-1 conversations
             const processedDirectConversations = (directConversations || []).map((conv: any) => {
                 const conversationParticipants = participantsByConversationId.get(conv.id) || [];
-                const otherParticipant = conversationParticipants.find((participant) => participant.user_id !== currentUserId)?.profile;
+                const currentParticipant = conversationParticipants.find((participant) => participant.user_id === currentUserId) || null;
+                const otherParticipant = normalizeProfile(
+                    conversationParticipants.find((participant) => participant.user_id !== currentUserId)?.profile,
+                );
 
                 return {
                     ...conv,
                     is_group: false,
+                    current_participant: currentParticipant,
                     other_participant: otherParticipant,
                     last_message: latestMessageByConversationId.get(conv.id) || null,
                     unread_count: unreadCountByConversationId.get(conv.id) || 0,
+                    is_muted: isConversationMuted(currentParticipant),
+                    muted_until: currentParticipant?.muted_until ?? null,
                 };
             });
 
             // Process group conversations
             const processedGroupConversations = groupConversations.map((conv: any) => {
                 const participants = participantsByConversationId.get(conv.id) || [];
+                const currentParticipant = participants.find((participant) => participant.user_id === currentUserId) || null;
 
                 return {
                     ...conv,
                     is_group: true,
+                    current_participant: currentParticipant,
                     participants: participants || [],
                     participant_count: participants?.length || 0,
                     last_message: latestMessageByConversationId.get(conv.id) || null,
                     unread_count: unreadCountByConversationId.get(conv.id) || 0,
+                    is_muted: isConversationMuted(currentParticipant),
+                    muted_until: currentParticipant?.muted_until ?? null,
                 };
             });
 
@@ -612,7 +723,7 @@ export function useConversations(currentUserId: string | null) {
         return () => {
             cancelled = true;
         };
-    }, [fetchConversations]);
+    }, [currentUserId, fetchConversations]);
 
     // REALTIME SUBSCRIPTION FOR CONVERSATION LIST
     useEffect(() => {
@@ -650,14 +761,16 @@ export function useConversations(currentUserId: string | null) {
                             // or fetch asynchronously. 
 
                             const sender = senderProfileCache.get(newMessage.sender_id);
-                            conversation.last_message = {
+                            const messageWithSender = {
                                 ...newMessage,
                                 sender,
                             };
+                            conversation.last_message = messageWithSender;
                             conversation.updated_at = newMessage.created_at;
 
                             if (newMessage.sender_id !== currentUserId) {
                                 conversation.unread_count = (conversation.unread_count || 0) + 1;
+                                emitIncomingMessageToast(conversation, messageWithSender, currentUserId);
                             }
 
                             // Remove from old position and add to top
@@ -733,7 +846,44 @@ export function useConversations(currentUserId: string | null) {
         };
     }, [currentUserId, fetchConversations]);
 
-    return { conversations, loading, error, refetch: fetchConversations };
+    const toggleConversationMute = useCallback(async (
+        conversationId: string,
+        muted: boolean,
+        mutedUntil: string | null = null,
+    ) => {
+        const muteState = await setConversationMute(conversationId, muted, mutedUntil);
+
+        setConversations((prevConversations) => {
+            const updatedConversations = prevConversations.map((conversation) => {
+                if (conversation.id !== conversationId) {
+                    return conversation;
+                }
+
+                return {
+                    ...conversation,
+                    is_muted: isConversationMuted(muteState),
+                    muted_until: muteState.muted_until,
+                    current_participant: conversation.current_participant
+                        ? {
+                            ...conversation.current_participant,
+                            is_muted: muteState.is_muted,
+                            muted_until: muteState.muted_until,
+                        }
+                        : conversation.current_participant,
+                };
+            });
+
+            if (currentUserId) {
+                void writeScreenCache(buildConversationListCacheKey(currentUserId), updatedConversations);
+            }
+
+            return updatedConversations;
+        });
+
+        return muteState;
+    }, [currentUserId]);
+
+    return { conversations, loading, error, refetch: fetchConversations, toggleConversationMute };
 }
 
 // Hook for chat messages in a conversation
@@ -781,13 +931,17 @@ export function useChat(conversationId: string | null, currentUserId: string | n
                 if (fetchError) throw fetchError;
                 if (cancelled) return;
 
-                const nextMessages = sortMessagesChronologically(data || []);
-                primeSenderProfileCache(nextMessages);
-                setMessages(nextMessages);
+                const fetchedMessages = sortMessagesChronologically(data || []);
+                primeSenderProfileCache(fetchedMessages);
+                setMessages((prev) => {
+                    const nextMessages = mergeFetchedMessages(prev, fetchedMessages);
 
-                if (messageCacheKey) {
-                    await writeScreenCache(messageCacheKey, nextMessages);
-                }
+                    if (messageCacheKey) {
+                        void writeScreenCache(messageCacheKey, nextMessages);
+                    }
+
+                    return nextMessages;
+                });
             } catch (err: any) {
                 console.error('Error fetching messages:', err);
                 setError(err.message);
@@ -911,6 +1065,7 @@ export function useChat(conversationId: string | null, currentUserId: string | n
         const trimmedContent = content.trim();
 
         try {
+            setError(null);
             const createdAt = new Date().toISOString();
             const optimisticMessage: Message = {
                 id: messageId,
@@ -1004,6 +1159,111 @@ export function useChat(conversationId: string | null, currentUserId: string | n
             setPendingSendCount((count) => Math.max(0, count - 1));
         }
     }, [conversationId, currentUserId, messageCacheKey]);
+
+    const retryMessage = useCallback(async (messageId: string) => {
+        if (!conversationId || !currentUserId) {
+            return { error: 'Missing required data' };
+        }
+
+        const failedMessage = messages.find((message) => {
+            return (
+                message.id === messageId &&
+                message.sender_id === currentUserId &&
+                message.local_status === 'failed'
+            );
+        });
+
+        if (!failedMessage || !failedMessage.content.trim()) {
+            return { error: 'Message is not available to retry' };
+        }
+
+        const retryAt = new Date().toISOString();
+        const nextMessage: Message = {
+            ...failedMessage,
+            content: failedMessage.content.trim(),
+            created_at: retryAt,
+            local_status: 'sending',
+            local_error: null,
+        };
+
+        try {
+            setError(null);
+            setPendingSendCount((count) => count + 1);
+            setMessages((prev) => {
+                const nextMessages = upsertMessage(prev, nextMessage);
+
+                if (messageCacheKey) {
+                    void writeScreenCache(messageCacheKey, nextMessages);
+                }
+
+                return nextMessages;
+            });
+
+            const { error: sendError } = await supabase
+                .from('messages')
+                .upsert({
+                    id: nextMessage.id,
+                    conversation_id: conversationId,
+                    sender_id: currentUserId,
+                    content: nextMessage.content,
+                    message_type: nextMessage.message_type,
+                    attachment_url: nextMessage.attachment_url,
+                }, { onConflict: 'id' });
+
+            if (sendError) throw sendError;
+
+            setMessages((prev) => {
+                const nextMessages = upsertMessage(prev, {
+                    ...nextMessage,
+                    local_status: 'sent',
+                    local_error: null,
+                });
+
+                if (messageCacheKey) {
+                    void writeScreenCache(messageCacheKey, nextMessages);
+                }
+
+                return nextMessages;
+            });
+
+            void supabase
+                .from('conversations')
+                .update({ updated_at: new Date().toISOString() })
+                .eq('id', conversationId)
+                .then(({ error: updateError }) => {
+                    if (updateError) {
+                        console.warn('Failed to update conversation timestamp:', updateError);
+                    }
+                });
+
+            return { error: null };
+        } catch (err: any) {
+            console.error('Error retrying message:', err);
+            const messageError = err?.message || 'Message failed to send';
+            setMessages((prev) => {
+                const failedMessages = prev.map((message) => {
+                    if (message.id !== messageId) {
+                        return message;
+                    }
+
+                    return {
+                        ...message,
+                        local_status: 'failed' as const,
+                        local_error: messageError,
+                    };
+                });
+
+                if (messageCacheKey) {
+                    void writeScreenCache(messageCacheKey, failedMessages);
+                }
+
+                return failedMessages;
+            });
+            return { error: messageError };
+        } finally {
+            setPendingSendCount((count) => Math.max(0, count - 1));
+        }
+    }, [conversationId, currentUserId, messageCacheKey, messages]);
 
     // Mark messages as read
     const markAsRead = useCallback(async () => {
@@ -1132,7 +1392,7 @@ export function useChat(conversationId: string | null, currentUserId: string | n
         }
     }, [currentUserId]);
 
-    return { messages, loading, sending, error, sendMessage, markAsRead, addReaction, removeReaction };
+    return { messages, loading, sending, error, sendMessage, retryMessage, markAsRead, addReaction, removeReaction };
 }
 
 // Helper to get total unread count (includes both 1-on-1 and group chats)

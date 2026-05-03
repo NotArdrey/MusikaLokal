@@ -5,7 +5,6 @@ import {
     BottomSheetScrollView,
     useBottomSheetTimingConfigs,
 } from "@gorhom/bottom-sheet";
-import { BlurView } from "expo-blur";
 import * as ExpoLinking from "expo-linking";
 import { router, useFocusEffect } from "expo-router";
 import React, {
@@ -2474,10 +2473,11 @@ const ListingDetailsSheet = forwardRef<
   const showReportButton = !!group && !isOwnListing && !isGuest;
   const isGroupListing = group?.type === "Group";
   const effectiveUserRole = userRole || currentUserRole;
+  const isMusicianUser = effectiveUserRole === "musician";
   const hasStructuredConnectionTab =
     !isGuest &&
     effectiveUserRole === "producer" &&
-    (group?.type === "Group" || group?.type === "Artist" || group?.type === "Venue");
+    (group?.type === "Group" || group?.type === "Artist");
   const hasGroupConnectContent =
     !isGuest &&
     group?.type === "Group" &&
@@ -2506,24 +2506,28 @@ const ListingDetailsSheet = forwardRef<
       baseTabs.push("Review");
     }
 
+    const roleFilteredTabs = isMusicianUser
+      ? baseTabs
+      : baseTabs.filter((tab) => !["Apply", "Book"].includes(tab));
+
     if (isGuest) {
-      return baseTabs.filter((tab) => !["Apply", "Connect", "Book"].includes(tab));
+      return roleFilteredTabs.filter((tab) => tab !== "Connect");
     }
 
-    if (shouldShowConnectTab && !baseTabs.includes("Connect")) {
-      const reviewTabIndex = baseTabs.indexOf("Review");
+    if (shouldShowConnectTab && !roleFilteredTabs.includes("Connect")) {
+      const reviewTabIndex = roleFilteredTabs.indexOf("Review");
       if (reviewTabIndex === -1) {
-        baseTabs.push("Connect");
+        roleFilteredTabs.push("Connect");
       } else {
-        baseTabs.splice(reviewTabIndex, 0, "Connect");
+        roleFilteredTabs.splice(reviewTabIndex, 0, "Connect");
       }
     }
 
     if (!isGroupListing) {
-      return baseTabs;
+      return roleFilteredTabs;
     }
 
-    const withoutApply = baseTabs.filter((tab) => tab !== "Apply");
+    const withoutApply = roleFilteredTabs.filter((tab) => tab !== "Apply");
     if (!canApplyToGroup) {
       return withoutApply;
     }
@@ -2540,9 +2544,12 @@ const ListingDetailsSheet = forwardRef<
     const nextTabs = [...withoutApply];
     nextTabs.splice(reviewTabIndex, 0, "Apply");
     return nextTabs;
-  }, [canApplyToGroup, isGroupListing, isGuest, labels.tabs, shouldShowConnectTab]);
+  }, [canApplyToGroup, isGroupListing, isGuest, isMusicianUser, labels.tabs, shouldShowConnectTab]);
 
   const showTabs = hasDefaultTabs && tabsToRender.length > 0;
+  const visibleActiveTab = tabsToRender.includes(activeTab)
+    ? activeTab
+    : tabsToRender[0] || "About";
 
   useEffect(() => {
     if (!tabsToRender.length) {
@@ -2561,7 +2568,7 @@ const ListingDetailsSheet = forwardRef<
           key={tab}
           style={[
             styles.tab,
-            activeTab === tab && {
+            visibleActiveTab === tab && {
               borderBottomColor: colors.primary,
               borderBottomWidth: 2,
             },
@@ -2571,7 +2578,7 @@ const ListingDetailsSheet = forwardRef<
           <Text
             style={[
               styles.tabText,
-              activeTab === tab
+              visibleActiveTab === tab
                 ? { color: colors.primary, fontFamily: "Poppins_600SemiBold" }
                 : { color: colors.textSecondary },
             ]}
@@ -3502,7 +3509,7 @@ const ListingDetailsSheet = forwardRef<
         styles={styles}
         colors={colors}
         group={group}
-        activeTab={activeTab}
+        activeTab={visibleActiveTab}
         showTabs={showTabs}
         renderGroupAbout={renderGroupAbout}
         renderGroupApply={renderGroupApply}
@@ -3672,12 +3679,14 @@ const ListingDetailsSheet = forwardRef<
         transparent
         statusBarTranslucent
         navigationBarTranslucent
+        presentationStyle="overFullScreen"
+        hardwareAccelerated
         animationType="fade"
         onRequestClose={() =>
           !isProcessingPayment && setShowPaymentOptionModal(false)
         }
       >
-        <BlurView intensity={60} tint="dark" style={styles.paymentModalOverlay}>
+        <View style={styles.paymentModalOverlay}>
           {isProcessingPayment ? (
             // Loading Screen while PayMongo processes
             <View
@@ -3870,7 +3879,7 @@ const ListingDetailsSheet = forwardRef<
               </TouchableOpacity>
             </View>
           )}
-        </BlurView>
+        </View>
       </RNModal>
     </>
   );
@@ -4287,6 +4296,18 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     borderWidth: 1,
   },
+  amenityChip: {
+    minWidth: 124,
+    maxWidth: "100%",
+    minHeight: 44,
+    paddingHorizontal: 14,
+    paddingVertical: 0,
+    borderRadius: 14,
+    borderWidth: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "flex-start",
+  },
   // Forms
   inputContainer: {
     marginBottom: moderateScale(16),
@@ -4618,6 +4639,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
     paddingHorizontal: 20,
+    backgroundColor: "rgba(15,23,42,0.58)",
   },
   paymentLoadingContainer: {
     borderRadius: 20,

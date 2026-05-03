@@ -1,11 +1,11 @@
 import { Ionicons } from '@expo/vector-icons';
-import { BottomSheetBackdrop, BottomSheetFlatList, BottomSheetModal, useBottomSheetTimingConfigs } from '@gorhom/bottom-sheet';
+import { BottomSheetBackdrop, BottomSheetFlatList, BottomSheetModal, useBottomSheetSpringConfigs } from '@gorhom/bottom-sheet';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { forwardRef, useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Dimensions, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { Easing } from 'react-native-reanimated';
 import { supabase } from '../../lib/supabase';
 import { useTheme } from '../context/ThemeContext';
+import { bottomSheetSpringConfig } from '../utils/motion';
 import ListingCard from './ListingCard';
 import TrackedBottomSheetModal from './TrackedBottomSheetModal';
 
@@ -35,12 +35,9 @@ interface RecentlyViewedSheetProps {
 }
 
 const RecentlyViewedSheet = forwardRef<BottomSheetModal, RecentlyViewedSheetProps>(({ onClose, onItemPress, onProductionTeamPress, onChat }, ref) => {
-    const { colors, isDark } = useTheme();
+    const { colors } = useTheme();
     const snapPoints = useMemo(() => ['90%'], []);
-    const animationConfigs = useBottomSheetTimingConfigs({
-        duration: 320,
-        easing: Easing.inOut(Easing.cubic),
-    });
+    const animationConfigs = useBottomSheetSpringConfigs(bottomSheetSpringConfig);
 
     const [data, setData] = useState<any[]>([]);
     const [loading, setLoading] = useState(false);
@@ -216,6 +213,7 @@ const RecentlyViewedSheet = forwardRef<BottomSheetModal, RecentlyViewedSheetProp
         <>
             <TrackedBottomSheetModal
                 ref={ref}
+                overlayLabel="RecentlyViewedSheet"
                 index={0}
                 snapPoints={snapPoints}
                 animationConfigs={animationConfigs}
@@ -329,5 +327,7 @@ const styles = StyleSheet.create({
         textAlign: 'center',
     },
 });
+
+RecentlyViewedSheet.displayName = 'RecentlyViewedSheet';
 
 export default RecentlyViewedSheet;

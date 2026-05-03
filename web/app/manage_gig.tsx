@@ -17,6 +17,7 @@ import CustomAlert, { AlertType } from "../src/components/CustomAlert";
 import Header from "../src/components/header";
 import Modal from "../src/components/modal";
 import Navbar from "../src/components/navbar";
+import SmoothTabTransition from "../src/components/SmoothTabTransition";
 import { useTheme } from "../src/context/ThemeContext";
 import {
     hasValidCoordinates,
@@ -487,7 +488,7 @@ export default function GigDetailsScreen() {
             ))}
           </View>
 
-          <View style={styles.contentContainer}>
+          <SmoothTabTransition activeKey={activeTab} style={styles.contentContainer}>
             {activeTab === "About" && (
               <View style={styles.aboutContainer}>
                 <View>
@@ -1639,7 +1640,7 @@ export default function GigDetailsScreen() {
                 )}
               </View>
             )}
-          </View>
+          </SmoothTabTransition>
         </ScrollView>
 
         <Navbar />

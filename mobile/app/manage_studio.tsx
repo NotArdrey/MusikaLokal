@@ -4,6 +4,7 @@ import React, { useRef, useState } from "react";
 import {
     ActivityIndicator,
     Image,
+    InteractionManager,
     Linking,
     ScrollView,
     StyleSheet,
@@ -19,6 +20,8 @@ import Header from "../src/components/header";
 import InAppMediaViewer, { isInAppMediaUrl } from "../src/components/InAppMediaViewer";
 import Modal from "../src/components/modal";
 import Navbar from "../src/components/navbar";
+import SlidingTabBar from "../src/components/SlidingTabBar";
+import SmoothTabTransition from "../src/components/SmoothTabTransition";
 import { useBottomBarClearance } from "../src/hooks/useBottomBarClearance";
 import { useTheme } from "../src/context/ThemeContext";
 import {
@@ -26,6 +29,7 @@ import {
     openNavigationDirections,
 } from "../src/utils/navigation";
 import { formatFriendlyDateTime } from "../src/utils/friendlyDateTime";
+import { getSmoothTabIndex, setSmoothTab } from "../src/utils/smoothTabs";
 
 const CUSTOM_DATE_PREVIEW_LIMIT = 5;
 
@@ -231,7 +235,17 @@ export default function StudioDetailsScreen() {
   // Role-based access control + refresh on screen focus (after edits)
   useFocusEffect(
     React.useCallback(() => {
-      checkAuthorization();
+      let isActive = true;
+      const focusTask = InteractionManager.runAfterInteractions(() => {
+        if (isActive) {
+          void checkAuthorization();
+        }
+      });
+
+      return () => {
+        isActive = false;
+        focusTask.cancel();
+      };
     }, [id]),
   );
 
@@ -721,55 +735,25 @@ export default function StudioDetailsScreen() {
             )}
           </View>
 
-          {/* Segmented Control Tabs */}
-          <View
-            style={[
-              styles.tabsContainer,
-              { backgroundColor: colors.inputBackground },
-            ]}
-          >
-            {tabs.map((tab) => (
-              <TouchableOpacity activeOpacity={1}
-                key={tab}
-                onPress={() => setActiveTab(tab)}
-                style={[
-                  styles.tab,
-                  {
-                    backgroundColor:
-                      activeTab === tab ? colors.surface : "transparent",
-                    shadowColor: "#000",
-                    shadowOffset: {
-                      width: 0,
-                      height: activeTab === tab ? 2 : 0,
-                    },
-                    shadowOpacity: activeTab === tab ? 0.05 : 0,
-                    shadowRadius: 4,
-                    elevation: activeTab === tab ? 2 : 0,
-                  },
-                ]}
-              >
-                <Text
-                  style={[
-                    styles.tabText,
-                    {
-                      fontFamily:
-                        activeTab === tab
-                          ? "Poppins_600SemiBold"
-                          : "Poppins_500Medium",
-                      color:
-                        activeTab === tab
-                          ? colors.primary
-                          : colors.textSecondary,
-                    },
-                  ]}
-                >
-                  {tab}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </View>
+          {/* Tabs */}
+          <SlidingTabBar
+            activeColor={colors.primary}
+            activeKey={activeTab}
+            borderColor={colors.border}
+            indicatorColor={colors.primary}
+            indicatorWidthRatio={0.34}
+            onChange={(tab) => setSmoothTab(setActiveTab, tab)}
+            style={styles.tabsContainer}
+            tabs={tabs.map((tab) => ({ key: tab, label: tab }))}
+            textStyle={styles.tabText}
+          />
 
-          <View style={styles.contentContainer}>
+          <SmoothTabTransition
+            activeKey={activeTab}
+            activeIndex={getSmoothTabIndex(tabs, activeTab)}
+            renderOutgoing={false}
+            style={styles.contentContainer}
+          >
             {activeTab === "About" && (
               <View style={styles.aboutContainer}>
                 <View>
@@ -1935,7 +1919,7 @@ export default function StudioDetailsScreen() {
                 ))}
               </View>
             )}
-          </View>
+          </SmoothTabTransition>
         </ScrollView>
 
         <Navbar />
@@ -1978,6 +1962,7 @@ export default function StudioDetailsScreen() {
       {/* Partial Approval Modal for Multi-Slot Bookings */}
       <BottomModal
         visible={partialModalVisible}
+        overlayLabel="ManageStudioPartialApprovalModal"
         onClose={() => {
           setPartialModalVisible(false);
           setSelectedBookingForPartial(null);
@@ -2225,9 +2210,6 @@ const styles = StyleSheet.create({
   tabsContainer: {
     marginHorizontal: 24,
     marginTop: 24,
-    padding: 4,
-    borderRadius: 16,
-    flexDirection: "row",
   },
   tab: {
     flex: 1,

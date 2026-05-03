@@ -6,7 +6,7 @@ import GuestSignInGate from '../src/components/GuestSignInGate';
 import Header from '../src/components/header';
 import Navbar from '../src/components/navbar';
 import { useAuth } from '../src/context/AuthContext';
-import { showTopToast } from '../src/context/TopToastContext';
+import { emitToast } from '../src/events/toastBus';
 import { useTheme } from '../src/context/ThemeContext';
 
 const DEFAULT_PREFERENCES = {
@@ -125,7 +125,7 @@ export default function NotificationSettingsScreen() {
       });
     } catch (e: any) {
       console.error('Error initializing notification settings:', e);
-      showTopToast({
+      emitToast({
         type: 'error',
         title: 'Unable to Load Preferences',
         message: e?.message || 'Please try again later.',
@@ -155,7 +155,7 @@ export default function NotificationSettingsScreen() {
         throw error;
       }
 
-      showTopToast({
+      emitToast({
         type: 'success',
         title: 'Preference Updated',
         message: 'Your notification preference has been saved.',
@@ -164,7 +164,7 @@ export default function NotificationSettingsScreen() {
       return true;
     } catch (e: any) {
       console.error(`Error saving ${field}:`, e);
-      showTopToast({
+      emitToast({
         type: 'error',
         title: 'Save Failed',
         message: e?.message || 'Could not save notification preference.',

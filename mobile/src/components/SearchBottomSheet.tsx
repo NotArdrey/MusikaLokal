@@ -2,7 +2,7 @@ import { Ionicons } from "@expo/vector-icons";
 import {
     BottomSheetBackdrop,
     BottomSheetModal,
-    useBottomSheetTimingConfigs,
+    useBottomSheetSpringConfigs,
 } from "@gorhom/bottom-sheet";
 import { router } from "expo-router";
 import React, {
@@ -28,7 +28,6 @@ import {
     UIManager,
     View,
 } from "react-native";
-import { Easing } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { supabase } from "../../lib/supabase";
 import { useAuth } from "../context/AuthContext";
@@ -37,7 +36,7 @@ import {
   RADIO_MINI_PLAYER_STACK_GAP,
   useRadioPlayerPresence,
 } from "../context/RadioPlayerContext";
-import { showTopToast } from "../context/TopToastContext";
+import { emitToast } from "../events/toastBus";
 import { useTheme } from "../context/ThemeContext";
 import { useSearchResultsQuery } from "../data/hooks";
 import {
@@ -45,6 +44,7 @@ import {
   getListingSocialFollowTarget,
 } from "../utils/socialFollow";
 import { usePageLoadLogger } from "../utils/loadTimeLogger";
+import { bottomSheetSpringConfig } from "../utils/motion";
 import { NAVBAR_BOTTOM_OFFSET } from "./navbar";
 import ListingCard from "./ListingCard";
 import TrackedBottomSheetModal from "./TrackedBottomSheetModal";
@@ -125,10 +125,7 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
     const insets = useSafeAreaInsets();
     const { activeStation } = useRadioPlayerPresence();
     const snapPoints = useMemo(() => ["90%"], []);
-    const animationConfigs = useBottomSheetTimingConfigs({
-      duration: 260,
-      easing: Easing.out(Easing.cubic),
-    });
+    const animationConfigs = useBottomSheetSpringConfigs(bottomSheetSpringConfig);
 
     // Filter Chips - safely handle null userRole
     const isOwner = userRole === "venue-owner" || userRole === "studio-owner";
@@ -456,7 +453,7 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
             throw error;
           }
 
-          showTopToast({
+          emitToast({
             type: "success",
             title: wasFollowing ? "Unfollowed" : "Following",
             message: "",
@@ -474,7 +471,7 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
             return next;
           });
 
-          showTopToast({
+          emitToast({
             type: "error",
             title: "Follow failed",
             message: error?.message || "Please try again.",
@@ -507,8 +504,8 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
               onPress={handleItemPress}
               onChat={onChat ? handleChatPress : undefined}
               showGigSummary={false}
-              variant="vertical"
-              style={{ width: "100%", marginBottom: 0 }}
+              variant="feed"
+              style={{ width: "100%" }}
               actionSlot={
                 canFollow ? (
                   <TouchableOpacity
@@ -563,7 +560,7 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
       [],
     );
 
-    const itemSeparator = useCallback(() => <View style={{ height: 24 }} />, []);
+    const itemSeparator = useCallback(() => <View style={{ height: 10 }} />, []);
 
     const handleLoadMore = useCallback(() => {
       if (loading || loadingMore || !hasMoreResults) return;
@@ -1011,6 +1008,7 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
     return (
       <TrackedBottomSheetModal
         ref={ref}
+        overlayLabel="SearchBottomSheet"
         index={0}
         snapPoints={snapPoints}
         animationConfigs={animationConfigs}
@@ -1051,7 +1049,7 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
             ListFooterComponent={listFooter}
             contentContainerStyle={[
               styles.listContent,
-              { paddingHorizontal: 24 },
+              { paddingHorizontal: 16 },
             ]}
             keyboardShouldPersistTaps="handled"
             showsVerticalScrollIndicator={false}
@@ -1191,19 +1189,20 @@ const styles = StyleSheet.create({
     position: "relative",
   },
   followBadgeBtn: {
-    height: 24,
-    minWidth: 70,
-    borderRadius: 8,
+    minHeight: 40,
+    borderRadius: 14,
     borderWidth: 1,
-    paddingHorizontal: 8,
+    paddingHorizontal: 14,
     alignItems: "center",
     justifyContent: "center",
-    alignSelf: "center",
+    alignSelf: "stretch",
   },
   followBadgeText: {
     fontFamily: "Poppins_600SemiBold",
-    fontSize: 10,
-    textTransform: "uppercase",
+    fontSize: 12,
+    lineHeight: 16,
+    includeFontPadding: false,
+    textAlignVertical: "center",
   },
   listContent: {
     paddingBottom: 100,

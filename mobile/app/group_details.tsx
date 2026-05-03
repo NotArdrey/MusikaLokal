@@ -4,7 +4,6 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { router, useLocalSearchParams } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-    ActivityIndicator,
     Dimensions,
     Image,
     ScrollView,
@@ -21,6 +20,7 @@ import CustomAlert, { AlertType } from '../src/components/CustomAlert';
 import GroupLinkedPlaylistsSection from '../src/components/GroupLinkedPlaylistsSection';
 import Modal from '../src/components/modal';
 import ReportModal from '../src/components/ReportModal';
+import Skeleton from '../src/components/Skeleton';
 import { useAuth } from '../src/context/AuthContext';
 import { useListingDetailsQuery } from '../src/data/hooks';
 import { useTheme } from '../src/context/ThemeContext';
@@ -32,15 +32,14 @@ import {
     openNavigationDirections,
 } from '../src/utils/navigation';
 
-const { height } = Dimensions.get('window');
+const { width: SCREEN_WIDTH, height } = Dimensions.get('window');
 const IMG_HEIGHT = height * 0.5;
 export default function GroupDetailsScreen() {
   const { id } = useLocalSearchParams();
   const { colors, isDark } = useTheme();
   const { userId, isGuest } = useAuth();
   const insets = useSafeAreaInsets();
-  const [loading, setLoading] = useState(true);
-  const [group, setGroup] = useState<any>(null);
+  const [groupState, setGroup] = useState<any>(null);
   const [groupPlaylists, setGroupPlaylists] = useState<any[]>([]);
   const [loadingGroupPlaylists, setLoadingGroupPlaylists] = useState(false);
   const [isFavorited, setIsFavorited] = useState(false);
@@ -76,14 +75,14 @@ export default function GroupDetailsScreen() {
   }, []);
 
   useEffect(() => {
-    if (groupDetailsQuery.data) {
+    if (groupDetailsQuery.data?.id === groupId) {
       applyGroupDetails(groupDetailsQuery.data);
     }
-  }, [applyGroupDetails, groupDetailsQuery.data]);
+  }, [applyGroupDetails, groupDetailsQuery.data, groupId]);
 
-  useEffect(() => {
-    setLoading(groupDetailsQuery.isLoading && !group);
-  }, [group, groupDetailsQuery.isLoading]);
+  const queryGroup = groupDetailsQuery.data?.id === groupId ? groupDetailsQuery.data : null;
+  const group = groupState?.id === groupId ? groupState : queryGroup;
+  const loading = (groupDetailsQuery.isLoading || groupDetailsQuery.isFetching) && !group;
 
   usePageLoadLogger({
     counts: {
@@ -252,7 +251,7 @@ export default function GroupDetailsScreen() {
         longitude: group?.longitude,
         label: group?.location || group?.name || 'Group location',
       });
-    } catch (error) {
+    } catch {
       showAlert(
         'warning',
         'Navigation Unavailable',
@@ -263,8 +262,70 @@ export default function GroupDetailsScreen() {
 
   if (loading) {
     return (
-      <View style={[styles.loadingContainer, { backgroundColor: colors.background }]}>
-        <ActivityIndicator size="large" color={colors.primary} />
+      <View style={[styles.container, { backgroundColor: colors.background }]}>
+        <StatusBar barStyle="light-content" />
+        <ScrollView
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+          bounces={false}
+        >
+          <View style={[styles.imageContainer, { backgroundColor: colors.border }]}>
+            <Skeleton width="100%" height={IMG_HEIGHT} borderRadius={0} />
+
+            <View style={[styles.headerActions, { top: insets.top + 10 }]}>
+              <TouchableOpacity activeOpacity={1} onPress={() => router.back()} style={styles.roundBtn}>
+                <Ionicons name="arrow-back" size={24} color="#000" />
+              </TouchableOpacity>
+
+              <View style={styles.rightActions}>
+                {[1, 2].map((item) => (
+                  <View key={`group-details-action-skeleton-${item}`} style={styles.roundBtn}>
+                    <Skeleton width={20} height={20} borderRadius={10} />
+                  </View>
+                ))}
+              </View>
+            </View>
+          </View>
+
+          <View style={[styles.contentBody, { backgroundColor: colors.background }]}>
+            <View style={styles.titleSection}>
+              <Skeleton width={SCREEN_WIDTH * 0.62} height={32} style={{ marginBottom: 12 }} />
+              <Skeleton width={SCREEN_WIDTH * 0.45} height={16} style={{ marginBottom: 10 }} />
+              <Skeleton width={SCREEN_WIDTH * 0.55} height={16} />
+            </View>
+
+            <View style={[styles.divider, { backgroundColor: colors.border }]} />
+
+            <View style={styles.hostSection}>
+              <View style={{ flex: 1 }}>
+                <Skeleton width={SCREEN_WIDTH * 0.52} height={18} style={{ marginBottom: 8 }} />
+                <Skeleton width={SCREEN_WIDTH * 0.34} height={14} />
+              </View>
+              <Skeleton width={56} height={56} borderRadius={28} />
+            </View>
+
+            <View style={[styles.divider, { backgroundColor: colors.border }]} />
+
+            <View style={styles.section}>
+              <Skeleton width={SCREEN_WIDTH * 0.48} height={22} />
+              <Skeleton width="100%" height={16} />
+              <Skeleton width="92%" height={16} />
+              <Skeleton width="74%" height={16} />
+            </View>
+
+            <View style={[styles.divider, { backgroundColor: colors.border }]} />
+
+            <View style={styles.section}>
+              <Skeleton width={SCREEN_WIDTH * 0.5} height={22} />
+              {[1, 2].map((item) => (
+                <View key={`group-details-feature-skeleton-${item}`} style={styles.featureItem}>
+                  <Skeleton width={24} height={24} borderRadius={12} />
+                  <Skeleton width={SCREEN_WIDTH * 0.5} height={16} />
+                </View>
+              ))}
+            </View>
+          </View>
+        </ScrollView>
       </View>
     );
   }

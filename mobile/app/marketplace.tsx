@@ -1,10 +1,11 @@
-﻿import { Ionicons } from "@expo/vector-icons";
+import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect } from "@react-navigation/native";
 import { router } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Dimensions,
+  InteractionManager,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -20,11 +21,14 @@ import Header from "../src/components/header";
 import ImageUploader from "../src/components/ImageUploader";
 import Navbar from "../src/components/navbar";
 import Skeleton from "../src/components/Skeleton";
+import SlidingTabBar from "../src/components/SlidingTabBar";
+import SmoothTabTransition from "../src/components/SmoothTabTransition";
 import CustomAlert, { AlertType } from "../src/components/CustomAlert";
 import { useBottomBarClearance } from "../src/hooks/useBottomBarClearance";
 import { useAuth } from "../src/context/AuthContext";
-import { showTopToast } from "../src/context/TopToastContext";
+import { emitToast } from "../src/events/toastBus";
 import { useTheme } from "../src/context/ThemeContext";
+import { getSmoothTabIndex, setSmoothTab } from "../src/utils/smoothTabs";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const moderateScale = (size: number, factor = 0.3) => {
@@ -32,6 +36,7 @@ const moderateScale = (size: number, factor = 0.3) => {
   return size + (scaled - size) * factor;
 };
 const CARD_WIDTH = (SCREEN_WIDTH - 48) / 2;
+const MARKETPLACE_PAGE_SIZE = 20;
 const MARKETPLACE_FOCUS_REFRESH_COOLDOWN_MS = 30000;
 const MARKETPLACE_CATEGORIES = [
   { value: "apparel", label: "Apparel" },
@@ -51,6 +56,7 @@ type MarketplaceCachePayload = {
   products: any[];
   sellerProducts: any[];
   fetchedAt: number;
+  hasMoreProducts: boolean;
 };
 
 const marketplaceScreenCache = new Map<string, MarketplaceCachePayload>();
@@ -62,6 +68,24 @@ const getCategoryLabel = (category: string | null | undefined) => {
 };
 
 const getProductImage = (product: any) => product?.cover_image_url || product?.primary_image || null;
+
+const mergeProductsById = (currentProducts: any[], nextProducts: any[]) => {
+  const merged = new Map<string, any>();
+
+  currentProducts.forEach((product) => {
+    if (product?.id) {
+      merged.set(product.id, product);
+    }
+  });
+
+  nextProducts.forEach((product) => {
+    if (product?.id) {
+      merged.set(product.id, product);
+    }
+  });
+
+  return Array.from(merged.values());
+};
 
 export default function MarketplaceScreen() {
   const { colors, isDark } = useTheme();
@@ -100,8 +124,15 @@ export default function MarketplaceScreen() {
   const [deleteLoadingId, setDeleteLoadingId] = useState<string | null>(null);
 
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMoreProducts, setHasMoreProducts] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [alert, setAlert] = useState<{ type: AlertType; title: string; message: string; buttons?: any[] } | null>(null);
+  const sellerProductsRef = React.useRef<any[]>([]);
+
+  useEffect(() => {
+    sellerProductsRef.current = sellerProducts;
+  }, [sellerProducts]);
 
   const invokeMarketplace = useCallback(async (body: Record<string, unknown>) => {
     const { data, error } = await supabase.functions.invoke("manage-marketplace", { body });
@@ -122,44 +153,72 @@ export default function MarketplaceScreen() {
     return data;
   }, []);
 
-  const fetchAll = useCallback(async (options: { showLoading?: boolean } = {}) => {
+  const fetchAll = useCallback(async (options: { append?: boolean; offset?: number; showLoading?: boolean } = {}) => {
+    const append = options.append === true;
+    const offset = Math.max(0, options.offset || 0);
+
     if (!session && !isGuest) {
       setProducts([]);
       setSellerProducts([]);
+      setHasMoreProducts(false);
       setLoading(false);
+      setLoadingMore(false);
       setRefreshing(false);
       return;
     }
 
-    if (options.showLoading) {
+    if (append) {
+      setLoadingMore(true);
+    } else if (options.showLoading) {
       setLoading(true);
     }
 
     try {
-      const browseBody: any = { action: "browse_products", include_sold: true, limit: 40 };
+      const browseBody: any = {
+        action: "browse_products",
+        include_sold: true,
+        limit: MARKETPLACE_PAGE_SIZE + 1,
+        offset,
+      };
       if (category) browseBody.category = category;
 
       const promises: Promise<any>[] = [invokeMarketplace(browseBody)];
 
-      if (canSell) {
+      if (canSell && !append) {
         promises.push(invokeMarketplace({ action: "list_my_products" }));
       }
 
       const results = await Promise.all(promises);
-      const nextProducts = results[0]?.data || [];
-      const nextSellerProducts = canSell ? results[1]?.data || [] : [];
+      const fetchedProducts = Array.isArray(results[0]?.data) ? results[0].data : [];
+      const pageProducts = fetchedProducts.slice(0, MARKETPLACE_PAGE_SIZE);
+      const nextHasMoreProducts = fetchedProducts.length > MARKETPLACE_PAGE_SIZE;
+      const nextSellerProducts = canSell && !append ? results[1]?.data || [] : sellerProductsRef.current;
 
-      setProducts(nextProducts);
-      setSellerProducts(nextSellerProducts);
-      marketplaceScreenCache.set(marketplaceCacheKey, {
-        products: nextProducts,
-        sellerProducts: nextSellerProducts,
-        fetchedAt: Date.now(),
+      if (!append) {
+        setSellerProducts(nextSellerProducts);
+        sellerProductsRef.current = nextSellerProducts;
+      }
+
+      setProducts((currentProducts) => {
+        const nextProducts = append
+          ? mergeProductsById(currentProducts, pageProducts)
+          : pageProducts;
+
+        marketplaceScreenCache.set(marketplaceCacheKey, {
+          products: nextProducts,
+          sellerProducts: nextSellerProducts,
+          fetchedAt: Date.now(),
+          hasMoreProducts: nextHasMoreProducts,
+        });
+
+        return nextProducts;
       });
+      setHasMoreProducts(nextHasMoreProducts);
     } catch (e: any) {
       console.warn("Marketplace fetch failed", e);
     } finally {
       setLoading(false);
+      setLoadingMore(false);
       setRefreshing(false);
     }
   }, [session, isGuest, category, invokeMarketplace, canSell, marketplaceCacheKey]);
@@ -173,18 +232,33 @@ export default function MarketplaceScreen() {
     if (cached) {
       setProducts(cached.products);
       setSellerProducts(cached.sellerProducts);
+      sellerProductsRef.current = cached.sellerProducts;
+      setHasMoreProducts(Boolean(cached.hasMoreProducts));
       setLoading(false);
       setRefreshing(false);
     } else {
       setLoading(true);
     }
 
+    let focusRefreshTask: ReturnType<typeof InteractionManager.runAfterInteractions> | null = null;
+
     if (!cacheIsFresh) {
-      fetchAll({ showLoading: !cached });
+      focusRefreshTask = InteractionManager.runAfterInteractions(() => {
+        void fetchAll({ showLoading: !cached });
+      });
     }
+
+    return () => {
+      focusRefreshTask?.cancel();
+    };
   }, [fetchAll, marketplaceCacheKey]));
 
   const onRefresh = () => { setRefreshing(true); fetchAll(); };
+
+  const loadMoreProducts = () => {
+    if (loading || loadingMore || !hasMoreProducts) return;
+    fetchAll({ append: true, offset: products.length });
+  };
 
   const browseProducts = useMemo(() => {
     const merged = new Map<string, any>();
@@ -285,7 +359,7 @@ export default function MarketplaceScreen() {
         throw new Error(data?.error || "Unable to delete listing");
       }
 
-      showTopToast({
+      emitToast({
         type: "success",
         title: "Listing Deleted",
         message: "The product has been removed from your seller inventory.",
@@ -365,7 +439,7 @@ export default function MarketplaceScreen() {
           listingIsLive = Boolean(publishData?.success);
         }
 
-        showTopToast({
+        emitToast({
           type: "success",
           title: editingProductId ? "Listing Updated" : listingIsLive ? "Listing Live" : "Listing Saved",
           message: editingProductId
@@ -409,7 +483,7 @@ export default function MarketplaceScreen() {
           : action === "relist_product"
             ? "Buyers can message you about this item again."
             : "Product is now live.";
-        showTopToast({ type: "success", title, message });
+        emitToast({ type: "success", title, message });
         fetchAll();
         return;
       }
@@ -430,6 +504,31 @@ export default function MarketplaceScreen() {
     { key: "browse", label: "Browse", icon: "storefront-outline" },
     ...(canSell ? [{ key: "sell" as MarketTab, label: "Sell", icon: "pricetags-outline" }] : []),
   ];
+
+  const renderProductSkeletonGrid = () => (
+    <View style={styles.grid}>
+      {[1, 2, 3, 4].map((item) => (
+        <View
+          key={`marketplace-product-skeleton-${item}`}
+          style={[
+            styles.productCard,
+            {
+              backgroundColor: colors.surface,
+              borderColor: isDark ? "#334155" : "#E2E8F0",
+            },
+          ]}
+        >
+          <Skeleton width="100%" height={CARD_WIDTH} borderRadius={0} />
+          <View style={styles.productInfo}>
+            <Skeleton width="86%" height={16} style={{ marginBottom: 8 }} />
+            <Skeleton width="62%" height={13} style={{ marginBottom: 8 }} />
+            <Skeleton width="48%" height={16} style={{ marginBottom: 8 }} />
+            <Skeleton width="78%" height={20} borderRadius={999} />
+          </View>
+        </View>
+      ))}
+    </View>
+  );
 
   // ==========================================
   // Browse Tab Content
@@ -499,77 +598,98 @@ export default function MarketplaceScreen() {
         ))}
       </ScrollView>
 
-      {filteredProducts.length > 0 ? (
-        <View style={styles.grid}>
-          {filteredProducts.map((product) => {
-            const isSold = product?.status === "sold_out";
-            const cardBorderColor = isSold ? "#F97316" + "55" : isDark ? "#334155" : "#E2E8F0";
-            const categoryLabel = getCategoryLabel(product.category);
+      {loading ? (
+        renderProductSkeletonGrid()
+      ) : filteredProducts.length > 0 ? (
+        <>
+          <View style={styles.grid}>
+            {filteredProducts.map((product) => {
+              const isSold = product?.status === "sold_out";
+              const cardBorderColor = isSold ? "#F97316" + "55" : isDark ? "#334155" : "#E2E8F0";
+              const categoryLabel = getCategoryLabel(product.category);
 
-            return (
-              <TouchableOpacity activeOpacity={1}
-                key={product.id}
-                style={[
-                  styles.productCard,
-                  {
-                    backgroundColor: colors.surface,
-                    borderColor: cardBorderColor,
-                    opacity: isSold ? 0.78 : 1,
-                  },
-                ]}
-                onPress={() => router.push({ pathname: "/product_details", params: { product_id: product.id } })}
-              >
-                <View style={styles.productImageWrap}>
-                  {getProductImage(product) ? (
-                    <CachedImage
-                      uri={getProductImage(product)}
-                      style={styles.productImage}
-                      width={Math.round(CARD_WIDTH)}
-                      height={Math.round(CARD_WIDTH)}
-                      priority="high"
-                    />
-                  ) : (
-                    <View style={[styles.productImagePlaceholder, { backgroundColor: colors.primary + "10" }]}>
-                      <Ionicons name="bag-outline" size={28} color={colors.primary} />
-                    </View>
-                  )}
-                  {isSold && (
-                    <View style={styles.soldOverlay}>
-                      <View style={styles.soldBadge}>
-                        <Ionicons name="checkmark-circle" size={13} color="#fff" />
-                        <Text style={styles.soldBadgeText}>Sold</Text>
+              return (
+                <TouchableOpacity activeOpacity={1}
+                  key={product.id}
+                  style={[
+                    styles.productCard,
+                    {
+                      backgroundColor: colors.surface,
+                      borderColor: cardBorderColor,
+                      opacity: isSold ? 0.78 : 1,
+                    },
+                  ]}
+                  onPress={() => router.push({ pathname: "/product_details", params: { product_id: product.id } })}
+                >
+                  <View style={styles.productImageWrap}>
+                    {getProductImage(product) ? (
+                      <CachedImage
+                        uri={getProductImage(product)}
+                        style={styles.productImage}
+                        width={Math.round(CARD_WIDTH)}
+                        height={Math.round(CARD_WIDTH)}
+                        priority="high"
+                      />
+                    ) : (
+                      <View style={[styles.productImagePlaceholder, { backgroundColor: colors.primary + "10" }]}>
+                        <Ionicons name="bag-outline" size={28} color={colors.primary} />
+                      </View>
+                    )}
+                    {isSold && (
+                      <View style={styles.soldOverlay}>
+                        <View style={styles.soldBadge}>
+                          <Ionicons name="checkmark-circle" size={13} color="#fff" />
+                          <Text style={styles.soldBadgeText}>Sold</Text>
+                        </View>
+                      </View>
+                    )}
+                  </View>
+                  <View style={styles.productInfo}>
+                    <Text style={[styles.productTitle, { color: isSold ? colors.textSecondary : colors.text }]} numberOfLines={2}>{product.title}</Text>
+                    <Text style={[styles.productSeller, { color: colors.textSecondary }]} numberOfLines={1}>
+                      {product.seller_name || "Seller"}
+                    </Text>
+                    <Text style={[styles.productPrice, { color: isSold ? "#F97316" : colors.primary }]}>{formatPrice(product.price)}</Text>
+                    <View style={styles.cardFooterRow}>
+                      {categoryLabel ? (
+                        <Text style={[styles.variantCount, { color: colors.textSecondary }]} numberOfLines={1}>
+                          {categoryLabel}
+                        </Text>
+                      ) : <View />}
+                      <View style={[styles.chatHint, { backgroundColor: isSold ? "#F97316" + "14" : colors.primary + "12" }]}>
+                        <Ionicons
+                          name={isSold ? "ban-outline" : "chatbubble-ellipses-outline"}
+                          size={12}
+                          color={isSold ? "#F97316" : colors.primary}
+                        />
+                        <Text style={[styles.chatHintText, { color: isSold ? "#F97316" : colors.primary }]}>
+                          {isSold ? "Sold" : "Message"}
+                        </Text>
                       </View>
                     </View>
-                  )}
-                </View>
-                <View style={styles.productInfo}>
-                  <Text style={[styles.productTitle, { color: isSold ? colors.textSecondary : colors.text }]} numberOfLines={2}>{product.title}</Text>
-                  <Text style={[styles.productSeller, { color: colors.textSecondary }]} numberOfLines={1}>
-                    {product.seller_name || "Seller"}
-                  </Text>
-                  <Text style={[styles.productPrice, { color: isSold ? "#F97316" : colors.primary }]}>{formatPrice(product.price)}</Text>
-                  <View style={styles.cardFooterRow}>
-                    {categoryLabel ? (
-                      <Text style={[styles.variantCount, { color: colors.textSecondary }]} numberOfLines={1}>
-                        {categoryLabel}
-                      </Text>
-                    ) : <View />}
-                    <View style={[styles.chatHint, { backgroundColor: isSold ? "#F97316" + "14" : colors.primary + "12" }]}>
-                      <Ionicons
-                        name={isSold ? "ban-outline" : "chatbubble-ellipses-outline"}
-                        size={12}
-                        color={isSold ? "#F97316" : colors.primary}
-                      />
-                      <Text style={[styles.chatHintText, { color: isSold ? "#F97316" : colors.primary }]}>
-                        {isSold ? "Sold" : "Message"}
-                      </Text>
-                    </View>
                   </View>
-                </View>
-              </TouchableOpacity>
-            );
-          })}
-        </View>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+          {hasMoreProducts && (
+            <TouchableOpacity
+              activeOpacity={1}
+              disabled={loadingMore}
+              onPress={loadMoreProducts}
+              style={[styles.loadMoreButton, { borderColor: colors.border, backgroundColor: colors.surface }]}
+            >
+              {loadingMore ? (
+                <ActivityIndicator size="small" color={colors.primary} />
+              ) : (
+                <>
+                  <Ionicons name="add-circle-outline" size={18} color={colors.primary} />
+                  <Text style={[styles.loadMoreText, { color: colors.primary }]}>Load more</Text>
+                </>
+              )}
+            </TouchableOpacity>
+          )}
+        </>
       ) : (
         <View style={styles.emptyContainer}>
           <Ionicons name="cube-outline" size={48} color={isDark ? "#334155" : "#E2E8F0"} />
@@ -700,25 +820,21 @@ export default function MarketplaceScreen() {
 
       {/* Main Tabs */}
       {tabs.length > 1 && (
-        <View style={[styles.tabRow, { borderBottomColor: isDark ? "#334155" : "#E2E8F0" }]}>
-          {tabs.map((t) => (
-            <TouchableOpacity activeOpacity={1}
-              key={t.key}
-              style={[styles.mainTab, tab === t.key && { borderBottomColor: colors.primary, borderBottomWidth: 2 }]}
-              onPress={() => setTab(t.key)}
-            >
-              <Ionicons
-                name={t.icon as any}
-                size={moderateScale(16)}
-                color={tab === t.key ? colors.primary : colors.textSecondary}
-                style={{ marginRight: 6 }}
-              />
-              <Text style={[styles.mainTabText, { color: tab === t.key ? colors.primary : colors.textSecondary }]}>
-                {t.label}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </View>
+        <SlidingTabBar
+          activeColor={colors.primary}
+          activeKey={tab}
+          borderColor={isDark ? "#334155" : "#E2E8F0"}
+          iconSize={moderateScale(16)}
+          indicatorColor={colors.primary}
+          indicatorWidthRatio={0.3}
+          onChange={(nextTab) => setSmoothTab(setTab, nextTab)}
+          tabs={tabs.map((item) => ({
+            key: item.key,
+            label: item.label,
+            icon: item.icon as any,
+          }))}
+          textStyle={styles.mainTabText}
+        />
       )}
 
       <ScrollView
@@ -726,22 +842,26 @@ export default function MarketplaceScreen() {
         contentContainerStyle={{ paddingBottom: contentBottomPadding }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
       >
-        {loading ? (
-          [1, 2, 3, 4].map((i) => (
-            <Skeleton key={i} width={SCREEN_WIDTH - 32} height={100} style={{ marginBottom: 12, borderRadius: 12 }} />
-          ))
-        ) : (
-          <>
-                  {tab === "browse" && renderBrowse()}
-                  {tab === "sell" && renderSell()}
-          </>
-        )}
+        <SmoothTabTransition
+          activeKey={tab}
+          activeIndex={getSmoothTabIndex(tabs.map((item) => item.key), tab)}
+          renderOutgoing={false}
+        >
+          {tab === "browse" ? (
+            renderBrowse()
+          ) : loading ? (
+            renderProductSkeletonGrid()
+          ) : (
+            renderSell()
+          )}
+        </SmoothTabTransition>
 
       </ScrollView>
 
       {/* Add Product Modal */}
       <BottomModal
         visible={showAddProduct}
+        overlayLabel="MarketplaceAddProductModal"
         onClose={() => {
           setShowAddProduct(false);
           resetCreateListingForm();
@@ -884,6 +1004,8 @@ const styles = StyleSheet.create({
   cardFooterRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: 6, gap: 8 },
   chatHint: { flexDirection: "row", alignItems: "center", gap: 4, borderRadius: 999, paddingHorizontal: 8, paddingVertical: 4 },
   chatHintText: { fontSize: moderateScale(10), fontFamily: "Poppins_600SemiBold" },
+  loadMoreButton: { minHeight: 46, borderWidth: 1, borderRadius: 14, marginTop: 4, marginBottom: 14, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8 },
+  loadMoreText: { fontSize: moderateScale(13), fontFamily: "Poppins_700Bold" },
   statusBadge: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6 },
   sellStatsRow: { flexDirection: "row", justifyContent: "space-between", gap: 10, marginBottom: 14 },
   sellStatCard: { flex: 1, borderRadius: 14, borderWidth: 1, paddingVertical: 14, paddingHorizontal: 10, alignItems: "center" },

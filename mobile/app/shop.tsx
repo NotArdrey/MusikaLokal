@@ -3,7 +3,9 @@ import { useFocusEffect } from "@react-navigation/native";
 import { router } from "expo-router";
 import React, { useCallback, useState } from "react";
 import {
+  ActivityIndicator,
   Dimensions,
+  InteractionManager,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -25,42 +27,168 @@ const moderateScale = (size: number, factor = 0.3) => {
 };
 
 const CARD_WIDTH = (SCREEN_WIDTH - 48) / 2;
+const SHOP_PAGE_SIZE = 20;
+const SHOP_FOCUS_REFRESH_COOLDOWN_MS = 30000;
+
+type ShopCachePayload = {
+  products: any[];
+  fetchedAt: number;
+  hasMoreProducts: boolean;
+};
+
+const shopScreenCache = new Map<string, ShopCachePayload>();
+
+const mergeProductsById = (currentProducts: any[], nextProducts: any[]) => {
+  const merged = new Map<string, any>();
+
+  currentProducts.forEach((product) => {
+    if (product?.id) {
+      merged.set(product.id, product);
+    }
+  });
+
+  nextProducts.forEach((product) => {
+    if (product?.id) {
+      merged.set(product.id, product);
+    }
+  });
+
+  return Array.from(merged.values());
+};
 
 export default function ShopScreen() {
   const { colors, isDark } = useTheme();
 
   const [products, setProducts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMoreProducts, setHasMoreProducts] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [category, setCategory] = useState<string | null>(null);
+  const shopCacheKey = category || "all";
 
   const categories = ["Merch", "Vinyl", "Digital", "Instruments", "Tickets"];
 
-  const fetchProducts = useCallback(async () => {
+  const fetchProducts = useCallback(async (options: { append?: boolean; offset?: number; showLoading?: boolean } = {}) => {
+    const append = options.append === true;
+    const offset = Math.max(0, options.offset || 0);
+
+    if (append) {
+      setLoadingMore(true);
+    } else if (options.showLoading) {
+      setLoading(true);
+    }
+
     try {
-      const body: any = { action: "browse_products", limit: 40 };
+      const body: any = { action: "browse_products", limit: SHOP_PAGE_SIZE + 1, offset };
       if (category) body.category = category;
-      if (searchQuery.trim()) body.search = searchQuery.trim();
 
       const { data } = await supabase.functions.invoke("manage-marketplace", { body });
-      if (data?.data) setProducts(data.data);
+      const fetchedProducts = Array.isArray(data?.data) ? data.data : [];
+      const pageProducts = fetchedProducts.slice(0, SHOP_PAGE_SIZE);
+      const nextHasMoreProducts = fetchedProducts.length > SHOP_PAGE_SIZE;
+
+      setProducts((currentProducts) => {
+        const nextProducts = append
+          ? mergeProductsById(currentProducts, pageProducts)
+          : pageProducts;
+
+        shopScreenCache.set(shopCacheKey, {
+          products: nextProducts,
+          fetchedAt: Date.now(),
+          hasMoreProducts: nextHasMoreProducts,
+        });
+
+        return nextProducts;
+      });
+      setHasMoreProducts(nextHasMoreProducts);
     } catch (e: any) {
       console.error("Shop fetch error:", e);
     } finally {
       setLoading(false);
+      setLoadingMore(false);
       setRefreshing(false);
     }
-  }, [category, searchQuery]);
+  }, [category, shopCacheKey]);
 
-  useFocusEffect(useCallback(() => { fetchProducts(); }, [fetchProducts]));
+  useFocusEffect(useCallback(() => {
+    const cached = shopScreenCache.get(shopCacheKey);
+    const cacheIsFresh =
+      cached &&
+      Date.now() - cached.fetchedAt < SHOP_FOCUS_REFRESH_COOLDOWN_MS;
 
-  const onRefresh = () => { setRefreshing(true); fetchProducts(); };
+    if (cached) {
+      setProducts(cached.products);
+      setHasMoreProducts(Boolean(cached.hasMoreProducts));
+      setLoading(false);
+      setRefreshing(false);
+    } else {
+      setLoading(true);
+    }
+
+    let focusRefreshTask: ReturnType<typeof InteractionManager.runAfterInteractions> | null = null;
+
+    if (!cacheIsFresh) {
+      focusRefreshTask = InteractionManager.runAfterInteractions(() => {
+        void fetchProducts({ showLoading: !cached });
+      });
+    }
+
+    return () => {
+      focusRefreshTask?.cancel();
+    };
+  }, [fetchProducts, shopCacheKey]));
+
+  const onRefresh = () => {
+    setRefreshing(true);
+    fetchProducts();
+  };
+
+  const loadMoreProducts = () => {
+    if (loading || loadingMore || !hasMoreProducts) return;
+    fetchProducts({ append: true, offset: products.length });
+  };
+
+  const visibleProducts = React.useMemo(() => {
+    const needle = searchQuery.trim().toLowerCase();
+    if (!needle) return products;
+
+    return products.filter((product) =>
+      [product?.title, product?.seller_name, product?.category, product?.product_type]
+        .filter((value): value is string => typeof value === "string")
+        .some((value) => value.toLowerCase().includes(needle)),
+    );
+  }, [products, searchQuery]);
 
   const formatPrice = (price: number | null) => {
     if (!price) return "Free";
     return `₱${price.toLocaleString()}`;
   };
+
+  const renderProductSkeletonGrid = () => (
+    <View style={styles.grid}>
+      {[1, 2, 3, 4].map((item) => (
+        <View
+          key={`shop-product-skeleton-${item}`}
+          style={[
+            styles.productCard,
+            {
+              backgroundColor: colors.surface,
+              borderColor: isDark ? "#334155" : "#E2E8F0",
+            },
+          ]}
+        >
+          <Skeleton width="100%" height={CARD_WIDTH} borderRadius={0} />
+          <View style={styles.productInfo}>
+            <Skeleton width="86%" height={16} style={{ marginBottom: 8 }} />
+            <Skeleton width="62%" height={13} style={{ marginBottom: 8 }} />
+            <Skeleton width="48%" height={16} />
+          </View>
+        </View>
+      ))}
+    </View>
+  );
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
@@ -90,7 +218,7 @@ export default function ShopScreen() {
           placeholderTextColor={colors.textSecondary}
           value={searchQuery}
           onChangeText={setSearchQuery}
-          onSubmitEditing={fetchProducts}
+          onSubmitEditing={() => fetchProducts()}
           returnKeyType="search"
         />
       </View>
@@ -125,41 +253,56 @@ export default function ShopScreen() {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
       >
         {loading ? (
-          <View style={styles.grid}>
-            {[1, 2, 3, 4].map((i) => (
-              <Skeleton key={i} width={CARD_WIDTH} height={200} style={{ borderRadius: 12, marginBottom: 12 }} />
-            ))}
-          </View>
-        ) : products.length > 0 ? (
-          <View style={styles.grid}>
-            {products.map((product) => (
-              <TouchableOpacity activeOpacity={1}
-                key={product.id}
-                style={[styles.productCard, { backgroundColor: colors.surface, borderColor: isDark ? "#334155" : "#E2E8F0" }]}
-                onPress={() => router.push({ pathname: "/product_details", params: { product_id: product.id } })}
-              >
-                {product.cover_image_url ? (
-                  <CachedImage uri={product.cover_image_url } style={styles.productImage} />
-                ) : (
-                  <View style={[styles.productImagePlaceholder, { backgroundColor: colors.primary + "10" }]}>
-                    <Ionicons name="bag-outline" size={28} color={colors.primary} />
-                  </View>
-                )}
-                <View style={styles.productInfo}>
-                  <Text style={[styles.productTitle, { color: colors.text }]} numberOfLines={2}>{product.title}</Text>
-                  <Text style={[styles.productSeller, { color: colors.textSecondary }]} numberOfLines={1}>
-                    {product.seller_name || "Seller"}
-                  </Text>
-                  <Text style={[styles.productPrice, { color: colors.primary }]}>{formatPrice(product.price)}</Text>
-                  {product.variant_count > 0 && (
-                    <Text style={[styles.variantCount, { color: colors.textSecondary }]}>
-                      {product.variant_count} variant{product.variant_count > 1 ? "s" : ""}
-                    </Text>
+          renderProductSkeletonGrid()
+        ) : visibleProducts.length > 0 ? (
+          <>
+            <View style={styles.grid}>
+              {visibleProducts.map((product) => (
+                <TouchableOpacity activeOpacity={1}
+                  key={product.id}
+                  style={[styles.productCard, { backgroundColor: colors.surface, borderColor: isDark ? "#334155" : "#E2E8F0" }]}
+                  onPress={() => router.push({ pathname: "/product_details", params: { product_id: product.id } })}
+                >
+                  {product.cover_image_url ? (
+                    <CachedImage uri={product.cover_image_url } style={styles.productImage} />
+                  ) : (
+                    <View style={[styles.productImagePlaceholder, { backgroundColor: colors.primary + "10" }]}>
+                      <Ionicons name="bag-outline" size={28} color={colors.primary} />
+                    </View>
                   )}
-                </View>
+                  <View style={styles.productInfo}>
+                    <Text style={[styles.productTitle, { color: colors.text }]} numberOfLines={2}>{product.title}</Text>
+                    <Text style={[styles.productSeller, { color: colors.textSecondary }]} numberOfLines={1}>
+                      {product.seller_name || "Seller"}
+                    </Text>
+                    <Text style={[styles.productPrice, { color: colors.primary }]}>{formatPrice(product.price)}</Text>
+                    {product.variant_count > 0 && (
+                      <Text style={[styles.variantCount, { color: colors.textSecondary }]}>
+                        {product.variant_count} variant{product.variant_count > 1 ? "s" : ""}
+                      </Text>
+                    )}
+                  </View>
+                </TouchableOpacity>
+              ))}
+            </View>
+            {hasMoreProducts && (
+              <TouchableOpacity
+                activeOpacity={1}
+                disabled={loadingMore}
+                onPress={loadMoreProducts}
+                style={[styles.loadMoreButton, { borderColor: colors.border, backgroundColor: colors.surface }]}
+              >
+                {loadingMore ? (
+                  <ActivityIndicator size="small" color={colors.primary} />
+                ) : (
+                  <>
+                    <Ionicons name="add-circle-outline" size={18} color={colors.primary} />
+                    <Text style={[styles.loadMoreText, { color: colors.primary }]}>Load more</Text>
+                  </>
+                )}
               </TouchableOpacity>
-            ))}
-          </View>
+            )}
+          </>
         ) : (
           <View style={{flex: 1, alignItems: "center", justifyContent: "center", minHeight: 400}}>
        <Ionicons name="cube-outline" size={48} color={isDark ? "#334155" : "#E2E8F0"} />
@@ -197,5 +340,7 @@ const styles = StyleSheet.create({
   productSeller: { fontSize: moderateScale(11), marginTop: 2 },
   productPrice: { fontSize: moderateScale(14), fontFamily: "Poppins_700Bold", marginTop: 4 },
   variantCount: { fontSize: moderateScale(10), marginTop: 2 },
+  loadMoreButton: { minHeight: 46, borderWidth: 1, borderRadius: 14, marginTop: 4, marginBottom: 14, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8 },
+  loadMoreText: { fontSize: moderateScale(13), fontFamily: "Poppins_700Bold" },
   emptyText: { textAlign: "center", marginTop: 12, fontSize: moderateScale(15), fontFamily: "Poppins_500Medium" },
 });

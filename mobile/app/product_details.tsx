@@ -18,7 +18,7 @@ import Skeleton from "../src/components/Skeleton";
 import CustomAlert, { AlertType } from "../src/components/CustomAlert";
 import { useBottomBarClearance } from "../src/hooks/useBottomBarClearance";
 import { useAuth } from "../src/context/AuthContext";
-import { showTopToast } from "../src/context/TopToastContext";
+import { emitToast } from "../src/events/toastBus";
 import { useTheme } from "../src/context/ThemeContext";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
@@ -116,7 +116,7 @@ export default function ProductDetailsScreen() {
       const data = await invokeMarketplace({ action, product_id: product.id });
 
       if (data?.success) {
-        showTopToast({
+        emitToast({
           type: "success",
           title: action === "mark_product_sold" ? "Marked as Sold" : action === "relist_product" ? "Listing Relisted" : "Published",
           message: action === "mark_product_sold"

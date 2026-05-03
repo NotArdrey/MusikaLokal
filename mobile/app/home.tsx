@@ -844,46 +844,62 @@ export default function HomeScreen() {
           Date.now() - lastProfileRefreshAtRef.current >= HOME_PROFILE_CACHE_TTL_MS
         );
 
-      if (shouldRefreshHome) {
-        void homeDataQuery.refetch();
-      }
-
-      if (shouldRefreshProfile) {
-        void fetchUserProfile();
-      } else if (isGuest) {
-        setUserName("Guest");
-        setHasGroups(false);
-      }
-
-      void fetchRecentlyViewed();
-      void loadViewedNewArrivals();
-      setTimeBasedGreeting();
-
-      const reopenListingId = Array.isArray(params.reopenListingId)
-        ? params.reopenListingId[0]
-        : params.reopenListingId;
-
-      if (reopenListingId && reopenListingId.length > 0) {
-        setSelectedListingId(reopenListingId);
-        setPendingReopenListingId(reopenListingId);
-        setTimeout(() => {
-          router.setParams({ reopenListingId: undefined as any });
-        }, 250);
-      }
-
-      const restorePendingReopen = async () => {
-        const storedListingId = await AsyncStorage.getItem(
-          "pending_reopen_listing_id",
-        );
-
-        if (storedListingId && storedListingId.length > 0) {
-          setSelectedListingId(storedListingId);
-          setPendingReopenListingId(storedListingId);
-          await AsyncStorage.removeItem("pending_reopen_listing_id");
+      let isActive = true;
+      const focusTask = InteractionManager.runAfterInteractions(() => {
+        if (!isActive) {
+          return;
         }
-      };
 
-      void restorePendingReopen();
+        if (shouldRefreshHome) {
+          void homeDataQuery.refetch();
+        }
+
+        if (shouldRefreshProfile) {
+          void fetchUserProfile();
+        } else if (isGuest) {
+          setUserName("Guest");
+          setHasGroups(false);
+        }
+
+        void fetchRecentlyViewed();
+        void loadViewedNewArrivals();
+        setTimeBasedGreeting();
+
+        const reopenListingId = Array.isArray(params.reopenListingId)
+          ? params.reopenListingId[0]
+          : params.reopenListingId;
+
+        if (reopenListingId && reopenListingId.length > 0) {
+          setSelectedListingId(reopenListingId);
+          setPendingReopenListingId(reopenListingId);
+          setTimeout(() => {
+            router.setParams({ reopenListingId: undefined as any });
+          }, 250);
+        }
+
+        const restorePendingReopen = async () => {
+          const storedListingId = await AsyncStorage.getItem(
+            "pending_reopen_listing_id",
+          );
+
+          if (!isActive) {
+            return;
+          }
+
+          if (storedListingId && storedListingId.length > 0) {
+            setSelectedListingId(storedListingId);
+            setPendingReopenListingId(storedListingId);
+            await AsyncStorage.removeItem("pending_reopen_listing_id");
+          }
+        };
+
+        void restorePendingReopen();
+      });
+
+      return () => {
+        isActive = false;
+        focusTask.cancel();
+      };
     }, [discover.length, featured.length, homeDataQuery.refetch, isGuest, loadViewedNewArrivals, params.reopenListingId, roleResolved, userId, userRole]),
   );
 

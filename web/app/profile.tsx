@@ -6,6 +6,7 @@ import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
     ActivityIndicator,
+    Animated,
     Image,
     Modal,
     ScrollView,
@@ -17,6 +18,7 @@ import {
     useWindowDimensions,
     View,
     Platform,
+    Easing as RNEasing,
 } from "react-native";
 import { supabase } from "../lib/supabase";
 import CustomAlert, { AlertType } from "../src/components/CustomAlert";
@@ -24,6 +26,7 @@ import ReportModal from "../src/components/ReportModal";
 import GuestSignInGate from "../src/components/GuestSignInGate";
 import Header from "../src/components/header";
 import Navbar from "../src/components/navbar";
+import SmoothTabTransition from "../src/components/SmoothTabTransition";
 import { DEFAULT_AVATAR } from "../src/constants/Images";
 import { useAuth } from "../src/context/AuthContext";
 import { useTheme } from "../src/context/ThemeContext";
@@ -32,6 +35,10 @@ import { screenUploadsWithAi } from "../src/services/uploadSafetyScreen";
 const GRID_GAP = 8;
 const NUM_COLUMNS = 3;
 const GRID_PADDING = 24;
+const DRAWER_WIDTH = 320;
+const DRAWER_OPEN_ANIMATION_MS = 320;
+const DRAWER_CLOSE_ANIMATION_MS = 240;
+const DRAWER_NAVIGATION_DELAY_MS = DRAWER_CLOSE_ANIMATION_MS;
 const MAX_INLINE_SCREEN_BYTES = 4 * 1024 * 1024;
 const SAFETY_CHECK_TIMEOUT_MS = 6000;
 const VIDEO_MEDIA_EXTENSIONS = new Set(["mp4", "mov", "avi", "mkv", "webm", "m4v"]);
@@ -462,6 +469,9 @@ export default function ProfileScreen() {
   const [supportsGigVisibilityPreference, setSupportsGigVisibilityPreference] = useState(true);
   const [activeTab, setActiveTab] = useState<"about" | "gigs" | "bookmarks">("about");
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [isMenuMounted, setIsMenuMounted] = useState(false);
+  const [isMenuTouchable, setIsMenuTouchable] = useState(false);
+  const drawerProgress = useRef(new Animated.Value(0)).current;
   const [bookmarkFilter, setBookmarkFilter] = useState<"all" | "studios" | "gigs" | "musicians">("all");
 
   useEffect(() => {
@@ -508,8 +518,12 @@ export default function ProfileScreen() {
       currentUserId: currentUserId ?? null,
     });
 
+    drawerProgress.stopAnimation();
+    drawerProgress.setValue(0);
+    setIsMenuTouchable(false);
+    setIsMenuMounted(true);
     setIsMenuOpen(true);
-  }, [activeTab, currentUserId, isGuest, isMenuOpen, isOwner, isWebDesktop, profile?.id, winWidth]);
+  }, [activeTab, currentUserId, drawerProgress, isGuest, isMenuOpen, isOwner, isWebDesktop, profile?.id, winWidth]);
 
   const closeMenu = useCallback((source: string = "unknown") => {
     console.log("[ProfileMenu][web] Close requested", {
@@ -522,8 +536,62 @@ export default function ProfileScreen() {
       profileId: profile?.id ?? null,
     });
 
+    if (!isMenuOpen) {
+      return;
+    }
+
+    setIsMenuTouchable(false);
     setIsMenuOpen(false);
   }, [activeTab, isMenuOpen, isWebDesktop, profile?.id, winWidth]);
+
+  useEffect(() => {
+    if (!isMenuMounted) {
+      return;
+    }
+
+    drawerProgress.stopAnimation();
+
+    const animation = Animated.timing(drawerProgress, {
+      toValue: isMenuOpen ? 1 : 0,
+      duration: isMenuOpen ? DRAWER_OPEN_ANIMATION_MS : DRAWER_CLOSE_ANIMATION_MS,
+      easing: RNEasing.out(RNEasing.cubic),
+      useNativeDriver: true,
+    });
+
+    animation.start(({ finished }) => {
+      if (!finished) {
+        return;
+      }
+
+      if (isMenuOpen) {
+        setIsMenuTouchable(true);
+      } else {
+        setIsMenuTouchable(false);
+        setIsMenuMounted(false);
+      }
+    });
+
+    return () => {
+      animation.stop();
+    };
+  }, [drawerProgress, isMenuMounted, isMenuOpen]);
+
+  const drawerTranslateX = useMemo(
+    () =>
+      drawerProgress.interpolate({
+        inputRange: [0, 1],
+        outputRange: [DRAWER_WIDTH + 28, 0],
+      }),
+    [drawerProgress],
+  );
+  const drawerBackdropOpacity = useMemo(
+    () =>
+      drawerProgress.interpolate({
+        inputRange: [0, 1],
+        outputRange: [0, 1],
+      }),
+    [drawerProgress],
+  );
 
   const isMissingShowGigStatusesColumnError = (error: any) => {
     const message = String(error?.message || "").toLowerCase();
@@ -1696,9 +1764,9 @@ export default function ProfileScreen() {
               )}
             </View>
 
-
-            {activeTab === "gigs" && profile?.role === "musician" && profile?.show_gig_statuses !== false && (
-              <View style={styles.gigTimelineSection}>
+            <SmoothTabTransition activeKey={activeTab} style={styles.profileTabTransition}>
+              {activeTab === "gigs" && profile?.role === "musician" && profile?.show_gig_statuses !== false && (
+                <View style={styles.gigTimelineSection}>
                 <View
                   style={[
                     styles.gigSearchWrap,
@@ -1771,15 +1839,15 @@ export default function ProfileScreen() {
                     )}
                   </View>
                 ))}
-              </View>
-            )}
+                </View>
+              )}
 
-            {activeTab === "gigs" && profile?.role === "musician" && profile?.show_gig_statuses === false && isOwner && (
-              <Text style={[styles.gigHiddenText, { color: colors.textSecondary }]}>Gig status is hidden from other users.</Text>
-            )}
+              {activeTab === "gigs" && profile?.role === "musician" && profile?.show_gig_statuses === false && isOwner && (
+                <Text style={[styles.gigHiddenText, { color: colors.textSecondary }]}>Gig status is hidden from other users.</Text>
+              )}
 
-            {activeTab === "bookmarks" && isOwner && !isGuest && (
-              <View style={styles.bookmarkSection}>
+              {activeTab === "bookmarks" && isOwner && !isGuest && (
+                <View style={styles.bookmarkSection}>
                 {loadingBookmarks ? (
                   <View style={[styles.bookmarkEmptyState, { borderColor: borderSoft, backgroundColor: surfaceBackground }]}>
                     <Text style={[styles.bookmarkEmptyText, { color: colors.textSecondary }]}>Loading saved bookmarks...</Text>
@@ -1856,21 +1924,23 @@ export default function ProfileScreen() {
                     </View>
                   </>
                 )}
-              </View>
-            )}
+                </View>
+              )}
+            </SmoothTabTransition>
 
           </View>
 
           {/* Media Section - Instagram Style Grid (About Tab) */}
-          {activeTab === "about" && (
-          <View
-            style={[
-              styles.mediaSection,
-              isWebDesktop && styles.mediaSectionWeb,
-              isWebDesktop && styles.webSectionCard,
-              { backgroundColor: isWebDesktop ? pageCardBackground : "transparent", borderColor: borderSoft },
-            ]}
-          >
+          <SmoothTabTransition activeKey={activeTab} style={styles.profileTabTransition}>
+            {activeTab === "about" && (
+            <View
+              style={[
+                styles.mediaSection,
+                isWebDesktop && styles.mediaSectionWeb,
+                isWebDesktop && styles.webSectionCard,
+                { backgroundColor: isWebDesktop ? pageCardBackground : "transparent", borderColor: borderSoft },
+              ]}
+            >
             <View style={styles.mediaSectionHeader}>
               <View style={styles.mediaSectionHeading}>
                 <View
@@ -1972,7 +2042,7 @@ export default function ProfileScreen() {
                 >
                   {isOwner
                     ? "Share your best work!"
-                    : "This musician hasn't added media yet"}
+                    : "This profile hasn't added media yet"}
                 </Text>
                 {isOwner && (
                   <TouchableOpacity
@@ -2056,8 +2126,9 @@ export default function ProfileScreen() {
                 ))}
               </View>
             )}
-          </View>
-          )}
+            </View>
+            )}
+          </SmoothTabTransition>
 
           {/* Media Viewer Modal */}
           <Modal
@@ -2113,66 +2184,66 @@ export default function ProfileScreen() {
         </ScrollView>
         <Navbar />
         </View>
-      </View>
-
-      <Modal
-        visible={isMenuOpen}
-        transparent={true}
-        animationType="fade"
-        onRequestClose={() => closeMenu("modal-request-close")}
-        onShow={() => {
-          console.log("[ProfileMenu][web] Drawer modal onShow fired", {
-            timestamp: new Date().toISOString(),
-            isMenuOpen,
-            isWebDesktop,
-            width: winWidth,
-            activeTab,
-            profileId: profile?.id ?? null,
-          });
-        }}
-      >
-        <View style={styles.drawerOverlay}>
-          <TouchableOpacity activeOpacity={1} style={styles.drawerBackdrop} onPress={() => closeMenu("drawer-backdrop")} />
-          <View style={[styles.drawerContent, { backgroundColor: colors.background, borderLeftColor: borderSoft }]}>
-            <View style={styles.drawerHeader}>
-              <Text style={[styles.drawerTitle, { color: colors.text }]}>Menu</Text>
-              <TouchableOpacity activeOpacity={1} onPress={() => closeMenu("drawer-close-button")}>
-                <Ionicons name="close" size={24} color={colors.text} />
-              </TouchableOpacity>
+        {isMenuMounted ? (
+          <View style={styles.drawerOverlay} pointerEvents="box-none">
+            <Animated.View
+              pointerEvents="none"
+              style={[styles.drawerScrim, { opacity: drawerBackdropOpacity }]}
+            />
+            <View pointerEvents={isMenuTouchable ? "auto" : "none"} style={styles.drawerBackdrop}>
+              <TouchableOpacity
+                activeOpacity={1}
+                style={styles.drawerBackdropTouchTarget}
+                onPress={() => closeMenu("drawer-backdrop")}
+              />
             </View>
-            <ScrollView showsVerticalScrollIndicator={false}>
-              {isOwner ? (
-                <View style={styles.drawerMenuList}>
-                  {MENU_ITEMS.map((item) => (
-                    <TouchableOpacity activeOpacity={1}
-                      key={item.label}
-                      onPress={() => {
-                        console.log("[ProfileMenu][web] Drawer menu item selected", {
-                          timestamp: new Date().toISOString(),
-                          label: item.label,
-                          route: item.route,
-                          isMenuOpen,
-                          isWebDesktop,
-                          width: winWidth,
-                        });
-                        closeMenu(`menu-item:${item.route}`);
-                        router.push(item.route as any);
-                      }}
-                      style={[styles.drawerMenuItem, { borderBottomColor: colors.border }]}
-                    >
-                      <View style={[styles.drawerMenuIcon, { backgroundColor: isDark ? "#1E293B" : "#F3F4F6" }]}>
-                        <Ionicons name={item.icon as any} size={20} color={colors.text} />
-                      </View>
-                      <Text style={[styles.drawerMenuLabel, { color: colors.text }]}>{item.label}</Text>
-                      <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              ) : null}
-            </ScrollView>
+            <Animated.View
+              style={[
+                styles.drawerContent,
+                { backgroundColor: colors.background, borderLeftColor: borderSoft },
+                { transform: [{ translateX: drawerTranslateX }] },
+              ]}
+            >
+              <View style={styles.drawerHeader}>
+                <Text style={[styles.drawerTitle, { color: colors.text }]}>Menu</Text>
+                <TouchableOpacity activeOpacity={1} onPress={() => closeMenu("drawer-close-button")}>
+                  <Ionicons name="close" size={24} color={colors.text} />
+                </TouchableOpacity>
+              </View>
+              <ScrollView showsVerticalScrollIndicator={false}>
+                {isOwner ? (
+                  <View style={styles.drawerMenuList}>
+                    {MENU_ITEMS.map((item) => (
+                      <TouchableOpacity activeOpacity={1}
+                        key={item.label}
+                        onPress={() => {
+                          console.log("[ProfileMenu][web] Drawer menu item selected", {
+                            timestamp: new Date().toISOString(),
+                            label: item.label,
+                            route: item.route,
+                            isMenuOpen,
+                            isWebDesktop,
+                            width: winWidth,
+                          });
+                          closeMenu(`menu-item:${item.route}`);
+                          setTimeout(() => router.push(item.route as any), DRAWER_NAVIGATION_DELAY_MS);
+                        }}
+                        style={[styles.drawerMenuItem, { borderBottomColor: colors.border }]}
+                      >
+                        <View style={[styles.drawerMenuIcon, { backgroundColor: isDark ? "#1E293B" : "#F3F4F6" }]}>
+                          <Ionicons name={item.icon as any} size={20} color={colors.text} />
+                        </View>
+                        <Text style={[styles.drawerMenuLabel, { color: colors.text }]}>{item.label}</Text>
+                        <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                ) : null}
+              </ScrollView>
+            </Animated.View>
           </View>
-        </View>
-      </Modal>
+        ) : null}
+      </View>
 
       <CustomAlert
         visible={alertVisible}
@@ -2237,6 +2308,9 @@ const styles = StyleSheet.create({
     alignSelf: "center",
     width: "100%",
     paddingTop: 12,
+  },
+  profileTabTransition: {
+    width: "100%",
   },
   webSectionCard: {
     borderWidth: 1,
@@ -2634,7 +2708,7 @@ const styles = StyleSheet.create({
     fontFamily: "Poppins_600SemiBold",
   },
   emptyMedia: {
-    alignItems: "center",
+    alignItems: "flex-start",
     justifyContent: "center",
     paddingVertical: 48,
     marginHorizontal: 24,
@@ -2659,8 +2733,7 @@ const styles = StyleSheet.create({
     marginTop: 4,
     fontSize: 13,
     fontFamily: "Poppins_400Regular",
-    textAlign: "center",
-    paddingHorizontal: 32,
+    textAlign: "left",
   },
   uploadBtn: {
     marginTop: 16,
@@ -2820,19 +2893,31 @@ const styles = StyleSheet.create({
   },
   // Drawer styles
   drawerOverlay: {
-    flex: 1,
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "transparent",
+    zIndex: 1000,
+    elevation: 1000,
+  },
+  drawerScrim: {
+    ...StyleSheet.absoluteFillObject,
     backgroundColor: "rgba(0,0,0,0.4)",
+    zIndex: 1,
   },
   drawerBackdrop: {
     ...StyleSheet.absoluteFillObject,
+    zIndex: 2,
+  },
+  drawerBackdropTouchTarget: {
+    ...StyleSheet.absoluteFillObject,
   },
   drawerContent: {
-    width: 320,
+    width: DRAWER_WIDTH,
     maxWidth: "80%" as any,
     position: "absolute" as const,
     top: 0,
     right: 0,
     bottom: 0,
+    zIndex: 3,
     shadowColor: "#000",
     shadowOffset: { width: -4, height: 0 },
     shadowOpacity: 0.18,

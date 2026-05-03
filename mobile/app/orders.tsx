@@ -4,6 +4,7 @@ import { router } from "expo-router";
 import React, { useCallback, useState } from "react";
 import {
   Dimensions,
+  InteractionManager,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -16,9 +17,12 @@ import GuestSignInGate from "../src/components/GuestSignInGate";
 import Header from "../src/components/header";
 import Navbar from "../src/components/navbar";
 import Skeleton from "../src/components/Skeleton";
+import SlidingTabBar from "../src/components/SlidingTabBar";
+import SmoothTabTransition from "../src/components/SmoothTabTransition";
 import { useAuth } from "../src/context/AuthContext";
 import { useTheme } from "../src/context/ThemeContext";
 import { formatFriendlyDateTime } from "../src/utils/friendlyDateTime";
+import { getSmoothTabIndex, setSmoothTab } from "../src/utils/smoothTabs";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const moderateScale = (size: number, factor = 0.3) => {
@@ -61,7 +65,19 @@ export default function OrdersScreen() {
     }
   }, [session, isSeller]);
 
-  useFocusEffect(useCallback(() => { fetchOrders(); }, [fetchOrders]));
+  useFocusEffect(useCallback(() => {
+    let isActive = true;
+    const focusTask = InteractionManager.runAfterInteractions(() => {
+      if (isActive) {
+        void fetchOrders();
+      }
+    });
+
+    return () => {
+      isActive = false;
+      focusTask.cancel();
+    };
+  }, [fetchOrders]));
 
   const onRefresh = () => { setRefreshing(true); fetchOrders(); };
 
@@ -129,25 +145,27 @@ export default function OrdersScreen() {
       <Header title="Orders" onBackPress={() => router.back()} />
 
       {tabs.length > 1 && (
-        <View style={[styles.tabRow, { borderBottomWidth: 1, borderBottomColor: isDark ? "#334155" : "#E2E8F0" }]}>
-          {tabs.map((t) => (
-            <TouchableOpacity activeOpacity={1}
-              key={t.key}
-              style={[styles.tab, tab === t.key && { borderBottomColor: colors.primary, borderBottomWidth: 2, borderBottomLeftRadius: 1, borderBottomRightRadius: 1 }]}
-              onPress={() => setTab(t.key)}
-            >
-              <Text style={[styles.tabText, { color: tab === t.key ? colors.primary : colors.textSecondary }]}>
-                {t.label}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </View>
+        <SlidingTabBar
+          activeColor={colors.primary}
+          activeKey={tab}
+          borderColor={isDark ? "#334155" : "#E2E8F0"}
+          indicatorColor={colors.primary}
+          indicatorWidthRatio={0.32}
+          onChange={(nextTab) => setSmoothTab(setTab, nextTab)}
+          tabs={tabs}
+          textStyle={styles.tabText}
+        />
       )}
 
       <ScrollView
         style={styles.content}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
       >
+        <SmoothTabTransition
+          activeKey={tab}
+          activeIndex={getSmoothTabIndex(tabs.map((item) => item.key), tab)}
+          renderOutgoing={false}
+        >
         {loading ? (
           [1, 2, 3].map((i) => <Skeleton key={i} width={SCREEN_WIDTH - 32} height={100} style={{ marginBottom: 10, borderRadius: 12 }} />)
         ) : (
@@ -170,6 +188,7 @@ export default function OrdersScreen() {
             )}
           </>
         )}
+        </SmoothTabTransition>
 
         <View style={{ height: 100 }} />
       </ScrollView>

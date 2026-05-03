@@ -22,7 +22,7 @@ import CustomAlert, { AlertType } from "../src/components/CustomAlert";
 import { useBottomBarClearance } from "../src/hooks/useBottomBarClearance";
 import { useAuth } from "../src/context/AuthContext";
 import { useRadioPlayer } from "../src/context/RadioPlayerContext";
-import { showTopToast } from "../src/context/TopToastContext";
+import { emitToast } from "../src/events/toastBus";
 import { useTheme } from "../src/context/ThemeContext";
 import { formatFriendlyDateTime } from "../src/utils/friendlyDateTime";
 
@@ -233,7 +233,7 @@ export default function StationDetailsScreen() {
         },
       });
       if (data?.success) {
-        showTopToast({ type: "success", title: "Updated", message: "Station updated." });
+        emitToast({ type: "success", title: "Updated", message: "Station updated." });
         setEditModalVisible(false);
         fetchStation();
       } else {
@@ -255,7 +255,7 @@ export default function StationDetailsScreen() {
         body: { action: "update_station", station_id, is_active: !station.is_active },
       });
       if (data?.success) {
-        showTopToast({ type: "success", title: station.is_active ? "Deactivated" : "Activated", message: `Station is now ${station.is_active ? "offline" : "live"}.` });
+        emitToast({ type: "success", title: station.is_active ? "Deactivated" : "Activated", message: `Station is now ${station.is_active ? "offline" : "live"}.` });
         fetchStation();
       }
     } catch (e: any) {
@@ -272,7 +272,7 @@ export default function StationDetailsScreen() {
         body: { action: "add_station_slot", station_id, playlist_id: playlistId },
       });
       if (data?.success) {
-        showTopToast({ type: "success", title: "Added", message: "Playlist added to station rotation." });
+        emitToast({ type: "success", title: "Added", message: "Playlist added to station rotation." });
         fetchStation();
       } else {
         setAlert({ type: "error", title: "Error", message: data?.error || "Failed to add slot" });
@@ -291,7 +291,7 @@ export default function StationDetailsScreen() {
         body: { action: "remove_station_slot", slot_id: slotId },
       });
       if (data?.success) {
-        showTopToast({ type: "success", title: "Removed", message: "Playlist removed from rotation." });
+        emitToast({ type: "success", title: "Removed", message: "Playlist removed from rotation." });
         fetchStation();
       } else {
         setAlert({ type: "error", title: "Error", message: data?.error || "Failed to remove slot" });

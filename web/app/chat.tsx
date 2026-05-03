@@ -1,5 +1,5 @@
 ﻿import { router, useLocalSearchParams } from 'expo-router';
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, View } from 'react-native';
 import { supabase } from '../lib/supabase';
 import ChatScreen from '../src/components/ChatScreen';
@@ -7,7 +7,7 @@ import ConversationsList from '../src/components/ConversationsList';
 import GuestSignInGate from '../src/components/GuestSignInGate';
 import { useAuth } from '../src/context/AuthContext';
 import { useTheme } from '../src/context/ThemeContext';
-import { Conversation, useConversation, useGroupConversation } from '../src/hooks/useChat';
+import { Conversation, isConversationMuted, useConversation, useGroupConversation } from '../src/hooks/useChat';
 
 export default function ChatPage() {
     const { colors } = useTheme();
@@ -33,6 +33,24 @@ export default function ChatPage() {
     const [isGroupChat, setIsGroupChat] = useState(false);
     const [loading, setLoading] = useState(true);
 
+    const withCurrentParticipantState = useCallback(async (conversation: Conversation): Promise<Conversation> => {
+        if (!userId) return conversation;
+
+        const { data: currentParticipant } = await supabase
+            .from('conversation_participants')
+            .select('*')
+            .eq('conversation_id', conversation.id)
+            .eq('user_id', userId)
+            .maybeSingle();
+
+        return {
+            ...conversation,
+            current_participant: currentParticipant || conversation.current_participant || null,
+            is_muted: isConversationMuted(currentParticipant || conversation),
+            muted_until: currentParticipant?.muted_until ?? conversation.muted_until ?? null,
+        };
+    }, [userId]);
+
     const { getOrCreateConversation } = useConversation(
         params.recipientId || null,
         userId || null
@@ -52,7 +70,7 @@ export default function ChatPage() {
                 const conversation = await getOrCreateGroupConversation();
                 
                 if (conversation) {
-                    setSelectedConversation(conversation);
+                    setSelectedConversation(await withCurrentParticipantState(conversation));
                     setIsGroupChat(true);
                 }
             }
@@ -67,7 +85,7 @@ export default function ChatPage() {
                 });
 
                 if (conversation) {
-                    setSelectedConversation(conversation);
+                    setSelectedConversation(await withCurrentParticipantState(conversation));
                     setIsGroupChat(false);
 
                     // Set other user info
@@ -112,7 +130,7 @@ export default function ChatPage() {
                         group_avatar_url: display?.group_avatar_url || null,
                     };
 
-                    setSelectedConversation(mergedConversation);
+                    setSelectedConversation(await withCurrentParticipantState(mergedConversation));
                     setIsGroupChat(conversation.is_group || false);
 
                     // For 1-on-1 chats, get other user
@@ -145,7 +163,16 @@ export default function ChatPage() {
         };
 
         initializeChat();
-    }, [params.recipientId, params.conversationId, params.groupChatId, params.isGroupChat, userId]);
+    }, [
+        params.recipientId,
+        params.conversationId,
+        params.groupChatId,
+        params.isGroupChat,
+        userId,
+        getOrCreateConversation,
+        getOrCreateGroupConversation,
+        withCurrentParticipantState,
+    ]);
 
     const handleSelectConversation = async (conversation: Conversation) => {
         setSelectedConversation(conversation);
@@ -153,6 +180,25 @@ export default function ChatPage() {
         if (!conversation.is_group) {
             setOtherUser(conversation.other_participant || null);
         }
+    };
+
+    const handleMuteChange = (muted: boolean, mutedUntil: string | null) => {
+        setSelectedConversation((conversation) => {
+            if (!conversation) return conversation;
+
+            return {
+                ...conversation,
+                is_muted: muted,
+                muted_until: mutedUntil,
+                current_participant: conversation.current_participant
+                    ? {
+                        ...conversation.current_participant,
+                        is_muted: muted,
+                        muted_until: mutedUntil,
+                    }
+                    : conversation.current_participant,
+            };
+        });
     };
 
     const handleBack = () => {
@@ -195,6 +241,9 @@ export default function ChatPage() {
                     groupId={selectedConversation.group_id || params.groupChatId || null}
                     groupName={selectedConversation.group_name || 'Group Chat'}
                     groupAvatar={selectedConversation.group_avatar_url}
+                    isMuted={isConversationMuted(selectedConversation)}
+                    mutedUntil={selectedConversation.muted_until ?? null}
+                    onMuteChange={handleMuteChange}
                     onBack={handleBack}
                 />
             );
@@ -208,6 +257,9 @@ export default function ChatPage() {
                     currentUserId={userId}
                     otherUser={otherUser}
                     isGroupChat={false}
+                    isMuted={isConversationMuted(selectedConversation)}
+                    mutedUntil={selectedConversation.muted_until ?? null}
+                    onMuteChange={handleMuteChange}
                     onBack={handleBack}
                 />
             );

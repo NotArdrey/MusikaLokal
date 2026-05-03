@@ -341,6 +341,18 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     borderWidth: 1,
   },
+  amenityChip: {
+    minWidth: 124,
+    maxWidth: "100%",
+    minHeight: 44,
+    paddingHorizontal: 14,
+    paddingVertical: 0,
+    borderRadius: 14,
+    borderWidth: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "flex-start",
+  },
   inputContainer: {
     marginBottom: moderateScale(16),
   },

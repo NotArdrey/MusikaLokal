@@ -1,8 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
-import { BlurView } from "expo-blur";
 import React, { useEffect, useMemo } from "react";
 import { Modal, Platform, StyleSheet, Text, TouchableOpacity, View } from "react-native";
-import { useTopToast } from "../context/TopToastContext";
+import { emitToast } from "../events/toastBus";
 import { useTheme } from "../context/ThemeContext";
 
 export type AlertType = "error" | "success" | "warning" | "info";
@@ -62,7 +61,6 @@ export default function CustomAlert({
   onClose,
 }: CustomAlertProps) {
   const { colors, isDark } = useTheme();
-  const { showToast } = useTopToast();
   const config = alertConfig[type];
   const hasStructuredMessage = useMemo(() => {
     return message.includes("\n") || message.includes("•") || message.includes("- ");
@@ -89,14 +87,14 @@ export default function CustomAlert({
   useEffect(() => {
     if (!visible || !shouldUseTopToast) return;
 
-    showToast({
+    emitToast({
       type,
       title,
       message,
     });
 
     onClose();
-  }, [message, onClose, shouldUseTopToast, showToast, title, type, visible]);
+  }, [message, onClose, shouldUseTopToast, title, type, visible]);
 
   if (shouldUseTopToast) {
     return null;
@@ -138,11 +136,13 @@ export default function CustomAlert({
       transparent
       statusBarTranslucent
       navigationBarTranslucent
+      presentationStyle="overFullScreen"
+      hardwareAccelerated
       visible={visible}
       animationType="fade"
       onRequestClose={onClose}
     >
-      <BlurView intensity={60} tint="dark" style={styles.overlay}>
+      <View style={styles.overlay}>
         <View
           style={[
             styles.container,
@@ -207,7 +207,7 @@ export default function CustomAlert({
             })}
           </View>
         </View>
-      </BlurView>
+      </View>
     </Modal>
   );
 }
@@ -219,6 +219,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: IS_WEB ? 16 : 24,
     paddingVertical: 20,
+    backgroundColor: 'rgba(15,23,42,0.58)',
   },
   container: {
     width: IS_WEB ? '92%' : '100%',
