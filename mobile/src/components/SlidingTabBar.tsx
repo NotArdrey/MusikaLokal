@@ -1,5 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   LayoutChangeEvent,
   StyleProp,
@@ -39,6 +39,7 @@ type SlidingTabBarProps<T extends SlidingTabKey> = {
   indicatorColor?: string;
   borderColor?: string;
   backgroundColor?: string;
+  deferOnChange?: boolean;
   iconSize?: number;
   indicatorWidthRatio?: number;
   showTopBorder?: boolean;
@@ -56,6 +57,7 @@ export default function SlidingTabBar<T extends SlidingTabKey>({
   indicatorColor,
   borderColor,
   backgroundColor,
+  deferOnChange = false,
   iconSize = 21,
   indicatorWidthRatio = 0.42,
   showTopBorder = false,
@@ -65,9 +67,13 @@ export default function SlidingTabBar<T extends SlidingTabKey>({
 }: SlidingTabBarProps<T>) {
   const { colors } = useTheme();
   const [containerWidth, setContainerWidth] = useState(0);
+  const [pressedActiveKey, setPressedActiveKey] = useState<T | null>(null);
+  const pendingFrameRef = useRef<number | null>(null);
+  const pendingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const displayedActiveKey = pressedActiveKey ?? activeKey;
   const activeIndex = useMemo(
-    () => Math.max(0, tabs.findIndex((tab) => tab.key === activeKey)),
-    [activeKey, tabs],
+    () => Math.max(0, tabs.findIndex((tab) => tab.key === displayedActiveKey)),
+    [displayedActiveKey, tabs],
   );
   const progress = useSharedValue(activeIndex);
   const resolvedActiveColor = activeColor ?? colors.text;
@@ -82,9 +88,65 @@ export default function SlidingTabBar<T extends SlidingTabKey>({
     progress.value = withTiming(activeIndex, motion.timing.tab);
   }, [activeIndex, progress]);
 
-  const handleLayout = (event: LayoutChangeEvent) => {
-    setContainerWidth(event.nativeEvent.layout.width);
-  };
+  useEffect(() => {
+    setPressedActiveKey(null);
+  }, [activeKey]);
+
+  useEffect(() => () => {
+    if (pendingFrameRef.current !== null) {
+      cancelAnimationFrame(pendingFrameRef.current);
+    }
+
+    if (pendingTimeoutRef.current !== null) {
+      clearTimeout(pendingTimeoutRef.current);
+    }
+  }, []);
+
+  const handleLayout = useCallback((event: LayoutChangeEvent) => {
+    const nextWidth = event.nativeEvent.layout.width;
+    setContainerWidth((currentWidth) => (
+      Math.abs(currentWidth - nextWidth) > 0.5 ? nextWidth : currentWidth
+    ));
+  }, []);
+
+  const commitChange = useCallback((key: T) => {
+    if (!deferOnChange) {
+      onChange(key);
+      return;
+    }
+
+    if (pendingFrameRef.current !== null) {
+      cancelAnimationFrame(pendingFrameRef.current);
+      pendingFrameRef.current = null;
+    }
+
+    if (pendingTimeoutRef.current !== null) {
+      clearTimeout(pendingTimeoutRef.current);
+      pendingTimeoutRef.current = null;
+    }
+
+    pendingFrameRef.current = requestAnimationFrame(() => {
+      pendingFrameRef.current = null;
+      pendingTimeoutRef.current = setTimeout(() => {
+        pendingTimeoutRef.current = null;
+        onChange(key);
+      }, 0);
+    });
+  }, [deferOnChange, onChange]);
+
+  const handlePress = useCallback((key: T) => {
+    if (key === displayedActiveKey) {
+      return;
+    }
+
+    const nextIndex = tabs.findIndex((tab) => tab.key === key);
+    if (nextIndex >= 0) {
+      progress.value = withTiming(nextIndex, motion.timing.tab);
+    }
+
+    setPressedActiveKey(key);
+    commitChange(key);
+  }, [commitChange, displayedActiveKey, progress, tabs]);
 
   const indicatorAnimatedStyle = useAnimatedStyle(() => ({
     opacity: tabWidth > 0 ? 1 : 0,
@@ -119,7 +181,7 @@ export default function SlidingTabBar<T extends SlidingTabKey>({
         ]}
       />
       {tabs.map((item) => {
-        const isActive = item.key === activeKey;
+        const isActive = item.key === displayedActiveKey;
         const color = isActive ? resolvedActiveColor : resolvedInactiveColor;
         const icon = isActive && item.activeIcon ? item.activeIcon : item.icon;
 
@@ -131,11 +193,7 @@ export default function SlidingTabBar<T extends SlidingTabKey>({
             accessibilityState={{ selected: isActive, disabled: item.disabled }}
             disabled={item.disabled}
             key={String(item.key)}
-            onPress={() => {
-              if (item.key !== activeKey) {
-                onChange(item.key);
-              }
-            }}
+            onPress={() => handlePress(item.key)}
             style={[styles.tab, tabStyle]}
           >
             {icon ? <Ionicons name={icon} size={iconSize} color={color} /> : null}

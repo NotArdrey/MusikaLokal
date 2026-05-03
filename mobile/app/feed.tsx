@@ -35,7 +35,6 @@ import ProductionTeamDetailsSheet from "../src/components/ProductionTeamDetailsS
 import SearchBottomSheet from "../src/components/SearchBottomSheet";
 import Skeleton from "../src/components/Skeleton";
 import SlidingTabBar from "../src/components/SlidingTabBar";
-import SmoothTabTransition from "../src/components/SmoothTabTransition";
 import CustomAlert, { AlertType } from "../src/components/CustomAlert";
 import { isTrackPlayerAvailable } from "../src/audio/safeTrackPlayer";
 import { useAuth } from "../src/context/AuthContext";
@@ -62,7 +61,7 @@ import {
   rerankHomeFeedWithGroq,
 } from "../src/services/groqModelRouter";
 import { usePageLoadLogger } from "../src/utils/loadTimeLogger";
-import { getSmoothTabIndex, setSmoothTab } from "../src/utils/smoothTabs";
+import { setSmoothTab } from "../src/utils/smoothTabs";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const moderateScale = (size: number, factor = 0.3) => {
@@ -71,7 +70,6 @@ const moderateScale = (size: number, factor = 0.3) => {
 };
 
 type FeedTab = "for_you" | "following";
-const FEED_TAB_ORDER: readonly FeedTab[] = ["for_you", "following"];
 const FEED_TABS = [
   { key: "for_you", label: "For You" },
   { key: "following", label: "Following" },
@@ -675,14 +673,16 @@ export default function FeedScreen() {
   }, [tab]);
 
   const applyFeedSnapshot = useCallback((snapshot: FeedCacheEntry) => {
-    setPosts(snapshot.posts);
-    setAiCards(snapshot.aiCards);
-    setAiFeedMessage(normalizeAiFeedMessage(snapshot.aiFeedMessage || ""));
-    setAiFeedProvider(normalizeAiFeedProvider(snapshot.aiFeedProvider || groqModelLabel));
-    setHasMore(snapshot.hasMore);
-    setLoading(false);
-    setRefreshing(false);
-    setLoadingMore(false);
+    React.startTransition(() => {
+      setPosts(snapshot.posts);
+      setAiCards(snapshot.aiCards);
+      setAiFeedMessage(normalizeAiFeedMessage(snapshot.aiFeedMessage || ""));
+      setAiFeedProvider(normalizeAiFeedProvider(snapshot.aiFeedProvider || groqModelLabel));
+      setHasMore(snapshot.hasMore);
+      setLoading(false);
+      setRefreshing(false);
+      setLoadingMore(false);
+    });
   }, [groqModelLabel]);
 
   const isEmptyForYouSnapshot = useCallback((snapshot: FeedCacheEntry) => (
@@ -1798,47 +1798,51 @@ export default function FeedScreen() {
 
     previousTabRef.current = tab;
 
-    const hydrated = hydrateCachedFeed(tab);
-    const hydratedSnapshot = feedCacheRef.current[tab];
-    const isHydratedEmptyForYou =
-      tab === "for_you" &&
-      hydrated &&
-      isEmptyForYouSnapshot(hydratedSnapshot);
-    const shouldRefreshTabFeed =
-      !hydrated ||
-      isHydratedEmptyForYou ||
-      Date.now() - feedLastFetchAt[tab] >= FEED_FOCUS_REFRESH_COOLDOWN_MS;
+    const tabSwitchTask = InteractionManager.runAfterInteractions(() => {
+      const hydrated = hydrateCachedFeed(tab);
+      const hydratedSnapshot = feedCacheRef.current[tab];
+      const isHydratedEmptyForYou =
+        tab === "for_you" &&
+        hydrated &&
+        isEmptyForYouSnapshot(hydratedSnapshot);
+      const shouldRefreshTabFeed =
+        !hydrated ||
+        isHydratedEmptyForYou ||
+        Date.now() - feedLastFetchAt[tab] >= FEED_FOCUS_REFRESH_COOLDOWN_MS;
 
-    if (tab === "for_you" && shouldRefreshTabFeed && (!hydrated || isEmptyForYouSnapshot(hydratedSnapshot))) {
-      setIsAiCardsLoading(true);
-    }
+      if (tab === "for_you" && shouldRefreshTabFeed && (!hydrated || isEmptyForYouSnapshot(hydratedSnapshot))) {
+        setIsAiCardsLoading(true);
+      }
 
-    if (!hydrated) {
-      setLoading(true);
-    }
+      if (!hydrated) {
+        setLoading(true);
+      }
 
-    if (shouldRefreshTabFeed) {
-      void fetchFeed(tab);
-    } else {
-      setLoading(false);
-      setRefreshing(false);
-    }
+      if (shouldRefreshTabFeed) {
+        void fetchFeed(tab);
+      } else {
+        setLoading(false);
+        setRefreshing(false);
+      }
+    });
+
+    return () => tabSwitchTask.cancel();
   }, [authLoading, fetchFeed, hydrateCachedFeed, isEmptyForYouSnapshot, tab]);
 
-  const onRefresh = () => {
+  const onRefresh = useCallback(() => {
     if (authLoading) {
       return;
     }
 
     setRefreshing(true);
-    if (tab === "for_you" && feedItems.length === 0) {
+    if (tab === "for_you" && posts.length === 0 && aiCards.length === 0) {
       setIsAiCardsLoading(true);
     }
     void fetchFeed(tab);
     void fetchLiveStations({ force: true });
-  };
+  }, [aiCards.length, authLoading, fetchFeed, fetchLiveStations, posts.length, tab]);
 
-  const loadMore = () => {
+  const loadMore = useCallback(() => {
     if (
       authLoading ||
       loading ||
@@ -1852,7 +1856,7 @@ export default function FeedScreen() {
 
     setLoadingMore(true);
     void fetchFeed(tab, true, posts.length);
-  };
+  }, [aiCards.length, authLoading, fetchFeed, hasMore, loading, loadingMore, posts.length, tab]);
 
   /* ── Actions ── */
   const handleCreatePost = async () => {
@@ -1886,7 +1890,7 @@ export default function FeedScreen() {
     }
   };
 
-  const handleReaction = async (postId: string, currentReaction: string | null) => {
+  const handleReaction = useCallback(async (postId: string, currentReaction: string | null) => {
     // optimistic
     setPosts((prev) =>
       prev.map((p) =>
@@ -1906,9 +1910,9 @@ export default function FeedScreen() {
     } catch (e: any) {
       console.error("Reaction error:", e);
     }
-  };
+  }, []);
 
-  const handleFollow = async (
+  const handleFollow = useCallback(async (
     targetId: string,
     targetType: SocialFollowTargetType,
     isFollowing: boolean,
@@ -1978,11 +1982,11 @@ export default function FeedScreen() {
         return next;
       });
     }
-  };
+  }, [fetchFeed, followBusyByKey, invalidateFeedCache, loadFollowingGraph, tab]);
 
   /* ── Renderers ── */
 
-  const timeAgo = (dateStr: string) => {
+  const timeAgo = useCallback((dateStr: string) => {
     const diff = Date.now() - new Date(dateStr).getTime();
     const mins = Math.floor(diff / 60_000);
     if (mins < 1) return "Just now";
@@ -1992,9 +1996,9 @@ export default function FeedScreen() {
     const days = Math.floor(hrs / 24);
     if (days < 7) return `${days}d`;
     return new Date(dateStr).toLocaleDateString();
-  };
+  }, []);
 
-  const renderPost = ({ item: post }: { item: any }) => {
+  const renderPost = useCallback(({ item: post }: { item: any }) => {
     if (post?.__feedKind === "following_entity") {
       const followKey = buildSocialFollowKey(post.followed_type, post.id);
       const isFollowingEntity = followKey ? followingKeys.has(followKey) : false;
@@ -2284,9 +2288,23 @@ export default function FeedScreen() {
         </View>
       </View>
     );
-  };
+  }, [
+    colors.border,
+    colors.primary,
+    colors.text,
+    colors.textSecondary,
+    followBusyByKey,
+    followingKeys,
+    handleFollow,
+    handleReaction,
+    isDark,
+    openListingDetails,
+    openProductionTeamDetails,
+    timeAgo,
+    userId,
+  ]);
 
-  const renderHeader = () => {
+  const renderHeader = useCallback(() => {
     const cardBg = isDark ? "#1E293B" : "#FFFFFF";
     const skeletonBorder = isDark ? "#334155" : "#E2E8F0";
     const showRadioStationSkeleton = isLiveStationsLoading && liveStations.length === 0;
@@ -2472,7 +2490,21 @@ export default function FeedScreen() {
 
       </>
     );
-  };
+  }, [
+    activeStation?.id,
+    colors.primary,
+    colors.text,
+    colors.textSecondary,
+    handleLiveStationPress,
+    isDark,
+    isLiveStationsLoading,
+    isPlaying,
+    liveStations,
+    loadingStationId,
+    openLiveStationCreator,
+    openSearchSheet,
+    tab,
+  ]);
 
   const showInitialFeedSkeleton = loading && !refreshing && !loadingMore;
 
@@ -2585,6 +2617,81 @@ export default function FeedScreen() {
   const feedBottomSpacer = hasRadioMiniPlayer
     ? radioPlayerBottom + RADIO_MINI_PLAYER_HEIGHT + 24
     : NAVBAR_CLEARANCE + insets.bottom;
+  const feedListHeader = useMemo(() => renderHeader(), [renderHeader]);
+  const feedKeyExtractor = useCallback(
+    (item: any, index: number) => `${item.id || "row"}-${item.__feedKind || "post"}-${index}`,
+    [],
+  );
+  const feedSeparator = useCallback(
+    () => <View style={{ height: isShowingAiCards ? 10 : 8 }} />,
+    [isShowingAiCards],
+  );
+  const feedFooter = useMemo(
+    () => (
+      <>
+        {loadingMore && <ActivityIndicator style={{ marginVertical: 20 }} color={colors.primary} />}
+        <View style={{ height: feedBottomSpacer }} />
+      </>
+    ),
+    [colors.primary, feedBottomSpacer, loadingMore],
+  );
+  const feedEmpty = useMemo(
+    () =>
+      showRecommendationLoadingState ? (
+        <View style={{ paddingHorizontal: 16, paddingTop: 8 }}>
+          {[1, 2].map((i) => (
+            <Skeleton
+              borderRadius={12}
+              height={180}
+              key={i}
+              style={{ marginBottom: 10 }}
+              width={SCREEN_WIDTH - 32}
+            />
+          ))}
+        </View>
+      ) : (
+        <View style={[styles.emptyStateContainer, { backgroundColor: isDark ? "#1E293B" : "#FFFFFF" }]}>
+          <View style={[styles.emptyIconCircle, { backgroundColor: isDark ? "#1E293B" : colors.primary + "10" }]}>
+            <Ionicons
+              name={tab === "following" ? "people-outline" : "sparkles-outline"}
+              size={48}
+              color={colors.primary}
+            />
+          </View>
+          <Text style={[styles.emptyTitle, { color: colors.text }]}>
+            {tab === "following"
+              ? "Your Following Feed is Empty"
+              : "No posts or recommendations yet"}
+          </Text>
+          <Text style={[styles.emptySubtitle, { color: colors.textSecondary }]}>
+            {tab === "following"
+              ? "Follow musicians, groups, and duos to see their updates here. Followed profiles and groups will also appear until they have posts."
+              : "Explore musicians, groups, studios, and gigs to help shape your For You feed."}
+          </Text>
+
+          <TouchableOpacity
+            activeOpacity={1}
+            style={[styles.emptyActionBtn, { backgroundColor: colors.primary, marginTop: 16 }]}
+            onPress={openSearchSheet}
+          >
+            <Ionicons name="search" size={18} color="#fff" />
+            <Text style={styles.emptyActionBtnText}>
+              {tab === "following" ? "Find Musicians" : "Explore Feed"}
+            </Text>
+          </TouchableOpacity>
+        </View>
+      ),
+    [
+      colors.primary,
+      colors.text,
+      colors.textSecondary,
+      isDark,
+      openSearchSheet,
+      showRecommendationLoadingState,
+      tab,
+    ],
+  );
+  const feedContentContainerStyle = useMemo(() => ({ paddingBottom: 20 }), []);
 
   if (isGuest) {
     return (
@@ -2602,75 +2709,24 @@ export default function FeedScreen() {
       {showInitialFeedSkeleton ? (
         renderFeedSkeleton()
       ) : (
-        <SmoothTabTransition
-          activeKey={tab}
-          activeIndex={getSmoothTabIndex(FEED_TAB_ORDER, tab)}
-          renderOutgoing={false}
-          style={{ flex: 1 }}
-        >
-          <FlatList
+        <FlatList
             data={feedItems}
-            keyExtractor={(item, index) => `${item.id || "row"}-${item.__feedKind || "post"}-${index}`}
+            initialNumToRender={4}
+            keyExtractor={feedKeyExtractor}
+            maxToRenderPerBatch={4}
             renderItem={renderPost}
-            ListHeaderComponent={renderHeader()}
-            ListEmptyComponent={
-              showRecommendationLoadingState ? (
-                <View style={{ paddingHorizontal: 16, paddingTop: 8 }}>
-                  {[1, 2].map((i) => <Skeleton key={i} width={SCREEN_WIDTH - 32} height={180} style={{ marginBottom: 10, borderRadius: 12 }} />)}
-                </View>
-              ) : (
-                <View style={[styles.emptyStateContainer, { backgroundColor: isDark ? "#1E293B" : "#FFFFFF" }]}>
-                  <View style={[styles.emptyIconCircle, { backgroundColor: isDark ? "#1E293B" : colors.primary + "10" }]}>
-                    <Ionicons
-                      name={tab === "following" ? "people-outline" : "sparkles-outline"}
-                      size={48}
-                      color={colors.primary}
-                    />
-                  </View>
-                  <Text style={[styles.emptyTitle, { color: colors.text }]}>
-                    {tab === "following"
-                      ? "Your Following Feed is Empty"
-                      : "No posts or recommendations yet"}
-                  </Text>
-                  <Text style={[styles.emptySubtitle, { color: colors.textSecondary }]}>
-                    {tab === "following"
-                      ? "Follow musicians, groups, and duos to see their updates here. Followed profiles and groups will also appear until they have posts."
-                      : "Explore musicians, groups, studios, and gigs to help shape your For You feed."}
-                  </Text>
-
-                  {tab === "following" ? (
-                    <TouchableOpacity activeOpacity={1}
-                      style={[styles.emptyActionBtn, { backgroundColor: colors.primary, marginTop: 16 }]}
-                      onPress={openSearchSheet}
-                    >
-                      <Ionicons name="search" size={18} color="#fff" />
-                      <Text style={styles.emptyActionBtnText}>Find Musicians</Text>
-                    </TouchableOpacity>
-                  ) : (
-                    <TouchableOpacity activeOpacity={1}
-                      style={[styles.emptyActionBtn, { backgroundColor: colors.primary, marginTop: 16 }]}
-                      onPress={openSearchSheet}
-                    >
-                      <Ionicons name="search" size={18} color="#fff" />
-                      <Text style={styles.emptyActionBtnText}>Explore Feed</Text>
-                    </TouchableOpacity>
-                  )}
-                </View>
-              )
-            }
-            ListFooterComponent={
-              <>
-                {loadingMore && <ActivityIndicator style={{ marginVertical: 20 }} color={colors.primary} />}
-                <View style={{ height: feedBottomSpacer }} />
-              </>
-            }
+            removeClippedSubviews
+            updateCellsBatchingPeriod={32}
+            windowSize={5}
+            ListHeaderComponent={feedListHeader}
+            ListEmptyComponent={feedEmpty}
+            ListFooterComponent={feedFooter}
             onEndReached={loadMore}
             onEndReachedThreshold={0.3}
             refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
-            ItemSeparatorComponent={() => <View style={{ height: isShowingAiCards ? 10 : 8 }} />}
-            contentContainerStyle={{ paddingBottom: 20 }}
+            ItemSeparatorComponent={feedSeparator}
+            contentContainerStyle={feedContentContainerStyle}
           />
-        </SmoothTabTransition>
       )}
 
       {/* Create Post Modal */}

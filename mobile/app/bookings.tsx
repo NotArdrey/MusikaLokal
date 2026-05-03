@@ -11,6 +11,8 @@ import {
     InteractionManager,
     Linking,
     Modal as RNModal,
+    NativeScrollEvent,
+    NativeSyntheticEvent,
     ScrollView,
     StyleSheet,
     Text,
@@ -28,7 +30,7 @@ import InAppMediaViewer, { isInAppMediaUrl } from "../src/components/InAppMediaV
 import BookingActionModal, { normalizeVisibleInput } from "../src/components/modal";
 import Navbar from "../src/components/navbar";
 import Skeleton from "../src/components/Skeleton";
-import SmoothTabTransition from "../src/components/SmoothTabTransition";
+import SlidingTabBar from "../src/components/SlidingTabBar";
 import { useAuth } from "../src/context/AuthContext";
 import { useBottomOverlay, useBottomOverlayVisibility } from "../src/context/BottomOverlayContext";
 import { emitToast } from "../src/events/toastBus";
@@ -39,7 +41,7 @@ import { createBookingCheckout } from "../src/services/paymongo";
 import { buildNotificationRouteMeta } from "../src/utils/notificationNavigation";
 import { formatFriendlyDateTime } from "../src/utils/friendlyDateTime";
 import { usePageLoadLogger } from "../src/utils/loadTimeLogger";
-import { getSmoothTabIndex, setSmoothTab } from "../src/utils/smoothTabs";
+import { setSmoothTab } from "../src/utils/smoothTabs";
 import {
   formatRecordingHours,
   formatRecordingRuleShort,
@@ -51,6 +53,8 @@ import {
 const debugLog = (..._args: unknown[]) => { };
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
+const INITIAL_BOOKINGS_RENDER_COUNT = 8;
+const BOOKINGS_RENDER_CHUNK_SIZE = 8;
 
 // Responsive scaling utilities - optimized for iPhone SE and smaller devices
 const scale = (size: number) => {
@@ -418,9 +422,6 @@ type Tab =
   | "Review"
   | "History";
 
-// Venue owner specific tabs for managing gig applications
-type VenueOwnerTab = "Applicants" | "Active Musicians" | "History";
-
 // Application-specific tabs for musician's gig application flow
 type ApplicationTab = "Applied" | "Accepted" | "Completed";
 
@@ -539,6 +540,12 @@ export default function BookingsScreen() {
     "confirm" | "cancel" | "decline" | "fire" | "complete" | "renew" | "clear_balance" | "late" | "late_confirm" | "report_access"
   >("confirm");
 
+  const handleBookingTabChange = useCallback((tab: Tab) => {
+    React.startTransition(() => {
+      setSmoothTab(setActiveTab, tab);
+    });
+  }, []);
+
   // Renew Contract State
   const [showRenewModal, setShowRenewModal] = useState(false);
   const [renewGigId, setRenewGigId] = useState<string | null>(null);
@@ -584,6 +591,11 @@ export default function BookingsScreen() {
   const [searchQuery, setSearchQuery] = useState("");
   const [activeFilter, setActiveFilter] = useState("All");
   const [showActivityFilters, setShowActivityFilters] = useState(false);
+  const deferredActiveTab = React.useDeferredValue(activeTab);
+  const deferredActiveAppTab = React.useDeferredValue(activeAppTab);
+  const deferredSearchQuery = React.useDeferredValue(searchQuery);
+  const deferredActiveFilter = React.useDeferredValue(activeFilter);
+  const renderActiveTab = deferredActiveTab;
   const [alertVisible, setAlertVisible] = useState(false);
   const [alertConfig, setAlertConfig] = useState<{
     type: AlertType;
@@ -2651,7 +2663,7 @@ export default function BookingsScreen() {
   };
 
   const isReviewOrCompletedContext =
-    activeTab === "Review" ||
+    renderActiveTab === "Review" ||
     (userRole === "musician" &&
       viewMode === "applications" &&
       activeAppTab === "Completed");
@@ -2718,7 +2730,7 @@ export default function BookingsScreen() {
   };
 
   const shouldShowLateReportButton = (item: any) => {
-    if (activeTab !== "Upcoming") return false;
+    if (renderActiveTab !== "Upcoming") return false;
     if (item?.type_id !== "studio_booking") return false;
     if (userRole !== "musician") return false;
     if (item?.isCancelled) return false;
@@ -2728,7 +2740,7 @@ export default function BookingsScreen() {
   };
 
   const shouldShowAccessIssueReportButton = (item: any) => {
-    if (activeTab !== "Ongoing") return false;
+    if (renderActiveTab !== "Ongoing") return false;
     if (item?.type_id !== "studio_booking") return false;
     if (userRole !== "musician") return false;
     if (item?.isCancelled) return false;
@@ -3651,35 +3663,42 @@ export default function BookingsScreen() {
     return "Other";
   };
 
-  // Determine items to show based on view mode
-  const currentItems = userRole === "musician" && viewMode === "applications"
-    ? applicationData[activeAppTab as keyof typeof applicationData] || []
-    : activeTab === "Active Musicians"
-      ? data.ActiveMusicians
-      : data[activeTab as keyof typeof data] || [];
+  const [bookingRenderWindow, setBookingRenderWindow] = useState({
+    key: "",
+    limit: INITIAL_BOOKINGS_RENDER_COUNT,
+  });
+
+  // Determine items to show based on view mode without rebuilding the list during the tab press.
+  const currentItems = React.useMemo(
+    () =>
+      userRole === "musician" && viewMode === "applications"
+        ? applicationData[deferredActiveAppTab as keyof typeof applicationData] || []
+        : deferredActiveTab === "Active Musicians"
+          ? data.ActiveMusicians
+          : data[deferredActiveTab as keyof typeof data] || [],
+    [applicationData, data, deferredActiveAppTab, deferredActiveTab, userRole, viewMode],
+  );
 
   const activeListLabel =
     userRole === "musician" && viewMode === "applications"
-      ? activeAppTab
-      : userRole === "venue-owner" && activeTab === "Review"
+      ? deferredActiveAppTab
+      : userRole === "venue-owner" && deferredActiveTab === "Review"
         ? "History"
-      : activeTab;
-  const bookingTabOrder = React.useMemo<readonly Tab[]>(
+      : deferredActiveTab;
+  const bookingTabs = React.useMemo(
     () =>
       userRole === "venue-owner"
-        ? (["Applicants", "Active Musicians", "Review"] as const)
-        : (["Pending", "Upcoming", "Ongoing", "Review", "History"] as const),
+        ? [
+            { key: "Applicants" as Tab, label: "Applicants" },
+            { key: "Active Musicians" as Tab, label: "Active" },
+            { key: "Review" as Tab, label: "History" },
+          ]
+        : (["Pending", "Upcoming", "Ongoing", "Review", "History"] as Tab[]).map((tab) => ({
+            key: tab,
+            label: tab,
+          })),
     [userRole],
   );
-  const applicationTabOrder = React.useMemo<readonly ApplicationTab[]>(
-    () => ["Applied", "Accepted", "Completed"] as const,
-    [],
-  );
-  const bookingTransitionIndex =
-    userRole === "musician" && viewMode === "applications"
-      ? getSmoothTabIndex(applicationTabOrder, activeAppTab)
-      : getSmoothTabIndex(bookingTabOrder, activeTab);
-
   const sortedCurrentItems = React.useMemo(
     () =>
       [...currentItems].sort(
@@ -3702,15 +3721,15 @@ export default function BookingsScreen() {
     [sortedCurrentItems],
   );
 
-  const normalizedSearchQuery = searchQuery.trim().toLowerCase();
+  const normalizedSearchQuery = deferredSearchQuery.trim().toLowerCase();
   const hasSearchOrFilter =
-    normalizedSearchQuery.length > 0 || activeFilter !== "All";
+    normalizedSearchQuery.length > 0 || deferredActiveFilter !== "All";
 
   const filteredItems = React.useMemo(
     () =>
       sortedCurrentItems.filter((item: any) => {
         const matchesFilter =
-          activeFilter === "All" || getItemFilterLabel(item) === activeFilter;
+          deferredActiveFilter === "All" || getItemFilterLabel(item) === deferredActiveFilter;
 
         if (!matchesFilter) return false;
         if (!normalizedSearchQuery) return true;
@@ -3746,8 +3765,58 @@ export default function BookingsScreen() {
 
         return searchableText.includes(normalizedSearchQuery);
       }),
-    [sortedCurrentItems, activeFilter, normalizedSearchQuery],
+    [sortedCurrentItems, deferredActiveFilter, normalizedSearchQuery],
   );
+  const bookingListKey = `${deferredActiveTab}|${deferredActiveAppTab}|${deferredActiveFilter}|${normalizedSearchQuery}`;
+
+  useEffect(() => {
+    setBookingRenderWindow({
+      key: bookingListKey,
+      limit: Math.min(INITIAL_BOOKINGS_RENDER_COUNT, filteredItems.length),
+    });
+  }, [bookingListKey, filteredItems.length]);
+
+  const handleBookingListScroll = useCallback(
+    (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+      const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
+      const distanceFromEnd =
+        contentSize.height - (contentOffset.y + layoutMeasurement.height);
+
+      if (distanceFromEnd > 520) {
+        return;
+      }
+
+      React.startTransition(() => {
+        setBookingRenderWindow((currentWindow) => {
+          if (
+            currentWindow.key !== bookingListKey ||
+            currentWindow.limit >= filteredItems.length
+          ) {
+            return currentWindow;
+          }
+
+          return {
+            key: bookingListKey,
+            limit: Math.min(
+              currentWindow.limit + BOOKINGS_RENDER_CHUNK_SIZE,
+              filteredItems.length,
+            ),
+          };
+        });
+      });
+    },
+    [bookingListKey, filteredItems.length],
+  );
+
+  const effectiveBookingRenderLimit =
+    bookingRenderWindow.key === bookingListKey
+      ? bookingRenderWindow.limit
+      : INITIAL_BOOKINGS_RENDER_COUNT;
+  const visibleFilteredItems = React.useMemo(
+    () => filteredItems.slice(0, effectiveBookingRenderLimit),
+    [effectiveBookingRenderLimit, filteredItems],
+  );
+  const hasDeferredBookingItems = visibleFilteredItems.length < filteredItems.length;
 
   useEffect(() => {
     if (activeFilter !== "All" && !availableFilters.includes(activeFilter)) {
@@ -3763,80 +3832,6 @@ export default function BookingsScreen() {
     showRenewModal;
   const isActivityFilterActive = activeFilter !== "All";
   const shouldShowActivityFilters = showActivityFilters;
-
-  // Render application tab for musicians
-  const renderAppTab = (tab: ApplicationTab) => {
-    const isActive = activeAppTab === tab;
-
-    return (
-      <TouchableOpacity activeOpacity={1}
-        key={tab}
-        onPress={() => setSmoothTab(setActiveAppTab, tab)}
-        style={[
-          styles.tabButton,
-          {
-            backgroundColor: isActive ? colors.primary : "transparent",
-            borderColor: isActive ? colors.primary : colors.border,
-          },
-        ]}
-      >
-        <Text
-          style={[
-            styles.tabText,
-            {
-              color: isActive ? "#FFF" : colors.textSecondary,
-            },
-          ]}
-        >
-          {tab}
-        </Text>
-      </TouchableOpacity>
-    );
-  };
-
-  // Render venue owner specific tab for managing gig applications
-  const renderVenueOwnerTab = (tab: VenueOwnerTab) => {
-    // Map tab to actual data key
-    const getTabData = (): any[] => {
-      switch (tab) {
-        case "Applicants":
-          return data.Applicants;
-        case "Active Musicians":
-          return data.ActiveMusicians;
-        case "History":
-          return data.Review.filter((item: any) => item.type_id === "gig_application");
-        default:
-          return [];
-      }
-    };
-
-    const isActive = activeTab === (tab === "History" ? "Review" : tab);
-
-    return (
-      <TouchableOpacity activeOpacity={1}
-        key={tab}
-        onPress={() => setSmoothTab(setActiveTab, tab === "History" ? "Review" : tab as Tab)}
-        style={[
-          styles.tabButton,
-          {
-            backgroundColor: isActive ? colors.primary : "transparent",
-            borderColor: isActive ? colors.primary : colors.border,
-          },
-        ]}
-      >
-        <Text
-          style={[
-            styles.tabText,
-            {
-              color: isActive ? "#FFF" : colors.textSecondary,
-            },
-          ]}
-        >
-          {tab}
-        </Text>
-      </TouchableOpacity>
-    );
-  };
 
   const inferApplicationKind = (item: any): "solo" | "duo" | "group" => {
     const candidates = [
@@ -3864,46 +3859,6 @@ export default function BookingsScreen() {
     return "Solo Artist";
   };
 
-  const renderTab = (tab: Tab) => {
-    // Hide Applicants tab if not venue owner AND empty
-    if (
-      tab === "Applicants" &&
-      userRole !== "venue-owner" &&
-      data.Applicants.length === 0
-    ) {
-      return null;
-    }
-
-    return (
-      <TouchableOpacity activeOpacity={1}
-        key={tab}
-        onPress={() => setSmoothTab(setActiveTab, tab)}
-        style={[
-          styles.tabButton,
-          {
-            backgroundColor: activeTab === tab ? colors.primary : "transparent",
-            borderColor: activeTab === tab ? colors.primary : colors.border,
-          },
-        ]}
-      >
-        <Text
-          style={[
-            styles.tabText,
-            {
-              color: activeTab === tab ? "#FFF" : colors.textSecondary,
-            },
-          ]}
-        >
-          {tab === "Applicants"
-            ? userRole === "venue-owner"
-              ? "Applicants"
-              : "Applications"
-            : tab}
-        </Text>
-      </TouchableOpacity>
-    );
-  };
-
   if (isGuest) {
     return (
       <View style={[styles.flex1, { backgroundColor: colors.background }]}>
@@ -3921,23 +3876,21 @@ export default function BookingsScreen() {
 
         {/* Tab Navigation */}
         <View style={styles.tabContainer}>
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.tabScrollContent}
-          >
-            {userRole === "venue-owner" ? (
-              // Venue owner specific tabs for managing gig applications
-              (["Applicants", "Active Musicians", "History"] as VenueOwnerTab[]).map(
-                (tab) => renderVenueOwnerTab(tab),
-              )
-            ) : (
-              // Default tabs for other users (musicians, studio-owners)
-              ["Pending", "Upcoming", "Ongoing", "Review", "History"].map(
-                (tab) => renderTab(tab as Tab),
-              )
-            )}
-          </ScrollView>
+          <SlidingTabBar
+            activeColor={colors.primary}
+            activeKey={activeTab}
+            backgroundColor={colors.background}
+            borderColor={colors.border}
+            deferOnChange
+            inactiveColor={colors.textSecondary}
+            indicatorColor={colors.primary}
+            indicatorWidthRatio={0.34}
+            onChange={handleBookingTabChange}
+            style={styles.animatedTabs}
+            tabStyle={styles.animatedTab}
+            tabs={bookingTabs}
+            textStyle={styles.animatedTabText}
+          />
         </View>
 
         <View style={styles.searchFilterContainer}>
@@ -4067,15 +4020,12 @@ export default function BookingsScreen() {
         <ScrollView
           showsVerticalScrollIndicator={false}
           contentContainerStyle={styles.scrollContent}
+          onScroll={handleBookingListScroll}
+          scrollEventThrottle={120}
         >
-          <SmoothTabTransition
-            activeKey={`${activeTab}-${activeAppTab}-${activeFilter}`}
-            activeIndex={bookingTransitionIndex}
-            renderOutgoing={false}
-          >
           {!loading &&
-            ((userRole === "studio-owner" && activeTab === "Pending") ||
-              (userRole === "venue-owner" && activeTab === "Applicants")) &&
+            ((userRole === "studio-owner" && renderActiveTab === "Pending") ||
+              (userRole === "venue-owner" && renderActiveTab === "Applicants")) &&
             pendingPermitStudios.length > 0 && (
               <View style={{ paddingHorizontal: scale(16), marginBottom: moderateScale(12), gap: moderateScale(8) }}>
                 {pendingPermitStudios.map((listing: any) => {
@@ -4315,31 +4265,31 @@ export default function BookingsScreen() {
                 {hasSearchOrFilter
                   ? "No matches found for the selected search/filter."
                   : userRole === "venue-owner"
-                  ? activeTab === "Applicants"
+                  ? renderActiveTab === "Applicants"
                     ? "No pending applications"
-                    : activeTab === "Active Musicians"
+                    : renderActiveTab === "Active Musicians"
                       ? "No active musicians"
-                      : activeTab === "Review"
+                      : renderActiveTab === "Review"
                         ? "No history yet"
                         : "No items"
-                    : userRole === "studio-owner" && activeTab === "Pending" && pendingPermitStudios.length > 0
+                    : userRole === "studio-owner" && renderActiveTab === "Pending" && pendingPermitStudios.length > 0
                       ? "No pending items below"
-                      : activeTab === "Pending"
+                      : renderActiveTab === "Pending"
                         ? "No pending items"
-                        : activeTab === "History"
+                        : renderActiveTab === "History"
                           ? "No history yet"
                           : isProducerActivityRole(userRole)
-                            ? `No ${activeTab.toLowerCase()} activity`
-                            : `No ${activeTab.toLowerCase()} bookings`}
+                            ? `No ${renderActiveTab.toLowerCase()} activity`
+                            : `No ${renderActiveTab.toLowerCase()} bookings`}
               </Text>
-                {userRole === "studio-owner" && activeTab === "Pending" && pendingPermitStudios.length > 0 && (
+                {userRole === "studio-owner" && renderActiveTab === "Pending" && pendingPermitStudios.length > 0 && (
                   <Text
                     style={[styles.emptySubtitle, { color: colors.textSecondary, marginTop: 8, textAlign: "center", paddingHorizontal: 24 }]}
                   >
                     Permit review items are listed above. New pending items will appear here.
                   </Text>
                 )}
-              {userRole === "venue-owner" && activeTab === "Applicants" && (
+              {userRole === "venue-owner" && renderActiveTab === "Applicants" && (
                 <Text
                   style={[styles.emptySubtitle, { color: colors.textSecondary, marginTop: 8, textAlign: "center", paddingHorizontal: 24 }]}
                 >
@@ -4348,7 +4298,8 @@ export default function BookingsScreen() {
               )}
             </View>
           ) : (
-            filteredItems.map((item: any) => {
+            <>
+              {visibleFilteredItems.map((item: any) => {
               // ==========================================
               // 0.75. CONNECTION REQUEST CARD
               // ==========================================
@@ -5015,7 +4966,7 @@ export default function BookingsScreen() {
                                 View Details
                               </Text>
                             </TouchableOpacity>
-                          ) : activeTab === "Applicants" ? (
+                          ) : renderActiveTab === "Applicants" ? (
                             userRole === "venue-owner" ? (
                               <>
                                 <View style={styles.compactActionRow}>
@@ -5133,7 +5084,7 @@ export default function BookingsScreen() {
                                 </TouchableOpacity>
                               </View>
                             )
-                          ) : activeTab === "Pending" && isMusicianView && isLeaderConfirmation ? (
+                          ) : renderActiveTab === "Pending" && isMusicianView && isLeaderConfirmation ? (
                             <>
                               <View style={styles.compactActionRow}>
                                 <TouchableOpacity activeOpacity={1}
@@ -5194,7 +5145,7 @@ export default function BookingsScreen() {
                                 </TouchableOpacity>
                               </View>
                             </>
-                          ) : activeTab === "Active Musicians" ? (
+                          ) : renderActiveTab === "Active Musicians" ? (
                             // FIRE & COMPLETE BUTTONS
                             <View style={{ flexDirection: "row", gap: 8, flex: 1 }}>
                               <TouchableOpacity activeOpacity={1}
@@ -5250,7 +5201,7 @@ export default function BookingsScreen() {
                                 </Text>
                               </TouchableOpacity>
                             </View>
-                          ) : activeTab === "Review" ? (
+                          ) : renderActiveTab === "Review" ? (
                             // History tab: completed contracts can be renewed by venue owners.
                             <View style={{ flexDirection: "row", gap: 8, flex: 1 }}>
                               {!(userRole === "venue-owner" && item.type_id === "gig_application") && (
@@ -5386,7 +5337,7 @@ export default function BookingsScreen() {
                         </View>
 
                         {/* Status Overlays */}
-                        {activeTab === "Ongoing" && (
+                        {renderActiveTab === "Ongoing" && (
                           <View style={[styles.liveBadge, styles.stackedImageBadge]}>
                             <View style={styles.liveDot} />
                             <Text style={styles.liveText}>Live</Text>
@@ -5395,7 +5346,7 @@ export default function BookingsScreen() {
                       </View>
                     )}
 
-                    {!item.pax && activeTab === "Ongoing" && (
+                    {!item.pax && renderActiveTab === "Ongoing" && (
                       <View style={styles.topRightBadgeStack}>
                         <View style={[styles.liveBadge, styles.stackedImageBadge]}>
                           <View style={styles.liveDot} />
@@ -5856,19 +5807,19 @@ export default function BookingsScreen() {
                               size={16}
                               color="#EF4444"
                             />
-                          ) : activeTab === "Ongoing" ? (
+                          ) : renderActiveTab === "Ongoing" ? (
                             <Ionicons
                               name="play-circle"
                               size={16}
                               color="#10B981"
                             />
-                          ) : activeTab === "Review" ? (
+                          ) : renderActiveTab === "Review" ? (
                             <Ionicons
                               name="checkmark-done-circle"
                               size={16}
                               color={colors.textSecondary}
                             />
-                          ) : activeTab === "Pending" ? (
+                          ) : renderActiveTab === "Pending" ? (
                             <Ionicons
                               name="time-outline"
                               size={16}
@@ -5888,11 +5839,11 @@ export default function BookingsScreen() {
                               {
                                 color: item.isCancelled
                                   ? "#EF4444"
-                                  : activeTab === "Pending"
+                                  : renderActiveTab === "Pending"
                                     ? "#F59E0B"
-                                    : activeTab === "Ongoing"
+                                    : renderActiveTab === "Ongoing"
                                       ? "#10B981"
-                                      : activeTab === "Review"
+                                      : renderActiveTab === "Review"
                                         ? colors.textSecondary
                                         : "#10B981",
                               },
@@ -6001,7 +5952,7 @@ export default function BookingsScreen() {
                         ]}
                       >
                         {/* PENDING TAB: Studio Bookings - Payment Button for Musicians */}
-                        {activeTab === "Pending" &&
+                        {renderActiveTab === "Pending" &&
                           item.type_id === "studio_booking" &&
                           userRole === "musician" &&
                           (item.raw_status === "pending_relocation" ||
@@ -6168,7 +6119,7 @@ export default function BookingsScreen() {
                               </View>
                             </TouchableOpacity>
                           </View>
-                        ) : activeTab === "Pending" &&
+                        ) : renderActiveTab === "Pending" &&
                           item.type_id === "studio_booking" &&
                           userRole === "musician" ? (
                           <View
@@ -6320,7 +6271,7 @@ export default function BookingsScreen() {
                               </Text>
                             </TouchableOpacity>
                           </View>
-                        ) : activeTab === "Pending" &&
+                        ) : renderActiveTab === "Pending" &&
                           item.type_id === "studio_booking" &&
                           (userRole === "studio-owner" || userRole === "venue-owner") ? (
                           // Studio Owner view for pending bookings
@@ -6388,7 +6339,7 @@ export default function BookingsScreen() {
                               </TouchableOpacity>
                             )}
                           </View>
-                        ) : activeTab === "Review" ? (
+                        ) : renderActiveTab === "Review" ? (
                           userRole === "venue-owner" && item.type_id === "gig_application" ? (
                             <TouchableOpacity activeOpacity={1}
                               onPress={() => handleDetailsPress(item)}
@@ -6495,7 +6446,7 @@ export default function BookingsScreen() {
                               </TouchableOpacity>
                             )}
 
-                            {activeTab === "Ongoing" &&
+                            {renderActiveTab === "Ongoing" &&
                               item.type_id === "studio_booking" &&
                               userRole === "musician" &&
                               hasAccessIssueAlready(item) && (
@@ -6525,7 +6476,7 @@ export default function BookingsScreen() {
                               )}
 
                             {/* Pay Balance / Clear Balance (F2F) Buttons */}
-                            {activeTab === "Upcoming" &&
+                            {renderActiveTab === "Upcoming" &&
                               item.type_id === "studio_booking" &&
                               canPayRemainingBalance(item) && (
                                 <>
@@ -6631,8 +6582,8 @@ export default function BookingsScreen() {
                                 </View>
                               </TouchableOpacity>
 
-                              {((activeTab === "Upcoming" && !item.isCancelled) ||
-                                (activeTab === "Ongoing" &&
+                              {((renderActiveTab === "Upcoming" && !item.isCancelled) ||
+                                (renderActiveTab === "Ongoing" &&
                                   userRole === "musician" &&
                                   item.type_id === "gig_application")) && (
                                   <TouchableOpacity activeOpacity={1}
@@ -6674,9 +6625,14 @@ export default function BookingsScreen() {
                   </View>
                 </View>
               );
-            })
+              })}
+              {hasDeferredBookingItems ? (
+                <View style={styles.deferredBookingsFooter}>
+                  <Skeleton width="100%" height={96} borderRadius={14} />
+                </View>
+              ) : null}
+            </>
           )}
-          </SmoothTabTransition>
         </ScrollView>
 
         {!shouldHideNavbar ? (
@@ -7207,25 +7163,21 @@ const styles = StyleSheet.create({
   tabContainer: {
     paddingTop: moderateScale(16),
     paddingBottom: moderateScale(8),
-  },
-  tabScrollContent: {
-    paddingHorizontal: scale(24),
-  },
-  tabButton: {
-    flexDirection: "row",
-    alignItems: "center",
     paddingHorizontal: scale(16),
-    paddingVertical: moderateScale(8),
-    borderRadius: moderateScale(9999),
-    marginRight: scale(8),
-    borderWidth: 1,
   },
-  tabText: {
-    fontSize: moderateScale(12),
-    lineHeight: moderateScale(16),
-    fontFamily: "Poppins_600SemiBold",
-    includeFontPadding: false,
-    textAlignVertical: "center",
+  animatedTabs: {
+    borderBottomWidth: 0,
+    borderRadius: moderateScale(14),
+    overflow: "hidden",
+  },
+  animatedTab: {
+    minHeight: moderateScale(44),
+    paddingHorizontal: scale(6),
+    paddingVertical: moderateScale(10),
+  },
+  animatedTabText: {
+    fontSize: moderateScale(11),
+    lineHeight: moderateScale(15),
   },
   searchFilterContainer: {
     paddingHorizontal: scale(16),
@@ -7325,6 +7277,10 @@ const styles = StyleSheet.create({
     borderRadius: moderateScale(16),
     borderWidth: 1,
     padding: moderateScale(12),
+  },
+  deferredBookingsFooter: {
+    paddingTop: moderateScale(4),
+    paddingBottom: moderateScale(12),
   },
   loadingText: {
     fontSize: moderateScale(14),
