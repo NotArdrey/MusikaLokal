@@ -218,6 +218,11 @@ const normalizeUserRole = (rawRole: unknown): UserRole => {
   return userRoleOptions.includes(normalized as UserRole) ? (normalized as UserRole) : 'musician';
 };
 
+const isVisibleInUserManagement = (user: UserEntry) => {
+  const verificationStatus = String(user.verification_status || '').trim().toUpperCase();
+  return verificationStatus !== 'DECLINED';
+};
+
 const styles = StyleSheet.create({
   booleanToggleButton: {
     borderWidth: 1,
@@ -648,7 +653,9 @@ export default function AdminUsersPage() {
         limit: 300,
       });
 
-      const items = Array.isArray(data?.items) ? data.items : [];
+      const items = Array.isArray(data?.items)
+        ? data.items.filter(isVisibleInUserManagement)
+        : [];
       setUsers(items);
       writeAdminPageCache(usersCacheKey, items);
     } catch (error) {
@@ -948,6 +955,8 @@ export default function AdminUsersPage() {
 
   const filteredUsers = useMemo(() => {
     const roleFiltered = users.filter((item) => {
+      if (!isVisibleInUserManagement(item)) return false;
+
       const role = String(item.role || '').trim().toLowerCase();
 
       if (userFilter === 'all') return true;

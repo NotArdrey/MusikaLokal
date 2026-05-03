@@ -29,6 +29,7 @@ import { resolveSupabaseMediaUrl } from '../utils/supabaseMedia';
 import BottomModal from './BottomModal';
 import CustomAlert, { AlertType } from './CustomAlert';
 import InAppMediaViewer, { isInAppMediaUrl } from './InAppMediaViewer';
+import { normalizeVisibleInput } from './modal';
 import ReportModal from './ReportModal';
 
 // Available reaction emojis
@@ -263,8 +264,8 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
     };
 
     const handleSend = () => {
-        if (!text.trim()) return;
-        const messageText = text.trim();
+        const messageText = normalizeVisibleInput(text);
+        if (!messageText) return;
         setText('');
         void sendMessage(messageText);
         scrollToLatestMessage();
@@ -719,10 +720,10 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
                         />
                     </View>
 
-                    {text.trim().length > 0 ? (
+                    {normalizeVisibleInput(text).length > 0 ? (
                         <TouchableOpacity
                             onPress={handleSend}
-                            disabled={!text.trim()}
+                            disabled={!normalizeVisibleInput(text)}
                             style={[styles.sendButton, { backgroundColor: colors.primary }]}
                             activeOpacity={1}
                         >

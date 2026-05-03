@@ -8,6 +8,8 @@ import { router, useLocalSearchParams } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
 import React, { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Image, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Calendar } from 'react-native-calendars';
+import type { DateData } from 'react-native-calendars';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { WebView } from 'react-native-webview';
 import { supabase } from '../lib/supabase';
@@ -24,7 +26,7 @@ type DocumentOption = {
     key: string;
     label: string;
     diditSupported: boolean;
-    diditDocumentType?: 'passport' | 'id_card' | 'drivers_license' | 'health_insurance';
+    diditDocumentType?: 'passport' | 'id_card' | 'drivers_license';
 };
 
 type ManualUploadAsset = {
@@ -40,10 +42,10 @@ type ManualImageTarget = 'front' | 'back' | 'selfie';
 const ALLOWED_SIGNUP_ROLES: SignupRole[] = ['musician'];
 
 const PH_DOCUMENT_OPTIONS: DocumentOption[] = [
-    { key: 'passport', label: 'Philippine Passport', diditSupported: true, diditDocumentType: 'passport' },
-    { key: 'national_id', label: 'PhilSys National ID', diditSupported: true, diditDocumentType: 'id_card' },
-    { key: 'drivers_license', label: 'Driver\'s License', diditSupported: true, diditDocumentType: 'drivers_license' },
-    { key: 'health_insurance', label: 'Health Insurance Card', diditSupported: true, diditDocumentType: 'health_insurance' },
+    { key: 'national_id', label: 'National ID card', diditSupported: true, diditDocumentType: 'id_card' },
+    { key: 'passport', label: 'Passport', diditSupported: true, diditDocumentType: 'passport' },
+    { key: 'drivers_license', label: 'Driver\'s license', diditSupported: true, diditDocumentType: 'drivers_license' },
+    { key: 'health_insurance', label: 'Health Insurance Card', diditSupported: false },
     { key: 'umid', label: 'UMID', diditSupported: false },
     { key: 'postal_id', label: 'Postal ID', diditSupported: false },
     { key: 'voters_id', label: 'Voter\'s ID', diditSupported: false },
@@ -55,12 +57,130 @@ const getDocumentOptionByKey = (key: string) => {
     return PH_DOCUMENT_OPTIONS.find((option) => option.key === key) ?? PH_DOCUMENT_OPTIONS[0];
 };
 
+const getLocalDateInputValue = (date = new Date()) => {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+};
+
+const formatSelectedDate = (value: string) => {
+    const parsed = new Date(`${value}T00:00:00`);
+    if (Number.isNaN(parsed.getTime())) return value;
+
+    return parsed.toLocaleDateString('en-PH', {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+    });
+};
+
 const isAllowedSignupRole = (role: unknown): role is SignupRole => {
     return typeof role === 'string' && ALLOWED_SIGNUP_ROLES.includes(role as SignupRole);
 };
 
 const isAdminRole = (role: unknown): boolean => {
     return typeof role === 'string' && role.toLowerCase() === 'admin';
+};
+
+const isSupersededVerificationStatus = (status: unknown) => {
+    const normalized = String(status || '').trim().toUpperCase();
+    return normalized === 'SUPERSEDED' || normalized === 'SUPERSEDED_APPROVED';
+};
+
+const createEmailConfirmationRedirectUrl = () => {
+    const baseUrl = Linking.createURL('/');
+    return `${baseUrl}${baseUrl.includes('?') ? '&' : '?'}verified=true`;
+};
+
+const DIDIT_EMAIL_FLOW_LOG_PREFIX = '[DiditEmailFlow]';
+const DIDIT_EMAIL_FLOW_DEBUG_VERSION = 'supabase-auth-signup-2026-05-03';
+
+const maskEmailForLog = (value?: string | null) => {
+    const normalized = (value ?? '').trim();
+    if (!normalized) return null;
+
+    const [localPart, domain] = normalized.split('@');
+    if (!domain) return normalized;
+
+    const visiblePrefix = localPart.slice(0, Math.min(2, localPart.length));
+    return `${visiblePrefix}${localPart.length > 2 ? '***' : '*'}@${domain}`;
+};
+
+const summarizeErrorForDiditEmailLog = (error: unknown) => {
+    const err = error as any;
+    if (!err) return null;
+
+    return {
+        name: err.name ?? null,
+        message: err.message ?? String(error),
+        status: err.status ?? err.statusCode ?? null,
+        code: err.code ?? err.error_code ?? null,
+        details: err.details ?? null,
+        hint: err.hint ?? null,
+        rawKeys: typeof err === 'object' ? Object.keys(err) : [],
+        contextStatus: err.context?.status ?? null,
+        contextStatusText: err.context?.statusText ?? null,
+    };
+};
+
+const summarizeAuthUserForDiditEmailLog = (user: any) => {
+    if (!user) return null;
+
+    return {
+        id: user.id ?? null,
+        email: maskEmailForLog(user.email),
+        aud: user.aud ?? null,
+        role: user.role ?? null,
+        emailConfirmedAt: user.email_confirmed_at ?? null,
+        confirmationSentAt: user.confirmation_sent_at ?? null,
+        createdAt: user.created_at ?? null,
+        identitiesCount: Array.isArray(user.identities) ? user.identities.length : null,
+        metadata: {
+            role: user.user_metadata?.role ?? null,
+            isVerified: user.user_metadata?.is_verified ?? null,
+            verificationStatus: user.user_metadata?.verification_status ?? null,
+            diditSessionId: user.user_metadata?.didit_session_id ?? null,
+        },
+    };
+};
+
+const diditEmailDeliveryWasAccepted = (emailDelivery: any) => {
+    return Boolean(emailDelivery?.sent || emailDelivery?.queued);
+};
+
+const getEmailDeliveryFromInvokeError = (error: any) => {
+    const responseBody = error?.responseBody;
+
+    if (responseBody && typeof responseBody === 'object' && !Array.isArray(responseBody)) {
+        return responseBody.emailDelivery ?? null;
+    }
+
+    if (typeof responseBody === 'string') {
+        try {
+            const parsed = JSON.parse(responseBody);
+            return parsed?.emailDelivery ?? null;
+        } catch {
+            return null;
+        }
+    }
+
+    return null;
+};
+
+const logDiditEmailFlow = (stage: string, payload: Record<string, unknown> = {}) => {
+    console.log(`${DIDIT_EMAIL_FLOW_LOG_PREFIX} ${stage}`, {
+        debugVersion: DIDIT_EMAIL_FLOW_DEBUG_VERSION,
+        ...payload,
+    });
+};
+
+const logDiditEmailFlowError = (stage: string, error: unknown, payload: Record<string, unknown> = {}) => {
+    console.error(`${DIDIT_EMAIL_FLOW_LOG_PREFIX} ${stage}`, {
+        debugVersion: DIDIT_EMAIL_FLOW_DEBUG_VERSION,
+        ...payload,
+        error: summarizeErrorForDiditEmailLog(error),
+    });
 };
 
 export default function SignupScreen() {
@@ -81,6 +201,9 @@ export default function SignupScreen() {
     const [manualFrontImage, setManualFrontImage] = useState<ManualUploadAsset | null>(null);
     const [manualBackImage, setManualBackImage] = useState<ManualUploadAsset | null>(null);
     const [manualSelfieImage, setManualSelfieImage] = useState<ManualUploadAsset | null>(null);
+    const [manualFullName, setManualFullName] = useState('');
+    const [manualIdExpiration, setManualIdExpiration] = useState('');
+    const [manualExpirationCalendarVisible, setManualExpirationCalendarVisible] = useState(false);
 
     const { verified, session_id, check_verification } = useLocalSearchParams<{ verified: string; session_id: string; check_verification: string }>();
 
@@ -245,7 +368,7 @@ export default function SignupScreen() {
                     if (error) return;
                     const s = data?.status || data?.verification_data?.status;
                     // If we detect a final status, manually trigger the completion flow
-                    if (['Approved', 'APPROVED', 'Declined', 'DECLINED', 'Abandoned', 'ABANDONED', 'PENDING_REVIEW', 'In Review'].includes(s)) {
+                    if (['Approved', 'APPROVED', 'Declined', 'DECLINED', 'Abandoned', 'ABANDONED', 'PENDING_REVIEW', 'In Review', 'SUPERSEDED', 'SUPERSEDED_APPROVED'].includes(s)) {
                         router.setParams({ check_verification: 'true' });
                     }
                 } catch (e: any) {
@@ -303,7 +426,7 @@ export default function SignupScreen() {
                     }
 
                     // 2. FAILURE (Final) - Show alert and go back to signup form
-                    if (['DECLINED', 'Declined', 'ABANDONED', 'Abandoned'].includes(status)) {
+                    if (['DECLINED', 'Declined', 'ABANDONED', 'Abandoned'].includes(status) || isSupersededVerificationStatus(status)) {
                         setLoading(false);
 
                         // Clear all verification state
@@ -323,6 +446,9 @@ export default function SignupScreen() {
                         } else if (status === 'ABANDONED' || status === 'Abandoned') {
                             title = 'Verification Incomplete';
                             message = 'You did not complete the verification process. Please try again.';
+                        } else if (isSupersededVerificationStatus(status)) {
+                            title = 'Verification Link Replaced';
+                            message = 'This verification attempt was replaced by a newer one. Please start verification again.';
                         }
 
                         // Go back to signup form
@@ -393,7 +519,7 @@ export default function SignupScreen() {
                         return;
                     }
 
-                    if (errorStatus && ['DECLINED', 'Declined', 'ABANDONED', 'Abandoned'].includes(errorStatus)) {
+                    if (errorStatus && (['DECLINED', 'Declined', 'ABANDONED', 'Abandoned'].includes(errorStatus) || isSupersededVerificationStatus(errorStatus))) {
                         setLoading(false);
                         setVerificationUrl('');
                         setSessionId('');
@@ -406,6 +532,9 @@ export default function SignupScreen() {
                         if (errorStatus === 'DECLINED' || errorStatus === 'Declined') {
                             title = 'Invalid I.D.';
                             message = 'Your I.D. was declined. Please try again with a valid government-issued I.D.';
+                        } else if (isSupersededVerificationStatus(errorStatus)) {
+                            title = 'Verification Link Replaced';
+                            message = 'This verification attempt was replaced by a newer one. Please start verification again.';
                         }
 
                         setStep('details');
@@ -490,6 +619,22 @@ export default function SignupScreen() {
             borderColor: isDark ? '#374151' : '#E5E7EB',
         }
     };
+    const todayDateString = useMemo(() => getLocalDateInputValue(), []);
+    const manualExpirationDateLabel = manualIdExpiration ? formatSelectedDate(manualIdExpiration) : 'Choose date';
+    const manualExpirationCalendarCurrent = manualIdExpiration && manualIdExpiration >= todayDateString
+        ? manualIdExpiration
+        : todayDateString;
+    const manualExpirationMarkedDates = useMemo(() => {
+        if (!manualIdExpiration) return {};
+
+        return {
+            [manualIdExpiration]: {
+                selected: true,
+                selectedColor: colors.primary,
+                selectedTextColor: '#FFFFFF',
+            },
+        };
+    }, [colors.primary, manualIdExpiration]);
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     const isDetailsStepReady =
         isAllowedSignupRole(selectedRole) &&
@@ -497,7 +642,12 @@ export default function SignupScreen() {
         password.length >= 6 &&
         password === confirmPassword &&
         Boolean(selectedDocumentOption?.key);
-    const isManualReviewReady = !selectedDocumentOption.diditSupported && Boolean(manualFrontImage);
+    const isManualReviewReady = !selectedDocumentOption.diditSupported &&
+        Boolean(manualFrontImage) &&
+        Boolean(manualBackImage) &&
+        Boolean(manualSelfieImage) &&
+        Boolean(manualFullName.trim()) &&
+        Boolean(manualIdExpiration.trim());
 
     const handleDocumentSelect = (documentKey: string) => {
         setSelectedDocumentKey(documentKey);
@@ -505,6 +655,16 @@ export default function SignupScreen() {
         if (errors.document) {
             setErrors((prev) => ({ ...prev, document: undefined }));
         }
+    };
+
+    const handleManualExpirationSelect = (day: DateData) => {
+        if (day.dateString < todayDateString) {
+            Alert.alert('Expired ID', 'Please choose an ID expiration date that is today or later.');
+            return;
+        }
+
+        setManualIdExpiration(day.dateString);
+        setManualExpirationCalendarVisible(false);
     };
 
     /**
@@ -558,8 +718,9 @@ export default function SignupScreen() {
             if (!data?.verificationUrl) throw new Error('No verification URL returned');
 
             // Save the ACTUAL Didit Session ID
-            if (data.id) {
-                setSessionId(data.id);
+            const createdSessionId = data.sessionId || data.id;
+            if (createdSessionId) {
+                setSessionId(createdSessionId);
                 // Update storage with the real ID
                 try {
                     await AsyncStorage.setItem('signup_current_session', JSON.stringify({
@@ -569,7 +730,7 @@ export default function SignupScreen() {
                         tempRef,
                         verificationMode,
                         selectedDocumentKey,
-                        sSessionId: data.id,
+                        sSessionId: createdSessionId,
                     }));
                 } catch (e) {
                     console.error('Failed to update session state with ID', e);
@@ -733,31 +894,32 @@ export default function SignupScreen() {
         const fallbackName = email.split('@')[0] || 'Musician';
 
         try {
-            const { error: manualSubmitError } = await supabase.functions.invoke('manual-identity-review', {
+            const emailRedirectTo = createEmailConfirmationRedirectUrl();
+            const { error: pendingSignupError } = await supabase.functions.invoke('create-unverified-user', {
                 body: {
-                    action: 'submit_manual_review_signup',
                     email: email.trim(),
                     password,
                     role: selectedRole,
                     fullName: fallbackName,
-                    documentType: selectedDocumentOption.label,
-                    documentTypeKey: selectedDocumentOption.key,
-                    documentCountry: 'PHL',
-                    source: 'DIDIT_PENDING',
+                    isVerified: false,
+                    verificationStatus: 'PENDING_REVIEW',
                     diditSessionId: refToLink || null,
+                    selectedDocumentType: selectedDocumentOption.label,
+                    verificationMode: 'didit',
+                    redirectTo: emailRedirectTo,
                 },
             });
 
-            if (manualSubmitError) {
-                console.error('manual-identity-review didit pending failed', {
-                    message: manualSubmitError.message,
-                    status: (manualSubmitError as any).status,
-                    code: (manualSubmitError as any).code,
-                    details: (manualSubmitError as any).details,
-                    hint: (manualSubmitError as any).hint,
-                    context: (manualSubmitError as any).context,
+            if (pendingSignupError) {
+                console.error('create-unverified-user didit pending failed', {
+                    message: pendingSignupError.message,
+                    status: (pendingSignupError as any).status,
+                    code: (pendingSignupError as any).code,
+                    details: (pendingSignupError as any).details,
+                    hint: (pendingSignupError as any).hint,
+                    context: (pendingSignupError as any).context,
                 });
-                throw manualSubmitError;
+                throw pendingSignupError;
             }
 
             try {
@@ -775,7 +937,7 @@ export default function SignupScreen() {
                 params: {
                     accountCreated: 'true',
                     email,
-                    verificationPendingReview: 'true',
+                    diditPendingReview: 'true',
                 },
             } as any);
         } catch (authErr: any) {
@@ -796,6 +958,35 @@ export default function SignupScreen() {
             return;
         }
 
+        if (!manualBackImage) {
+            Alert.alert('Upload Required', 'Please upload the back photo of your ID to continue.');
+            return;
+        }
+
+        if (!manualSelfieImage) {
+            Alert.alert('Upload Required', 'Please upload a selfie holding your ID to continue.');
+            return;
+        }
+
+        const enteredFullName = manualFullName.trim();
+        const enteredIdExpiration = manualIdExpiration.trim();
+        const expirationDate = new Date(`${enteredIdExpiration}T00:00:00Z`);
+
+        if (!enteredFullName) {
+            Alert.alert('Name Required', 'Please enter the full name shown on your ID.');
+            return;
+        }
+
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(enteredIdExpiration) || Number.isNaN(expirationDate.getTime()) || expirationDate.toISOString().slice(0, 10) !== enteredIdExpiration) {
+            Alert.alert('Invalid Expiration Date', 'Please enter the ID expiration date in YYYY-MM-DD format.');
+            return;
+        }
+
+        if (enteredIdExpiration < getLocalDateInputValue()) {
+            Alert.alert('Expired ID', 'Please choose an ID expiration date that is today or later.');
+            return;
+        }
+
         if (!email || !password || !selectedRole) {
             Alert.alert('Session Reset', 'Please go back and complete your signup details first.');
             setStep('details');
@@ -804,8 +995,6 @@ export default function SignupScreen() {
 
         setLoading(true);
 
-        const fallbackName = email.split('@')[0] || 'Musician';
-
         try {
             const { error: manualSubmitError } = await supabase.functions.invoke('manual-identity-review', {
                 body: {
@@ -813,7 +1002,8 @@ export default function SignupScreen() {
                     email: email.trim(),
                     password,
                     role: selectedRole,
-                    fullName: fallbackName,
+                    fullName: enteredFullName,
+                    idDocumentExpiry: enteredIdExpiration,
                     documentType: selectedDocumentOption.label,
                     documentTypeKey: selectedDocumentOption.key,
                     documentCountry: 'PHL',
@@ -907,7 +1097,11 @@ export default function SignupScreen() {
 
         try {
             // Check if profile exists (optional, nice to have to prevent dupe emails early)
-            const { data: profile } = await supabase.from('profiles').select('id, is_verified, role').eq('email', email.trim()).maybeSingle();
+            const { data: profile } = await supabase
+                .from('profiles')
+                .select('id, is_verified, role, verification_status')
+                .eq('email', email.trim())
+                .maybeSingle();
 
             if (isAdminRole(profile?.role)) {
                 Alert.alert('Unsupported Account Type', 'Admin accounts cannot be used in the mobile app.');
@@ -916,15 +1110,20 @@ export default function SignupScreen() {
             }
 
             if (profile) {
+                const existingStatus = String((profile as any).verification_status || '').trim().toUpperCase();
+                const canRetryVerification = ['DECLINED', 'ABANDONED'].includes(existingStatus);
+
                 if (profile.is_verified) {
                     Alert.alert('Account Exists', 'This email is already registered and verified. Please login.', [{ text: 'Login', onPress: () => router.push('/') }]);
                     setLoading(false);
                     return;
                 }
-                // If unverified profile exists, we could resume, but for this flow we just warn
-                Alert.alert('Account Exists', 'This email is already registered. Please login to continue verification.', [{ text: 'Login', onPress: () => router.push('/') }]);
-                setLoading(false);
-                return;
+
+                if (!canRetryVerification) {
+                    Alert.alert('Account Exists', 'This email is already registered. Please login to continue verification.', [{ text: 'Login', onPress: () => router.push('/') }]);
+                    setLoading(false);
+                    return;
+                }
             }
 
             if (selectedDocumentOption.diditSupported) {
@@ -953,6 +1152,13 @@ export default function SignupScreen() {
     const finishAccountCreation = async () => {
         // 1. Sanity Check: Ensure we have params
         if (!email || !password || !selectedRole) {
+            logDiditEmailFlow('finishAccountCreation.blocked', {
+                reason: 'missing_signup_state',
+                hasEmail: Boolean(email),
+                hasPassword: Boolean(password),
+                hasSelectedRole: Boolean(selectedRole),
+                platform: Platform.OS,
+            });
             Alert.alert('Session Reset', 'Please re-enter your details to finish creating your account.', [{
                 text: 'OK', onPress: () => {
                     router.setParams({ verified: '' });
@@ -963,6 +1169,11 @@ export default function SignupScreen() {
         }
 
         if (!isAllowedSignupRole(selectedRole) || isAdminRole(selectedRole)) {
+            logDiditEmailFlow('finishAccountCreation.blocked', {
+                reason: 'unsupported_role',
+                selectedRole,
+                platform: Platform.OS,
+            });
             Alert.alert('Unsupported Account Type', 'Only musician accounts can be registered right now.');
             setStep('details');
             return;
@@ -971,7 +1182,28 @@ export default function SignupScreen() {
         // 2. Security Check: Validate the verification result on the server
         const refToLink = sessionId || tempSessionRef || verificationUrl.split('reference=')[1]?.split('&')[0];
 
+        logDiditEmailFlow('finishAccountCreation.start', {
+            email: maskEmailForLog(email),
+            selectedRole,
+            verificationMode,
+            documentType: selectedDocumentOption.label,
+            documentTypeKey: selectedDocumentOption.key,
+            diditSessionId: refToLink ?? null,
+            sessionIdState: sessionId || null,
+            tempSessionRefState: tempSessionRef || null,
+            hasVerificationUrl: Boolean(verificationUrl),
+            platform: Platform.OS,
+        });
+
         if (!refToLink) {
+            logDiditEmailFlow('finishAccountCreation.blocked', {
+                reason: 'missing_didit_session',
+                email: maskEmailForLog(email),
+                sessionIdState: sessionId || null,
+                tempSessionRefState: tempSessionRef || null,
+                verificationUrlContainsReference: verificationUrl.includes('reference='),
+                platform: Platform.OS,
+            });
             Alert.alert('Verification Error', 'No verification session found. Please try confirming your identity again.');
             return;
         }
@@ -979,25 +1211,51 @@ export default function SignupScreen() {
         setLoading(true);
 
         // Fetch Didit Data via Edge Function
-        let diditData = null;
         let verifiedName = '';
+        let verifiedNameSource: 'didit' | 'email_fallback' = 'email_fallback';
         try {
+            logDiditEmailFlow('didit.getSession.start', {
+                diditSessionId: refToLink,
+                email: maskEmailForLog(email),
+                platform: Platform.OS,
+            });
+
             const { data: sessionData, error: invokeError } = await supabase.functions.invoke('create-didit-session', {
                 body: { action: 'get_session', session_id: refToLink }
             });
 
             if (invokeError) {
-                console.warn('Edge Function Invoke Error:', invokeError);
+                logDiditEmailFlowError('didit.getSession.invokeError', invokeError, {
+                    diditSessionId: refToLink,
+                    email: maskEmailForLog(email),
+                    platform: Platform.OS,
+                });
             }
 
             if (sessionData) {
-                diditData = sessionData;
+                const diditSessionForLog = sessionData as any;
+                logDiditEmailFlow('didit.getSession.result', {
+                    diditSessionId: refToLink,
+                    email: maskEmailForLog(email),
+                    sessionKeys: typeof sessionData === 'object' ? Object.keys(sessionData as Record<string, unknown>) : [],
+                    status: diditSessionForLog.status ?? null,
+                    decision: diditSessionForLog.decision ?? null,
+                    verificationStatus: diditSessionForLog.verification_status ?? null,
+                    hasDerivedFullName: Boolean(diditSessionForLog.derived?.fullName),
+                    platform: Platform.OS,
+                });
 
                 if (sessionData?.derived?.fullName) {
                     verifiedName = sessionData.derived.fullName;
+                    verifiedNameSource = 'didit';
                 }
             }
-        } catch (e) {
+        } catch (e: any) {
+            logDiditEmailFlowError('didit.getSession.exception', e, {
+                diditSessionId: refToLink,
+                email: maskEmailForLog(email),
+                platform: Platform.OS,
+            });
         }
 
         // Fallback for name if Didit fails
@@ -1005,103 +1263,193 @@ export default function SignupScreen() {
             verifiedName = email.split('@')[0] || 'Musician';
         }
 
+        logDiditEmailFlow('verifiedName.resolved', {
+            email: maskEmailForLog(email),
+            source: verifiedNameSource,
+            hasVerifiedName: Boolean(verifiedName),
+            platform: Platform.OS,
+        });
 
         try {
-            // 3. Create Account
-            const { data: authData, error: authError } = await supabase.auth.signUp({
-                email: email.trim(),
-                password: password,
-                options: {
-                    emailRedirectTo: Linking.createURL('/'),
-                    data: {
-                        role: selectedRole,
-                        verification_status: 'APPROVED',
-                        is_verified: true,
-                        didit_session_id: refToLink,
-                        selected_document_type: selectedDocumentOption.label,
-                        verification_mode: verificationMode,
-                        full_name: verifiedName,
-                        display_name: verifiedName,
-                        name: verifiedName
-                    }
-                }
+            // 3. Create the auth user/profile through the signup Edge Function.
+            // Direct supabase.auth.signUp() hard-fails when the project SMTP
+            // provider rejects confirmation email delivery.
+            const emailRedirectTo = createEmailConfirmationRedirectUrl();
+            logDiditEmailFlow('auth.edgeSignup.start', {
+                email: maskEmailForLog(email),
+                selectedRole,
+                verificationMode,
+                diditSessionId: refToLink,
+                documentType: selectedDocumentOption.label,
+                documentTypeKey: selectedDocumentOption.key,
+                redirectTo: emailRedirectTo,
+                payloadPreview: {
+                    role: selectedRole,
+                    verification_status: 'APPROVED',
+                    is_verified: true,
+                    didit_session_id: refToLink,
+                    selected_document_type: selectedDocumentOption.label,
+                    verification_mode: verificationMode,
+                    hasFullName: Boolean(verifiedName),
+                },
+                platform: Platform.OS,
             });
 
+            const { data: signupData, error: signupError } = await supabase.functions.invoke('create-unverified-user', {
+                body: {
+                    email: email.trim(),
+                    password,
+                    role: selectedRole,
+                    fullName: verifiedName,
+                    isVerified: true,
+                    verificationStatus: 'APPROVED',
+                    diditSessionId: refToLink,
+                    selectedDocumentType: selectedDocumentOption.label,
+                    verificationMode,
+                    redirectTo: emailRedirectTo,
+                },
+            });
 
-            if (authError) throw authError;
+            const signupUser = (signupData as any)?.user;
+            const emailDelivery = (signupData as any)?.emailDelivery;
 
-            if (authData.user) {
-                // FORCE CREATE PROFILE (Via Edge Function to Bypass RLS)
-                // Use retry mechanism to handle race conditions with auth user propagation
-                const createProfileWithRetry = async (retries = 0): Promise<boolean> => {
-                    try {
-                        const { data: profileData, error: profileError } = await supabase.functions.invoke('manage-profile', {
-                            body: {
-                                action: 'create',
-                                userId: authData.user!.id,
-                                email: email.trim(),
-                                full_name: verifiedName,
-                                display_name: verifiedName,
-                                role: selectedRole,
-                                is_verified: true,
-                                verification_status: 'APPROVED',
-                                didit_session_id: refToLink
-                            }
-                        });
-
-                        if (profileError) {
-                            throw profileError;
-                        }
-                        return true;
-                    } catch (profErr: any) {
-                        // Silently retry up to 3 times with 1 second delay
-                        if (retries < 3) {
-                            await new Promise(resolve => setTimeout(resolve, 1000));
-                            return createProfileWithRetry(retries + 1);
-                        }
-                        // Silent fail - profile will be created on first login
-                        return false;
+            logDiditEmailFlow('auth.edgeSignup.result', {
+                email: maskEmailForLog(email),
+                diditSessionId: refToLink,
+                hasError: Boolean(signupError),
+                error: summarizeErrorForDiditEmailLog(signupError),
+                user: summarizeAuthUserForDiditEmailLog(signupUser),
+                emailDelivery: emailDelivery
+                    ? {
+                        sent: Boolean(emailDelivery.sent),
+                        queued: Boolean(emailDelivery.queued),
+                        provider: emailDelivery.provider ?? null,
+                        hasError: Boolean(emailDelivery.error),
+                        hasSupabaseAuthError: Boolean(emailDelivery.supabaseAuthError),
+                        hasResendError: Boolean(emailDelivery.resendError),
                     }
-                };
+                    : null,
+                platform: Platform.OS,
+            });
 
-                await createProfileWithRetry();
+            if (signupError) {
+                logDiditEmailFlowError('auth.edgeSignup.error', signupError, {
+                    email: maskEmailForLog(email),
+                    diditSessionId: refToLink,
+                    redirectTo: emailRedirectTo,
+                    platform: Platform.OS,
+                });
+                throw signupError;
+            }
 
-                // (Magic Link block removed to ensure strict Account Confirmation flow)
-                // The signUp() call above already sends the "Confirm your email" link.
-
+            if (signupUser) {
+                logDiditEmailFlow('profile.create.final', {
+                    profileCreated: true,
+                    source: 'create-unverified-user',
+                    userId: signupUser.id,
+                    email: maskEmailForLog(email),
+                    diditSessionId: refToLink,
+                    platform: Platform.OS,
+                });
 
                 // Clear the temporary signup session
                 try {
+                    logDiditEmailFlow('signupSession.cleanup.start', {
+                        storageKey: 'signup_current_session',
+                        email: maskEmailForLog(email),
+                        platform: Platform.OS,
+                    });
                     await AsyncStorage.removeItem('signup_current_session');
                 } catch (e) {
+                    logDiditEmailFlowError('signupSession.cleanup.error', e, {
+                        storageKey: 'signup_current_session',
+                        email: maskEmailForLog(email),
+                        platform: Platform.OS,
+                    });
                 }
 
                 // SUCCESS: Alert and Redirect to Login
                 // SUCCESS: Redirect to Login immediately
                 // The Login screen will handle showing the "Email Sent" popup
+                logDiditEmailFlow('redirect.login.start', {
+                    accountCreated: true,
+                    email: maskEmailForLog(email),
+                    diditSessionId: refToLink,
+                    platform: Platform.OS,
+                });
                 router.replace({
                     pathname: '/',
                     params: {
                         accountCreated: 'true',
-                        email: email
+                        email: email,
+                        diditVerified: 'true',
                     }
                 } as any);
+            } else {
+                logDiditEmailFlow('auth.edgeSignup.noUser', {
+                    email: maskEmailForLog(email),
+                    diditSessionId: refToLink,
+                    emailDeliveryAccepted: diditEmailDeliveryWasAccepted(emailDelivery),
+                    platform: Platform.OS,
+                });
             }
 
         } catch (authErr: any) {
+            logDiditEmailFlowError('finishAccountCreation.catch', authErr, {
+                email: maskEmailForLog(email),
+                diditSessionId: refToLink,
+                platform: Platform.OS,
+            });
             // Handle "User already registered" specifically
             if (authErr?.message?.includes('already registered') || authErr?.status === 422) {
-                console.warn('User already registered. Attempting to resend verification email...');
-
-                const { error: resendError } = await supabase.auth.resend({
-                    type: 'signup',
-                    email: email.trim(),
-                    options: { emailRedirectTo: Linking.createURL('/') }
+                logDiditEmailFlow('auth.signUp.accountAlreadyRegistered', {
+                    email: maskEmailForLog(email),
+                    diditSessionId: refToLink,
+                    status: authErr?.status ?? null,
+                    platform: Platform.OS,
                 });
 
-                if (resendError) {
+                const resendRedirectTo = createEmailConfirmationRedirectUrl();
+                logDiditEmailFlow('auth.resendExisting.start', {
+                    email: maskEmailForLog(email),
+                    diditSessionId: refToLink,
+                    redirectTo: resendRedirectTo,
+                    provider: 'create-unverified-user',
+                    platform: Platform.OS,
+                });
+
+                const { data: resendData, error: resendError } = await supabase.functions.invoke('create-unverified-user', {
+                    body: {
+                        action: 'resend_confirmation_email',
+                        email: email.trim(),
+                        redirectTo: resendRedirectTo,
+                    },
+                });
+
+                const emailDelivery = (resendData as any)?.emailDelivery;
+                const errorEmailDelivery = getEmailDeliveryFromInvokeError(resendError);
+                if (resendError && !diditEmailDeliveryWasAccepted(errorEmailDelivery)) {
+                    logDiditEmailFlowError('auth.resendExisting.error', resendError, {
+                        email: maskEmailForLog(email),
+                        diditSessionId: refToLink,
+                        redirectTo: resendRedirectTo,
+                        platform: Platform.OS,
+                    });
                     Alert.alert('Account Exists', 'This email is already registered. We tried to resend the verification link but failed. Please log in.');
                 } else {
+                    logDiditEmailFlow('auth.resendExisting.success', {
+                        email: maskEmailForLog(email),
+                        diditSessionId: refToLink,
+                        redirectTo: resendRedirectTo,
+                        emailDelivery: (emailDelivery ?? errorEmailDelivery)
+                            ? {
+                                sent: Boolean((emailDelivery ?? errorEmailDelivery).sent),
+                                queued: Boolean((emailDelivery ?? errorEmailDelivery).queued),
+                                provider: (emailDelivery ?? errorEmailDelivery).provider ?? null,
+                            }
+                            : null,
+                        platform: Platform.OS,
+                    });
                     Alert.alert('Account Exists', 'This email is already registered. We have sent a new verification link to your inbox.');
                     setStep('email_verification');
                 }
@@ -1117,18 +1465,62 @@ export default function SignupScreen() {
      * Resend Confirmation Email
      */
     const handleResendEmail = async () => {
-        if (!email) return;
-        try {
-            const { error } = await supabase.auth.resend({
-                type: 'signup',
-                email: email,
-                options: {
-                    emailRedirectTo: Linking.createURL('/')
-                }
+        if (!email) {
+            logDiditEmailFlow('auth.resendManual.blocked', {
+                reason: 'missing_email',
+                platform: Platform.OS,
             });
-            if (error) throw error;
+            return;
+        }
+
+        const emailRedirectTo = createEmailConfirmationRedirectUrl();
+        logDiditEmailFlow('auth.resendManual.start', {
+            email: maskEmailForLog(email),
+            redirectTo: emailRedirectTo,
+            type: 'signup',
+            platform: Platform.OS,
+        });
+
+        try {
+            const { data, error } = await supabase.functions.invoke('create-unverified-user', {
+                body: {
+                    action: 'resend_confirmation_email',
+                    email: email.trim(),
+                    redirectTo: emailRedirectTo,
+                },
+            });
+            const emailDelivery = (data as any)?.emailDelivery;
+            const errorEmailDelivery = getEmailDeliveryFromInvokeError(error);
+            logDiditEmailFlow('auth.resendManual.result', {
+                email: maskEmailForLog(email),
+                hasError: Boolean(error),
+                error: summarizeErrorForDiditEmailLog(error),
+                emailDelivery: (emailDelivery ?? errorEmailDelivery)
+                    ? {
+                        sent: Boolean((emailDelivery ?? errorEmailDelivery).sent),
+                        queued: Boolean((emailDelivery ?? errorEmailDelivery).queued),
+                        provider: (emailDelivery ?? errorEmailDelivery).provider ?? null,
+                    }
+                    : null,
+                redirectTo: emailRedirectTo,
+                platform: Platform.OS,
+            });
+
+            if (error && !diditEmailDeliveryWasAccepted(errorEmailDelivery)) {
+                logDiditEmailFlowError('auth.resendManual.error', error, {
+                    email: maskEmailForLog(email),
+                    redirectTo: emailRedirectTo,
+                    platform: Platform.OS,
+                });
+                throw error;
+            }
             Alert.alert('Email Sent', 'A new verification link has been sent to your email.');
         } catch (e: any) {
+            logDiditEmailFlowError('auth.resendManual.catch', e, {
+                email: maskEmailForLog(email),
+                redirectTo: emailRedirectTo,
+                platform: Platform.OS,
+            });
             Alert.alert('Error', e.message);
         }
     };
@@ -1229,7 +1621,11 @@ export default function SignupScreen() {
                 onPress={handleNext}
                 disabled={loading || !isDetailsStepReady}
                 activeOpacity={1}
-                style={[styles.nextButton, { backgroundColor: isDetailsStepReady ? colors.primary : colors.border }]}
+                style={[
+                    styles.nextButton,
+                    { backgroundColor: isDetailsStepReady ? colors.primary : (isDark ? '#374151' : '#E5E7EB') },
+                    !isDetailsStepReady ? styles.nextButtonDisabled : null,
+                ]}
             >
                 {loading ? <ActivityIndicator color="white" /> : <Text style={[styles.nextButtonText, { color: isDetailsStepReady ? "white" : colors.textSecondary }]}>Next</Text>}
             </TouchableOpacity>
@@ -1239,8 +1635,14 @@ export default function SignupScreen() {
                 onClose={() => setDocumentModalVisible(false)}
                 closeOnBackdropPress
             >
-                    <View style={[styles.documentModalSheet, safeModalPadding, { backgroundColor: colors.card }]}>
-                        <View style={styles.documentModalHeader}>
+                    <View style={[styles.documentModalSheet, safeModalPadding, { backgroundColor: colors.background, borderColor: colors.border }]}>
+                        <View
+                            style={[
+                                styles.documentModalHandle,
+                                { backgroundColor: isDark ? "#4B5563" : "#E5E7EB" },
+                            ]}
+                        />
+                        <View style={[styles.documentModalHeader, { borderBottomColor: colors.border }]}>
                             <View style={styles.documentModalHeaderCopy}>
                                 <Text style={[styles.documentModalTitle, themeStyles.text]}>Select ID type</Text>
                                 <Text style={[styles.documentModalSubtitle, themeStyles.textSecondary]}>
@@ -1250,13 +1652,21 @@ export default function SignupScreen() {
                             <TouchableOpacity
                                 activeOpacity={1}
                                 onPress={() => setDocumentModalVisible(false)}
-                                style={styles.documentModalCloseButton}
+                                style={[
+                                    styles.documentModalCloseButton,
+                                    { backgroundColor: colors.card, borderColor: colors.border },
+                                ]}
                             >
-                                <Ionicons name="close" size={22} color={colors.textSecondary} />
+                                <Ionicons name="close" size={18} color={colors.text} />
                             </TouchableOpacity>
                         </View>
 
-                        <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="always">
+                        <ScrollView
+                            style={styles.documentModalBody}
+                            contentContainerStyle={styles.documentModalList}
+                            showsVerticalScrollIndicator={false}
+                            keyboardShouldPersistTaps="always"
+                        >
                             {PH_DOCUMENT_OPTIONS.map((option) => {
                                 const selected = selectedDocumentKey === option.key;
                                 return (
@@ -1264,8 +1674,26 @@ export default function SignupScreen() {
                                         key={option.key}
                                         activeOpacity={1}
                                         onPress={() => handleDocumentSelect(option.key)}
-                                        style={[styles.documentModalOption, { borderBottomColor: isDark ? '#374151' : '#F3F4F6' }]}
+                                        style={[
+                                            styles.documentModalOption,
+                                            {
+                                                backgroundColor: selected ? (isDark ? 'rgba(37, 99, 235, 0.16)' : 'rgba(37, 99, 235, 0.08)') : (isDark ? '#111827' : '#F9FAFB'),
+                                                borderColor: selected ? colors.primary : (isDark ? '#374151' : '#E5E7EB'),
+                                            },
+                                        ]}
                                     >
+                                        <View
+                                            style={[
+                                                styles.documentModalOptionIcon,
+                                                { backgroundColor: option.diditSupported ? 'rgba(22, 163, 74, 0.10)' : 'rgba(217, 119, 6, 0.10)' },
+                                            ]}
+                                        >
+                                            <Ionicons
+                                                name={option.diditSupported ? 'shield-checkmark-outline' : 'document-text-outline'}
+                                                size={18}
+                                                color={option.diditSupported ? '#16A34A' : '#D97706'}
+                                            />
+                                        </View>
                                         <View style={styles.documentModalOptionCopy}>
                                             <Text style={[styles.documentModalOptionTitle, themeStyles.text]}>{option.label}</Text>
                                             <Text
@@ -1277,7 +1705,9 @@ export default function SignupScreen() {
                                                 {option.diditSupported ? 'Auto verification' : 'Manual review'}
                                             </Text>
                                         </View>
-                                        {selected ? <Ionicons name="checkmark-circle" size={24} color={colors.primary} style={{ marginLeft: 16 }} /> : null}
+                                        <View style={styles.documentModalOptionCheck}>
+                                            {selected ? <Ionicons name="checkmark-circle" size={24} color={colors.primary} /> : null}
+                                        </View>
                                     </TouchableOpacity>
                                 );
                             })}
@@ -1316,7 +1746,7 @@ export default function SignupScreen() {
                 } else if (status === 'In Review' || status === 'PENDING_REVIEW') {
                     await finishAccountCreationPendingReview(refToCheck);
                     return;
-                } else if (['DECLINED', 'Declined', 'ABANDONED', 'Abandoned'].includes(status)) {
+                } else if (['DECLINED', 'Declined', 'ABANDONED', 'Abandoned'].includes(status) || isSupersededVerificationStatus(status)) {
                     // Failed - show alert and go back to form
                     setLoading(false);
                     setVerificationUrl('');
@@ -1330,6 +1760,9 @@ export default function SignupScreen() {
                     if (status === 'ABANDONED' || status === 'Abandoned') {
                         title = 'Verification Incomplete';
                         message = 'You did not complete the verification. Please try again.';
+                    } else if (isSupersededVerificationStatus(status)) {
+                        title = 'Verification Link Replaced';
+                        message = 'This verification attempt was replaced by a newer one. Please start verification again.';
                     }
 
                     setStep('details');
@@ -1359,7 +1792,6 @@ export default function SignupScreen() {
                 label: string,
                 asset: ManualUploadAsset | null,
                 target: ManualImageTarget,
-                required = false,
                 icon: keyof typeof Ionicons.glyphMap = 'image-outline',
             ) => (
                 <TouchableOpacity
@@ -1374,16 +1806,6 @@ export default function SignupScreen() {
                     <View style={styles.manualUploadCopy}>
                         <View style={styles.manualUploadTitleRow}>
                             <Text style={[styles.manualUploadTitle, themeStyles.text]}>{label}</Text>
-                            <View
-                                style={[
-                                    styles.manualRequirementBadge,
-                                    { backgroundColor: required ? `${colors.primary}1A` : (isDark ? '#334155' : '#F3F4F6') },
-                                ]}
-                            >
-                                <Text style={[styles.manualRequirementText, { color: required ? colors.primary : colors.textSecondary }]}>
-                                    {required ? 'Required' : 'Optional'}
-                                </Text>
-                            </View>
                         </View>
 
                         {asset ? (
@@ -1440,10 +1862,51 @@ export default function SignupScreen() {
                             </View>
                         </View>
 
+                        <View style={styles.manualInfoFields}>
+                            <View style={styles.manualInfoField}>
+                                <Text style={[styles.manualInfoFieldLabel, themeStyles.textSecondary]}>Full name on ID</Text>
+                                <View style={[styles.manualInfoControl, { backgroundColor: isDark ? '#1F2937' : '#F9FAFB', borderColor: isDark ? '#374151' : '#E5E7EB' }]}>
+                                    <Ionicons name="person-outline" size={18} color={colors.textSecondary} style={styles.manualInfoIcon} />
+                                    <TextInput
+                                        value={manualFullName}
+                                        onChangeText={setManualFullName}
+                                        placeholder="Juan Dela Cruz"
+                                        placeholderTextColor={colors.textSecondary}
+                                        autoCapitalize="words"
+                                        style={[styles.manualInfoInput, themeStyles.text]}
+                                    />
+                                </View>
+                            </View>
+
+                            <View style={styles.manualInfoField}>
+                                <Text style={[styles.manualInfoFieldLabel, themeStyles.textSecondary]}>ID expiration date</Text>
+                                <View style={[styles.manualInfoControl, { backgroundColor: isDark ? '#1F2937' : '#F9FAFB', borderColor: isDark ? '#374151' : '#E5E7EB' }]}>
+                                    <Ionicons name="calendar-outline" size={18} color={colors.textSecondary} style={styles.manualInfoIcon} />
+                                    <TouchableOpacity
+                                        activeOpacity={1}
+                                        onPress={() => setManualExpirationCalendarVisible(true)}
+                                        style={styles.manualInfoDateButton}
+                                        accessibilityRole="button"
+                                    >
+                                        <Text
+                                            numberOfLines={1}
+                                            style={[
+                                                styles.manualInfoDateText,
+                                                { color: manualIdExpiration ? colors.text : colors.textSecondary },
+                                            ]}
+                                        >
+                                            {manualExpirationDateLabel}
+                                        </Text>
+                                    </TouchableOpacity>
+                                    <Ionicons name="chevron-down" size={18} color={colors.textSecondary} />
+                                </View>
+                            </View>
+                        </View>
+
                         <View style={styles.manualUploadList}>
-                            {renderManualAsset('Front of ID', manualFrontImage, 'front', true, 'card-outline')}
-                            {renderManualAsset('Back of ID', manualBackImage, 'back', false, 'albums-outline')}
-                            {renderManualAsset('Selfie holding ID', manualSelfieImage, 'selfie', false, 'person-circle-outline')}
+                            {renderManualAsset('Front of ID', manualFrontImage, 'front', 'card-outline')}
+                            {renderManualAsset('Back of ID', manualBackImage, 'back', 'albums-outline')}
+                            {renderManualAsset('Selfie holding ID', manualSelfieImage, 'selfie', 'person-circle-outline')}
                         </View>
 
                         <View style={[styles.manualFlowHintCard, themeStyles.inputContainer]}>
@@ -1457,11 +1920,68 @@ export default function SignupScreen() {
                             activeOpacity={1}
                             onPress={() => void submitManualReviewSignup()}
                             disabled={loading || !isManualReviewReady}
-                            style={[styles.nextButton, { backgroundColor: isManualReviewReady ? colors.primary : colors.border, marginTop: 8 }]}
+                            style={[
+                                styles.nextButton,
+                                { backgroundColor: isManualReviewReady ? colors.primary : (isDark ? '#374151' : '#E5E7EB'), marginTop: 8 },
+                                !isManualReviewReady ? styles.nextButtonDisabled : null,
+                            ]}
                         >
                             {loading ? <ActivityIndicator color="#FFFFFF" /> : <Text style={[styles.nextButtonText, { color: isManualReviewReady ? "white" : colors.textSecondary }]}>Submit for Manual Review</Text>}
                         </TouchableOpacity>
                     </ScrollView>
+
+                    <BottomModal
+                        visible={manualExpirationCalendarVisible}
+                        onClose={() => setManualExpirationCalendarVisible(false)}
+                        closeOnBackdropPress
+                    >
+                        <View style={[styles.documentModalSheet, styles.manualCalendarSheet, safeModalPadding, { backgroundColor: colors.background, borderColor: colors.border }]}>
+                            <View
+                                style={[
+                                    styles.documentModalHandle,
+                                    { backgroundColor: isDark ? "#4B5563" : "#E5E7EB" },
+                                ]}
+                            />
+                            <View style={[styles.documentModalHeader, { borderBottomColor: colors.border }]}>
+                                <View style={styles.documentModalHeaderCopy}>
+                                    <Text style={[styles.documentModalTitle, themeStyles.text]}>ID expiration date</Text>
+                                    <Text style={[styles.documentModalSubtitle, themeStyles.textSecondary]}>
+                                        Select the date printed on your ID.
+                                    </Text>
+                                </View>
+                                <TouchableOpacity
+                                    activeOpacity={1}
+                                    onPress={() => setManualExpirationCalendarVisible(false)}
+                                    style={[
+                                        styles.documentModalCloseButton,
+                                        { backgroundColor: colors.card, borderColor: colors.border },
+                                    ]}
+                                >
+                                    <Ionicons name="close" size={18} color={colors.text} />
+                                </TouchableOpacity>
+                            </View>
+
+                            <View style={styles.manualCalendarContainer}>
+                                <Calendar
+                                    current={manualExpirationCalendarCurrent}
+                                    minDate={todayDateString}
+                                    onDayPress={handleManualExpirationSelect}
+                                    markedDates={manualExpirationMarkedDates}
+                                    enableSwipeMonths
+                                    theme={{
+                                        calendarBackground: colors.background,
+                                        textSectionTitleColor: colors.textSecondary,
+                                        dayTextColor: colors.text,
+                                        monthTextColor: colors.text,
+                                        todayTextColor: colors.primary,
+                                        selectedDayBackgroundColor: colors.primary,
+                                        selectedDayTextColor: '#FFFFFF',
+                                        arrowColor: colors.primary,
+                                    }}
+                                />
+                            </View>
+                        </View>
+                    </BottomModal>
                 </View>
             );
         }
@@ -1585,14 +2105,14 @@ export default function SignupScreen() {
                 <Text style={[styles.stepTitle, themeStyles.text, { textAlign: 'center' }]}>Check your inbox</Text>
 
                 <Text style={[styles.stepSubtitle, themeStyles.textSecondary, { textAlign: 'center', maxWidth: 400, marginBottom: 8 }]}>
-                    We have sent a Magic Link to:
+                    We have sent a confirmation link to:
                 </Text>
                 <Text style={[themeStyles.text, { fontSize: 18, fontWeight: '600', marginBottom: 32, fontFamily: 'Poppins_600SemiBold' }]}>
                     {email}
                 </Text>
 
                 <Text style={[themeStyles.textSecondary, { textAlign: 'center', maxWidth: 350, fontSize: 14, marginBottom: 40, lineHeight: 22 }]}>
-                    Click the link in your email to log in instantly.
+                    Confirm your email, then return to MusikaLokal to log in.
                 </Text>
 
                 {/* 'Back to Login' button removed as requested */}
@@ -1664,10 +2184,20 @@ const styles = StyleSheet.create({
     roleLabelBig: { fontSize: 18, fontWeight: '600', fontFamily: 'Poppins_600SemiBold' },
     roleDescBig: { fontSize: 12, flex: 1, fontFamily: 'Poppins_400Regular' },
     nextButton: {
-        height: 56, borderRadius: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginTop: 32,
-        shadowColor: "#000", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.1, shadowRadius: 8, elevation: 4
+        height: 56,
+        borderRadius: 16,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginTop: 16,
+        shadowColor: "#4F46E5",
+        shadowOffset: { width: 0, height: 10 },
+        shadowOpacity: 0.3,
+        shadowRadius: 10,
+        elevation: 10,
     },
-    nextButtonText: { color: 'white', fontSize: 16, fontWeight: '600', marginRight: 8, fontFamily: 'Poppins_600SemiBold' },
+    nextButtonDisabled: { shadowOpacity: 0, shadowRadius: 0, elevation: 0 },
+    nextButtonText: { color: 'white', fontSize: 16, fontWeight: '600', fontFamily: 'Poppins_600SemiBold' },
     inputContainer: {
         flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, height: 56, borderRadius: 16, borderWidth: 1
     },
@@ -1698,29 +2228,56 @@ const styles = StyleSheet.create({
     documentSelectCopy: { flex: 1, gap: 2 },
     documentSelectValue: { fontSize: 14, lineHeight: 18, fontFamily: 'Poppins_600SemiBold' },
     documentSelectionMeta: { fontSize: 11, lineHeight: 14, fontFamily: 'Poppins_700Bold', textTransform: 'uppercase' },
-    documentModalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
+    documentModalOverlay: {
+        flex: 1,
+        backgroundColor: 'rgba(0,0,0,0.5)',
+        justifyContent: 'flex-end',
+    },
     documentModalBackdrop: { flex: 1 },
     documentModalSheet: {
-        maxHeight: '80%',
-        borderTopLeftRadius: 24,
-        borderTopRightRadius: 24,
-        padding: 24,
-        paddingBottom: Platform.OS === 'ios' ? 40 : 24,
+        maxHeight: '88%',
+        borderTopLeftRadius: 32,
+        borderTopRightRadius: 32,
+        borderWidth: 1,
+        borderBottomWidth: 0,
+        overflow: 'hidden',
     },
-    documentModalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
-    documentModalHeaderCopy: { flex: 1, gap: 4, paddingRight: 12 },
+    documentModalHandle: {
+        width: 40,
+        height: 5,
+        borderRadius: 999,
+        alignSelf: 'center',
+        marginTop: 10,
+        marginBottom: 10,
+    },
+    documentModalHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingHorizontal: 20,
+        paddingBottom: 14,
+        borderBottomWidth: 1,
+    },
+    documentModalHeaderCopy: { flex: 1, gap: 4, paddingRight: 16 },
     documentModalTitle: { fontSize: 18, fontFamily: 'Poppins_600SemiBold' },
     documentModalSubtitle: { fontSize: 12, lineHeight: 18, fontFamily: 'Poppins_400Regular' },
-    documentModalCloseButton: { alignItems: 'center', justifyContent: 'center' },
+    documentModalCloseButton: { width: 38, height: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center', borderWidth: 1 },
+    documentModalBody: { flexGrow: 0 },
+    documentModalList: { gap: 8, paddingHorizontal: 20, paddingTop: 16, paddingBottom: 4 },
     documentModalOption: {
         flexDirection: 'row',
         alignItems: 'center',
-        paddingVertical: 16,
-        borderBottomWidth: 1,
+        minHeight: 60,
+        borderRadius: 14,
+        borderWidth: 1,
+        paddingHorizontal: 12,
+        paddingVertical: 9,
+        gap: 10,
     },
-    documentModalOptionCopy: { flex: 1, gap: 4 },
-    documentModalOptionTitle: { fontSize: 16, lineHeight: 21, fontFamily: 'Poppins_600SemiBold' },
-    documentModalOptionMeta: { fontSize: 13, lineHeight: 18, fontFamily: 'Poppins_500Medium', marginTop: 4 },
+    documentModalOptionIcon: { width: 34, height: 34, borderRadius: 11, alignItems: 'center', justifyContent: 'center' },
+    documentModalOptionCopy: { flex: 1, gap: 2 },
+    documentModalOptionTitle: { fontSize: 14, lineHeight: 18, fontFamily: 'Poppins_600SemiBold' },
+    documentModalOptionMeta: { fontSize: 11, lineHeight: 14, fontFamily: 'Poppins_700Bold', textTransform: 'uppercase' },
+    documentModalOptionCheck: { width: 24, height: 24, alignItems: 'center', justifyContent: 'center' },
     manualFlowContainer: { paddingHorizontal: 20, paddingBottom: 28, gap: 16 },
     manualReviewIntroCard: {
         borderRadius: 20,
@@ -1740,6 +2297,49 @@ const styles = StyleSheet.create({
     manualReviewIntroCopy: { flex: 1 },
     manualReviewTitle: { fontSize: 24, marginBottom: 6 },
     manualReviewSubtitle: { fontSize: 14, lineHeight: 21, marginBottom: 0 },
+    manualInfoFields: { gap: 14 },
+    manualInfoField: { gap: 6 },
+    manualInfoControl: {
+        height: 52,
+        borderWidth: 1,
+        borderRadius: 14,
+        paddingHorizontal: 14,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 10,
+    },
+    manualInfoIcon: { width: 20, textAlign: 'center' },
+    manualInfoFieldLabel: { fontSize: 12, lineHeight: 16, fontFamily: 'Poppins_500Medium', marginLeft: 2 },
+    manualInfoInput: {
+        flex: 1,
+        height: '100%',
+        fontSize: 14,
+        lineHeight: 18,
+        fontFamily: 'Poppins_500Medium',
+        includeFontPadding: false,
+        paddingVertical: 0,
+        paddingHorizontal: 0,
+        margin: 0,
+        textAlignVertical: 'center',
+    },
+    manualInfoDateButton: {
+        flex: 1,
+        height: '100%',
+        justifyContent: 'center',
+    },
+    manualInfoDateText: {
+        fontSize: 14,
+        lineHeight: 18,
+        fontFamily: 'Poppins_500Medium',
+    },
+    manualCalendarSheet: {
+        maxHeight: '78%',
+    },
+    manualCalendarContainer: {
+        paddingHorizontal: 12,
+        paddingTop: 12,
+        paddingBottom: 18,
+    },
     manualUploadList: { gap: 12 },
     manualUploadCard: {
         flexDirection: 'row',
@@ -1761,8 +2361,6 @@ const styles = StyleSheet.create({
     manualUploadTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
     manualUploadTitle: { fontSize: 14, lineHeight: 19, fontFamily: 'Poppins_600SemiBold' },
     manualUploadSubtitle: { fontSize: 11, lineHeight: 15, fontFamily: 'Poppins_400Regular' },
-    manualRequirementBadge: { borderRadius: 999, paddingHorizontal: 8, paddingVertical: 3 },
-    manualRequirementText: { fontSize: 10, lineHeight: 13, fontFamily: 'Poppins_700Bold', textTransform: 'uppercase' },
     manualPreviewRow: { flexDirection: 'row', alignItems: 'center', gap: 10, minWidth: 0 },
     manualPreviewImage: { width: 44, height: 44, borderRadius: 12, backgroundColor: '#D1D5DB' },
     manualPreviewCopy: { flex: 1, minWidth: 0 },

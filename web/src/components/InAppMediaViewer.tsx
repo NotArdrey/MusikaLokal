@@ -50,6 +50,13 @@ const isPreviewableDocumentUrl = (url: string | null | undefined) => {
   return PREVIEWABLE_DOCUMENT_EXTENSIONS.includes(extension);
 };
 
+const getPreviewUri = (url: string, mediaType: InAppMediaType | null) => {
+  if (mediaType !== "document" || getExtension(url) !== "pdf") return url;
+
+  const [baseUrl] = url.split("#");
+  return `${baseUrl}#toolbar=0&navpanes=0&scrollbar=0`;
+};
+
 export const getInAppMediaType = (url: string | null | undefined): InAppMediaType | null => {
   const normalizedUrl = String(url || "").trim();
   if (!normalizedUrl) return null;
@@ -92,6 +99,7 @@ const InAppMediaViewer = ({ visible, uri, title, onClose }: InAppMediaViewerProp
   const [loading, setLoading] = useState(false);
   const mediaType = useMemo(() => getInAppMediaType(uri), [uri]);
   const canPreviewDocument = useMemo(() => isPreviewableDocumentUrl(uri), [uri]);
+  const previewUri = useMemo(() => (uri ? getPreviewUri(uri, mediaType) : null), [mediaType, uri]);
 
   useEffect(() => {
     if (visible) {
@@ -136,11 +144,11 @@ const InAppMediaViewer = ({ visible, uri, title, onClose }: InAppMediaViewerProp
               onLoadEnd={() => setLoading(false)}
               onError={() => setLoading(false)}
             />
-          ) : uri && mediaType === "document" && canPreviewDocument ? (
-            <WebFrame uri={uri} onLoad={() => setLoading(false)} />
+          ) : previewUri && mediaType === "document" && canPreviewDocument ? (
+            <WebFrame uri={previewUri} onLoad={() => setLoading(false)} />
           ) : uri && mediaType === "document" ? (
             <Text style={styles.unsupportedText}>
-              This document type cannot be previewed in-app without downloading.
+              This document type cannot be previewed in-app.
             </Text>
           ) : uri && mediaType === "web" ? (
             <WebFrame uri={uri} onLoad={() => setLoading(false)} />

@@ -5,7 +5,6 @@ import {
   ActivityIndicator,
   Alert,
   Image,
-  Linking,
   Modal,
   Platform,
   ScrollView,
@@ -19,6 +18,7 @@ import {
 import { supabase } from '../../lib/supabase';
 import CustomAlert, { AlertType } from '../../src/components/CustomAlert';
 import Header from '../../src/components/header';
+import InAppMediaViewer from '../../src/components/InAppMediaViewer';
 import { useAuth } from '../../src/context/AuthContext';
 import { useTheme } from '../../src/context/ThemeContext';
 import { getFriendlyDetailEntries, getFriendlyDetailImage } from './_formatters';
@@ -588,6 +588,7 @@ export default function AdminPanel({ initialTab, children }: AdminPanelProps) {
   const [rejectReason, setRejectReason] = useState('');
   const [adminNotes, setAdminNotes] = useState('');
   const [reviewSubmitting, setReviewSubmitting] = useState(false);
+  const [mediaPreview, setMediaPreview] = useState<{ uri: string; title: string } | null>(null);
 
   const [alertState, setAlertState] = useState<AlertState>({
     visible: false,
@@ -601,6 +602,16 @@ export default function AdminPanel({ initialTab, children }: AdminPanelProps) {
   const showAlert = useCallback((type: AlertType, title: string, message: string) => {
     setAlertState({ visible: true, type, title, message, buttons: undefined });
   }, []);
+
+  const openMediaPreview = useCallback((url?: string | null, title = 'Uploaded file') => {
+    const normalized = String(url || '').trim();
+    if (!normalized) {
+      showAlert('warning', 'File unavailable', 'No uploaded file was found for this item.');
+      return;
+    }
+
+    setMediaPreview({ uri: normalized, title });
+  }, [showAlert]);
 
   const handleTabChange = useCallback((nextTab: Tab) => {
     if (nextTab === tab) return;
@@ -2335,11 +2346,7 @@ export default function AdminPanel({ initialTab, children }: AdminPanelProps) {
                         {!!item.business_permit_url && (
                           <TouchableOpacity
                             activeOpacity={1}
-                            onPress={() => {
-                              if (item.business_permit_url) {
-                                void Linking.openURL(item.business_permit_url);
-                              }
-                            }}
+                            onPress={() => openMediaPreview(item.business_permit_url, 'Business permit')}
                             style={[styles.smallActionButton, { borderColor: colors.border }]}
                           >
                             <Ionicons name="eye-outline" size={14} color={colors.text} />
@@ -3586,6 +3593,13 @@ export default function AdminPanel({ initialTab, children }: AdminPanelProps) {
           </View>
         </View>
       </Modal>
+
+      <InAppMediaViewer
+        visible={Boolean(mediaPreview)}
+        uri={mediaPreview?.uri || null}
+        title={mediaPreview?.title || 'Uploaded file'}
+        onClose={() => setMediaPreview(null)}
+      />
 
       <CustomAlert
         visible={alertState.visible}

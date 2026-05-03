@@ -10,6 +10,9 @@ verify_jwt = false
 [functions.create-didit-session]
 verify_jwt = false
 
+[functions.create-unverified-user]
+verify_jwt = false
+
 [functions.create-address-verification]
 verify_jwt = false
 

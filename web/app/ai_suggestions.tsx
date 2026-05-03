@@ -19,6 +19,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { supabase } from '../lib/supabase';
 import GuestSignInGate from '../src/components/GuestSignInGate';
 import Header from '../src/components/header';
+import { normalizeVisibleInput } from '../src/components/modal';
 import Navbar, { NAVBAR_CLEARANCE } from '../src/components/navbar';
 import { useAuth } from '../src/context/AuthContext';
 import { useTheme } from '../src/context/ThemeContext';
@@ -140,7 +141,7 @@ export default function AiSuggestionsScreen() {
 
     const sendFollowupQuestion = useCallback(
         async (presetQuestion?: string) => {
-            const question = (presetQuestion ?? followupQuestion).trim();
+            const question = normalizeVisibleInput(presetQuestion ?? followupQuestion);
 
             if (!question || followupLoading || suggestions.length === 0) {
                 return;
@@ -1137,18 +1138,18 @@ export default function AiSuggestionsScreen() {
                             <TouchableOpacity
                                 activeOpacity={1}
                                 onPress={() => sendFollowupQuestion()}
-                                disabled={followupLoading || !followupQuestion.trim()}
+                                disabled={followupLoading || !normalizeVisibleInput(followupQuestion)}
                                 style={[
                                     styles.followupSendButton,
                                     {
                                         backgroundColor:
-                                            followupLoading || !followupQuestion.trim()
+                                            followupLoading || !normalizeVisibleInput(followupQuestion)
                                                 ? borderSoft
                                                 : badgeColor,
                                     },
                                 ]}
                             >
-                                <Ionicons name="send" size={16} color={followupQuestion.trim() ? "#FFFFFF" : textSecondary} />
+                                <Ionicons name="send" size={16} color={normalizeVisibleInput(followupQuestion) ? "#FFFFFF" : textSecondary} />
                             </TouchableOpacity>
                         </View>
                     </View>

@@ -2,9 +2,10 @@
 import { decode as base64Decode } from 'https://deno.land/std@0.168.0/encoding/base64.ts';
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { sendEmailWithGmail } from '../_shared/gmailEmail.ts';
 
 // Note: Removed SMTP library import as it's incompatible with current Deno runtime
-// Using Resend API or Supabase built-in email instead
+// Using Gmail HTTP/SMTP or Supabase built-in email instead
 
 const corsHeaders = {
     'Access-Control-Allow-Origin': '*',
@@ -506,37 +507,19 @@ async function sendVerificationEmail(
     } catch (error) {
     }
 
-    // Method 2: Try Resend API as fallback
-    const resendApiKey = Deno.env.get('RESEND_API_KEY');
-
-    if (resendApiKey) {
-        try {
-            const resendFrom = Deno.env.get('RESEND_FROM') || 'MusikaLokal <noreply@musikalokal.com>';
-
-            const response = await fetch('https://api.resend.com/emails', {
-                method: 'POST',
-                headers: {
-                    'Authorization': `Bearer ${resendApiKey}`,
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    from: resendFrom,
-                    to: [userEmail],
-                    subject: subject,
-                    html: htmlContent,
-                }),
-            });
-
-            if (response.ok) {
-                const result = await response.json();
-                return true;
-            } else {
-                const error = await response.text();
-                console.error('Resend API error:', error);
-            }
-        } catch (error) {
-            console.error('Failed to send email via Resend:', error);
-        }
+    // Method 2: Try Gmail sender as fallback
+    const gmailDelivery = await sendEmailWithGmail({
+        to: userEmail,
+        subject,
+        html: htmlContent,
+        recipientName: displayName,
+        source: 'didit-webhook',
+    });
+    if (gmailDelivery.sent) {
+        return true;
+    }
+    if (gmailDelivery.error) {
+        console.error('Gmail email error:', gmailDelivery.error);
     }
 
     // Method 3: Use Supabase's built-in email by storing notification in database
@@ -563,7 +546,7 @@ async function sendVerificationEmail(
 
     console.error('=== EMAIL SEND INFO ===');
     console.error('Email notification was not sent. The user has been verified but may not receive email confirmation.');
-    console.error('To enable emails, configure RESEND_API_KEY in Supabase Edge Function secrets.');
+    console.error('To enable emails, configure GMAIL_MAILER_URL or GMAIL_SMTP_USER/GMAIL_SMTP_APP_PASSWORD in Supabase Edge Function secrets.');
     return false;
 }
 
@@ -612,12 +595,23 @@ async function handleApproved(
     // This provides a persistent record for both TEMP and Registered users.
     // create-didit-session checks this table using the Didit Session ID.
     if (sessionId) {
+        const { data: existingSession } = await supabaseAdmin
+            .from('verification_sessions')
+            .select('status, verification_data')
+            .eq('session_ref', sessionId)
+            .maybeSingle();
+
+        const existingVerificationData = existingSession?.verification_data || {};
+        const existingStatus = String(existingSession?.status || '').toUpperCase();
+        const wasSuperseded = existingStatus.startsWith('SUPERSEDED');
+        const storedEmail = userEmail || existingVerificationData.email || null;
 
         const { error: sessionError } = await supabaseAdmin
             .from('verification_sessions')
             .upsert({
                 session_ref: sessionId, // Must use Didit Session ID as key
                 verification_data: {
+                    ...existingVerificationData,
                     full_name: fullName,
                     first_name: firstName,
                     middle_name: middleName,
@@ -626,9 +620,9 @@ async function handleApproved(
                     id_document_expiry: documentExpiry,
                     id_verified_at: new Date().toISOString(),
                     user_ref: userReference, // Store the user ID reference inside data
-                    email: userEmail
+                    email: storedEmail
                 },
-                status: 'APPROVED'
+                status: wasSuperseded ? 'SUPERSEDED_APPROVED' : 'APPROVED'
             });
 
         if (sessionError) {

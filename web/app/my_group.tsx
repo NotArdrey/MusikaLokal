@@ -11,6 +11,14 @@ import Navbar from '../src/components/navbar';
 import { useRequireAuth } from '../src/context/AuthContext';
 import { useTheme } from '../src/context/ThemeContext';
 
+const normalizeDeleteConfirmation = (value: string) =>
+    String(value || '')
+        .normalize('NFKC')
+        .replace(/[\u200B-\u200D\uFEFF]/g, '')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .toLowerCase();
+
 export default function MyGroupScreen() {
     const { colors, isDark } = useTheme();
     const { width } = useWindowDimensions();
@@ -150,7 +158,9 @@ export default function MyGroupScreen() {
         setModalVisible(true);
     };
 
-    const isDeleteConfirmed = deleteConfirmationText.trim() === selectedName.trim();
+    const isDeleteConfirmed =
+        normalizeDeleteConfirmation(deleteConfirmationText) ===
+        normalizeDeleteConfirmation(selectedName);
 
     const handleDelete = async () => {
         if (!selectedId || !userId || deleting) return;

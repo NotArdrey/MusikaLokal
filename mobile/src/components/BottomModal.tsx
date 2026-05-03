@@ -42,20 +42,37 @@ export default function BottomModal({
   statusBarTranslucent = true,
 }: BottomModalProps) {
   const [rendered, setRendered] = useState(visible);
+  const openFrameRef = useRef<number | null>(null);
+  const animationTokenRef = useRef(0);
   const backdropOpacity = useRef(new Animated.Value(visible ? 1 : 0)).current;
   const sheetTranslateY = useRef(
     new Animated.Value(visible ? OPEN_TRANSLATE_Y : CLOSED_TRANSLATE_Y),
   ).current;
 
   useEffect(() => {
+    animationTokenRef.current += 1;
+    const animationToken = animationTokenRef.current;
+
+    if (openFrameRef.current !== null) {
+      cancelAnimationFrame(openFrameRef.current);
+      openFrameRef.current = null;
+    }
+
+    backdropOpacity.stopAnimation();
+    sheetTranslateY.stopAnimation();
+
     if (visible) {
-      backdropOpacity.stopAnimation();
-      sheetTranslateY.stopAnimation();
       backdropOpacity.setValue(0);
       sheetTranslateY.setValue(CLOSED_TRANSLATE_Y);
       setRendered(true);
 
-      requestAnimationFrame(() => {
+      openFrameRef.current = requestAnimationFrame(() => {
+        openFrameRef.current = null;
+
+        if (animationTokenRef.current !== animationToken) {
+          return;
+        }
+
         Animated.parallel([
           Animated.timing(backdropOpacity, {
             toValue: 1,
@@ -71,7 +88,13 @@ export default function BottomModal({
           }),
         ]).start();
       });
-      return;
+
+      return () => {
+        if (openFrameRef.current !== null) {
+          cancelAnimationFrame(openFrameRef.current);
+          openFrameRef.current = null;
+        }
+      };
     }
 
     if (!rendered) {
@@ -92,10 +115,17 @@ export default function BottomModal({
         useNativeDriver: true,
       }),
     ]).start(({ finished }) => {
-      if (finished) {
+      if (finished && animationTokenRef.current === animationToken) {
         setRendered(false);
       }
     });
+
+    return () => {
+      if (openFrameRef.current !== null) {
+        cancelAnimationFrame(openFrameRef.current);
+        openFrameRef.current = null;
+      }
+    };
   }, [backdropOpacity, rendered, sheetTranslateY, visible]);
 
   if (!rendered) {

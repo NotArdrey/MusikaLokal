@@ -25,7 +25,7 @@ import CustomAlert, { AlertType } from "../src/components/CustomAlert";
 import GuestSignInGate from "../src/components/GuestSignInGate";
 import Header from "../src/components/header";
 import InAppMediaViewer, { isInAppMediaUrl } from "../src/components/InAppMediaViewer";
-import BookingActionModal from "../src/components/modal";
+import BookingActionModal, { normalizeVisibleInput } from "../src/components/modal";
 import Navbar from "../src/components/navbar";
 import { useAuth } from "../src/context/AuthContext";
 import { useTheme } from "../src/context/ThemeContext";
@@ -6529,7 +6529,7 @@ export default function BookingsScreen() {
                     : modalMode === "clear_balance"
                       ? `Mark ₱${selectedItem?.remaining_balance?.toLocaleString() || 0} as paid via face-to-face payment? This amount will be credited to your wallet.`
                       : modalMode === "late_confirm"
-                        ? `Send this late-arrival reason to the studio owner?\n\n${cancellationReason.trim()}`
+                        ? `Send this late-arrival reason to the studio owner?\n\n${normalizeVisibleInput(cancellationReason)}`
                       : modalMode === "late"
                         ? "Please provide your reason for being late."
                         : modalMode === "report_access"
@@ -6634,7 +6634,7 @@ export default function BookingsScreen() {
               modalMode === "late" ||
               modalMode === "report_access") &&
             !(modalMode === "decline" && selectedItem?.leader_approval_required) &&
-            !cancellationReason.trim()
+            !normalizeVisibleInput(cancellationReason)
           ) {
             showAlert("warning", "Required", "Please provide a reason.");
             return;
@@ -6690,7 +6690,7 @@ export default function BookingsScreen() {
             }
 
             if (modalMode === "report_access") {
-              await handleReportAccessIssue(selectedItem, cancellationReason);
+              await handleReportAccessIssue(selectedItem, normalizeVisibleInput(cancellationReason));
               return;
             }
 

@@ -22,7 +22,7 @@ interface AlertState {
 export default function LoginScreen() {
   const { colors, isDark } = useTheme();
   const { session, loading: authLoading, roleResolved, setGuestMode, userRole } = useAuth();
-  const { verified, accountCreated, email: createdEmail, verification_error, verificationPendingReview } = useLocalSearchParams();
+  const { verified, accountCreated, email: createdEmail, verification_error, verificationPendingReview, diditPendingReview, diditVerified } = useLocalSearchParams();
   const { width } = Dimensions.get('window');
   const isWebDesktop = Platform.OS === 'web' && width >= 768;
 
@@ -178,11 +178,29 @@ export default function LoginScreen() {
   // Check for Account Created success (New User)
   useEffect(() => {
     if (accountCreated === 'true') {
+      if (diditPendingReview === 'true') {
+        showAlert(
+          'success',
+          'Verification In Review',
+          `Your identity verification is still being reviewed by Didit.\n\nPlease confirm the email link we sent to ${createdEmail || 'your email'}. We will update your account when Didit finishes the review.`
+        );
+        return;
+      }
+
       if (verificationPendingReview === 'true') {
         showAlert(
           'success',
           'Manual Review Submitted',
           `Your requirements were submitted and your account is under manual review.\n\nWe will email ${createdEmail || 'you'} when the review is complete. If you receive an email confirmation link, confirm your email so you can sign in after approval.`
+        );
+        return;
+      }
+
+      if (diditVerified === 'true') {
+        showAlert(
+          'success',
+          'Check Your Inbox',
+          `Your identity has been verified.\n\nPlease confirm the email link we sent to ${createdEmail || 'your email'} before logging in.`
         );
         return;
       }
@@ -193,15 +211,14 @@ export default function LoginScreen() {
         `We have sent a verification link to ${createdEmail || 'your email'}.\n\nPlease confirm your email address to log in.`
       );
     } else if (verified === 'true') {
-      // Only show this 'Identity Verified' alert if we are NOT coming from a fresh signup creation
-      // (which handles its own flow via accountCreated)
       showAlert(
         'success',
-        'Verification Successful! 🎉',
-        'Your identity has been verified. You can now log in.'
+        'Account Ready',
+        'Your email has been confirmed and your identity is verified. You can now log in.'
       );
+      return;
     }
-  }, [verified, accountCreated, createdEmail, verificationPendingReview]);
+  }, [verified, accountCreated, createdEmail, verificationPendingReview, diditPendingReview, diditVerified]);
 
   const signInWithCredentials = async (loginEmail: string, loginPassword: string) => {
     setLoading(true);
@@ -284,16 +301,17 @@ export default function LoginScreen() {
             console.error('Profile check failed:', profileError);
           }
 
-          // SELF-HEALING: If profile is missing but Auth Metadata says verified, recreate the profile
-          if (!profile && metaVerified) {
-            console.log('Profile missing but Metadata Verified. Attempting to repair profile...');
+          // SELF-HEALING: After the email confirmation link creates a valid auth session,
+          // promote the Didit-approved profile from pending to verified.
+          if ((!profile || !profile.is_verified) && metaVerified) {
+            console.log('Profile pending/missing but Metadata Verified. Attempting to repair profile...');
             const { error: upsertError } = await supabase
               .from('profiles')
               .upsert({
                 id: user.id,
                 email: user.email,
                 full_name: user.user_metadata?.full_name || user.user_metadata?.name || '',
-                role: user.user_metadata?.role || 'musician',
+                role: profile?.role || user.user_metadata?.role || 'musician',
                 is_verified: true,
                 verification_status: 'APPROVED',
                 didit_session_id: user.user_metadata?.didit_session_id

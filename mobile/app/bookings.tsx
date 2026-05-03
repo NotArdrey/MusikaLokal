@@ -25,7 +25,7 @@ import CustomAlert, { AlertType } from "../src/components/CustomAlert";
 import GuestSignInGate from "../src/components/GuestSignInGate";
 import Header from "../src/components/header";
 import InAppMediaViewer, { isInAppMediaUrl } from "../src/components/InAppMediaViewer";
-import BookingActionModal from "../src/components/modal";
+import BookingActionModal, { normalizeVisibleInput } from "../src/components/modal";
 import Navbar from "../src/components/navbar";
 import Skeleton from "../src/components/Skeleton";
 import { useAuth } from "../src/context/AuthContext";
@@ -6760,7 +6760,7 @@ export default function BookingsScreen() {
                       : modalMode === "report_access"
                         ? "Please describe the issue so we can notify the studio owner and review this booking case."
                       : modalMode === "late_confirm"
-                        ? `Send this late-arrival reason to the studio owner?\n\n${cancellationReason.trim()}`
+                        ? `Send this late-arrival reason to the studio owner?\n\n${normalizeVisibleInput(cancellationReason)}`
                       : modalMode === "late"
                         ? "Please provide your reason for being late."
                         : (() => {
@@ -6847,7 +6847,7 @@ export default function BookingsScreen() {
               modalMode === "late" ||
               modalMode === "report_access") &&
             !(modalMode === "decline" && selectedItem?.leader_approval_required) &&
-            !cancellationReason.trim()
+            !normalizeVisibleInput(cancellationReason)
           ) {
             Alert.alert("Warning", "Please provide a reason.");
             return;
@@ -6905,7 +6905,7 @@ export default function BookingsScreen() {
             if (modalMode === "report_access") {
               await handleReportAccessIssue(
                 selectedItem,
-                cancellationReason.trim(),
+                normalizeVisibleInput(cancellationReason),
               );
               return;
             }

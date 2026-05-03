@@ -25,6 +25,7 @@ import GuestSignInGate from "../src/components/GuestSignInGate";
 import Header from "../src/components/header";
 import ListingCard from "../src/components/ListingCard";
 import ListingDetailsSheet from "../src/components/ListingDetailsSheet";
+import { normalizeVisibleInput } from "../src/components/modal";
 import Navbar, {
   NAVBAR_BOTTOM_OFFSET,
   NAVBAR_CLEARANCE,
@@ -67,6 +68,36 @@ const moderateScale = (size: number, factor = 0.3) => {
 };
 
 type FeedTab = "for_you" | "following";
+
+type ForYouTabIconProps = {
+  active: boolean;
+  primaryColor: string;
+  mutedColor: string;
+};
+
+function ForYouTabIcon({ active, primaryColor, mutedColor }: ForYouTabIconProps) {
+  const iconColor = active ? primaryColor : mutedColor;
+
+  return (
+    <View
+      style={[
+        styles.forYouTabIcon,
+        {
+          borderColor: active ? primaryColor : mutedColor,
+          backgroundColor: active ? `${primaryColor}18` : "transparent",
+        },
+      ]}
+    >
+      <View style={[styles.forYouTabIconCenter, { backgroundColor: iconColor }]} />
+      <Ionicons
+        name={active ? "sparkles" : "sparkles-outline"}
+        size={12}
+        color={iconColor}
+        style={styles.forYouTabIconSparkle}
+      />
+    </View>
+  );
+}
 
 type FeedAiCardsResult = {
   cards: any[];
@@ -1732,14 +1763,15 @@ export default function FeedScreen() {
 
   /* ── Actions ── */
   const handleCreatePost = async () => {
-    if (!postBody.trim()) {
+    const content = normalizeVisibleInput(postBody);
+    if (!content) {
       setAlert({ type: "warning", title: "Empty Post", message: "Please write something." });
       return;
     }
     setCreating(true);
     try {
       const { data, error } = await supabase.functions.invoke("manage-social-feed", {
-        body: { action: "create_post", content: postBody.trim(), visibility: postVisibility },
+        body: { action: "create_post", content, visibility: postVisibility },
       });
 
       if (error) {
@@ -2315,7 +2347,20 @@ export default function FeedScreen() {
         <View style={[styles.tabRow, { backgroundColor: cardBg, borderBottomColor: isDark ? "#334155" : "#E2E8F0" }]}>
           {(["for_you", "following"] as FeedTab[]).map((t) => (
             <TouchableOpacity activeOpacity={1} key={t} style={[styles.tab, tab === t && { borderBottomColor: colors.primary, borderBottomWidth: 2 }]} onPress={() => setTab(t)}>
-              <Ionicons name={t === "for_you" ? "flame-outline" : "people-outline"} size={18} color={tab === t ? colors.primary : colors.textSecondary} style={{ marginRight: 6 }} />
+              {t === "for_you" ? (
+                <ForYouTabIcon
+                  active={tab === t}
+                  primaryColor={colors.primary}
+                  mutedColor={colors.textSecondary}
+                />
+              ) : (
+                <Ionicons
+                  name="people-outline"
+                  size={18}
+                  color={tab === t ? colors.primary : colors.textSecondary}
+                  style={{ marginRight: 6 }}
+                />
+              )}
               <Text style={[styles.tabText, { color: tab === t ? colors.primary : colors.textSecondary }]}>{t === "for_you" ? "For You" : "Following"}</Text>
             </TouchableOpacity>
           ))}
@@ -2473,13 +2518,13 @@ export default function FeedScreen() {
                 <Text style={[styles.emptyTitle, { color: colors.text }]}>
                   {tab === "following"
                     ? "Your Following Feed is Empty"
-                    : "There is no"}
+                    : "No posts or recommendations yet"}
                 </Text>
-                {tab === "following" ? (
-                  <Text style={[styles.emptySubtitle, { color: colors.textSecondary }]}>
-                    Follow musicians, groups, and duos to see their updates here. Followed profiles and groups will also appear until they have posts.
-                  </Text>
-                ) : null}
+                <Text style={[styles.emptySubtitle, { color: colors.textSecondary }]}>
+                  {tab === "following"
+                    ? "Follow musicians, groups, and duos to see their updates here. Followed profiles and groups will also appear until they have posts."
+                    : "Explore musicians, groups, studios, and gigs to help shape your For You feed."}
+                </Text>
 
                 {tab === "following" ? (
                   <TouchableOpacity activeOpacity={1}
@@ -2489,7 +2534,15 @@ export default function FeedScreen() {
                     <Ionicons name="search" size={18} color="#fff" />
                     <Text style={styles.emptyActionBtnText}>Find Musicians</Text>
                   </TouchableOpacity>
-                ) : null}
+                ) : (
+                  <TouchableOpacity activeOpacity={1}
+                    style={[styles.emptyActionBtn, { backgroundColor: colors.primary, marginTop: 16 }]}
+                    onPress={openSearchSheet}
+                  >
+                    <Ionicons name="search" size={18} color="#fff" />
+                    <Text style={styles.emptyActionBtnText}>Explore Feed</Text>
+                  </TouchableOpacity>
+                )}
               </View>
             )
           }
@@ -2515,11 +2568,11 @@ export default function FeedScreen() {
               <TouchableOpacity activeOpacity={1} onPress={() => setShowCreate(false)}><Ionicons name="close" size={24} color={colors.text} /></TouchableOpacity>
               <Text style={[styles.modalTitle, { color: colors.text }]}>Create Post</Text>
               <TouchableOpacity activeOpacity={1}
-                style={[styles.postBtn, { backgroundColor: postBody.trim() ? colors.primary : colors.border, opacity: creating ? 0.6 : 1 }]}
+                style={[styles.postBtn, { backgroundColor: normalizeVisibleInput(postBody) ? colors.primary : colors.border, opacity: creating ? 0.6 : 1 }]}
                 onPress={handleCreatePost}
-                disabled={creating || !postBody.trim()}
+                disabled={creating || !normalizeVisibleInput(postBody)}
               >
-                {creating ? <ActivityIndicator color="#fff" size="small" /> : <Text style={[styles.postBtnText, { color: postBody.trim() ? "#fff" : colors.textSecondary }]}>Post</Text>}
+                {creating ? <ActivityIndicator color="#fff" size="small" /> : <Text style={[styles.postBtnText, { color: normalizeVisibleInput(postBody) ? "#fff" : colors.textSecondary }]}>Post</Text>}
               </TouchableOpacity>
             </View>
             <View style={styles.composerAuthorRow}>
@@ -2665,6 +2718,26 @@ const styles = StyleSheet.create({
   tabRow: { flexDirection: "row", borderBottomWidth: 1, marginTop: 6 },
   tab: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", paddingVertical: 12 },
   tabText: { fontSize: moderateScale(13), fontWeight: "600" },
+  forYouTabIcon: {
+    width: 22,
+    height: 22,
+    marginRight: 6,
+    borderRadius: 11,
+    borderWidth: 1.5,
+    alignItems: "center",
+    justifyContent: "center",
+    position: "relative",
+  },
+  forYouTabIconCenter: {
+    width: 5,
+    height: 5,
+    borderRadius: 2.5,
+  },
+  forYouTabIconSparkle: {
+    position: "absolute",
+    top: -4,
+    right: -5,
+  },
 
   aiCardContainer: {
     marginHorizontal: 16,

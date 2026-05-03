@@ -23,6 +23,14 @@ const normalizePermitStatus = (permitStatus: string | null | undefined) => {
     return normalizedPermitStatus;
 };
 
+const normalizeDeleteConfirmation = (value: string) =>
+    String(value || '')
+        .normalize('NFKC')
+        .replace(/[\u200B-\u200D\uFEFF]/g, '')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .toLowerCase();
+
 export default function MyStudioScreen() {
     const { colors, isDark } = useTheme();
     const { contentBottomPadding } = useBottomBarClearance(24);
@@ -185,7 +193,9 @@ export default function MyStudioScreen() {
         setModalVisible(true);
     };
 
-    const isDeleteConfirmed = deleteConfirmationText.trim() === selectedName.trim();
+    const isDeleteConfirmed =
+        normalizeDeleteConfirmation(deleteConfirmationText) ===
+        normalizeDeleteConfirmation(selectedName);
 
     const handleDelete = async () => {
         if (!selectedId || !userId || deleting) return;

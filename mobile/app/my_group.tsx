@@ -243,6 +243,8 @@ export default function MyGroupScreen() {
 
     const normalizeForDeleteConfirmation = (value: string) =>
         String(value || '')
+            .normalize('NFKC')
+            .replace(/[\u200B-\u200D\uFEFF]/g, '')
             .trim()
             .replace(/\s+/g, ' ')
             .toLowerCase();
@@ -480,7 +482,7 @@ export default function MyGroupScreen() {
                 inputPlaceholder="Type group name"
                 inputValue={deleteConfirmationText}
                 onInputChange={setDeleteConfirmationText}
-                confirmDisabled={deleting}
+                confirmDisabled={!isDeleteConfirmed || deleting}
             />
             <CustomAlert
                 visible={alertVisible}

@@ -1,6 +1,7 @@
 // @ts-nocheck
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { sendEmailWithGmail } from "../_shared/gmailEmail.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -59,6 +60,42 @@ function escapeHtml(raw: unknown) {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#039;");
+}
+
+function getPhilippineDateInputValue(date = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Manila",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(date);
+
+  const values = new Map(parts.map((part) => [part.type, part.value]));
+  return `${values.get("year")}-${values.get("month")}-${values.get("day")}`;
+}
+
+function normalizeDateInput(raw: unknown, label: string, required = false) {
+  const value = String(raw || "").trim();
+  if (!value) {
+    if (required) throw new Error(`${label} is required`);
+    return null;
+  }
+
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    throw new Error(`${label} must use YYYY-MM-DD format`);
+  }
+
+  const parsed = new Date(`${value}T00:00:00Z`);
+  if (Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== value) {
+    throw new Error(`${label} is invalid`);
+  }
+
+  const today = getPhilippineDateInputValue();
+  if (value < today) {
+    throw new Error(`${label} cannot be in the past`);
+  }
+
+  return value;
 }
 
 function buildMusikaLokalEmail({
@@ -170,10 +207,12 @@ async function ensurePendingReviewProfile(
   authUser: any,
   email: string,
   diditSessionId: string | null = null,
+  submittedFullName: string | null = null,
+  idDocumentExpiry: string | null = null,
 ) {
   const metadata = authUser?.user_metadata || {};
   const fallbackName =
-    String(metadata.full_name || metadata.display_name || metadata.name || "").trim() ||
+    String(submittedFullName || metadata.full_name || metadata.display_name || metadata.name || "").trim() ||
     email.split("@")[0] ||
     "Musician";
 
@@ -187,6 +226,8 @@ async function ensurePendingReviewProfile(
       is_verified: false,
       verification_status: "PENDING_REVIEW",
       didit_session_id: diditSessionId,
+      id_document_expiry: idDocumentExpiry,
+      id_verified_at: null,
     })
     .select("id")
     .single();
@@ -208,6 +249,7 @@ async function ensurePendingReviewAuthUser(
     documentTypeKey: string | null;
     verificationMode: string;
     diditSessionId: string | null;
+    idDocumentExpiry: string | null;
   },
 ) {
   const role = String(payload.role || "musician").trim().toLowerCase();
@@ -243,7 +285,37 @@ async function ensurePendingReviewAuthUser(
       throw new Error("This email is already registered and verified. Please log in.");
     }
 
-    return existingUser;
+    const fallbackName = payload.fullName || payload.email.split("@")[0] || "Musician";
+    const updatePayload: Record<string, unknown> = {
+      user_metadata: {
+        ...(existingUser.user_metadata || {}),
+        role,
+        verification_status: "PENDING_REVIEW",
+        is_verified: false,
+        full_name: fallbackName,
+        display_name: fallbackName,
+        name: fallbackName,
+        selected_document_type: payload.documentType,
+        selected_document_type_key: payload.documentTypeKey,
+        verification_mode: payload.verificationMode,
+        didit_session_id: payload.diditSessionId,
+      },
+    };
+
+    if (payload.password && payload.password.length >= 6) {
+      updatePayload.password = payload.password;
+    }
+
+    const { data: updatedUserData, error: updateUserError } = await supabaseAdmin.auth.admin.updateUserById(
+      existingUser.id,
+      updatePayload,
+    );
+
+    if (updateUserError || !updatedUserData?.user) {
+      throw new Error(updateUserError?.message || "Unable to update existing signup user for review.");
+    }
+
+    return updatedUserData.user;
   }
 
   if (!payload.password || payload.password.length < 6) {
@@ -266,6 +338,7 @@ async function ensurePendingReviewAuthUser(
       selected_document_type_key: payload.documentTypeKey,
       verification_mode: payload.verificationMode,
       didit_session_id: payload.diditSessionId,
+      id_document_expiry: payload.idDocumentExpiry,
     },
   });
 
@@ -325,38 +398,21 @@ async function sendSubmissionEmail(
   <p style="margin: 0;">Thank you,<br>MusikaLokal Team</p>`,
   });
 
-  const resendApiKey = Deno.env.get("RESEND_API_KEY") || "";
-  if (resendApiKey) {
-    try {
-      const resendFrom = Deno.env.get("RESEND_FROM") || "MusikaLokal <noreply@musikalokal.com>";
-      const response = await fetch("https://api.resend.com/emails", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${resendApiKey}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          from: resendFrom,
-          to: [userEmail],
-          subject,
-          html,
-        }),
-      });
-
-      if (response.ok) {
-        return { sent: true, queued: false, provider: "resend" };
-      }
-      const errorText = await response.text().catch(() => "");
-      console.error("manual_identity_review_submission_email_resend_failed", {
-        status: response.status,
-        body: errorText.slice(0, 500),
-      });
-    } catch (error) {
-      console.error("manual_identity_review_submission_email_resend_exception", {
-        message: error instanceof Error ? error.message : String(error),
-      });
-      // Fall through to DB queue.
-    }
+  const gmailDelivery = await sendEmailWithGmail({
+    to: userEmail,
+    subject,
+    html,
+    recipientName: "User",
+    source: "manual-identity-review",
+  });
+  if (gmailDelivery.sent) {
+    return { sent: true, queued: false, provider: gmailDelivery.provider };
+  }
+  if (gmailDelivery.error) {
+    console.error("manual_identity_review_submission_email_gmail_failed", {
+      provider: gmailDelivery.provider,
+      message: gmailDelivery.error,
+    });
   }
 
   const { error } = await supabaseAdmin.from("email_notifications").insert({
@@ -371,10 +427,20 @@ async function sendSubmissionEmail(
 
   if (error) {
     console.error("manual_identity_review_submission_email_queue_failed", { message: error.message });
-    return { sent: false, queued: false, provider: resendApiKey ? "resend" : "email_notifications", error: error.message };
+    return {
+      sent: false,
+      queued: false,
+      provider: "email_notifications",
+      error: error.message,
+    };
   }
 
-  return { sent: false, queued: true, provider: "email_notifications" };
+  return {
+    sent: false,
+    queued: true,
+    provider: "email_notifications",
+    error: null,
+  };
 }
 
 serve(async (req: Request) => {
@@ -404,10 +470,15 @@ serve(async (req: Request) => {
     const password = String(body?.password || "");
     const role = String(body?.role || "musician").trim().toLowerCase();
     const fullName = String(body?.fullName || body?.displayName || "").trim();
+    const source = String(body?.source || "MANUAL_UPLOAD").trim().toUpperCase();
+    const idDocumentExpiry = normalizeDateInput(
+      body?.idDocumentExpiry || body?.id_document_expiry,
+      "ID expiration date",
+      source === "MANUAL_UPLOAD",
+    );
     const documentType = String(body?.documentType || "").trim();
     const documentTypeKey = String(body?.documentTypeKey || "").trim() || null;
     const documentCountry = String(body?.documentCountry || "PHL").trim().toUpperCase();
-    const source = String(body?.source || "MANUAL_UPLOAD").trim().toUpperCase();
     const diditSessionId = String(body?.diditSessionId || body?.didit_session_id || "").trim() || null;
     const verificationMode = source === "DIDIT_PENDING" ? "didit" : "manual_upload";
 
@@ -417,6 +488,10 @@ serve(async (req: Request) => {
 
     if (source !== "MANUAL_UPLOAD" && source !== "DIDIT_PENDING") {
       return jsonResponse({ error: "Invalid manual identity review source" }, 400);
+    }
+
+    if (source === "MANUAL_UPLOAD" && !fullName) {
+      return jsonResponse({ error: "Full name on ID is required" }, 400);
     }
 
     const authUser = await ensurePendingReviewAuthUser(supabaseAdmin, {
@@ -429,6 +504,7 @@ serve(async (req: Request) => {
       documentTypeKey,
       verificationMode,
       diditSessionId,
+      idDocumentExpiry,
     });
 
     userId = String(authUser.id || "").trim();
@@ -437,7 +513,7 @@ serve(async (req: Request) => {
       return jsonResponse({ error: "Email mismatch for this user" }, 400);
     }
 
-    await ensurePendingReviewProfile(supabaseAdmin, authUser, authEmail || email, diditSessionId);
+    await ensurePendingReviewProfile(supabaseAdmin, authUser, authEmail || email, diditSessionId, fullName || null, idDocumentExpiry);
 
     const frontImage = normalizeImagePayload(body?.frontImage, "front");
     if (!frontImage && source === "MANUAL_UPLOAD") {
@@ -446,6 +522,13 @@ serve(async (req: Request) => {
 
     const backImage = normalizeImagePayload(body?.backImage, "back");
     const selfieImage = normalizeImagePayload(body?.selfieImage, "selfie");
+    if (!backImage && source === "MANUAL_UPLOAD") {
+      return jsonResponse({ error: "backImage is required" }, 400);
+    }
+
+    if (!selfieImage && source === "MANUAL_UPLOAD") {
+      return jsonResponse({ error: "selfieImage is required" }, 400);
+    }
 
     const frontPath = frontImage
       ? await uploadImage(supabaseAdmin, userId, "front", frontImage)
@@ -525,6 +608,8 @@ serve(async (req: Request) => {
       .update({
         verification_status: "PENDING_REVIEW",
         is_verified: false,
+        full_name: fullName || undefined,
+        id_document_expiry: idDocumentExpiry,
         id_verified_at: null,
       })
       .eq("id", userId);

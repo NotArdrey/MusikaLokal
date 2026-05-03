@@ -1,4 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
+import * as Linking from 'expo-linking';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Image, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
@@ -23,10 +24,15 @@ const isAdminRole = (role: unknown): boolean => {
   return typeof role === 'string' && role.toLowerCase() === 'admin';
 };
 
+const createEmailConfirmationRedirectUrl = () => {
+  const baseUrl = Linking.createURL('/');
+  return `${baseUrl}${baseUrl.includes('?') ? '&' : '?'}verified=true`;
+};
+
 export default function LoginScreen() {
   const { colors, isDark } = useTheme();
   const { session, loading: authLoading, setGuestMode } = useAuth();
-  const { verified, accountCreated, email: createdEmail, verification_error, verificationPendingReview } = useLocalSearchParams();
+  const { verified, accountCreated, email: createdEmail, verification_error, verificationPendingReview, diditPendingReview, diditVerified } = useLocalSearchParams();
 
   useEffect(() => {
     if (!authLoading && session) {
@@ -85,6 +91,9 @@ export default function LoginScreen() {
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [errors, setErrors] = useState<{ email?: string; password?: string }>({});
+  const [canResendConfirmation, setCanResendConfirmation] = useState(false);
+  const [resendingConfirmation, setResendingConfirmation] = useState(false);
+  const [resendCooldownSeconds, setResendCooldownSeconds] = useState(0);
   const emailInputRef = useRef<TextInput>(null);
   const passwordInputRef = useRef<TextInput>(null);
 
@@ -124,6 +133,16 @@ export default function LoginScreen() {
   const closeAlert = () => {
     setAlertState(prev => ({ ...prev, visible: false }));
   };
+
+  useEffect(() => {
+    if (resendCooldownSeconds <= 0) return;
+
+    const timer = setInterval(() => {
+      setResendCooldownSeconds((seconds) => Math.max(0, seconds - 1));
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, [resendCooldownSeconds]);
 
   const focusField = (field: 'email' | 'password') => {
     setTimeout(() => {
@@ -185,11 +204,29 @@ export default function LoginScreen() {
   // Check for Account Created success (New User)
   useEffect(() => {
     if (accountCreated === 'true') {
+      if (diditPendingReview === 'true') {
+        showAlert(
+          'success',
+          'Verification In Review',
+          `Your identity verification is still being reviewed by Didit.\n\nPlease confirm the email link we sent to ${createdEmail || 'your email'}. We will update your account when Didit finishes the review.`
+        );
+        return;
+      }
+
       if (verificationPendingReview === 'true') {
         showAlert(
           'success',
           'Manual Review Submitted',
           `Your requirements were submitted and your account is under manual review.\n\nWe will email ${createdEmail || 'you'} when the review is complete. If you receive an email confirmation link, confirm your email so you can sign in after approval.`
+        );
+        return;
+      }
+
+      if (diditVerified === 'true') {
+        showAlert(
+          'success',
+          'Check Your Inbox',
+          `Your identity has been verified.\n\nPlease confirm the email link we sent to ${createdEmail || 'your email'} before logging in.`
         );
         return;
       }
@@ -200,18 +237,18 @@ export default function LoginScreen() {
         `We have sent a verification link to ${createdEmail || 'your email'}.\n\nPlease confirm your email address to log in.`
       );
     } else if (verified === 'true') {
-      // Only show this 'Identity Verified' alert if we are NOT coming from a fresh signup creation
-      // (which handles its own flow via accountCreated)
       showAlert(
         'success',
-        'Verification Successful! 🎉',
-        'Your identity has been verified. You can now log in.'
+        'Account Ready',
+        'Your email has been confirmed and your identity is verified. You can now log in.'
       );
+      return;
     }
-  }, [verified, accountCreated, createdEmail, verificationPendingReview]);
+  }, [verified, accountCreated, createdEmail, verificationPendingReview, diditPendingReview, diditVerified]);
 
   const signInWithCredentials = async (loginEmail: string, loginPassword: string) => {
     setLoading(true);
+    setCanResendConfirmation(false);
     try {
       // Clear any stale session first to prevent refresh token errors
       await supabase.auth.signOut({ scope: 'local' });
@@ -226,7 +263,18 @@ export default function LoginScreen() {
         if (error.message.includes('Invalid login credentials')) {
           showLoginError('Invalid Login', 'Invalid email or password.');
         } else if (error.message.includes('Email not confirmed')) {
-          showLoginError('Email Not Confirmed', 'Email not confirmed. Check your inbox.');
+          setCanResendConfirmation(true);
+          setLoginMessage({ type: 'error', text: 'Email not confirmed. Check your inbox or resend the confirmation email.' });
+          showAlert(
+            'warning',
+            'Email Not Confirmed',
+            'Email not confirmed. Check your inbox or resend the confirmation email.',
+            [
+              { text: 'Resend Email', onPress: () => void handleResendConfirmationEmail(), style: 'default' },
+              { text: 'OK', style: 'cancel' },
+            ],
+            true,
+          );
         } else if (error.message.includes('rate') || error.status === 429) {
           showLoginError('Too Many Attempts', 'Too many attempts. Please wait before trying again.');
         } else if (error.message.includes('refresh') || error.message.includes('token')) {
@@ -291,15 +339,16 @@ export default function LoginScreen() {
             return;
           }
 
-          // SELF-HEALING: If profile is missing but Auth Metadata says verified, recreate the profile
-          if (!profile && metaVerified) {
+          // SELF-HEALING: After the email confirmation link creates a valid auth session,
+          // promote the Didit-approved profile from pending to verified.
+          if ((!profile || !profile.is_verified) && metaVerified) {
             const { error: upsertError } = await supabase
               .from('profiles')
               .upsert({
                 id: user.id,
                 email: user.email,
                 full_name: user.user_metadata?.full_name || user.user_metadata?.name || '',
-                role: user.user_metadata?.role || 'musician',
+                role: profile?.role || user.user_metadata?.role || 'musician',
                 is_verified: true,
                 verification_status: 'APPROVED',
                 didit_session_id: user.user_metadata?.didit_session_id
@@ -363,6 +412,53 @@ export default function LoginScreen() {
       );
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleResendConfirmationEmail = async () => {
+    const normalizedEmail = email.trim().toLowerCase();
+
+    if (!normalizedEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
+      setErrors((prev) => ({ ...prev, email: 'Please enter a valid email address.' }));
+      showAlert('warning', 'Check Your Email', 'Enter the email address you used to sign up.', [{ text: 'OK' }], true);
+      return;
+    }
+
+    if (resendingConfirmation || resendCooldownSeconds > 0) {
+      return;
+    }
+
+    setResendingConfirmation(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('create-unverified-user', {
+        body: {
+          action: 'resend_confirmation_email',
+          email: normalizedEmail,
+          redirectTo: createEmailConfirmationRedirectUrl(),
+        },
+      });
+
+      if (error) {
+        throw error;
+      }
+
+      if ((data as any)?.alreadyConfirmed) {
+        setCanResendConfirmation(false);
+        setLoginMessage({ type: 'success', text: 'Email already confirmed. You can sign in now.' });
+        showAlert('success', 'Email Confirmed', 'Your email is already confirmed. You can sign in now.', [{ text: 'OK' }], true);
+        return;
+      }
+
+      setResendCooldownSeconds(60);
+      setCanResendConfirmation(true);
+      setLoginMessage({ type: 'success', text: 'A new confirmation email has been sent.' });
+      showAlert('success', 'Email Sent', 'A new confirmation link has been sent to your email.', [{ text: 'OK' }], true);
+    } catch (e: any) {
+      const message = e?.message || 'Could not resend the confirmation email. Please try again.';
+      setLoginMessage({ type: 'error', text: message });
+      showAlert('error', 'Resend Failed', message, [{ text: 'OK' }], true);
+    } finally {
+      setResendingConfirmation(false);
     }
   };
 
@@ -480,6 +576,7 @@ export default function LoginScreen() {
                   value={email}
                   onChangeText={(text) => {
                     setEmail(text);
+                    setCanResendConfirmation(false);
                     if (errors.email) setErrors({ ...errors, email: undefined });
                   }}
                   autoCapitalize="none"
@@ -557,6 +654,31 @@ export default function LoginScreen() {
                   {loginMessage.text}
                 </Text>
               </View>
+            )}
+
+            {canResendConfirmation && (
+              <TouchableOpacity
+                onPress={handleResendConfirmationEmail}
+                disabled={resendingConfirmation || resendCooldownSeconds > 0}
+                activeOpacity={1}
+                style={[
+                  styles.resendConfirmationButton,
+                  {
+                    borderColor: colors.primary,
+                    opacity: resendingConfirmation || resendCooldownSeconds > 0 ? 0.65 : 1,
+                  },
+                ]}
+              >
+                {resendingConfirmation ? (
+                  <ActivityIndicator color={colors.primary} />
+                ) : (
+                  <Text style={[styles.resendConfirmationText, { color: colors.primary }]}>
+                    {resendCooldownSeconds > 0
+                      ? `Resend available in ${resendCooldownSeconds}s`
+                      : 'Resend confirmation email'}
+                  </Text>
+                )}
+              </TouchableOpacity>
             )}
 
             <View style={styles.signupLinkContainer}>
@@ -721,5 +843,16 @@ const styles = StyleSheet.create({
     marginTop: 4,
     marginLeft: 4,
     fontFamily: 'Poppins_400Regular',
+  },
+  resendConfirmationButton: {
+    height: 48,
+    borderRadius: 14,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  resendConfirmationText: {
+    fontFamily: 'Poppins_600SemiBold',
+    fontSize: 14,
   },
 });

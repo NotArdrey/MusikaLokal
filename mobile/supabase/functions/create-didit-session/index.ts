@@ -40,6 +40,7 @@ serve(async (req) => {
 
     // Parse request body
     const { userId, email, callback, redirect_url, action, session_id } = await req.json();
+    const normalizedEmail = typeof email === 'string' ? email.trim().toLowerCase() : '';
 
     // HANDLE GET SESSION ACTION
     if (action === 'get_session' && session_id) {
@@ -223,7 +224,7 @@ serve(async (req) => {
         workflow_id: DIDIT_WORKFLOW_ID,
         vendor_data: userId, // This is passed to webhook and included in session
         callback: finalRedirectUrl, // Browser redirect URL after verification completes
-        features: email ? { email } : undefined, // v3 uses 'features' instead of 'contact_details'
+        features: normalizedEmail ? { email: normalizedEmail } : undefined, // v3 uses 'features' instead of 'contact_details'
       }),
     });
 
@@ -256,23 +257,55 @@ serve(async (req) => {
     }
     */
 
-    // Update user profile with the session ID
-    // SKIP if it's a temp ID (user not created yet)
-    if (userId && !userId.startsWith('TEMP_') && SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY) {
+    if (SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY) {
       const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
-      const { error: updateError } = await supabase
-        .from("profiles")
-        .update({
-          didit_session_id: diditData.session_id,
-          verification_status: "PENDING",
-        })
-        .eq("id", userId);
+      if (normalizedEmail) {
+        const { error: supersedeError } = await supabase
+          .from('verification_sessions')
+          .update({ status: 'SUPERSEDED' })
+          .eq('verification_data->>email', normalizedEmail)
+          .in('status', ['PENDING', 'Not Started', 'In Progress'])
+          .neq('session_ref', diditData.session_id);
 
-      if (updateError) {
-        console.error("Failed to update profile:", updateError);
-        // Don't fail the request, just log the error
-      } else {
+        if (supersedeError) {
+          console.error('Failed to supersede older Didit sessions:', supersedeError);
+        }
+      }
+
+      const { error: sessionStoreError } = await supabase
+        .from('verification_sessions')
+        .upsert({
+          session_ref: diditData.session_id,
+          status: 'PENDING',
+          verification_data: {
+            user_ref: userId,
+            email: normalizedEmail || null,
+            session_url: diditData.url || null,
+            started_at: new Date().toISOString(),
+          },
+        });
+
+      if (sessionStoreError) {
+        console.error('Failed to store pending Didit session:', sessionStoreError);
+      }
+
+      // Update user profile with the session ID.
+      // SKIP if it's a temp ID (user not created yet).
+      if (userId && !userId.startsWith('TEMP_')) {
+        const { error: updateError } = await supabase
+          .from("profiles")
+          .update({
+            didit_session_id: diditData.session_id,
+            verification_status: "PENDING",
+          })
+          .eq("id", userId);
+
+        if (updateError) {
+          console.error("Failed to update profile:", updateError);
+          // Don't fail the request, just log the error
+        } else {
+        }
       }
     }
 

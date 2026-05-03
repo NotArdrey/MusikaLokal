@@ -2,6 +2,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 // @ts-ignore
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { sendEmailWithGmail } from "../_shared/gmailEmail.ts";
 
 declare const Deno: {
   env: {
@@ -168,40 +169,72 @@ function buildMusikaLokalEmail({
 </html>`;
 }
 
-async function generateApprovedEmailLink(client: any, userEmail: string) {
-  if (!userEmail) return { link: null, error: "Missing recipient email" };
+function getManualApprovalConfirmationRedirect() {
+  return Deno.env.get("EMAIL_CONFIRM_REDIRECT_TO") || "musikalokal://?verified=true";
+}
+
+async function sendManualApprovalConfirmationEmail(
+  userEmail: string,
+  supabaseUrl: string,
+  anonKey: string,
+) {
+  if (!userEmail) {
+    return { sent: false, queued: false, provider: "none", error: "Missing recipient email" };
+  }
+
+  if (!supabaseUrl || !anonKey) {
+    return { sent: false, queued: false, provider: "supabase_auth", error: "Missing SUPABASE_URL or SUPABASE_ANON_KEY" };
+  }
 
   // Match the Didit confirmation flow: after Supabase verifies the link,
   // send the user straight back into the app with the verified flag.
-  const redirectTo = "musikalokal://?verified=true";
+  const redirectTo = getManualApprovalConfirmationRedirect();
 
-  const { data, error } = await client.auth.admin.generateLink({
-    type: "magiclink",
-    email: userEmail,
-    options: {
-      redirectTo,
-      data: {
-        is_verified: true,
-        verification_status: "APPROVED",
+  try {
+    const response = await fetch(`${supabaseUrl}/auth/v1/resend`, {
+      method: "POST",
+      headers: {
+        apikey: anonKey,
+        Authorization: `Bearer ${anonKey}`,
+        "Content-Type": "application/json",
       },
-    },
-  });
-
-  if (error) {
-    console.error("manual_identity_review_confirmation_link_failed", {
-      recipient: maskEmailForLog(userEmail),
-      message: error.message,
+      body: JSON.stringify({
+        type: "signup",
+        email: userEmail,
+        options: {
+          email_redirect_to: redirectTo,
+        },
+      }),
     });
-    return { link: null, error: error.message };
+
+    if (response.ok) {
+      console.log("manual_identity_review_confirmation_email_sent", {
+        provider: "supabase_auth",
+        recipient: maskEmailForLog(userEmail),
+      });
+      return { sent: true, queued: false, provider: "supabase_auth" };
+    }
+
+    const errorText = await response.text().catch(() => "");
+    console.error("manual_identity_review_confirmation_email_failed", {
+      status: response.status,
+      body: errorText.slice(0, 500),
+      recipient: maskEmailForLog(userEmail),
+    });
+    return {
+      sent: false,
+      queued: false,
+      provider: "supabase_auth",
+      error: `Supabase Auth ${response.status}: ${errorText.slice(0, 500)}`,
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error("manual_identity_review_confirmation_email_exception", {
+      message,
+      recipient: maskEmailForLog(userEmail),
+    });
+    return { sent: false, queued: false, provider: "supabase_auth", error: message };
   }
-
-  const actionLink = String(data?.properties?.action_link || "").trim();
-  console.log("manual_identity_review_confirmation_link_generated", {
-    recipient: maskEmailForLog(userEmail),
-    hasLink: Boolean(actionLink),
-  });
-
-  return { link: actionLink || null, error: actionLink ? null : "Generated link was empty" };
 }
 
 async function sendDecisionEmail(
@@ -260,49 +293,27 @@ async function sendDecisionEmail(
   <p style="margin: 16px 0 0;">Thank you,<br>MusikaLokal Team</p>`,
   });
 
-  const resendApiKey = Deno.env.get("RESEND_API_KEY") || "";
-  if (resendApiKey) {
-    try {
-      const resendFrom = Deno.env.get("RESEND_FROM") || "MusikaLokal <noreply@musikalokal.com>";
-      const response = await fetch("https://api.resend.com/emails", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${resendApiKey}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          from: resendFrom,
-          to: [userEmail],
-          subject,
-          html,
-        }),
-      });
-
-      if (response.ok) {
-        console.log("manual_identity_review_decision_email_sent", {
-          decision,
-          provider: "resend",
-          recipient: maskEmailForLog(userEmail),
-        });
-        return { sent: true, queued: false, provider: "resend" };
-      }
-      const errorText = await response.text().catch(() => "");
-      fallbackReason = `Resend returned ${response.status}${errorText ? `: ${errorText.slice(0, 240)}` : ""}`;
-      console.error("manual_identity_review_decision_email_resend_failed", {
-        status: response.status,
-        body: errorText.slice(0, 500),
-      });
-    } catch (error) {
-      fallbackReason = error instanceof Error ? error.message : String(error);
-      console.error("manual_identity_review_decision_email_resend_exception", {
-        message: fallbackReason,
-      });
-      // Fallback to DB queue below.
-    }
-  } else {
-    fallbackReason = "RESEND_API_KEY is not configured";
-    console.warn("manual_identity_review_decision_email_resend_missing_secret");
+  const gmailDelivery = await sendEmailWithGmail({
+    to: userEmail,
+    subject,
+    html,
+    recipientName: "User",
+    source: "admin-users-management",
+  });
+  if (gmailDelivery.sent) {
+    console.log("manual_identity_review_decision_email_sent", {
+      decision,
+      provider: gmailDelivery.provider,
+      recipient: maskEmailForLog(userEmail),
+    });
+    return { sent: true, queued: false, provider: gmailDelivery.provider };
   }
+
+  fallbackReason = gmailDelivery.error || "Gmail sender is not configured";
+  console.error("manual_identity_review_decision_email_gmail_failed", {
+    provider: gmailDelivery.provider,
+    message: fallbackReason,
+  });
 
   const { error } = await client.from("email_notifications").insert({
     recipient_email: userEmail,
@@ -316,14 +327,19 @@ async function sendDecisionEmail(
 
   if (error) {
     console.error("manual_identity_review_decision_email_queue_failed", { message: error.message });
-    return { sent: false, queued: false, provider: resendApiKey ? "resend" : "email_notifications", error: error.message };
+    return {
+      sent: false,
+      queued: false,
+      provider: "email_notifications",
+      error: fallbackReason ? `${fallbackReason}; ${error.message}` : error.message,
+    };
   }
 
   console.log("manual_identity_review_decision_email_queued", {
     decision,
     provider: "email_notifications",
     recipient: maskEmailForLog(userEmail),
-    reason: fallbackReason || "resend unavailable",
+    reason: fallbackReason || "gmail sender unavailable",
   });
 
   return {
@@ -376,6 +392,7 @@ serve(async (req: Request) => {
         .select(
           "id, full_name, email, role, is_verified, verification_status, created_at",
         )
+        .or("verification_status.is.null,verification_status.neq.DECLINED")
         .order("created_at", { ascending: false })
         .limit(limit);
 
@@ -411,7 +428,7 @@ serve(async (req: Request) => {
       if (userIds.length > 0) {
         const { data: linkedProfiles, error: linkedProfilesError } = await client
           .from("profiles")
-          .select("id, full_name, email, verification_status")
+          .select("id, full_name, email, verification_status, id_document_expiry")
           .in("id", userIds);
 
         if (!linkedProfilesError && linkedProfiles) {
@@ -488,7 +505,6 @@ serve(async (req: Request) => {
       }
 
       const profileVerificationStatus = decision === "APPROVED" ? "APPROVED" : "DECLINED";
-      const isVerified = decision === "APPROVED";
       const nowIso = new Date().toISOString();
 
       const { data: updatedReview, error: updateReviewError } = await client
@@ -508,6 +524,14 @@ serve(async (req: Request) => {
         return jsonResponse({ error: updateReviewError.message }, 400);
       }
 
+      const { data: authUserData, error: authUserError } = await client.auth.admin.getUserById(String(review.user_id));
+      if (authUserError || !authUserData?.user) {
+        return jsonResponse({ error: "User not found for review" }, 404);
+      }
+
+      const emailAlreadyConfirmed = Boolean(authUserData.user.email_confirmed_at);
+      const isVerified = decision === "APPROVED" && emailAlreadyConfirmed;
+
       const { error: profileUpdateError } = await client
         .from("profiles")
         .update({
@@ -521,16 +545,11 @@ serve(async (req: Request) => {
         return jsonResponse({ error: profileUpdateError.message }, 400);
       }
 
-      const { data: authUserData, error: authUserError } = await client.auth.admin.getUserById(String(review.user_id));
-      if (authUserError || !authUserData?.user) {
-        return jsonResponse({ error: "User not found for review" }, 404);
-      }
-
       const existingMetadata = (authUserData.user.user_metadata || {}) as Record<string, unknown>;
       const authUpdatePayload: Record<string, unknown> = {
         user_metadata: {
           ...existingMetadata,
-          is_verified: isVerified,
+          is_verified: decision === "APPROVED",
           verification_status: profileVerificationStatus,
         },
       };
@@ -557,18 +576,23 @@ serve(async (req: Request) => {
 
       const fallbackEmail = String(review.submitted_by_email || "").trim();
       const targetEmail = String(authUserData.user.email || fallbackEmail).trim().toLowerCase();
-      const emailAlreadyConfirmed = Boolean(authUserData.user.email_confirmed_at);
-      const confirmationLinkResult = decision === "APPROVED" && !emailAlreadyConfirmed
-        ? await generateApprovedEmailLink(client, targetEmail)
-        : { link: null, error: emailAlreadyConfirmed ? "Email is already confirmed" : null };
-      const decisionEmail = await sendDecisionEmail(
-        client,
-        targetEmail,
-        decision as "APPROVED" | "DECLINED",
-        reviewNotes,
-        confirmationLinkResult.link,
-        confirmationLinkResult.error,
-      );
+      let confirmationLinkResult = { link: null as string | null, error: null as string | null };
+      let decisionEmail;
+
+      if (decision === "APPROVED") {
+        decisionEmail = emailAlreadyConfirmed
+          ? { sent: true, queued: false, provider: "email_already_confirmed", error: null }
+          : await sendManualApprovalConfirmationEmail(targetEmail, supabaseUrl, anonKey);
+      } else {
+        decisionEmail = await sendDecisionEmail(
+          client,
+          targetEmail,
+          decision as "APPROVED" | "DECLINED",
+          reviewNotes,
+          confirmationLinkResult.link,
+          confirmationLinkResult.error,
+        );
+      }
       console.log("manual_identity_review_decision_email_result", {
         reviewId,
         decision,

@@ -7,7 +7,7 @@ import { supabase } from '../lib/supabase';
 import CachedImage from '../src/components/CachedImage';
 import CustomAlert, { AlertType } from '../src/components/CustomAlert';
 import Header from '../src/components/header';
-import Modal from '../src/components/modal';
+import Modal, { normalizeVisibleInput } from '../src/components/modal';
 import Navbar from '../src/components/navbar';
 import Skeleton from '../src/components/Skeleton';
 import { useBottomBarClearance } from '../src/hooks/useBottomBarClearance';
@@ -270,7 +270,8 @@ export default function MyVenueScreen() {
 
     const handleDelete = async () => {
         if (!selectedId || !userId || deleting) return;
-        if (!cancellationReason.trim()) {
+        const reason = normalizeVisibleInput(cancellationReason);
+        if (!reason) {
             showAlert('warning', 'Cancellation Reason Required', 'Please provide a cancellation reason before deleting this gig.');
             return;
         }
@@ -278,7 +279,7 @@ export default function MyVenueScreen() {
         try {
             const { data, error } = await supabase.rpc('delete_gig_safely', {
                 p_gig_id: selectedId,
-                p_reason: cancellationReason.trim(),
+                p_reason: reason,
             });
 
             if (error) throw error;
@@ -588,7 +589,7 @@ export default function MyVenueScreen() {
                 inputPlaceholder="Cancellation reason"
                 inputValue={cancellationReason}
                 onInputChange={setCancellationReason}
-                confirmDisabled={!cancellationReason.trim() || deleting}
+                confirmDisabled={!normalizeVisibleInput(cancellationReason) || deleting}
             />
             <CustomAlert
                 visible={alertVisible}

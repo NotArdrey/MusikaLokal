@@ -15,6 +15,7 @@ import {
 } from 'react-native';
 import CustomAlert, { AlertType } from '../../src/components/CustomAlert';
 import Header from '../../src/components/header';
+import InAppMediaViewer from '../../src/components/InAppMediaViewer';
 import { useAuth } from '../../src/context/AuthContext';
 import { useTheme } from '../../src/context/ThemeContext';
 import { supabase } from '../../lib/supabase';
@@ -90,6 +91,22 @@ const readErrorContextMessage = async (context: unknown): Promise<string | null>
   }
 };
 
+const cleanManualReviewEmailError = (rawError: string) => {
+  const value = String(rawError || '').trim();
+  if (!value) return '';
+
+  const normalized = value.toLowerCase();
+  if (
+    normalized.includes('only send testing emails') ||
+    normalized.includes('verify a domain') ||
+    normalized.includes('resend is in testing mode')
+  ) {
+    return 'The Gmail test sender is not configured yet. Set GMAIL_MAILER_URL or GMAIL_SMTP_USER/GMAIL_SMTP_APP_PASSWORD in Supabase secrets.';
+  }
+
+  return value.replace(/;?\s*queued in email_notifications\.?$/i, '').trim();
+};
+
 type Tab = 'dashboard' | 'users' | 'reports' | 'audit' | 'posts' | 'products';
 
 interface ManualIdentityReviewEntry {
@@ -112,6 +129,7 @@ interface ManualIdentityReviewEntry {
     full_name?: string | null;
     email?: string | null;
     verification_status?: string | null;
+    id_document_expiry?: string | null;
   } | null;
 }
 
@@ -454,6 +472,7 @@ export default function AdminIdentityReviewsPage() {
   const [manualReviewNotes, setManualReviewNotes] = useState('');
   const [manualReviewSubmitting, setManualReviewSubmitting] = useState(false);
   const [manualReviewTarget, setManualReviewTarget] = useState<ManualIdentityReviewEntry | null>(null);
+  const [manualReviewMediaPreview, setManualReviewMediaPreview] = useState<{ uri: string; title: string } | null>(null);
   const [alertState, setAlertState] = useState<{
     visible: boolean;
     type: AlertType;
@@ -540,19 +559,14 @@ export default function AdminIdentityReviewsPage() {
     };
   }, [loading, roleResolved, session, isGuest, isAdmin, fetchManualReviews]);
 
-  const openManualReviewAsset = useCallback((url?: string | null) => {
+  const openManualReviewAsset = useCallback((url?: string | null, title = 'Uploaded file') => {
     const normalized = String(url || '').trim();
     if (!normalized) {
       showAlert('warning', 'File unavailable', 'No uploaded file was found for this item.');
       return;
     }
 
-    if (Platform.OS === 'web' && typeof window !== 'undefined') {
-      window.open(normalized, '_blank', 'noopener,noreferrer');
-      return;
-    }
-
-    showAlert('info', 'Web only', 'Open this file from the web admin panel.');
+    setManualReviewMediaPreview({ uri: normalized, title });
   }, [showAlert]);
 
   const openManualReviewDecisionModal = useCallback((targetReview: ManualIdentityReviewEntry, decision: 'APPROVED' | 'DECLINED') => {
@@ -599,11 +613,12 @@ export default function AdminIdentityReviewsPage() {
         provider: reviewedItem.decision_email_provider || null,
         error: emailError || null,
       });
+      const cleanEmailError = cleanManualReviewEmailError(emailError);
       const emailMessage = emailSent
         ? 'The decision was saved and the email notification was sent automatically.'
         : emailQueued
-          ? `The decision was saved, but the email was queued instead of sent. ${emailError || 'Check the Resend secret, sender, or account limit.'}`
-          : `The decision was saved, but the email notification was not sent. ${emailError || 'Check the email provider configuration.'}`;
+          ? `The decision was saved. The email is queued for later delivery. ${cleanEmailError || 'Check the Gmail sender secrets or account limit.'}`
+          : `The decision was saved, but the email notification was not sent. ${cleanEmailError || 'Check the email provider configuration.'}`;
 
       showAlert(
         emailSent ? 'success' : 'warning',
@@ -785,6 +800,7 @@ export default function AdminIdentityReviewsPage() {
                     <Text style={[styles.cardTitle, { color: colors.text }]}>{profileName}</Text>
                     <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>{profileEmail}</Text>
                     <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Document: {review.document_type} ({review.document_country || 'PHL'})</Text>
+                    <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>ID expires: {review.profile?.id_document_expiry || '-'}</Text>
                     <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Source: {String(review.source || 'MANUAL_UPLOAD').replace(/_/g, ' ')}</Text>
                     <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Submitted: {formatDateTime(review.created_at)}</Text>
                     {review.expected_decision_by ? (
@@ -794,7 +810,7 @@ export default function AdminIdentityReviewsPage() {
                     <View style={styles.cardActionsRow}>
                       <TouchableOpacity
                         activeOpacity={1}
-                        onPress={() => openManualReviewAsset(review.front_image_url)}
+                        onPress={() => openManualReviewAsset(review.front_image_url, 'Front of ID')}
                         style={[styles.smallActionButton, { borderColor: colors.border }]}
                       >
                         <Ionicons name="image-outline" size={14} color={colors.text} />
@@ -803,7 +819,7 @@ export default function AdminIdentityReviewsPage() {
 
                       <TouchableOpacity
                         activeOpacity={1}
-                        onPress={() => openManualReviewAsset(review.back_image_url)}
+                        onPress={() => openManualReviewAsset(review.back_image_url, 'Back of ID')}
                         style={[styles.smallActionButton, { borderColor: colors.border }]}
                       >
                         <Ionicons name="images-outline" size={14} color={colors.text} />
@@ -812,7 +828,7 @@ export default function AdminIdentityReviewsPage() {
 
                       <TouchableOpacity
                         activeOpacity={1}
-                        onPress={() => openManualReviewAsset(review.selfie_image_url)}
+                        onPress={() => openManualReviewAsset(review.selfie_image_url, 'Selfie holding ID')}
                         style={[styles.smallActionButton, { borderColor: colors.border }]}
                       >
                         <Ionicons name="person-circle-outline" size={14} color={colors.text} />
@@ -871,6 +887,9 @@ export default function AdminIdentityReviewsPage() {
               User: {manualReviewTarget?.profile?.full_name || manualReviewTarget?.submitted_by_email || '-'}
             </Text>
             <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>
+              ID expires: {manualReviewTarget?.profile?.id_document_expiry || '-'}
+            </Text>
+            <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>
               Document: {manualReviewTarget?.document_type || '-'}
             </Text>
 
@@ -925,6 +944,13 @@ export default function AdminIdentityReviewsPage() {
           </View>
         </View>
       </Modal>
+
+      <InAppMediaViewer
+        visible={Boolean(manualReviewMediaPreview)}
+        uri={manualReviewMediaPreview?.uri || null}
+        title={manualReviewMediaPreview?.title || 'Uploaded file'}
+        onClose={() => setManualReviewMediaPreview(null)}
+      />
 
       <CustomAlert
         visible={alertState.visible}

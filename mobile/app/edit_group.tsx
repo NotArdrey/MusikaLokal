@@ -19,7 +19,7 @@ import PlaylistSelectionSection from "../src/components/PlaylistSelectionSection
 import Header from "../src/components/header";
 import ImageUploader from "../src/components/ImageUploader";
 import LocationPicker from "../src/components/LocationPicker";
-import Modal from "../src/components/modal";
+import Modal, { normalizeVisibleInput } from "../src/components/modal";
 import Navbar, { NAVBAR_CLEARANCE } from "../src/components/navbar";
 import {
     isDuoGroupType,
@@ -1825,11 +1825,11 @@ export default function EditGroupScreen() {
                   />
                   <TouchableOpacity activeOpacity={1}
                     onPress={() => confirmAddMember(newMemberInstrument)}
-                    disabled={!newMemberInstrument.trim()}
+                    disabled={!normalizeVisibleInput(newMemberInstrument)}
                     style={[
                       styles.addMemberButton,
                       {
-                        backgroundColor: !newMemberInstrument.trim()
+                        backgroundColor: !normalizeVisibleInput(newMemberInstrument)
                           ? "#9CA3AF"
                           : colors.primary,
                         width: 48,
@@ -1870,12 +1870,12 @@ export default function EditGroupScreen() {
             {members.map((member, index) => {
               const isLeader = isGroupLeaderMember(member, groupOwnerId);
               const currentInstrument = member.instrument || "";
-              const needsInstrument = !currentInstrument.trim();
+              const needsInstrument = !normalizeVisibleInput(currentInstrument);
               const isInstrumentFinalized = isLeader
                 ? isLeaderInstrumentFinalized
                 : Boolean(memberInstrumentFinalization[index]);
               const needsMemberFinalization =
-                Boolean(currentInstrument.trim()) && !isInstrumentFinalized;
+                Boolean(normalizeVisibleInput(currentInstrument)) && !isInstrumentFinalized;
               return (
                 <View
                   key={index}
@@ -1991,7 +1991,7 @@ export default function EditGroupScreen() {
                             onEndEditing={(event) =>
                               updateMemberInstrument(
                                 index,
-                                event.nativeEvent.text.trim(),
+                                normalizeVisibleInput(event.nativeEvent.text),
                               )
                             }
                             style={[
@@ -2017,14 +2017,14 @@ export default function EditGroupScreen() {
                           <TouchableOpacity
                             activeOpacity={1}
                             onPress={() => finalizeMemberInstrument(index)}
-                            disabled={!currentInstrument.trim()}
+                            disabled={!normalizeVisibleInput(currentInstrument)}
                             style={[
                               styles.addMemberButton,
                               {
                                 width: 40,
                                 height: 40,
                                 borderRadius: 8,
-                                backgroundColor: !currentInstrument.trim()
+                                backgroundColor: !normalizeVisibleInput(currentInstrument)
                                   ? "#9CA3AF"
                                   : colors.primary,
                               },

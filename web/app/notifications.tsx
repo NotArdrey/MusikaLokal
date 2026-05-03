@@ -137,6 +137,20 @@ const collectNotificationImageCandidates = (raw: unknown, candidates: string[] =
     return candidates;
 };
 
+const normalizeNotificationsPayload = (payload: unknown): any[] => {
+    if (Array.isArray(payload)) {
+        return payload;
+    }
+
+    if (payload && typeof payload === 'object') {
+        const source = payload as Record<string, unknown>;
+        if (Array.isArray(source.items)) return source.items;
+        if (Array.isArray(source.data)) return source.data;
+    }
+
+    return [];
+};
+
 export default function NotificationsScreen() {
     const { colors, isDark } = useTheme();
     const { isGuest } = useAuth();
@@ -186,7 +200,7 @@ export default function NotificationsScreen() {
             });
 
             if (error) throw error;
-            setNotifications(data || []);
+            setNotifications(normalizeNotificationsPayload(data));
         } catch (e) {
             console.log('Error fetching notifications:', e);
         } finally {
@@ -265,7 +279,7 @@ export default function NotificationsScreen() {
     const onRefresh = React.useCallback(() => {
         setRefreshing(true);
         fetchNotifications();
-    }, []);
+    }, [fetchNotifications]);
 
     const markAsRead = async (id: string, currentReadStatus: boolean) => {
         if (currentReadStatus) return; // Already read

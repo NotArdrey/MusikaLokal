@@ -146,7 +146,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     setIdentityRequired(false);
 
     try {
-      const { data: profile, error } = await supabase
+      let { data: profile, error } = await supabase
         .from("profiles")
         .select("is_verified, verification_status, id_document_expiry")
         .eq("id", session.user.id)
@@ -168,6 +168,29 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
         setIdentityChecked(true);
         return;
+      }
+
+      if ((!profile || profile.is_verified !== true) && session.user?.user_metadata?.is_verified === true) {
+        const { error: promoteError } = await supabase
+          .from("profiles")
+          .upsert({
+            id: session.user.id,
+            email: session.user.email,
+            full_name: session.user.user_metadata?.full_name || session.user.user_metadata?.name || "",
+            role: session.user.user_metadata?.role || "musician",
+            is_verified: true,
+            verification_status: "APPROVED",
+            didit_session_id: session.user.user_metadata?.didit_session_id || null,
+          });
+
+        if (!promoteError) {
+          const { data: promotedProfile } = await supabase
+            .from("profiles")
+            .select("is_verified, verification_status, id_document_expiry")
+            .eq("id", session.user.id)
+            .maybeSingle();
+          profile = promotedProfile;
+        }
       }
 
       const normalizedStatus =

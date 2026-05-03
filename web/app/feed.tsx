@@ -18,12 +18,43 @@ import { supabase } from "../lib/supabase";
 import CachedImage from "../src/components/CachedImage";
 import CustomAlert, { AlertType } from "../src/components/CustomAlert";
 import Header from "../src/components/header";
+import { normalizeVisibleInput } from "../src/components/modal";
 import Navbar from "../src/components/navbar";
 import { useAuth } from "../src/context/AuthContext";
 import { showTopToast } from "../src/context/TopToastContext";
 import { useTheme } from "../src/context/ThemeContext";
 
 type FeedTab = "for_you" | "following";
+
+type ForYouTabIconProps = {
+  active: boolean;
+  primaryColor: string;
+  mutedColor: string;
+};
+
+function ForYouTabIcon({ active, primaryColor, mutedColor }: ForYouTabIconProps) {
+  const iconColor = active ? "#FFFFFF" : mutedColor;
+
+  return (
+    <View
+      style={[
+        styles.forYouTabIcon,
+        {
+          borderColor: active ? "#FFFFFF" : mutedColor,
+          backgroundColor: active ? "rgba(255,255,255,0.18)" : "transparent",
+        },
+      ]}
+    >
+      <View style={[styles.forYouTabIconCenter, { backgroundColor: active ? "#FFFFFF" : primaryColor }]} />
+      <Ionicons
+        name={active ? "sparkles" : "sparkles-outline"}
+        size={12}
+        color={iconColor}
+        style={styles.forYouTabIconSparkle}
+      />
+    </View>
+  );
+}
 
 const FEED_PAGE_SIZE = 20;
 const KNOWN_FEED_MEDIA_BUCKETS = ["post-media", "posts", "images", "listings", "documents", "avatars"];
@@ -128,7 +159,7 @@ export default function FeedScreen() {
   const cardBg = isWebDesktop ? (isDark ? "#1E293B" : "#FFFFFF") : colors.surface;
   const borderCol = isWebDesktop ? (isDark ? "#334155" : "#E2E8F0") : colors.border;
 
-  const canCreatePost = !!session && !isGuest && postBody.trim().length > 0;
+  const canCreatePost = !!session && !isGuest && normalizeVisibleInput(postBody).length > 0;
 
   const fetchFeed = useCallback(
     async (feedTab: FeedTab, append = false) => {
@@ -196,7 +227,8 @@ export default function FeedScreen() {
   };
 
   const handleCreatePost = async () => {
-    if (!postBody.trim()) {
+    const content = normalizeVisibleInput(postBody);
+    if (!content) {
       setAlert({ type: "warning", title: "Empty Post", message: "Please write something." });
       return;
     }
@@ -205,7 +237,7 @@ export default function FeedScreen() {
 
     try {
       const { data, error } = await supabase.functions.invoke("manage-social-feed", {
-        body: { action: "create_post", content: postBody.trim(), visibility: postVisibility },
+        body: { action: "create_post", content, visibility: postVisibility },
       });
 
       if (error) throw error;
@@ -323,8 +355,8 @@ export default function FeedScreen() {
           <View style={[styles.headerBlock, { width: contentWidth }]}>
             <View style={styles.tabRow}>
               {[
-                { key: "for_you", label: "For You" },
-                { key: "following", label: "Following" },
+                { key: "for_you", label: "For You", icon: "for_you" },
+                { key: "following", label: "Following", icon: "people-outline" },
               ].map((item) => {
                 const active = tab === item.key;
                 return (
@@ -340,6 +372,19 @@ export default function FeedScreen() {
                     ]}
                     onPress={() => setTab(item.key as FeedTab)}
                   >
+                    {item.icon === "for_you" ? (
+                      <ForYouTabIcon
+                        active={active}
+                        primaryColor={colors.primary}
+                        mutedColor={colors.textSecondary}
+                      />
+                    ) : (
+                      <Ionicons
+                        name="people-outline"
+                        size={18}
+                        color={active ? "#FFFFFF" : colors.textSecondary}
+                      />
+                    )}
                     <Text style={[styles.tabText, { color: active ? "#FFFFFF" : colors.text }]}>{item.label}</Text>
                   </TouchableOpacity>
                 );
@@ -416,8 +461,27 @@ const styles = StyleSheet.create({
   listContentWeb: { paddingTop: 22 },
   headerBlock: { gap: 12, marginBottom: 12 },
   tabRow: { flexDirection: "row", gap: 10 },
-  tabButton: { flex: 1, borderWidth: 1, borderRadius: 12, paddingVertical: 10, alignItems: "center" },
+  tabButton: { flex: 1, borderWidth: 1, borderRadius: 12, paddingVertical: 10, alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 8 },
   tabText: { fontSize: 14, fontFamily: "Poppins_600SemiBold" },
+  forYouTabIcon: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    borderWidth: 1.5,
+    alignItems: "center",
+    justifyContent: "center",
+    position: "relative",
+  },
+  forYouTabIconCenter: {
+    width: 5,
+    height: 5,
+    borderRadius: 2.5,
+  },
+  forYouTabIconSparkle: {
+    position: "absolute",
+    top: -4,
+    right: -5,
+  },
   composer: { borderWidth: 1, borderRadius: 14, padding: 12 },
   composerInput: { minHeight: 82, fontSize: 14, lineHeight: 20, textAlignVertical: "top" },
   composerFooter: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: 10, marginTop: 10 },

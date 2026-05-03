@@ -30,6 +30,12 @@ type CustomModalProps = {
   loadingMessage?: string;
 };
 
+export const normalizeVisibleInput = (value: unknown) =>
+  String(value ?? '')
+    .normalize('NFKC')
+    .replace(/[\u200B-\u200D\uFEFF]/g, '')
+    .trim();
+
 const CustomModal: React.FC<CustomModalProps> = ({
   visible,
   onClose,
@@ -82,13 +88,16 @@ const CustomModal: React.FC<CustomModalProps> = ({
     return () => clearTimeout(timeout);
   }, [visible]);
 
+  const hasEmptyRequiredInput = showInput && !normalizeVisibleInput(inputValue);
+
   const hasUnmetConfirmRequirement =
+    hasEmptyRequiredInput ||
     confirmDisabled ||
     (requireTermsAcceptance && !isTermsAccepted) ||
     (hasCustomContract && !isContractAccepted);
 
   const getValidationFeedback = () => {
-    if (showInput && !String(inputValue ?? '').trim()) {
+    if (hasEmptyRequiredInput) {
       return inputPlaceholder
         ? `Please fill in "${inputPlaceholder.replace(/\.+$/, '')}" before continuing.`
         : 'Please fill in the required field before continuing.';

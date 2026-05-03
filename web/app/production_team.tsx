@@ -16,7 +16,7 @@ import { supabase } from "../lib/supabase";
 import CachedImage from "../src/components/CachedImage";
 import CustomAlert, { AlertType } from "../src/components/CustomAlert";
 import Header from "../src/components/header";
-import Modal from "../src/components/modal";
+import Modal, { normalizeVisibleInput } from "../src/components/modal";
 import Navbar from "../src/components/navbar";
 import Skeleton from "../src/components/Skeleton";
 import { useBottomBarClearance } from "../src/hooks/useBottomBarClearance";
@@ -285,12 +285,14 @@ export default function ProductionTeamScreen() {
       return;
     }
 
-    if (!newTeamName.trim()) {
+    const teamName = normalizeVisibleInput(newTeamName);
+    const teamDescription = normalizeVisibleInput(newTeamDescription);
+    if (!teamName) {
       showAlert("warning", "Required", "Team name is required");
       return;
     }
 
-    if (!newTeamDescription.trim()) {
+    if (!teamDescription) {
       showAlert("warning", "Required", "Description is required");
       return;
     }
@@ -299,8 +301,8 @@ export default function ProductionTeamScreen() {
     try {
       await invokeProduction({
         action: "create_production_team",
-        name: newTeamName.trim(),
-        description: newTeamDescription.trim(),
+        name: teamName,
+        description: teamDescription,
       });
 
       setCreateModalVisible(false);
@@ -314,7 +316,9 @@ export default function ProductionTeamScreen() {
       setCreating(false);
     }
   };
-  const isCreateTeamReady = newTeamName.trim().length > 0 && newTeamDescription.trim().length > 0;
+  const isCreateTeamReady =
+    normalizeVisibleInput(newTeamName).length > 0 &&
+    normalizeVisibleInput(newTeamDescription).length > 0;
 
   const openFireMemberModal = (member: TeamMember) => {
     setMemberToFire(member);
@@ -331,7 +335,7 @@ export default function ProductionTeamScreen() {
 
   const handleRemoveMember = async () => {
     if (!selectedTeam || !memberToFire || firingMember) return;
-    const reason = fireReason.trim();
+    const reason = normalizeVisibleInput(fireReason);
     if (!reason) {
       showAlert("warning", "Reason Required", "Please provide a reason before firing this member.");
       return;
@@ -570,7 +574,7 @@ export default function ProductionTeamScreen() {
           inputPlaceholder="Reason for firing"
           inputValue={fireReason}
           onInputChange={setFireReason}
-          confirmDisabled={!fireReason.trim() || firingMember}
+          confirmDisabled={!normalizeVisibleInput(fireReason) || firingMember}
           loading={firingMember}
           loadingMessage="Removing member and sending notification..."
         />
