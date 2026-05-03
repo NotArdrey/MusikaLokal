@@ -928,6 +928,9 @@ export default function AddGroupScreen() {
                     />
                   </View>
                   <Text
+                    numberOfLines={1}
+                    adjustsFontSizeToFit
+                    minimumFontScale={0.82}
                     style={[
                       styles.stepText,
                       {
@@ -1974,7 +1977,7 @@ const styles = StyleSheet.create({
     paddingTop: IS_WEB ? 16 : 0,
   },
   stepIndicatorContainer: {
-    paddingHorizontal: IS_WEB ? 22 : 24,
+    paddingHorizontal: IS_WEB ? 22 : 16,
     paddingTop: IS_WEB ? 18 : 24,
     paddingBottom: IS_WEB ? 14 : 8,
     borderRadius: IS_WEB ? 20 : 0,
@@ -2011,7 +2014,8 @@ const styles = StyleSheet.create({
   stepItem: {
     alignItems: "center",
     zIndex: 10,
-    width: IS_WEB ? 96 : 80,
+    flex: 1,
+    minWidth: 0,
   },
   stepCircle: {
     width: IS_WEB ? 44 : 40,
@@ -2022,9 +2026,12 @@ const styles = StyleSheet.create({
     borderWidth: 4,
   },
   stepText: {
-    fontSize: IS_WEB ? 13 : 12,
+    fontSize: IS_WEB ? 13 : 11,
     marginTop: 8,
     textAlign: "center",
+    lineHeight: IS_WEB ? 18 : 15,
+    includeFontPadding: false,
+    width: "100%",
   },
   formContainer: {
     flex: 1,

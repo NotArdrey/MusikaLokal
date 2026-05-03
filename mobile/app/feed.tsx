@@ -2321,16 +2321,6 @@ export default function FeedScreen() {
           ))}
         </View>
 
-        {tab === "for_you" && posts.length === 0 && (isAiCardsLoading || (aiCards.length > 0 && aiFeedMessage)) ? (
-          <View style={[styles.aiStatusBanner, { backgroundColor: cardBg, borderColor: isDark ? "#334155" : "#E2E8F0" }]}>
-            <View style={[styles.aiStatusDot, { backgroundColor: isAiCardsLoading ? "#F59E0B" : "#10B981" }]} />
-            <Text style={[styles.aiStatusText, { color: colors.textSecondary }]} numberOfLines={2}>
-              {isAiCardsLoading
-                ? `Building ${groqModelLabel} Feed cards...`
-                : aiFeedMessage || `Feed cards powered by ${aiFeedProvider || groqModelLabel}.`}
-            </Text>
-          </View>
-        ) : null}
       </>
     );
   };
@@ -2675,28 +2665,6 @@ const styles = StyleSheet.create({
   tabRow: { flexDirection: "row", borderBottomWidth: 1, marginTop: 6 },
   tab: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", paddingVertical: 12 },
   tabText: { fontSize: moderateScale(13), fontWeight: "600" },
-
-  aiStatusBanner: {
-    marginHorizontal: 12,
-    marginTop: 8,
-    borderRadius: 12,
-    borderWidth: 1,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-  },
-  aiStatusDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-  },
-  aiStatusText: {
-    flex: 1,
-    fontSize: moderateScale(11),
-    fontWeight: "500",
-  },
 
   aiCardContainer: {
     marginHorizontal: 16,

@@ -2900,6 +2900,8 @@ export default function EditStudioScreen() {
               studio_id: studioId,
               instrument_name: item.name,
               image_url: item.image || null,
+              quantity: item.quantity || null,
+              description: item.description || null,
             })),
           );
         if (instrumentsError) {
@@ -5018,6 +5020,10 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                               : colors.text,
                           fontFamily: "Poppins_500Medium",
                           fontSize: 14,
+                          lineHeight: 32,
+                          textAlign: "center",
+                          textAlignVertical: "center",
+                          includeFontPadding: false,
                         }}
                       >
                         {date.day}
@@ -5094,12 +5100,18 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                       marginBottom: 8,
                     }}
                   >
-                    SELECTED DATES (OVERRIDES WEEKLY SCHEDULE)
+                    SELECTED DATE OVERRIDES
                   </Text>
-                  {Object.entries(selectedDates)
-                    .filter(([_, data]) => data.selected)
-                    .sort(([a], [b]) => a.localeCompare(b))
-                    .map(([dateStr, data]) => {
+                  <ScrollView
+                    style={styles.selectedDateOverridesList}
+                    contentContainerStyle={styles.selectedDateOverridesContent}
+                    nestedScrollEnabled
+                    showsVerticalScrollIndicator
+                  >
+                    {Object.entries(selectedDates)
+                      .filter(([_, data]) => data.selected)
+                      .sort(([a], [b]) => a.localeCompare(b))
+                      .map(([dateStr, data]) => {
                       const date = new Date(dateStr + "T00:00:00");
                       const dayName = date.toLocaleDateString("en-US", {
                         weekday: "long",
@@ -5202,12 +5214,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                               >
                                 SESSION TYPE FOR THIS DATE
                               </Text>
-                              <View
-                                style={{
-                                  flexDirection: "row",
-                                  gap: 8,
-                                }}
-                              >
+                              <View style={styles.sessionTypeOptions}>
                                 {([
                                   { value: "both", label: "Both" },
                                   { value: "rehearsal", label: "Rehearsal" },
@@ -5234,18 +5241,17 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                                           },
                                         }));
                                       }}
-                                      style={{
-                                        paddingHorizontal: 10,
-                                        paddingVertical: 6,
-                                        borderRadius: 999,
-                                        borderWidth: 1,
-                                        borderColor: isSelected
-                                          ? colors.primary
-                                          : colors.border,
-                                        backgroundColor: isSelected
-                                          ? `${colors.primary}20`
-                                          : "transparent",
-                                      }}
+                                      style={[
+                                        styles.sessionTypeChip,
+                                        {
+                                          borderColor: isSelected
+                                            ? colors.primary
+                                            : colors.border,
+                                          backgroundColor: isSelected
+                                            ? `${colors.primary}20`
+                                            : "transparent",
+                                        },
+                                      ]}
                                     >
                                       <Text
                                         style={{
@@ -5253,6 +5259,8 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                                             ? colors.primary
                                             : colors.textSecondary,
                                           fontSize: 11,
+                                          lineHeight: 16,
+                                          includeFontPadding: false,
                                           fontFamily: "Poppins_500Medium",
                                         }}
                                       >
@@ -5269,14 +5277,9 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                           {data.slots.map((slot, slotIndex) => (
                             <View
                               key={slotIndex}
-                              style={{
-                                flexDirection: "row",
-                                alignItems: "center",
-                                gap: 8,
-                                marginTop: 12,
-                              }}
+                              style={styles.timeSlotRow}
                             >
-                              <View style={{ flex: 1 }}>
+                              <View style={styles.timeSlotGroup}>
                                 <Text
                                   style={{
                                     color: colors.textSecondary,
@@ -5287,13 +5290,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                                 >
                                   START
                                 </Text>
-                                <View
-                                  style={{
-                                    flexDirection: "row",
-                                    alignItems: "center",
-                                    gap: 4,
-                                  }}
-                                >
+                                <View style={styles.timeInputRow}>
                                   <TextInput
                                     value={slot.start.split(" ")[0]}
                                     onChangeText={(text) => {
@@ -5336,13 +5333,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                                       },
                                     ]}
                                   >
-                                    <Text
-                                      style={{
-                                        fontSize: 12,
-                                        fontFamily: "Poppins_600SemiBold",
-                                        color: colors.text,
-                                      }}
-                                    >
+                                    <Text style={[styles.ampmBtnText, { color: colors.text }]}>
                                       {slot.start.split(" ")[1] || "AM"}
                                     </Text>
                                   </TouchableOpacity>
@@ -5352,9 +5343,9 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                                 name="arrow-forward"
                                 size={20}
                                 color={colors.textSecondary}
-                                style={{ marginTop: 20 }}
+                                style={styles.timeSlotArrow}
                               />
-                              <View style={{ flex: 1 }}>
+                              <View style={styles.timeSlotGroup}>
                                 <Text
                                   style={{
                                     color: colors.textSecondary,
@@ -5365,13 +5356,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                                 >
                                   END
                                 </Text>
-                                <View
-                                  style={{
-                                    flexDirection: "row",
-                                    alignItems: "center",
-                                    gap: 4,
-                                  }}
-                                >
+                                <View style={styles.timeInputRow}>
                                   <TextInput
                                     value={slot.end.split(" ")[0]}
                                     onChangeText={(text) => {
@@ -5414,13 +5399,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                                       },
                                     ]}
                                   >
-                                    <Text
-                                      style={{
-                                        fontSize: 12,
-                                        fontFamily: "Poppins_600SemiBold",
-                                        color: colors.text,
-                                      }}
-                                    >
+                                    <Text style={[styles.ampmBtnText, { color: colors.text }]}>
                                       {slot.end.split(" ")[1] || "PM"}
                                     </Text>
                                   </TouchableOpacity>
@@ -5433,7 +5412,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                                     newDates[dateStr].slots.splice(slotIndex, 1);
                                     setSelectedDates(newDates);
                                   }}
-                                  style={{ marginTop: 20 }}
+                                  style={styles.timeSlotDeleteButton}
                                 >
                                   <Ionicons
                                     name="trash-outline"
@@ -5496,7 +5475,8 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                           )}
                         </View>
                       );
-                    })}
+                      })}
+                  </ScrollView>
                 </View>
               )}
           </View>
@@ -5606,12 +5586,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                   >
                     SESSION TYPE FOR THIS DAY
                   </Text>
-                  <View
-                    style={{
-                      flexDirection: "row",
-                      gap: 8,
-                    }}
-                  >
+                  <View style={styles.sessionTypeOptions}>
                     {([
                       { value: "both", label: "Both" },
                       { value: "rehearsal", label: "Rehearsal" },
@@ -5635,18 +5610,17 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                               ),
                             );
                           }}
-                          style={{
-                            paddingHorizontal: 10,
-                            paddingVertical: 6,
-                            borderRadius: 999,
-                            borderWidth: 1,
-                            borderColor: isSelected
-                              ? colors.primary
-                              : colors.border,
-                            backgroundColor: isSelected
-                              ? `${colors.primary}20`
-                              : "transparent",
-                          }}
+                          style={[
+                            styles.sessionTypeChip,
+                            {
+                              borderColor: isSelected
+                                ? colors.primary
+                                : colors.border,
+                              backgroundColor: isSelected
+                                ? `${colors.primary}20`
+                                : "transparent",
+                            },
+                          ]}
                         >
                           <Text
                             style={{
@@ -5654,6 +5628,8 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                                 ? colors.primary
                                 : colors.textSecondary,
                               fontSize: 11,
+                              lineHeight: 16,
+                              includeFontPadding: false,
                               fontFamily: "Poppins_500Medium",
                             }}
                           >
@@ -5675,14 +5651,9 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                 return (
                   <View
                     key={slotIndex}
-                    style={{
-                      flexDirection: "row",
-                      alignItems: "center",
-                      gap: 8,
-                      marginTop: 8,
-                    }}
+                    style={styles.weeklyTimeSlotRow}
                   >
-                    <View style={{ flex: 1 }}>
+                    <View style={styles.timeSlotGroup}>
                       <Text
                         style={{
                           color: colors.textSecondary,
@@ -5693,13 +5664,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                       >
                         START
                       </Text>
-                      <View
-                        style={{
-                          flexDirection: "row",
-                          alignItems: "center",
-                          gap: 4,
-                        }}
-                      >
+                      <View style={styles.timeInputRow}>
                         <TextInput
                           value={slot.start.split(" ")[0]}
                           onChangeText={(text) => {
@@ -5735,13 +5700,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                             { backgroundColor: isDark ? "#374151" : "#E5E7EB" },
                           ]}
                         >
-                          <Text
-                            style={{
-                              fontSize: 12,
-                              fontFamily: "Poppins_600SemiBold",
-                              color: colors.text,
-                            }}
-                          >
+                          <Text style={[styles.ampmBtnText, { color: colors.text }]}>
                             {slot.start.split(" ")[1]}
                           </Text>
                         </TouchableOpacity>
@@ -5751,9 +5710,9 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                       name="arrow-forward"
                       size={20}
                       color={colors.textSecondary}
-                      style={{ marginTop: 20 }}
+                      style={styles.timeSlotArrow}
                     />
-                    <View style={{ flex: 1 }}>
+                    <View style={styles.timeSlotGroup}>
                       <Text
                         style={{
                           color: colors.textSecondary,
@@ -5764,13 +5723,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                       >
                         END
                       </Text>
-                      <View
-                        style={{
-                          flexDirection: "row",
-                          alignItems: "center",
-                          gap: 4,
-                        }}
-                      >
+                      <View style={styles.timeInputRow}>
                         <TextInput
                           value={slot.end.split(" ")[0]}
                           onChangeText={(text) => {
@@ -5806,13 +5759,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                             { backgroundColor: isDark ? "#374151" : "#E5E7EB" },
                           ]}
                         >
-                          <Text
-                            style={{
-                              fontSize: 12,
-                              fontFamily: "Poppins_600SemiBold",
-                              color: colors.text,
-                            }}
-                          >
+                          <Text style={[styles.ampmBtnText, { color: colors.text }]}>
                             {slot.end.split(" ")[1]}
                           </Text>
                         </TouchableOpacity>
@@ -5825,7 +5772,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                           newAvailability[dayIndex].slots.splice(slotIndex, 1);
                           setAvailability(newAvailability);
                         }}
-                        style={{ marginTop: 20 }}
+                        style={styles.timeSlotDeleteButton}
                       >
                         <Ionicons
                           name="trash-outline"
@@ -6450,19 +6397,33 @@ const styles = StyleSheet.create({
     borderRadius: 8,
   },
   timeInput: {
-    paddingVertical: 8,
+    height: 44,
+    minWidth: 74,
+    paddingVertical: 0,
     paddingHorizontal: 12,
     borderRadius: 8,
     borderWidth: 1,
     fontFamily: "Poppins_500Medium",
     fontSize: 14,
+    textAlign: "center",
+    textAlignVertical: "center",
+    includeFontPadding: false,
   },
   ampmBtn: {
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    width: 52,
+    height: 44,
+    paddingHorizontal: 0,
+    paddingVertical: 0,
     borderRadius: 8,
-    minWidth: 50,
     alignItems: "center",
+    justifyContent: "center",
+  },
+  ampmBtnText: {
+    fontSize: 12,
+    lineHeight: 16,
+    fontFamily: "Poppins_600SemiBold",
+    textAlign: "center",
+    includeFontPadding: false,
   },
   subtitle: {
     fontSize: 13,
@@ -6556,6 +6517,55 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     borderWidth: 1,
     marginBottom: 8,
+  },
+  selectedDateOverridesList: {
+    maxHeight: 420,
+  },
+  selectedDateOverridesContent: {
+    paddingBottom: 4,
+  },
+  sessionTypeOptions: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+  },
+  sessionTypeChip: {
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    borderRadius: 999,
+    borderWidth: 1,
+    minHeight: 32,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  timeSlotRow: {
+    flexDirection: "row",
+    alignItems: "flex-end",
+    flexWrap: "wrap",
+    gap: 8,
+    marginTop: 12,
+  },
+  weeklyTimeSlotRow: {
+    flexDirection: "row",
+    alignItems: "flex-end",
+    flexWrap: "wrap",
+    gap: 8,
+    marginTop: 8,
+  },
+  timeSlotGroup: {
+    flex: 1,
+    minWidth: 130,
+  },
+  timeInputRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+  },
+  timeSlotArrow: {
+    marginBottom: 12,
+  },
+  timeSlotDeleteButton: {
+    marginBottom: 12,
   },
   sectionSubtitle: {
     fontSize: 14,

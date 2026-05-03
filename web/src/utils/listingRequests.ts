@@ -185,6 +185,14 @@ const buildFunctionsError = (
   return normalizedError;
 };
 
+const isProductionTeamInvitePayload = (payload: ListingRequestPayload) => {
+  const extraMeta = normalizeExtraMeta(payload.extraMeta);
+  return (
+    payload.senderEntityType === "production_team" &&
+    String(extraMeta.request_kind || "").trim().toLowerCase() === "invite"
+  );
+};
+
 export const uploadListingRequestDocument = async (
   userId: string,
   file: any,
@@ -314,6 +322,20 @@ export const submitListingRequest = async ({
 
   if (error) {
     const contextBody = await readFunctionsErrorBody(error as FunctionsInvokeError);
+    if (isProductionTeamInvitePayload(body)) {
+      console.error("create_listing_request failed for production invite", {
+        message: getFunctionsErrorMessage(error as FunctionsInvokeError, contextBody),
+        status: (error as any).status || (error as any).context?.status,
+        code: (error as any).code || contextBody?.code,
+        details: (error as any).details || contextBody?.details,
+        hint: (error as any).hint || contextBody?.hint,
+        context: (error as any).context,
+        contextBody,
+        body,
+      });
+      throw buildFunctionsError(error as FunctionsInvokeError, contextBody);
+    }
+
     try {
       const fallbackRequest = await createListingRequestFallback(body);
       console.warn("create_listing_request edge function failed; used direct booking_requests fallback", {

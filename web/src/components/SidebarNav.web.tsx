@@ -477,10 +477,7 @@ export default function SidebarNav() {
         }
 
         if (isGuest) {
-            return [
-                { id: 'home', icon: 'home', label: 'Home', route: '/home' },
-                { id: 'profile', icon: 'person', label: 'Profile', route: '/profile' },
-            ];
+            return [];
         }
 
         return [
@@ -614,6 +611,41 @@ export default function SidebarNav() {
             ],
         );
     };
+
+    if (isGuest) {
+        return (
+            <>
+                <View style={[styles.sidebarContainer, { backgroundColor: isDark ? '#1F2937' : '#FFFFFF', borderRightColor: colors.border }]}>
+                    <View style={styles.logoSection}>
+                        <Image
+                            source={require('../../assets/images/Musika-lokal-logo.png')}
+                            style={[styles.logoImage, { tintColor: colors.primary }]}
+                            resizeMode="contain"
+                        />
+                        <Text style={[styles.brandName, { color: colors.text }]}>MusikaLokal</Text>
+                    </View>
+
+                    <View style={styles.navContainer} />
+
+                    <View style={[styles.footer, { borderTopColor: colors.border }]}>
+                        <TouchableOpacity activeOpacity={1} style={styles.logoutButton} onPress={handleLogout}>
+                            <Ionicons name="log-in-outline" size={22} color={colors.textSecondary} style={{ width: 30 }} />
+                            <Text style={[styles.navLabel, { color: colors.textSecondary }]}>Sign In</Text>
+                        </TouchableOpacity>
+                    </View>
+                </View>
+
+                <CustomAlert
+                    visible={alertVisible}
+                    type={alertConfig.type}
+                    title={alertConfig.title}
+                    message={alertConfig.message}
+                    buttons={alertConfig.buttons}
+                    onClose={() => setAlertVisible(false)}
+                />
+            </>
+        );
+    }
 
     if (!isAdminContext) {
         return (

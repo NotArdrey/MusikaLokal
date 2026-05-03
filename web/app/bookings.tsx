@@ -24,6 +24,7 @@ import CachedImage from "../src/components/CachedImage";
 import CustomAlert, { AlertType } from "../src/components/CustomAlert";
 import GuestSignInGate from "../src/components/GuestSignInGate";
 import Header from "../src/components/header";
+import InAppMediaViewer, { isInAppMediaUrl } from "../src/components/InAppMediaViewer";
 import BookingActionModal from "../src/components/modal";
 import Navbar from "../src/components/navbar";
 import { useAuth } from "../src/context/AuthContext";
@@ -552,6 +553,8 @@ export default function BookingsScreen() {
     title: "",
     message: "",
   });
+  const [mediaViewerUrl, setMediaViewerUrl] = useState<string | null>(null);
+  const [mediaViewerTitle, setMediaViewerTitle] = useState("Media");
 
   const showAlert = (
     type: AlertType,
@@ -2650,6 +2653,12 @@ export default function BookingsScreen() {
       const normalizedUrl = String(url || "").trim();
       if (!normalizedUrl) return;
 
+      if (isInAppMediaUrl(normalizedUrl)) {
+        setMediaViewerTitle(label);
+        setMediaViewerUrl(normalizedUrl);
+        return;
+      }
+
       void Linking.openURL(normalizedUrl).catch(() => {
         showAlert(
           "error",
@@ -4636,7 +4645,7 @@ export default function BookingsScreen() {
                             {/* Video Link */}
                             {item.video_url && (
                               <TouchableOpacity activeOpacity={1}
-                                onPress={() => Linking.openURL(item.video_url)}
+                                onPress={() => openConnectionRequestLink(item.video_url, "Audition Video")}
                                 style={{
                                   flexDirection: "row",
                                   alignItems: "center",
@@ -4669,7 +4678,7 @@ export default function BookingsScreen() {
                             {/* CV Link */}
                             {item.cv_url && (
                               <TouchableOpacity activeOpacity={1}
-                                onPress={() => Linking.openURL(item.cv_url)}
+                                onPress={() => openConnectionRequestLink(item.cv_url, "CV / Resume")}
                                 style={{
                                   flexDirection: "row",
                                   alignItems: "center",
@@ -5406,7 +5415,7 @@ export default function BookingsScreen() {
                               {item.video_url && (
                                 <TouchableOpacity activeOpacity={1}
                                   onPress={() =>
-                                    Linking.openURL(item.video_url)
+                                    openConnectionRequestLink(item.video_url, "Audition Video")
                                   }
                                   style={{
                                     flexDirection: "row",
@@ -6757,6 +6766,13 @@ export default function BookingsScreen() {
         message={alertConfig.message}
         buttons={alertConfig.buttons}
         onClose={() => setAlertVisible(false)}
+      />
+
+      <InAppMediaViewer
+        visible={!!mediaViewerUrl}
+        uri={mediaViewerUrl}
+        title={mediaViewerTitle}
+        onClose={() => setMediaViewerUrl(null)}
       />
 
       <BookingDetailsSheet

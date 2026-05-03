@@ -23,6 +23,7 @@ import { supabase, supabaseAnonKey, supabaseUrl } from "../lib/supabase";
 import CustomAlert, { AlertType } from "../src/components/CustomAlert";
 import ReportModal from "../src/components/ReportModal";
 import { isTrackPlayerAvailable } from "../src/audio/safeTrackPlayer";
+import GuestSignInGate from "../src/components/GuestSignInGate";
 import Header from "../src/components/header";
 import Navbar from "../src/components/navbar";
 import Skeleton from "../src/components/Skeleton";
@@ -124,6 +125,69 @@ const normalizeBookmarkBuckets = (value: any) => ({
   musicians: Array.isArray(value?.musicians) ? value.musicians : [],
 });
 
+type ProfileConnectionItem = {
+  id: string;
+  full_name: string;
+  avatar_url: string | null;
+  role: string | null;
+  target_type: "profile" | "group";
+};
+
+const normalizeFollowerProfile = (row: any): ProfileConnectionItem | null => {
+  const follower = row?.follower || row;
+  const id = typeof follower?.id === "string" ? follower.id.trim() : "";
+
+  if (!id) {
+    return null;
+  }
+
+  return {
+    id,
+    full_name:
+      typeof follower?.full_name === "string" && follower.full_name.trim().length > 0
+        ? follower.full_name.trim()
+        : "MusikaLokal User",
+    avatar_url: sanitizeAvatarUrl(follower?.avatar_url),
+    role: typeof follower?.role === "string" ? follower.role : null,
+    target_type: "profile",
+  };
+};
+
+const normalizeFollowingProfile = (row: any): ProfileConnectionItem | null => {
+  const followedType = row?.followed_type === "group" ? "group" : "profile";
+  const followed = followedType === "group" ? row?.followed_group : row?.followed;
+  const id = typeof followed?.id === "string" ? followed.id.trim() : "";
+
+  if (!id) {
+    return null;
+  }
+
+  const groupImages = Array.isArray(followed?.images) ? followed.images : [];
+  const groupImage = groupImages.find((item: any) => typeof item === "string" && item.trim().length > 0);
+
+  return {
+    id,
+    full_name:
+      followedType === "group"
+        ? typeof followed?.name === "string" && followed.name.trim().length > 0
+          ? followed.name.trim()
+          : "MusikaLokal Group"
+        : typeof followed?.full_name === "string" && followed.full_name.trim().length > 0
+          ? followed.full_name.trim()
+          : "MusikaLokal User",
+    avatar_url: sanitizeAvatarUrl(followed?.avatar_url || groupImage),
+    role:
+      followedType === "group"
+        ? typeof followed?.group_type === "string" && followed.group_type.trim().length > 0
+          ? followed.group_type
+          : "group"
+        : typeof followed?.role === "string"
+          ? followed.role
+          : null,
+    target_type: followedType,
+  };
+};
+
 type ProfileScreenCachePayload = {
   profile: any;
   isOwner: boolean;
@@ -131,6 +195,9 @@ type ProfileScreenCachePayload = {
   gigTimeline: { active: any[]; upcoming: any[]; done: any[] };
   supportsGigVisibilityPreference: boolean;
   profileFollowerCount: number;
+  profileFollowingCount: number;
+  profileFollowers: ProfileConnectionItem[];
+  profileFollowing: ProfileConnectionItem[];
   fetchedAt: number;
 };
 
@@ -580,7 +647,7 @@ export default function ProfileScreen() {
   const [profile, setProfile] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [isOwner, setIsOwner] = useState(false);
-  const [gigStats, setGigStats] = useState({ active: 0, upcoming: 0, done: 0 });
+  const [, setGigStats] = useState({ active: 0, upcoming: 0, done: 0 });
   const [gigTimeline, setGigTimeline] = useState<{
     active: any[];
     upcoming: any[];
@@ -604,6 +671,11 @@ export default function ProfileScreen() {
   const [isProfileFollowing, setIsProfileFollowing] = useState(false);
   const [isProfileFollowBusy, setIsProfileFollowBusy] = useState(false);
   const [profileFollowerCount, setProfileFollowerCount] = useState(0);
+  const [profileFollowingCount, setProfileFollowingCount] = useState(0);
+  const [profileFollowers, setProfileFollowers] = useState<ProfileConnectionItem[]>([]);
+  const [profileFollowing, setProfileFollowing] = useState<ProfileConnectionItem[]>([]);
+  const [loadingProfileFollowers, setLoadingProfileFollowers] = useState(false);
+  const [followListModal, setFollowListModal] = useState<"followers" | "following" | null>(null);
   const profileFetchInFlightRef = useRef(false);
   const canManageStations = !isGuest && userRole === "admin";
 
@@ -965,6 +1037,10 @@ export default function ProfileScreen() {
           setBookmarkedListings(createEmptyBookmarks());
           setLoadingBookmarks(false);
           setProfileFollowerCount(0);
+          setProfileFollowingCount(0);
+          setProfileFollowers([]);
+          setProfileFollowing([]);
+          setLoadingProfileFollowers(false);
           setProfile({
             full_name: "Guest User",
             role: null,
@@ -1151,7 +1227,14 @@ export default function ProfileScreen() {
       let nextProfileFollowerCount = Number.isFinite(fallbackFollowerCount)
         ? Math.max(0, Math.floor(fallbackFollowerCount))
         : 0;
+      let nextProfileFollowingCount = 0;
+      let nextProfileFollowers: ProfileConnectionItem[] = [];
+      let nextProfileFollowing: ProfileConnectionItem[] = [];
       setProfileFollowerCount(nextProfileFollowerCount);
+      setProfileFollowingCount(nextProfileFollowingCount);
+      setProfileFollowers(nextProfileFollowers);
+      setProfileFollowing(nextProfileFollowing);
+      setLoadingProfileFollowers(!isGuest);
 
       try {
         const { count: followerCount, error: followerCountError } = await supabase
@@ -1168,6 +1251,87 @@ export default function ProfileScreen() {
         // Keep the fallback count if follows query is unavailable.
       }
 
+      try {
+        const { count: followingCount, error: followingCountError } = await supabase
+          .from("follows")
+          .select("id", { count: "exact", head: true })
+          .eq("follower_id", targetId);
+
+        if (!followingCountError && typeof followingCount === "number") {
+          nextProfileFollowingCount = Math.max(0, followingCount);
+          setProfileFollowingCount(nextProfileFollowingCount);
+        }
+      } catch {
+        // Keep the fallback following count when follows query is unavailable.
+      }
+
+      if (!isGuest) {
+        try {
+          const { data: followingResponse, error: followingError } = await supabase.functions.invoke(
+            "manage-social-feed",
+            {
+              body: {
+                action: "get_following",
+                target_user_id: targetId,
+              },
+            },
+          );
+
+          if (!followingError && Array.isArray(followingResponse?.data)) {
+            nextProfileFollowingCount = followingResponse.data.length;
+            setProfileFollowingCount(nextProfileFollowingCount);
+            const seenFollowingKeys = new Set<string>();
+            nextProfileFollowing = followingResponse.data
+              .map(normalizeFollowingProfile)
+              .filter((item: ProfileConnectionItem | null): item is ProfileConnectionItem => {
+                const key = item ? `${item.target_type}:${item.id}` : "";
+                if (!item || seenFollowingKeys.has(key)) {
+                  return false;
+                }
+                seenFollowingKeys.add(key);
+                return true;
+              });
+            setProfileFollowing(nextProfileFollowing);
+          }
+
+          const { data: followersResponse, error: followersError } = await supabase.functions.invoke(
+            "manage-social-feed",
+            {
+              body: {
+                action: "get_followers",
+                target_user_id: targetId,
+                target_type: "profile",
+              },
+            },
+          );
+
+          if (followersError) {
+            throw followersError;
+          }
+
+          const seenFollowerIds = new Set<string>();
+          nextProfileFollowers = (Array.isArray(followersResponse?.data) ? followersResponse.data : [])
+            .map(normalizeFollowerProfile)
+            .filter((item: ProfileConnectionItem | null): item is ProfileConnectionItem => {
+              if (!item || seenFollowerIds.has(item.id)) {
+                return false;
+              }
+              seenFollowerIds.add(item.id);
+              return true;
+            });
+
+          setProfileFollowers(nextProfileFollowers);
+          nextProfileFollowerCount = Math.max(nextProfileFollowerCount, nextProfileFollowers.length);
+          setProfileFollowerCount(nextProfileFollowerCount);
+        } catch {
+          // Counts still render when the follower list endpoint is unavailable.
+        } finally {
+          setLoadingProfileFollowers(false);
+        }
+      } else {
+        setLoadingProfileFollowers(false);
+      }
+
       profileScreenCache.set(targetId, {
         profile: nextProfile,
         isOwner: !!ownership,
@@ -1175,6 +1339,9 @@ export default function ProfileScreen() {
         gigTimeline: nextGigTimeline,
         supportsGigVisibilityPreference: hasGigVisibilityPreference,
         profileFollowerCount: nextProfileFollowerCount,
+        profileFollowingCount: nextProfileFollowingCount,
+        profileFollowers: nextProfileFollowers,
+        profileFollowing: nextProfileFollowing,
         fetchedAt: Date.now(),
       });
 
@@ -1204,6 +1371,10 @@ export default function ProfileScreen() {
           setGigTimeline(cached.gigTimeline);
           setSupportsGigVisibilityPreference(cached.supportsGigVisibilityPreference);
           setProfileFollowerCount(cached.profileFollowerCount);
+          setProfileFollowingCount(cached.profileFollowingCount ?? 0);
+          setProfileFollowers(cached.profileFollowers || []);
+          setProfileFollowing(cached.profileFollowing || []);
+          setLoadingProfileFollowers(false);
           setLoading(false);
         }
 
@@ -1720,6 +1891,32 @@ export default function ProfileScreen() {
   const viewedProfileId = typeof profile?.id === "string" ? profile.id.trim() : "";
   const profileFollowKey = buildSocialFollowKey("profile", viewedProfileId);
   const canFollowProfile = !isGuest && !isOwner && viewedProfileId.length > 0;
+  const formatFollowerRole = (role?: string | null) => {
+    if (!role) return "Profile";
+    if (role === "group") return "Group";
+    if (role === "studio-owner") return "Studio Owner";
+    if (role === "venue-owner") return "Venue Owner";
+    return role.replace("-", " ").replace(/\b\w/g, (char) => char.toUpperCase());
+  };
+
+  const openFollowListItem = (item: ProfileConnectionItem) => {
+    if (!item.id) return;
+
+    setFollowListModal(null);
+
+    if (item.target_type === "group") {
+      router.push({
+        pathname: "/group_details",
+        params: { id: item.id },
+      });
+      return;
+    }
+
+    router.push({
+      pathname: "/profile",
+      params: { userId: item.id },
+    });
+  };
 
   const logPlaylistInvokeError = useCallback((context: string, error: any, body: Record<string, unknown>) => {
     console.error(`manage-playlists ${context} failed`, {
@@ -1940,6 +2137,7 @@ export default function ProfileScreen() {
         title: wasFollowing ? "Unfollowed" : "Following",
         message: "",
       });
+      void fetchProfile({ showLoading: false });
     } catch (error: any) {
       setIsProfileFollowing(wasFollowing);
       setProfileFollowerCount(previousFollowerCount);
@@ -1951,7 +2149,7 @@ export default function ProfileScreen() {
     } finally {
       setIsProfileFollowBusy(false);
     }
-  }, [canFollowProfile, isProfileFollowBusy, isProfileFollowing, profileFollowerCount, viewedProfileId]);
+  }, [canFollowProfile, fetchProfile, isProfileFollowBusy, isProfileFollowing, profileFollowerCount, viewedProfileId]);
 
   const playlistSectionHint = hasStation
     ? canManageStations
@@ -1980,6 +2178,14 @@ export default function ProfileScreen() {
       ? "LIVE NOW"
       : "LIVE"
     : "OFFLINE";
+  const followListTitle = followListModal === "following" ? "Following" : "Followers";
+  const followListItems = followListModal === "following" ? profileFollowing : profileFollowers;
+  const followListCount = followListModal === "following" ? profileFollowingCount : profileFollowerCount;
+  const followListEmptyText = isGuest
+    ? "Sign in to view this list."
+    : followListModal === "following"
+      ? "Not following anyone yet."
+      : "No followers yet.";
 
   const openStationScreen = () => {
     if (hasStation && userStation?.id) {
@@ -2022,6 +2228,16 @@ export default function ProfileScreen() {
       openStationScreen();
     }
   };
+
+  if (isGuest && !normalizedParamUserId) {
+    return (
+      <View style={[styles.flex1, { backgroundColor: colors.background }]}>
+        <Header title="Profile" />
+        <GuestSignInGate message="Sign in to view and manage your MusikaLokal profile." />
+        <Navbar />
+      </View>
+    );
+  }
 
   if (loading) {
     return (
@@ -2253,17 +2469,12 @@ export default function ProfileScreen() {
                   Rating
                 </Text>
               </View>
-              <View style={styles.statItem}>
-                <Text style={[styles.statValue, { color: colors.text }]}>
-                  {profile?.review_count || 0}
-                </Text>
-                <Text
-                  style={[styles.statLabel, { color: colors.textSecondary }]}
-                >
-                  Reviews
-                </Text>
-              </View>
-              <View style={styles.statItem}>
+              <TouchableOpacity
+                activeOpacity={0.8}
+                accessibilityRole="button"
+                onPress={() => setFollowListModal("followers")}
+                style={styles.statItem}
+              >
                 <Text style={[styles.statValue, { color: colors.text }]}>
                   {profileFollowerCount}
                 </Text>
@@ -2272,17 +2483,22 @@ export default function ProfileScreen() {
                 >
                   Followers
                 </Text>
-              </View>
-              <View style={styles.statItem}>
+              </TouchableOpacity>
+              <TouchableOpacity
+                activeOpacity={0.8}
+                accessibilityRole="button"
+                onPress={() => setFollowListModal("following")}
+                style={styles.statItem}
+              >
                 <Text style={[styles.statValue, { color: colors.text }]}>
-                  {profile?.role === "musician" ? gigStats.active : "-"}
+                  {profileFollowingCount}
                 </Text>
                 <Text
                   style={[styles.statLabel, { color: colors.textSecondary }]}
                 >
-                  Active
+                  Following
                 </Text>
-              </View>
+              </TouchableOpacity>
             </View>
 
             {/* TAB NAVIGATION */}
@@ -3141,6 +3357,108 @@ export default function ProfileScreen() {
         </View>
       </Modal>
 
+      <Modal
+        visible={followListModal !== null}
+        transparent={true}
+        animationType="slide"
+        statusBarTranslucent
+        onRequestClose={() => setFollowListModal(null)}
+      >
+        <View style={styles.followModalOverlay}>
+          <TouchableOpacity
+            activeOpacity={1}
+            style={styles.followModalBackdrop}
+            onPress={() => setFollowListModal(null)}
+          />
+          <View
+            style={[
+              styles.followModalSheet,
+              { backgroundColor: colors.background, borderColor: colors.border },
+            ]}
+          >
+            <View style={[styles.followModalHandle, { backgroundColor: colors.border }]} />
+            <View style={styles.followModalHeader}>
+              <View>
+                <Text style={[styles.followModalTitle, { color: colors.text }]}>
+                  {followListTitle}
+                </Text>
+                <Text style={[styles.followModalCount, { color: colors.textSecondary }]}>
+                  {followListCount} {followListCount === 1 ? "user" : "users"}
+                </Text>
+              </View>
+              <TouchableOpacity
+                activeOpacity={1}
+                onPress={() => setFollowListModal(null)}
+                style={[styles.followModalCloseBtn, { backgroundColor: isDark ? "#111827" : "#F8FAFC" }]}
+              >
+                <Ionicons name="close" size={20} color={colors.textSecondary} />
+              </TouchableOpacity>
+            </View>
+
+            {loadingProfileFollowers ? (
+              <View style={styles.followModalState}>
+                <ActivityIndicator size="small" color={colors.primary} />
+                <Text style={[styles.followersEmptyText, { color: colors.textSecondary }]}>
+                  Loading {followListTitle.toLowerCase()}...
+                </Text>
+              </View>
+            ) : followListItems.length > 0 ? (
+              <ScrollView
+                showsVerticalScrollIndicator={false}
+                contentContainerStyle={styles.followModalList}
+              >
+                {followListItems.map((item) => (
+                  <TouchableOpacity
+                    key={`${item.target_type}-${item.id}`}
+                    activeOpacity={1}
+                    onPress={() => openFollowListItem(item)}
+                    style={[
+                      styles.followerRow,
+                      { backgroundColor: colors.surface, borderColor: colors.border },
+                    ]}
+                  >
+                    <View style={[styles.followerAvatar, { backgroundColor: isDark ? "#1E293B" : "#EEF2FF" }]}>
+                      {item.avatar_url ? (
+                        <CachedImage
+                          uri={item.avatar_url}
+                          style={styles.followerAvatarImage}
+                          contentFit="cover"
+                          transition={120}
+                          width={88}
+                          height={88}
+                          disableRecyclingKey
+                        />
+                      ) : (
+                        <Ionicons
+                          name={item.target_type === "group" ? "people" : "person"}
+                          size={20}
+                          color={colors.textSecondary}
+                        />
+                      )}
+                    </View>
+                    <View style={styles.followerInfo}>
+                      <Text style={[styles.followerName, { color: colors.text }]} numberOfLines={1}>
+                        {item.full_name}
+                      </Text>
+                      <Text style={[styles.followerRole, { color: colors.textSecondary }]} numberOfLines={1}>
+                        {formatFollowerRole(item.role)}
+                      </Text>
+                    </View>
+                    <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            ) : (
+              <View style={styles.followModalState}>
+                <Text style={[styles.followersEmptyText, { color: colors.textSecondary }]}>
+                  {followListEmptyText}
+                </Text>
+              </View>
+            )}
+          </View>
+        </View>
+      </Modal>
+
       <CustomAlert
         visible={alertVisible}
         type={alertConfig.type}
@@ -3338,6 +3656,136 @@ const styles = StyleSheet.create({
     fontFamily: "Poppins_400Regular",
     fontSize: 12,
     marginTop: 2,
+  },
+  followersSection: {
+    width: "100%",
+    marginBottom: 16,
+  },
+  followersHeaderRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 10,
+  },
+  followersTitle: {
+    fontFamily: "Poppins_600SemiBold",
+    fontSize: 14,
+  },
+  followersCountLabel: {
+    fontFamily: "Poppins_500Medium",
+    fontSize: 12,
+  },
+  followersList: {
+    width: "100%",
+    gap: 8,
+  },
+  followersLoadingRow: {
+    width: "100%",
+    minHeight: 52,
+    borderRadius: 14,
+    borderWidth: 1,
+    paddingHorizontal: 14,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+  },
+  followersEmptyText: {
+    fontFamily: "Poppins_400Regular",
+    fontSize: 12,
+  },
+  followerRow: {
+    width: "100%",
+    minHeight: 60,
+    borderRadius: 14,
+    borderWidth: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  followerAvatar: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    overflow: "hidden",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  followerAvatarImage: {
+    width: "100%",
+    height: "100%",
+  },
+  followerInfo: {
+    flex: 1,
+    minWidth: 0,
+  },
+  followerName: {
+    fontFamily: "Poppins_600SemiBold",
+    fontSize: 13,
+  },
+  followerRole: {
+    fontFamily: "Poppins_400Regular",
+    fontSize: 11,
+    marginTop: 1,
+  },
+  followModalOverlay: {
+    flex: 1,
+    justifyContent: "flex-end",
+    backgroundColor: "rgba(15,23,42,0.44)",
+  },
+  followModalBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  followModalSheet: {
+    maxHeight: "78%",
+    minHeight: 260,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    borderWidth: 1,
+    paddingTop: 10,
+    paddingHorizontal: 16,
+    paddingBottom: 24,
+  },
+  followModalHandle: {
+    width: 42,
+    height: 4,
+    borderRadius: 2,
+    alignSelf: "center",
+    marginBottom: 14,
+  },
+  followModalHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 14,
+  },
+  followModalTitle: {
+    fontFamily: "Poppins_700Bold",
+    fontSize: 20,
+  },
+  followModalCount: {
+    fontFamily: "Poppins_400Regular",
+    fontSize: 12,
+    marginTop: 2,
+  },
+  followModalCloseBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  followModalList: {
+    gap: 8,
+    paddingBottom: 12,
+  },
+  followModalState: {
+    minHeight: 150,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
   },
   statDivider: {
     display: "none",

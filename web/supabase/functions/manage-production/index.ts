@@ -278,6 +278,159 @@ function isProductionTeamInviteRequest(request: any) {
   );
 }
 
+function isProductionTeamInviteEvent(eventDetails: any) {
+  const senderEntityType = String(eventDetails?.sender_entity_type || "")
+    .trim()
+    .toLowerCase();
+
+  return (
+    senderEntityType === "production_team" &&
+    getListingRequestKind({ event_details: eventDetails }) === "invite"
+  );
+}
+
+async function validateProductionTeamInviteAvailability(
+  supabaseAdmin: any,
+  params: {
+    eventDetails: any;
+    groupId: string | null;
+    receiverUserId: string;
+    actorUserId: string;
+  },
+) {
+  const { eventDetails, groupId, receiverUserId, actorUserId } = params;
+
+  if (!isProductionTeamInviteEvent(eventDetails)) {
+    return null;
+  }
+
+  const productionTeamId = toNonEmptyString(
+    eventDetails.production_team_id || eventDetails.sender_entity_id,
+  );
+
+  if (!productionTeamId) {
+    return { error: "Production team invite is missing a team reference", status: 400 };
+  }
+
+  const managerMembership = await getTeamManagerMembership(
+    supabaseAdmin,
+    productionTeamId,
+    actorUserId,
+  );
+
+  if (!managerMembership) {
+    return { error: "Only team owners or managers can send production invites", status: 403 };
+  }
+
+  if (groupId) {
+    const { data: rosterEntry, error: rosterError } = await supabaseAdmin
+      .from("production_team_roster")
+      .select("id")
+      .eq("team_id", productionTeamId)
+      .eq("group_id", groupId)
+      .maybeSingle();
+
+    if (rosterError) {
+      throw rosterError;
+    }
+
+    if (rosterEntry) {
+      return { error: "This band or duo is already in this production team.", status: 409 };
+    }
+
+    const { data: existingInvite, error: inviteError } = await supabaseAdmin
+      .from("booking_requests")
+      .select("id, status")
+      .eq("group_id", groupId)
+      .in("status", ["pending", "accepted"])
+      .contains("event_details", {
+        production_team_id: productionTeamId,
+        sender_entity_type: "production_team",
+        request_kind: "invite",
+      })
+      .limit(1)
+      .maybeSingle();
+
+    if (inviteError) {
+      throw inviteError;
+    }
+
+    if (existingInvite) {
+      return {
+        error:
+          existingInvite.status === "accepted"
+            ? "This band or duo has already accepted an invite to this production team."
+            : "This band or duo already has a pending invite to this production team.",
+        status: 409,
+      };
+    }
+
+    return null;
+  }
+
+  const profileId = toNonEmptyString(eventDetails.receiver_entity_id) || receiverUserId;
+
+  const { data: rosterEntry, error: rosterError } = await supabaseAdmin
+    .from("production_team_roster")
+    .select("id")
+    .eq("team_id", productionTeamId)
+    .eq("profile_id", profileId)
+    .maybeSingle();
+
+  if (rosterError) {
+    throw rosterError;
+  }
+
+  if (rosterEntry) {
+    return { error: "This musician is already in this production team.", status: 409 };
+  }
+
+  const { data: existingInvite, error: inviteError } = await supabaseAdmin
+    .from("booking_requests")
+    .select("id, status")
+    .eq("receiver_id", profileId)
+    .is("group_id", null)
+    .in("status", ["pending", "accepted"])
+    .contains("event_details", {
+      production_team_id: productionTeamId,
+      sender_entity_type: "production_team",
+      request_kind: "invite",
+    })
+    .limit(1)
+    .maybeSingle();
+
+  if (inviteError) {
+    throw inviteError;
+  }
+
+  if (existingInvite) {
+    return {
+      error:
+        existingInvite.status === "accepted"
+          ? "This musician has already accepted an invite to this production team."
+          : "This musician already has a pending invite to this production team.",
+      status: 409,
+    };
+  }
+
+  const { data: memberEntry, error: memberError } = await supabaseAdmin
+    .from("production_team_members")
+    .select("id")
+    .eq("team_id", productionTeamId)
+    .eq("user_id", profileId)
+    .maybeSingle();
+
+  if (memberError) {
+    throw memberError;
+  }
+
+  if (memberEntry) {
+    return { error: "This musician has already joined this production team.", status: 409 };
+  }
+
+  return null;
+}
+
 function isProductionTeamApplicationRequest(request: any) {
   const eventDetails =
     request?.event_details && typeof request.event_details === "object"
@@ -530,6 +683,24 @@ serve(async (req: Request) => {
 
       const eventDetails = buildListingRequestEventDetails(params);
 
+      try {
+        const validationResult = await validateProductionTeamInviteAvailability(supabaseAdmin, {
+          eventDetails,
+          groupId,
+          receiverUserId,
+          actorUserId: authUser.id,
+        });
+
+        if (validationResult?.error) {
+          return jsonResponse({ error: validationResult.error }, validationResult.status || 400);
+        }
+      } catch (validationError: any) {
+        return jsonResponse(
+          { error: validationError?.message || "Failed to validate production invite" },
+          500,
+        );
+      }
+
       const { data: requestRow, error: requestError } = await supabaseAdmin
         .from("booking_requests")
         .insert({
@@ -568,6 +739,8 @@ serve(async (req: Request) => {
             group_id: groupId,
             studio_id: studioId,
             production_team_id: eventDetails.production_team_id || null,
+            request_kind: eventDetails.request_kind || null,
+            request_details: eventDetails.request_details || null,
             route: eventDetails.route || null,
             route_params: eventDetails.route_params || null,
           },

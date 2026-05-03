@@ -1221,6 +1221,9 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                     />
                   </View>
                   <Text
+                    numberOfLines={1}
+                    adjustsFontSizeToFit
+                    minimumFontScale={0.82}
                     style={[
                       styles.stepText,
                       {
@@ -1526,14 +1529,8 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                     },
                   ]}
                 >
-                  <View
-                    style={{
-                      flexDirection: "row",
-                      alignItems: "center",
-                      gap: 8,
-                    }}
-                  >
-                    <View style={{ flex: 1 }}>
+                  <View style={styles.timeSlotRow}>
+                    <View style={styles.timeSlotGroup}>
                       <Text
                         style={{
                           color: colors.textSecondary,
@@ -1544,13 +1541,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                       >
                         START TIME
                       </Text>
-                      <View
-                        style={{
-                          flexDirection: "row",
-                          alignItems: "center",
-                          gap: 4,
-                        }}
-                      >
+                      <View style={styles.timeInputRow}>
                         <TextInput
                           value={eventStartTime.split(" ")[0]}
                           onChangeText={(text) => {
@@ -1584,13 +1575,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                             { backgroundColor: isDark ? "#374151" : "#E5E7EB" },
                           ]}
                         >
-                          <Text
-                            style={{
-                              fontSize: 12,
-                              fontFamily: "Poppins_600SemiBold",
-                              color: colors.text,
-                            }}
-                          >
+                          <Text style={[styles.ampmBtnText, { color: colors.text }]}>
                             {eventStartTime.split(" ")[1]}
                           </Text>
                         </TouchableOpacity>
@@ -1600,9 +1585,9 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                       name="arrow-forward"
                       size={20}
                       color={colors.textSecondary}
-                      style={{ marginTop: 20 }}
+                      style={styles.timeSlotArrow}
                     />
-                    <View style={{ flex: 1 }}>
+                    <View style={styles.timeSlotGroup}>
                       <Text
                         style={{
                           color: colors.textSecondary,
@@ -1613,13 +1598,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                       >
                         END TIME
                       </Text>
-                      <View
-                        style={{
-                          flexDirection: "row",
-                          alignItems: "center",
-                          gap: 4,
-                        }}
-                      >
+                      <View style={styles.timeInputRow}>
                         <TextInput
                           value={eventEndTime.split(" ")[0]}
                           onChangeText={(text) => {
@@ -1653,13 +1632,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                             { backgroundColor: isDark ? "#374151" : "#E5E7EB" },
                           ]}
                         >
-                          <Text
-                            style={{
-                              fontSize: 12,
-                              fontFamily: "Poppins_600SemiBold",
-                              color: colors.text,
-                            }}
-                          >
+                          <Text style={[styles.ampmBtnText, { color: colors.text }]}>
                             {eventEndTime.split(" ")[1]}
                           </Text>
                         </TouchableOpacity>
@@ -3142,7 +3115,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   stepIndicatorContainer: {
-    paddingHorizontal: 24,
+    paddingHorizontal: 16,
     paddingTop: 24,
     paddingBottom: 8,
   },
@@ -3170,7 +3143,8 @@ const styles = StyleSheet.create({
   stepItem: {
     alignItems: "center",
     zIndex: 10,
-    width: 80,
+    flex: 1,
+    minWidth: 0,
   },
   stepCircle: {
     width: 40,
@@ -3181,9 +3155,12 @@ const styles = StyleSheet.create({
     borderWidth: 4,
   },
   stepText: {
-    fontSize: 12,
+    fontSize: 11,
     marginTop: 8,
     textAlign: "center",
+    lineHeight: 15,
+    includeFontPadding: false,
+    width: "100%",
   },
   formContainer: {
     flex: 1,
@@ -3445,20 +3422,51 @@ const styles = StyleSheet.create({
     padding: 16,
   },
   timeInput: {
-    paddingVertical: 10,
+    height: 44,
+    minWidth: 74,
+    paddingVertical: 0,
     paddingHorizontal: 12,
     borderRadius: 8,
     borderWidth: 1,
     fontSize: 14,
     fontFamily: "Poppins_500Medium",
+    textAlign: "center",
+    textAlignVertical: "center",
+    includeFontPadding: false,
   },
   ampmBtn: {
-    paddingVertical: 10,
-    paddingHorizontal: 16,
+    width: 52,
+    height: 44,
+    paddingVertical: 0,
+    paddingHorizontal: 0,
     borderRadius: 8,
     alignItems: "center",
     justifyContent: "center",
-    minWidth: 60,
+  },
+  ampmBtnText: {
+    fontSize: 12,
+    lineHeight: 16,
+    fontFamily: "Poppins_600SemiBold",
+    textAlign: "center",
+    includeFontPadding: false,
+  },
+  timeSlotRow: {
+    flexDirection: "row",
+    alignItems: "flex-end",
+    flexWrap: "wrap",
+    gap: 8,
+  },
+  timeSlotGroup: {
+    flex: 1,
+    minWidth: 130,
+  },
+  timeInputRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+  },
+  timeSlotArrow: {
+    marginBottom: 12,
   },
   calendarContainer: {
     borderRadius: 12,

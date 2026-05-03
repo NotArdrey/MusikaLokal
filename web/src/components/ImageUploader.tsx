@@ -242,7 +242,7 @@ export default function ImageUploader({
       const { data: { session }, error: authError } = await supabase.auth.getSession();
       if (authError || !session) {
         showAlert('warning', 'Authentication Required', 'Please log in to upload images.');
-        console.error('Auth check failed:', authError?.message || 'No session');
+        debugLog('Auth check failed:', authError?.message || 'No session');
         return;
       }
 

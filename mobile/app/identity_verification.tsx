@@ -5,6 +5,7 @@ import { ActivityIndicator, ScrollView, StyleSheet, Text, TouchableOpacity, View
 import { supabase } from '../lib/supabase';
 import CustomAlert, { AlertType } from '../src/components/CustomAlert';
 import VerificationModal from '../src/components/VerificationModal';
+import GuestSignInGate from '../src/components/GuestSignInGate';
 import Header from '../src/components/header';
 import Navbar from '../src/components/navbar';
 import { useAuth } from '../src/context/AuthContext';
@@ -56,6 +57,16 @@ const statusColor = (status: string | null, isExpired: boolean): string => {
 
 const formatDate = (value: string | null): string => {
   return formatFriendlyDateTime(value, { fallback: 'Not available' });
+};
+
+const identityExpiryLabel = (profile: IdentityProfile | null): string => {
+  if (profile?.id_document_expiry) return formatDate(profile.id_document_expiry);
+  return profile?.is_verified ? 'No expiry on file' : 'Not available';
+};
+
+const lastVerifiedLabel = (profile: IdentityProfile | null): string => {
+  if (profile?.id_verified_at) return formatDate(profile.id_verified_at);
+  return profile?.is_verified ? 'Verified' : 'Not available';
 };
 
 const isDateExpired = (value: string | null): boolean => {
@@ -236,12 +247,9 @@ export default function IdentityVerificationScreen() {
     return (
       <View style={[styles.container, { backgroundColor: colors.background }]}>
         <Header title="Identity Verification" />
-        <View style={styles.emptyState}>
-          <Text style={[styles.emptyTitle, { color: colors.text }]}>Sign in required</Text>
-          <Text style={[styles.emptyMessage, { color: colors.textSecondary }]}>Please sign in to manage your identity verification status.</Text>
-          <TouchableOpacity activeOpacity={1} onPress={() => router.replace('/')} style={[styles.actionButton, { backgroundColor: colors.primary }]}>
-            <Text style={styles.actionButtonText}>Go to Sign In</Text>
-          </TouchableOpacity>
+        <GuestSignInGate message="Sign in to manage your identity verification status." />
+        <View style={styles.navbarContainer}>
+          <Navbar />
         </View>
       </View>
     );
@@ -277,12 +285,12 @@ export default function IdentityVerificationScreen() {
 
                   <View style={[styles.detailRow, { borderTopColor: colors.border }]}>
                     <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>ID Expiry Date</Text>
-                    <Text style={[styles.detailValue, { color: colors.text }]}>{formatDate(profile?.id_document_expiry || null)}</Text>
+                    <Text style={[styles.detailValue, { color: colors.text }]}>{identityExpiryLabel(profile)}</Text>
                   </View>
 
                   <View style={[styles.detailRow, { borderTopColor: colors.border }]}>
                     <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>Last Verified</Text>
-                    <Text style={[styles.detailValue, { color: colors.text }]}>{formatDate(profile?.id_verified_at || null)}</Text>
+                    <Text style={[styles.detailValue, { color: colors.text }]}>{lastVerifiedLabel(profile)}</Text>
                   </View>
 
                   <Text style={[styles.hintText, { color: colors.textSecondary }]}>

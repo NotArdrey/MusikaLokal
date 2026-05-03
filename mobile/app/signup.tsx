@@ -24,7 +24,7 @@ type DocumentOption = {
     key: string;
     label: string;
     diditSupported: boolean;
-    diditDocumentType?: 'passport' | 'id_card' | 'drivers_license' | 'residence_permit' | 'health_insurance';
+    diditDocumentType?: 'passport' | 'id_card' | 'drivers_license' | 'health_insurance';
 };
 
 type ManualUploadAsset = {
@@ -43,7 +43,6 @@ const PH_DOCUMENT_OPTIONS: DocumentOption[] = [
     { key: 'passport', label: 'Philippine Passport', diditSupported: true, diditDocumentType: 'passport' },
     { key: 'national_id', label: 'PhilSys National ID', diditSupported: true, diditDocumentType: 'id_card' },
     { key: 'drivers_license', label: 'Driver\'s License', diditSupported: true, diditDocumentType: 'drivers_license' },
-    { key: 'residence_permit', label: 'Residence Permit', diditSupported: true, diditDocumentType: 'residence_permit' },
     { key: 'health_insurance', label: 'Health Insurance Card', diditSupported: true, diditDocumentType: 'health_insurance' },
     { key: 'umid', label: 'UMID', diditSupported: false },
     { key: 'postal_id', label: 'Postal ID', diditSupported: false },

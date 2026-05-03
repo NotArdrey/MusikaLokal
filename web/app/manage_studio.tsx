@@ -24,6 +24,8 @@ import {
     openNavigationDirections,
 } from "../src/utils/navigation";
 
+const CUSTOM_DATE_PREVIEW_LIMIT = 5;
+
 const canonicalizeStudioType = (
   value: unknown,
 ): "Rehearsal" | "Recording" | null => {
@@ -611,6 +613,17 @@ export default function StudioDetailsScreen() {
           : hourlyRateValue > 0
             ? `₱${hourlyRateValue.toLocaleString()}/hr`
             : "N/A";
+  const studioEquipment = Array.isArray(studio?.instruments)
+    ? studio.instruments.filter((item: any) => {
+      if (typeof item === "string") return item.trim().length > 0;
+      return typeof item?.name === "string" && item.name.trim().length > 0;
+    })
+    : [];
+  const getEquipmentLabel = (item: any) => {
+    const name = typeof item === "string" ? item : item?.name;
+    const quantity = typeof item === "object" && item?.quantity ? ` x${item.quantity}` : "";
+    return `${name}${quantity}`;
+  };
 
   // Show loading while checking authorization
   if (checkingAuth) {
@@ -809,6 +822,37 @@ export default function StudioDetailsScreen() {
                     </Text>
                   </View>
                 </View>
+
+                {studioEquipment.length > 0 && (
+                  <View>
+                    <Text
+                      style={[
+                        styles.sectionTitle,
+                        { color: colors.text, marginBottom: 12 },
+                      ]}
+                    >
+                      Studio Equipment
+                    </Text>
+                    <View style={styles.tagsContainer}>
+                      {studioEquipment.map((item: any, i: number) => (
+                        <View
+                          key={item?.id || `${getEquipmentLabel(item)}-${i}`}
+                          style={[
+                            styles.tag,
+                            {
+                              borderColor: colors.border,
+                              backgroundColor: colors.surface,
+                            },
+                          ]}
+                        >
+                          <Text style={[styles.tagText, { color: colors.text }]}>
+                            {getEquipmentLabel(item)}
+                          </Text>
+                        </View>
+                      ))}
+                    </View>
+                  </View>
+                )}
 
                 {/* <View style={{ flexDirection: "row", gap: 16 }}> */}
                 {/* Recording Rate removed as requested */}
@@ -1016,15 +1060,11 @@ export default function StudioDetailsScreen() {
                     Equipment & Instruments
                   </Text>
                   <View style={styles.tagsContainer}>
-                    {studio?.instruments?.length ? (
-                      studio.instruments.map((item: any, i: number) => {
-                        const name = item?.name || item;
-                        const quantity = item?.quantity
-                          ? ` ×${item.quantity}`
-                          : "";
+                    {studioEquipment.length ? (
+                      studioEquipment.map((item: any, i: number) => {
                         return (
                           <View
-                            key={i}
+                            key={item?.id || `${getEquipmentLabel(item)}-${i}`}
                             style={[
                               styles.tag,
                               {
@@ -1035,7 +1075,7 @@ export default function StudioDetailsScreen() {
                           >
                             <Text
                               style={[styles.tagText, { color: colors.text }]}
-                            >{`${name}${quantity}`}</Text>
+                            >{getEquipmentLabel(item)}</Text>
                           </View>
                         );
                       })
@@ -1101,9 +1141,10 @@ export default function StudioDetailsScreen() {
                       >
                         Custom Dates
                       </Text>
-                      {studio.calendar_availability.map(
-                        (entry: any, i: number) => (
-                          <View key={i} style={{ marginBottom: 8 }}>
+                      {studio.calendar_availability
+                        .slice(0, CUSTOM_DATE_PREVIEW_LIMIT)
+                        .map((entry: any, i: number) => (
+                          <View key={entry?.date || i} style={{ marginBottom: 8 }}>
                             <Text
                               style={{
                                 fontFamily: "Poppins_500Medium",
@@ -1128,8 +1169,18 @@ export default function StudioDetailsScreen() {
                                 : "No slots"}
                             </Text>
                           </View>
-                        ),
-                      )}
+                        ))}
+                      {studio.calendar_availability.length > CUSTOM_DATE_PREVIEW_LIMIT ? (
+                        <Text
+                          style={{
+                            fontFamily: "Poppins_500Medium",
+                            color: colors.textSecondary,
+                            marginTop: 2,
+                          }}
+                        >
+                          +{studio.calendar_availability.length - CUSTOM_DATE_PREVIEW_LIMIT} more custom dates
+                        </Text>
+                      ) : null}
                     </View>
                   ) : null}
                 </View>

@@ -6,6 +6,7 @@ import { ActivityIndicator, Image, Linking, Platform, RefreshControl, ScrollView
 import { supabase } from '../lib/supabase';
 import CustomAlert, { AlertType } from '../src/components/CustomAlert';
 import BottomModal from '../src/components/BottomModal';
+import GuestSignInGate from '../src/components/GuestSignInGate';
 import Header from '../src/components/header';
 import CustomModal from '../src/components/modal';
 import Navbar from '../src/components/navbar';
@@ -50,7 +51,7 @@ interface WithdrawalErrorPayload {
 
 export default function WalletScreen() {
   const { colors, isDark } = useTheme();
-  const { userId } = useAuth();
+  const { userId, isGuest } = useAuth();
   const { contentBottomPadding } = useBottomBarClearance(24);
   const params = useLocalSearchParams<{ refresh?: string }>();
   const walletRefreshKey = Array.isArray(params.refresh) ? params.refresh[0] : params.refresh;
@@ -793,6 +794,18 @@ export default function WalletScreen() {
     { key: "booking_downpayment", label: "Downpayment" },
     { key: "booking_balance", label: "Balance" },
   ];
+
+  if (isGuest) {
+    return (
+      <View style={[styles.container, { backgroundColor: colors.background }]}>
+        <Header title="Wallet" />
+        <GuestSignInGate message="Sign in to view your wallet and payment history." />
+        <View style={styles.navbarContainer}>
+          <Navbar />
+        </View>
+      </View>
+    );
+  }
 
   return (
     <>

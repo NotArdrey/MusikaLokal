@@ -1,8 +1,8 @@
-import { Ionicons } from '@expo/vector-icons';
-import { router, useFocusEffect } from 'expo-router';
+import { useFocusEffect } from 'expo-router';
 import React, { useCallback, useState } from 'react';
 import { ActivityIndicator, ScrollView, StyleSheet, Switch, Text, TouchableOpacity, View } from 'react-native';
 import { supabase } from '../lib/supabase';
+import GuestSignInGate from '../src/components/GuestSignInGate';
 import Header from '../src/components/header';
 import Navbar from '../src/components/navbar';
 import { useAuth } from '../src/context/AuthContext';
@@ -232,18 +232,7 @@ export default function NotificationSettingsScreen() {
               </Text>
             </View>
           ) : isGuest || !userId ? (
-            <View style={[styles.guestCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
-              <Ionicons name="notifications-off-outline" size={26} color={colors.textSecondary} />
-              <Text style={[styles.guestTitle, { color: colors.text }]}>Sign in required</Text>
-              <Text style={[styles.guestMessage, { color: colors.textSecondary }]}>Sign in to manage your notification preferences.</Text>
-              <TouchableOpacity
-                activeOpacity={1}
-                onPress={() => router.replace('/')}
-                style={[styles.signInButton, { backgroundColor: colors.primary }]}
-              >
-                <Text style={styles.signInButtonText}>Go to Sign In</Text>
-              </TouchableOpacity>
-            </View>
+            <GuestSignInGate message="Sign in to manage your notification preferences." />
           ) : (
             <>
               {PREFERENCE_OPTIONS.map((option) =>

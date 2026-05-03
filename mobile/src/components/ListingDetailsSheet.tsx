@@ -2599,9 +2599,11 @@ const ListingDetailsSheet = forwardRef<
   const isGroupListing = group?.type === "Group";
   const effectiveUserRole = userRole || currentUserRole;
   const hasStructuredConnectionTab =
+    !isGuest &&
     effectiveUserRole === "producer" &&
     (group?.type === "Group" || group?.type === "Artist" || group?.type === "Venue");
   const hasGroupConnectContent =
+    !isGuest &&
     group?.type === "Group" &&
     (effectiveUserRole === "venue-owner" ||
       (effectiveUserRole === "musician" && !!group?.requirements?.audition) ||
@@ -2609,22 +2611,27 @@ const ListingDetailsSheet = forwardRef<
   const shouldShowConnectTab = hasStructuredConnectionTab || hasGroupConnectContent;
   const canApplyToGroup =
     isGroupListing &&
+    !isGuest &&
     group?.open_group_applications === true &&
     !!userId &&
     effectiveUserRole === "musician" &&
     group?.owner_id !== userId;
 
   useEffect(() => {
-    if (activeTab === "Connect" && effectiveUserRole === "producer" && activeUserId) {
+    if (!isGuest && activeTab === "Connect" && effectiveUserRole === "producer" && activeUserId) {
       void fetchProductionTeams();
     }
-  }, [activeTab, activeUserId, effectiveUserRole, fetchProductionTeams]);
+  }, [activeTab, activeUserId, effectiveUserRole, fetchProductionTeams, isGuest]);
 
   const tabsToRender = useMemo(() => {
     const baseTabs = Array.isArray(labels.tabs) ? [...labels.tabs] : [];
 
     if (!baseTabs.includes("Review")) {
       baseTabs.push("Review");
+    }
+
+    if (isGuest) {
+      return baseTabs.filter((tab) => !["Apply", "Connect", "Book"].includes(tab));
     }
 
     if (shouldShowConnectTab && !baseTabs.includes("Connect")) {
@@ -2657,7 +2664,7 @@ const ListingDetailsSheet = forwardRef<
     const nextTabs = [...withoutApply];
     nextTabs.splice(reviewTabIndex, 0, "Apply");
     return nextTabs;
-  }, [canApplyToGroup, isGroupListing, labels.tabs, shouldShowConnectTab]);
+  }, [canApplyToGroup, isGroupListing, isGuest, labels.tabs, shouldShowConnectTab]);
 
   const showTabs = hasDefaultTabs && tabsToRender.length > 0;
 
@@ -3652,7 +3659,7 @@ const ListingDetailsSheet = forwardRef<
             />
 
             {/* Bottom Bar for GROUP/Default only - Tabs have their own CTAs */}
-            {!showTabs && (
+            {!isGuest && !showTabs && (
               <ListingBottomBar
                 styles={styles}
                 colors={colors}

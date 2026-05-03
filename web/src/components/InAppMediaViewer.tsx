@@ -11,7 +11,6 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import { WebView } from "react-native-webview";
 
 type InAppMediaType = "image" | "video" | "document" | "web";
 
@@ -74,6 +73,21 @@ interface InAppMediaViewerProps {
   onClose: () => void;
 }
 
+const WebFrame = ({
+  uri,
+  onLoad,
+}: {
+  uri: string;
+  onLoad: () => void;
+}) =>
+  React.createElement("iframe", {
+    src: uri,
+    onLoad,
+    sandbox: "allow-same-origin allow-scripts allow-forms allow-popups",
+    style: StyleSheet.flatten(styles.webFrame),
+    title: "Media preview",
+  });
+
 const InAppMediaViewer = ({ visible, uri, title, onClose }: InAppMediaViewerProps) => {
   const [loading, setLoading] = useState(false);
   const mediaType = useMemo(() => getInAppMediaType(uri), [uri]);
@@ -86,13 +100,7 @@ const InAppMediaViewer = ({ visible, uri, title, onClose }: InAppMediaViewerProp
   }, [canPreviewDocument, mediaType, visible, uri]);
 
   return (
-    <Modal
-      visible={visible}
-      transparent
-      animationType="fade"
-      statusBarTranslucent
-      onRequestClose={onClose}
-    >
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <View style={styles.overlay}>
         <Pressable style={StyleSheet.absoluteFillObject} onPress={onClose} />
 
@@ -129,30 +137,13 @@ const InAppMediaViewer = ({ visible, uri, title, onClose }: InAppMediaViewerProp
               onError={() => setLoading(false)}
             />
           ) : uri && mediaType === "document" && canPreviewDocument ? (
-            <WebView
-              source={{ uri }}
-              style={styles.webView}
-              startInLoadingState
-              onFileDownload={() => setLoading(false)}
-              onShouldStartLoadWithRequest={(request) => isPreviewableDocumentUrl(request.url)}
-              onLoadStart={() => setLoading(true)}
-              onLoadEnd={() => setLoading(false)}
-              onError={() => setLoading(false)}
-            />
+            <WebFrame uri={uri} onLoad={() => setLoading(false)} />
           ) : uri && mediaType === "document" ? (
             <Text style={styles.unsupportedText}>
               This document type cannot be previewed in-app without downloading.
             </Text>
           ) : uri && mediaType === "web" ? (
-            <WebView
-              source={{ uri }}
-              style={styles.webView}
-              startInLoadingState
-              onFileDownload={() => setLoading(false)}
-              onLoadStart={() => setLoading(true)}
-              onLoadEnd={() => setLoading(false)}
-              onError={() => setLoading(false)}
-            />
+            <WebFrame uri={uri} onLoad={() => setLoading(false)} />
           ) : (
             <Text style={styles.unsupportedText}>This file cannot be previewed in-app.</Text>
           )}
@@ -169,9 +160,9 @@ const styles = StyleSheet.create({
   },
   header: {
     position: "absolute",
-    top: 44,
-    left: 16,
-    right: 16,
+    top: 24,
+    left: 24,
+    right: 24,
     zIndex: 2,
     flexDirection: "row",
     alignItems: "center",
@@ -196,18 +187,20 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
-    paddingHorizontal: 12,
+    paddingHorizontal: 24,
+    paddingTop: 70,
+    paddingBottom: 24,
   },
   media: {
     width: "100%",
-    height: "78%",
+    height: "100%",
   },
-  webView: {
+  webFrame: {
     width: "100%",
-    height: "78%",
+    height: "100%",
     backgroundColor: "#FFFFFF",
-    borderRadius: 12,
-    overflow: "hidden",
+    borderWidth: 0,
+    borderRadius: 8,
   },
   loadingOverlay: {
     position: "absolute",

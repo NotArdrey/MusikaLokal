@@ -5,6 +5,7 @@ import { ActivityIndicator, Platform, ScrollView, StyleSheet, Text, TouchableOpa
 import { supabase } from '../lib/supabase';
 import CustomAlert, { AlertType } from '../src/components/CustomAlert';
 import VerificationModal from '../src/components/VerificationModal';
+import GuestSignInGate from '../src/components/GuestSignInGate';
 import Header from '../src/components/header';
 import Navbar from '../src/components/navbar';
 import { useAuth } from '../src/context/AuthContext';
@@ -58,6 +59,16 @@ const formatDate = (value: string | null): string => {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return 'Not available';
   return date.toLocaleDateString();
+};
+
+const identityExpiryLabel = (profile: IdentityProfile | null): string => {
+  if (profile?.id_document_expiry) return formatDate(profile.id_document_expiry);
+  return profile?.is_verified ? 'No expiry on file' : 'Not available';
+};
+
+const lastVerifiedLabel = (profile: IdentityProfile | null): string => {
+  if (profile?.id_verified_at) return formatDate(profile.id_verified_at);
+  return profile?.is_verified ? 'Verified' : 'Not available';
 };
 
 const isDateExpired = (value: string | null): boolean => {
@@ -328,21 +339,8 @@ export default function IdentityVerificationScreen() {
       <View style={[styles.container, { backgroundColor: pageBackground }]}>
         <View style={[styles.pageFrame, isWebDesktop && styles.pageFrameWeb]}>
           <Header title="Identity Verification" onBackPress={handleBackToProfile} />
-          <View style={styles.emptyState}>
-            <View
-              style={[
-                styles.emptyCard,
-                isWebDesktop && styles.webSectionCard,
-                { backgroundColor: pageCardBackground, borderColor: borderSoft },
-              ]}
-            >
-              <Text style={[styles.emptyTitle, { color: colors.text }]}>Sign in required</Text>
-              <Text style={[styles.emptyMessage, { color: colors.textSecondary }]}>Please sign in to manage your identity verification status.</Text>
-              <TouchableOpacity activeOpacity={1} onPress={() => router.replace('/')} style={[styles.actionButton, { backgroundColor: colors.primary }]}>
-                <Text style={styles.actionButtonText}>Go to Sign In</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
+          <GuestSignInGate message="Sign in to manage your identity verification status." />
+          <Navbar />
         </View>
       </View>
     );
@@ -388,12 +386,12 @@ export default function IdentityVerificationScreen() {
 
                     <View style={[styles.detailRow, { borderTopColor: borderSoft }]}>
                     <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>ID Expiry Date</Text>
-                    <Text style={[styles.detailValue, { color: colors.text }]}>{formatDate(profile?.id_document_expiry || null)}</Text>
+                    <Text style={[styles.detailValue, { color: colors.text }]}>{identityExpiryLabel(profile)}</Text>
                   </View>
 
                     <View style={[styles.detailRow, { borderTopColor: borderSoft }]}>
                     <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>Last Verified</Text>
-                    <Text style={[styles.detailValue, { color: colors.text }]}>{formatDate(profile?.id_verified_at || null)}</Text>
+                    <Text style={[styles.detailValue, { color: colors.text }]}>{lastVerifiedLabel(profile)}</Text>
                   </View>
 
                   <Text style={[styles.hintText, { color: colors.textSecondary }]}> 

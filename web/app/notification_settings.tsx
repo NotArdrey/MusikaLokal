@@ -1,12 +1,15 @@
 import React, { useState } from 'react';
 import { ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 import { supabase } from '../lib/supabase';
+import GuestSignInGate from '../src/components/GuestSignInGate';
 import Header from '../src/components/header';
 import Navbar from '../src/components/navbar';
+import { useAuth } from '../src/context/AuthContext';
 import { useTheme } from '../src/context/ThemeContext';
 
 export default function NotificationSettingsScreen() {
   const { colors, isDark } = useTheme();
+  const { isGuest } = useAuth();
   const [loading, setLoading] = useState(true);
   const [userId, setUserId] = useState<string | null>(null);
   const [bookingConfirmed, setBookingConfirmed] = useState(true);
@@ -17,6 +20,12 @@ export default function NotificationSettingsScreen() {
 
   React.useEffect(() => {
     const loadPreferences = async () => {
+      if (isGuest) {
+        setLoading(false);
+        setUserId(null);
+        return;
+      }
+
       try {
         const {
           data: { user },
@@ -64,7 +73,7 @@ export default function NotificationSettingsScreen() {
     };
 
     loadPreferences();
-  }, []);
+  }, [isGuest]);
 
   const savePreference = async (field: string, value: boolean) => {
     if (!userId) return;
@@ -122,6 +131,8 @@ export default function NotificationSettingsScreen() {
             <Text style={{ color: colors.textSecondary, textAlign: 'center', marginTop: 24 }}>
               Loading notification settings...
             </Text>
+          ) : isGuest || !userId ? (
+            <GuestSignInGate message="Sign in to manage your notification preferences." />
           ) : (
             <>
           {renderToggle(

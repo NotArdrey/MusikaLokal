@@ -21,6 +21,7 @@ import {
 import { supabase } from "../lib/supabase";
 import CustomAlert, { AlertType } from "../src/components/CustomAlert";
 import ReportModal from "../src/components/ReportModal";
+import GuestSignInGate from "../src/components/GuestSignInGate";
 import Header from "../src/components/header";
 import Navbar from "../src/components/navbar";
 import { DEFAULT_AVATAR } from "../src/constants/Images";
@@ -443,6 +444,7 @@ export default function ProfileScreen() {
     returnToHome?: string;
     returnListingId?: string;
   }>();
+  const normalizedParamUserId = Array.isArray(params.userId) ? params.userId[0] : params.userId;
 
   const [profile, setProfile] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -723,9 +725,7 @@ export default function ProfileScreen() {
       setLoading(true);
       // Determine target ID: param OR current user
       // Handle case where userId might be an array
-      const paramUserId = Array.isArray(params.userId)
-        ? params.userId[0]
-        : params.userId;
+      const paramUserId = normalizedParamUserId;
       let resolvedCurrentUserId = currentUserId;
 
       // Resolve the active user ID from auth when context is temporarily unavailable.
@@ -1459,6 +1459,18 @@ export default function ProfileScreen() {
       setUploading(false);
     }
   };
+
+  if (isGuest && !normalizedParamUserId) {
+    return (
+      <View style={[styles.flex1, { backgroundColor: pageBackground }]}>
+        <View style={[styles.pageFrame, isWebDesktop && styles.pageFrameWeb]}>
+          <Header title="Profile" />
+          <GuestSignInGate message="Sign in to view and manage your MusikaLokal profile." />
+          <Navbar />
+        </View>
+      </View>
+    );
+  }
 
   if (loading) {
     return (

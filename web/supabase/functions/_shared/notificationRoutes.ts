@@ -89,6 +89,18 @@ const inferNotificationRoute = (
     meta.notificationType,
     meta.type,
   );
+  const senderEntityType = readString(meta.sender_entity_type, meta.senderEntityType)?.toLowerCase();
+  const requestKind = readString(meta.request_kind, meta.requestKind)?.toLowerCase();
+
+  if (
+    eventType === "listing_connection_request" &&
+    (senderEntityType === "production_team" || requestKind === "invite")
+  ) {
+    return {
+      pathname: "/bookings",
+      routeParams: { tab: "Pending" },
+    };
+  }
 
   const teamId = readString(
     meta.team_id,

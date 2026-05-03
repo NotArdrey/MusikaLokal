@@ -5,9 +5,11 @@ import React, { useCallback, useMemo, useState } from 'react';
 import { ActivityIndicator, Image, KeyboardAvoidingView, Linking, Platform, RefreshControl, Modal as RNModal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { supabase } from '../lib/supabase';
 import CustomAlert, { AlertType } from '../src/components/CustomAlert';
+import GuestSignInGate from '../src/components/GuestSignInGate';
 import Header from '../src/components/header';
 import CustomModal from '../src/components/modal';
 import Navbar from '../src/components/navbar';
+import { useAuth } from '../src/context/AuthContext';
 import { showTopToast } from '../src/context/TopToastContext';
 import { useTheme } from '../src/context/ThemeContext';
 
@@ -55,6 +57,7 @@ const isBookingEarningTransaction = (tx: any) =>
 
 export default function WalletScreen() {
   const { colors, isDark } = useTheme();
+  const { isGuest } = useAuth();
   const params = useLocalSearchParams<{ refresh?: string }>();
   const walletRefreshKey = Array.isArray(params.refresh) ? params.refresh[0] : params.refresh;
 
@@ -845,6 +848,18 @@ export default function WalletScreen() {
     { key: "booking_downpayment", label: "Downpayment" },
     { key: "booking_balance", label: "Balance" },
   ];
+
+  if (isGuest) {
+    return (
+      <View style={[styles.container, { backgroundColor: colors.background }]}>
+        <Header title="Wallet" />
+        <GuestSignInGate message="Sign in to view your wallet and payment history." />
+        <View style={styles.navbarContainer}>
+          <Navbar />
+        </View>
+      </View>
+    );
+  }
 
   return (
     <>

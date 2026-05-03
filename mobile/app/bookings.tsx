@@ -4433,23 +4433,17 @@ export default function BookingsScreen() {
 
                       {item.message ? (
                         <View
-                          style={{
-                            backgroundColor: isDark ? "rgba(255,255,255,0.05)" : "#F9FAFB",
-                            padding: moderateScale(10),
-                            borderRadius: moderateScale(8),
-                            borderLeftWidth: 3,
-                            borderLeftColor: colors.primary,
-                            marginBottom: moderateScale(8),
-                          }}
+                          style={[
+                            styles.cardSnippet,
+                            {
+                              backgroundColor: isDark ? "rgba(255,255,255,0.05)" : "#F9FAFB",
+                              borderLeftColor: colors.primary,
+                            },
+                          ]}
                         >
                           <Text
-                            style={{
-                              fontSize: moderateScale(12),
-                              color: colors.text,
-                              fontFamily: "Poppins_400Regular",
-                              fontStyle: "italic",
-                            }}
-                            numberOfLines={3}
+                            style={[styles.cardSnippetText, { color: colors.text }]}
+                            numberOfLines={1}
                           >
                             {`"${item.message}"`}
                           </Text>
@@ -4457,15 +4451,15 @@ export default function BookingsScreen() {
                       ) : null}
                       {item.request_application_context ? (
                         <Text
-                          style={[styles.cardDetailText, { color: colors.textSecondary, marginBottom: moderateScale(8) }]}
-                          numberOfLines={2}
+                          style={[styles.cardDetailText, { color: colors.textSecondary, marginBottom: moderateScale(6) }]}
+                          numberOfLines={1}
                         >
                           {item.request_context_title || "Application Context"}: {item.request_application_context}
                         </Text>
                       ) : null}
 
                       {(item.request_contract_url || item.request_cv_url || item.request_video_url) && (
-                        <View style={{ flexDirection: "row", gap: scale(8), flexWrap: "wrap", marginBottom: moderateScale(8) }}>
+                        <View style={styles.attachmentChipRow}>
                           {item.request_contract_url ? (
                             <TouchableOpacity
                               activeOpacity={1}
@@ -4473,22 +4467,11 @@ export default function BookingsScreen() {
                                 e.stopPropagation();
                                 openConnectionRequestLink(item.request_contract_url, "Contract");
                               }}
-                              style={{
-                                flex: 1,
-                                flexDirection: "row",
-                                alignItems: "center",
-                                justifyContent: "center",
-                                gap: 4,
-                                borderWidth: 1,
-                                borderColor: colors.border,
-                                backgroundColor: colors.card,
-                                paddingVertical: scale(8),
-                                borderRadius: moderateScale(100),
-                              }}
+                              style={[styles.attachmentChip, { borderColor: colors.border, backgroundColor: colors.card }]}
                             >
                               <Ionicons name="document-attach-outline" size={16} color={colors.textSecondary} />
-                              <Text style={{ color: colors.textSecondary, fontSize: moderateScale(12), fontWeight: "600" }}>
-                                Open Contract
+                              <Text style={[styles.attachmentChipText, { color: colors.textSecondary }]}>
+                                Contract
                               </Text>
                             </TouchableOpacity>
                           ) : null}
@@ -4499,22 +4482,11 @@ export default function BookingsScreen() {
                                 e.stopPropagation();
                                 openConnectionRequestLink(item.request_cv_url, "CV");
                               }}
-                              style={{
-                                flex: 1,
-                                flexDirection: "row",
-                                alignItems: "center",
-                                justifyContent: "center",
-                                gap: 4,
-                                borderWidth: 1,
-                                borderColor: colors.border,
-                                backgroundColor: colors.card,
-                                paddingVertical: scale(8),
-                                borderRadius: moderateScale(100),
-                              }}
+                              style={[styles.attachmentChip, { borderColor: colors.border, backgroundColor: colors.card }]}
                             >
                               <Ionicons name="document-text-outline" size={16} color={colors.textSecondary} />
-                              <Text style={{ color: colors.textSecondary, fontSize: moderateScale(12), fontWeight: "600" }}>
-                                Open CV
+                              <Text style={[styles.attachmentChipText, { color: colors.textSecondary }]}>
+                                CV
                               </Text>
                             </TouchableOpacity>
                           ) : null}
@@ -4525,22 +4497,11 @@ export default function BookingsScreen() {
                                 e.stopPropagation();
                                 openConnectionRequestLink(item.request_video_url, "Video");
                               }}
-                              style={{
-                                flex: 1,
-                                flexDirection: "row",
-                                alignItems: "center",
-                                justifyContent: "center",
-                                gap: 4,
-                                borderWidth: 1,
-                                borderColor: colors.border,
-                                backgroundColor: colors.card,
-                                paddingVertical: scale(8),
-                                borderRadius: moderateScale(100),
-                              }}
+                              style={[styles.attachmentChip, { borderColor: colors.border, backgroundColor: colors.card }]}
                             >
                               <Ionicons name="play-circle-outline" size={16} color={colors.textSecondary} />
-                              <Text style={{ color: colors.textSecondary, fontSize: moderateScale(12), fontWeight: "600" }}>
-                                Open Video
+                              <Text style={[styles.attachmentChipText, { color: colors.textSecondary }]}>
+                                Video
                               </Text>
                             </TouchableOpacity>
                           ) : null}
@@ -4554,7 +4515,7 @@ export default function BookingsScreen() {
                             borderColor: isDark ? colors.border : "#F3F4F6",
                             flexDirection: "column",
                             alignItems: "flex-start",
-                            gap: moderateScale(12),
+                            gap: moderateScale(8),
                           },
                         ]}
                       >
@@ -4610,7 +4571,7 @@ export default function BookingsScreen() {
                           </Text>
                         )}
 
-                        <View style={[styles.actionButtonsContainer, { marginTop: 0, width: "100%", gap: scale(8) }]}>
+                        <View style={[styles.actionButtonsContainer, styles.compactActionRow]}>
                           <TouchableOpacity
                             activeOpacity={1}
                             onPress={(e) => {
@@ -4628,7 +4589,7 @@ export default function BookingsScreen() {
                             <View style={styles.detailsButtonLabelContainer}>
                               <Ionicons name="eye-outline" size={16} color={colors.textSecondary} />
                               <Text style={[styles.outlineButtonText, { color: colors.textSecondary }]}>
-                                View Request
+                                View
                               </Text>
                             </View>
                           </TouchableOpacity>
@@ -4659,7 +4620,6 @@ export default function BookingsScreen() {
                               </View>
                             </TouchableOpacity>
                           ) : null}
-                        </View>
 
                         {canRespond ? (
                           <TouchableOpacity
@@ -4672,7 +4632,7 @@ export default function BookingsScreen() {
                             style={[
                               styles.actionButton,
                               {
-                                width: "100%",
+                                flex: 1,
                                 flexDirection: "row",
                                 gap: scale(6),
                                 backgroundColor: "#10B981",
@@ -4686,6 +4646,7 @@ export default function BookingsScreen() {
                             </Text>
                           </TouchableOpacity>
                         ) : null}
+                        </View>
                       </View>
                     </View>
                   </TouchableOpacity>
@@ -4839,70 +4800,52 @@ export default function BookingsScreen() {
 
                       {/* Content: Pitch & Audition (for venue owners) */}
                       {!isMusicianView && (
-                        <View style={{ marginBottom: 16 }}>
+                        <View style={{ marginBottom: moderateScale(8) }}>
                           {item.note && (
                             <View
-                              style={{
-                                backgroundColor: isDark
-                                  ? "rgba(255,255,255,0.05)"
-                                  : "#F9FAFB",
-                                padding: 10,
-                                borderRadius: 8,
-                                marginBottom: 8,
-                                borderLeftWidth: 3,
-                                borderLeftColor: colors.primary,
-                              }}
+                              style={[
+                                styles.cardSnippet,
+                                {
+                                  backgroundColor: isDark
+                                    ? "rgba(255,255,255,0.05)"
+                                    : "#F9FAFB",
+                                  borderLeftColor: colors.primary,
+                                },
+                              ]}
                             >
                               <Text
-                                style={{
-                                  fontFamily: "Poppins_400Regular",
-                                  fontSize: 13,
-                                  color: colors.text,
-                                  fontStyle: "italic",
-                                }}
-                                numberOfLines={3}
+                                style={[styles.cardSnippetText, { color: colors.text }]}
+                                numberOfLines={1}
                               >
                                 {`"${item.note}"`}
                               </Text>
                             </View>
                           )}
 
-                          <View
-                            style={{
-                              flexDirection: "row",
-                              gap: 8,
-                              flexWrap: "wrap",
-                            }}
-                          >
+                          <View style={styles.attachmentChipRow}>
                             {/* Video Link */}
                             {item.video_url && (
                               <TouchableOpacity activeOpacity={1}
                                 onPress={() => openConnectionRequestLink(item.video_url, "Audition Video")}
-                                style={{
-                                  flexDirection: "row",
-                                  alignItems: "center",
-                                  backgroundColor: isDark
-                                    ? "rgba(59, 130, 246, 0.2)"
-                                    : "#EFF6FF",
-                                  paddingHorizontal: 10,
-                                  paddingVertical: 6,
-                                  borderRadius: 6,
-                                }}
+                                style={[
+                                  styles.attachmentChip,
+                                  {
+                                    borderColor: isDark ? "rgba(59, 130, 246, 0.35)" : "#BFDBFE",
+                                    backgroundColor: isDark
+                                      ? "rgba(59, 130, 246, 0.2)"
+                                      : "#EFF6FF",
+                                  },
+                                ]}
                               >
                                 <Ionicons
                                   name="play-circle"
                                   size={16}
                                   color="#3B82F6"
-                                  style={{ marginRight: 4 }}
                                 />
                                 <Text
-                                  style={{
-                                    fontSize: 12,
-                                    color: "#3B82F6",
-                                    fontFamily: "Poppins_500Medium",
-                                  }}
+                                  style={[styles.attachmentChipText, { color: "#3B82F6" }]}
                                 >
-                                  Watch Audition
+                                  Audition
                                 </Text>
                               </TouchableOpacity>
                             )}
@@ -4911,31 +4854,25 @@ export default function BookingsScreen() {
                             {item.cv_url && (
                               <TouchableOpacity activeOpacity={1}
                                 onPress={() => openConnectionRequestLink(item.cv_url, "CV / Resume")}
-                                style={{
-                                  flexDirection: "row",
-                                  alignItems: "center",
-                                  backgroundColor: isDark
-                                    ? "rgba(139, 92, 246, 0.2)"
-                                    : "#F3E8FF",
-                                  paddingHorizontal: 10,
-                                  paddingVertical: 6,
-                                  borderRadius: 6,
-                                }}
+                                style={[
+                                  styles.attachmentChip,
+                                  {
+                                    borderColor: isDark ? "rgba(139, 92, 246, 0.35)" : "#DDD6FE",
+                                    backgroundColor: isDark
+                                      ? "rgba(139, 92, 246, 0.2)"
+                                      : "#F3E8FF",
+                                  },
+                                ]}
                               >
                                 <Ionicons
                                   name="document-text"
                                   size={16}
                                   color="#8B5CF6"
-                                  style={{ marginRight: 4 }}
                                 />
                                 <Text
-                                  style={{
-                                    fontSize: 12,
-                                    color: "#8B5CF6",
-                                    fontFamily: "Poppins_500Medium",
-                                  }}
+                                  style={[styles.attachmentChipText, { color: "#8B5CF6" }]}
                                 >
-                                  View CV/Resume
+                                  CV
                                 </Text>
                               </TouchableOpacity>
                             )}
@@ -4951,7 +4888,7 @@ export default function BookingsScreen() {
                             borderColor: isDark ? colors.border : "#F3F4F6",
                             flexDirection: "column",
                             alignItems: "flex-start",
-                            gap: moderateScale(12),
+                            gap: moderateScale(8),
                           },
                         ]}
                       >
@@ -5050,56 +4987,43 @@ export default function BookingsScreen() {
                           ) : activeTab === "Applicants" ? (
                             userRole === "venue-owner" ? (
                               <>
-                                {/* View Details Button for Venue Owners */}
-                                <TouchableOpacity activeOpacity={1}
-                                  onPress={() => handleDetailsPress(item)}
-                                  style={{
-                                    flexDirection: "row",
-                                    alignItems: "center",
-                                    justifyContent: "center",
-                                    backgroundColor: isDark
-                                      ? "rgba(99, 102, 241, 0.15)"
-                                      : "#EEF2FF",
-                                    padding: 10,
-                                    borderRadius: 100,
-                                    gap: 6,
-                                  }}
-                                >
-                                  <Ionicons
-                                    name="eye-outline"
-                                    size={16}
-                                    color={colors.primary}
-                                  />
-                                  <Text
-                                    style={{
-                                      color: colors.primary,
-                                      fontFamily: "Poppins_500Medium",
-                                      fontSize: 12,
-                                    }}
+                                <View style={styles.compactActionRow}>
+                                  <TouchableOpacity activeOpacity={1}
+                                    onPress={() => handleDetailsPress(item)}
+                                    style={[
+                                      styles.outlineButton,
+                                      {
+                                        flex: 1,
+                                        borderColor: colors.border,
+                                      },
+                                    ]}
                                   >
-                                    View Full Details
-                                  </Text>
-                                </TouchableOpacity>
-                                {/* Decline / Accept Row */}
-                                <View style={{ flexDirection: "row", gap: 8 }}>
+                                    <View style={styles.detailsButtonLabelContainer}>
+                                      <Ionicons
+                                        name="eye-outline"
+                                        size={16}
+                                        color={colors.textSecondary}
+                                      />
+                                      <Text style={[styles.outlineButtonText, { color: colors.textSecondary }]}>
+                                        View
+                                      </Text>
+                                    </View>
+                                  </TouchableOpacity>
                                   <TouchableOpacity activeOpacity={1}
                                     onPress={() => handleDeclineBooking(item)}
-                                    style={{
-                                      flex: 1,
-                                      backgroundColor: isDark
-                                        ? "rgba(239, 68, 68, 0.2)"
-                                        : "#FEF2F2",
-                                      padding: 10,
-                                      borderRadius: 100,
-                                      alignItems: "center",
-                                    }}
+                                    style={[
+                                      styles.outlineButton,
+                                      {
+                                        flex: 1,
+                                        borderColor: "#EF4444",
+                                        backgroundColor: isDark
+                                          ? "rgba(239, 68, 68, 0.2)"
+                                          : "#FEF2F2",
+                                      },
+                                    ]}
                                   >
                                     <Text
-                                      style={{
-                                        color: "#EF4444",
-                                        fontFamily: "Poppins_600SemiBold",
-                                        fontSize: 12,
-                                      }}
+                                      style={[styles.outlineButtonText, { color: "#EF4444", fontFamily: "Poppins_600SemiBold" }]}
                                     >
                                       Decline
                                     </Text>
@@ -5113,17 +5037,14 @@ export default function BookingsScreen() {
                                     style={{
                                       flex: 1,
                                       backgroundColor: "#10B981",
-                                      padding: 10,
                                       borderRadius: 100,
                                       alignItems: "center",
+                                      justifyContent: "center",
+                                      paddingVertical: moderateScale(8),
                                     }}
                                   >
                                     <Text
-                                      style={{
-                                        color: "white",
-                                        fontFamily: "Poppins_600SemiBold",
-                                        fontSize: 12,
-                                      }}
+                                      style={[styles.actionButtonText, { color: "white" }]}
                                     >
                                       Accept
                                     </Text>
@@ -5193,54 +5114,43 @@ export default function BookingsScreen() {
                             )
                           ) : activeTab === "Pending" && isMusicianView && isLeaderConfirmation ? (
                             <>
-                              <TouchableOpacity activeOpacity={1}
-                                onPress={() => handleDetailsPress(item)}
-                                style={{
-                                  flexDirection: "row",
-                                  alignItems: "center",
-                                  justifyContent: "center",
-                                  backgroundColor: isDark
-                                    ? "rgba(99, 102, 241, 0.15)"
-                                    : "#EEF2FF",
-                                  padding: 10,
-                                  borderRadius: 100,
-                                  gap: 6,
-                                }}
-                              >
-                                <Ionicons
-                                  name="eye-outline"
-                                  size={16}
-                                  color={colors.primary}
-                                />
-                                <Text
-                                  style={{
-                                    color: colors.primary,
-                                    fontFamily: "Poppins_500Medium",
-                                    fontSize: 12,
-                                  }}
+                              <View style={styles.compactActionRow}>
+                                <TouchableOpacity activeOpacity={1}
+                                  onPress={() => handleDetailsPress(item)}
+                                  style={[
+                                    styles.outlineButton,
+                                    {
+                                      flex: 1,
+                                      borderColor: colors.border,
+                                    },
+                                  ]}
                                 >
-                                  View Full Details
-                                </Text>
-                              </TouchableOpacity>
-                              <View style={{ flexDirection: "row", gap: 8 }}>
+                                  <View style={styles.detailsButtonLabelContainer}>
+                                    <Ionicons
+                                      name="eye-outline"
+                                      size={16}
+                                      color={colors.textSecondary}
+                                    />
+                                    <Text style={[styles.outlineButtonText, { color: colors.textSecondary }]}>
+                                      View
+                                    </Text>
+                                  </View>
+                                </TouchableOpacity>
                                 <TouchableOpacity activeOpacity={1}
                                   onPress={() => handleDeclineBooking(item)}
-                                  style={{
-                                    flex: 1,
-                                    backgroundColor: isDark
-                                      ? "rgba(239, 68, 68, 0.2)"
-                                      : "#FEF2F2",
-                                    padding: 10,
-                                    borderRadius: 100,
-                                    alignItems: "center",
-                                  }}
+                                  style={[
+                                    styles.outlineButton,
+                                    {
+                                      flex: 1,
+                                      borderColor: "#EF4444",
+                                      backgroundColor: isDark
+                                        ? "rgba(239, 68, 68, 0.2)"
+                                        : "#FEF2F2",
+                                    },
+                                  ]}
                                 >
                                   <Text
-                                    style={{
-                                      color: "#EF4444",
-                                      fontFamily: "Poppins_600SemiBold",
-                                      fontSize: 12,
-                                    }}
+                                    style={[styles.outlineButtonText, { color: "#EF4444", fontFamily: "Poppins_600SemiBold" }]}
                                   >
                                     Reject
                                   </Text>
@@ -5254,17 +5164,14 @@ export default function BookingsScreen() {
                                   style={{
                                     flex: 1,
                                     backgroundColor: "#10B981",
-                                    padding: 10,
                                     borderRadius: 100,
                                     alignItems: "center",
+                                    justifyContent: "center",
+                                    paddingVertical: moderateScale(8),
                                   }}
                                 >
                                   <Text
-                                    style={{
-                                      color: "white",
-                                      fontFamily: "Poppins_600SemiBold",
-                                      fontSize: 12,
-                                    }}
+                                    style={[styles.actionButtonText, { color: "white" }]}
                                   >
                                     Approve
                                   </Text>
@@ -5922,7 +5829,7 @@ export default function BookingsScreen() {
                         {
                           flexDirection: "column",
                           alignItems: "flex-start",
-                          gap: moderateScale(12),
+                          gap: moderateScale(8),
                         },
                       ]}
                     >
@@ -6265,12 +6172,10 @@ export default function BookingsScreen() {
                           userRole === "musician" ? (
                           <View
                             style={{
-                              gap: scale(6),
                               flex: 1,
                             }}
                           >
-                            {/* Row 1  -  Details + Pay Now (hidden when fully paid & awaiting confirmation) */}
-                            <View style={{ flexDirection: "row", gap: scale(8) }}>
+                            <View style={styles.compactActionRow}>
                               {/* Details Button */}
                               <TouchableOpacity activeOpacity={1}
                                 onPress={() => handleDetailsPress(item)}
@@ -6303,7 +6208,7 @@ export default function BookingsScreen() {
                                     styles.actionButton,
                                     {
                                       backgroundColor: "#16A34A",
-                                      flex: 2,
+                                      flex: 1,
                                       justifyContent: "center",
                                       alignItems: "center",
                                       flexDirection: "row",
@@ -6318,44 +6223,42 @@ export default function BookingsScreen() {
                                       { color: "white" },
                                     ]}
                                   >
-                                    {canPayRemainingBalance(item)
-                                      ? "Pay Balance"
-                                      : "Pay Now"}
+                                    Pay
                                   </Text>
                                 </TouchableOpacity>
                               )}
-                            </View>
 
-                            <TouchableOpacity activeOpacity={1}
-                              onPress={() => {
-                                setSelectedItem(item);
-                                setModalMode("cancel");
-                                setCancellationReason("");
-                                setModalVisible(true);
-                              }}
-                              style={[
-                                styles.cancelButton,
-                                {
-                                  backgroundColor: isDark
-                                    ? "rgba(127, 29, 29, 0.2)"
-                                    : "#FEF2F2",
-                                  width: "100%",
-                                  alignItems: "center",
-                                  borderRadius: 100,
-                                },
-                              ]}
-                            >
-                              <Text
+                              <TouchableOpacity activeOpacity={1}
+                                onPress={() => {
+                                  setSelectedItem(item);
+                                  setModalMode("cancel");
+                                  setCancellationReason("");
+                                  setModalVisible(true);
+                                }}
                                 style={[
-                                  styles.cancelButtonText,
-                                  isDark
-                                    ? { color: "#F87171" }
-                                    : { color: "#DC2626" },
+                                  styles.cancelButton,
+                                  {
+                                    backgroundColor: isDark
+                                      ? "rgba(127, 29, 29, 0.2)"
+                                      : "#FEF2F2",
+                                    flex: 1,
+                                    alignItems: "center",
+                                    borderRadius: 100,
+                                  },
                                 ]}
                               >
-                                Cancel Booking
-                              </Text>
-                            </TouchableOpacity>
+                                <Text
+                                  style={[
+                                    styles.cancelButtonText,
+                                    isDark
+                                      ? { color: "#F87171" }
+                                      : { color: "#DC2626" },
+                                  ]}
+                                >
+                                  Cancel
+                                </Text>
+                              </TouchableOpacity>
+                            </View>
                           </View>
                         ) : userRole === "musician" &&
                           viewMode === "applications" &&
@@ -7444,8 +7347,8 @@ const styles = StyleSheet.create({
     opacity: 0.7,
   },
   cardContainer: {
-    marginBottom: SCREEN_HEIGHT < 700 ? moderateScale(10) : moderateScale(14),
-    borderRadius: moderateScale(14),
+    marginBottom: SCREEN_HEIGHT < 700 ? moderateScale(8) : moderateScale(12),
+    borderRadius: moderateScale(12),
     borderWidth: 1,
     overflow: "hidden",
     backgroundColor: "#FFFFFF",
@@ -7458,9 +7361,9 @@ const styles = StyleSheet.create({
   },
   cardImage: {
     width: "100%",
-    height: SCREEN_HEIGHT < 700 ? verticalScale(100) : verticalScale(122),
-    borderTopLeftRadius: moderateScale(14),
-    borderTopRightRadius: moderateScale(14),
+    height: SCREEN_HEIGHT < 700 ? verticalScale(88) : verticalScale(104),
+    borderTopLeftRadius: moderateScale(12),
+    borderTopRightRadius: moderateScale(12),
   },
   typeBadge: {
     position: "absolute",
@@ -7542,7 +7445,7 @@ const styles = StyleSheet.create({
     textTransform: "uppercase",
   },
   cardContent: {
-    padding: SCREEN_HEIGHT < 700 ? moderateScale(10) : moderateScale(14),
+    padding: SCREEN_HEIGHT < 700 ? moderateScale(10) : moderateScale(12),
   },
   cardHeader: {
     flexDirection: "row",
@@ -7567,8 +7470,8 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    marginTop: moderateScale(6),
-    paddingTop: moderateScale(10),
+    marginTop: moderateScale(4),
+    paddingTop: moderateScale(8),
     borderTopWidth: 1,
   },
   statusContainer: {
@@ -7645,9 +7548,16 @@ const styles = StyleSheet.create({
   },
   actionButtonsContainer: {
     flexDirection: "row",
-    marginTop: moderateScale(12),
+    marginTop: moderateScale(8),
     width: "100%",
     justifyContent: "flex-end",
+  },
+  compactActionRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: scale(8),
+    marginTop: 0,
+    width: "100%",
   },
   messageIconButton: {
     width: moderateScale(34),
@@ -7725,8 +7635,8 @@ const styles = StyleSheet.create({
   },
 
   actionButton: {
-    paddingHorizontal: scale(16),
-    paddingVertical: moderateScale(10),
+    paddingHorizontal: scale(12),
+    paddingVertical: moderateScale(8),
     borderRadius: moderateScale(100),
     alignItems: "center",
     justifyContent: "center",
@@ -7737,8 +7647,8 @@ const styles = StyleSheet.create({
     textAlign: "center",
   },
   outlineButton: {
-    paddingHorizontal: scale(16),
-    paddingVertical: moderateScale(10),
+    paddingHorizontal: scale(12),
+    paddingVertical: moderateScale(8),
     borderRadius: moderateScale(100),
     borderWidth: 1.5,
     alignItems: "center",
@@ -7783,8 +7693,8 @@ const styles = StyleSheet.create({
     gap: scale(8),
   },
   cancelButton: {
-    paddingHorizontal: scale(16),
-    paddingVertical: moderateScale(10),
+    paddingHorizontal: scale(12),
+    paddingVertical: moderateScale(8),
     borderRadius: moderateScale(100),
     alignItems: "center",
     justifyContent: "center",
@@ -7919,7 +7829,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     minHeight: moderateScale(15),
-    marginTop: moderateScale(5),
+    marginTop: moderateScale(4),
     gap: scale(5),
   },
   cardDetailText: {
@@ -7927,6 +7837,40 @@ const styles = StyleSheet.create({
     lineHeight: moderateScale(15),
     fontFamily: "Poppins_400Regular",
     flex: 1,
+  },
+  cardSnippet: {
+    paddingHorizontal: scale(10),
+    paddingVertical: moderateScale(7),
+    borderRadius: moderateScale(8),
+    borderLeftWidth: 3,
+    marginBottom: moderateScale(6),
+  },
+  cardSnippetText: {
+    fontSize: moderateScale(11),
+    lineHeight: moderateScale(15),
+    fontFamily: "Poppins_400Regular",
+    fontStyle: "italic",
+  },
+  attachmentChipRow: {
+    flexDirection: "row",
+    gap: scale(6),
+    flexWrap: "wrap",
+    marginBottom: moderateScale(6),
+  },
+  attachmentChip: {
+    minHeight: moderateScale(30),
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: scale(4),
+    borderWidth: 1,
+    paddingHorizontal: scale(10),
+    paddingVertical: moderateScale(6),
+    borderRadius: moderateScale(100),
+  },
+  attachmentChipText: {
+    fontSize: moderateScale(11),
+    fontFamily: "Poppins_600SemiBold",
   },
 });
 

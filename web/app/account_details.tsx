@@ -3,13 +3,16 @@ import { router } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { supabase } from '../lib/supabase';
+import GuestSignInGate from '../src/components/GuestSignInGate';
 import Header from '../src/components/header';
 import Modal from '../src/components/modal';
 import Navbar from '../src/components/navbar';
+import { useAuth } from '../src/context/AuthContext';
 import { useTheme } from '../src/context/ThemeContext';
 
 export default function AccountDetailsScreen() {
   const { colors, isDark } = useTheme();
+  const { isGuest } = useAuth();
   const [modalVisible, setModalVisible] = useState(false);
   const [profile, setProfile] = useState<any>(null);
   const [userEmail, setUserEmail] = useState<string | null>(null);
@@ -101,6 +104,18 @@ export default function AccountDetailsScreen() {
       {onPress && showArrow && <Ionicons name="chevron-forward" size={20} color={colors.textSecondary} />}
     </TouchableOpacity>
   );
+
+  if (isGuest) {
+    return (
+      <View style={[styles.container, { backgroundColor: colors.background }]}>
+        <Header title="Account Details" />
+        <GuestSignInGate message="Sign in to view and manage your account details." />
+        <View style={styles.navbarContainer}>
+          <Navbar />
+        </View>
+      </View>
+    );
+  }
 
   if (loading) {
     return (

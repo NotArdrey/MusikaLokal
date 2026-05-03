@@ -14,6 +14,7 @@ import {
 } from 'react-native';
 import { supabase } from '../lib/supabase';
 import CustomAlert, { AlertType } from '../src/components/CustomAlert';
+import GuestSignInGate from '../src/components/GuestSignInGate';
 import Header from '../src/components/header';
 import Navbar from '../src/components/navbar';
 import { useBottomBarClearance } from '../src/hooks/useBottomBarClearance';
@@ -27,14 +28,125 @@ import {
     resolveNotificationNavigationTarget,
 } from '../src/utils/notificationNavigation';
 
+const DEFAULT_NOTIFICATION_IMAGE = 'https://images.unsplash.com/photo-1598488035139-bdbb2231ce04?w=100&h=100&fit=crop';
+const KNOWN_IMAGE_BUCKETS = ['listings', 'avatars', 'profile-images', 'group-images', 'studio-images', 'gig-images', 'documents', 'portfolio', 'images', 'public-assets'];
+const DATE_ONLY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+const ISO_TIMESTAMP_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d{1,6})?)?(Z|[+-]\d{2}:?\d{2})?$/i;
+const IMAGE_OBJECT_FIELDS = [
+    'image',
+    'image_url',
+    'avatar_url',
+    'logo_url',
+    'cover_image_url',
+    'primary_image',
+    'public_url',
+    'publicUrl',
+    'url',
+    'storage_path',
+    'storagePath',
+    'media_url',
+    'mediaUrl',
+];
+
+const getSupabaseBaseUrl = () => {
+    const envBase = (process.env.EXPO_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || '').trim();
+    return envBase.endsWith('/') ? envBase.slice(0, -1) : envBase;
+};
+
+const normalizeNotificationImageUrl = (value: string) => {
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+
+    const lower = trimmed.toLowerCase();
+    if (lower === 'null' || lower === 'undefined' || lower === 'none') return null;
+    if (DATE_ONLY_PATTERN.test(trimmed) || ISO_TIMESTAMP_PATTERN.test(trimmed)) return null;
+
+    if (trimmed.startsWith('/storage/v1/') || trimmed.startsWith('storage/v1/')) {
+        const base = getSupabaseBaseUrl();
+        const normalizedPath = trimmed.startsWith('/') ? trimmed : `/${trimmed}`;
+        return base ? `${base}${normalizedPath}` : normalizedPath;
+    }
+
+    if (trimmed.includes('/storage/v1/object/avatars/')) {
+        return trimmed.replace('/storage/v1/object/avatars/', '/storage/v1/object/public/avatars/');
+    }
+
+    if (trimmed.includes('/storage/v1/object/public/') || trimmed.includes('/storage/v1/render/image/public/')) {
+        return trimmed;
+    }
+
+    if (/^(https?:\/\/|data:|file:\/\/|content:\/\/|blob:|asset:)/i.test(trimmed)) {
+        return trimmed;
+    }
+
+    const normalized = trimmed.replace(/^\/+/, '');
+    const directParts = normalized.split('/');
+    const hasFileLikeSuffix = /\.[a-z0-9]{2,5}(\?|#|$)/i.test(normalized);
+
+    if (!hasFileLikeSuffix && directParts.length < 2) {
+        return null;
+    }
+
+    if (directParts.length > 1) {
+        const directBucket = directParts[0];
+        const directPath = directParts.slice(1).join('/');
+
+        if (KNOWN_IMAGE_BUCKETS.includes(directBucket) || hasFileLikeSuffix) {
+            const { data } = supabase.storage.from(directBucket).getPublicUrl(directPath);
+            if (data?.publicUrl) return data.publicUrl;
+        }
+    }
+
+    for (const bucket of KNOWN_IMAGE_BUCKETS) {
+        const { data } = supabase.storage.from(bucket).getPublicUrl(normalized);
+        if (data?.publicUrl) return data.publicUrl;
+    }
+
+    return null;
+};
+
+const collectNotificationImageCandidates = (raw: unknown, candidates: string[] = []) => {
+    if (!raw) return candidates;
+
+    if (Array.isArray(raw)) {
+        raw.forEach((entry) => collectNotificationImageCandidates(entry, candidates));
+        return candidates;
+    }
+
+    if (typeof raw === 'object') {
+        const source = raw as Record<string, unknown>;
+        IMAGE_OBJECT_FIELDS.forEach((field) => collectNotificationImageCandidates(source[field], candidates));
+        return candidates;
+    }
+
+    if (typeof raw !== 'string') return candidates;
+
+    const trimmed = raw.trim();
+    if (!trimmed) return candidates;
+
+    if ((trimmed.startsWith('[') && trimmed.endsWith(']')) || (trimmed.startsWith('{') && trimmed.endsWith('}'))) {
+        try {
+            collectNotificationImageCandidates(JSON.parse(trimmed), candidates);
+            return candidates;
+        } catch (_) {
+            // Fall through and treat it as a plain URL/path candidate.
+        }
+    }
+
+    const normalized = normalizeNotificationImageUrl(trimmed);
+    if (normalized && !candidates.includes(normalized)) {
+        candidates.push(normalized);
+    }
+
+    return candidates;
+};
+
 
 export default function NotificationsScreen() {
     const { colors, isDark } = useTheme();
-    const { userId } = useAuth();
+    const { userId, isGuest } = useAuth();
     const queryClient = useQueryClient();
     const { contentBottomPadding } = useBottomBarClearance(24);
-    const DEFAULT_NOTIFICATION_IMAGE = 'https://images.unsplash.com/photo-1598488035139-bdbb2231ce04?w=100&h=100&fit=crop';
-    const KNOWN_IMAGE_BUCKETS = ['avatars', 'profile-images', 'group-images', 'studio-images', 'gig-images', 'documents'];
     const [notifications, setNotifications] = useState<any[]>([]);
     const [refreshing, setRefreshing] = useState(false);
     const [processingTransferId, setProcessingTransferId] = useState<string | null>(null);
@@ -83,67 +195,36 @@ export default function NotificationsScreen() {
         setNotifications(queriedNotifications);
     }, [queriedNotifications]);
 
-    const resolveNotificationImage = useCallback((item: any) => {
+    const resolveNotificationImages = useCallback((item: any) => {
         const rawCandidates = [
             item?.image,
+            item?.image_url,
+            item?.avatar_url,
+            item?.logo_url,
+            item?.cover_image_url,
+            item?.primary_image,
             item?.meta?.image,
+            item?.meta?.images,
+            item?.meta?.image_url,
             item?.meta?.avatar_url,
+            item?.meta?.logo_url,
+            item?.meta?.cover_image_url,
+            item?.meta?.primary_image,
+            item?.meta?.sender_image,
+            item?.meta?.sender_avatar_url,
+            item?.meta?.actor_avatar_url,
+            item?.meta?.team_logo_url,
+            item?.meta?.production_team_logo_url,
             item?.meta?.studio_image,
+            item?.meta?.studio_images,
             item?.meta?.gig_image,
+            item?.meta?.gig_images,
             item?.meta?.group_image,
+            item?.meta?.group_images,
         ];
 
-        const candidates: string[] = [];
-
-        for (const raw of rawCandidates) {
-            if (!raw) continue;
-
-            if (Array.isArray(raw)) {
-                candidates.push(...raw.filter((entry) => typeof entry === 'string'));
-                continue;
-            }
-
-            if (typeof raw !== 'string') continue;
-            const trimmed = raw.trim();
-            if (!trimmed) continue;
-
-            if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
-                try {
-                    const parsed = JSON.parse(trimmed);
-                    if (Array.isArray(parsed)) {
-                        candidates.push(...parsed.filter((entry) => typeof entry === 'string'));
-                        continue;
-                    }
-                } catch (_) {
-                    // keep original candidate
-                }
-            }
-
-            candidates.push(trimmed);
-        }
-
-        for (const candidate of candidates) {
-            if (/^(https?:\/\/|data:|file:\/\/)/i.test(candidate)) {
-                return candidate;
-            }
-
-            const normalized = candidate.replace(/^\/+/, '');
-            const directParts = normalized.split('/');
-
-            if (directParts.length > 1) {
-                const directBucket = directParts[0];
-                const directPath = directParts.slice(1).join('/');
-                const { data } = supabase.storage.from(directBucket).getPublicUrl(directPath);
-                if (data?.publicUrl) return data.publicUrl;
-            }
-
-            for (const bucket of KNOWN_IMAGE_BUCKETS) {
-                const { data } = supabase.storage.from(bucket).getPublicUrl(normalized);
-                if (data?.publicUrl) return data.publicUrl;
-            }
-        }
-
-        return DEFAULT_NOTIFICATION_IMAGE;
+        const candidates = rawCandidates.flatMap((raw) => collectNotificationImageCandidates(raw, []));
+        return [...candidates, DEFAULT_NOTIFICATION_IMAGE].filter((candidate, index, all) => all.indexOf(candidate) === index);
     }, []);
 
     const onRefresh = React.useCallback(async () => {
@@ -484,12 +565,14 @@ export default function NotificationsScreen() {
     const NotificationItem = ({ item }: { item: any }) => {
         const isTransfer = isLeadershipTransfer(item);
         const isRead = item.read;
-        const resolvedImage = useMemo(() => resolveNotificationImage(item), [item, resolveNotificationImage]);
-        const [imageFailed, setImageFailed] = useState(false);
+        const imageCandidates = useMemo(() => resolveNotificationImages(item), [item, resolveNotificationImages]);
+        const [imageCandidateIndex, setImageCandidateIndex] = useState(0);
 
         useEffect(() => {
-            setImageFailed(false);
-        }, [resolvedImage]);
+            setImageCandidateIndex(0);
+        }, [imageCandidates]);
+
+        const resolvedImage = imageCandidates[imageCandidateIndex] || DEFAULT_NOTIFICATION_IMAGE;
 
         return (
             <TouchableOpacity activeOpacity={1}
@@ -500,6 +583,7 @@ export default function NotificationsScreen() {
                         borderLeftWidth: isRead ? 0 : 4,
                         borderLeftColor: colors.primary,
                         opacity: isRead ? 0.7 : 1,
+                        paddingLeft: isRead ? 20 : 16,
                     }
                 ]}
                 onPress={() => {
@@ -512,28 +596,16 @@ export default function NotificationsScreen() {
                     <View style={styles.leftContent}>
                         <View style={[styles.avatarContainer, { borderColor: colors.border }]}>
                             <Image
-                                source={{ uri: imageFailed ? DEFAULT_NOTIFICATION_IMAGE : resolvedImage }}
+                                source={{ uri: resolvedImage }}
                                 style={styles.avatarImage}
                                 resizeMode="cover"
-                                onError={() => setImageFailed(true)}
+                                onError={() => {
+                                    setImageCandidateIndex((currentIndex) => {
+                                        const nextIndex = currentIndex + 1;
+                                        return nextIndex < imageCandidates.length ? nextIndex : currentIndex;
+                                    });
+                                }}
                             />
-                            {/* Icon Badge */}
-                            <View style={[styles.iconBadge, {
-                                backgroundColor: item.type === 'success' ? '#10B981' :
-                                    item.type === 'warning' ? '#F59E0B' :
-                                        item.type === 'error' ? '#EF4444' : '#3B82F6',
-                                borderColor: colors.card
-                            }]}>
-                                <Ionicons
-                                    name={
-                                        item.type === 'success' ? "checkmark" :
-                                            item.type === 'warning' ? "alert" :
-                                                item.type === 'error' ? "warning" : "information"
-                                    }
-                                    size={8}
-                                    color="white"
-                                />
-                            </View>
                         </View>
                     </View>
 
@@ -593,6 +665,18 @@ export default function NotificationsScreen() {
             </TouchableOpacity>
         );
     };
+
+    if (isGuest) {
+        return (
+            <View style={[styles.container, { backgroundColor: colors.background }]}>
+                <Header title="Notifications" />
+                <GuestSignInGate message="Sign in to view your notifications." />
+                <View style={styles.navbarContainer}>
+                    <Navbar />
+                </View>
+            </View>
+        );
+    }
 
     return (
         <View style={[styles.container, { backgroundColor: colors.background }]}>
@@ -706,7 +790,7 @@ const styles = StyleSheet.create({
     },
     notificationContent: {
         flexDirection: 'row',
-        alignItems: 'flex-start',
+        alignItems: 'center',
     },
     leftContent: {
         marginRight: 16,
@@ -720,22 +804,12 @@ const styles = StyleSheet.create({
         borderRadius: 22,
         borderWidth: 1,
         position: 'relative',
+        overflow: 'hidden',
     },
     avatarImage: {
         width: '100%',
         height: '100%',
         borderRadius: 22,
-    },
-    iconBadge: {
-        position: 'absolute',
-        bottom: -2,
-        right: -2,
-        width: 16,
-        height: 16,
-        borderRadius: 8,
-        justifyContent: 'center',
-        alignItems: 'center',
-        borderWidth: 1.5,
     },
     headerRow: {
         flexDirection: 'row',

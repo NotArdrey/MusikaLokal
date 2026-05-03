@@ -133,14 +133,21 @@ const replaceStudioInstruments = async (client: any, studioId: string, instrumen
     const payload = (instruments || [])
         .map((item) => {
             if (item && typeof item === 'object') {
+                const quantity = Number(item.quantity)
                 return {
                     instrument_name: String(item.name ?? item.instrument ?? '').trim(),
                     image_url: item.image ?? item.image_url ?? null,
+                    quantity: Number.isFinite(quantity) && quantity > 0 ? Math.trunc(quantity) : null,
+                    description: typeof item.description === 'string' && item.description.trim().length > 0
+                        ? item.description.trim()
+                        : null,
                 }
             }
             return {
                 instrument_name: String(item ?? '').trim(),
                 image_url: null,
+                quantity: null,
+                description: null,
             }
         })
         .filter((item) => item.instrument_name.length > 0)
@@ -148,6 +155,8 @@ const replaceStudioInstruments = async (client: any, studioId: string, instrumen
             studio_id: studioId,
             instrument_name: item.instrument_name,
             image_url: item.image_url,
+            quantity: item.quantity,
+            description: item.description,
         }))
 
     if (payload.length > 0) {

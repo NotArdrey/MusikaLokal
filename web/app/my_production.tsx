@@ -23,6 +23,14 @@ type TeamRecord = {
   created_at: string;
 };
 
+const normalizeDeleteConfirmation = (value: string) =>
+  String(value || '')
+    .normalize('NFKC')
+    .replace(/[\u200B-\u200D\uFEFF]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+
 export default function MyProductionScreen() {
   const { colors } = useTheme();
   const { contentBottomPadding } = useBottomBarClearance(24);
@@ -113,7 +121,9 @@ export default function MyProductionScreen() {
     setModalVisible(true);
   };
 
-  const isDeleteConfirmed = deleteConfirmationText.trim() === selectedTeamName.trim();
+  const isDeleteConfirmed =
+    normalizeDeleteConfirmation(deleteConfirmationText) ===
+    normalizeDeleteConfirmation(selectedTeamName);
 
   const handleDelete = async () => {
     if (!selectedTeamId || deleting) return;

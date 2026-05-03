@@ -89,24 +89,9 @@ function Header({ title, transparent, onBackPress, leftComponent, rightComponent
         return '/add_group';
     }, [pathname]);
 
-    const guestMenuItems = useMemo(
-        () => [
-            { label: 'Home', icon: 'home-outline', route: '/home' },
-            { label: 'Profile', icon: 'person-outline', route: '/profile' },
-        ],
-        [],
-    );
-
     const closeGuestMenu = useCallback(() => {
         setGuestMenuVisible(false);
     }, []);
-
-    const navigateGuestMenu = useCallback((route: string) => {
-        closeGuestMenu();
-        if (pathname !== route) {
-            router.navigate(route as any);
-        }
-    }, [closeGuestMenu, pathname]);
 
     const handleGuestSignIn = useCallback(async () => {
         closeGuestMenu();
@@ -413,20 +398,6 @@ function Header({ title, transparent, onBackPress, leftComponent, rightComponent
                         </View>
 
                         <View style={styles.guestMenuList}>
-                            {guestMenuItems.map((item) => (
-                                <TouchableOpacity
-                                    activeOpacity={1}
-                                    key={item.label}
-                                    onPress={() => navigateGuestMenu(item.route)}
-                                    style={[styles.guestMenuItem, { borderBottomColor: isDark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.05)" }]}
-                                >
-                                    <View style={[styles.guestMenuIcon, { backgroundColor: isDark ? "#1E293B" : "#F1F5F9" }]}>
-                                        <Ionicons name={item.icon as any} size={19} color={colors.primary} />
-                                    </View>
-                                    <Text style={[styles.guestMenuLabel, { color: colors.text }]}>{item.label}</Text>
-                                    <Ionicons name="chevron-forward" size={16} color={colors.textSecondary} />
-                                </TouchableOpacity>
-                            ))}
                             <TouchableOpacity
                                 activeOpacity={1}
                                 onPress={handleGuestSignIn}

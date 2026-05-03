@@ -23,6 +23,7 @@ import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 import { ConversationParticipant, Message, useChat, useGroupParticipants } from '../hooks/useChat';
 import CustomAlert, { AlertType } from './CustomAlert';
+import InAppMediaViewer, { isInAppMediaUrl } from './InAppMediaViewer';
 import ReportModal from './ReportModal';
 
 // Available reaction emojis
@@ -77,6 +78,8 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
         title: '',
         message: '',
     });
+    const [mediaViewerUrl, setMediaViewerUrl] = useState<string | null>(null);
+    const [mediaViewerTitle, setMediaViewerTitle] = useState('Media');
     const [showReportModal, setShowReportModal] = useState(false);
     const [showOptions, setShowOptions] = useState(false);
     const [otherUserOnline, setOtherUserOnline] = useState(false);
@@ -224,6 +227,21 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
     const handleLongPress = (messageId: string) => {
         setSelectedMessageId(messageId);
         setShowReactionPicker(true);
+    };
+
+    const openAttachment = (url: string | null | undefined, title = 'Attachment') => {
+        const normalizedUrl = String(url || '').trim();
+        if (!normalizedUrl) return;
+
+        if (isInAppMediaUrl(normalizedUrl)) {
+            setMediaViewerTitle(title);
+            setMediaViewerUrl(normalizedUrl);
+            return;
+        }
+
+        void Linking.openURL(normalizedUrl).catch(() => {
+            showAlert('error', 'Unable to Open', 'We could not open this attachment.');
+        });
     };
 
     const handleSelectReaction = async (emoji: string) => {
@@ -406,17 +424,19 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
                             ]}>
                                 {/* Image message */}
                                 {item.message_type === 'image' && item.attachment_url && (
-                                    <Image
-                                        source={{ uri: item.attachment_url }}
-                                        style={styles.messageImage}
-                                        resizeMode="cover"
-                                    />
+                                    <Pressable onPress={() => openAttachment(item.attachment_url, 'Image')}>
+                                        <Image
+                                            source={{ uri: item.attachment_url }}
+                                            style={styles.messageImage}
+                                            resizeMode="cover"
+                                        />
+                                    </Pressable>
                                 )}
                                 {/* File message */}
                                 {item.message_type === 'file' && item.attachment_url && (
                                     <TouchableOpacity activeOpacity={1}
                                         style={[styles.fileBubble, { borderColor: isMe ? 'rgba(255,255,255,0.3)' : colors.border }]}
-                                        onPress={() => Linking.openURL(item.attachment_url!)}
+                                        onPress={() => openAttachment(item.attachment_url, item.content.replace('ðŸ“„ ', '') || 'Attachment')}
                                     >
                                         <Ionicons name="document-attach" size={28} color={isMe ? '#FFF' : colors.primary} />
                                         <View style={{ flex: 1, marginLeft: 8 }}>
@@ -845,6 +865,13 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
                 message={alertConfig.message}
                 buttons={alertConfig.buttons}
                 onClose={() => setAlertVisible(false)}
+            />
+
+            <InAppMediaViewer
+                visible={!!mediaViewerUrl}
+                uri={mediaViewerUrl}
+                title={mediaViewerTitle}
+                onClose={() => setMediaViewerUrl(null)}
             />
         </View>
     );

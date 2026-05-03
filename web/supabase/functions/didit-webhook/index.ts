@@ -76,6 +76,49 @@ async function verifySignature(payload: string, signature: string): Promise<bool
     }
 }
 
+function firstNonEmptyString(values: any[]): string | null {
+    for (const value of values) {
+        if (typeof value === 'string' && value.trim().length > 0) {
+            return value.trim();
+        }
+    }
+    return null;
+}
+
+function normalizeDateOnly(value: any): string | null {
+    const rawValue = typeof value === 'string' ? value.trim() : '';
+    if (!rawValue) return null;
+
+    const isoMatch = rawValue.match(/^(\d{4}-\d{2}-\d{2})/);
+    if (isoMatch) return isoMatch[1];
+
+    return null;
+}
+
+function extractDocumentExpiry(idVerification: any): string | null {
+    const rawExpiry = firstNonEmptyString([
+        idVerification?.expiration_date,
+        idVerification?.expiry_date,
+        idVerification?.date_of_expiry,
+        idVerification?.document_expiration_date,
+        idVerification?.document_expiry,
+        idVerification?.valid_until,
+        idVerification?.expires_at,
+        idVerification?.id_document_expiry,
+        idVerification?.document?.expiration_date,
+        idVerification?.document?.expiry_date,
+        idVerification?.document?.date_of_expiry,
+        idVerification?.document_details?.expiration_date,
+        idVerification?.document_details?.expiry_date,
+        idVerification?.document_details?.date_of_expiry,
+        idVerification?.extra_fields?.expiration_date,
+        idVerification?.extra_fields?.expiry_date,
+        idVerification?.extra_fields?.date_of_expiry,
+    ]);
+
+    return normalizeDateOnly(rawExpiry);
+}
+
 serve(async (req) => {
     console.log('=== DIDIT WEBHOOK v41 TRIGGERED ===');
 
@@ -644,7 +687,7 @@ async function handleApproved(
     const nameParts = [firstName, middleName, lastName, secondSurname].filter(Boolean);
     const fullName = nameParts.length > 0 ? nameParts.join(' ') : '';
 
-    const documentExpiry = idVerification?.expiration_date || null;
+    const documentExpiry = extractDocumentExpiry(idVerification);
 
     console.log('Approving user - extracted data:', {
         userReference,

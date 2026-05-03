@@ -66,6 +66,32 @@ const readNotificationEventType = (
   return undefined;
 };
 
+const isProductionTeamInviteNotification = (
+  notificationType: string | undefined,
+  record: Record<string, unknown>,
+  meta: Record<string, unknown>,
+) => {
+  if (notificationType !== "listing_connection_request") {
+    return false;
+  }
+
+  const senderEntityType = readStringId(
+    meta.sender_entity_type,
+    meta.senderEntityType,
+    record.sender_entity_type,
+    record.senderEntityType,
+  )?.toLowerCase();
+
+  const requestKind = readStringId(
+    meta.request_kind,
+    meta.requestKind,
+    record.request_kind,
+    record.requestKind,
+  )?.toLowerCase();
+
+  return senderEntityType === "production_team" || requestKind === "invite";
+};
+
 export const normalizeNotificationRouteParams = (value: unknown) => {
   if (!isRecord(value)) {
     return undefined;
@@ -115,6 +141,11 @@ export const resolveNotificationNavigationTarget = (
     || normalizeNotificationRouteParams(record.params)
     || normalizeNotificationRouteParams(meta.route_params)
     || normalizeNotificationRouteParams(meta.params);
+  const notificationType = readNotificationEventType(record, meta);
+
+  if (isProductionTeamInviteNotification(notificationType, record, meta)) {
+    return { pathname: "/bookings", params: { tab: "Pending" } };
+  }
 
   if (explicitPath) {
     return explicitParams
@@ -122,7 +153,6 @@ export const resolveNotificationNavigationTarget = (
       : { pathname: explicitPath };
   }
 
-  const notificationType = readNotificationEventType(record, meta);
   if (notificationType === "leadership_transfer") {
     return { pathname: "/notifications" };
   }

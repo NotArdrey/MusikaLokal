@@ -4,6 +4,7 @@ import { ActivityIndicator, View } from 'react-native';
 import { supabase } from '../lib/supabase';
 import ChatScreen from '../src/components/ChatScreen';
 import ConversationsList from '../src/components/ConversationsList';
+import GuestSignInGate from '../src/components/GuestSignInGate';
 import Navbar from '../src/components/navbar';
 import { useAuth } from '../src/context/AuthContext';
 import { useTheme } from '../src/context/ThemeContext';
@@ -11,7 +12,7 @@ import { Conversation, useConversation, useGroupConversation } from '../src/hook
 
 export default function ChatPage() {
     const { colors } = useTheme();
-    const { userId } = useAuth();
+    const { userId, isGuest } = useAuth();
     const params = useLocalSearchParams<{
         recipientId?: string;
         conversationId?: string;
@@ -171,6 +172,15 @@ export default function ChatPage() {
         return (
             <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.background }}>
                 <ActivityIndicator size="large" color={colors.primary} />
+            </View>
+        );
+    }
+
+    if (isGuest || !userId) {
+        return (
+            <View style={{ flex: 1, backgroundColor: colors.background }}>
+                <GuestSignInGate message="Sign in to view your messages." />
+                <Navbar global forceVisible />
             </View>
         );
     }

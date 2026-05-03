@@ -21,6 +21,7 @@ import {
   resolveRecordingRule,
 } from "../utils/recordingRule";
 import CachedImage from "./CachedImage";
+import InAppMediaViewer, { isInAppMediaUrl } from "./InAppMediaViewer";
 
 const debugLog = (..._args: unknown[]) => { };
 
@@ -59,8 +60,27 @@ const BookingDetailsSheet = forwardRef<
   const [loading, setLoading] = useState(false);
   const [studioDetails, setStudioDetails] = useState<any>(null);
   const [dateOverride, setDateOverride] = useState<any>(null);
+  const [mediaViewerUrl, setMediaViewerUrl] = useState<string | null>(null);
+  const [mediaViewerTitle, setMediaViewerTitle] = useState("Media");
 
   const snapPoints = useMemo(() => ["85%"], []);
+
+  const openMediaOrExternal = async (url: string, label: string) => {
+    const normalizedUrl = String(url || "").trim();
+    if (!normalizedUrl) return;
+
+    if (isInAppMediaUrl(normalizedUrl)) {
+      setMediaViewerTitle(label);
+      setMediaViewerUrl(normalizedUrl);
+      return;
+    }
+
+    try {
+      await Linking.openURL(normalizedUrl);
+    } catch {
+      alert(`Could not open ${label}.`);
+    }
+  };
 
   useEffect(() => {
     if (booking?.studio_id) {
@@ -618,7 +638,7 @@ const BookingDetailsSheet = forwardRef<
                         Video / Demo
                       </Text>
                       <TouchableOpacity activeOpacity={1}
-                        onPress={() => Linking.openURL(booking.video_url)}
+                        onPress={() => openMediaOrExternal(booking.video_url, "Video / Demo")}
                       >
                         <Text
                           style={[
@@ -651,7 +671,7 @@ const BookingDetailsSheet = forwardRef<
                         CV / Resume
                       </Text>
                       <TouchableOpacity activeOpacity={1}
-                        onPress={() => Linking.openURL(booking.cv_url)}
+                        onPress={() => openMediaOrExternal(booking.cv_url, "CV / Resume")}
                       >
                         <Text
                           style={[
@@ -1424,10 +1444,16 @@ const BookingDetailsSheet = forwardRef<
               </View>
             </>
           )}
-        </View>
-      </BottomSheetScrollView>
-    </BottomSheetModal>
-  );
+      </View>
+    </BottomSheetScrollView>
+    <InAppMediaViewer
+      visible={!!mediaViewerUrl}
+      uri={mediaViewerUrl}
+      title={mediaViewerTitle}
+      onClose={() => setMediaViewerUrl(null)}
+    />
+  </BottomSheetModal>
+);
 });
 
 BookingDetailsSheet.displayName = "BookingDetailsSheet";

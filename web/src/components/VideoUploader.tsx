@@ -171,7 +171,7 @@ export default function VideoUploader({
       const { data: { session }, error: authError } = await supabase.auth.getSession();
       if (authError || !session) {
         showAlert('warning', 'Authentication Required', 'Please log in to upload videos.');
-        console.error('Auth check failed:', authError?.message || 'No session');
+        debugLog('Auth check failed:', authError?.message || 'No session');
         return;
       }
 

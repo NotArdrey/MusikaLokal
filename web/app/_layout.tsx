@@ -210,9 +210,9 @@ function RootContent() {
   const currentScreen = segmentStrings.length > 0 ? segmentStrings[segmentStrings.length - 1] : "index";
   const isAuthScreen = authScreens.includes(currentScreen);
   const { width } = useWindowDimensions();
-  const showSidebar = Platform.OS === 'web' && width >= 768 && !isAuthScreen && !isGuest;
+  const showSidebar = Platform.OS === 'web' && width >= 768 && !isAuthScreen;
   const isAdminContext = userRole === 'admin' || segmentStrings.includes('admin');
-  const useSidebarLayout = showSidebar && isAdminContext;
+  const useSidebarLayout = showSidebar && (isAdminContext || isGuest);
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background, flexDirection: useSidebarLayout ? 'row' : 'column' }}>

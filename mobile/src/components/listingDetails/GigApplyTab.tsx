@@ -2,6 +2,7 @@ import { Ionicons } from "@expo/vector-icons";
 import React from "react";
 import {
     ActivityIndicator,
+    Modal as RNModal,
     ScrollView,
     StyleSheet,
     Text,
@@ -103,6 +104,7 @@ const GigApplyTab = ({
   const [isSystemTermsAccepted, setIsSystemTermsAccepted] = React.useState(false);
   const [isCustomContractAccepted, setIsCustomContractAccepted] = React.useState(false);
   const [mediaViewerUrl, setMediaViewerUrl] = React.useState<string | null>(null);
+  const [termsVisible, setTermsVisible] = React.useState(false);
   const isGroupApplicationFlow = applicationContext === "group";
   const isProducerFlow = !isGroupApplicationFlow && userRole === "producer";
   const hasCustomContract = !isGroupApplicationFlow && Boolean(group?.contract_url);
@@ -822,21 +824,27 @@ const GigApplyTab = ({
             </TouchableOpacity>
           )}
 
-          <TouchableOpacity activeOpacity={1}
-            onPress={() => setIsSystemTermsAccepted((prev) => !prev)}
-            style={gigApplyStyles.termsRow}
-          >
-            <View style={[gigApplyStyles.checkbox, {
-              borderColor: isSystemTermsAccepted ? colors.primary : colors.border,
-              backgroundColor: isSystemTermsAccepted ? colors.primary : 'transparent',
-            }]}>
+          <View style={gigApplyStyles.termsRow}>
+            <TouchableOpacity
+              activeOpacity={1}
+              onPress={() => setIsSystemTermsAccepted((prev) => !prev)}
+              style={[gigApplyStyles.checkbox, {
+                borderColor: isSystemTermsAccepted ? colors.primary : colors.border,
+                backgroundColor: isSystemTermsAccepted ? colors.primary : 'transparent',
+              }]}
+            >
               {isSystemTermsAccepted && <Text style={gigApplyStyles.checkboxTick}>✓</Text>}
-            </View>
+            </TouchableOpacity>
             <Text style={[gigApplyStyles.termsText, { color: colors.text }]}>
               {"I agree to Musika Lokal's "}
-              <Text style={{ fontFamily: 'Poppins_600SemiBold', color: colors.primary }}>Terms and Conditions</Text>. *
+              <Text
+                onPress={() => setTermsVisible(true)}
+                style={{ fontFamily: 'Poppins_600SemiBold', color: colors.primary, textDecorationLine: 'underline' }}
+              >
+                Terms and Conditions
+              </Text>. *
             </Text>
-          </TouchableOpacity>
+          </View>
         </View>
       )}
 
@@ -902,6 +910,40 @@ const GigApplyTab = ({
         title="Custom Contract"
         onClose={() => setMediaViewerUrl(null)}
       />
+
+      <RNModal
+        animationType="slide"
+        transparent
+        visible={termsVisible}
+        onRequestClose={() => setTermsVisible(false)}
+      >
+        <View style={gigApplyStyles.termsOverlay}>
+          <View style={[gigApplyStyles.termsModal, { backgroundColor: colors.card }]}>
+            <View style={gigApplyStyles.termsModalHeader}>
+              <Text style={[gigApplyStyles.termsModalTitle, { color: colors.text }]}>Terms and Conditions</Text>
+              <TouchableOpacity activeOpacity={1} onPress={() => setTermsVisible(false)}>
+                <Text style={[gigApplyStyles.termsCloseText, { color: colors.primary }]}>Close</Text>
+              </TouchableOpacity>
+            </View>
+            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={gigApplyStyles.termsModalBody}>
+              <Text style={[gigApplyStyles.termsSectionTitle, { color: colors.text }]}>1. Booking and Payments</Text>
+              <Text style={[gigApplyStyles.termsBody, { color: colors.textSecondary }]}>All transactions are processed through the Musika Lokal Wallet. Funds may be held in escrow and released after completion if no dispute is raised.</Text>
+
+              <Text style={[gigApplyStyles.termsSectionTitle, { color: colors.text }]}>2. Cancellations</Text>
+              <Text style={[gigApplyStyles.termsBody, { color: colors.textSecondary }]}>Cancellation rules, refunds, and force majeure exceptions follow the current Musika Lokal policy shown in the full terms page.</Text>
+
+              <Text style={[gigApplyStyles.termsSectionTitle, { color: colors.text }]}>3. User Conduct</Text>
+              <Text style={[gigApplyStyles.termsBody, { color: colors.textSecondary }]}>Users must not bypass platform payments, harass others, submit fraudulent information, or upload content they do not have permission to use.</Text>
+
+              <Text style={[gigApplyStyles.termsSectionTitle, { color: colors.text }]}>4. Liability</Text>
+              <Text style={[gigApplyStyles.termsBody, { color: colors.textSecondary }]}>Musika Lokal acts as a facilitator and is not liable for personal injury, property damage, external payment network failures, or loss of income due to app downtime.</Text>
+
+              <Text style={[gigApplyStyles.termsSectionTitle, { color: colors.text }]}>5. Governing Law</Text>
+              <Text style={[gigApplyStyles.termsBody, { color: colors.textSecondary }]}>These terms are governed by the laws of the Republic of the Philippines.</Text>
+            </ScrollView>
+          </View>
+        </View>
+      </RNModal>
     </View>
   );
 };
@@ -938,6 +980,48 @@ const gigApplyStyles = StyleSheet.create({
     fontSize: 12,
     fontFamily: 'Poppins_500Medium',
     textDecorationLine: 'underline',
+  },
+  termsOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 18,
+  },
+  termsModal: {
+    width: '100%',
+    maxHeight: '82%',
+    borderRadius: 16,
+    paddingHorizontal: 16,
+    paddingTop: 14,
+  },
+  termsModalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  termsModalTitle: {
+    fontSize: 16,
+    fontFamily: 'Poppins_600SemiBold',
+  },
+  termsCloseText: {
+    fontSize: 14,
+    fontFamily: 'Poppins_600SemiBold',
+  },
+  termsModalBody: {
+    paddingBottom: 18,
+  },
+  termsSectionTitle: {
+    fontSize: 14,
+    fontFamily: 'Poppins_600SemiBold',
+    marginTop: 12,
+    marginBottom: 6,
+  },
+  termsBody: {
+    fontSize: 13,
+    lineHeight: 20,
+    fontFamily: 'Poppins_400Regular',
   },
 });
 

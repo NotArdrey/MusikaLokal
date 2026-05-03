@@ -113,7 +113,7 @@ export async function searchProductionInviteTargets({
   }));
 
   const groupTargets = ((groupResponse.data || []) as any[]).map((group) => {
-    const kind = group.group_type === "duo" ? "duo" : "group";
+    const kind: ProductionInviteKind = group.group_type === "duo" ? "duo" : "group";
     return {
       key: `${kind}:${group.id}`,
       id: group.id,
