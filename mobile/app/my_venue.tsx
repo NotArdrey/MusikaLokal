@@ -128,7 +128,6 @@ export default function MyVenueScreen() {
                     .from('gigs')
                     .select('id, organizer_id, name, location, budget, description, event_date, status, created_at, permit_status, permit_rejection_reason, permit_reviewed_at')
                     .eq('organizer_id', userId)
-                    .in('permit_status', ['approved', 'approved_by_admin', 'verified'])
                     .order('created_at', { ascending: false });
 
                 if (baseError) throw baseError;

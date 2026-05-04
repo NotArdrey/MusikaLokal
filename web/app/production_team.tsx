@@ -18,11 +18,13 @@ import CustomAlert, { AlertType } from "../src/components/CustomAlert";
 import Header from "../src/components/header";
 import Modal, { normalizeVisibleInput } from "../src/components/modal";
 import Navbar from "../src/components/navbar";
+import ProductionInviteSection from "../src/components/ProductionInviteSection";
 import Skeleton from "../src/components/Skeleton";
 import SmoothTabTransition from "../src/components/SmoothTabTransition";
 import { useBottomBarClearance } from "../src/hooks/useBottomBarClearance";
 import { useAuth, useRequireAuth } from "../src/context/AuthContext";
 import { useTheme } from "../src/context/ThemeContext";
+import { ProductionInviteTarget, sendProductionTeamInvites } from "../src/utils/productionTeamInvites";
 
 interface Team {
   id: string;
@@ -85,6 +87,10 @@ export default function ProductionTeamScreen() {
   const [memberToFire, setMemberToFire] = useState<TeamMember | null>(null);
   const [fireReason, setFireReason] = useState("");
   const [firingMember, setFiringMember] = useState(false);
+  const [inviteModalVisible, setInviteModalVisible] = useState(false);
+  const [inviteMessage, setInviteMessage] = useState("");
+  const [selectedInviteTargets, setSelectedInviteTargets] = useState<ProductionInviteTarget[]>([]);
+  const [sendingInvites, setSendingInvites] = useState(false);
 
   // Alert
   const [alertVisible, setAlertVisible] = useState(false);
@@ -332,6 +338,9 @@ export default function ProductionTeamScreen() {
     setFireModalVisible(false);
     setMemberToFire(null);
     setFireReason("");
+    setInviteModalVisible(false);
+    setInviteMessage("");
+    setSelectedInviteTargets([]);
   };
 
   const handleRemoveMember = async () => {
@@ -369,6 +378,58 @@ export default function ProductionTeamScreen() {
     }
   };
 
+  const closeInviteMemberModal = () => {
+    if (sendingInvites) return;
+    setInviteModalVisible(false);
+    setInviteMessage("");
+    setSelectedInviteTargets([]);
+  };
+
+  const handleSendMemberInvites = async () => {
+    if (!selectedTeam || sendingInvites) return;
+
+    if (!userId) {
+      showAlert("warning", "Sign In Required", "Sign in again before sending invites.");
+      return;
+    }
+
+    if (selectedInviteTargets.length === 0) {
+      showAlert("warning", "No Talent Selected", "Select at least one musician, duo, or group to invite.");
+      return;
+    }
+
+    setSendingInvites(true);
+    try {
+      const inviteSummary = await sendProductionTeamInvites({
+        currentUserId: userId,
+        teamId: selectedTeam.id,
+        teamName: selectedTeam.name,
+        teamLogoUrl: selectedTeam.logo_url,
+        inviteMessage,
+        inviteTargets: selectedInviteTargets,
+      });
+
+      if (inviteSummary.sentCount === 0 && inviteSummary.failedCount > 0) {
+        throw new Error("No invites were sent. Please try again.");
+      }
+
+      setInviteModalVisible(false);
+      setInviteMessage("");
+      setSelectedInviteTargets([]);
+      showAlert(
+        inviteSummary.failedCount > 0 ? "warning" : "success",
+        inviteSummary.failedCount > 0 ? "Invites Partially Sent" : "Invites Sent",
+        inviteSummary.failedCount > 0
+          ? `${inviteSummary.sentCount} invite(s) sent, ${inviteSummary.failedCount} failed.`
+          : `${inviteSummary.sentCount} invite(s) sent.`,
+      );
+    } catch (e: any) {
+      showAlert("error", "Error", e.message || "Failed to send invites");
+    } finally {
+      setSendingInvites(false);
+    }
+  };
+
   const openTeamDetail = (team: Team) => {
     setActiveTab("About");
     setSelectedTeam(team);
@@ -402,7 +463,7 @@ export default function ProductionTeamScreen() {
 
   // Team detail view
   if (selectedTeam) {
-    const tabs: Array<"About" | "Members" | "Reviews"> = ["About", "Members", "Reviews"];
+    const tabs: ("About" | "Members" | "Reviews")[] = ["About", "Members", "Reviews"];
     const canManage =
       selectedTeam.member_role === "owner" ||
       selectedTeam.member_role === "manager";
@@ -501,6 +562,16 @@ export default function ProductionTeamScreen() {
               <>
                 <View style={styles.sectionHeader}>
                   <Text style={[styles.sectionTitle, { color: colors.text }]}>Members</Text>
+                  {canManage ? (
+                    <TouchableOpacity
+                      activeOpacity={1}
+                      onPress={() => setInviteModalVisible(true)}
+                      style={[styles.inviteBtn, { backgroundColor: colors.primary }]}
+                    >
+                      <Ionicons name="person-add-outline" size={16} color="#FFFFFF" />
+                      <Text style={styles.inviteBtnText}>Invite</Text>
+                    </TouchableOpacity>
+                  ) : null}
                 </View>
 
                 {loadingMembers ? (
@@ -579,6 +650,58 @@ export default function ProductionTeamScreen() {
           loading={firingMember}
           loadingMessage="Removing member and sending notification..."
         />
+
+        {renderSheetModal({
+          visible: inviteModalVisible,
+          onClose: closeInviteMemberModal,
+          title: "Invite Members",
+          subtitle: selectedTeam.name,
+          scrollable: true,
+          children: (
+            <View style={styles.modalContent}>
+              <ProductionInviteSection
+                currentUserId={userId}
+                selectedTargets={selectedInviteTargets}
+                onSelectedTargetsChange={setSelectedInviteTargets}
+                inviteMessage={inviteMessage}
+                onInviteMessageChange={setInviteMessage}
+                disabled={sendingInvites}
+              />
+
+              <TouchableOpacity
+                activeOpacity={1}
+                onPress={handleSendMemberInvites}
+                disabled={sendingInvites || selectedInviteTargets.length === 0}
+                style={[
+                  styles.submitBtn,
+                  {
+                    backgroundColor:
+                      selectedInviteTargets.length > 0 ? colors.primary : colors.border,
+                    opacity: sendingInvites ? 0.6 : 1,
+                  },
+                ]}
+              >
+                {sendingInvites ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <Text
+                    style={[
+                      styles.submitBtnText,
+                      {
+                        color:
+                          selectedInviteTargets.length > 0
+                            ? "#FFFFFF"
+                            : colors.textSecondary,
+                      },
+                    ]}
+                  >
+                    Send Invite{selectedInviteTargets.length === 1 ? "" : "s"}
+                  </Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          ),
+        })}
 
         <CustomAlert
           visible={alertVisible}
@@ -842,6 +965,8 @@ const styles = StyleSheet.create({
   // Members
   sectionHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 12 },
   sectionTitle: { fontFamily: "Poppins_600SemiBold", fontSize: 16 },
+  inviteBtn: { flexDirection: "row", alignItems: "center", gap: 6, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8 },
+  inviteBtnText: { color: "#FFFFFF", fontFamily: "Poppins_600SemiBold", fontSize: 12 },
   memberCard: { borderRadius: 12, borderWidth: 1, padding: 12, marginBottom: 8 },
   memberRow: { flexDirection: "row", alignItems: "center" },
   avatar: { width: 36, height: 36, borderRadius: 18 },

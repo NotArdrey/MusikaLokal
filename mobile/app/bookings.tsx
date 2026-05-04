@@ -3685,6 +3685,10 @@ export default function BookingsScreen() {
       : userRole === "venue-owner" && deferredActiveTab === "Review"
         ? "History"
       : deferredActiveTab;
+  const isHistoryTabView =
+    userRole === "venue-owner"
+      ? renderActiveTab === "Review"
+      : renderActiveTab === "History";
   const bookingTabs = React.useMemo(
     () =>
       userRole === "venue-owner"
@@ -4442,7 +4446,7 @@ export default function BookingsScreen() {
                         </Text>
                       ) : null}
 
-                      {(item.request_contract_url || item.request_cv_url || item.request_video_url) && (
+                      {!isHistoryTabView && (item.request_contract_url || item.request_cv_url || item.request_video_url) && (
                         <View style={styles.attachmentChipRow}>
                           {item.request_contract_url ? (
                             <TouchableOpacity
@@ -4526,7 +4530,7 @@ export default function BookingsScreen() {
                             </Text>
                           </View>
 
-                          {shouldShowMessageForItem(item) && (
+                          {!isHistoryTabView && shouldShowMessageForItem(item) && (
                             <TouchableOpacity
                               activeOpacity={1}
                               onPress={(e) => {
@@ -4552,27 +4556,54 @@ export default function BookingsScreen() {
                           </Text>
                         )}
 
-                        <View style={[styles.actionButtonsContainer, styles.compactActionRow]}>
-                          <TouchableOpacity
-                            activeOpacity={1}
-                            onPress={(e) => {
-                              e.stopPropagation();
-                              handleDetailsPress(item);
-                            }}
-                            style={[
-                              styles.outlineButton,
-                              {
-                                flex: 1,
-                                borderColor: colors.border,
-                              },
-                            ]}
-                          >
-                            <View style={styles.detailsButtonLabelContainer}>
-                              <Text style={[styles.outlineButtonText, { color: colors.textSecondary }]}>
-                                View
-                              </Text>
-                            </View>
-                          </TouchableOpacity>
+                        {!isHistoryTabView && (
+                          <View style={[styles.actionButtonsContainer, styles.compactActionRow]}>
+                            <TouchableOpacity
+                              activeOpacity={1}
+                              onPress={(e) => {
+                                e.stopPropagation();
+                                handleDetailsPress(item);
+                              }}
+                              style={[
+                                styles.outlineButton,
+                                {
+                                  flex: 1,
+                                  borderColor: colors.border,
+                                },
+                              ]}
+                            >
+                              <View style={styles.detailsButtonLabelContainer}>
+                                <Text style={[styles.outlineButtonText, { color: colors.textSecondary }]}>
+                                  View
+                                </Text>
+                              </View>
+                            </TouchableOpacity>
+
+                            {canRespond ? (
+                              <TouchableOpacity
+                                activeOpacity={1}
+                                disabled={isRequestActionPending}
+                                onPress={(e) => {
+                                  e.stopPropagation();
+                                  promptConnectionRequestDecision(item, "declined");
+                                }}
+                                style={[
+                                  styles.outlineButton,
+                                  {
+                                    flex: 1,
+                                    borderColor: "#EF4444",
+                                    backgroundColor: colors.card,
+                                    opacity: isRequestActionPending ? 0.6 : 1,
+                                  },
+                                ]}
+                              >
+                                <View style={styles.detailsButtonLabelContainer}>
+                                  <Text style={[styles.outlineButtonText, { color: "#EF4444", fontFamily: "Poppins_600SemiBold" }]}>
+                                    Decline
+                                  </Text>
+                                </View>
+                              </TouchableOpacity>
+                            ) : null}
 
                           {canRespond ? (
                             <TouchableOpacity
@@ -4580,51 +4611,26 @@ export default function BookingsScreen() {
                               disabled={isRequestActionPending}
                               onPress={(e) => {
                                 e.stopPropagation();
-                                promptConnectionRequestDecision(item, "declined");
+                                promptConnectionRequestDecision(item, "accepted");
                               }}
                               style={[
-                                styles.outlineButton,
+                                styles.actionButton,
                                 {
                                   flex: 1,
-                                  borderColor: "#EF4444",
-                                  backgroundColor: colors.card,
+                                  flexDirection: "row",
+                                  gap: scale(6),
+                                  backgroundColor: "#10B981",
                                   opacity: isRequestActionPending ? 0.6 : 1,
                                 },
                               ]}
                             >
-                              <View style={styles.detailsButtonLabelContainer}>
-                                <Text style={[styles.outlineButtonText, { color: "#EF4444", fontFamily: "Poppins_600SemiBold" }]}>
-                                  Decline
-                                </Text>
-                              </View>
+                              <Text style={[styles.actionButtonText, { color: "#fff" }]}>
+                                Accept
+                              </Text>
                             </TouchableOpacity>
                           ) : null}
-
-                        {canRespond ? (
-                          <TouchableOpacity
-                            activeOpacity={1}
-                            disabled={isRequestActionPending}
-                            onPress={(e) => {
-                              e.stopPropagation();
-                              promptConnectionRequestDecision(item, "accepted");
-                            }}
-                            style={[
-                              styles.actionButton,
-                              {
-                                flex: 1,
-                                flexDirection: "row",
-                                gap: scale(6),
-                                backgroundColor: "#10B981",
-                                opacity: isRequestActionPending ? 0.6 : 1,
-                              },
-                            ]}
-                          >
-                            <Text style={[styles.actionButtonText, { color: "#fff" }]}>
-                              Accept
-                            </Text>
-                          </TouchableOpacity>
-                        ) : null}
-                        </View>
+                          </View>
+                        )}
                       </View>
                     </View>
                   </TouchableOpacity>
@@ -4819,7 +4825,8 @@ export default function BookingsScreen() {
                             </View>
                           )}
 
-                          <View style={styles.attachmentChipRow}>
+                          {!isHistoryTabView && (item.video_url || item.cv_url) ? (
+                            <View style={styles.attachmentChipRow}>
                             {/* Video Link */}
                             {item.video_url && (
                               <TouchableOpacity activeOpacity={1}
@@ -4863,7 +4870,8 @@ export default function BookingsScreen() {
                                 </Text>
                               </TouchableOpacity>
                             )}
-                          </View>
+                            </View>
+                          ) : null}
                         </View>
                       )}
 
@@ -4916,7 +4924,7 @@ export default function BookingsScreen() {
                             </Text>
                           </View>
 
-                          {shouldShowMessageForItem(item) && (
+                          {!isHistoryTabView && shouldShowMessageForItem(item) && (
                             <TouchableOpacity
                               activeOpacity={1}
                               onPress={() => handleMessagePress(item)}
@@ -4936,12 +4944,13 @@ export default function BookingsScreen() {
                             </TouchableOpacity>
                           )}
                         </View>
-                        <View
-                          style={[
-                            styles.actionButtonsContainer,
-                            { marginTop: 0, width: "100%", flexDirection: "column", gap: moderateScale(8) },
-                          ]}
-                        >
+                        {!isHistoryTabView && (
+                          <View
+                            style={[
+                              styles.actionButtonsContainer,
+                              { marginTop: 0, width: "100%", flexDirection: "column", gap: moderateScale(8) },
+                            ]}
+                          >
                           {isReadOnlyApplication ? (
                             <TouchableOpacity activeOpacity={1}
                               onPress={() => handleDetailsPress(item)}
@@ -5281,7 +5290,8 @@ export default function BookingsScreen() {
                               </Text>
                             </TouchableOpacity>
                           )}
-                        </View>
+                          </View>
+                        )}
                       </View>
                     </View>
                   </View>
@@ -5924,7 +5934,7 @@ export default function BookingsScreen() {
                           )}
                         </View>
 
-                        {shouldShowMessageForItem(item) && (
+                        {!isHistoryTabView && shouldShowMessageForItem(item) && (
                           <TouchableOpacity
                             activeOpacity={1}
                             onPress={() => handleMessagePress(item)}
@@ -5945,12 +5955,13 @@ export default function BookingsScreen() {
                         )}
                       </View>
 
-                      <View
-                        style={[
-                          styles.actionButtonsContainer,
-                          { marginTop: 0, width: "100%" },
-                        ]}
-                      >
+                      {!isHistoryTabView && (
+                        <View
+                          style={[
+                            styles.actionButtonsContainer,
+                            { marginTop: 0, width: "100%" },
+                          ]}
+                        >
                         {/* PENDING TAB: Studio Bookings - Payment Button for Musicians */}
                         {renderActiveTab === "Pending" &&
                           item.type_id === "studio_booking" &&
@@ -6620,7 +6631,8 @@ export default function BookingsScreen() {
                             </View>
                           </View>
                         )}
-                      </View>
+                        </View>
+                      )}
                     </View>
                   </View>
                 </View>

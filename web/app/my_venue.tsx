@@ -1,4 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import React, { useCallback, useEffect, useState } from 'react';
 import { RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View, Platform, useWindowDimensions } from 'react-native';
@@ -7,8 +8,9 @@ import CachedImage from '../src/components/CachedImage';
 import CustomAlert, { AlertType } from '../src/components/CustomAlert';
 import Header from '../src/components/header';
 import Modal, { normalizeVisibleInput } from '../src/components/modal';
+import MusicianWorkspaceTabs from '../src/components/MusicianWorkspaceTabs';
 import Navbar from '../src/components/navbar';
-import { useRequireAuth } from '../src/context/AuthContext';
+import { useAuth, useRequireAuth } from '../src/context/AuthContext';
 import { useTheme } from '../src/context/ThemeContext';
 
 const DEFAULT_GIG_IMAGE = 'https://images.unsplash.com/photo-1501281668745-f7f57925c3b4?w=800&fit=crop';
@@ -71,7 +73,9 @@ export default function MyVenueScreen() {
             ? '#1E2C48'
             : '#D8E3F2'
         : colors.border;
-    const { isAuthenticated, loading: authLoading, userId } = useRequireAuth();
+    const { isAuthenticated, userId } = useRequireAuth();
+    const { userRole } = useAuth();
+    const isMusicianView = userRole === 'musician';
     const params = useLocalSearchParams<{ refresh?: string }>();
     const refreshKey = Array.isArray(params.refresh) ? params.refresh[0] : params.refresh;
     const [modalVisible, setModalVisible] = useState(false);
@@ -102,14 +106,78 @@ export default function MyVenueScreen() {
     const fetchGigs = useCallback(async () => {
         if (!userId) return;
         try {
-            const { data: baseGigs, error: baseError } = await supabase
-                .from('gigs')
-                .select('id, organizer_id, name, location, budget, description, event_date, status, created_at, permit_status, permit_rejection_reason, permit_reviewed_at')
-                .eq('organizer_id', userId)
-                .in('permit_status', ['approved', 'approved_by_admin', 'verified'])
-                .order('created_at', { ascending: false });
+            let baseGigs: any[] = [];
 
-            if (baseError) throw baseError;
+            if (isMusicianView) {
+                const acceptedStatuses = ['accepted', 'confirmed', 'happening now', 'completed'];
+
+                const { data: groupMembershipRows, error: membershipError } = await supabase
+                    .from('group_members')
+                    .select('group_id')
+                    .eq('user_id', userId);
+
+                if (membershipError) {
+                    console.log('Error fetching musician group memberships:', membershipError);
+                }
+
+                const joinedGroupIds = Array.from(
+                    new Set(
+                        (groupMembershipRows || [])
+                            .map((row: any) => row?.group_id)
+                            .filter((value: any): value is string => typeof value === 'string' && value.length > 0),
+                    ),
+                );
+
+                const [soloAppsResult, groupAppsResult] = await Promise.all([
+                    supabase
+                        .from('gig_applications')
+                        .select('gig_id')
+                        .eq('applicant_id', userId)
+                        .is('group_id', null)
+                        .in('status', acceptedStatuses),
+                    joinedGroupIds.length > 0
+                        ? supabase
+                            .from('gig_applications')
+                            .select('gig_id')
+                            .in('group_id', joinedGroupIds)
+                            .in('status', acceptedStatuses)
+                        : Promise.resolve({ data: [] as any[], error: null }),
+                ]);
+
+                if (soloAppsResult.error) throw soloAppsResult.error;
+                if (groupAppsResult.error) throw groupAppsResult.error;
+
+                const joinedGigIds = Array.from(
+                    new Set(
+                        [...(soloAppsResult.data || []), ...(groupAppsResult.data || [])]
+                            .map((row: any) => row?.gig_id)
+                            .filter((value: any): value is string => typeof value === 'string' && value.length > 0),
+                    ),
+                );
+
+                if (joinedGigIds.length === 0) {
+                    setGigs([]);
+                    return;
+                }
+
+                const { data: joinedGigs, error: joinedGigsError } = await supabase
+                    .from('gigs')
+                    .select('id, organizer_id, name, location, budget, description, event_date, status, created_at, permit_status, permit_rejection_reason, permit_reviewed_at')
+                    .in('id', joinedGigIds)
+                    .order('created_at', { ascending: false });
+
+                if (joinedGigsError) throw joinedGigsError;
+                baseGigs = joinedGigs || [];
+            } else {
+                const { data, error: baseError } = await supabase
+                    .from('gigs')
+                    .select('id, organizer_id, name, location, budget, description, event_date, status, created_at, permit_status, permit_rejection_reason, permit_reviewed_at')
+                    .eq('organizer_id', userId)
+                    .order('created_at', { ascending: false });
+
+                if (baseError) throw baseError;
+                baseGigs = data || [];
+            }
 
             const gigIds = (baseGigs || []).map((gig: any) => gig.id);
 
@@ -182,6 +250,7 @@ export default function MyVenueScreen() {
                     permit_status: normalizedPermitStatus,
                     permit_rejection_reason: gig.permit_rejection_reason || null,
                     permit_reviewed_at: gig.permit_reviewed_at || null,
+                    is_owner: gig.organizer_id === userId,
                 };
             }));
         } catch (e) {
@@ -190,7 +259,7 @@ export default function MyVenueScreen() {
             setLoading(false);
             setRefreshing(false);
         }
-    }, [userId]);
+    }, [isMusicianView, userId]);
 
     useFocusEffect(
         useCallback(() => {
@@ -208,7 +277,7 @@ export default function MyVenueScreen() {
     );
 
     useEffect(() => {
-        if (!isAuthenticated || !userId) return;
+        if (!isAuthenticated || !userId || isMusicianView) return;
 
         const channel = supabase
             .channel(`my-venue-listings:${userId}`)
@@ -224,7 +293,7 @@ export default function MyVenueScreen() {
         return () => {
             supabase.removeChannel(channel);
         };
-    }, [isAuthenticated, userId, fetchGigs]);
+    }, [isAuthenticated, userId, fetchGigs, isMusicianView]);
 
     const onRefresh = () => {
         setRefreshing(true);
@@ -303,6 +372,33 @@ export default function MyVenueScreen() {
         }
     };
 
+    const openGigPreview = async (gigId: string) => {
+        if (!gigId) return;
+
+        try {
+            await AsyncStorage.setItem('pending_reopen_listing_id', gigId);
+        } catch {
+            // Continue navigation even if caching fails.
+        }
+
+        router.push('/feed');
+    };
+
+    const handleOpenGigChat = (gig: any) => {
+        if (!gig?.organizer_id) {
+            showAlert('warning', 'Chat Unavailable', 'Venue organizer is unavailable for this gig.');
+            return;
+        }
+
+        router.push({
+            pathname: '/chat',
+            params: {
+                recipientId: gig.organizer_id,
+                gigId: gig.id,
+            },
+        });
+    };
+
     return (
         <>
             <View style={[styles.flex1, { backgroundColor: pageBackground }]}>
@@ -315,12 +411,16 @@ export default function MyVenueScreen() {
                         style={styles.flex1}
                         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
                     >
+                        {isMusicianView && (
+                            <MusicianWorkspaceTabs activeKey="venue" />
+                        )}
+
                         {loading ? (
                             <Text style={[styles.loadingText, { color: colors.textSecondary }]}>Loading gigs...</Text>
                         ) : gigs.length === 0 ? (
                             <View style={styles.emptyState}>
                                 <Ionicons name="musical-notes-outline" size={48} color={colors.textSecondary} />
-                                <Text style={[styles.emptyText, { color: colors.textSecondary }]}>No gigs found</Text>
+                                <Text style={[styles.emptyText, { color: colors.textSecondary }]}>{isMusicianView ? 'No joined venues found' : 'No gigs found'}</Text>
                             </View>
                         ) : (
                             <View style={[styles.gridWrap, isWebDesktop && styles.gridWrapWeb]}>
@@ -329,6 +429,7 @@ export default function MyVenueScreen() {
                                     const isRejected = normalizedPermitStatus === 'rejected';
                                     const isApproved = normalizedPermitStatus === 'approved';
                                     const isResubmitted = normalizedPermitStatus === 'resubmitted';
+                                    const canManageGig = !isMusicianView || gig.is_owner === true;
 
                                     const permitStatusLabel = isRejected
                                         ? 'Rejected'
@@ -406,27 +507,45 @@ export default function MyVenueScreen() {
                                                 <View style={[styles.actionRow, { borderColor: colors.border }]}>
                                                     <View style={styles.actionLeft}>
                                                         <TouchableOpacity activeOpacity={1}
-                                                            onPress={() => router.push({ pathname: '/manage_gig', params: { id: gig.id } })}
+                                                            onPress={() => {
+                                                                if (canManageGig) {
+                                                                    router.push({ pathname: '/manage_gig', params: { id: gig.id } });
+                                                                    return;
+                                                                }
+
+                                                                void openGigPreview(gig.id);
+                                                            }}
                                                             style={[styles.manageBtn, { backgroundColor: colors.primary }]}
                                                         >
-                                                            <Ionicons name="settings-outline" size={16} color="#FFF" />
-                                                            <Text style={styles.manageBtnText}>Manage</Text>
+                                                            <Ionicons name={canManageGig ? 'settings-outline' : 'eye-outline'} size={16} color="#FFF" />
+                                                            <Text style={styles.manageBtnText}>{canManageGig ? 'Manage' : 'View'}</Text>
                                                         </TouchableOpacity>
 
-                                                        <TouchableOpacity activeOpacity={1}
-                                                            onPress={() => router.push({ pathname: '/edit_gig', params: { id: gig.id } })}
-                                                            style={[styles.editBtn, { borderColor: colors.border }]}
-                                                        >
-                                                            <Ionicons name="pencil-outline" size={18} color={colors.text} />
-                                                        </TouchableOpacity>
+                                                        {canManageGig ? (
+                                                            <TouchableOpacity activeOpacity={1}
+                                                                onPress={() => router.push({ pathname: '/edit_gig', params: { id: gig.id } })}
+                                                                style={[styles.editBtn, { borderColor: colors.border }]}
+                                                            >
+                                                                <Ionicons name="pencil-outline" size={18} color={colors.text} />
+                                                            </TouchableOpacity>
+                                                        ) : (
+                                                            <TouchableOpacity activeOpacity={1}
+                                                                onPress={() => handleOpenGigChat(gig)}
+                                                                style={[styles.editBtn, { borderColor: colors.border }]}
+                                                            >
+                                                                <Ionicons name="chatbubble-outline" size={18} color={colors.text} />
+                                                            </TouchableOpacity>
+                                                        )}
                                                     </View>
 
-                                                    <TouchableOpacity activeOpacity={1}
-                                                        onPress={() => confirmDelete(gig.id, gig.name)}
-                                                        style={styles.deleteBtn}
-                                                    >
-                                                        <Ionicons name="trash-outline" size={18} color="#EF4444" />
-                                                    </TouchableOpacity>
+                                                    {canManageGig ? (
+                                                        <TouchableOpacity activeOpacity={1}
+                                                            onPress={() => confirmDelete(gig.id, gig.name)}
+                                                            style={styles.deleteBtn}
+                                                        >
+                                                            <Ionicons name="trash-outline" size={18} color="#EF4444" />
+                                                        </TouchableOpacity>
+                                                    ) : null}
                                                 </View>
                                             </View>
                                         </View>

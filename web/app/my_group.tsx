@@ -7,8 +7,9 @@ import CachedImage from '../src/components/CachedImage';
 import CustomAlert, { AlertType } from '../src/components/CustomAlert';
 import Header from '../src/components/header';
 import Modal from '../src/components/modal';
+import MusicianWorkspaceTabs from '../src/components/MusicianWorkspaceTabs';
 import Navbar from '../src/components/navbar';
-import { useRequireAuth } from '../src/context/AuthContext';
+import { useAuth, useRequireAuth } from '../src/context/AuthContext';
 import { useTheme } from '../src/context/ThemeContext';
 
 const normalizeDeleteConfirmation = (value: string) =>
@@ -38,7 +39,9 @@ export default function MyGroupScreen() {
             ? '#1E2C48'
             : '#D8E3F2'
         : colors.border;
-    const { isAuthenticated, loading: authLoading, userId } = useRequireAuth();
+    const { isAuthenticated, userId } = useRequireAuth();
+    const { userRole } = useAuth();
+    const isMusicianView = userRole === 'musician';
     const params = useLocalSearchParams<{ refresh?: string }>();
     const refreshKey = Array.isArray(params.refresh) ? params.refresh[0] : params.refresh;
     const [modalVisible, setModalVisible] = useState(false);
@@ -66,19 +69,120 @@ export default function MyGroupScreen() {
         setAlertVisible(true);
     };
 
+    const isMissingRelationError = (error: any, relationName: string) => {
+        const message = String(error?.message || '').toLowerCase();
+        return error?.code === '42P01' && message.includes(relationName.toLowerCase());
+    };
+
+    const isMissingFunctionError = (error: any, functionName: string) => {
+        const message = String(error?.message || '').toLowerCase();
+        return error?.code === '42883' && message.includes(functionName.toLowerCase());
+    };
+
     const fetchGroups = async () => {
         if (!userId) return;
         try {
-            // Direct query to groups_with_stats view
-            const { data, error } = await supabase
-                .from('groups_with_stats')
-                .select('*')
-                .eq('owner_id', userId)
-                .order('created_at', { ascending: false });
+            let groupRows: any[] = [];
+            const membershipRoleByGroupId = new Map<string, string>();
 
-            if (error) throw error;
+            const fetchOwnedGroups = async () => {
+                const { data, error } = await supabase
+                    .from('groups_with_stats')
+                    .select('*')
+                    .eq('owner_id', userId)
+                    .order('created_at', { ascending: false });
 
-            const groupRows = data || [];
+                if (!error) {
+                    return data || [];
+                }
+
+                if (isMissingRelationError(error, 'groups_with_stats')) {
+                    const { data: fallbackData, error: fallbackError } = await supabase
+                        .from('groups')
+                        .select('id, owner_id, name, genre, description, location, latitude, longitude, rate, created_at, group_type')
+                        .eq('owner_id', userId)
+                        .order('created_at', { ascending: false });
+
+                    if (fallbackError) throw fallbackError;
+
+                    return (fallbackData || []).map((row: any) => ({
+                        ...row,
+                        rating: 0,
+                        review_count: 0,
+                        images: [],
+                    }));
+                }
+
+                throw error;
+            };
+
+            const fetchGroupsByIds = async (groupIds: string[]) => {
+                const { data, error } = await supabase
+                    .from('groups_with_stats')
+                    .select('*')
+                    .in('id', groupIds)
+                    .order('created_at', { ascending: false });
+
+                if (!error) {
+                    return data || [];
+                }
+
+                if (isMissingRelationError(error, 'groups_with_stats')) {
+                    const { data: fallbackData, error: fallbackError } = await supabase
+                        .from('groups')
+                        .select('id, owner_id, name, genre, description, location, latitude, longitude, rate, created_at, group_type')
+                        .in('id', groupIds)
+                        .order('created_at', { ascending: false });
+
+                    if (fallbackError) throw fallbackError;
+
+                    return (fallbackData || []).map((row: any) => ({
+                        ...row,
+                        rating: 0,
+                        review_count: 0,
+                        images: [],
+                    }));
+                }
+
+                throw error;
+            };
+
+            if (isMusicianView) {
+                const { data: memberRows, error: memberError } = await supabase
+                    .from('group_members')
+                    .select('group_id, role')
+                    .eq('user_id', userId);
+
+                if (memberError) {
+                    groupRows = await fetchOwnedGroups();
+                    groupRows.forEach((row: any) => {
+                        if (row?.id) {
+                            membershipRoleByGroupId.set(row.id, row.owner_id === userId ? 'owner' : 'member');
+                        }
+                    });
+                } else {
+                    const joinedGroupIds = Array.from(
+                        new Set(
+                            (memberRows || [])
+                                .map((row: any) => row?.group_id)
+                                .filter((value: any): value is string => typeof value === 'string' && value.length > 0),
+                        ),
+                    );
+
+                    (memberRows || []).forEach((row: any) => {
+                        if (!row?.group_id) return;
+                        membershipRoleByGroupId.set(
+                            row.group_id,
+                            String(row?.role || '').trim().toLowerCase() || 'member',
+                        );
+                    });
+
+                    groupRows = joinedGroupIds.length > 0 ? await fetchGroupsByIds(joinedGroupIds) : [];
+                }
+            } else {
+                groupRows = await fetchOwnedGroups();
+            }
+
             const groupIds = groupRows.map((item: any) => item.id).filter(Boolean);
 
             let mediaByGroupId = new Map<string, string[]>();
@@ -107,13 +211,17 @@ export default function MyGroupScreen() {
 
             setGroups(groupRows.map((item: any) => {
                 const mediaImages = mediaByGroupId.get(item.id) || [];
+                const membershipRole = membershipRoleByGroupId.get(item.id) || (item.owner_id === userId ? 'owner' : 'member');
+                const isOwnerGroup = membershipRole === 'owner' || item.owner_id === userId;
                 return {
                     ...item,
                     images: mediaImages.length > 0
                         ? mediaImages
                         : (Array.isArray(item.images) ? item.images : []),
                     rating: item.rating || 0,
-                    review_count: item.review_count || 0
+                    review_count: item.review_count || 0,
+                    membership_role: membershipRole,
+                    is_owner: isOwnerGroup,
                 };
             }));
         } catch (e) {
@@ -136,7 +244,7 @@ export default function MyGroupScreen() {
             return () => {
                 clearInterval(refreshInterval);
             };
-        }, [isAuthenticated, userId, refreshKey])
+        }, [isAuthenticated, userId, refreshKey, isMusicianView])
     );
 
     const onRefresh = () => {
@@ -175,9 +283,23 @@ export default function MyGroupScreen() {
                 p_reason: 'Deleted from My Group screen by owner',
             });
 
-            if (error) throw error;
+            let result: any = data;
 
-            const result: any = data;
+            if (error) {
+                if (isMissingFunctionError(error, 'delete_group_safely')) {
+                    const { error: fallbackDeleteError } = await supabase
+                        .from('groups')
+                        .delete()
+                        .eq('id', selectedId)
+                        .eq('owner_id', userId);
+
+                    if (fallbackDeleteError) throw fallbackDeleteError;
+                    result = { success: true };
+                } else {
+                    throw error;
+                }
+            }
+
             if (!result?.success) {
                 if (result?.code === 'ACTIVE_ACCEPTED_APPLICATIONS_EXIST') {
                     showAlert(
@@ -232,6 +354,10 @@ export default function MyGroupScreen() {
                         style={styles.flex1}
                         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
                     >
+                        {isMusicianView && (
+                            <MusicianWorkspaceTabs activeKey="group" />
+                        )}
+
                             {loading ? (
                             <Text style={[styles.loadingText, { color: colors.textSecondary }]}>Loading groups...</Text>
                         ) : groups.length === 0 ? (
@@ -241,7 +367,10 @@ export default function MyGroupScreen() {
                             </View>
                         ) : (
                             <View style={[styles.gridWrap, isWebDesktop && styles.gridWrapWeb]}>
-                                {groups.map((group) => (
+                                {groups.map((group) => {
+                                    const canManageGroup = !isMusicianView || group.is_owner === true;
+
+                                    return (
                                     <View key={group.id} style={[styles.gridItem, isWebDesktop && styles.gridItemWeb]}>
                                         <View style={[styles.cardContainer, {
                                             backgroundColor: pageCardBackground,
@@ -259,7 +388,7 @@ export default function MyGroupScreen() {
                                                     cacheVersion={group.updated_at || group.created_at || group.id}
                                                 />
                                                 <View style={[styles.activeBadge, { backgroundColor: isDark ? 'rgba(0,0,0,0.6)' : 'rgba(255,255,255,0.9)' }]}>
-                                                    <Text style={[styles.activeText, { color: colors.primary }]}>Active</Text>
+                                                    <Text style={[styles.activeText, { color: colors.primary }]}>{canManageGroup ? 'Active' : 'Joined'}</Text>
                                                 </View>
                                             </View>
 
@@ -272,11 +401,15 @@ export default function MyGroupScreen() {
                                                 <View style={[styles.actionRow, { borderColor: colors.border }]}>
                                                     <View style={styles.actionLeft}>
                                                         <TouchableOpacity activeOpacity={1}
-                                                            onPress={() => router.push({ pathname: '/manage_group', params: { id: group.id } })}
+                                                            onPress={() =>
+                                                                canManageGroup
+                                                                    ? router.push({ pathname: '/manage_group', params: { id: group.id } })
+                                                                    : router.push({ pathname: '/group_details', params: { id: group.id } })
+                                                            }
                                                             style={[styles.manageBtn, { backgroundColor: colors.primary }]}
                                                         >
-                                                            <Ionicons name="settings-outline" size={16} color="#FFF" />
-                                                            <Text style={styles.manageBtnText}>Manage</Text>
+                                                            <Ionicons name={canManageGroup ? 'settings-outline' : 'eye-outline'} size={16} color="#FFF" />
+                                                            <Text style={styles.manageBtnText}>{canManageGroup ? 'Manage' : 'View'}</Text>
                                                         </TouchableOpacity>
 
                                                         <TouchableOpacity activeOpacity={1}
@@ -292,25 +425,30 @@ export default function MyGroupScreen() {
                                                             <Ionicons name="chatbubbles-outline" size={18} color={colors.text} />
                                                         </TouchableOpacity>
 
-                                                        <TouchableOpacity activeOpacity={1}
-                                                            onPress={() => router.push({ pathname: '/edit_group', params: { id: group.id } })}
-                                                            style={[styles.editBtn, { borderColor: colors.border }]}
-                                                        >
-                                                            <Ionicons name="pencil-outline" size={18} color={colors.text} />
-                                                        </TouchableOpacity>
+                                                        {canManageGroup ? (
+                                                            <TouchableOpacity activeOpacity={1}
+                                                                onPress={() => router.push({ pathname: '/edit_group', params: { id: group.id } })}
+                                                                style={[styles.editBtn, { borderColor: colors.border }]}
+                                                            >
+                                                                <Ionicons name="pencil-outline" size={18} color={colors.text} />
+                                                            </TouchableOpacity>
+                                                        ) : null}
                                                     </View>
 
-                                                    <TouchableOpacity activeOpacity={1}
-                                                        onPress={() => confirmDelete(group.id, group.name)}
-                                                        style={styles.deleteBtn}
-                                                    >
-                                                        <Ionicons name="trash-outline" size={18} color="#EF4444" />
-                                                    </TouchableOpacity>
+                                                    {canManageGroup ? (
+                                                        <TouchableOpacity activeOpacity={1}
+                                                            onPress={() => confirmDelete(group.id, group.name)}
+                                                            style={styles.deleteBtn}
+                                                        >
+                                                            <Ionicons name="trash-outline" size={18} color="#EF4444" />
+                                                        </TouchableOpacity>
+                                                    ) : null}
                                                 </View>
                                             </View>
                                         </View>
                                     </View>
-                                ))}
+                                    );
+                                })}
                             </View>
                         )}
                     </ScrollView>

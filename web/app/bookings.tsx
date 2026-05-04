@@ -3632,6 +3632,10 @@ export default function BookingsScreen() {
     : activeTab === "Active Musicians"
       ? data.ActiveMusicians
       : data[activeTab as keyof typeof data] || [];
+  const isHistoryTabView =
+    userRole === "venue-owner"
+      ? activeTab === "Review"
+      : activeTab === "History";
 
   // Render application tab for musicians
   const renderAppTab = (tab: ApplicationTab) => {
@@ -4288,7 +4292,7 @@ export default function BookingsScreen() {
                         {new Date(item.created_at || item.raw_date).toLocaleDateString()}
                       </Text>
 
-                      {(item.request_contract_url || item.request_cv_url || item.request_video_url) && (
+                      {!isHistoryTabView && (item.request_contract_url || item.request_cv_url || item.request_video_url) && (
                         <View style={{ flexDirection: "row", gap: scale(8), marginTop: moderateScale(8) }}>
                           {item.request_contract_url ? (
                             <TouchableOpacity
@@ -4368,7 +4372,8 @@ export default function BookingsScreen() {
                         </View>
                       )}
 
-                      <View style={{ flexDirection: "row", gap: scale(8), marginTop: moderateScale(10) }}>
+                      {!isHistoryTabView && (
+                        <View style={{ flexDirection: "row", gap: scale(8), marginTop: moderateScale(10) }}>
                         <TouchableOpacity
                           activeOpacity={1}
                           onPress={() => handleDetailsPress(item)}
@@ -4389,7 +4394,7 @@ export default function BookingsScreen() {
                             View Request
                           </Text>
                         </TouchableOpacity>
-                        {shouldShowMessageForItem(item) && (
+                        {!isHistoryTabView && shouldShowMessageForItem(item) && (
                           <TouchableOpacity
                             activeOpacity={1}
                             onPress={() => handleMessagePress(item)}
@@ -4410,9 +4415,10 @@ export default function BookingsScreen() {
                             </Text>
                           </TouchableOpacity>
                         )}
-                      </View>
+                        </View>
+                      )}
 
-                      {canRespond && (
+                      {!isHistoryTabView && canRespond && (
                         <View style={{ marginTop: moderateScale(8), gap: moderateScale(8) }}>
                           {isRequestActionPending && (
                             <Text style={{ fontSize: moderateScale(11), color: colors.textSecondary }}>
@@ -4669,13 +4675,14 @@ export default function BookingsScreen() {
                             </View>
                           )}
 
-                          <View
-                            style={{
-                              flexDirection: "row",
-                              gap: 8,
-                              flexWrap: "wrap",
-                            }}
-                          >
+                          {!isHistoryTabView && (item.video_url || item.cv_url) ? (
+                            <View
+                              style={{
+                                flexDirection: "row",
+                                gap: 8,
+                                flexWrap: "wrap",
+                              }}
+                            >
                             {/* Video Link */}
                             {item.video_url && (
                               <TouchableOpacity activeOpacity={1}
@@ -4741,7 +4748,8 @@ export default function BookingsScreen() {
                                 </Text>
                               </TouchableOpacity>
                             )}
-                          </View>
+                            </View>
+                          ) : null}
                         </View>
                       )}
 
@@ -4794,7 +4802,7 @@ export default function BookingsScreen() {
                             </Text>
                           </View>
 
-                          {shouldShowMessageForItem(item) && (
+                          {!isHistoryTabView && shouldShowMessageForItem(item) && (
                             <TouchableOpacity
                               activeOpacity={1}
                               onPress={() => handleMessagePress(item)}
@@ -4814,12 +4822,13 @@ export default function BookingsScreen() {
                             </TouchableOpacity>
                           )}
                         </View>
-                        <View
-                          style={[
-                            styles.actionButtonsContainer,
-                            { marginTop: 0, width: "100%", flexDirection: "column", gap: moderateScale(8) },
-                          ]}
-                        >
+                        {!isHistoryTabView && (
+                          <View
+                            style={[
+                              styles.actionButtonsContainer,
+                              { marginTop: 0, width: "100%", flexDirection: "column", gap: moderateScale(8) },
+                            ]}
+                          >
                           {isReadOnlyApplication ? (
                             <TouchableOpacity activeOpacity={1}
                               onPress={() => handleDetailsPress(item)}
@@ -5231,7 +5240,8 @@ export default function BookingsScreen() {
                               </Text>
                             </TouchableOpacity>
                           )}
-                        </View>
+                          </View>
+                        )}
                       </View>
                     </View>
                   </View>
@@ -5890,7 +5900,7 @@ export default function BookingsScreen() {
                           )}
                         </View>
 
-                        {shouldShowMessageForItem(item) && (
+                        {!isHistoryTabView && shouldShowMessageForItem(item) && (
                           <TouchableOpacity
                             activeOpacity={1}
                             onPress={() => handleMessagePress(item)}
@@ -5911,12 +5921,13 @@ export default function BookingsScreen() {
                         )}
                       </View>
 
-                      <View
-                        style={[
-                          styles.actionButtonsContainer,
-                          { marginTop: 0, width: "100%" },
-                        ]}
-                      >
+                      {!isHistoryTabView && (
+                        <View
+                          style={[
+                            styles.actionButtonsContainer,
+                            { marginTop: 0, width: "100%" },
+                          ]}
+                        >
                         {/* PENDING TAB: Studio Bookings - Payment Button for Musicians */}
                         {activeTab === "Pending" &&
                           item.type_id === "studio_booking" &&
@@ -6491,7 +6502,8 @@ export default function BookingsScreen() {
                             </View>
                           </View>
                         )}
-                      </View>
+                        </View>
+                      )}
                     </View>
                   </View>
                 </View>

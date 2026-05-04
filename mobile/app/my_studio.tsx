@@ -69,7 +69,6 @@ export default function MyStudioScreen() {
                 .from('studios')
                 .select('id, owner_id, name, description, created_at, permit_status, permit_rejection_reason, permit_reviewed_at')
                 .eq('owner_id', userId)
-                .in('permit_status', ['approved', 'approved_by_admin', 'verified'])
                 .order('created_at', { ascending: false });
 
             if (baseError) throw baseError;

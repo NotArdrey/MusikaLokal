@@ -132,6 +132,73 @@ const parsePositiveDecimal = (value: unknown): number | null => {
   return parsed;
 };
 
+const isMissingStudioInstrumentDetailColumns = (error: any): boolean => {
+  const haystack = [
+    error?.code,
+    error?.message,
+    error?.details,
+    error?.hint,
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+
+  return (
+    haystack.includes("pgrst204") ||
+    (haystack.includes("studio_instruments") &&
+      (haystack.includes("quantity") || haystack.includes("description")) &&
+      (haystack.includes("schema cache") ||
+        haystack.includes("could not find") ||
+        haystack.includes("column")))
+  );
+};
+
+const buildStudioInstrumentRows = (
+  studioId: string,
+  instruments: any[] = [],
+  includeDetailColumns = true,
+) =>
+  instruments.map((item: any) => {
+    const baseRow: any = {
+      studio_id: studioId,
+      instrument_name: item.name,
+      image_url: item.image || null,
+    };
+
+    if (includeDetailColumns) {
+      baseRow.quantity = item.quantity || null;
+      baseRow.description = item.description || null;
+    }
+
+    return baseRow;
+  });
+
+const insertStudioInstrumentRows = async (
+  studioId: string,
+  instruments: any[] = [],
+) => {
+  if (instruments.length === 0) return null;
+
+  const { error } = await supabase
+    .from("studio_instruments")
+    .insert(buildStudioInstrumentRows(studioId, instruments, true));
+
+  if (!error || !isMissingStudioInstrumentDetailColumns(error)) {
+    return error;
+  }
+
+  console.warn(
+    "studio_instruments detail columns are missing in the live schema; retrying without quantity/description.",
+    error,
+  );
+
+  const { error: fallbackError } = await supabase
+    .from("studio_instruments")
+    .insert(buildStudioInstrumentRows(studioId, instruments, false));
+
+  return fallbackError;
+};
+
 const PROMOTION_CRITERIA_PREFIX = "How to get promo:";
 const PROMOTION_MIN_HOURS_PREFIX = "Minimum booking hours:";
 const PROMOTION_MIN_SPEND_PREFIX = "Minimum spend:";
@@ -2893,17 +2960,10 @@ export default function EditStudioScreen() {
 
       await supabase.from('studio_instruments').delete().eq('studio_id', studioId);
       if ((payload.instruments || []).length > 0) {
-        const { error: instrumentsError } = await supabase
-          .from('studio_instruments')
-          .insert(
-            payload.instruments.map((item: any) => ({
-              studio_id: studioId,
-              instrument_name: item.name,
-              image_url: item.image || null,
-              quantity: item.quantity || null,
-              description: item.description || null,
-            })),
-          );
+        const instrumentsError = await insertStudioInstrumentRows(
+          studioId,
+          payload.instruments,
+        );
         if (instrumentsError) {
           throw new Error(`Failed to sync studio instruments: ${instrumentsError.message}`);
         }
