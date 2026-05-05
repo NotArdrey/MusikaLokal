@@ -2,6 +2,7 @@
 import { router } from 'expo-router';
 import React, { useCallback, useEffect, useState } from 'react';
 import {
+  Alert,
   ActivityIndicator,
   FlatList,
   ScrollView,
@@ -16,6 +17,7 @@ import Header from '../../src/components/header';
 import { useAuth } from '../../src/context/AuthContext';
 import { useTheme } from '../../src/context/ThemeContext';
 import { supabase } from '../../lib/supabase';
+import { getEdgeFunctionErrorMessage } from '../../src/utils/edgeFunctionErrors';
 
 type Tab = 'dashboard' | 'users' | 'reports' | 'audit' | 'posts' | 'products';
 
@@ -54,29 +56,57 @@ export default function AdminProductsPage() {
     router.replace(adminTabRoutes[nextTab] as any);
   }, []);
 
+  const invokeMarketplaceAdmin = useCallback(async (body: Record<string, unknown>) => {
+    const { data, error } = await supabase.functions.invoke('admin-marketplace-management', { body });
+
+    if (error) {
+      throw new Error(await getEdgeFunctionErrorMessage(error, 'Unable to reach marketplace admin tools.'));
+    }
+
+    if (data?.error) {
+      throw new Error(String(data.error));
+    }
+
+    return data?.data;
+  }, []);
+
   const fetchProducts = useCallback(async () => {
     setLoadingProducts(true);
     try {
       const body: any = { action: 'admin_list_products' };
       if (search.trim()) body.search = search.trim();
       if (filter !== 'all') body.status = filter;
-      const { data } = await supabase.functions.invoke('manage-marketplace', { body });
-      if (data?.data) setProducts(data.data);
+      const data = await invokeMarketplaceAdmin(body);
+      if (data) setProducts(data);
       else setProducts([]);
-    } catch (e) { console.error(e); setProducts([]); }
+    } catch (e) {
+      console.error(e);
+      setProducts([]);
+      Alert.alert('Unable to load products', e instanceof Error ? e.message : 'Please try again.');
+    }
     finally { setLoadingProducts(false); }
-  }, [search, filter]);
+  }, [filter, invokeMarketplaceAdmin, search]);
 
   useEffect(() => { fetchProducts(); }, [fetchProducts]);
 
   const handleSuspend = async (productId: string) => {
-    await supabase.functions.invoke('manage-marketplace', { body: { action: 'update_product', product_id: productId, status: 'suspended' } });
-    fetchProducts();
+    try {
+      await invokeMarketplaceAdmin({ action: 'update_product', product_id: productId, status: 'suspended' });
+      fetchProducts();
+    } catch (e) {
+      console.error(e);
+      Alert.alert('Unable to suspend product', e instanceof Error ? e.message : 'Please try again.');
+    }
   };
 
   const handleActivate = async (productId: string) => {
-    await supabase.functions.invoke('manage-marketplace', { body: { action: 'update_product', product_id: productId, status: 'active' } });
-    fetchProducts();
+    try {
+      await invokeMarketplaceAdmin({ action: 'update_product', product_id: productId, status: 'active' });
+      fetchProducts();
+    } catch (e) {
+      console.error(e);
+      Alert.alert('Unable to activate product', e instanceof Error ? e.message : 'Please try again.');
+    }
   };
 
   if (loading || !roleResolved) return <View style={[styles.container, { backgroundColor: colors.background }]}><Header title="Admin" onBackPress={() => router.back()} /><ActivityIndicator size="large" color={colors.primary} style={{ marginTop: 40 }} /></View>;

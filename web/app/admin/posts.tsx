@@ -2,6 +2,7 @@
 import { router } from 'expo-router';
 import React, { useCallback, useEffect, useState } from 'react';
 import {
+  Alert,
   ActivityIndicator,
   FlatList,
   Platform,
@@ -17,6 +18,7 @@ import Header from '../../src/components/header';
 import { useAuth } from '../../src/context/AuthContext';
 import { useTheme } from '../../src/context/ThemeContext';
 import { supabase } from '../../lib/supabase';
+import { getEdgeFunctionErrorMessage } from '../../src/utils/edgeFunctionErrors';
 
 type Tab = 'dashboard' | 'users' | 'reports' | 'audit' | 'posts' | 'products';
 
@@ -55,29 +57,62 @@ export default function AdminPostsPage() {
     router.replace(adminTabRoutes[nextTab] as any);
   }, []);
 
+  const invokeSocialAdmin = useCallback(async (body: Record<string, unknown>) => {
+    const { data, error } = await supabase.functions.invoke('admin-social-feed-management', { body });
+
+    if (error) {
+      throw new Error(await getEdgeFunctionErrorMessage(error, 'Unable to reach social feed admin tools.'));
+    }
+
+    if (data?.error) {
+      throw new Error(String(data.error));
+    }
+
+    return data?.data;
+  }, []);
+
   const fetchPosts = useCallback(async () => {
     setLoadingPosts(true);
     try {
       const body: any = { action: 'admin_list_posts' };
       if (search.trim()) body.search = search.trim();
       if (filter !== 'all') body.filter = filter;
-      const { data } = await supabase.functions.invoke('manage-social-feed', { body });
-      if (data?.data) setPosts(data.data);
+      const data = await invokeSocialAdmin(body);
+      if (data) setPosts(data);
       else setPosts([]);
-    } catch (e) { console.error(e); setPosts([]); }
+    } catch (e) {
+      console.error(e);
+      setPosts([]);
+      Alert.alert('Unable to load posts', e instanceof Error ? e.message : 'Please try again.');
+    }
     finally { setLoadingPosts(false); }
-  }, [search, filter]);
+  }, [filter, invokeSocialAdmin, search]);
 
   useEffect(() => { fetchPosts(); }, [fetchPosts]);
 
   const handleHidePost = async (postId: string) => {
-    await supabase.functions.invoke('manage-social-feed', { body: { action: 'admin_hide_post', post_id: postId } });
-    fetchPosts();
+    const target = posts.find((post) => post.id === postId);
+    try {
+      await invokeSocialAdmin({
+        action: 'admin_hide_post',
+        post_id: postId,
+        hidden: !target?.is_hidden,
+      });
+      fetchPosts();
+    } catch (e) {
+      console.error(e);
+      Alert.alert('Unable to update post', e instanceof Error ? e.message : 'Please try again.');
+    }
   };
 
   const handleDeletePost = async (postId: string) => {
-    await supabase.functions.invoke('manage-social-feed', { body: { action: 'delete_post', post_id: postId } });
-    fetchPosts();
+    try {
+      await invokeSocialAdmin({ action: 'delete_post', post_id: postId });
+      fetchPosts();
+    } catch (e) {
+      console.error(e);
+      Alert.alert('Unable to delete post', e instanceof Error ? e.message : 'Please try again.');
+    }
   };
 
   if (loading || !roleResolved) return <View style={[styles.container, { backgroundColor: colors.background }]}><Header title="Admin" onBackPress={() => router.back()} /><ActivityIndicator size="large" color={colors.primary} style={{ marginTop: 40 }} /></View>;
@@ -128,7 +163,7 @@ export default function AdminPostsPage() {
               </View>
               <View style={styles.actionRow}>
                 <TouchableOpacity activeOpacity={1} style={[styles.actionBtn, { backgroundColor: '#eab30820' }]} onPress={() => handleHidePost(item.id)}>
-                  <Text style={{ color: '#eab308', fontSize: 12, fontWeight: '600' }}>Hide</Text>
+                  <Text style={{ color: '#eab308', fontSize: 12, fontWeight: '600' }}>{item.is_hidden ? 'Restore' : 'Hide'}</Text>
                 </TouchableOpacity>
                 <TouchableOpacity activeOpacity={1} style={[styles.actionBtn, { backgroundColor: '#ef444420' }]} onPress={() => handleDeletePost(item.id)}>
                   <Text style={{ color: '#ef4444', fontSize: 12, fontWeight: '600' }}>Delete</Text>
