@@ -102,6 +102,34 @@ const inferNotificationRoute = (
     };
   }
 
+  if (eventType === "listing_connection_request") {
+    const status = readString(meta.status)?.toLowerCase();
+    return {
+      pathname: "/bookings",
+      routeParams: { tab: status && status !== "pending" ? "History" : "Pending" },
+    };
+  }
+
+  if (eventType) {
+    const status = readString(meta.status)?.toLowerCase();
+    const isTerminal =
+      eventType.includes("cancelled") ||
+      eventType.includes("canceled") ||
+      eventType.includes("fired") ||
+      ["cancelled", "canceled", "fired", "rejected", "declined"].includes(status || "");
+
+    if (isTerminal) {
+      return { pathname: "/bookings", routeParams: { tab: "History" } };
+    }
+
+    if (eventType.includes("application")) {
+      return {
+        pathname: "/bookings",
+        routeParams: { tab: status && status !== "pending" ? "History" : "Pending" },
+      };
+    }
+  }
+
   const teamId = readString(
     meta.team_id,
     meta.teamId,

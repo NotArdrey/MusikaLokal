@@ -1,11 +1,10 @@
 import { Ionicons } from "@expo/vector-icons";
-import { useFocusEffect } from "@react-navigation/native";
+import { useQueryClient } from "@tanstack/react-query";
 import { router } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Dimensions,
-  InteractionManager,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -28,6 +27,10 @@ import { useBottomBarClearance } from "../src/hooks/useBottomBarClearance";
 import { useAuth } from "../src/context/AuthContext";
 import { emitToast } from "../src/events/toastBus";
 import { useTheme } from "../src/context/ThemeContext";
+import {
+  useMarketplaceProductsQuery,
+  useSellerProductsQuery,
+} from "../src/data/hooks";
 import { getSmoothTabIndex, setSmoothTab } from "../src/utils/smoothTabs";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
@@ -37,7 +40,6 @@ const moderateScale = (size: number, factor = 0.3) => {
 };
 const CARD_WIDTH = (SCREEN_WIDTH - 48) / 2;
 const MARKETPLACE_PAGE_SIZE = 20;
-const MARKETPLACE_FOCUS_REFRESH_COOLDOWN_MS = 30000;
 const MARKETPLACE_CATEGORIES = [
   { value: "apparel", label: "Apparel" },
   { value: "accessories", label: "Accessories" },
@@ -52,15 +54,6 @@ const MARKETPLACE_CATEGORIES = [
 
 type MarketTab = "browse" | "sell";
 
-type MarketplaceCachePayload = {
-  products: any[];
-  sellerProducts: any[];
-  fetchedAt: number;
-  hasMoreProducts: boolean;
-};
-
-const marketplaceScreenCache = new Map<string, MarketplaceCachePayload>();
-
 const getCategoryLabel = (category: string | null | undefined) => {
   if (!category) return null;
   const match = MARKETPLACE_CATEGORIES.find((option) => option.value === category);
@@ -69,29 +62,13 @@ const getCategoryLabel = (category: string | null | undefined) => {
 
 const getProductImage = (product: any) => product?.cover_image_url || product?.primary_image || null;
 
-const mergeProductsById = (currentProducts: any[], nextProducts: any[]) => {
-  const merged = new Map<string, any>();
-
-  currentProducts.forEach((product) => {
-    if (product?.id) {
-      merged.set(product.id, product);
-    }
-  });
-
-  nextProducts.forEach((product) => {
-    if (product?.id) {
-      merged.set(product.id, product);
-    }
-  });
-
-  return Array.from(merged.values());
-};
-
 export default function MarketplaceScreen() {
   const { colors, isDark } = useTheme();
   const { contentBottomPadding } = useBottomBarClearance(24);
   const { session, isGuest, userId, userRole, roleResolved } = useAuth();
+  const queryClient = useQueryClient();
   const normalizedUserRole = (userRole || "").toLowerCase();
+  const isFan = normalizedUserRole === "fan";
   const isMusician = normalizedUserRole === "musician";
   const canSell = Boolean(session) && roleResolved && !isMusician;
 
@@ -104,11 +81,8 @@ export default function MarketplaceScreen() {
   }, [canSell, tab]);
 
   // Browse state
-  const [products, setProducts] = useState<any[]>([]);
-  const [sellerProducts, setSellerProducts] = useState<any[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [category, setCategory] = useState<string | null>(null);
-  const marketplaceCacheKey = `${userId || "guest"}:${category || "all"}:${canSell ? "seller" : "buyer"}:sold-visible`;
 
   // Add product modal
   const [showAddProduct, setShowAddProduct] = useState(false);
@@ -123,16 +97,35 @@ export default function MarketplaceScreen() {
   const [statusUpdatingId, setStatusUpdatingId] = useState<string | null>(null);
   const [deleteLoadingId, setDeleteLoadingId] = useState<string | null>(null);
 
-  const [loading, setLoading] = useState(true);
-  const [loadingMore, setLoadingMore] = useState(false);
-  const [hasMoreProducts, setHasMoreProducts] = useState(false);
-  const [refreshing, setRefreshing] = useState(false);
   const [alert, setAlert] = useState<{ type: AlertType; title: string; message: string; buttons?: any[] } | null>(null);
-  const sellerProductsRef = React.useRef<any[]>([]);
 
-  useEffect(() => {
-    sellerProductsRef.current = sellerProducts;
-  }, [sellerProducts]);
+  const productsQuery = useMarketplaceProductsQuery<any>({
+    category,
+    enabled: Boolean(session || isGuest),
+    includeSold: true,
+    limit: MARKETPLACE_PAGE_SIZE,
+  });
+  const sellerProductsQuery = useSellerProductsQuery<any>(userId, {
+    enabled: canSell,
+  });
+
+  const products = useMemo(
+    () => productsQuery.data?.pages.flatMap((page) => page.items || page.data || []) ?? [],
+    [productsQuery.data],
+  );
+  const sellerProducts = useMemo(
+    () => Array.isArray(sellerProductsQuery.data?.data) ? sellerProductsQuery.data.data : [],
+    [sellerProductsQuery.data],
+  );
+  const loading = productsQuery.isLoading || (canSell && sellerProductsQuery.isLoading);
+  const loadingMore = productsQuery.isFetchingNextPage;
+  const hasMoreProducts = productsQuery.hasNextPage;
+  const refreshing =
+    productsQuery.isRefetching || (canSell && sellerProductsQuery.isRefetching);
+
+  const invalidateMarketplaceQueries = useCallback(() => {
+    void queryClient.invalidateQueries({ queryKey: ["marketplace"] });
+  }, [queryClient]);
 
   const invokeMarketplace = useCallback(async (body: Record<string, unknown>) => {
     const { data, error } = await supabase.functions.invoke("manage-marketplace", { body });
@@ -153,123 +146,28 @@ export default function MarketplaceScreen() {
     return data;
   }, []);
 
-  const fetchAll = useCallback(async (options: { append?: boolean; offset?: number; showLoading?: boolean } = {}) => {
-    const append = options.append === true;
-    const offset = Math.max(0, options.offset || 0);
-
-    if (!session && !isGuest) {
-      setProducts([]);
-      setSellerProducts([]);
-      setHasMoreProducts(false);
-      setLoading(false);
-      setLoadingMore(false);
-      setRefreshing(false);
-      return;
+  const onRefresh = () => {
+    void productsQuery.refetch();
+    if (canSell) {
+      void sellerProductsQuery.refetch();
     }
-
-    if (append) {
-      setLoadingMore(true);
-    } else if (options.showLoading) {
-      setLoading(true);
-    }
-
-    try {
-      const browseBody: any = {
-        action: "browse_products",
-        include_sold: true,
-        limit: MARKETPLACE_PAGE_SIZE + 1,
-        offset,
-      };
-      if (category) browseBody.category = category;
-
-      const promises: Promise<any>[] = [invokeMarketplace(browseBody)];
-
-      if (canSell && !append) {
-        promises.push(invokeMarketplace({ action: "list_my_products" }));
-      }
-
-      const results = await Promise.all(promises);
-      const fetchedProducts = Array.isArray(results[0]?.data) ? results[0].data : [];
-      const pageProducts = fetchedProducts.slice(0, MARKETPLACE_PAGE_SIZE);
-      const nextHasMoreProducts = fetchedProducts.length > MARKETPLACE_PAGE_SIZE;
-      const nextSellerProducts = canSell && !append ? results[1]?.data || [] : sellerProductsRef.current;
-
-      if (!append) {
-        setSellerProducts(nextSellerProducts);
-        sellerProductsRef.current = nextSellerProducts;
-      }
-
-      setProducts((currentProducts) => {
-        const nextProducts = append
-          ? mergeProductsById(currentProducts, pageProducts)
-          : pageProducts;
-
-        marketplaceScreenCache.set(marketplaceCacheKey, {
-          products: nextProducts,
-          sellerProducts: nextSellerProducts,
-          fetchedAt: Date.now(),
-          hasMoreProducts: nextHasMoreProducts,
-        });
-
-        return nextProducts;
-      });
-      setHasMoreProducts(nextHasMoreProducts);
-    } catch (e: any) {
-      console.warn("Marketplace fetch failed", e);
-    } finally {
-      setLoading(false);
-      setLoadingMore(false);
-      setRefreshing(false);
-    }
-  }, [session, isGuest, category, invokeMarketplace, canSell, marketplaceCacheKey]);
-
-  useFocusEffect(useCallback(() => {
-    const cached = marketplaceScreenCache.get(marketplaceCacheKey);
-    const cacheIsFresh =
-      cached &&
-      Date.now() - cached.fetchedAt < MARKETPLACE_FOCUS_REFRESH_COOLDOWN_MS;
-
-    if (cached) {
-      setProducts(cached.products);
-      setSellerProducts(cached.sellerProducts);
-      sellerProductsRef.current = cached.sellerProducts;
-      setHasMoreProducts(Boolean(cached.hasMoreProducts));
-      setLoading(false);
-      setRefreshing(false);
-    } else {
-      setLoading(true);
-    }
-
-    let focusRefreshTask: ReturnType<typeof InteractionManager.runAfterInteractions> | null = null;
-
-    if (!cacheIsFresh) {
-      focusRefreshTask = InteractionManager.runAfterInteractions(() => {
-        void fetchAll({ showLoading: !cached });
-      });
-    }
-
-    return () => {
-      focusRefreshTask?.cancel();
-    };
-  }, [fetchAll, marketplaceCacheKey]));
-
-  const onRefresh = () => { setRefreshing(true); fetchAll(); };
+  };
 
   const loadMoreProducts = () => {
     if (loading || loadingMore || !hasMoreProducts) return;
-    fetchAll({ append: true, offset: products.length });
+    void productsQuery.fetchNextPage();
   };
 
   const browseProducts = useMemo(() => {
     const merged = new Map<string, any>();
 
-    products.forEach((product) => {
+    products.forEach((product: any) => {
       if (product?.id) {
         merged.set(product.id, product);
       }
     });
 
-    sellerProducts.forEach((product) => {
+    sellerProducts.forEach((product: any) => {
       if (product?.id && product?.status === "sold_out") {
         merged.set(product.id, product);
       }
@@ -291,7 +189,7 @@ export default function MarketplaceScreen() {
     const needle = searchQuery.trim().toLowerCase();
     if (!needle) return browseProducts;
 
-    return browseProducts.filter((product) =>
+    return browseProducts.filter((product: any) =>
       [product?.title, product?.seller_name, product?.category, product?.product_type]
         .filter((value): value is string => typeof value === "string")
         .some((value) => value.toLowerCase().includes(needle)),
@@ -300,8 +198,8 @@ export default function MarketplaceScreen() {
 
   const listingStats = useMemo(() => ({
     total: sellerProducts.length,
-    live: sellerProducts.filter((item) => item?.status === "active").length,
-    sold: sellerProducts.filter((item) => item?.status === "sold_out").length,
+    live: sellerProducts.filter((item: any) => item?.status === "active").length,
+    sold: sellerProducts.filter((item: any) => item?.status === "sold_out").length,
   }), [sellerProducts]);
 
   const formatPrice = (price: number | string | null | undefined) => {
@@ -321,6 +219,8 @@ export default function MarketplaceScreen() {
   }, []);
 
   const openEditListing = async (productId: string) => {
+    if (statusUpdatingId) return;
+
     setStatusUpdatingId(productId);
     try {
       const data = await invokeMarketplace({ action: "get_product_details", product_id: productId });
@@ -351,6 +251,8 @@ export default function MarketplaceScreen() {
   };
 
   const handleDeleteProduct = async (productId: string) => {
+    if (deleteLoadingId) return;
+
     setDeleteLoadingId(productId);
     try {
       const data = await invokeMarketplace({ action: "delete_product", product_id: productId });
@@ -364,7 +266,7 @@ export default function MarketplaceScreen() {
         title: "Listing Deleted",
         message: "The product has been removed from your seller inventory.",
       });
-      fetchAll();
+      invalidateMarketplaceQueries();
     } catch (e: any) {
       setAlert({ type: "error", title: "Error", message: e.message || "Unable to delete listing." });
     } finally {
@@ -385,6 +287,8 @@ export default function MarketplaceScreen() {
   };
 
   const handleSubmitProduct = async () => {
+    if (adding) return;
+
     if (!canSell) {
       setAlert({
         type: "warning",
@@ -451,7 +355,7 @@ export default function MarketplaceScreen() {
         setShowAddProduct(false);
         resetCreateListingForm();
         setTab("sell");
-        fetchAll();
+        invalidateMarketplaceQueries();
       } else {
         setAlert({ type: "error", title: "Error", message: data?.error || "Failed to create listing" });
       }
@@ -468,6 +372,8 @@ export default function MarketplaceScreen() {
     (!newPrice.trim() || Number.isFinite(parsedListingPrice));
 
   const handleListingStatus = async (productId: string, action: "publish_product" | "mark_product_sold" | "relist_product") => {
+    if (statusUpdatingId) return;
+
     setStatusUpdatingId(productId);
     try {
       const data = await invokeMarketplace({ action, product_id: productId });
@@ -484,7 +390,7 @@ export default function MarketplaceScreen() {
             ? "Buyers can message you about this item again."
             : "Product is now live.";
         emitToast({ type: "success", title, message });
-        fetchAll();
+        invalidateMarketplaceQueries();
         return;
       }
 
@@ -496,8 +402,8 @@ export default function MarketplaceScreen() {
     }
   };
 
-  const handlePublishProduct = async (productId: string) => {
-    handleListingStatus(productId, "publish_product");
+  const handlePublishProduct = (productId: string) => {
+    void handleListingStatus(productId, "publish_product");
   };
 
   const tabs: { key: MarketTab; label: string; icon: string }[] = [
@@ -656,16 +562,18 @@ export default function MarketplaceScreen() {
                           {categoryLabel}
                         </Text>
                       ) : <View />}
-                      <View style={[styles.chatHint, { backgroundColor: isSold ? "#F97316" + "14" : colors.primary + "12" }]}>
-                        <Ionicons
-                          name={isSold ? "ban-outline" : "chatbubble-ellipses-outline"}
-                          size={12}
-                          color={isSold ? "#F97316" : colors.primary}
-                        />
-                        <Text style={[styles.chatHintText, { color: isSold ? "#F97316" : colors.primary }]}>
-                          {isSold ? "Sold" : "Message"}
-                        </Text>
-                      </View>
+                      {(isSold || !isFan) && (
+                        <View style={[styles.chatHint, { backgroundColor: isSold ? "#F97316" + "14" : colors.primary + "12" }]}>
+                          <Ionicons
+                            name={isSold ? "ban-outline" : "chatbubble-ellipses-outline"}
+                            size={12}
+                            color={isSold ? "#F97316" : colors.primary}
+                          />
+                          <Text style={[styles.chatHintText, { color: isSold ? "#F97316" : colors.primary }]}>
+                            {isSold ? "Sold" : "Message"}
+                          </Text>
+                        </View>
+                      )}
                     </View>
                   </View>
                 </TouchableOpacity>
@@ -730,7 +638,7 @@ export default function MarketplaceScreen() {
       </TouchableOpacity>
 
       {sellerProducts.length > 0 ? (
-        sellerProducts.map((product) => {
+        sellerProducts.map((product: any) => {
           const isLive = product.status === "active";
           const isSold = product.status === "sold_out";
           const isBusy = statusUpdatingId === product.id || deleteLoadingId === product.id;
@@ -947,8 +855,8 @@ export default function MarketplaceScreen() {
                   );
                 })}
               </ScrollView>
-              <TouchableOpacity activeOpacity={1}
-                style={[styles.submitBtn, { backgroundColor: isProductFormReady ? colors.primary : colors.border, opacity: adding ? 0.6 : 1 }]}
+              <TouchableOpacity activeOpacity={adding || !isProductFormReady ? 1 : 0.78}
+                style={[styles.submitBtn, { backgroundColor: isProductFormReady ? colors.primary : colors.border, opacity: adding || !isProductFormReady ? 0.6 : 1 }]}
                 onPress={handleSubmitProduct}
                 disabled={adding || !isProductFormReady}
               >

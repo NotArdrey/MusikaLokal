@@ -234,6 +234,53 @@ function getNumericAmount(value: any): number {
   return Number.isFinite(amount) ? amount : 0;
 }
 
+function uniqueStrings(values: unknown[]) {
+  return Array.from(
+    new Set(
+      values.filter((value): value is string => typeof value === "string" && value.trim().length > 0),
+    ),
+  );
+}
+
+async function hydrateStudioBookingLegacy(supabaseAdmin: any, rows: any[]) {
+  const studioIds = uniqueStrings(rows.map((row: any) => row?.studio?.id || row?.studio_id));
+  const legacyById = new Map<string, any>();
+
+  if (studioIds.length > 0) {
+    const { data, error } = await supabaseAdmin
+      .from("studios_with_stats")
+      .select("id, images, location, hourly_rate, rate")
+      .in("id", studioIds);
+
+    if (error) throw error;
+    (data || []).forEach((row: any) => legacyById.set(row.id, row));
+  }
+
+  return rows.map((row: any) => {
+    const studioId = row?.studio?.id || row?.studio_id || null;
+    const legacy = studioId ? legacyById.get(studioId) : null;
+
+    return {
+      ...row,
+      studio: row?.studio
+        ? {
+            ...row.studio,
+            id: studioId,
+            images: Array.isArray(legacy?.images) ? legacy.images : [],
+            location: legacy?.location || row.studio.location || row.studio.address || null,
+            rate_per_hour:
+              row.studio.rate_per_hour ??
+              legacy?.hourly_rate ??
+              row.studio.hourly_rate ??
+              legacy?.rate ??
+              row.studio.rate ??
+              null,
+          }
+        : row?.studio,
+    };
+  });
+}
+
 function inferBookingPaymentType(metadata: any, booking?: any): string {
   if (metadata?.payment_type) return metadata.payment_type;
 
@@ -1029,11 +1076,13 @@ serve(async (req: Request) => {
         const { data: fullBookings } = await supabaseAdmin
           .from("studio_bookings")
           .select(
-            "id, user_id, studio_id, booking_date, studio:studios(name, owner_id, images), profile:user_id(avatar_url)",
+            "id, user_id, studio_id, booking_date, studio:studios(id, name, owner_id, address, hourly_rate, rate), profile:user_id(avatar_url)",
           )
           .in("id", bookingIdsToSettle);
 
-        for (const fullBooking of fullBookings || []) {
+        const hydratedFullBookings = await hydrateStudioBookingLegacy(supabaseAdmin, fullBookings || []);
+
+        for (const fullBooking of hydratedFullBookings) {
           const studioImage = fullBooking.studio?.images?.[0];
           const userAvatar = fullBooking.profile?.avatar_url;
 
@@ -1234,11 +1283,13 @@ serve(async (req: Request) => {
                 const { data: fullBookings } = await supabaseAdmin
                   .from("studio_bookings")
                   .select(
-                    "id, user_id, studio_id, booking_date, remaining_balance, studio:studios(name, owner_id, images), profile:user_id(avatar_url)",
+                    "id, user_id, studio_id, booking_date, remaining_balance, studio:studios(id, name, owner_id, address, hourly_rate, rate), profile:user_id(avatar_url)",
                   )
                   .in("id", bookingIdsToSettle);
 
-                for (const fullBooking of fullBookings || []) {
+                const hydratedFullBookings = await hydrateStudioBookingLegacy(supabaseAdmin, fullBookings || []);
+
+                for (const fullBooking of hydratedFullBookings) {
                   const studioImage = fullBooking.studio?.images?.[0];
                   const userAvatar = fullBooking.profile?.avatar_url;
                   const bookingRemainingBalance = getNumericAmount(
@@ -1468,11 +1519,13 @@ serve(async (req: Request) => {
           const { data: paidBookings } = await supabaseAdmin
             .from("studio_bookings")
             .select(
-              "id, user_id, studio_id, booking_date, remaining_balance, studio:studios(name, owner_id, images)",
+              "id, user_id, studio_id, booking_date, remaining_balance, studio:studios(id, name, owner_id, address, hourly_rate, rate)",
             )
             .in("id", processedBookingIds);
 
-          for (const booking of paidBookings || []) {
+          const hydratedPaidBookings = await hydrateStudioBookingLegacy(supabaseAdmin, paidBookings || []);
+
+          for (const booking of hydratedPaidBookings) {
             const studioImage = booking.studio?.images?.[0] || null;
             const bookingRemainingBalance = getNumericAmount(
               booking.remaining_balance ?? remainingBalance,
@@ -1645,10 +1698,12 @@ serve(async (req: Request) => {
           // Notify user about failed payment
           const { data: bookings } = await supabaseAdmin
             .from("studio_bookings")
-            .select("id, user_id, studio:studios(name, images)")
+            .select("id, user_id, studio_id, studio:studios(id, name, address, hourly_rate, rate)")
             .in("id", targetBookingIds);
 
-          for (const booking of bookings || []) {
+          const hydratedBookings = await hydrateStudioBookingLegacy(supabaseAdmin, bookings || []);
+
+          for (const booking of hydratedBookings) {
             await supabaseAdmin.from("notifications").insert({
               user_id: booking.user_id,
               type: "warning",
@@ -1687,17 +1742,21 @@ serve(async (req: Request) => {
           // Notify user
           const { data: booking } = await supabaseAdmin
             .from("studio_bookings")
-            .select("user_id, studio:studios(name, images)")
+            .select("user_id, studio_id, studio:studios(id, name, address, hourly_rate, rate)")
             .eq("id", bookingId)
             .single();
 
-          if (booking) {
+          const [bookingWithLegacy] = booking
+            ? await hydrateStudioBookingLegacy(supabaseAdmin, [booking])
+            : [];
+
+          if (bookingWithLegacy) {
             await supabaseAdmin.from("notifications").insert({
-              user_id: booking.user_id,
+              user_id: bookingWithLegacy.user_id,
               type: "success",
               title: "Refund Completed",
-              message: `Your refund of ₱${refundAmount.toLocaleString()} for ${booking.studio?.name} has been processed.`,
-              image: booking.studio?.images?.[0] || null,
+              message: `Your refund of ₱${refundAmount.toLocaleString()} for ${bookingWithLegacy.studio?.name} has been processed.`,
+              image: bookingWithLegacy.studio?.images?.[0] || null,
               meta: { booking_id: bookingId },
             });
           }
@@ -1716,17 +1775,21 @@ serve(async (req: Request) => {
           // Notify user that refund failed
           const { data: booking } = await supabaseAdmin
             .from("studio_bookings")
-            .select("user_id, studio:studios(name, images)")
+            .select("user_id, studio_id, studio:studios(id, name, address, hourly_rate, rate)")
             .eq("id", bookingId)
             .single();
 
-          if (booking) {
+          const [bookingWithLegacy] = booking
+            ? await hydrateStudioBookingLegacy(supabaseAdmin, [booking])
+            : [];
+
+          if (bookingWithLegacy) {
             await supabaseAdmin.from("notifications").insert({
-              user_id: booking.user_id,
+              user_id: bookingWithLegacy.user_id,
               type: "warning",
               title: "Refund Failed",
-              message: `Your refund request for ${booking.studio?.name} could not be processed. Please contact support.`,
-              image: booking.studio?.images?.[0] || null,
+              message: `Your refund request for ${bookingWithLegacy.studio?.name} could not be processed. Please contact support.`,
+              image: bookingWithLegacy.studio?.images?.[0] || null,
               meta: { booking_id: bookingId },
             });
           }

@@ -238,11 +238,9 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   }, []);
 
   useEffect(() => {
-    AsyncStorage.getItem("auth_guest_mode")
-      .then((value) => {
-        if (value === "1") {
-          setIsGuest(true);
-        }
+    AsyncStorage.removeItem("auth_guest_mode")
+      .then(() => {
+        setIsGuest(false);
       })
       .catch((e) => {
       });

@@ -262,6 +262,99 @@ function getListingRequestKind(eventDetails: any) {
     .toLowerCase();
 }
 
+const ACTIVE_LISTING_REQUEST_STATUSES = [
+  "pending",
+  "accepted",
+  "approved",
+  "connected",
+];
+
+function readEventString(eventDetails: any, key: string) {
+  const requestDetails =
+    eventDetails?.request_details && typeof eventDetails.request_details === "object"
+      ? eventDetails.request_details
+      : {};
+
+  return toNonEmptyString(eventDetails?.[key]) || toNonEmptyString(requestDetails?.[key]);
+}
+
+function valuesConflict(expected: unknown, actual: unknown) {
+  const normalizedExpected = toNonEmptyString(expected);
+  const normalizedActual = toNonEmptyString(actual);
+
+  return Boolean(
+    normalizedExpected &&
+      normalizedActual &&
+      normalizedExpected !== normalizedActual,
+  );
+}
+
+function isDuplicateListingRequestEvent(existingDetails: any, expectedDetails: any) {
+  const actualDetails =
+    existingDetails && typeof existingDetails === "object" && !Array.isArray(existingDetails)
+      ? existingDetails
+      : {};
+  const expectedKind = readEventString(expectedDetails, "request_kind");
+  const actualKind = readEventString(actualDetails, "request_kind");
+
+  if (expectedKind && actualKind && expectedKind !== actualKind) {
+    return false;
+  }
+
+  if (
+    valuesConflict(expectedDetails.sender_entity_type, actualDetails.sender_entity_type) ||
+    valuesConflict(expectedDetails.receiver_entity_type, actualDetails.receiver_entity_type) ||
+    valuesConflict(expectedDetails.sender_entity_id, actualDetails.sender_entity_id) ||
+    valuesConflict(expectedDetails.receiver_entity_id, actualDetails.receiver_entity_id) ||
+    valuesConflict(expectedDetails.production_team_id, actualDetails.production_team_id)
+  ) {
+    return false;
+  }
+
+  return true;
+}
+
+async function validateActiveListingRequestDuplicate(
+  supabaseAdmin: any,
+  params: {
+    eventDetails: any;
+    groupId: string | null;
+    studioId: string | null;
+    receiverUserId: string;
+    actorUserId: string;
+  },
+) {
+  const { eventDetails, groupId, studioId, receiverUserId, actorUserId } = params;
+
+  let query = supabaseAdmin
+    .from("booking_requests")
+    .select("id, status, event_details")
+    .eq("sender_id", actorUserId)
+    .eq("receiver_id", receiverUserId)
+    .in("status", ACTIVE_LISTING_REQUEST_STATUSES);
+
+  query = groupId ? query.eq("group_id", groupId) : query.is("group_id", null);
+  query = studioId ? query.eq("studio_id", studioId) : query.is("studio_id", null);
+
+  const { data, error } = await query
+    .order("created_at", { ascending: false })
+    .limit(20);
+
+  if (error) {
+    throw error;
+  }
+
+  const duplicate = (data || []).find((request: any) =>
+    isDuplicateListingRequestEvent(request?.event_details, eventDetails),
+  );
+
+  if (!duplicate) {
+    return null;
+  }
+
+  return { error: "An active request already exists for this listing.", status: 409 };
+}
+
 function isProductionTeamInviteRequest(request: any) {
   const eventDetails =
     request?.event_details && typeof request.event_details === "object"
@@ -694,9 +787,24 @@ serve(async (req: Request) => {
         if (validationResult?.error) {
           return jsonResponse({ error: validationResult.error }, validationResult.status || 400);
         }
+
+        const duplicateValidation = await validateActiveListingRequestDuplicate(supabaseAdmin, {
+          eventDetails,
+          groupId,
+          studioId,
+          receiverUserId,
+          actorUserId: authUser.id,
+        });
+
+        if (duplicateValidation?.error) {
+          return jsonResponse(
+            { error: duplicateValidation.error },
+            duplicateValidation.status || 409,
+          );
+        }
       } catch (validationError: any) {
         return jsonResponse(
-          { error: validationError?.message || "Failed to validate production invite" },
+          { error: validationError?.message || "Failed to validate listing request" },
           500,
         );
       }
@@ -930,11 +1038,34 @@ serve(async (req: Request) => {
       if (teamErr) return jsonResponse({ error: teamErr.message }, 500);
 
       // Auto-add owner as member
-      await supabaseAdmin.from("production_team_members").insert({
-        team_id: team.id,
-        user_id: authUser.id,
-        role: "owner",
-      });
+      const { error: ownerMemberError } = await supabaseAdmin
+        .from("production_team_members")
+        .upsert({
+          team_id: team.id,
+          user_id: authUser.id,
+          role: "owner",
+        }, { onConflict: "team_id,user_id" });
+
+      if (ownerMemberError) {
+        console.error("[manage-production] Failed to attach owner membership", {
+          team_id: team.id,
+          user_id: authUser.id,
+          message: ownerMemberError.message,
+          code: ownerMemberError.code,
+          details: ownerMemberError.details,
+          hint: ownerMemberError.hint,
+        });
+
+        await supabaseAdmin
+          .from("production_teams")
+          .delete()
+          .eq("id", team.id)
+          .eq("owner_id", authUser.id);
+
+        return jsonResponse({
+          error: `Failed to create production team membership: ${ownerMemberError.message}`,
+        }, 500);
+      }
 
       return jsonResponse({ success: true, team });
     }
@@ -944,15 +1075,49 @@ serve(async (req: Request) => {
       if (!team_id) return jsonResponse({ error: "team_id is required" }, 400);
       if (!name?.trim()) return jsonResponse({ error: "Team name is required" }, 400);
 
-      const { data: membership } = await supabaseAdmin
-        .from("production_team_members")
-        .select("role")
-        .eq("team_id", team_id)
-        .eq("user_id", authUser.id)
-        .in("role", ["owner", "manager"])
+      const { data: existingTeam, error: existingTeamError } = await supabaseAdmin
+        .from("production_teams")
+        .select("id, owner_id")
+        .eq("id", team_id)
         .maybeSingle();
 
-      if (!membership) {
+      if (existingTeamError) return jsonResponse({ error: existingTeamError.message }, 500);
+      if (!existingTeam) return jsonResponse({ error: "Production team not found" }, 404);
+
+      let membership: any = null;
+      if (existingTeam.owner_id === authUser.id) {
+        const { error: ownerMembershipError } = await supabaseAdmin
+          .from("production_team_members")
+          .upsert({
+            team_id,
+            user_id: authUser.id,
+            role: "owner",
+          }, { onConflict: "team_id,user_id" });
+
+        if (ownerMembershipError) {
+          console.error("[manage-production] Failed to repair owner membership before update", {
+            team_id,
+            user_id: authUser.id,
+            message: ownerMembershipError.message,
+            code: ownerMembershipError.code,
+            details: ownerMembershipError.details,
+            hint: ownerMembershipError.hint,
+          });
+        }
+      } else {
+        const { data: managerMembership, error: membershipError } = await supabaseAdmin
+          .from("production_team_members")
+          .select("role")
+          .eq("team_id", team_id)
+          .eq("user_id", authUser.id)
+          .in("role", ["owner", "manager"])
+          .maybeSingle();
+
+        if (membershipError) return jsonResponse({ error: membershipError.message }, 500);
+        membership = managerMembership;
+      }
+
+      if (existingTeam.owner_id !== authUser.id && !membership) {
         return jsonResponse({ error: "Only team owners or managers can update this team" }, 403);
       }
 
@@ -1490,7 +1655,7 @@ serve(async (req: Request) => {
     }
 
     if (action === "list_my_teams") {
-      const { data: teams, error } = await supabaseAdmin
+      const { data: memberships, error } = await supabaseAdmin
         .from("production_team_members")
         .select(`
           team_id,
@@ -1502,7 +1667,59 @@ serve(async (req: Request) => {
         .eq("user_id", authUser.id);
 
       if (error) return jsonResponse({ error: error.message }, 500);
-      return jsonResponse({ teams: teams?.map((t: any) => ({ ...t.production_teams, member_role: t.role })) || [] });
+
+      const { data: ownedTeams, error: ownedTeamsError } = await supabaseAdmin
+        .from("production_teams")
+        .select("id, name, description, logo_url, owner_id, created_at")
+        .eq("owner_id", authUser.id);
+
+      if (ownedTeamsError) return jsonResponse({ error: ownedTeamsError.message }, 500);
+
+      const teamsById = new Map<string, any>();
+      (memberships || []).forEach((membershipRow: any) => {
+        const teamRecord = Array.isArray(membershipRow.production_teams)
+          ? membershipRow.production_teams[0]
+          : membershipRow.production_teams;
+
+        if (teamRecord?.id) {
+          teamsById.set(teamRecord.id, {
+            ...teamRecord,
+            member_role: membershipRow.role,
+          });
+        }
+      });
+
+      for (const ownedTeam of ownedTeams || []) {
+        const { error: repairError } = await supabaseAdmin
+          .from("production_team_members")
+          .upsert({
+            team_id: ownedTeam.id,
+            user_id: authUser.id,
+            role: "owner",
+          }, { onConflict: "team_id,user_id" });
+
+        if (repairError) {
+          console.error("[manage-production] Failed to repair owner membership while listing teams", {
+            team_id: ownedTeam.id,
+            user_id: authUser.id,
+            message: repairError.message,
+            code: repairError.code,
+            details: repairError.details,
+            hint: repairError.hint,
+          });
+        }
+
+        teamsById.set(ownedTeam.id, {
+          ...ownedTeam,
+          member_role: "owner",
+        });
+      }
+
+      const teams = Array.from(teamsById.values()).sort((a: any, b: any) =>
+        String(b.created_at || "").localeCompare(String(a.created_at || "")),
+      );
+
+      return jsonResponse({ teams });
     }
 
 

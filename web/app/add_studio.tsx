@@ -182,11 +182,6 @@ const insertStudioInstrumentRows = async (
     return error;
   }
 
-  console.warn(
-    "studio_instruments detail columns are missing in the live schema; retrying without quantity/description.",
-    error,
-  );
-
   const { error: fallbackError } = await supabase
     .from("studio_instruments")
     .insert(buildStudioInstrumentRows(studioId, instruments, false));
@@ -1016,7 +1011,7 @@ export default function AddStudioScreen() {
 
   const handleBack = () => {
     if (step > 1) setStep(step - 1);
-    else router.back();
+    else router.replace("/my_studio");
   };
 
   const toggleCalendarDate = (dateStr: string) => {
@@ -2109,7 +2104,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
         />
       )}
       <View style={[styles.flex1, { backgroundColor: colors.background }]}>
-        <Header title="List Studio" />
+        <Header title="List Studio" onBackPress={handleBack} />
 
         {/* Enhanced Step Indicator (Fixed at top) */}
         <View style={styles.stepIndicatorContainer}>
@@ -2409,7 +2404,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                     </View>
                   </TouchableOpacity>
                 ) : (
-                  <TouchableOpacity activeOpacity={1}
+                  <TouchableOpacity activeOpacity={addressVerificationLoading ? 1 : 0.78}
                     onPress={startAddressVerification}
                     disabled={addressVerificationLoading}
                     style={[
@@ -2528,6 +2523,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                           minWidth: 80,
                           textAlign: "right",
                           paddingVertical: 16,
+                          textAlignVertical: "center",
                         }}
                       />
                       <Text
@@ -2599,6 +2595,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                           minWidth: 80,
                           textAlign: "right",
                           paddingVertical: 16,
+                          textAlignVertical: "center",
                         }}
                       />
                       <Text
@@ -2657,6 +2654,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                             fontFamily: "Poppins_500Medium",
                             fontSize: 15,
                             paddingVertical: 14,
+                            textAlignVertical: "center",
                           }}
                         />
                         <Text
@@ -2721,6 +2719,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                             fontFamily: "Poppins_500Medium",
                             fontSize: 15,
                             paddingVertical: 14,
+                            textAlignVertical: "center",
                           }}
                         />
                         <Text
@@ -2876,6 +2875,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                         fontFamily: "Poppins_500Medium",
                         fontSize: 14,
                         marginBottom: 12,
+                        textAlignVertical: "center",
                       }}
                     />
 
@@ -2923,6 +2923,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                         fontFamily: "Poppins_500Medium",
                         fontSize: 14,
                         marginBottom: 12,
+                        textAlignVertical: "center",
                       }}
                     />
 
@@ -2946,6 +2947,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                             color: colors.text,
                             fontFamily: "Poppins_500Medium",
                             fontSize: 14,
+                            textAlignVertical: "center",
                           }}
                         />
                       </View>
@@ -2968,6 +2970,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                             color: colors.text,
                             fontFamily: "Poppins_500Medium",
                             fontSize: 14,
+                            textAlignVertical: "center",
                           }}
                         />
                       </View>
@@ -3037,6 +3040,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                           color: colors.text,
                           fontFamily: "Poppins_500Medium",
                           fontSize: 14,
+                          textAlignVertical: "center",
                         }}
                       />
                       {promotionForm.discount_type === "percentage" && (
@@ -3293,6 +3297,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                       fontFamily: "Poppins_500Medium",
                       fontSize: 16,
                       paddingVertical: 16,
+                      textAlignVertical: "center",
                     }}
                   />
                   <Text
@@ -3382,7 +3387,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                   <TouchableOpacity
                     onPress={handleContractUpload}
                     disabled={uploadingContract}
-                    activeOpacity={1}
+                    activeOpacity={uploadingContract ? 1 : 0.78}
                     style={[
                       styles.uploadContractBtn,
                       {
@@ -5097,7 +5102,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
             <TouchableOpacity
               onPress={handleBack}
               disabled={creating}
-              activeOpacity={1}
+              activeOpacity={creating ? 1 : 0.78}
               style={[
                 styles.backBtn,
                 {
@@ -5114,14 +5119,14 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
             <TouchableOpacity
               onPress={handleNext}
               disabled={creating || !isCurrentStepComplete}
-              activeOpacity={1}
+              activeOpacity={creating || !isCurrentStepComplete ? 1 : 0.78}
               style={[
                 styles.nextBtn,
                 {
                   flex: 1,
                   backgroundColor: isCurrentStepComplete ? colors.primary : colors.border,
                   shadowColor: colors.primary,
-                  opacity: creating ? 0.7 : 1,
+                  opacity: creating || !isCurrentStepComplete ? 0.6 : 1,
                 },
               ]}
             >
@@ -5337,6 +5342,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                     fontFamily: "Poppins_400Regular",
                     borderWidth: 1,
                     borderColor: isDark ? "#374151" : "#E5E7EB",
+                    textAlignVertical: "center",
                   }}
                 />
               </View>
@@ -5372,6 +5378,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                     fontFamily: "Poppins_400Regular",
                     borderWidth: 1,
                     borderColor: isDark ? "#374151" : "#E5E7EB",
+                    textAlignVertical: "center",
                   }}
                 />
               </View>
@@ -5449,7 +5456,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                   <TouchableOpacity
                     onPress={pickEquipmentImage}
                     disabled={uploadingEquipmentImage}
-                    activeOpacity={1}
+                    activeOpacity={uploadingEquipmentImage ? 1 : 0.78}
                     style={{
                       backgroundColor: colors.inputBackground,
                       borderRadius: 12,

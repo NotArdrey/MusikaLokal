@@ -27,6 +27,7 @@ import LocationPicker from "../src/components/LocationPicker";
 import Modal from "../src/components/modal";
 import Navbar from "../src/components/navbar";
 import { useTheme } from "../src/context/ThemeContext";
+import { formatDashedNumericDate } from "../src/utils/friendlyDateTime";
 import {
   formatRecordingRuleSentence,
   formatRecordingRuleShort,
@@ -186,11 +187,6 @@ const insertStudioInstrumentRows = async (
   if (!error || !isMissingStudioInstrumentDetailColumns(error)) {
     return error;
   }
-
-  console.warn(
-    "studio_instruments detail columns are missing in the live schema; retrying without quantity/description.",
-    error,
-  );
 
   const { error: fallbackError } = await supabase
     .from("studio_instruments")
@@ -357,6 +353,13 @@ export default function EditStudioScreen() {
   const { id } = useLocalSearchParams<{
     id?: string | string[];
   }>();
+  const returnTab = useLocalSearchParams<{
+    returnTab?: string | string[];
+  }>().returnTab;
+  const returnTabParam = Array.isArray(returnTab) ? returnTab[0] : returnTab;
+  const normalizedReturnTab = ["About", "Setup", "Bookings", "Review"].includes(returnTabParam || "")
+    ? returnTabParam || "About"
+    : "About";
   const [studioName, setStudioName] = useState("");
   const [description, setDescription] = useState("");
   const [address, setAddress] = useState("");
@@ -443,6 +446,19 @@ export default function EditStudioScreen() {
     setAlertVisible(true);
   };
 
+  const handleReturnToTabs = useCallback(() => {
+    const studioId = Array.isArray(id) ? id[0] : id;
+    if (studioId) {
+      router.replace({
+        pathname: "/manage_studio",
+        params: { id: studioId, tab: normalizedReturnTab },
+      });
+      return;
+    }
+
+    router.replace("/my_studio");
+  }, [id, normalizedReturnTab]);
+
   const handleAttemptLeave = useCallback(() => {
     if (saving) return;
 
@@ -452,10 +468,10 @@ export default function EditStudioScreen() {
       "Your current edits won't be saved unless you tap Save Changes.",
       [
         { text: "Stay", style: "cancel" },
-        { text: "Leave", style: "destructive", onPress: () => router.back() },
+        { text: "Leave", style: "destructive", onPress: handleReturnToTabs },
       ],
     );
-  }, [saving]);
+  }, [handleReturnToTabs, saving]);
 
   const toggleCalendarDate = (dateStr: string) => {
     setSelectedDates((prev) => {
@@ -2542,7 +2558,7 @@ export default function EditStudioScreen() {
               user_id: conflict.user_id,
               type: "warning",
               title: "Booking Cancelled",
-              message: `Your booking at ${studioName} on ${new Date(conflict.booking_date).toLocaleDateString()} has been cancelled due to schedule changes. You will receive a refund.`,
+              message: `Your booking at ${studioName} on ${formatDashedNumericDate(conflict.booking_date)} has been cancelled due to schedule changes. You will receive a refund.`,
               meta: { bookingId: resolution.bookingId, studioId },
             });
           }
@@ -2668,7 +2684,7 @@ export default function EditStudioScreen() {
               user_id: conflict.user_id,
               type: "warning",
               title: "Booking Relocation Request",
-              message: `Your booking at ${studioName} needs relocation to ${new Date(resolution.newSlot.date).toLocaleDateString()} at ${resolution.newSlot.start_time}. Please accept within 24 hours or your booking will be cancelled and refunded.`,
+              message: `Your booking at ${studioName} needs relocation to ${formatDashedNumericDate(resolution.newSlot.date)} at ${resolution.newSlot.start_time}. Please accept within 24 hours or your booking will be cancelled and refunded.`,
               meta: {
                 bookingId: resolution.bookingId,
                 studioId,
@@ -3151,7 +3167,7 @@ export default function EditStudioScreen() {
         {
           text: "OK",
           onPress: () => {
-            router.replace({ pathname: "/my_studio", params: { refresh: String(Date.now()) } });
+            handleReturnToTabs();
           },
         },
       ]);
@@ -3819,6 +3835,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                       minWidth: 80,
                       textAlign: "center",
                       paddingVertical: 16,
+                      textAlignVertical: "center",
                     }}
                   />
                   <Text
@@ -3890,6 +3907,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                       minWidth: 80,
                       textAlign: "center",
                       paddingVertical: 16,
+                      textAlignVertical: "center",
                     }}
                   />
                   <Text
@@ -3946,6 +3964,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                         fontFamily: "Poppins_500Medium",
                         fontSize: 15,
                         paddingVertical: 14,
+                        textAlignVertical: "center",
                       }}
                     />
                     <Text
@@ -4010,6 +4029,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                         fontFamily: "Poppins_500Medium",
                         fontSize: 15,
                         paddingVertical: 14,
+                        textAlignVertical: "center",
                       }}
                     />
                     <Text
@@ -4169,6 +4189,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                     fontFamily: "Poppins_500Medium",
                     fontSize: 14,
                     marginBottom: 12,
+                    textAlignVertical: "center",
                   }}
                 />
 
@@ -4215,6 +4236,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                     fontFamily: "Poppins_500Medium",
                     fontSize: 14,
                     marginBottom: 12,
+                    textAlignVertical: "center",
                   }}
                 />
 
@@ -4243,6 +4265,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                         color: colors.text,
                         fontFamily: "Poppins_500Medium",
                         fontSize: 14,
+                        textAlignVertical: "center",
                       }}
                     />
                   </View>
@@ -4270,6 +4293,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                         color: colors.text,
                         fontFamily: "Poppins_500Medium",
                         fontSize: 14,
+                        textAlignVertical: "center",
                       }}
                     />
                   </View>
@@ -4339,6 +4363,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                       color: colors.text,
                       fontFamily: "Poppins_500Medium",
                       fontSize: 14,
+                      textAlignVertical: "center",
                     }}
                   />
                   {promotionForm.discount_type === "percentage" && (
@@ -4591,6 +4616,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                   fontSize: 16,
                   textAlign: "left",
                   paddingVertical: 16,
+                  textAlignVertical: "center",
                 }}
               />
               <Text
@@ -4666,7 +4692,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
               <TouchableOpacity
                 onPress={handleContractUpload}
                 disabled={uploadingContract}
-                activeOpacity={1}
+                activeOpacity={uploadingContract ? 1 : 0.78}
                 style={[
                   styles.uploadContractBtn,
                   {
@@ -5903,12 +5929,13 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                     : isFormComplete
                       ? colors.primary
                       : colors.border,
+                  opacity: saving || !isFormComplete ? 0.6 : 1,
                   shadowColor: colors.primary,
                 },
               ]}
               onPress={handleSave}
               disabled={saving || !isFormComplete}
-              activeOpacity={1}
+              activeOpacity={saving || !isFormComplete ? 1 : 0.78}
             >
               {saving ? (
                 <ActivityIndicator size="small" color="#fff" />
@@ -6054,6 +6081,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                     fontFamily: "Poppins_400Regular",
                     borderWidth: 1,
                     borderColor: isDark ? "#374151" : "#E5E7EB",
+                    textAlignVertical: "center",
                   }}
                 />
               </View>
@@ -6089,6 +6117,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                     fontFamily: "Poppins_400Regular",
                     borderWidth: 1,
                     borderColor: isDark ? "#374151" : "#E5E7EB",
+                    textAlignVertical: "center",
                   }}
                 />
               </View>
@@ -6166,7 +6195,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                   <TouchableOpacity
                     onPress={pickEquipmentImage}
                     disabled={uploadingEquipmentImage}
-                    activeOpacity={1}
+                    activeOpacity={uploadingEquipmentImage ? 1 : 0.78}
                     style={{
                       backgroundColor: colors.inputBackground,
                       borderRadius: 12,

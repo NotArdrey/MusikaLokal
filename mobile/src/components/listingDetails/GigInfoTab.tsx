@@ -54,23 +54,6 @@ const GigInfoTab = ({ group, colors, isDark, styles }: GigInfoTabProps) => {
         </View>
       </View>
 
-      {requirements.experience_level && (
-        <View style={[styles.section, { marginTop: 16 }]}>
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-            <Ionicons name="ribbon-outline" size={20} color={colors.primary} />
-            <Text
-              style={{
-                fontFamily: "Poppins_600SemiBold",
-                color: colors.text,
-                fontSize: 14,
-              }}
-            >
-              Experience Level: <Text style={{ color: colors.primary }}>{requirements.experience_level}</Text>
-            </Text>
-          </View>
-        </View>
-      )}
-
       <View style={[styles.section, { marginTop: 24 }]}>
         <Text style={[styles.sectionTitle, { color: colors.text }]}>Event Details</Text>
         {group.event_date && (

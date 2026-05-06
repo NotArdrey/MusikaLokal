@@ -12,6 +12,7 @@ import MusicianWorkspaceTabs from '../src/components/MusicianWorkspaceTabs';
 import Navbar from '../src/components/navbar';
 import { useAuth, useRequireAuth } from '../src/context/AuthContext';
 import { useTheme } from '../src/context/ThemeContext';
+import { formatDashedNumericDate } from '../src/utils/friendlyDateTime';
 
 const DEFAULT_GIG_IMAGE = 'https://images.unsplash.com/photo-1501281668745-f7f57925c3b4?w=800&fit=crop';
 
@@ -478,7 +479,7 @@ export default function MyVenueScreen() {
                                             <View style={styles.cardContent}>
                                                 <Text style={[styles.cardTitle, { color: colors.text }]} numberOfLines={1}>{gig.name}</Text>
                                                 <Text style={[styles.cardSubTitle, { color: colors.primary }]} numberOfLines={1}>
-                                                    {gig.event_date ? new Date(gig.event_date).toLocaleDateString() : 'Date TBA'}
+                                                    {gig.event_date ? formatDashedNumericDate(gig.event_date) : 'Date TBA'}
                                                     {gig.requirements?.event_start_time && gig.requirements?.event_end_time ? ` • ${gig.requirements.event_start_time} - ${gig.requirements.event_end_time}` : ''} • {gig.location}
                                                 </Text>
 
@@ -573,7 +574,7 @@ export default function MyVenueScreen() {
                 inputPlaceholder="Cancellation reason"
                 inputValue={cancellationReason}
                 onInputChange={setCancellationReason}
-                confirmDisabled={!normalizeVisibleInput(cancellationReason) || deleting}
+                confirmDisabled={deleting}
             />
             <CustomAlert
                 visible={alertVisible}

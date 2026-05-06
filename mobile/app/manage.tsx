@@ -124,7 +124,7 @@ export default function ManageScreen() {
                         Management Dashboard
                     </Text>
                     <Text style={[styles.description, { color: colors.textSecondary }]}>
-                        It seems we couldn't automatically direct you to your specific dashboard.
+                        It seems we couldn&apos;t automatically direct you to your specific dashboard.
                         Please ensure your account has the correct role assigned or contact support for assistance.
                     </Text>
 

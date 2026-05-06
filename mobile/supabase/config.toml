@@ -46,8 +46,36 @@ verify_jwt = false
 verify_jwt = false
 [functions.manual-identity-review]
 verify_jwt = false
+
+[functions.account-email]
+verify_jwt = false
+
 [functions.gig-applications]
 verify_jwt = false
 [functions.upload-safety-screen]
 verify_jwt = false
+
+[auth.email.template.confirmation]
+subject = "Confirm your signup - MusikaLokal"
+content_path = "./supabase/templates/confirmation.html"
+
+[auth.email.template.magic_link]
+subject = "Open MusikaLokal"
+content_path = "./supabase/templates/magic_link.html"
+
+[auth.email.template.invite]
+subject = "Your MusikaLokal account is ready"
+content_path = "./supabase/templates/invite.html"
+
+[auth.email.template.recovery]
+subject = "Reset your password - MusikaLokal"
+content_path = "./supabase/templates/recovery.html"
+
+[auth.email.template.email_change]
+subject = "Confirm email change - MusikaLokal"
+content_path = "./supabase/templates/email_change.html"
+
+[auth.email.template.reauthentication]
+subject = "Confirm reauthentication - MusikaLokal"
+content_path = "./supabase/templates/reauthentication.html"
 

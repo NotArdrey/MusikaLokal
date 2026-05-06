@@ -39,6 +39,7 @@ import {
 import { useGlobalRealtimeInvalidation } from "../src/data/realtime";
 import { ThemeProvider, useTheme } from "../src/context/ThemeContext";
 import { logLoadTime } from "../src/utils/loadTimeLogger";
+import { isFanUserRole } from "../src/utils/roleRouting";
 
 SplashScreen.preventAutoHideAsync();
 
@@ -53,6 +54,7 @@ LogBox.ignoreLogs([
 const NOTIFICATION_TOAST_BACKFILL_LIMIT = 12;
 const NOTIFICATION_TOAST_BACKFILL_SKEW_MS = 15000;
 const NOTIFICATION_TOAST_RECONNECT_DELAY_MS = 1500;
+const NOTIFICATION_TOAST_SEEN_LIMIT = 240;
 const NOTIFICATION_TOAST_DEBUG_LOGS = __DEV__;
 
 type IncomingNotificationToastRecord = {
@@ -150,6 +152,8 @@ function RootContent() {
     loading,
     identityRequired,
     identityChecked,
+    roleResolved,
+    userRole,
   } =
     useAuth();
   const segments = useSegments();
@@ -157,6 +161,7 @@ function RootContent() {
   const processedDeepLinksRef = useRef<Set<string>>(new Set());
   const notificationAppStateRef = useRef(AppState.currentState);
   const notificationBackgroundedAtRef = useRef<number | null>(null);
+  const displayedNotificationToastIdsRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     const startedAt = Date.now();
@@ -197,6 +202,14 @@ function RootContent() {
         return false;
       }
 
+      if (displayedNotificationToastIdsRef.current.has(notificationId)) {
+        logNotificationToastDebug("Skipping already displayed notification toast", {
+          source,
+          notificationId,
+        });
+        return false;
+      }
+
       const normalizedType = String(nextNotification.type || "info").toLowerCase();
       let toastType: ToastType = "info";
       if (
@@ -216,6 +229,17 @@ function RootContent() {
         message,
         source,
       });
+
+      if (emitted) {
+        displayedNotificationToastIdsRef.current.add(notificationId);
+        while (displayedNotificationToastIdsRef.current.size > NOTIFICATION_TOAST_SEEN_LIMIT) {
+          const oldestNotificationId = displayedNotificationToastIdsRef.current.values().next().value;
+          if (typeof oldestNotificationId !== "string") {
+            break;
+          }
+          displayedNotificationToastIdsRef.current.delete(oldestNotificationId);
+        }
+      }
 
       logNotificationToastDebug("Displayed notification toast", {
         source,
@@ -315,6 +339,7 @@ function RootContent() {
 
   useEffect(() => {
     toastBus.clearDedupe();
+    displayedNotificationToastIdsRef.current.clear();
     notificationBackgroundedAtRef.current = null;
     notificationAppStateRef.current = AppState.currentState;
   }, [session?.user?.id]);
@@ -329,6 +354,7 @@ function RootContent() {
     let activeChannelGeneration = 0;
     let connectAttemptGeneration = 0;
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    let notificationGapBackfillCursorMs = Date.now();
 
     const isNotificationAppActive = () =>
       notificationAppStateRef.current === "active";
@@ -369,6 +395,12 @@ function RootContent() {
           void connectChannel(`retry:${reason}`);
         }
       }, NOTIFICATION_TOAST_RECONNECT_DELAY_MS);
+    };
+
+    const backfillNotificationGap = (reason: string) => {
+      const sinceMs = notificationGapBackfillCursorMs;
+      notificationGapBackfillCursorMs = Date.now();
+      void backfillRecentNotificationToasts(activeUserId, sinceMs, reason);
     };
 
     const connectChannel = async (reason: string) => {
@@ -433,6 +465,7 @@ function RootContent() {
               nextRecord,
               "realtime",
             );
+            notificationGapBackfillCursorMs = Date.now();
           },
         )
         .subscribe((status) => {
@@ -449,6 +482,7 @@ function RootContent() {
 
           if (status === "SUBSCRIBED") {
             clearReconnectTimer();
+            backfillNotificationGap(`subscribed:${reason}`);
             return;
           }
 
@@ -484,7 +518,9 @@ function RootContent() {
       }
 
       if (previousState === "active" && nextState !== "active") {
-        notificationBackgroundedAtRef.current = Date.now();
+        const now = Date.now();
+        notificationBackgroundedAtRef.current = now;
+        notificationGapBackfillCursorMs = now;
         clearReconnectTimer();
         void disposeChannel(`app-state:${nextState}`);
         return;
@@ -499,11 +535,8 @@ function RootContent() {
         }
 
         if (backgroundedAt) {
-          void backfillRecentNotificationToasts(
-            activeUserId,
-            backgroundedAt,
-            "foreground",
-          );
+          notificationGapBackfillCursorMs = backgroundedAt;
+          backfillNotificationGap("foreground");
         }
       }
     });
@@ -563,6 +596,43 @@ function RootContent() {
     loading,
     segments,
   ]);
+
+  useEffect(() => {
+    if (loading || !session || !roleResolved || !isFanUserRole(userRole)) return;
+
+    const segmentStrings = segments.map((segment) => String(segment));
+    const currentScreen =
+      segmentStrings.length > 0
+        ? segmentStrings[segmentStrings.length - 1]
+        : "index";
+    const allowedScreens = new Set([
+      "index",
+      "feed",
+      "profile",
+      "edit_profile",
+      "settings",
+      "account_details",
+      "identity_verification",
+      "notification_settings",
+      "change_email",
+      "change_password",
+      "help_support",
+      "privacy_policy",
+      "terms_and_conditions",
+    ]);
+    const isAllowed =
+      allowedScreens.has(currentScreen) ||
+      segmentStrings.some((screen) => allowedScreens.has(screen));
+
+    if (currentScreen === "home" || segmentStrings.includes("home")) {
+      router.replace("/feed");
+      return;
+    }
+
+    if (!isAllowed) {
+      router.replace("/feed");
+    }
+  }, [loading, roleResolved, segments, session, userRole]);
 
   // Handle deep links for payment redirects
   useEffect(() => {

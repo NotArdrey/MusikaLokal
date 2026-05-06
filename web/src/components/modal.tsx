@@ -8,7 +8,7 @@ import CustomAlert from './CustomAlert';
 type CustomModalProps = {
   visible: boolean;
   onClose: () => void;
-  onConfirm?: () => void;
+  onConfirm?: () => void | Promise<void>;
   title?: string;
   message?: string;
   buttonText?: string;
@@ -18,6 +18,7 @@ type CustomModalProps = {
   inputValue?: string;
   inputPlaceholder?: string;
   inputMultiline?: boolean;
+  requiredInputValue?: string;
   confirmDisabled?: boolean;
   requireTermsAcceptance?: boolean;
   termsLabel?: string;
@@ -34,8 +35,13 @@ const IS_WEB = Platform.OS === 'web';
 export const normalizeVisibleInput = (value: unknown) =>
   String(value ?? '')
     .normalize('NFKC')
-    .replace(/[\u200B-\u200D\uFEFF]/g, '')
+    .replace(/[\u200B-\u200F\u202A-\u202E\u2060-\u206F\uFEFF]/g, '')
     .trim();
+
+export const normalizeConfirmationInput = (value: unknown) =>
+  normalizeVisibleInput(value)
+    .replace(/\s+/g, ' ')
+    .toLowerCase();
 
 const CustomModal: React.FC<CustomModalProps> = ({
   visible,
@@ -50,6 +56,7 @@ const CustomModal: React.FC<CustomModalProps> = ({
   inputValue,
   inputPlaceholder = 'Enter reason...',
   inputMultiline = true,
+  requiredInputValue,
   confirmDisabled = false,
   requireTermsAcceptance = false,
   termsLabel = 'I agree to the Terms and Conditions.',
@@ -66,7 +73,9 @@ const CustomModal: React.FC<CustomModalProps> = ({
   const [showTermsContent, setShowTermsContent] = React.useState(false);
   const [feedbackVisible, setFeedbackVisible] = React.useState(false);
   const [feedbackMessage, setFeedbackMessage] = React.useState('');
+  const [canInteract, setCanInteract] = React.useState(false);
   const hasCustomContract = Boolean(contractUrl);
+  const confirmationLockedRef = React.useRef(false);
   const [rendered, setRendered] = React.useState(visible);
   const wasVisibleRef = React.useRef(visible);
   const modalProgress = React.useRef(new Animated.Value(visible ? 1 : 0)).current;
@@ -78,8 +87,25 @@ const CustomModal: React.FC<CustomModalProps> = ({
       setShowTermsContent(false);
       setFeedbackVisible(false);
       setFeedbackMessage('');
+      setCanInteract(false);
+      confirmationLockedRef.current = false;
+      return;
     }
+
+    setCanInteract(false);
+    confirmationLockedRef.current = false;
+    const timeout = setTimeout(() => {
+      setCanInteract(true);
+    }, 180);
+
+    return () => clearTimeout(timeout);
   }, [visible]);
+
+  React.useEffect(() => {
+    if (visible && !loading) {
+      confirmationLockedRef.current = false;
+    }
+  }, [loading, visible]);
 
   React.useEffect(() => {
     const wasVisible = wasVisibleRef.current;
@@ -124,19 +150,34 @@ const CustomModal: React.FC<CustomModalProps> = ({
     return;
   }, [modalProgress, rendered, visible]);
 
-  const hasEmptyRequiredInput = showInput && !normalizeVisibleInput(inputValue);
+  const hasRequiredInputValue = requiredInputValue !== undefined && requiredInputValue !== null;
+  const normalizedInput = normalizeVisibleInput(inputValue);
+  const hasEmptyRequiredInput = showInput && !normalizedInput;
+  const hasMismatchedRequiredInput =
+    showInput &&
+    hasRequiredInputValue &&
+    !hasEmptyRequiredInput &&
+    normalizeConfirmationInput(inputValue) !== normalizeConfirmationInput(requiredInputValue);
 
   const isConfirmDisabled =
     hasEmptyRequiredInput ||
+    hasMismatchedRequiredInput ||
     confirmDisabled ||
     (requireTermsAcceptance && !isTermsAccepted) ||
     (hasCustomContract && !isContractAccepted);
+  const isConfirmButtonDisabled = !canInteract || loading || isConfirmDisabled;
 
   const getValidationFeedback = () => {
     if (hasEmptyRequiredInput) {
       return inputPlaceholder
         ? `Please fill in "${inputPlaceholder.replace(/\.+$/, '')}" before continuing.`
         : 'Please fill in the required field before continuing.';
+    }
+
+    if (hasMismatchedRequiredInput) {
+      return hasRequiredInputValue
+        ? `Please type "${requiredInputValue}" to confirm.`
+        : 'Please complete the confirmation requirement before continuing.';
     }
 
     if (requireTermsAcceptance && !isTermsAccepted) {
@@ -155,6 +196,10 @@ const CustomModal: React.FC<CustomModalProps> = ({
   };
 
   const handleConfirmPress = () => {
+    if (!canInteract || loading || confirmationLockedRef.current) {
+      return;
+    }
+
     const validationFeedback = getValidationFeedback();
     if (validationFeedback) {
       setFeedbackMessage(validationFeedback);
@@ -162,7 +207,16 @@ const CustomModal: React.FC<CustomModalProps> = ({
       return;
     }
 
-    (onConfirm || onClose)();
+    confirmationLockedRef.current = true;
+    try {
+      const result = onConfirm ? onConfirm() : onClose();
+      void Promise.resolve(result).finally(() => {
+        confirmationLockedRef.current = false;
+      });
+    } catch (error) {
+      confirmationLockedRef.current = false;
+      throw error;
+    }
   };
 
   const renderCheckbox = (checked: boolean) => (
@@ -316,21 +370,23 @@ const CustomModal: React.FC<CustomModalProps> = ({
 
               <View style={styles.buttonContainer}>
                 <TouchableOpacity
-                  activeOpacity={1}
+                  activeOpacity={isConfirmButtonDisabled ? 1 : 0.78}
+                  accessibilityState={{ disabled: isConfirmButtonDisabled }}
                   style={[
                     styles.confirmButton,
                     {
                       backgroundColor: danger ? '#EF4444' : colors.primary,
-                      opacity: isConfirmDisabled ? 0.6 : 1
+                      opacity: isConfirmDisabled || loading ? 0.6 : 1
                     }
                   ]}
+                  disabled={isConfirmButtonDisabled}
                   onPress={handleConfirmPress}
                 >
                   <Text style={styles.confirmButtonText}>{buttonText}</Text>
                 </TouchableOpacity>
 
                 <TouchableOpacity
-                  activeOpacity={1}
+                  activeOpacity={!canInteract ? 1 : 0.78}
                   style={[
                     styles.cancelButton,
                     {
@@ -338,6 +394,7 @@ const CustomModal: React.FC<CustomModalProps> = ({
                       backgroundColor: colors.background,
                     },
                   ]}
+                  disabled={!canInteract}
                   onPress={onClose}
                 >
                   <Text style={[styles.cancelButtonText, { color: colors.textSecondary }]}>Cancel</Text>

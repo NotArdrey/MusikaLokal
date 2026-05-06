@@ -50,6 +50,13 @@ type ListingRequestPayload = {
   extraMeta: Record<string, unknown> | null;
 };
 
+const ACTIVE_LISTING_REQUEST_STATUSES = [
+  "pending",
+  "accepted",
+  "approved",
+  "connected",
+];
+
 const toNonEmptyString = (value: unknown) => {
   const normalized = String(value ?? "").trim();
   return normalized.length > 0 ? normalized : null;
@@ -77,8 +84,90 @@ const buildListingRequestEventDetails = (payload: ListingRequestPayload) => ({
   ...normalizeExtraMeta(payload.extraMeta),
 });
 
-const createListingRequestFallback = async (payload: ListingRequestPayload) => {
+const readEventString = (details: any, key: string) =>
+  toNonEmptyString(details?.[key]) ||
+  toNonEmptyString(details?.request_details?.[key]);
+
+const valuesConflict = (expected: unknown, actual: unknown) => {
+  const normalizedExpected = toNonEmptyString(expected);
+  const normalizedActual = toNonEmptyString(actual);
+
+  return Boolean(
+    normalizedExpected &&
+      normalizedActual &&
+      normalizedExpected !== normalizedActual,
+  );
+};
+
+const isDuplicateListingRequest = (
+  row: any,
+  expectedDetails: ReturnType<typeof buildListingRequestEventDetails>,
+) => {
+  const details =
+    row?.event_details && typeof row.event_details === "object"
+      ? row.event_details
+      : {};
+  const expectedKind = readEventString(expectedDetails, "request_kind");
+  const actualKind = readEventString(details, "request_kind");
+
+  if (expectedKind && actualKind && expectedKind !== actualKind) {
+    return false;
+  }
+
+  if (
+    valuesConflict(expectedDetails.sender_entity_type, details.sender_entity_type) ||
+    valuesConflict(expectedDetails.receiver_entity_type, details.receiver_entity_type) ||
+    valuesConflict(expectedDetails.sender_entity_id, details.sender_entity_id) ||
+    valuesConflict(expectedDetails.receiver_entity_id, details.receiver_entity_id) ||
+    valuesConflict(expectedDetails.production_team_id, details.production_team_id)
+  ) {
+    return false;
+  }
+
+  return true;
+};
+
+const findActiveDuplicateListingRequest = async (payload: ListingRequestPayload) => {
   const eventDetails = buildListingRequestEventDetails(payload);
+  let query = supabase
+    .from("booking_requests")
+    .select("id, status, event_details")
+    .eq("sender_id", payload.currentUserId)
+    .eq("receiver_id", payload.receiverUserId)
+    .in("status", ACTIVE_LISTING_REQUEST_STATUSES);
+
+  query = payload.groupId
+    ? query.eq("group_id", payload.groupId)
+    : query.is("group_id", null);
+
+  query = payload.studioId
+    ? query.eq("studio_id", payload.studioId)
+    : query.is("studio_id", null);
+
+  const { data, error } = await query
+    .order("created_at", { ascending: false })
+    .limit(20);
+
+  if (error) {
+    throw error;
+  }
+
+  return (data || []).find((row) => isDuplicateListingRequest(row, eventDetails)) || null;
+};
+
+const ensureNoActiveDuplicateListingRequest = async (payload: ListingRequestPayload) => {
+  const duplicate = await findActiveDuplicateListingRequest(payload);
+
+  if (duplicate) {
+    throw new Error("An active request already exists for this listing.");
+  }
+};
+
+const createListingRequestFallback = async (payload: ListingRequestPayload) => {
+  await ensureNoActiveDuplicateListingRequest(payload);
+
+  const eventDetails = buildListingRequestEventDetails(payload);
+  const eventMeta = eventDetails as Record<string, any>;
 
   const { data, error } = await supabase
     .from("booking_requests")
@@ -97,6 +186,53 @@ const createListingRequestFallback = async (payload: ListingRequestPayload) => {
 
   if (error) {
     throw error;
+  }
+
+  const notificationMeta = {
+    type: "listing_connection_request",
+    request_id: data?.id || null,
+    sender_entity_type: eventDetails.sender_entity_type || null,
+    sender_entity_id: eventDetails.sender_entity_id || null,
+    sender_entity_name: eventDetails.sender_entity_name || null,
+    receiver_entity_type: eventDetails.receiver_entity_type || null,
+    receiver_entity_id: eventDetails.receiver_entity_id || null,
+    receiver_entity_name: eventDetails.receiver_entity_name || null,
+    group_id: payload.groupId || null,
+    studio_id: payload.studioId || null,
+    production_team_id: eventDetails.production_team_id || null,
+    request_kind: eventMeta.request_kind || null,
+    request_details: eventMeta.request_details || null,
+    route: eventDetails.route || null,
+    route_params: eventDetails.route_params || null,
+  };
+
+  try {
+    const { error: notificationError } = await supabase.functions.invoke("listings-crud", {
+      body: {
+        action: "create_notification",
+        userId: payload.currentUserId,
+        targetUserId: payload.receiverUserId,
+        type: "info",
+        title: payload.notificationTitle,
+        message: payload.notificationMessage,
+        image: payload.notificationImage,
+        meta: notificationMeta,
+      },
+    });
+
+    if (notificationError) {
+      console.error("create_notification fallback failed for listing request", {
+        message: notificationError.message,
+        status: (notificationError as any).status,
+        code: (notificationError as any).code,
+        details: (notificationError as any).details,
+        hint: (notificationError as any).hint,
+        context: (notificationError as any).context,
+        request_id: data?.id || null,
+      });
+    }
+  } catch (notificationError) {
+    console.warn("booking_requests fallback created request but could not send notification", notificationError);
   }
 
   return data;
@@ -315,6 +451,8 @@ export const submitListingRequest = async ({
     routeParams: normalizedRouteParams,
     extraMeta: extraMeta || null,
   };
+
+  await ensureNoActiveDuplicateListingRequest(body);
 
   const { data, error } = await supabase.functions.invoke("manage-production", {
     body,

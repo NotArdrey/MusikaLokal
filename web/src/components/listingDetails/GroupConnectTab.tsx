@@ -153,10 +153,10 @@ const GroupConnectTab = ({
           </TouchableOpacity>
 
           <TouchableOpacity
-            style={[styles.primaryBtn, { backgroundColor: colors.primary }]}
+            style={[styles.primaryBtn, { backgroundColor: colors.primary, opacity: checkingVenue || isSendingRequest ? 0.6 : 1 }]}
             onPress={handleSendBookingRequest}
             disabled={checkingVenue || isSendingRequest}
-            activeOpacity={1}
+            activeOpacity={checkingVenue || isSendingRequest ? 1 : 0.78}
           >
             {isSendingRequest ? (
               <ActivityIndicator color="#FFF" />

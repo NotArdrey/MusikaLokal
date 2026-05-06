@@ -12,6 +12,7 @@ export type PaginatedResponse<T> = {
   data?: T[];
   items?: T[];
   nextCursor?: string | null;
+  nextOffset?: number | null;
   unreadCount?: number;
   [key: string]: unknown;
 };
@@ -241,5 +242,83 @@ export const useFeedQuery = <TItem = any>(params: {
     },
     queryKey: queryKeys.feed.list(params.feedTab, params.userId, params.limit, personalize),
     staleTime: 30_000,
+  });
+};
+
+export const useMarketplaceProductsQuery = <TItem = any>(params: {
+  category?: string | null;
+  enabled?: boolean;
+  includeSold?: boolean;
+  limit: number;
+}) => {
+  const includeSold = params.includeSold ?? true;
+
+  return useInfiniteQuery({
+    enabled: params.enabled ?? true,
+    getNextPageParam: (lastPage: PaginatedResponse<TItem>) =>
+      lastPage.nextOffset ?? undefined,
+    initialPageParam: 0,
+    placeholderData: keepPreviousData,
+    queryFn: async ({ pageParam }) => {
+      const offset = Math.max(0, Number(pageParam) || 0);
+      const body: Record<string, unknown> = {
+        action: "browse_products",
+        include_sold: includeSold,
+        limit: params.limit + 1,
+        offset,
+      };
+
+      if (params.category) {
+        body.category = params.category;
+      }
+
+      const response = await invokeEdgeFunction<PaginatedResponse<TItem>>(
+        "manage-marketplace",
+        { body },
+      );
+      const rows = Array.isArray(response?.data) ? response.data : [];
+      const items = rows.slice(0, params.limit);
+
+      return {
+        ...response,
+        data: items,
+        items,
+        nextOffset: rows.length > params.limit ? offset + params.limit : null,
+      } as PaginatedResponse<TItem>;
+    },
+    queryKey: queryKeys.marketplace.products(params.category, includeSold, params.limit),
+    staleTime: 30_000,
+  });
+};
+
+export const useSellerProductsQuery = <TData = any>(
+  userId: string | null | undefined,
+  options?: { enabled?: boolean },
+) => {
+  return useQuery({
+    enabled: Boolean(userId) && (options?.enabled ?? true),
+    placeholderData: keepPreviousData,
+    queryFn: () =>
+      invokeEdgeFunction<TData>("manage-marketplace", {
+        body: { action: "list_my_products" },
+      }),
+    queryKey: queryKeys.marketplace.sellerProducts(userId),
+    staleTime: 30_000,
+  });
+};
+
+export const useMarketplaceProductDetailsQuery = <TData = any>(
+  productId: string | null | undefined,
+  options?: { enabled?: boolean },
+) => {
+  return useQuery({
+    enabled: Boolean(productId) && (options?.enabled ?? true),
+    placeholderData: keepPreviousData,
+    queryFn: () =>
+      invokeEdgeFunction<TData>("manage-marketplace", {
+        body: { action: "get_product_details", product_id: productId },
+      }),
+    queryKey: queryKeys.marketplace.product(productId),
+    staleTime: 60_000,
   });
 };

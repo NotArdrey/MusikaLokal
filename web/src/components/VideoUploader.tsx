@@ -293,10 +293,10 @@ export default function VideoUploader({
         </View>
       ) : (
         <TouchableOpacity
-          style={[styles.uploadBox, { borderColor: colors.border }]}
+          style={[styles.uploadBox, { borderColor: colors.border, opacity: uploading ? 0.6 : 1 }]}
           onPress={pickAndUploadVideo}
           disabled={uploading}
-          activeOpacity={1}
+          activeOpacity={uploading ? 1 : 0.78}
         >
           {uploading ? (
             <>

@@ -6,7 +6,7 @@ import { supabase } from '../lib/supabase';
 import CachedImage from '../src/components/CachedImage';
 import CustomAlert, { AlertType } from '../src/components/CustomAlert';
 import Header from '../src/components/header';
-import Modal from '../src/components/modal';
+import Modal, { normalizeConfirmationInput } from '../src/components/modal';
 import MusicianWorkspaceTabs from '../src/components/MusicianWorkspaceTabs';
 import Navbar from '../src/components/navbar';
 import Skeleton from '../src/components/Skeleton';
@@ -23,14 +23,6 @@ type TeamRecord = {
   member_role: string;
   created_at: string;
 };
-
-const normalizeDeleteConfirmation = (value: string) =>
-  String(value || '')
-    .normalize('NFKC')
-    .replace(/[\u200B-\u200D\uFEFF]/g, '')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .toLowerCase();
 
 export default function MyProductionScreen() {
   const { colors } = useTheme();
@@ -123,8 +115,8 @@ export default function MyProductionScreen() {
   };
 
   const isDeleteConfirmed =
-    normalizeDeleteConfirmation(deleteConfirmationText) ===
-    normalizeDeleteConfirmation(selectedTeamName);
+    normalizeConfirmationInput(deleteConfirmationText) ===
+    normalizeConfirmationInput(selectedTeamName);
 
   const handleDelete = async () => {
     if (!selectedTeamId || deleting) return;
@@ -293,6 +285,7 @@ export default function MyProductionScreen() {
         inputPlaceholder="Type team name"
         inputValue={deleteConfirmationText}
         onInputChange={setDeleteConfirmationText}
+        requiredInputValue={selectedTeamName}
         confirmDisabled={!isDeleteConfirmed || deleting}
       />
 

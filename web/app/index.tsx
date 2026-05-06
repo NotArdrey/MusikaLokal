@@ -21,14 +21,16 @@ interface AlertState {
 
 export default function LoginScreen() {
   const { colors, isDark } = useTheme();
-  const { session, loading: authLoading, roleResolved, setGuestMode, userRole } = useAuth();
+  const { session, loading: authLoading, roleResolved, userRole } = useAuth();
   const { verified, accountCreated, email: createdEmail, verification_error, verificationPendingReview, diditPendingReview, diditVerified } = useLocalSearchParams();
   const { width } = Dimensions.get('window');
   const isWebDesktop = Platform.OS === 'web' && width >= 768;
 
   const resolvePostLoginRoute = (role: unknown) => {
     const normalizedRole = typeof role === 'string' ? role.trim().toLowerCase() : '';
-    return normalizedRole === 'admin' ? '/admin' : '/home';
+    if (normalizedRole === 'admin') return '/admin';
+    if (normalizedRole === 'fan') return '/feed';
+    return '/home';
   };
 
   useEffect(() => {
@@ -438,12 +440,6 @@ export default function LoginScreen() {
     // Silent
   };
 
-  const handleContinueAsGuest = async () => {
-    await supabase.auth.signOut({ scope: 'local' });
-    await setGuestMode(true);
-    router.replace('/home' as any);
-  };
-
   // Derived styles based on theme
   const themeStyles = {
     container: { backgroundColor: colors.background },
@@ -591,8 +587,8 @@ export default function LoginScreen() {
                   accessibilityLabel="auth-sign-in-button"
                   onPress={handleLogin}
                   disabled={loading}
-                  activeOpacity={1}
-                  style={[styles.loginButton, themeStyles.primaryButton, styles.shadow]}
+                  activeOpacity={loading ? 1 : 0.78}
+                  style={[styles.loginButton, themeStyles.primaryButton, styles.shadow, { opacity: loading ? 0.6 : 1 }]}
                 >
                   {loading ? (
                     <ActivityIndicator color="white" />
@@ -601,16 +597,6 @@ export default function LoginScreen() {
                       Sign In
                     </Text>
                   )}
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  testID="auth-continue-guest-button"
-                  accessibilityLabel="auth-continue-guest-button"
-                  onPress={handleContinueAsGuest}
-                  activeOpacity={1}
-                  style={[styles.guestButton, { borderColor: colors.border }]}
-                >
-                  <Text style={[styles.guestButtonText, { color: colors.text }]}>Continue as Guest</Text>
                 </TouchableOpacity>
 
                 {loginMessage && (
@@ -626,14 +612,13 @@ export default function LoginScreen() {
                     Don&apos;t have an account?{' '}
                   </Text>
                   <TouchableOpacity
-                    activeOpacity={1}
-                    testID="auth-create-account-link"
-                    accessibilityLabel="auth-create-account-link"
+                    activeOpacity={0.65}
+                    testID="auth-register-link"
+                    accessibilityLabel="auth-register-link"
                     onPress={() => router.push('/signup' as any)}
+                    style={styles.signupLinkPressable}
                   >
-                    <Text style={[styles.signupLinkHighlight, themeStyles.primaryText]}>
-                      Create Account
-                    </Text>
+                    <Text style={[styles.signupLinkHighlight, themeStyles.primaryText]}>Register here</Text>
                   </TouchableOpacity>
                 </View>
               </View>
@@ -800,18 +785,6 @@ const styles = StyleSheet.create({
     color: 'white',
     fontSize: 18,
   },
-  guestButton: {
-    height: 64,
-    borderRadius: 20,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    marginTop: 8,
-  },
-  guestButtonText: {
-    fontFamily: 'Poppins_500Medium',
-    fontSize: 16,
-  },
   shadow: {
     shadowColor: "#4F46E5", // shadow-primary
     shadowOffset: {
@@ -824,14 +797,23 @@ const styles = StyleSheet.create({
   },
   signupLinkContainer: {
     flexDirection: 'row',
+    alignItems: 'center',
     justifyContent: 'center',
+    flexWrap: 'wrap',
     marginTop: 24, // mt-6
   },
   signupLinkText: {
     fontFamily: 'Poppins_400Regular',
+    fontSize: 14,
+  },
+  signupLinkPressable: {
+    paddingVertical: 4,
+    paddingHorizontal: 2,
   },
   signupLinkHighlight: {
     fontFamily: 'Poppins_600SemiBold',
+    fontSize: 14,
+    textAlign: 'center',
   },
   errorText: {
     color: '#EF4444',

@@ -6,13 +6,16 @@ import { supabase } from '../lib/supabase';
 import CachedImage from '../src/components/CachedImage';
 import CustomAlert, { AlertType } from '../src/components/CustomAlert';
 import Header from '../src/components/header';
-import Modal from '../src/components/modal';
+import InlineErrorBanner from '../src/components/InlineErrorBanner';
+import Modal, { normalizeConfirmationInput } from '../src/components/modal';
 import MusicianWorkspaceTabs from '../src/components/MusicianWorkspaceTabs';
 import Navbar from '../src/components/navbar';
 import Skeleton from '../src/components/Skeleton';
 import { useBottomBarClearance } from '../src/hooks/useBottomBarClearance';
 import { useAuth, useRequireAuth } from '../src/context/AuthContext';
 import { useTheme } from '../src/context/ThemeContext';
+import { getActionErrorMessage, getResultErrorMessage, logActionError } from '../src/utils/actionError';
+import { invalidateListingCaches } from '../src/utils/listingCacheInvalidation';
 
 type TeamRecord = {
   id: string;
@@ -23,14 +26,6 @@ type TeamRecord = {
   member_role: string;
   created_at: string;
 };
-
-const normalizeDeleteConfirmation = (value: string) =>
-  String(value || '')
-    .normalize('NFKC')
-    .replace(/[\u200B-\u200D\uFEFF]/g, '')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .toLowerCase();
 
 export default function MyProductionScreen() {
   const { colors } = useTheme();
@@ -45,6 +40,7 @@ export default function MyProductionScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [modalVisible, setModalVisible] = useState(false);
   const [selectedTeamId, setSelectedTeamId] = useState<string | null>(null);
   const [selectedTeamName, setSelectedTeamName] = useState('');
@@ -56,24 +52,16 @@ export default function MyProductionScreen() {
     message: '',
   });
 
-  const showAlert = (type: AlertType, title: string, message: string, buttons?: any[]) => {
+  const showAlert = useCallback((type: AlertType, title: string, message: string, buttons?: any[]) => {
     setAlertConfig({ type, title, message, buttons });
     setAlertVisible(true);
-  };
+  }, []);
 
   const invokeProduction = useCallback(async (body: Record<string, unknown>) => {
     const { data, error } = await supabase.functions.invoke('manage-production', { body });
     if (error) {
       const status = Number((error as any)?.status || (error as any)?.context?.status || 0);
-      console.warn('manage-production failed', {
-        message: error.message,
-        status,
-        code: (error as any).code,
-        details: (error as any).details,
-        hint: (error as any).hint,
-        context: (error as any).context,
-        body,
-      });
+      logActionError('MyProduction', 'manage-production invoke', error, { body });
 
       if ([502, 503, 504].includes(status)) {
         const transientError = new Error('Production services are temporarily unavailable. Please try again.');
@@ -86,19 +74,25 @@ export default function MyProductionScreen() {
     return data;
   }, []);
 
-  const fetchTeams = useCallback(async () => {
+  const fetchTeams = useCallback(async (options?: { showAlertOnError?: boolean }) => {
     if (!userId) return;
+    setLoadError(null);
 
     try {
       const data = await invokeProduction({ action: 'list_my_teams' });
       setTeams((data?.teams || []) as TeamRecord[]);
     } catch (error: any) {
-      showAlert('error', 'Error', error?.message || 'Failed to fetch production teams.');
+      const message = getActionErrorMessage(error, 'Failed to fetch production teams.');
+      logActionError('MyProduction', 'fetchTeams', error, { userId });
+      setLoadError(message);
+      if (options?.showAlertOnError) {
+        showAlert('error', 'Could Not Load Production Teams', message);
+      }
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [invokeProduction, userId]);
+  }, [invokeProduction, showAlert, userId]);
 
   useFocusEffect(
     useCallback(() => {
@@ -134,8 +128,8 @@ export default function MyProductionScreen() {
   };
 
   const isDeleteConfirmed =
-    normalizeDeleteConfirmation(deleteConfirmationText) ===
-    normalizeDeleteConfirmation(selectedTeamName);
+    normalizeConfirmationInput(deleteConfirmationText) ===
+    normalizeConfirmationInput(selectedTeamName);
 
   const handleDelete = async () => {
     if (!selectedTeamId || deleting) return;
@@ -148,14 +142,17 @@ export default function MyProductionScreen() {
     try {
       const data = await invokeProduction({ action: 'delete_production_team', team_id: selectedTeamId });
       if (!data?.success) {
-        throw new Error(data?.error || 'Failed to delete production team.');
+        throw new Error(getResultErrorMessage(data, 'Failed to delete production team.'));
       }
 
       setTeams((prev) => prev.filter((team) => team.id !== selectedTeamId));
+      invalidateListingCaches(userId, ['bookings', 'details', 'home', 'search']);
       closeDeleteModal();
       showAlert('success', 'Production Team Deleted', 'Production team deleted successfully.');
     } catch (error: any) {
-      showAlert('error', 'Error', error?.message || 'Failed to delete production team.');
+      const message = getActionErrorMessage(error, 'Failed to delete production team.');
+      logActionError('MyProduction', 'delete production team', error, { teamId: selectedTeamId, userId });
+      showAlert('error', 'Delete Failed', message);
     } finally {
       setDeleting(false);
     }
@@ -163,7 +160,7 @@ export default function MyProductionScreen() {
 
   const onRefresh = () => {
     setRefreshing(true);
-    fetchTeams();
+    void fetchTeams({ showAlertOnError: true });
   };
 
   return (
@@ -179,6 +176,14 @@ export default function MyProductionScreen() {
           {isMusicianView && (
             <MusicianWorkspaceTabs activeKey="producer" />
           )}
+
+          <InlineErrorBanner
+            message={loadError}
+            onRetry={() => {
+              if (teams.length === 0) setLoading(true);
+              void fetchTeams({ showAlertOnError: true });
+            }}
+          />
 
           {loading ? (
             <View style={styles.skeletonList}>
@@ -311,7 +316,10 @@ export default function MyProductionScreen() {
         inputPlaceholder="Type team name"
         inputValue={deleteConfirmationText}
         onInputChange={setDeleteConfirmationText}
+        requiredInputValue={selectedTeamName}
         confirmDisabled={!isDeleteConfirmed || deleting}
+        loading={deleting}
+        loadingMessage="Deleting production team..."
       />
 
       <CustomAlert

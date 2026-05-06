@@ -12,6 +12,136 @@ const corsHeaders = {
     'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-supabase-client-platform',
 }
 
+function uniqueStrings(values: unknown[]) {
+    return Array.from(
+        new Set(
+            values.filter((value): value is string => typeof value === 'string' && value.trim().length > 0),
+        ),
+    )
+}
+
+async function loadProfileLegacyById(client: any, profileIds: string[]) {
+    const ids = uniqueStrings(profileIds)
+    const legacyById = new Map<string, any>()
+    if (ids.length === 0) return legacyById
+
+    const { data, error } = await client
+        .from('profiles_legacy_projection')
+        .select('id, skills, genres, portfolio_urls')
+        .in('id', ids)
+
+    if (error) throw error
+
+    ;(data || []).forEach((row: any) => legacyById.set(row.id, row))
+    return legacyById
+}
+
+async function loadGroupLegacyById(client: any, groupIds: string[]) {
+    const ids = uniqueStrings(groupIds)
+    const legacyById = new Map<string, any>()
+    if (ids.length === 0) return legacyById
+
+    const { data, error } = await client
+        .from('groups_legacy_projection')
+        .select('id, images, members')
+        .in('id', ids)
+
+    if (error) throw error
+
+    ;(data || []).forEach((row: any) => legacyById.set(row.id, row))
+    return legacyById
+}
+
+async function loadStudioLegacyById(client: any, studioIds: string[]) {
+    const ids = uniqueStrings(studioIds)
+    const legacyById = new Map<string, any>()
+    if (ids.length === 0) return legacyById
+
+    const { data, error } = await client
+        .from('studios_with_stats')
+        .select('id, images, location, hourly_rate, rate')
+        .in('id', ids)
+
+    if (error) throw error
+
+    ;(data || []).forEach((row: any) => legacyById.set(row.id, row))
+    return legacyById
+}
+
+function mergeProfileLegacy(profile: any, legacyById: Map<string, any>) {
+    if (!profile?.id) return profile || null
+    const legacy = legacyById.get(profile.id)
+
+    return {
+        ...profile,
+        skills: Array.isArray(legacy?.skills) ? legacy.skills : [],
+        genres: Array.isArray(legacy?.genres) ? legacy.genres : [],
+        portfolio_urls: Array.isArray(legacy?.portfolio_urls) ? legacy.portfolio_urls : [],
+    }
+}
+
+function mergeGroupLegacy(group: any, legacyById: Map<string, any>) {
+    if (!group?.id) return group || null
+    const legacy = legacyById.get(group.id)
+
+    return {
+        ...group,
+        images: Array.isArray(legacy?.images) ? legacy.images : [],
+        members: Array.isArray(legacy?.members) ? legacy.members : [],
+    }
+}
+
+function mergeStudioLegacy(studio: any, studioId: string | null, legacyById: Map<string, any>) {
+    const id = studio?.id || studioId
+    if (!studio && !id) return studio || null
+    const legacy = id ? legacyById.get(id) : null
+
+    return {
+        ...studio,
+        id,
+        images: Array.isArray(legacy?.images) ? legacy.images : [],
+        location: legacy?.location || studio?.location || studio?.address || null,
+        rate_per_hour: studio?.rate_per_hour ?? legacy?.hourly_rate ?? studio?.hourly_rate ?? legacy?.rate ?? studio?.rate ?? null,
+    }
+}
+
+async function hydrateGigApplicationLegacy(client: any, rows: any[]) {
+    const [profileLegacyById, groupLegacyById] = await Promise.all([
+        loadProfileLegacyById(client, rows.map((row: any) => row?.applicant?.id || row?.applicant_id)),
+        loadGroupLegacyById(client, rows.map((row: any) => row?.group?.id || row?.group_id)),
+    ])
+
+    return rows.map((row: any) => ({
+        ...row,
+        applicant: mergeProfileLegacy(row?.applicant, profileLegacyById),
+        group: mergeGroupLegacy(row?.group, groupLegacyById),
+    }))
+}
+
+async function hydrateGroupMemberProfileLegacy(client: any, rows: any[]) {
+    const legacyById = await loadProfileLegacyById(
+        client,
+        rows.map((row: any) => row?.user?.id || row?.user_id),
+    )
+
+    return rows.map((row: any) => ({
+        ...row,
+        user: mergeProfileLegacy(row?.user, legacyById),
+    }))
+}
+
+async function hydrateStudioBookingLegacy(client: any, rows: any[]) {
+    const legacyById = await loadStudioLegacyById(
+        client,
+        rows.map((row: any) => row?.studio?.id || row?.studio_id),
+    )
+
+    return rows.map((row: any) => ({
+        ...row,
+        studio: mergeStudioLegacy(row?.studio, row?.studio_id || null, legacyById),
+    }))
+}
+
 const syncStudio3NF = async (client: any, studioId: string) => {
     const { error } = await client.rpc('sync_studio_3nf', { p_studio_id: studioId })
     if (error) throw error
@@ -517,7 +647,7 @@ serve(async (req: Request) => {
                     'name', 'address', 'hourly_rate', 'description',
                     'latitude', 'longitude', 'rate', 'contract_url',
                     'availability', 'rehearsal_rate',
-                    'recording_rate', 'open_dates', 'pax', 'business_permit_url'
+                    'recording_rate', 'pax', 'business_permit_url'
                 ];
                 const filteredPayload: any = {};
                 for (const key of validStudioColumns) {
@@ -538,7 +668,7 @@ serve(async (req: Request) => {
                 // 1. Fetch gig settings for cooldown and slot tracking
                 const { data: gigData, error: gigError } = await supabaseClient
                     .from('gigs')
-                    .select('reapplication_cooldown_days, slots_filled, total_slots_filled, status')
+                    .select('reapplication_cooldown_days, total_slots_filled, status')
                     .eq('id', gig_id)
                     .single();
 
@@ -569,7 +699,19 @@ serve(async (req: Request) => {
                 // Check specific slot type availability if provided
                 if (slot_type && gigRequirements?.slots?.[slot_type]) {
                     const slotNeeded = gigRequirements.slots[slot_type]?.needed || 0;
-                    const slotFilled = gigData.slots_filled?.[slot_type]?.accepted || 0;
+                    let slotFilled = 0;
+
+                    if (slotNeeded > 0) {
+                        const { data: slotSummary, error: slotSummaryError } = await supabaseClient
+                            .from('gig_slot_fill_summary')
+                            .select('accepted_count')
+                            .eq('gig_id', gig_id)
+                            .eq('slot_type', slot_type)
+                            .maybeSingle();
+
+                        if (slotSummaryError) throw slotSummaryError;
+                        slotFilled = slotSummary?.accepted_count || 0;
+                    }
                     
                     if (slotNeeded > 0 && slotFilled >= slotNeeded) {
                         throw new Error(`All ${slot_type} slots have been filled. Try applying for a different slot type.`);
@@ -868,9 +1010,9 @@ serve(async (req: Request) => {
             if (type === 'studio') {
                 const validStudioColumns = [
                     'name', 'address', 'hourly_rate', 'description',
-                    'images', 'latitude', 'longitude', 'rate', 'contract_url',
+                    'latitude', 'longitude', 'rate', 'contract_url',
                     'availability', 'rehearsal_rate',
-                    'recording_rate', 'open_dates', 'pax', 'business_permit_url'
+                    'recording_rate', 'pax', 'business_permit_url'
                 ];
                 const filteredPayload: any = {};
                 for (const key of validStudioColumns) {
@@ -886,9 +1028,7 @@ serve(async (req: Request) => {
 
             if (type === 'studio' && updatePayload.availability) {
                 studioAvailability = updatePayload.availability;
-                // Keep availability in payload if column exists in table
-                // If you want to use normalized tables instead, uncomment the line below:
-                // delete updatePayload.availability;
+                delete updatePayload.availability;
             }
 
             // Extract calendar_availability (specific date overrides)
@@ -1235,15 +1375,16 @@ serve(async (req: Request) => {
                 .from('gig_applications')
                 .select(`
                     *,
-                    applicant:profiles!applicant_id(id, full_name, avatar_url, role, skills, genres, bio, location, portfolio_urls),
-                    group:groups!group_id(id, name, genre, images, members, description, location, rate)
+                    applicant:profiles!applicant_id(id, full_name, avatar_url, role, bio, location),
+                    group:groups!group_id(id, name, genre, description, location, rate, group_type)
                 `)
                 .eq('gig_id', gigId)
                 .or('leader_approval_status.is.null,leader_approval_status.eq.approved')
                 .order('created_at', { ascending: false });
 
             if (error) throw error;
-            return new Response(JSON.stringify(data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 });
+            const hydratedData = await hydrateGigApplicationLegacy(supabaseClient, data || []);
+            return new Response(JSON.stringify(hydratedData), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 });
         }
 
         // FETCH GROUP APPLICATIONS (My applications as a group/musician)
@@ -1568,13 +1709,14 @@ serve(async (req: Request) => {
                 .from('studio_bookings')
                 .select(`
                     *,
-                    studio:studios!studio_id(name, images, location, rate_per_hour)
+                    studio:studios!studio_id(id, name, address, hourly_rate, rate)
                 `)
                 .eq('user_id', userId)
                 .order('created_at', { ascending: false });
 
             if (error) throw error;
-            return new Response(JSON.stringify(data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 });
+            const hydratedData = await hydrateStudioBookingLegacy(supabaseClient, data || []);
+            return new Response(JSON.stringify(hydratedData), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 });
         }
 
         // CHECK ELIGIBILITY (Spam Block Check)
@@ -1706,14 +1848,15 @@ serve(async (req: Request) => {
                     user_id,
                     role,
                     joined_at,
-                    user:profiles!user_id(id, full_name, avatar_url, email, skills, genres)
+                    user:profiles!user_id(id, full_name, avatar_url, email)
                 `)
                 .eq('group_id', groupId)
                 .order('joined_at', { ascending: true });
 
             if (error) throw error;
+            const hydratedData = await hydrateGroupMemberProfileLegacy(supabaseClient, data || []);
 
-            return new Response(JSON.stringify(data || []), {
+            return new Response(JSON.stringify(hydratedData), {
                 headers: { ...corsHeaders, 'Content-Type': 'application/json' },
                 status: 200,
             });

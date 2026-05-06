@@ -7,6 +7,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
+import { isFanUserRole, resolveRoleManageRoute } from '../utils/roleRouting';
 
 const AnimatedIcon = Animated.createAnimatedComponent(Ionicons);
 const AnimatedTouchableOpacity = Animated.createAnimatedComponent(TouchableOpacity);
@@ -15,16 +16,18 @@ interface HeaderProps {
     title: string;
     transparent?: boolean;
     onBackPress?: () => void;
+    showBack?: boolean;
     leftComponent?: React.ReactNode;
     rightComponent?: React.ReactNode;
     rightIconName?: string;
     rightIconOnPress?: () => void;
 }
 
-function Header({ title, transparent, onBackPress, leftComponent, rightComponent, rightIconName, rightIconOnPress }: HeaderProps) {
+function Header({ title, transparent, onBackPress, showBack, leftComponent, rightComponent, rightIconName, rightIconOnPress }: HeaderProps) {
     const { colors, isDark } = useTheme();
     const { isGuest, setGuestMode, userId, userRole } = useAuth();
     const insets = useSafeAreaInsets();
+    const isFan = isFanUserRole(userRole);
 
     const pathname = usePathname();
     const [hasUnread, setHasUnread] = useState(false);
@@ -45,12 +48,8 @@ function Header({ title, transparent, onBackPress, leftComponent, rightComponent
         [pathname],
     );
 
-    const isManageDetailPath = useMemo(
-        () => pathname === "/manage_studio" || pathname === "/manage_gig" || pathname === "/manage_group",
-        [pathname],
-    );
-
-    const backVisible = !!onBackPress || !(isMainNavPath || isSettingsOrProfile || isMyListingPath || isManageDetailPath);
+    const computedBackVisible = !!onBackPress || !(isMainNavPath || isSettingsOrProfile || isMyListingPath);
+    const backVisible = showBack === false ? false : showBack === true ? true : computedBackVisible;
     const addbtnvisible = useMemo(() => {
         if (!isMyListingPath) return false;
         if (pathname === "/my_group") return userRole === "musician";
@@ -88,6 +87,35 @@ function Header({ title, transparent, onBackPress, leftComponent, rightComponent
         if (pathname === "/my_production") return '/add_production';
         return '/add_group';
     }, [pathname]);
+
+    const defaultBackRoute = useMemo(() => {
+        if (pathname === "/edit_profile") return "/profile";
+        if (pathname === "/add_gig" || pathname === "/edit_gig") return "/my_venue";
+        if (pathname === "/add_group" || pathname === "/add_duo" || pathname === "/edit_group") return "/my_group";
+        if (pathname === "/add_studio" || pathname === "/edit_studio") return "/my_studio";
+        if (pathname === "/add_production" || pathname === "/edit_production") return "/my_production";
+        if (pathname === "/manage_gig") return "/my_venue";
+        if (pathname === "/manage_group") return "/my_group";
+        if (pathname === "/manage_studio") return "/my_studio";
+        if (pathname.startsWith("/add_") || pathname.startsWith("/edit_")) {
+            return resolveRoleManageRoute(userRole);
+        }
+        return null;
+    }, [pathname, userRole]);
+
+    const handleBackPress = useCallback(() => {
+        if (onBackPress) {
+            onBackPress();
+            return;
+        }
+
+        if (defaultBackRoute) {
+            router.replace(defaultBackRoute as any);
+            return;
+        }
+
+        router.back();
+    }, [defaultBackRoute, onBackPress]);
 
     const closeGuestMenu = useCallback(() => {
         setGuestMenuVisible(false);
@@ -132,7 +160,7 @@ function Header({ title, transparent, onBackPress, leftComponent, rightComponent
 
     const checkUnreadChats = useCallback(async () => {
         try {
-            if (!userId || isGuest) {
+            if (!userId || isGuest || isFan) {
                 setHasUnreadChats(false);
                 return;
             }
@@ -162,7 +190,7 @@ function Header({ title, transparent, onBackPress, leftComponent, rightComponent
         } catch {
             // Silently ignore errors
         }
-    }, [isGuest, userId]);
+    }, [isFan, isGuest, userId]);
 
     useFocusEffect(
         useCallback(() => {
@@ -173,14 +201,16 @@ function Header({ title, transparent, onBackPress, leftComponent, rightComponent
                 }
 
                 void checkUnreadNotifications();
-                void checkUnreadChats();
+                if (!isFan) {
+                    void checkUnreadChats();
+                }
             });
 
             return () => {
                 isActive = false;
                 focusTask.cancel();
             };
-        }, [checkUnreadNotifications, checkUnreadChats])
+        }, [checkUnreadNotifications, checkUnreadChats, isFan])
     );
 
     useEffect(() => {
@@ -191,7 +221,11 @@ function Header({ title, transparent, onBackPress, leftComponent, rightComponent
         }
 
         checkUnreadNotifications();
-        checkUnreadChats();
+        if (isFan) {
+            setHasUnreadChats(false);
+        } else {
+            checkUnreadChats();
+        }
 
         const channel = supabase
             .channel(`header-notifications:${userId}`)
@@ -204,22 +238,26 @@ function Header({ title, transparent, onBackPress, leftComponent, rightComponent
             )
             .subscribe();
 
-        const messagesChannel = supabase
-            .channel(`header-messages:${userId}`)
-            .on(
-                'postgres_changes',
-                { event: '*', schema: 'public', table: 'messages' },
-                () => {
-                    checkUnreadChats();
-                }
-            )
-            .subscribe();
+        const messagesChannel = isFan
+            ? null
+            : supabase
+                .channel(`header-messages:${userId}`)
+                .on(
+                    'postgres_changes',
+                    { event: '*', schema: 'public', table: 'messages' },
+                    () => {
+                        checkUnreadChats();
+                    }
+                )
+                .subscribe();
 
         return () => {
             supabase.removeChannel(channel);
-            supabase.removeChannel(messagesChannel);
+            if (messagesChannel) {
+                supabase.removeChannel(messagesChannel);
+            }
         };
-    }, [userId, isGuest, checkUnreadNotifications, checkUnreadChats]);
+    }, [userId, isGuest, isFan, checkUnreadNotifications, checkUnreadChats]);
 
     const isTransparent = useSharedValue(transparent ? 1 : 0);
 
@@ -312,7 +350,7 @@ function Header({ title, transparent, onBackPress, leftComponent, rightComponent
                                 leftComponent
                             ) : (
                                 <AnimatedTouchableOpacity activeOpacity={1}
-                                    onPress={() => (onBackPress ? onBackPress() : router.back())}
+                                    onPress={handleBackPress}
                                     style={[styles.backButton, buttonAnimatedStyle]}
                                 >
                                     <AnimatedIcon name="chevron-back" size={20} animatedProps={iconAnimatedProps} />
@@ -362,13 +400,14 @@ function Header({ title, transparent, onBackPress, leftComponent, rightComponent
                             </AnimatedTouchableOpacity>
                         ) : notifVisible ? (
                             <View style={styles.iconRow}>
-                                {/* Chat Button */}
-                                <AnimatedTouchableOpacity activeOpacity={1} onPress={() => router.push('/chat')} style={[styles.iconButton, buttonAnimatedStyle]}>
-                                    <AnimatedIcon name="chatbubble-ellipses" size={20} animatedProps={iconAnimatedProps} />
-                                    {hasUnreadChats && (
-                                        <View style={[styles.badge, transparent && { borderColor: 'rgba(0,0,0,0.3)' }]} />
-                                    )}
-                                </AnimatedTouchableOpacity>
+                                {!isFan && (
+                                    <AnimatedTouchableOpacity activeOpacity={1} onPress={() => router.push('/chat')} style={[styles.iconButton, buttonAnimatedStyle]}>
+                                        <AnimatedIcon name="chatbubble-ellipses" size={20} animatedProps={iconAnimatedProps} />
+                                        {hasUnreadChats && (
+                                            <View style={[styles.badge, transparent && { borderColor: 'rgba(0,0,0,0.3)' }]} />
+                                        )}
+                                    </AnimatedTouchableOpacity>
+                                )}
                                 {/* Notifications Button */}
                                 <AnimatedTouchableOpacity activeOpacity={1} onPress={() => router.push('/notifications')} style={[styles.iconButton, buttonAnimatedStyle]}>
                                     <AnimatedIcon name="notifications" size={20} animatedProps={iconAnimatedProps} />
@@ -451,7 +490,7 @@ const styles = StyleSheet.create({
     leftContainer: {
         width: 46,
         justifyContent: 'center',
-        alignItems: 'flex-start',
+        alignItems: 'center',
         zIndex: 1,
     },
     rightContainer: {

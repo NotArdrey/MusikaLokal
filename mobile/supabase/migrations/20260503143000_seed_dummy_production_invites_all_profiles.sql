@@ -1,5 +1,5 @@
--- Seed pending production-team invites for every existing profile.
--- This gives each account a Bookings > Pending invite for QA coverage.
+-- Seed pending production-team invites for existing musician profiles.
+-- Solo production roster entries only support musician profiles.
 
 WITH owner_profile AS (
   SELECT p.id
@@ -63,6 +63,7 @@ invite_targets AS (
     coalesce(nullif(trim(p.full_name), ''), p.email, 'MusikaLokal user') AS receiver_name
   FROM upsert_team ut
   CROSS JOIN public.profiles p
+  WHERE lower(coalesce(p.role, '')) = 'musician'
 ),
 inserted_requests AS (
   INSERT INTO public.booking_requests (

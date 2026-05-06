@@ -9,6 +9,7 @@ import Modal from '../src/components/modal';
 import Navbar from '../src/components/navbar';
 import { useAuth } from '../src/context/AuthContext';
 import { useTheme } from '../src/context/ThemeContext';
+import { formatDashedNumericDate } from '../src/utils/friendlyDateTime';
 
 export default function AccountDetailsScreen() {
   const { colors, isDark } = useTheme();
@@ -51,12 +52,12 @@ export default function AccountDetailsScreen() {
     const isExpired = !!expiryDate && hasValidExpiry && expiryDate <= new Date();
 
     if (isExpired && expiryDate) {
-      return `Expired on ${expiryDate.toLocaleDateString()}`;
+      return `Expired on ${formatDashedNumericDate(expiryDate)}`;
     }
 
     if (profile?.is_verified) {
       if (hasValidExpiry && expiryDate) {
-        return `Verified • Expires ${expiryDate.toLocaleDateString()}`;
+        return `Verified • Expires ${formatDashedNumericDate(expiryDate)}`;
       }
       return 'Verified';
     }
@@ -176,7 +177,7 @@ export default function AccountDetailsScreen() {
           ))}
 
           <Text style={[styles.footerText, { color: colors.textSecondary }]}>
-            Member since {profile?.created_at ? new Date(profile.created_at).toLocaleDateString() : 'Unknown'}
+            Member since {profile?.created_at ? formatDashedNumericDate(profile.created_at) : 'Unknown'}
           </Text>
 
         </ScrollView>

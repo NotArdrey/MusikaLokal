@@ -92,6 +92,31 @@ const formatTimeInput = (text: string): string => {
 const TITLE_MAX_LENGTH = 120;
 const DESCRIPTION_MAX_LENGTH = 1000;
 
+const formatSupabaseError = (error: any): string => {
+  const parts = [
+    error?.message,
+    error?.details ? `Details: ${error.details}` : null,
+    error?.hint ? `Hint: ${error.hint}` : null,
+    error?.code ? `Code: ${error.code}` : null,
+  ].filter(Boolean);
+
+  return parts.join("\n") || "Unknown error";
+};
+
+const logActionError = (
+  context: string,
+  error: any,
+  extra?: Record<string, unknown>,
+) => {
+  console.error(`[${context}]`, {
+    message: error?.message || String(error),
+    code: error?.code,
+    details: error?.details,
+    hint: error?.hint,
+    extra,
+  });
+};
+
 const canonicalizeStudioType = (
   value: unknown,
 ): "Rehearsal" | "Recording" | null => {
@@ -111,6 +136,16 @@ const resolveStudioTypeRows = (value: unknown): ("Rehearsal" | "Recording")[] =>
 
   const singleType = canonicalizeStudioType(value);
   return singleType ? [singleType] : [];
+};
+
+const normalizeStudioTypeColumnValue = (
+  value: unknown,
+): "Rehearsal" | "Recording" | "Both" | null => {
+  if (typeof value === "string" && value.trim().toLowerCase() === "both") {
+    return "Both";
+  }
+
+  return canonicalizeStudioType(value);
 };
 
 const parsePositiveInteger = (value: unknown): number | null => {
@@ -182,11 +217,6 @@ const insertStudioInstrumentRows = async (
     return error;
   }
 
-  console.warn(
-    "studio_instruments detail columns are missing in the live schema; retrying without quantity/description.",
-    error,
-  );
-
   const { error: fallbackError } = await supabase
     .from("studio_instruments")
     .insert(buildStudioInstrumentRows(studioId, instruments, false));
@@ -202,7 +232,7 @@ const buildPromotionDescription = (
 
 const getAllowedPromotionTargets = (
   type: "Rehearsal" | "Recording" | "Both",
-): Array<"rehearsal" | "recording" | "both"> => {
+): ("rehearsal" | "recording" | "both")[] => {
   if (type === "Rehearsal") return ["rehearsal"];
   if (type === "Recording") return ["recording"];
   return ["both", "rehearsal", "recording"];
@@ -1016,7 +1046,7 @@ export default function AddStudioScreen() {
 
   const handleBack = () => {
     if (step > 1) setStep(step - 1);
-    else router.back();
+    else router.replace("/my_studio");
   };
 
   const toggleCalendarDate = (dateStr: string) => {
@@ -1186,13 +1216,17 @@ export default function AddStudioScreen() {
           latitude: payload.latitude,
           longitude: payload.longitude,
           permit_status: 'approved',
+          studio_type: normalizeStudioTypeColumnValue(payload.type),
         })
         .select()
         .single();
 
 
       if (error) {
-        console.error("❌ Error details:", JSON.stringify(error, null, 2));
+        logActionError("add_studio.create_base_failed", error, {
+          ownerId: session.user.id,
+          studioType: payload.type,
+        });
 
         let alertMessage = `Failed to create studio: ${error.message}`;
         if (error.hint) alertMessage += `\n\nHint: ${error.hint}`;
@@ -1216,7 +1250,11 @@ export default function AddStudioScreen() {
             })),
           );
         if (typesError) {
-          throw new Error(`Failed to save studio types: ${typesError.message}`);
+          logActionError("add_studio.save_types_failed", typesError, {
+            studioId,
+            types: normalizedTypes,
+          });
+          throw new Error(`Failed to save studio types: ${formatSupabaseError(typesError)}`);
         }
       }
 
@@ -1230,7 +1268,11 @@ export default function AddStudioScreen() {
             })),
           );
         if (amenitiesError) {
-          throw new Error(`Failed to save studio amenities: ${amenitiesError.message}`);
+          logActionError("add_studio.save_amenities_failed", amenitiesError, {
+            studioId,
+            amenities: payload.amenities,
+          });
+          throw new Error(`Failed to save studio amenities: ${formatSupabaseError(amenitiesError)}`);
         }
       }
 
@@ -1240,7 +1282,11 @@ export default function AddStudioScreen() {
           payload.instruments,
         );
         if (instrumentsError) {
-          throw new Error(`Failed to save studio instruments: ${instrumentsError.message}`);
+          logActionError("add_studio.save_instruments_failed", instrumentsError, {
+            studioId,
+            count: payload.instruments.length,
+          });
+          throw new Error(`Failed to save studio instruments: ${formatSupabaseError(instrumentsError)}`);
         }
       }
 
@@ -1256,13 +1302,17 @@ export default function AddStudioScreen() {
             })),
           );
         if (mediaError) {
-          throw new Error(`Failed to save studio images: ${mediaError.message}`);
+          logActionError("add_studio.save_images_failed", mediaError, {
+            studioId,
+            imageCount: payload.images.length,
+          });
+          throw new Error(`Failed to save studio images: ${formatSupabaseError(mediaError)}`);
         }
       }
 
       // Insert studio settings
       const bookingSettings = payload.booking_settings || {};
-      await supabase.from('studio_settings').insert({
+      const { error: settingsError } = await supabase.from('studio_settings').insert({
         studio_id: studioId,
         buffer_minutes: 30,
         bulk_discount_threshold_hours: 10,
@@ -1283,6 +1333,10 @@ export default function AddStudioScreen() {
         off_peak_dates: bookingSettings.off_peak_dates || [],
         recording_rate_negotiable: false,
       });
+      if (settingsError) {
+        logActionError("add_studio.save_settings_failed", settingsError, { studioId });
+        throw new Error(`Failed to save booking settings: ${formatSupabaseError(settingsError)}`);
+      }
 
       // Insert promotions
       if (promotions.length > 0) {
@@ -1308,7 +1362,11 @@ export default function AddStudioScreen() {
             })),
           );
         if (promosError) {
-          console.warn("Failed to save promotions:", promosError.message);
+          logActionError("add_studio.save_promotions_failed", promosError, {
+            studioId,
+            count: promotions.length,
+          });
+          throw new Error(`Failed to save promotions: ${formatSupabaseError(promosError)}`);
         }
       }
 
@@ -1347,8 +1405,12 @@ export default function AddStudioScreen() {
           .from('studio_operating_hours')
           .insert(operatingHours);
         if (operatingHoursError) {
+          logActionError("add_studio.save_operating_hours_failed", operatingHoursError, {
+            studioId,
+            rowCount: operatingHours.length,
+          });
           throw new Error(
-            `Failed to save weekly schedule: ${operatingHoursError.message}`,
+            `Failed to save weekly schedule: ${formatSupabaseError(operatingHoursError)}`,
           );
         }
       }
@@ -1378,8 +1440,12 @@ export default function AddStudioScreen() {
             .from('studio_date_overrides')
             .insert(dateOverrides);
           if (dateOverridesError) {
+            logActionError("add_studio.save_date_overrides_failed", dateOverridesError, {
+              studioId,
+              rowCount: dateOverrides.length,
+            });
             throw new Error(
-              `Failed to save calendar availability: ${dateOverridesError.message}`,
+              `Failed to save calendar availability: ${formatSupabaseError(dateOverridesError)}`,
             );
           }
         }
@@ -1388,17 +1454,11 @@ export default function AddStudioScreen() {
       setNewStudioId(data.id);
       setModalVisible(true);
     } catch (e: any) {
-      console.error("❌ Error creating studio:", e);
-      console.error("❌ Error message:", e?.message);
-      console.error("❌ Error stack:", e?.stack);
-      console.error(
-        "❌ Full error object:",
-        JSON.stringify(e, Object.getOwnPropertyNames(e), 2),
-      );
+      logActionError("add_studio.create_failed", e);
       showAlert(
         "warning",
         "Couldn't Create Studio",
-        `Failed to create studio: ${e?.message || "Unknown error"}`,
+        `Failed to create studio: ${formatSupabaseError(e)}`,
       );
     } finally {
       setCreating(false);
@@ -1459,6 +1519,11 @@ export default function AddStudioScreen() {
 
       // Handle errors from Supabase functions
       if (error || (data && data.error)) {
+        logActionError("add_studio.address_verification_invoke_failed", error || data, {
+          functionName: "create-address-verification",
+          action: "create",
+          response: data,
+        });
         let errorMessage = "Could not start address verification. Please try again.";
 
         // First check if data contains the error response (Supabase returns error body in data for non-2xx)
@@ -1512,11 +1577,11 @@ export default function AddStudioScreen() {
         throw new Error('No verification URL returned');
       }
     } catch (e: any) {
-      console.error('Address verification error:', e);
+      logActionError("add_studio.address_verification_failed", e);
       showAlert(
         "warning",
         "Verification Error",
-        e.message || "Could not start address verification. Please try again."
+        formatSupabaseError(e) || "Could not start address verification. Please try again."
       );
     } finally {
       setAddressVerificationLoading(false);
@@ -1557,7 +1622,7 @@ export default function AddStudioScreen() {
           setAddressVerificationStatus('pending');
         }
       } catch (e) {
-        console.error('Error fetching verification result:', e);
+        logActionError("add_studio.fetch_address_verification_result_failed", e);
         showAlert(
           "info",
           "Verification Submitted",
@@ -1615,7 +1680,9 @@ export default function AddStudioScreen() {
         throw new Error('No verification URL returned');
       }
     } catch (e: any) {
-      console.error('Address verification error:', e);
+      logActionError("add_studio.post_creation_address_verification_failed", e, {
+        studioId: newStudioId,
+      });
       showAlert(
         "info",
         "Address Verification",
@@ -1903,8 +1970,7 @@ export default function AddStudioScreen() {
 
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: "images",
-        allowsEditing: true,
-        aspect: [1, 1],
+        allowsEditing: false,
         quality: 0.8,
       });
 
@@ -2066,7 +2132,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
         />
       )}
       <View style={[styles.flex1, { backgroundColor: colors.background }]}>
-        <Header title="List Studio" />
+        <Header title="List Studio" onBackPress={handleBack} />
 
         {/* Enhanced Step Indicator (Fixed at top) */}
         <View style={styles.stepIndicatorContainer}>
@@ -2366,7 +2432,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                     </View>
                   </TouchableOpacity>
                 ) : (
-                  <TouchableOpacity activeOpacity={1}
+                  <TouchableOpacity activeOpacity={addressVerificationLoading ? 1 : 0.78}
                     onPress={startAddressVerification}
                     disabled={addressVerificationLoading}
                     style={[
@@ -2485,6 +2551,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                           minWidth: 80,
                           textAlign: "right",
                           paddingVertical: 16,
+                          textAlignVertical: "center",
                         }}
                       />
                       <Text
@@ -2556,6 +2623,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                           minWidth: 80,
                           textAlign: "right",
                           paddingVertical: 16,
+                          textAlignVertical: "center",
                         }}
                       />
                       <Text
@@ -2614,6 +2682,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                             fontFamily: "Poppins_500Medium",
                             fontSize: 15,
                             paddingVertical: 14,
+                            textAlignVertical: "center",
                           }}
                         />
                         <Text
@@ -2678,6 +2747,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                             fontFamily: "Poppins_500Medium",
                             fontSize: 15,
                             paddingVertical: 14,
+                            textAlignVertical: "center",
                           }}
                         />
                         <Text
@@ -2833,6 +2903,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                         fontFamily: "Poppins_500Medium",
                         fontSize: 14,
                         marginBottom: 12,
+                        textAlignVertical: "center",
                       }}
                     />
 
@@ -2880,6 +2951,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                         fontFamily: "Poppins_500Medium",
                         fontSize: 14,
                         marginBottom: 12,
+                        textAlignVertical: "center",
                       }}
                     />
 
@@ -2903,6 +2975,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                             color: colors.text,
                             fontFamily: "Poppins_500Medium",
                             fontSize: 14,
+                            textAlignVertical: "center",
                           }}
                         />
                       </View>
@@ -2925,6 +2998,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                             color: colors.text,
                             fontFamily: "Poppins_500Medium",
                             fontSize: 14,
+                            textAlignVertical: "center",
                           }}
                         />
                       </View>
@@ -2994,6 +3068,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                           color: colors.text,
                           fontFamily: "Poppins_500Medium",
                           fontSize: 14,
+                          textAlignVertical: "center",
                         }}
                       />
                       {promotionForm.discount_type === "percentage" && (
@@ -3250,6 +3325,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                       fontFamily: "Poppins_500Medium",
                       fontSize: 16,
                       paddingVertical: 16,
+                      textAlignVertical: "center",
                     }}
                   />
                   <Text
@@ -3339,7 +3415,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                   <TouchableOpacity
                     onPress={handleContractUpload}
                     disabled={uploadingContract}
-                    activeOpacity={1}
+                    activeOpacity={uploadingContract ? 1 : 0.78}
                     style={[
                       styles.uploadContractBtn,
                       {
@@ -4814,7 +4890,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                         <View key={promo.id} style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 6, marginTop: 4 }}>
                           <Ionicons name="pricetag-outline" size={12} color={colors.primary} />
                           <Text style={{ color: colors.text, fontFamily: "Poppins_500Medium", fontSize: 12 }}>
-                            "{promo.name}": {promo.discount_type === "percentage" ? `${promo.discount_value}% off` : `₱${promo.discount_value}/hr off`}
+                            {promo.name}: {promo.discount_type === "percentage" ? `${promo.discount_value}% off` : `₱${promo.discount_value}/hr off`}
                             {" "}({promo.applies_to === "both" ? "All" : promo.applies_to})
                             {promo.criteria ? ` | ${promo.criteria}` : ""}
                             {promo.minimum_booking_hours ? ` | Min ${promo.minimum_booking_hours} hr` : ""}
@@ -5054,7 +5130,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
             <TouchableOpacity
               onPress={handleBack}
               disabled={creating}
-              activeOpacity={1}
+              activeOpacity={creating ? 1 : 0.78}
               style={[
                 styles.backBtn,
                 {
@@ -5071,14 +5147,14 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
             <TouchableOpacity
               onPress={handleNext}
               disabled={creating || !isCurrentStepComplete}
-              activeOpacity={1}
+              activeOpacity={creating || !isCurrentStepComplete ? 1 : 0.78}
               style={[
                 styles.nextBtn,
                 {
                   flex: 1,
                   backgroundColor: isCurrentStepComplete ? colors.primary : colors.border,
                   shadowColor: colors.primary,
-                  opacity: creating ? 0.7 : 1,
+                  opacity: creating || !isCurrentStepComplete ? 0.6 : 1,
                 },
               ]}
             >
@@ -5293,6 +5369,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                     fontFamily: "Poppins_400Regular",
                     borderWidth: 1,
                     borderColor: isDark ? "#374151" : "#E5E7EB",
+                    textAlignVertical: "center",
                   }}
                 />
               </View>
@@ -5328,6 +5405,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                     fontFamily: "Poppins_400Regular",
                     borderWidth: 1,
                     borderColor: isDark ? "#374151" : "#E5E7EB",
+                    textAlignVertical: "center",
                   }}
                 />
               </View>
@@ -5405,7 +5483,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                   <TouchableOpacity
                     onPress={pickEquipmentImage}
                     disabled={uploadingEquipmentImage}
-                    activeOpacity={1}
+                    activeOpacity={uploadingEquipmentImage ? 1 : 0.78}
                     style={{
                       backgroundColor: colors.inputBackground,
                       borderRadius: 12,

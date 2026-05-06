@@ -10,7 +10,11 @@ const corsHeaders = {
 
 const IDENTITY_BUCKET = "identity-manual";
 const MAX_IMAGE_BYTES = 7 * 1024 * 1024;
-const allowedSignupRoles = new Set(["musician"]);
+const allowedSignupRoles = new Set(["fan", "musician"]);
+
+function getDefaultDisplayNameForRole(role: unknown) {
+  return String(role || "").trim().toLowerCase() === "fan" ? "Fan" : "Musician";
+}
 
 function jsonResponse(payload: unknown, status = 200) {
   return new Response(JSON.stringify(payload), {
@@ -209,12 +213,18 @@ async function ensurePendingReviewProfile(
   diditSessionId: string | null = null,
   submittedFullName: string | null = null,
   idDocumentExpiry: string | null = null,
+  role = "musician",
 ) {
   const metadata = authUser?.user_metadata || {};
+  const normalizedRole = String(role || metadata.role || "musician").trim().toLowerCase();
+  if (!allowedSignupRoles.has(normalizedRole)) {
+    throw new Error("Invalid signup role.");
+  }
+
   const fallbackName =
     String(submittedFullName || metadata.full_name || metadata.display_name || metadata.name || "").trim() ||
     email.split("@")[0] ||
-    "Musician";
+    getDefaultDisplayNameForRole(normalizedRole);
 
   const { error } = await supabaseAdmin
     .from("profiles")
@@ -222,7 +232,7 @@ async function ensurePendingReviewProfile(
       id: authUser.id,
       email,
       full_name: fallbackName,
-      role: "musician",
+      role: normalizedRole,
       is_verified: false,
       verification_status: "PENDING_REVIEW",
       didit_session_id: diditSessionId,
@@ -254,7 +264,7 @@ async function ensurePendingReviewAuthUser(
 ) {
   const role = String(payload.role || "musician").trim().toLowerCase();
   if (!allowedSignupRoles.has(role)) {
-    throw new Error("Only musician accounts can submit manual identity review during signup.");
+    throw new Error("Only fan or musician accounts can submit manual identity review during signup.");
   }
 
   if (payload.userId) {
@@ -277,7 +287,7 @@ async function ensurePendingReviewAuthUser(
     const existingRole = String(existingProfile?.role || existingUser.user_metadata?.role || "").trim().toLowerCase();
     const existingStatus = String(existingProfile?.verification_status || existingUser.user_metadata?.verification_status || "").trim().toUpperCase();
 
-    if (existingRole && existingRole !== "musician") {
+    if (existingRole && existingRole !== role) {
       throw new Error("This email is already registered with another account type. Please log in to continue.");
     }
 
@@ -285,7 +295,7 @@ async function ensurePendingReviewAuthUser(
       throw new Error("This email is already registered and verified. Please log in.");
     }
 
-    const fallbackName = payload.fullName || payload.email.split("@")[0] || "Musician";
+    const fallbackName = payload.fullName || payload.email.split("@")[0] || getDefaultDisplayNameForRole(role);
     const updatePayload: Record<string, unknown> = {
       user_metadata: {
         ...(existingUser.user_metadata || {}),
@@ -322,7 +332,7 @@ async function ensurePendingReviewAuthUser(
     throw new Error("Password must be at least 6 characters.");
   }
 
-  const fallbackName = payload.fullName || payload.email.split("@")[0] || "Musician";
+  const fallbackName = payload.fullName || payload.email.split("@")[0] || getDefaultDisplayNameForRole(role);
   const { data: createdUser, error: createUserError } = await supabaseAdmin.auth.admin.createUser({
     email: payload.email,
     password: payload.password,
@@ -513,7 +523,7 @@ serve(async (req: Request) => {
       return jsonResponse({ error: "Email mismatch for this user" }, 400);
     }
 
-    await ensurePendingReviewProfile(supabaseAdmin, authUser, authEmail || email, diditSessionId, fullName || null, idDocumentExpiry);
+    await ensurePendingReviewProfile(supabaseAdmin, authUser, authEmail || email, diditSessionId, fullName || null, idDocumentExpiry, role);
 
     const frontImage = normalizeImagePayload(body?.frontImage, "front");
     if (!frontImage && source === "MANUAL_UPLOAD") {

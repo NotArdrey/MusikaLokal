@@ -13,6 +13,8 @@ import {
 } from "react-native";
 import { supabase } from "../lib/supabase";
 import CustomAlert, { AlertType } from "../src/components/CustomAlert";
+import BottomModal from "../src/components/BottomModal";
+import GroupInviteSection from "../src/components/GroupInviteSection";
 import GroupLinkedPlaylistsSection from "../src/components/GroupLinkedPlaylistsSection";
 import Header from "../src/components/header";
 import Modal from "../src/components/modal";
@@ -29,17 +31,26 @@ import {
     openNavigationDirections,
 } from "../src/utils/navigation";
 import { formatFriendlyDateTime } from "../src/utils/friendlyDateTime";
+import {
+    GroupInviteTarget,
+    sendGroupMemberInvites,
+} from "../src/utils/groupMemberInvites";
 import { getSmoothTabIndex, setSmoothTab } from "../src/utils/smoothTabs";
 
 import { useLocalSearchParams } from "expo-router";
+
+const GROUP_TABS = ["About", "Applications", "Review"];
 
 export default function GroupDetailsScreen() {
   const { colors, isDark } = useTheme();
   const { contentBottomPadding } = useBottomBarClearance(24);
   const { isSystemLocked, showLockAlert } = useAuth();
-  const { id } = useLocalSearchParams();
+  const { id, tab } = useLocalSearchParams<{ id?: string | string[]; tab?: string | string[] }>();
+  const requestedTab = Array.isArray(tab) ? tab[0] : tab;
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState("About");
+  const [activeTab, setActiveTab] = useState(
+    GROUP_TABS.includes(requestedTab || "") ? requestedTab || "About" : "About",
+  );
   const [modalVisible, setModalVisible] = useState(false);
   const [modalTitle, setModalTitle] = useState("");
   const [modalMessage, setModalMessage] = useState("");
@@ -52,14 +63,26 @@ export default function GroupDetailsScreen() {
   const [updatingGigVisibility, setUpdatingGigVisibility] = useState(false);
   const [openGroupApplications, setOpenGroupApplications] = useState(true);
   const [updatingGroupApplications, setUpdatingGroupApplications] = useState(false);
+  const [inviteModalVisible, setInviteModalVisible] = useState(false);
+  const [selectedInviteTargets, setSelectedInviteTargets] = useState<GroupInviteTarget[]>([]);
+  const [inviteMessage, setInviteMessage] = useState("");
+  const [sendingInvites, setSendingInvites] = useState(false);
 
   const [group, setGroup] = useState<any>(null);
   const [groupMembers, setGroupMembers] = useState<any[]>([]);
+  const [groupMemberApplications, setGroupMemberApplications] = useState<any[]>([]);
+  const [respondingGroupApplicationId, setRespondingGroupApplicationId] = useState<string | null>(null);
   const [applications, setApplications] = useState<any[]>([]);
   const [reviews, setReviews] = useState<any[]>([]);
   const [groupPlaylists, setGroupPlaylists] = useState<any[]>([]);
   const [loadingGroupPlaylists, setLoadingGroupPlaylists] = useState(false);
   const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (requestedTab && GROUP_TABS.includes(requestedTab) && requestedTab !== activeTab) {
+      setActiveTab(requestedTab);
+    }
+  }, [activeTab, requestedTab]);
   const [alertVisible, setAlertVisible] = useState(false);
   const [alertConfig, setAlertConfig] = useState<{
     type: AlertType;
@@ -90,6 +113,26 @@ export default function GroupDetailsScreen() {
   const isMissingShowGigStatusesColumnError = (error: any) => {
     const message = String(error?.message || "").toLowerCase();
     return error?.code === "42703" && message.includes("show_gig_statuses");
+  };
+
+  const formatGroupTypeLabel = (value?: unknown) => {
+    const raw = typeof value === "string" ? value.trim() : "";
+    if (!raw) return "N/A";
+    return raw
+      .replace(/[_-]+/g, " ")
+      .split(" ")
+      .filter(Boolean)
+      .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(" ");
+  };
+
+  const getDisplayGroupType = (sourceGroup?: any) => {
+    const rosterMembers = Array.isArray(sourceGroup?.members) ? sourceGroup.members : [];
+    const persistedUiType = rosterMembers.find(
+      (member: any) => typeof member?.group_type_ui === "string" && member.group_type_ui.trim(),
+    )?.group_type_ui;
+
+    return persistedUiType || sourceGroup?.group_type || "";
   };
 
   const handleNavigateToGroup = async () => {
@@ -232,6 +275,7 @@ export default function GroupDetailsScreen() {
     setLoading(true);
     setGroup(null);
     setGroupMembers([]);
+    setGroupMemberApplications([]);
     setApplications([]);
     setReviews([]);
     try {
@@ -346,15 +390,15 @@ export default function GroupDetailsScreen() {
         if (memberError) {
           setGroupMembers([]);
         } else {
-          const legacyMembers = Array.isArray(legacyGroup?.members)
-            ? legacyGroup.members
+          const rosterMembersForInstruments = Array.isArray(legacyMembers)
+            ? legacyMembers
             : [];
           const mappedMembers = (memberRows || []).map((row: any) => ({
             user_id: row.user_id,
             name: row.profiles?.full_name || "Member",
             avatar_url: row.profiles?.avatar_url,
             instrument:
-              legacyMembers.find(
+              rosterMembersForInstruments.find(
                 (member: any) => member?.user_id && member.user_id === row.user_id,
               )?.instrument || "",
             role:
@@ -376,6 +420,27 @@ export default function GroupDetailsScreen() {
         setApplications(apps);
       } catch (appErr) {
         setApplications([]);
+      }
+
+      try {
+        const { data: groupApplicationData, error: groupApplicationError } =
+          await supabase.functions.invoke("group-members", {
+            body: {
+              action: "fetch_group_applications",
+              userId,
+              groupId,
+            },
+          });
+
+        if (groupApplicationError) throw groupApplicationError;
+
+        setGroupMemberApplications(
+          Array.isArray(groupApplicationData?.applications)
+            ? groupApplicationData.applications
+            : [],
+        );
+      } catch (groupApplicationErr) {
+        setGroupMemberApplications([]);
       }
 
       // Direct query to reviews table
@@ -452,6 +517,91 @@ export default function GroupDetailsScreen() {
         setModalVisible(false);
       } catch (e: any) {
         showAlert("warning", "Update Failed", e?.message || "Failed to update leader decision.");
+      }
+    });
+    setModalVisible(true);
+  };
+
+  const confirmGroupMemberApplicationDecision = (
+    app: any,
+    decision: "accepted" | "declined",
+  ) => {
+    const applicantName = app?.applicant?.full_name || "this applicant";
+
+    setModalTitle(
+      decision === "accepted" ? "Accept Group Application" : "Decline Group Application",
+    );
+    setModalMessage(
+      decision === "accepted"
+        ? `Add ${applicantName} to ${group?.name || "this group"}?`
+        : `Decline ${applicantName}'s application to ${group?.name || "this group"}?`,
+    );
+    setModalButtonText(decision === "accepted" ? "Accept" : "Decline");
+    setModalAction(() => async () => {
+      setRespondingGroupApplicationId(app.id);
+      try {
+        const { data, error } = await supabase.functions.invoke("group-members", {
+          body: {
+            action: "respond_group_application",
+            userId: currentUserId,
+            requestId: app.id,
+            decision,
+          },
+        });
+
+        if (error) throw error;
+        if (data?.error) throw new Error(data.error);
+
+        const nextStatus = data?.request?.status || decision;
+        setGroupMemberApplications((prev) =>
+          prev.map((request) =>
+            request.id === app.id
+              ? {
+                  ...request,
+                  status: nextStatus,
+                  event_details: data?.request?.event_details || request.event_details,
+                }
+              : request,
+          ),
+        );
+
+        if (data?.member) {
+          setGroupMembers((prev) => {
+            if (prev.some((member) => member.user_id === data.member.user_id)) {
+              return prev;
+            }
+
+            return [
+              ...prev,
+              {
+                user_id: data.member.user_id,
+                name: app?.applicant?.full_name || "Member",
+                avatar_url: app?.applicant?.avatar_url || null,
+                instrument: "",
+                role: "Member",
+                membershipState: "active",
+                source: "group_members",
+              },
+            ];
+          });
+        }
+
+        setModalVisible(false);
+        showAlert(
+          "success",
+          decision === "accepted" ? "Application Accepted" : "Application Declined",
+          decision === "accepted"
+            ? "The applicant has been added to your group."
+            : "The application has been declined.",
+        );
+      } catch (e: any) {
+        showAlert(
+          "warning",
+          "Update Failed",
+          e?.message || "Failed to update the group application.",
+        );
+      } finally {
+        setRespondingGroupApplicationId(null);
       }
     });
     setModalVisible(true);
@@ -535,12 +685,85 @@ export default function GroupDetailsScreen() {
     }
   };
 
-  const tabs = ["About", "Applications", "Review"];
-  const hasSyncedMembers = groupMembers.length > 0;
-  const displayMembers = hasSyncedMembers ? groupMembers : group?.members || [];
-  const displayMemberCount = hasSyncedMembers
-    ? groupMembers.length
-    : group?.members?.length || 0;
+  const handleSendGroupInvites = async () => {
+    if (!currentUserId || !group?.id || sendingInvites) return;
+
+    if (selectedInviteTargets.length === 0) {
+      showAlert("info", "No Musicians Selected", "Select at least one musician to invite.");
+      return;
+    }
+
+    setSendingInvites(true);
+
+    try {
+      const inviteSummary = await sendGroupMemberInvites({
+        currentUserId,
+        groupId: group.id,
+        groupName: group.name,
+        groupImageUrl: Array.isArray(group.images) ? group.images[0] || null : null,
+        inviteMessage,
+        inviteTargets: selectedInviteTargets,
+      });
+
+      setSelectedInviteTargets([]);
+      setInviteMessage("");
+      setInviteModalVisible(false);
+
+      const failureText = inviteSummary.failedCount > 0
+        ? ` ${inviteSummary.failedCount} invite(s) were not sent because an active request may already exist.`
+        : "";
+
+      showAlert(
+        inviteSummary.sentCount > 0 ? "success" : "warning",
+        inviteSummary.sentCount > 0 ? "Invites Sent" : "No Invites Sent",
+        `${inviteSummary.sentCount} invite(s) sent.${failureText}`,
+      );
+    } catch (error: any) {
+      showAlert(
+        "warning",
+        "Invite Failed",
+        error?.message || "Could not send group invites.",
+      );
+    } finally {
+      setSendingInvites(false);
+    }
+  };
+
+  const tabs = GROUP_TABS;
+  const rosterMembers = Array.isArray(group?.members) ? group.members : [];
+  const syncedMembersByUserId = new Map(
+    groupMembers
+      .filter((member: any) => member?.user_id)
+      .map((member: any) => [member.user_id, member]),
+  );
+  const rosterUserIds = new Set(
+    rosterMembers
+      .map((member: any) => (typeof member === "string" ? "" : member?.user_id))
+      .filter(Boolean),
+  );
+  const displayMembers = [
+    ...rosterMembers.map((member: any) => {
+      if (typeof member === "string") return member;
+
+      const syncedMember = member?.user_id
+        ? syncedMembersByUserId.get(member.user_id)
+        : null;
+
+      return {
+        ...member,
+        name: syncedMember?.name || member?.name || member?.full_name,
+        avatar_url: syncedMember?.avatar_url || member?.avatar_url,
+        role: member?.role || syncedMember?.role,
+        membershipState: syncedMember
+          ? "active"
+          : member?.membershipState || "roster",
+        source: syncedMember ? "group_members" : member?.source || "group_roster_members",
+      };
+    }),
+    ...groupMembers.filter((member: any) => !rosterUserIds.has(member?.user_id)),
+  ];
+  const displayMemberCount = displayMembers.length;
+  const displayGroupType = getDisplayGroupType(group);
 
   // Show loading while checking authorization
   if (checkingAuth) {
@@ -801,10 +1024,9 @@ export default function GroupDetailsScreen() {
                         color: colors.text,
                         fontFamily: "Poppins_500Medium",
                         fontSize: 14,
-                        textTransform: "capitalize",
                       }}
                     >
-                      {group?.group_type || "N/A"}
+                      {formatGroupTypeLabel(displayGroupType)}
                     </Text>
                   </View>
                 </View>
@@ -817,16 +1039,6 @@ export default function GroupDetailsScreen() {
                     ]}
                   >
                     {getGroupMembersLabel(group?.group_type)} & Roles
-                  </Text>
-                  <Text
-                    style={{
-                      color: colors.textSecondary,
-                      fontFamily: "Poppins_400Regular",
-                      fontSize: 12,
-                      marginBottom: 10,
-                    }}
-                  >
-                    Source: {hasSyncedMembers ? "group_members (synced)" : "groups.members (legacy fallback)"}
                   </Text>
                   {displayMembers && displayMembers.length > 0 ? (
                     displayMembers.map((member: any, index: number) => {
@@ -897,6 +1109,8 @@ export default function GroupDetailsScreen() {
                                 >
                                   {membershipState === "active"
                                     ? "Active Member"
+                                    : membershipState === "roster"
+                                      ? "Roster Member"
                                     : "Legacy Member"}
                                 </Text>
                               </View>
@@ -956,6 +1170,120 @@ export default function GroupDetailsScreen() {
 
             {activeTab === "Applications" && (
               <View style={styles.aboutContainer}>
+                <View>
+                  <View style={styles.applicationsHeaderRow}>
+                    <Text style={[styles.sectionTitle, { color: colors.text, flex: 1 }]}>
+                      Member Applications
+                    </Text>
+                    <TouchableOpacity
+                      activeOpacity={1}
+                      style={[styles.inviteMembersButton, { backgroundColor: colors.primary }]}
+                      onPress={() => setInviteModalVisible(true)}
+                    >
+                      <Ionicons name="person-add-outline" size={16} color="#FFFFFF" />
+                      <Text style={styles.inviteMembersButtonText}>Invite</Text>
+                    </TouchableOpacity>
+                  </View>
+
+                  {groupMemberApplications.length === 0 ? (
+                    <Text style={{ color: colors.textSecondary, marginTop: 8 }}>
+                      No member applications yet.
+                    </Text>
+                  ) : (
+                    groupMemberApplications.map((app) => {
+                      const rawStatus = String(app?.status || "pending");
+                      const normalizedStatus = rawStatus.toLowerCase();
+                      const requestDetails =
+                        app?.event_details?.request_details &&
+                        typeof app.event_details.request_details === "object"
+                          ? app.event_details.request_details
+                          : {};
+                      const statusColor =
+                        normalizedStatus === "accepted" ||
+                        normalizedStatus === "approved" ||
+                        normalizedStatus === "connected"
+                          ? "#10B981"
+                          : normalizedStatus === "pending"
+                            ? "#F59E0B"
+                            : "#EF4444";
+                      const isPending = normalizedStatus === "pending";
+                      const isResponding = respondingGroupApplicationId === app.id;
+
+                      return (
+                        <View
+                          key={app.id}
+                          style={[
+                            styles.setupCard,
+                            { backgroundColor: colors.surface, marginTop: 12 },
+                          ]}
+                        >
+                          <View
+                            style={{
+                              flexDirection: "row",
+                              justifyContent: "space-between",
+                              gap: 12,
+                              marginBottom: 8,
+                            }}
+                          >
+                            <Text style={[styles.setupTitle, { color: colors.text, flex: 1 }]}>
+                              {app.applicant?.full_name || "Applicant"}
+                            </Text>
+                            <Text style={{ color: statusColor, fontWeight: "bold" }}>
+                              {rawStatus.toUpperCase()}
+                            </Text>
+                          </View>
+
+                          <Text style={{ color: colors.textSecondary, marginBottom: 6 }}>
+                            {requestDetails?.application_context ||
+                              requestDetails?.pitch_message ||
+                              app.message ||
+                              "No application message provided."}
+                          </Text>
+                          <Text style={{ color: colors.textSecondary, marginBottom: isPending ? 12 : 0 }}>
+                            Applied on:{" "}
+                            {app.created_at
+                              ? formatFriendlyDateTime(app.created_at)
+                              : "N/A"}
+                          </Text>
+
+                          {isPending && (
+                            <View style={styles.actionButtons}>
+                              <TouchableOpacity
+                                activeOpacity={1}
+                                disabled={isResponding}
+                                style={[
+                                  styles.declineButton,
+                                  { borderColor: colors.border, opacity: isResponding ? 0.6 : 1 },
+                                ]}
+                                onPress={() =>
+                                  confirmGroupMemberApplicationDecision(app, "declined")
+                                }
+                              >
+                                <Text style={{ color: "#EF4444", fontFamily: "Poppins_600SemiBold" }}>
+                                  Decline
+                                </Text>
+                              </TouchableOpacity>
+                              <TouchableOpacity
+                                activeOpacity={1}
+                                disabled={isResponding}
+                                style={[
+                                  styles.acceptButton,
+                                  { backgroundColor: colors.primary, opacity: isResponding ? 0.6 : 1 },
+                                ]}
+                                onPress={() =>
+                                  confirmGroupMemberApplicationDecision(app, "accepted")
+                                }
+                              >
+                                <Text style={styles.actionBtnText}>Accept</Text>
+                              </TouchableOpacity>
+                            </View>
+                          )}
+                        </View>
+                      );
+                    })
+                  )}
+                </View>
+
                 <Text style={[styles.sectionTitle, { color: colors.text }]}>
                   Sent Applications
                 </Text>
@@ -1128,13 +1456,101 @@ export default function GroupDetailsScreen() {
 
         <Navbar />
       </View>
+      <BottomModal
+        visible={inviteModalVisible}
+        overlayLabel="ManageGroupInviteMembersModal"
+        onClose={() => {
+          if (!sendingInvites) {
+            setInviteModalVisible(false);
+          }
+        }}
+        contentContainerStyle={[
+          styles.inviteModalContent,
+          { backgroundColor: colors.background },
+        ]}
+        keyboardAvoiding
+      >
+        <ScrollView
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+          contentContainerStyle={styles.inviteModalScroll}
+        >
+          <View style={styles.inviteModalHeader}>
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.inviteModalTitle, { color: colors.text }]}>
+                Invite Members
+              </Text>
+              <Text style={[styles.inviteModalSubtitle, { color: colors.textSecondary }]}>
+                Send group invites to musicians and track responses in Bookings.
+              </Text>
+            </View>
+            <TouchableOpacity
+              activeOpacity={1}
+              disabled={sendingInvites}
+              onPress={() => setInviteModalVisible(false)}
+              style={[styles.inviteModalClose, { backgroundColor: colors.surface }]}
+            >
+              <Ionicons name="close" size={20} color={colors.text} />
+            </TouchableOpacity>
+          </View>
+
+          <GroupInviteSection
+            currentUserId={currentUserId}
+            groupId={group?.id}
+            selectedTargets={selectedInviteTargets}
+            onSelectedTargetsChange={setSelectedInviteTargets}
+            inviteMessage={inviteMessage}
+            onInviteMessageChange={setInviteMessage}
+            disabled={sendingInvites}
+          />
+
+          <TouchableOpacity
+            activeOpacity={sendingInvites || selectedInviteTargets.length === 0 ? 1 : 0.78}
+            disabled={sendingInvites || selectedInviteTargets.length === 0}
+            onPress={handleSendGroupInvites}
+            style={[
+              styles.sendInviteButton,
+              {
+                backgroundColor:
+                  selectedInviteTargets.length > 0 ? colors.primary : colors.border,
+                opacity: sendingInvites || selectedInviteTargets.length === 0 ? 0.6 : 1,
+              },
+            ]}
+          >
+            {sendingInvites ? (
+              <ActivityIndicator size="small" color="#FFFFFF" />
+            ) : (
+              <>
+                <Ionicons
+                  name="send-outline"
+                  size={18}
+                  color={selectedInviteTargets.length > 0 ? "#FFFFFF" : colors.textSecondary}
+                />
+                <Text
+                  style={[
+                    styles.sendInviteButtonText,
+                    {
+                      color:
+                        selectedInviteTargets.length > 0
+                          ? "#FFFFFF"
+                          : colors.textSecondary,
+                    },
+                  ]}
+                >
+                  Send Invite{selectedInviteTargets.length === 1 ? "" : "s"}
+                </Text>
+              </>
+            )}
+          </TouchableOpacity>
+        </ScrollView>
+      </BottomModal>
       <Modal
         visible={modalVisible}
         onClose={() => setModalVisible(false)}
         title={modalTitle}
         message={modalMessage}
         buttonText={modalButtonText}
-        danger={modalButtonText === "Reject"}
+        danger={modalButtonText === "Reject" || modalButtonText === "Decline"}
         onConfirm={() => {
           if (modalAction) {
             modalAction();
@@ -1334,6 +1750,69 @@ const styles = StyleSheet.create({
   sectionTitle: {
     fontSize: 18,
     fontFamily: "Poppins_600SemiBold",
+  },
+  applicationsHeaderRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+  },
+  inviteMembersButton: {
+    minHeight: 38,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+  },
+  inviteMembersButtonText: {
+    color: "#FFFFFF",
+    fontFamily: "Poppins_600SemiBold",
+    fontSize: 12,
+  },
+  inviteModalContent: {
+    maxHeight: "88%",
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+  },
+  inviteModalScroll: {
+    padding: 20,
+    paddingBottom: 36,
+  },
+  inviteModalHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+  },
+  inviteModalTitle: {
+    fontFamily: "Poppins_700Bold",
+    fontSize: 20,
+  },
+  inviteModalSubtitle: {
+    marginTop: 2,
+    fontFamily: "Poppins_400Regular",
+    fontSize: 12,
+  },
+  inviteModalClose: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  sendInviteButton: {
+    marginTop: 16,
+    minHeight: 48,
+    borderRadius: 14,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+  },
+  sendInviteButtonText: {
+    fontFamily: "Poppins_600SemiBold",
+    fontSize: 14,
   },
   completionCard: {
     padding: 16,

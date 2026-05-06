@@ -91,6 +91,7 @@ export default function SubmitReviewScreen() {
   const reviewSubtitle = isReviewingCounterparty
     ? `How was your interaction with ${entityName}?`
     : `How was your booking with ${entityName}?`;
+  const isSubmitDisabled = selectedValue === 0 || submitting;
 
   const handleSubmitReview = async () => {
     if (submitting) return;
@@ -258,11 +259,11 @@ export default function SubmitReviewScreen() {
             <TouchableOpacity
               style={[
                 styles.submitButton,
-                { backgroundColor: selectedValue > 0 ? colors.primary : colors.border, opacity: submitting ? 0.5 : 1 }
+                { backgroundColor: selectedValue > 0 ? colors.primary : colors.border, opacity: isSubmitDisabled ? 0.6 : 1 }
               ]}
               onPress={handleSubmitReview}
-              disabled={selectedValue === 0 || submitting}
-              activeOpacity={1}
+              disabled={isSubmitDisabled}
+              activeOpacity={isSubmitDisabled ? 1 : 0.78}
             >
               <Text style={[styles.submitButtonText, { color: selectedValue > 0 ? "#FFFFFF" : colors.textSecondary }]}>
                 {submitting ? 'Submitting...' : 'Submit Review'}

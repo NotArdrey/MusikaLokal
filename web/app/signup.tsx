@@ -7,18 +7,26 @@ import * as Linking from 'expo-linking';
 import { router, useLocalSearchParams } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
 import React, { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Image, KeyboardAvoidingView, Modal as RNModal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Dimensions, Image, KeyboardAvoidingView, Modal as RNModal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { Calendar } from 'react-native-calendars';
 import type { DateData } from 'react-native-calendars';
 import { WebView } from 'react-native-webview';
 import { supabase } from '../lib/supabase';
 import CustomAlert, { AlertType } from '../src/components/CustomAlert';
+import AuthMusicHero from '../src/components/AuthMusicHero';
 import { emitToast } from '../src/events/toastBus';
 import { useTheme } from '../src/context/ThemeContext';
 
 type OnboardingStep = 'details' | 'verification' | 'email_verification';
-type SignupRole = 'musician';
+type SignupRole = 'fan' | 'musician';
 type VerificationMode = 'didit' | 'manual';
+
+type SignupRoleOption = {
+    role: SignupRole;
+    title: string;
+    description: string;
+    icon: React.ComponentProps<typeof Ionicons>['name'];
+};
 
 type DocumentOption = {
     key: string;
@@ -35,7 +43,22 @@ type ManualUploadAsset = {
     fileName: string;
 };
 
-const ALLOWED_SIGNUP_ROLES: SignupRole[] = ['musician'];
+const ALLOWED_SIGNUP_ROLES: SignupRole[] = ['fan', 'musician'];
+
+const SIGNUP_ROLE_OPTIONS: SignupRoleOption[] = [
+    {
+        role: 'fan',
+        title: 'Register as a Fan',
+        description: 'Follow artists, save favorites, and discover local music.',
+        icon: 'heart-outline',
+    },
+    {
+        role: 'musician',
+        title: 'Register as a Musician',
+        description: 'Create a music profile and join gigs, listings, and collaborations.',
+        icon: 'musical-notes-outline',
+    },
+];
 
 const PH_DOCUMENT_OPTIONS: DocumentOption[] = [
     { key: 'national_id', label: 'National ID card', diditSupported: true, diditDocumentType: 'id_card' },
@@ -78,6 +101,8 @@ const isAllowedSignupRole = (role: unknown): role is SignupRole => {
 const isAdminRole = (role: unknown): boolean => {
     return typeof role === 'string' && role.toLowerCase() === 'admin';
 };
+
+const getSignupRoleFallbackName = (role: SignupRole) => role === 'fan' ? 'Fan' : 'Musician';
 
 const createEmailConfirmationRedirectUrl = () => {
     const baseUrl = Linking.createURL('/');
@@ -153,6 +178,8 @@ const logDiditEmailFlowError = (stage: string, error: unknown, payload: Record<s
 
 export default function SignupScreen() {
     const { colors, isDark } = useTheme();
+    const { width } = Dimensions.get('window');
+    const isWebDesktop = Platform.OS === 'web' && width >= 768;
 
     // State
     // State
@@ -172,10 +199,10 @@ export default function SignupScreen() {
     const [manualIdExpiration, setManualIdExpiration] = useState('');
     const [manualExpirationCalendarVisible, setManualExpirationCalendarVisible] = useState(false);
 
-    const { verified, session_id, check_verification } = useLocalSearchParams<{ verified: string; session_id: string; check_verification: string }>();
+    const { verified, session_id, check_verification, role } = useLocalSearchParams<{ verified: string; session_id: string; check_verification: string; role?: string }>();
 
     // Form Fields
-    const [selectedRole, setSelectedRole] = useState<SignupRole>('musician');
+    const [selectedRole, setSelectedRole] = useState<SignupRole>('fan');
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [confirmPassword, setConfirmPassword] = useState('');
@@ -249,6 +276,14 @@ export default function SignupScreen() {
     const Alert = { alert: showAlertNative };
 
     const [errors, setErrors] = useState<{ email?: string; password?: string; confirmPassword?: string; role?: string; document?: string }>({});
+
+    useEffect(() => {
+        const requestedRole = Array.isArray(role) ? role[0] : role;
+        if (isAllowedSignupRole(requestedRole)) {
+            setSelectedRole(requestedRole);
+        }
+    }, [role]);
+
     const selectedDocumentOption = useMemo(() => getDocumentOptionByKey(selectedDocumentKey), [selectedDocumentKey]);
     const todayDateString = useMemo(() => getLocalDateInputValue(), []);
     const manualExpirationDateLabel = manualIdExpiration ? formatSelectedDate(manualIdExpiration) : 'Choose date';
@@ -284,6 +319,13 @@ export default function SignupScreen() {
     React.useEffect(() => {
         setVerificationUrl('');
     }, [email]);
+
+    const handleRoleSelect = (nextRole: SignupRole) => {
+        setSelectedRole(nextRole);
+        if (errors.role) {
+            setErrors((prev) => ({ ...prev, role: undefined }));
+        }
+    };
 
     // Restore state on mount if returning from verification
     useEffect(() => {
@@ -601,6 +643,12 @@ export default function SignupScreen() {
             borderColor: isDark ? '#374151' : '#E5E7EB',
         }
     };
+    const authTextStyle = themeStyles.text;
+    const authSecondaryTextStyle = themeStyles.textSecondary;
+    const authInputContainerStyle = themeStyles.inputContainer;
+    const authPrimaryColor = colors.primary;
+    const authIconColor = colors.textSecondary;
+    const authPlaceholderColor = colors.textSecondary;
 
     const handleDocumentSelect = (documentKey: string) => {
         setSelectedDocumentKey(documentKey);
@@ -789,14 +837,14 @@ export default function SignupScreen() {
         }
 
         if (!isAllowedSignupRole(selectedRole) || isAdminRole(selectedRole)) {
-            Alert.alert('Unsupported Account Type', 'Only musician accounts can be registered right now.');
+            Alert.alert('Unsupported Account Type', 'Only fan and musician accounts can be registered right now.');
             setStep('details');
             return;
         }
 
         setLoading(true);
 
-        const fallbackName = email.split('@')[0] || 'Musician';
+        const fallbackName = email.split('@')[0] || getSignupRoleFallbackName(selectedRole);
 
         try {
             const emailRedirectTo = createEmailConfirmationRedirectUrl();
@@ -963,7 +1011,7 @@ export default function SignupScreen() {
 
         if (!isAllowedSignupRole(selectedRole)) {
             setErrors({ role: 'Please select a valid account type.' });
-            Alert.alert('Unsupported Account Type', 'Only musician accounts can be registered right now.');
+            Alert.alert('Unsupported Account Type', 'Only fan and musician accounts can be registered right now.');
             setStep('details');
             return;
         }
@@ -1082,7 +1130,7 @@ export default function SignupScreen() {
                 selectedRole,
                 platform: Platform.OS,
             });
-            Alert.alert('Unsupported Account Type', 'Only musician accounts can be registered right now.');
+            Alert.alert('Unsupported Account Type', 'Only fan and musician accounts can be registered right now.');
             setStep('details');
             return;
         }
@@ -1167,7 +1215,7 @@ export default function SignupScreen() {
 
         // Fallback for name if Didit fails
         if (!verifiedName) {
-            verifiedName = email.split('@')[0] || 'Musician';
+            verifiedName = email.split('@')[0] || getSignupRoleFallbackName(selectedRole);
         }
 
         logDiditEmailFlow('verifiedName.resolved', {
@@ -1477,23 +1525,67 @@ export default function SignupScreen() {
      * Render Step 2: Details
      */
     const renderDetailsStep = () => (
-        <View style={styles.stepContainer}>
-            <TouchableOpacity activeOpacity={1} onPress={() => router.back()} style={styles.backLink}>
-                <Ionicons name="arrow-back" size={20} color={colors.textSecondary} />
-                <Text style={themeStyles.textSecondary}>Back</Text>
-            </TouchableOpacity>
+        <View style={[styles.stepContainer, isWebDesktop ? styles.webSignupCard : null]}>
+            <View style={[styles.signupHeader, isWebDesktop ? styles.webSignupHeader : null]}>
+                <Text style={[styles.stepTitle, isWebDesktop ? styles.webStepTitle : null, authTextStyle]}>Create your account</Text>
+                <Text style={[styles.stepSubtitle, isWebDesktop ? styles.webStepSubtitle : null, authSecondaryTextStyle]}>Choose how you want to join MusikaLokal, then verify your ID to keep the community trusted.</Text>
+            </View>
 
-            <Text style={[styles.stepTitle, themeStyles.text]}>Create your account</Text>
-            <Text style={[styles.stepSubtitle, themeStyles.textSecondary]}>Enter your credentials to get started.</Text>
+            <View style={[styles.roleSectionContainer, isWebDesktop ? styles.webRoleSectionContainer : null]}>
+                <View style={styles.sectionHeadingRow}>
+                    <Text style={[styles.sectionEyebrow, { color: authPrimaryColor }]}>Account type</Text>
+                    <Text style={[styles.sectionHint, authSecondaryTextStyle]}>Pick one to continue</Text>
+                </View>
+                <View style={[styles.roleGrid, isWebDesktop ? styles.webRoleGrid : null]}>
+                    {SIGNUP_ROLE_OPTIONS.map((option) => {
+                        const selected = selectedRole === option.role;
 
-            <View style={styles.formGap}>
+                        return (
+                            <Pressable
+                                key={option.role}
+                                accessibilityRole="button"
+                                accessibilityState={{ selected }}
+                                onPress={() => handleRoleSelect(option.role)}
+                                style={({ pressed, hovered }: any) => [
+                                    styles.roleCardBig,
+                                    isWebDesktop ? styles.webRoleCard : null,
+                                    {
+                                        backgroundColor: selected
+                                            ? (isDark ? 'rgba(79, 70, 229, 0.2)' : 'rgba(79, 70, 229, 0.08)')
+                                            : (isDark ? 'rgba(31, 41, 55, 0.62)' : 'rgba(249, 250, 251, 0.86)'),
+                                        borderColor: selected ? authPrimaryColor : (hovered ? colors.primary : colors.border),
+                                        opacity: pressed ? 0.82 : 1,
+                                    },
+                                ]}
+                            >
+                                <View style={[styles.roleIconBubble, { backgroundColor: selected ? authPrimaryColor : (isDark ? 'rgba(79, 70, 229, 0.16)' : '#EEF2FF') }]}>
+                                    <Ionicons name={option.icon} size={22} color={selected ? '#FFFFFF' : authIconColor} />
+                                </View>
+                                <View style={styles.roleCopy}>
+                                    <Text style={[styles.roleLabelBig, authTextStyle]}>{option.title}</Text>
+                                    <Text style={[styles.roleDescBig, authSecondaryTextStyle]}>{option.description}</Text>
+                                </View>
+                                {selected ? <Ionicons name="checkmark-circle" size={22} color={authPrimaryColor} /> : null}
+                            </Pressable>
+                        );
+                    })}
+                </View>
+                {errors.role ? <Text style={{ color: 'red', fontSize: 12 }}>{errors.role}</Text> : null}
+            </View>
+
+            <View style={[styles.formSection, isWebDesktop ? styles.webFormSection : null]}>
+                <View style={styles.sectionHeadingRow}>
+                    <Text style={[styles.sectionEyebrow, { color: authPrimaryColor }]}>Credentials</Text>
+                    <Text style={[styles.sectionHint, authSecondaryTextStyle]}>Use an active email address</Text>
+                </View>
+                <View style={styles.formGap}>
                 {/* Email */}
-                <View style={[styles.inputContainer, themeStyles.inputContainer, errors.email ? { borderColor: 'red' } : null]}>
-                    <Ionicons name="mail-outline" size={20} color={colors.textSecondary} />
+                <View style={[styles.inputContainer, isWebDesktop ? styles.webCompactInputContainer : null, authInputContainerStyle, errors.email ? { borderColor: 'red' } : null]}>
+                    <Ionicons name="mail-outline" size={20} color={authIconColor} />
                     <TextInput
-                        style={[styles.input, themeStyles.text]}
+                        style={[styles.input, authTextStyle]}
                         placeholder="Email"
-                        placeholderTextColor={colors.textSecondary}
+                        placeholderTextColor={authPlaceholderColor}
                         value={email}
                         onChangeText={setEmail}
                         autoCapitalize="none"
@@ -1502,53 +1594,60 @@ export default function SignupScreen() {
                 {errors.email && <Text style={{ color: 'red', fontSize: 12 }}>{errors.email}</Text>}
 
                 {/* Password */}
-                <View style={[styles.inputContainer, themeStyles.inputContainer, errors.password ? { borderColor: 'red' } : null]}>
-                    <Ionicons name="lock-closed-outline" size={20} color={colors.textSecondary} />
+                <View style={[styles.inputContainer, isWebDesktop ? styles.webCompactInputContainer : null, authInputContainerStyle, errors.password ? { borderColor: 'red' } : null]}>
+                    <Ionicons name="lock-closed-outline" size={20} color={authIconColor} />
                     <TextInput
-                        style={[styles.input, themeStyles.text]}
+                        style={[styles.input, authTextStyle]}
                         placeholder="Password"
-                        placeholderTextColor={colors.textSecondary}
+                        placeholderTextColor={authPlaceholderColor}
                         value={password}
                         onChangeText={setPassword}
                         secureTextEntry={!showPassword}
                     />
                     <TouchableOpacity activeOpacity={1} onPress={() => setShowPassword(!showPassword)}>
-                        <Ionicons name={showPassword ? "eye-off-outline" : "eye-outline"} size={20} color={colors.textSecondary} />
+                        <Ionicons name={showPassword ? "eye-off-outline" : "eye-outline"} size={20} color={authIconColor} />
                     </TouchableOpacity>
                 </View>
                 {errors.password && <Text style={{ color: 'red', fontSize: 12 }}>{errors.password}</Text>}
 
                 {/* Confirm */}
-                <View style={[styles.inputContainer, themeStyles.inputContainer, errors.confirmPassword ? { borderColor: 'red' } : null]}>
-                    <Ionicons name="lock-closed-outline" size={20} color={colors.textSecondary} />
+                <View style={[styles.inputContainer, isWebDesktop ? styles.webCompactInputContainer : null, authInputContainerStyle, errors.confirmPassword ? { borderColor: 'red' } : null]}>
+                    <Ionicons name="lock-closed-outline" size={20} color={authIconColor} />
                     <TextInput
-                        style={[styles.input, themeStyles.text]}
+                        style={[styles.input, authTextStyle]}
                         placeholder="Confirm Password"
-                        placeholderTextColor={colors.textSecondary}
+                        placeholderTextColor={authPlaceholderColor}
                         value={confirmPassword}
                         onChangeText={setConfirmPassword}
                         secureTextEntry={!showConfirmPassword}
                     />
                     <TouchableOpacity activeOpacity={1} onPress={() => setShowConfirmPassword(!showConfirmPassword)}>
-                        <Ionicons name={showConfirmPassword ? "eye-off-outline" : "eye-outline"} size={20} color={colors.textSecondary} />
+                        <Ionicons name={showConfirmPassword ? "eye-off-outline" : "eye-outline"} size={20} color={authIconColor} />
                     </TouchableOpacity>
                 </View>
                 {errors.confirmPassword && <Text style={{ color: 'red', fontSize: 12 }}>{errors.confirmPassword}</Text>}
+                </View>
+            </View>
 
+            <View style={[styles.formSection, isWebDesktop ? styles.webFormSection : null]}>
                 <View style={styles.documentSectionContainer}>
-                    <Text style={[styles.documentSectionTitle, themeStyles.text]}>Select your ID type (Philippines)</Text>
-                    <Text style={[styles.documentSectionSubtitle, themeStyles.textSecondary]}>
+                    <View style={styles.sectionHeadingRow}>
+                        <Text style={[styles.sectionEyebrow, { color: authPrimaryColor }]}>Verification</Text>
+                        <Text style={[styles.sectionHint, authSecondaryTextStyle]}>Philippines ID</Text>
+                    </View>
+                    <Text style={[styles.documentSectionTitle, authTextStyle]}>Select your ID type</Text>
+                    <Text style={[styles.documentSectionSubtitle, authSecondaryTextStyle]}>
                         Supported IDs continue with Didit. Unsupported IDs can be uploaded manually for admin review (5-7 business days).
                     </Text>
 
                     <TouchableOpacity
                         activeOpacity={1}
                         onPress={() => setDocumentModalVisible(true)}
-                        style={[styles.documentSelectButton, themeStyles.inputContainer, errors.document ? { borderColor: 'red' } : null]}
+                        style={[styles.documentSelectButton, isWebDesktop ? styles.webCompactDocumentSelectButton : null, authInputContainerStyle, errors.document ? { borderColor: 'red' } : null]}
                     >
-                        <Ionicons name="id-card-outline" size={20} color={colors.textSecondary} />
+                        <Ionicons name="id-card-outline" size={20} color={authIconColor} />
                         <View style={styles.documentSelectCopy}>
-                            <Text style={[styles.documentSelectValue, themeStyles.text]}>{selectedDocumentOption.label}</Text>
+                            <Text style={[styles.documentSelectValue, authTextStyle]}>{selectedDocumentOption.label}</Text>
                             <Text
                                 style={[
                                     styles.documentSelectionMeta,
@@ -1558,7 +1657,7 @@ export default function SignupScreen() {
                                 {selectedDocumentOption.diditSupported ? 'Auto verification' : 'Manual review'}
                             </Text>
                         </View>
-                        <Ionicons name="chevron-down" size={20} color={colors.textSecondary} />
+                        <Ionicons name="chevron-down" size={20} color={authIconColor} />
                     </TouchableOpacity>
 
                     {errors.document ? <Text style={{ color: 'red', fontSize: 12 }}>{errors.document}</Text> : null}
@@ -1568,15 +1667,31 @@ export default function SignupScreen() {
             <TouchableOpacity
                 onPress={handleNext}
                 disabled={loading || !isDetailsStepReady}
-                activeOpacity={1}
+                activeOpacity={loading || !isDetailsStepReady ? 1 : 0.78}
                 style={[
                     styles.nextButton,
+                    isWebDesktop ? styles.webCompactNextButton : null,
                     { backgroundColor: isDetailsStepReady ? colors.primary : (isDark ? '#374151' : '#E5E7EB') },
+                    { opacity: loading || !isDetailsStepReady ? 0.6 : 1 },
                     !isDetailsStepReady ? styles.nextButtonDisabled : null,
                 ]}
             >
                 {loading ? <ActivityIndicator color="white" /> : <Text style={[styles.nextButtonText, { color: isDetailsStepReady ? "white" : colors.textSecondary }]}>Next</Text>}
             </TouchableOpacity>
+
+            <View style={[styles.authFooterLinkContainer, isWebDesktop ? styles.webAuthFooterLinkContainer : null]}>
+                <Text style={[styles.authFooterText, authSecondaryTextStyle]}>
+                    Already have an account?{' '}
+                    <Text
+                        accessibilityRole="link"
+                        accessibilityLabel="auth-login-link"
+                        onPress={() => router.push('/')}
+                        style={[styles.authFooterLinkText, { color: authPrimaryColor }]}
+                    >
+                        Log in
+                    </Text>
+                </Text>
+            </View>
 
             <RNModal
                 visible={documentModalVisible}
@@ -1593,31 +1708,30 @@ export default function SignupScreen() {
                         style={styles.documentModalBackdrop}
                         onPress={() => setDocumentModalVisible(false)}
                     />
-                    <View style={[styles.documentModalSheet, { backgroundColor: colors.background, borderColor: colors.border }]}>
+                    <View style={[styles.documentModalSheet, { backgroundColor: isDark ? '#1E2530' : '#FFFFFF' }]}>
                         <View
                             style={[
                                 styles.documentModalHandle,
-                                { backgroundColor: isDark ? "#4B5563" : "#E5E7EB" },
+                                { backgroundColor: isDark ? '#6B7280' : '#9CA3AF' },
                             ]}
                         />
-                        <View style={[styles.documentModalHeader, { borderBottomColor: colors.border }]}>
-                            <View style={styles.documentModalHeaderCopy}>
-                                <Text style={[styles.documentModalTitle, themeStyles.text]}>Select ID type</Text>
-                                <Text style={[styles.documentModalSubtitle, themeStyles.textSecondary]}>
-                                    Choose the government ID you will use for verification.
-                                </Text>
-                            </View>
+                        <View style={styles.documentModalHeader}>
                             <TouchableOpacity
                                 activeOpacity={1}
                                 onPress={() => setDocumentModalVisible(false)}
                                 style={[
                                     styles.documentModalCloseButton,
-                                    { backgroundColor: colors.card, borderColor: colors.border },
+                                    { backgroundColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)' },
                                 ]}
                             >
-                                <Ionicons name="close" size={18} color={colors.text} />
+                                <Ionicons name="close" size={22} color={colors.textSecondary} />
                             </TouchableOpacity>
+                            <Text style={[styles.documentModalTitle, themeStyles.text]}>Select ID type</Text>
+                            <View style={styles.documentModalHeaderSpacer} />
                         </View>
+                        <Text style={[styles.documentModalSubtitle, themeStyles.textSecondary]}>
+                            Choose the government ID you will use for verification.
+                        </Text>
 
                         <ScrollView
                             style={styles.documentModalBody}
@@ -1635,8 +1749,10 @@ export default function SignupScreen() {
                                         style={[
                                             styles.documentModalOption,
                                             {
-                                                backgroundColor: selected ? (isDark ? 'rgba(37, 99, 235, 0.16)' : 'rgba(37, 99, 235, 0.08)') : (isDark ? '#111827' : '#F9FAFB'),
-                                                borderColor: selected ? colors.primary : (isDark ? '#374151' : '#E5E7EB'),
+                                                backgroundColor: selected
+                                                    ? (isDark ? 'rgba(99,102,241,0.18)' : 'rgba(99,102,241,0.08)')
+                                                    : (isDark ? '#252D3A' : '#F7F8FA'),
+                                                borderColor: selected ? colors.primary : 'transparent',
                                             },
                                         ]}
                                     >
@@ -1859,12 +1975,13 @@ export default function SignupScreen() {
                         </View>
 
                         <TouchableOpacity
-                            activeOpacity={1}
+                            activeOpacity={loading || !isManualReviewReady ? 1 : 0.78}
                             onPress={() => void submitManualReviewSignup()}
                             disabled={loading || !isManualReviewReady}
                             style={[
                                 styles.nextButton,
                                 { backgroundColor: isManualReviewReady ? colors.primary : (isDark ? '#374151' : '#E5E7EB'), marginTop: 8 },
+                                { opacity: loading || !isManualReviewReady ? 0.6 : 1 },
                                 !isManualReviewReady ? styles.nextButtonDisabled : null,
                             ]}
                         >
@@ -1887,31 +2004,30 @@ export default function SignupScreen() {
                                 style={styles.documentModalBackdrop}
                                 onPress={() => setManualExpirationCalendarVisible(false)}
                             />
-                            <View style={[styles.documentModalSheet, styles.manualCalendarSheet, { backgroundColor: colors.background, borderColor: colors.border }]}>
+                            <View style={[styles.documentModalSheet, styles.manualCalendarSheet, { backgroundColor: isDark ? '#1E2530' : '#FFFFFF' }]}>
                                 <View
                                     style={[
                                         styles.documentModalHandle,
-                                        { backgroundColor: isDark ? "#4B5563" : "#E5E7EB" },
+                                        { backgroundColor: isDark ? '#6B7280' : '#9CA3AF' },
                                     ]}
                                 />
-                                <View style={[styles.documentModalHeader, { borderBottomColor: colors.border }]}>
-                                    <View style={styles.documentModalHeaderCopy}>
-                                        <Text style={[styles.documentModalTitle, themeStyles.text]}>ID expiration date</Text>
-                                        <Text style={[styles.documentModalSubtitle, themeStyles.textSecondary]}>
-                                            Select the date printed on your ID.
-                                        </Text>
-                                    </View>
+                                <View style={styles.documentModalHeader}>
                                     <TouchableOpacity
                                         activeOpacity={1}
                                         onPress={() => setManualExpirationCalendarVisible(false)}
                                         style={[
                                             styles.documentModalCloseButton,
-                                            { backgroundColor: colors.card, borderColor: colors.border },
+                                            { backgroundColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)' },
                                         ]}
                                     >
-                                        <Ionicons name="close" size={18} color={colors.text} />
+                                        <Ionicons name="close" size={22} color={colors.textSecondary} />
                                     </TouchableOpacity>
+                                    <Text style={[styles.documentModalTitle, themeStyles.text]}>ID expiration date</Text>
+                                    <View style={styles.documentModalHeaderSpacer} />
                                 </View>
+                                <Text style={[styles.documentModalSubtitle, themeStyles.textSecondary]}>
+                                    Select the date printed on your ID.
+                                </Text>
 
                                 <View style={styles.manualCalendarContainer}>
                                     <Calendar
@@ -1921,7 +2037,7 @@ export default function SignupScreen() {
                                         markedDates={manualExpirationMarkedDates}
                                         enableSwipeMonths
                                         theme={{
-                                            calendarBackground: colors.background,
+                                            calendarBackground: isDark ? '#1E2530' : '#FFFFFF',
                                             textSectionTitleColor: colors.textSecondary,
                                             dayTextColor: colors.text,
                                             monthTextColor: colors.text,
@@ -2105,9 +2221,19 @@ export default function SignupScreen() {
     return (
         <>
             <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={[styles.flex1, themeStyles.container]}>
-                <ScrollView contentContainerStyle={styles.scrollContent}>
-                    <View style={styles.contentContainer}>
-                        {step === 'details' && renderDetailsStep()}
+                <ScrollView contentContainerStyle={isWebDesktop ? styles.webScrollContent : styles.scrollContent}>
+                    <View style={isWebDesktop ? styles.webAuthContainer : styles.contentContainer}>
+                        {isWebDesktop ? (
+                            <View style={styles.webLeftPanel}>
+                                <AuthMusicHero
+                                    title={`Join the local\nmusic scene.`}
+                                    subtitle="Create your trusted profile, discover artists, and start connecting with the MusikaLokal community."
+                                />
+                            </View>
+                        ) : null}
+                        <View style={isWebDesktop ? [styles.webRightPanel, { backgroundColor: isDark ? 'rgba(31, 41, 55, 0.85)' : 'rgba(255, 255, 255, 0.85)' }] : null}>
+                            {step === 'details' && renderDetailsStep()}
+                        </View>
                     </View>
                 </ScrollView>
             </KeyboardAvoidingView>
@@ -2126,16 +2252,59 @@ export default function SignupScreen() {
 const styles = StyleSheet.create({
     flex1: { flex: 1 },
     scrollContent: { flexGrow: 1 },
-    contentContainer: { flex: 1, padding: 24, justifyContent: 'center' },
-    stepContainer: { flex: 1, width: '100%', maxWidth: 500, alignSelf: 'center' },
-    stepTitle: { fontSize: 28, fontWeight: 'bold', marginBottom: 8, fontFamily: 'Poppins_700Bold' },
-    stepSubtitle: { fontSize: 16, marginBottom: 32, fontFamily: 'Poppins_400Regular' },
-    roleGrid: { gap: 16 },
-    roleCardBig: {
-        flexDirection: 'row', alignItems: 'center', padding: 20, borderRadius: 16, borderWidth: 1, gap: 16
+    webScrollContent: { flexGrow: 1, minHeight: '100%' },
+    contentContainer: { flex: 1, paddingHorizontal: 32, justifyContent: 'center', paddingVertical: 48 },
+    webAuthContainer: { flexGrow: 1, minHeight: '100%', flexDirection: 'row' },
+    webLeftPanel: { flex: 1, display: 'flex' },
+    webRightPanel: {
+        flex: 1,
+        maxWidth: 800,
+        justifyContent: 'flex-start',
+        alignItems: 'center',
+        paddingHorizontal: 64,
+        paddingVertical: 48,
     },
-    roleLabelBig: { fontSize: 18, fontWeight: '600', fontFamily: 'Poppins_600SemiBold' },
-    roleDescBig: { fontSize: 12, flex: 1, fontFamily: 'Poppins_400Regular' },
+    stepContainer: { flex: 1, width: '100%', maxWidth: 500, alignSelf: 'center' },
+    webSignupCard: {
+        flex: 0,
+        width: '100%',
+        maxWidth: 500,
+        borderWidth: 0,
+        borderRadius: 0,
+        padding: 0,
+        backgroundColor: 'transparent',
+        shadowColor: '#000000',
+        shadowOffset: { width: 0, height: 18 },
+        shadowOpacity: 0,
+        shadowRadius: 0,
+    },
+    webAuthText: { color: '#F8FAFC' },
+    webAuthSecondaryText: { color: '#94A3B8' },
+    webInputContainer: {
+        backgroundColor: 'rgba(15, 23, 42, 0.86)',
+        borderColor: 'rgba(148, 163, 184, 0.22)',
+    },
+    signupHeader: { marginBottom: 32 },
+    webSignupHeader: { marginBottom: 22 },
+    stepTitle: { fontSize: 36, lineHeight: 44, fontWeight: 'bold', marginBottom: 8, fontFamily: 'Poppins_700Bold' },
+    webStepTitle: { fontSize: 34, lineHeight: 40 },
+    stepSubtitle: { fontSize: 18, lineHeight: 27, fontFamily: 'Poppins_400Regular' },
+    webStepSubtitle: { fontSize: 16, lineHeight: 24 },
+    sectionHeadingRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 10 },
+    sectionEyebrow: { fontSize: 11, lineHeight: 14, letterSpacing: 0.8, textTransform: 'uppercase', fontFamily: 'Poppins_700Bold' },
+    sectionHint: { fontSize: 12, lineHeight: 16, fontFamily: 'Poppins_400Regular' },
+    roleSectionContainer: { marginBottom: 20, gap: 0 },
+    webRoleSectionContainer: { marginBottom: 14 },
+    roleGrid: { gap: 12 },
+    webRoleGrid: { flexDirection: 'row' },
+    roleCardBig: {
+        flexDirection: 'row', alignItems: 'center', padding: 14, borderRadius: 18, borderWidth: 1, gap: 12, minHeight: 84
+    },
+    webRoleCard: { flex: 1, padding: 12, borderRadius: 16, minHeight: 76 },
+    roleIconBubble: { width: 40, height: 40, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
+    roleCopy: { flex: 1, gap: 3 },
+    roleLabelBig: { fontSize: 15, lineHeight: 19, fontWeight: '600', fontFamily: 'Poppins_600SemiBold' },
+    roleDescBig: { fontSize: 11, lineHeight: 16, fontFamily: 'Poppins_400Regular' },
     nextButton: {
         height: 64,
         borderRadius: 20,
@@ -2149,87 +2318,109 @@ const styles = StyleSheet.create({
         shadowRadius: 10,
         elevation: 10,
     },
+    webCompactNextButton: { height: 58, borderRadius: 18, marginTop: 14 },
     nextButtonDisabled: { shadowOpacity: 0, shadowRadius: 0, elevation: 0 },
-    nextButtonText: { color: 'white', fontSize: 18, fontWeight: '600', fontFamily: 'Poppins_600SemiBold' },
-    inputContainer: {
-        flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, height: 56, borderRadius: 16, borderWidth: 1
+    nextButtonText: { color: 'white', fontSize: 16, fontWeight: '600', fontFamily: 'Poppins_600SemiBold' },
+    authFooterLinkContainer: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        minHeight: 28,
+        marginTop: 24,
     },
+    webAuthFooterLinkContainer: { minHeight: 24, marginTop: 16 },
+    authFooterText: { fontSize: 14, lineHeight: 22, textAlign: 'center', fontFamily: 'Poppins_400Regular', includeFontPadding: false },
+    authFooterLinkText: { fontSize: 14, lineHeight: 22, fontFamily: 'Poppins_600SemiBold', includeFontPadding: false },
+    inputContainer: {
+        flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, height: 64, borderRadius: 20, borderWidth: 1
+    },
+    webCompactInputContainer: { height: 58, borderRadius: 18 },
     input: {
         flex: 1,
-        marginLeft: 12,
+        marginLeft: 16,
         height: '100%',
         fontFamily: 'Poppins_400Regular',
         includeFontPadding: false,
         textAlignVertical: 'center',
         paddingVertical: 0,
+        fontSize: 16,
     },
-    formGap: { gap: 16 },
+    formSection: { gap: 0, marginTop: 0, marginBottom: 20 },
+    webFormSection: { marginBottom: 14 },
+    formGap: { gap: 14 },
     backLink: { flexDirection: 'row', alignItems: 'center', marginBottom: 24, gap: 4 },
-    documentSectionContainer: { gap: 8, marginTop: 4 },
+    documentSectionContainer: { gap: 8, marginTop: 2 },
     documentSectionTitle: { fontSize: 14, fontFamily: 'Poppins_600SemiBold' },
     documentSectionSubtitle: { fontSize: 12, lineHeight: 18, fontFamily: 'Poppins_400Regular' },
     documentSelectButton: {
         flexDirection: 'row',
         alignItems: 'center',
-        minHeight: 62,
-        borderRadius: 16,
+        minHeight: 64,
+        borderRadius: 20,
         borderWidth: 1,
-        paddingHorizontal: 16,
-        paddingVertical: 9,
+        paddingHorizontal: 20,
+        paddingVertical: 10,
         gap: 12,
     },
+    webCompactDocumentSelectButton: { minHeight: 58, borderRadius: 18, paddingVertical: 8 },
     documentSelectCopy: { flex: 1, gap: 2 },
     documentSelectValue: { fontSize: 14, lineHeight: 18, fontFamily: 'Poppins_600SemiBold' },
     documentSelectionMeta: { fontSize: 11, lineHeight: 14, fontFamily: 'Poppins_700Bold', textTransform: 'uppercase' },
     documentModalOverlay: {
         flex: 1,
-        backgroundColor: 'rgba(0,0,0,0.5)',
+        backgroundColor: 'rgba(0,0,0,0.65)',
         justifyContent: 'flex-end',
     },
     documentModalBackdrop: { flex: 1 },
     documentModalSheet: {
-        maxHeight: '88%',
-        borderTopLeftRadius: 32,
-        borderTopRightRadius: 32,
-        borderWidth: 1,
-        borderBottomWidth: 0,
+        maxHeight: '90%',
+        borderTopLeftRadius: 28,
+        borderTopRightRadius: 28,
+        paddingHorizontal: 20,
+        paddingTop: 12,
+        borderWidth: 0,
         overflow: 'hidden',
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: -4 },
+        shadowOpacity: 0.2,
+        shadowRadius: 12,
+        elevation: 16,
     },
     documentModalHandle: {
-        width: 40,
-        height: 5,
-        borderRadius: 999,
+        width: 44,
+        height: 4,
+        borderRadius: 2,
         alignSelf: 'center',
-        marginTop: 10,
-        marginBottom: 10,
+        marginBottom: 16,
     },
     documentModalHeader: {
         flexDirection: 'row',
         alignItems: 'center',
-        paddingHorizontal: 20,
-        paddingBottom: 14,
-        borderBottomWidth: 1,
+        justifyContent: 'space-between',
+        marginBottom: 10,
+        borderBottomWidth: 0,
     },
     documentModalHeaderCopy: { flex: 1, gap: 4, paddingRight: 16 },
-    documentModalTitle: { fontSize: 18, fontFamily: 'Poppins_600SemiBold' },
-    documentModalSubtitle: { fontSize: 12, lineHeight: 18, fontFamily: 'Poppins_400Regular' },
-    documentModalCloseButton: { width: 38, height: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center', borderWidth: 1 },
+    documentModalHeaderSpacer: { width: 38, height: 38 },
+    documentModalTitle: { flex: 1, fontSize: 18, textAlign: 'center', fontFamily: 'Poppins_700Bold' },
+    documentModalSubtitle: { fontSize: 13, lineHeight: 19, marginBottom: 16, textAlign: 'center', fontFamily: 'Poppins_400Regular' },
+    documentModalCloseButton: { width: 38, height: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center', borderWidth: 0 },
     documentModalBody: { flexGrow: 0 },
-    documentModalList: { gap: 8, paddingHorizontal: 20, paddingTop: 16, paddingBottom: 24 },
+    documentModalList: { gap: 8, paddingBottom: 24 },
     documentModalOption: {
         flexDirection: 'row',
         alignItems: 'center',
-        minHeight: 60,
+        minHeight: 58,
         borderRadius: 14,
-        borderWidth: 1,
-        paddingHorizontal: 12,
+        borderWidth: 1.5,
+        paddingHorizontal: 14,
         paddingVertical: 9,
-        gap: 10,
+        gap: 12,
     },
-    documentModalOptionIcon: { width: 34, height: 34, borderRadius: 11, alignItems: 'center', justifyContent: 'center' },
+    documentModalOptionIcon: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
     documentModalOptionCopy: { flex: 1, gap: 2 },
-    documentModalOptionTitle: { fontSize: 14, lineHeight: 18, fontFamily: 'Poppins_600SemiBold' },
-    documentModalOptionMeta: { fontSize: 11, lineHeight: 14, fontFamily: 'Poppins_700Bold', textTransform: 'uppercase' },
+    documentModalOptionTitle: { fontSize: 15, lineHeight: 20, fontFamily: 'Poppins_600SemiBold' },
+    documentModalOptionMeta: { fontSize: 11, lineHeight: 15, fontFamily: 'Poppins_700Bold', textTransform: 'uppercase' },
     documentModalOptionCheck: { width: 24, height: 24, alignItems: 'center', justifyContent: 'center' },
     manualFlowContainer: { paddingHorizontal: 20, paddingBottom: 28, gap: 16 },
     manualReviewIntroCard: {

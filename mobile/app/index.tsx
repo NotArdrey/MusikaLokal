@@ -31,14 +31,19 @@ const createEmailConfirmationRedirectUrl = () => {
 
 export default function LoginScreen() {
   const { colors, isDark } = useTheme();
-  const { session, loading: authLoading, setGuestMode } = useAuth();
+  const { session, loading: authLoading, roleResolved, userRole } = useAuth();
   const { verified, accountCreated, email: createdEmail, verification_error, verificationPendingReview, diditPendingReview, diditVerified } = useLocalSearchParams();
+
+  const resolvePostLoginRoute = () => '/feed';
 
   useEffect(() => {
     if (!authLoading && session) {
-      router.replace('/feed' as any);
+      if (!roleResolved) return;
+
+      const route = resolvePostLoginRoute();
+      router.replace(route as any);
     }
-  }, [authLoading, session]);
+  }, [authLoading, roleResolved, session, userRole]);
 
   // ... (existing initializeAuth is fine)
 
@@ -399,7 +404,8 @@ export default function LoginScreen() {
             router.replace('/identity_verification' as any);
             return;
           } else {
-            router.replace('/feed' as any);
+            const route = resolvePostLoginRoute();
+            router.replace(route as any);
           }
         }
       }
@@ -509,12 +515,6 @@ export default function LoginScreen() {
   const handleVerificationSuccess = () => {
     setShowVerification(false);
     // Silent
-  };
-
-  const handleContinueAsGuest = async () => {
-    await supabase.auth.signOut({ scope: 'local' });
-    await setGuestMode(true);
-    router.replace('/home' as any);
   };
 
   // Derived styles based on theme
@@ -628,8 +628,8 @@ export default function LoginScreen() {
             <TouchableOpacity
               onPress={handleLogin}
               disabled={loading}
-              activeOpacity={1}
-              style={[styles.loginButton, themeStyles.primaryButton, styles.shadow]}
+              activeOpacity={loading ? 1 : 0.78}
+              style={[styles.loginButton, themeStyles.primaryButton, styles.shadow, { opacity: loading ? 0.6 : 1 }]}
             >
               {loading ? (
                 <ActivityIndicator color="white" />
@@ -638,14 +638,6 @@ export default function LoginScreen() {
                   Sign In
                 </Text>
               )}
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              onPress={handleContinueAsGuest}
-              activeOpacity={1}
-              style={[styles.guestButton, { borderColor: colors.border }]}
-            >
-              <Text style={[styles.guestButtonText, { color: colors.text }]}>Continue as Guest</Text>
             </TouchableOpacity>
 
             {loginMessage && (
@@ -660,7 +652,7 @@ export default function LoginScreen() {
               <TouchableOpacity
                 onPress={handleResendConfirmationEmail}
                 disabled={resendingConfirmation || resendCooldownSeconds > 0}
-                activeOpacity={1}
+                activeOpacity={resendingConfirmation || resendCooldownSeconds > 0 ? 1 : 0.78}
                 style={[
                   styles.resendConfirmationButton,
                   {
@@ -685,10 +677,12 @@ export default function LoginScreen() {
               <Text style={[styles.signupLinkText, themeStyles.textSecondary]}>
                 Don&apos;t have an account?{' '}
               </Text>
-              <TouchableOpacity activeOpacity={1} onPress={() => router.push('/signup' as any)}>
-                <Text style={[styles.signupLinkHighlight, themeStyles.primaryText]}>
-                  Create Account
-                </Text>
+              <TouchableOpacity
+                activeOpacity={0.65}
+                onPress={() => router.push('/signup' as any)}
+                style={styles.signupLinkPressable}
+              >
+                <Text style={[styles.signupLinkHighlight, themeStyles.primaryText]}>Register here</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -805,17 +799,6 @@ const styles = StyleSheet.create({
     color: 'white',
     fontSize: 16,
   },
-  guestButton: {
-    height: 52,
-    borderRadius: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-  },
-  guestButtonText: {
-    fontFamily: 'Poppins_500Medium',
-    fontSize: 15,
-  },
   shadow: {
     shadowColor: "#4F46E5", // shadow-primary
     shadowOffset: {
@@ -828,14 +811,23 @@ const styles = StyleSheet.create({
   },
   signupLinkContainer: {
     flexDirection: 'row',
+    alignItems: 'center',
     justifyContent: 'center',
+    flexWrap: 'wrap',
     marginTop: 24, // mt-6
   },
   signupLinkText: {
     fontFamily: 'Poppins_400Regular',
+    fontSize: 14,
+  },
+  signupLinkPressable: {
+    paddingVertical: 4,
+    paddingHorizontal: 2,
   },
   signupLinkHighlight: {
     fontFamily: 'Poppins_600SemiBold',
+    fontSize: 14,
+    textAlign: 'center',
   },
   errorText: {
     color: '#EF4444',

@@ -20,6 +20,7 @@ import Header from "../src/components/header";
 import SmoothTabTransition from "../src/components/SmoothTabTransition";
 import { useAuth } from "../src/context/AuthContext";
 import { useTheme } from "../src/context/ThemeContext";
+import { formatDashedNumericDate } from "../src/utils/friendlyDateTime";
 
 const moderateScale = (size: number, factor = 0.3) => {
   const w = Math.min(Dimensions.get("window").width, 600);
@@ -132,7 +133,7 @@ export default function OrdersScreen() {
         </View>
       </View>
 
-      <Text style={[styles.orderMeta, { color: colors.textSecondary }]}>{new Date(item.created_at).toLocaleDateString()}</Text>
+      <Text style={[styles.orderMeta, { color: colors.textSecondary }]}>{formatDashedNumericDate(item.created_at)}</Text>
 
       {isSelling && item.buyer_name && (
         <Text style={[styles.orderMeta, { color: colors.textSecondary }]}>Buyer: {item.buyer_name}</Text>

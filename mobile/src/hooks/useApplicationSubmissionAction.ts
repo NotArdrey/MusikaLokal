@@ -1,6 +1,7 @@
 import { useCallback, useRef } from "react";
 import { supabase } from "../../lib/supabase";
 import { getGigApplicationDeadlineInfo } from "../utils/gigApplication";
+import { submitListingRequest } from "../utils/listingRequests";
 import { buildNotificationRouteMeta } from "../utils/notificationNavigation";
 
 interface AlertConfig {
@@ -32,7 +33,10 @@ interface UseApplicationSubmissionActionParams {
     action: () => void,
     title: string,
     message: string,
-    options?: { requireTerms?: boolean },
+    options?: {
+      requireTerms?: boolean;
+      summaryItems?: { label: string; value: string | number | null | undefined; icon?: any }[];
+    },
   ) => void;
   setIsSubmittingApplication: (value: boolean) => void;
   setHasExistingApplication: (value: boolean) => void;
@@ -74,6 +78,13 @@ export const useApplicationSubmissionAction = ({
   closeSheet,
 }: UseApplicationSubmissionActionParams) => {
   const submissionInFlightRef = useRef(false);
+
+  const formatSlotLabel = (slotType: "solo" | "duo" | "band" | null) => {
+    if (slotType === "solo") return "Solo";
+    if (slotType === "duo") return "Duo";
+    if (slotType === "band") return "Group";
+    return "Not selected";
+  };
 
   const invokeListingsCrudAction = useCallback(
     async (body: Record<string, unknown>) => {
@@ -173,6 +184,16 @@ export const useApplicationSubmissionAction = ({
 
 
       if (isGroupListing) {
+        if (!userId || !listingId) {
+          setAlertConfig({
+            type: "error",
+            title: "Application Failed",
+            message: "Please sign in and try again.",
+          });
+          setAlertVisible(true);
+          return;
+        }
+
         if (!group?.owner_id) {
           setAlertConfig({
             type: "error",
@@ -184,45 +205,74 @@ export const useApplicationSubmissionAction = ({
         }
 
 
+        const submittedAt = new Date().toISOString();
+        const { data: applicantProfile } = await supabase
+          .from("profiles")
+          .select("full_name")
+          .eq("id", userId)
+          .maybeSingle();
+        const applicantName =
+          typeof applicantProfile?.full_name === "string" &&
+          applicantProfile.full_name.trim().length > 0
+            ? applicantProfile.full_name.trim()
+            : "Musician";
         const applicationMeta = {
+          request_kind: "application",
           application_scope: "group_member",
           group_listing_id: listingId,
           group_listing_name: group?.name || "Group",
           target_group_type: group?.group_type || null,
           applicant_id: userId,
           selected_group_id: selectedGroupId || null,
+          listing_type: "Group",
+          listing_id: listingId,
           pitch_message: pitchMessage,
           video_url: videoUrl || null,
           cv_url: uploadedCvUrl,
-          submitted_at: new Date().toISOString(),
+          submitted_at: submittedAt,
           status: "pending",
-        };
-        const ownerApplicationMeta = listingId
-          ? buildNotificationRouteMeta("/manage_group", { id: listingId }, applicationMeta)
-          : applicationMeta;
-        const selfApplicationMeta = listingId
-          ? buildNotificationRouteMeta("/group_details", { id: listingId }, applicationMeta)
-          : applicationMeta;
-
-        const { error: ownerNotificationError } = await invokeListingsCrudAction(
-          {
-            action: "create_notification",
-            targetUserId: group.owner_id,
-            type: "info",
-            title: "New Group Application",
-            message: `You have a new application for "${group.name}".`,
-            meta: ownerApplicationMeta,
+          request_details: {
+            pitch_message: pitchMessage,
+            application_context: pitchMessage,
+            context_label: "Application Context",
+            request_kind: "application",
+            cv_url: uploadedCvUrl,
+            video_url: videoUrl || null,
           },
-        );
+        };
+        const selfApplicationMeta = listingId
+          ? buildNotificationRouteMeta("/bookings", { tab: "Pending" }, applicationMeta)
+          : applicationMeta;
 
-
-        if (ownerNotificationError) {
-          console.error("Failed to notify group owner:", ownerNotificationError);
+        try {
+          await submitListingRequest({
+            currentUserId: userId,
+            receiverUserId: group.owner_id,
+            message: pitchMessage,
+            senderEntityType: "musician",
+            senderEntityName: applicantName,
+            senderEntityId: userId,
+            receiverEntityType: "group",
+            receiverEntityName: group?.name || "Group",
+            receiverEntityId: listingId,
+            groupId: listingId,
+            studioId: null,
+            productionTeamId: null,
+            notificationTitle: "New Group Application",
+            notificationMessage: `You have a new application for "${group.name}".`,
+            notificationImage: null,
+            attachmentUrl: uploadedCvUrl,
+            routePath: "/bookings",
+            routeParams: { tab: "Pending" },
+            extraMeta: applicationMeta,
+          });
+        } catch (requestError: any) {
+          console.error("Failed to create group application request:", requestError);
           setAlertConfig({
             type: "error",
             title: "Submission Failed",
             message:
-              ownerNotificationError.message ||
+              requestError?.message ||
               "Failed to send your application. Please try again.",
           });
           setAlertVisible(true);
@@ -365,6 +415,33 @@ export const useApplicationSubmissionAction = ({
         cv_url: uploadedCvUrl,
         status: "pending",
       };
+
+      if (selectedGroupId) {
+        const { data: existingGroupApplication, error: existingGroupApplicationError } =
+          await supabase
+            .from("gig_applications")
+            .select("id, status")
+            .eq("gig_id", listingId)
+            .eq("group_id", selectedGroupId)
+            .in("status", ["pending", "accepted", "approved"])
+            .order("created_at", { ascending: false })
+            .limit(1)
+            .maybeSingle();
+
+        if (existingGroupApplicationError) {
+          console.error("Error checking group application duplicate:", existingGroupApplicationError);
+        }
+
+        if (existingGroupApplication) {
+          setAlertConfig({
+            type: "error",
+            title: "Duplicate Application",
+            message: "This group has already applied to this gig.",
+          });
+          setAlertVisible(true);
+          return;
+        }
+      }
 
       let data: any = null;
       let error: any = null;
@@ -636,7 +713,13 @@ export const useApplicationSubmissionAction = ({
         },
         "Submit Application?",
         "Are you sure you want to submit this group application? This action cannot be undone.",
-        { requireTerms: true },
+        {
+          summaryItems: [
+            { label: "Group", value: group?.name || "Group", icon: "people-outline" },
+            { label: "Applicant", value: "Solo musician", icon: "person-outline" },
+            { label: "Attachments", value: `${cvFile || cvUrl ? "CV" : "No CV"} + ${videoUrl ? "Video" : "No video"}`, icon: "document-text-outline" },
+          ],
+        },
       );
       return;
     }
@@ -666,6 +749,9 @@ export const useApplicationSubmissionAction = ({
     const musicianTypeRequired = group.requirements?.musician_type || "both";
     const isProducerGigFlow = group.type === "Gig" && userRole === "producer";
     const isGroupApplication = !!selectedGroupId;
+    const selectedGroup = selectedGroupId
+      ? userGroups.find((g) => g.id === selectedGroupId)
+      : null;
     const selectedProductionRoster = selectedProductionRosterId
       ? productionRoster.find((entry) => entry.id === selectedProductionRosterId)
       : null;
@@ -863,7 +949,20 @@ export const useApplicationSubmissionAction = ({
       },
       "Submit Application?",
       "Are you sure you want to submit this application? This action cannot be undone.",
-      { requireTerms: true },
+      {
+        summaryItems: [
+          { label: "Gig", value: group?.name || "Gig", icon: "musical-notes-outline" },
+          {
+            label: "Apply as",
+            value: isProducerGigFlow
+              ? selectedProductionRoster?.display_name || "Production roster"
+              : selectedGroup?.name || "Solo musician",
+            icon: isGroupApplication || isProducerGigFlow ? "people-outline" : "person-outline",
+          },
+          { label: "Slot", value: formatSlotLabel(selectedSlotType), icon: "albums-outline" },
+          { label: "Attachments", value: `${cvFile || cvUrl ? "CV" : "No CV"} + ${videoUrl ? "Video" : "No video"}`, icon: "document-text-outline" },
+        ],
+      },
     );
   }, [
     cvFile,

@@ -387,6 +387,7 @@ export default function CreatePlaylistScreen() {
     return !hasAnyDraftValue || track.title.trim().length > 0;
   });
   const isSaveReady = title.trim().length > 0 && hasValidTrackDrafts;
+  const isSaveDisabled = saving || authLoading || !isSaveReady;
 
   if (loading) {
     return (
@@ -544,10 +545,10 @@ export default function CreatePlaylistScreen() {
           </View>
         )}
 
-        <TouchableOpacity activeOpacity={1}
-          style={[styles.saveBtn, { backgroundColor: isSaveReady ? colors.primary : colors.border, opacity: saving || authLoading ? 0.6 : 1 }]}
+        <TouchableOpacity activeOpacity={isSaveDisabled ? 1 : 0.78}
+          style={[styles.saveBtn, { backgroundColor: isSaveReady ? colors.primary : colors.border, opacity: isSaveDisabled ? 0.6 : 1 }]}
           onPress={handleSave}
-          disabled={saving || authLoading || !isSaveReady}
+          disabled={isSaveDisabled}
         >
           {saving ? (
             <ActivityIndicator color="#fff" />

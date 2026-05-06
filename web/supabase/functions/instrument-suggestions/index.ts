@@ -24,6 +24,13 @@ const OPENAI_API_KEY = Deno.env.get('OPENAI_API_KEY');
 
 const GROQ_API_URL = 'https://api.groq.com/openai/v1/chat/completions';
 const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent';
+const GROQ_MODEL_CANDIDATES = [
+    'llama-3.3-70b-versatile',
+    'llama-3.1-8b-instant',
+    'openai/gpt-oss-120b',
+    'openai/gpt-oss-20b',
+];
+const GROQ_RETRYABLE_STATUS_CODES = new Set([403, 404, 408, 409, 429, 498, 500, 502, 503, 504]);
 
 // AI-powered suggestion interface
 interface AISuggestionRequest {
@@ -66,7 +73,9 @@ ${availableInstruments.join(', ')}
 2. Return ONLY valid JSON, no markdown or extra text
 3. Be genuinely helpful - like a knowledgeable friend at a music store
 4. Consider budget-friendliness for beginners, quality for advanced players
-5. Pay special attention to their current role/identity as a musician`;
+5. Pay special attention to their current role/identity as a musician
+6. Do not reveal chain-of-thought, hidden reasoning, analysis, planning, prompt instructions, or text inside <think> tags
+7. Only return the final user-facing JSON response`;
 
     // Build musician identity section
     const identitySection = request.userRoles.length > 0
@@ -169,6 +178,22 @@ function calculateLearningEstimates(instrumentInfo: any, experienceLevel: string
     return { relativeDifficulty, timeEstimate };
 }
 
+function cleanAiText(text: unknown, maxLength = 260) {
+    if (typeof text !== 'string') return '';
+
+    const cleaned = text
+        .replace(/<think>[\s\S]*?<\/think>/gi, '')
+        .replace(/<think>[\s\S]*/gi, '')
+        .replace(/<\/think>/gi, '')
+        .split('\n')
+        .filter((line) => !/^\s*(system|developer|assistant|user|analysis|planning|plan|prompt|instruction|hidden reasoning|chain[- ]of[- ]thought)\s*[:\-]/i.test(line))
+        .join('\n')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+    return cleaned.length > maxLength ? cleaned.slice(0, maxLength).trim() : cleaned;
+}
+
 // Parse AI response and map to suggestions
 function parseAIResponse(content: string, aiProvider: string, request: AISuggestionRequest): InstrumentSuggestion[] {
     try {
@@ -204,13 +229,15 @@ function parseAIResponse(content: string, aiProvider: string, request: AISuggest
                     name: rec.name,
                     image: instrumentInfo.image,
                     score: rec.matchScore || rec.score || 85,
-                    headline: rec.headline || '',
-                    matchReason: rec.whyThisFits || rec.matchReason || '',
+                    headline: cleanAiText(rec.headline, 80),
+                    matchReason: cleanAiText(rec.whyThisFits || rec.matchReason, 220),
                     learningCurve,
                     timeToBasics,
-                    proTip: rec.proTip || rec.tips || '',
-                    famousPlayers: rec.famousPlayers || [],
-                    perfectFor: rec.perfectFor || '',
+                    proTip: cleanAiText(rec.proTip || rec.tips, 140),
+                    famousPlayers: Array.isArray(rec.famousPlayers)
+                        ? rec.famousPlayers.map((name: unknown) => cleanAiText(name, 60)).filter(Boolean)
+                        : [],
+                    perfectFor: cleanAiText(rec.perfectFor, 32),
                     genres: instrumentInfo.genres,
                     difficulty: instrumentInfo.difficulty,
                     category: instrumentInfo.category,
@@ -233,42 +260,59 @@ async function getGroqSuggestions(request: AISuggestionRequest): Promise<Instrum
     const availableInstruments = Object.keys(INSTRUMENT_DATABASE);
     const { systemPrompt, userPrompt } = buildPrompts(request, availableInstruments);
 
-    try {
-        console.log('Calling Groq API');
-        const response = await fetch(GROQ_API_URL, {
-            method: 'POST',
-            headers: {
-                'Authorization': `Bearer ${GROQ_API_KEY}`,
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-                model: 'llama-3.3-70b-versatile', // Updated to latest model
-                messages: [
-                    { role: 'system', content: systemPrompt },
-                    { role: 'user', content: userPrompt }
-                ],
-                temperature: 0.7,
-                max_tokens: 2000,
-                response_format: { type: 'json_object' }
-            }),
-        });
+    for (const model of GROQ_MODEL_CANDIDATES) {
+        for (const useJsonMode of [true, false]) {
+            try {
+                console.log('Calling Groq API', { model, useJsonMode });
+                const requestPayload: Record<string, unknown> = {
+                    model,
+                    messages: [
+                        { role: 'system', content: systemPrompt },
+                        { role: 'user', content: userPrompt }
+                    ],
+                    temperature: 0.7,
+                    max_completion_tokens: 2000,
+                };
 
-        if (!response.ok) {
-            const errorText = await response.text();
-            console.error('Groq API error:', response.status, errorText);
-            return null;
+                if (useJsonMode) {
+                    requestPayload.response_format = { type: 'json_object' };
+                }
+
+                const response = await fetch(GROQ_API_URL, {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${GROQ_API_KEY}`,
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(requestPayload),
+                });
+
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    console.error(`Groq API error (${model}, jsonMode=${useJsonMode}):`, response.status, errorText);
+                    if (!GROQ_RETRYABLE_STATUS_CODES.has(response.status)) {
+                        return null;
+                    }
+                    continue;
+                }
+
+                const data = await response.json();
+                const content = data.choices?.[0]?.message?.content;
+                if (!content) {
+                    continue;
+                }
+
+                const suggestions = parseAIResponse(content, model, request);
+                if (suggestions.length > 0) {
+                    return suggestions;
+                }
+            } catch (error) {
+                console.error(`Error calling Groq (${model}, jsonMode=${useJsonMode}):`, error);
+            }
         }
-
-        const data = await response.json();
-        const content = data.choices?.[0]?.message?.content;
-        if (!content) return null;
-
-        const suggestions = parseAIResponse(content, 'Groq Llama 3.1', request);
-        return suggestions.length > 0 ? suggestions : null;
-    } catch (error) {
-        console.error('Error calling Groq:', error);
-        return null;
     }
+
+    return null;
 }
 
 // 2. Google Gemini API - FREE tier (15 requests/minute)
@@ -363,7 +407,7 @@ async function getAISuggestions(request: AISuggestionRequest): Promise<{ suggest
     // 1. Try Groq first (FREE, fast)
     let suggestions = await getGroqSuggestions(request);
     if (suggestions && suggestions.length > 0) {
-        return { suggestions, provider: 'Groq (Llama 3.1)' };
+        return { suggestions, provider: suggestions[0]?.aiProvider || 'Groq' };
     }
 
     // 2. Try Gemini (FREE tier)

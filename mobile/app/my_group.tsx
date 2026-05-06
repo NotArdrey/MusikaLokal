@@ -6,13 +6,21 @@ import { supabase } from '../lib/supabase';
 import CachedImage from '../src/components/CachedImage';
 import CustomAlert, { AlertType } from '../src/components/CustomAlert';
 import Header from '../src/components/header';
-import Modal from '../src/components/modal';
+import InlineErrorBanner from '../src/components/InlineErrorBanner';
+import Modal, { normalizeConfirmationInput } from '../src/components/modal';
 import MusicianWorkspaceTabs from '../src/components/MusicianWorkspaceTabs';
 import Navbar from '../src/components/navbar';
 import Skeleton from '../src/components/Skeleton';
 import { useBottomBarClearance } from '../src/hooks/useBottomBarClearance';
 import { useAuth, useRequireAuth } from '../src/context/AuthContext';
 import { useTheme } from '../src/context/ThemeContext';
+import { getActionErrorMessage, getResultErrorMessage, logActionError } from '../src/utils/actionError';
+import { invalidateListingCaches } from '../src/utils/listingCacheInvalidation';
+
+const isMissingRelationError = (error: any, relationName: string) => {
+    const message = String(error?.message || '').toLowerCase();
+    return error?.code === '42P01' && message.includes(relationName.toLowerCase());
+};
 
 export default function MyGroupScreen() {
     const { colors, isDark } = useTheme();
@@ -30,6 +38,7 @@ export default function MyGroupScreen() {
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
     const [deleting, setDeleting] = useState(false);
+    const [loadError, setLoadError] = useState<string | null>(null);
     const [alertVisible, setAlertVisible] = useState(false);
     const [alertConfig, setAlertConfig] = useState<{
         type: AlertType;
@@ -42,23 +51,14 @@ export default function MyGroupScreen() {
         message: '',
     });
 
-    const showAlert = (type: AlertType, title: string, message: string, buttons?: any[]) => {
+    const showAlert = useCallback((type: AlertType, title: string, message: string, buttons?: any[]) => {
         setAlertConfig({ type, title, message, buttons });
         setAlertVisible(true);
-    };
+    }, []);
 
-    const isMissingRelationError = (error: any, relationName: string) => {
-        const message = String(error?.message || '').toLowerCase();
-        return error?.code === '42P01' && message.includes(relationName.toLowerCase());
-    };
-
-    const isMissingFunctionError = (error: any, functionName: string) => {
-        const message = String(error?.message || '').toLowerCase();
-        return error?.code === '42883' && message.includes(functionName.toLowerCase());
-    };
-
-    const fetchGroups = async () => {
+    const fetchGroups = useCallback(async (options?: { showAlertOnError?: boolean }) => {
         if (!userId) return;
+        setLoadError(null);
         try {
             let groupRows: any[] = [];
             const membershipRoleByGroupId = new Map<string, string>();
@@ -126,18 +126,35 @@ export default function MyGroupScreen() {
             };
 
             if (isMusicianView) {
+                const groupRowsById = new Map<string, any>();
+                const addGroupRows = (rows: any[]) => {
+                    rows.forEach((row: any) => {
+                        if (row?.id) {
+                            groupRowsById.set(row.id, row);
+                        }
+                    });
+                };
+
+                const ownedRows = await fetchOwnedGroups();
+                addGroupRows(ownedRows);
+                ownedRows.forEach((row: any) => {
+                    if (row?.id) {
+                        membershipRoleByGroupId.set(row.id, 'owner');
+                    }
+                });
+
                 const { data: memberRows, error: memberError } = await supabase
                     .from('group_members')
                     .select('group_id, role')
                     .eq('user_id', userId);
 
                 if (memberError) {
-                    groupRows = await fetchOwnedGroups();
-                    groupRows.forEach((row: any) => {
-                        if (row?.id) {
-                            membershipRoleByGroupId.set(row.id, row.owner_id === userId ? 'owner' : 'member');
-                        }
-                    });
+                    const message = getActionErrorMessage(memberError, 'Joined groups could not be loaded.');
+                    logActionError('MyGroup', 'fetch group_members', memberError, { userId });
+                    setLoadError(`Owned groups loaded, but joined groups could not be loaded: ${message}`);
+                    if (options?.showAlertOnError) {
+                        showAlert('error', 'Could Not Load Joined Groups', message);
+                    }
                 } else {
                     const joinedGroupIds = Array.from(
                         new Set(
@@ -155,8 +172,14 @@ export default function MyGroupScreen() {
                         );
                     });
 
-                    groupRows = joinedGroupIds.length > 0 ? await fetchGroupsByIds(joinedGroupIds) : [];
+                    if (joinedGroupIds.length > 0) {
+                        addGroupRows(await fetchGroupsByIds(joinedGroupIds));
+                    }
                 }
+
+                groupRows = Array.from(groupRowsById.values()).sort((a: any, b: any) =>
+                    String(b?.created_at || '').localeCompare(String(a?.created_at || '')),
+                );
             } else {
                 groupRows = await fetchOwnedGroups();
             }
@@ -175,6 +198,9 @@ export default function MyGroupScreen() {
                     .order('created_at', { ascending: true });
 
                 if (mediaError) {
+                    const message = getActionErrorMessage(mediaError, 'Group images could not be loaded.');
+                    logActionError('MyGroup', 'fetch group_media', mediaError, { groupCount: groupIds.length });
+                    setLoadError((current) => current || `Groups loaded, but images could not be loaded: ${message}`);
                 }
 
                 for (const row of mediaRows || []) {
@@ -202,11 +228,17 @@ export default function MyGroupScreen() {
                 };
             }));
         } catch (e) {
+            const message = getActionErrorMessage(e, 'Failed to load groups.');
+            logActionError('MyGroup', 'fetchGroups', e, { userId, isMusicianView });
+            setLoadError(message);
+            if (options?.showAlertOnError) {
+                showAlert('error', 'Could Not Load Groups', message);
+            }
         } finally {
             setLoading(false);
             setRefreshing(false);
         }
-    };
+    }, [isMusicianView, showAlert, userId]);
 
     useFocusEffect(
         useCallback(() => {
@@ -219,7 +251,7 @@ export default function MyGroupScreen() {
                 }
             });
             const refreshInterval = setInterval(() => {
-                fetchGroups();
+                void fetchGroups();
             }, 30000);
 
             return () => {
@@ -227,12 +259,12 @@ export default function MyGroupScreen() {
                 focusTask.cancel();
                 clearInterval(refreshInterval);
             };
-        }, [isAuthenticated, userId, refreshKey, isMusicianView])
+        }, [fetchGroups, isAuthenticated, userId, refreshKey])
     );
 
     const onRefresh = () => {
         setRefreshing(true);
-        fetchGroups();
+        void fetchGroups({ showAlertOnError: true });
     };
 
     const closeDeleteModal = () => {
@@ -249,17 +281,9 @@ export default function MyGroupScreen() {
         setModalVisible(true);
     };
 
-    const normalizeForDeleteConfirmation = (value: string) =>
-        String(value || '')
-            .normalize('NFKC')
-            .replace(/[\u200B-\u200D\uFEFF]/g, '')
-            .trim()
-            .replace(/\s+/g, ' ')
-            .toLowerCase();
-
     const isDeleteConfirmed =
-        normalizeForDeleteConfirmation(deleteConfirmationText) ===
-        normalizeForDeleteConfirmation(selectedName);
+        normalizeConfirmationInput(deleteConfirmationText) ===
+        normalizeConfirmationInput(selectedName);
 
     const handleDelete = async () => {
         if (!selectedId || !userId || deleting) return;
@@ -274,22 +298,9 @@ export default function MyGroupScreen() {
                 p_reason: 'Deleted from My Group screen by owner',
             });
 
-            let result: any = data;
+            if (error) throw error;
 
-            if (error) {
-                if (isMissingFunctionError(error, 'delete_group_safely')) {
-                    const { error: fallbackDeleteError } = await supabase
-                        .from('groups')
-                        .delete()
-                        .eq('id', selectedId)
-                        .eq('owner_id', userId);
-
-                    if (fallbackDeleteError) throw fallbackDeleteError;
-                    result = { success: true };
-                } else {
-                    throw error;
-                }
-            }
+            const result: any = data;
 
             if (!result?.success) {
                 if (result?.code === 'ACTIVE_ACCEPTED_APPLICATIONS_EXIST') {
@@ -319,14 +330,17 @@ export default function MyGroupScreen() {
                     return;
                 }
 
-                throw new Error(result?.message || 'Delete failed');
+                throw new Error(getResultErrorMessage(result, 'Delete failed'));
             }
 
             setGroups(prev => prev.filter(g => g.id !== selectedId));
+            invalidateListingCaches(userId, ['bookings', 'details', 'home', 'search', 'notifications']);
             closeDeleteModal();
             showAlert('success', 'Group Deleted', 'Group deleted successfully.');
         } catch (e) {
-            showAlert('error', 'Error', 'Failed to delete group');
+            const message = getActionErrorMessage(e, 'Failed to delete group.');
+            logActionError('MyGroup', 'delete group', e, { groupId: selectedId, userId });
+            showAlert('error', 'Delete Failed', message);
         } finally {
             setDeleting(false);
         }
@@ -346,6 +360,14 @@ export default function MyGroupScreen() {
                         {isMusicianView && (
                             <MusicianWorkspaceTabs activeKey="group" />
                         )}
+
+                        <InlineErrorBanner
+                            message={loadError}
+                            onRetry={() => {
+                                if (groups.length === 0) setLoading(true);
+                                void fetchGroups({ showAlertOnError: true });
+                            }}
+                        />
 
                         {loading ? (
                         <View style={styles.skeletonList}>
@@ -469,7 +491,10 @@ export default function MyGroupScreen() {
                 inputPlaceholder="Type group name"
                 inputValue={deleteConfirmationText}
                 onInputChange={setDeleteConfirmationText}
+                requiredInputValue={selectedName}
                 confirmDisabled={!isDeleteConfirmed || deleting}
+                loading={deleting}
+                loadingMessage="Deleting group..."
             />
             <CustomAlert
                 visible={alertVisible}

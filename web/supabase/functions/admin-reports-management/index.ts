@@ -914,7 +914,7 @@ serve(async (req: Request) => {
           type: "info",
           title: "Booking Incident Resolved",
           message: `An admin resolved your booking incident as ${String(resolution).replace(/_/g, " ")}.`,
-          is_read: false,
+          read: false,
           meta: { incident_id, booking_id: incident.booking_id, resolution, event_type: "booking_incident_resolved_by_admin" },
         }).then(() => {});
       }

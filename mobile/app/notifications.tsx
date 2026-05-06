@@ -48,6 +48,167 @@ const IMAGE_OBJECT_FIELDS = [
     'mediaUrl',
 ];
 
+type NotificationEntityRefs = {
+    profileIds: string[];
+    groupIds: string[];
+    productionTeamIds: string[];
+    studioIds: string[];
+    gigIds: string[];
+};
+
+type NotificationImageLookup = {
+    profiles: Map<string, string[]>;
+    groups: Map<string, string[]>;
+    productionTeams: Map<string, string[]>;
+    studios: Map<string, string[]>;
+    gigs: Map<string, string[]>;
+};
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+    Boolean(value && typeof value === 'object' && !Array.isArray(value));
+
+const readStringId = (...values: unknown[]) => {
+    for (const value of values) {
+        const normalized = String(value ?? '').trim();
+        if (normalized) return normalized;
+    }
+
+    return null;
+};
+
+const normalizeEntityType = (value: unknown) =>
+    String(value ?? '').trim().toLowerCase().replace(/[\s-]+/g, '_');
+
+const addUniqueString = (target: string[], value: unknown, blockedValue?: string | null) => {
+    const normalized = readStringId(value);
+    if (!normalized || normalized === blockedValue || target.includes(normalized)) return;
+    target.push(normalized);
+};
+
+const collectNotificationEntityRefs = (
+    item: any,
+    currentUserId?: string | null,
+): NotificationEntityRefs => {
+    const meta = isRecord(item?.meta) ? item.meta : {};
+    const refs: NotificationEntityRefs = {
+        profileIds: [],
+        groupIds: [],
+        productionTeamIds: [],
+        studioIds: [],
+        gigIds: [],
+    };
+
+    const addProfile = (...values: unknown[]) =>
+        values.forEach((value) => addUniqueString(refs.profileIds, value, currentUserId || null));
+    const addGroup = (...values: unknown[]) =>
+        values.forEach((value) => addUniqueString(refs.groupIds, value));
+    const addProductionTeam = (...values: unknown[]) =>
+        values.forEach((value) => addUniqueString(refs.productionTeamIds, value));
+    const addStudio = (...values: unknown[]) =>
+        values.forEach((value) => addUniqueString(refs.studioIds, value));
+    const addGig = (...values: unknown[]) =>
+        values.forEach((value) => addUniqueString(refs.gigIds, value));
+
+    const addByEntityType = (entityType: unknown, entityId: unknown) => {
+        const normalizedType = normalizeEntityType(entityType);
+        if (!normalizedType) return;
+
+        if (normalizedType === 'musician' || normalizedType === 'profile' || normalizedType === 'user') {
+            addProfile(entityId);
+        } else if (normalizedType === 'group' || normalizedType === 'duo') {
+            addGroup(entityId);
+        } else if (normalizedType === 'production_team' || normalizedType === 'production') {
+            addProductionTeam(entityId);
+        } else if (normalizedType === 'studio') {
+            addStudio(entityId);
+        } else if (normalizedType === 'gig') {
+            addGig(entityId);
+        }
+    };
+
+    addByEntityType(meta.sender_entity_type, meta.sender_entity_id);
+    addByEntityType(meta.senderEntityType, meta.senderEntityId);
+    addByEntityType(meta.receiver_entity_type, meta.receiver_entity_id);
+    addByEntityType(meta.receiverEntityType, meta.receiverEntityId);
+    addByEntityType(meta.listing_type, meta.listing_id);
+    addByEntityType(meta.listingType, meta.listingId);
+
+    addProfile(
+        meta.sender_id,
+        meta.senderId,
+        meta.actor_id,
+        meta.actorId,
+        meta.follower_id,
+        meta.followerId,
+        meta.profile_id,
+        meta.profileId,
+        meta.member_id,
+        meta.memberId,
+        meta.musician_id,
+        meta.musicianId,
+        meta.from_user_id,
+        meta.fromUserId,
+    );
+
+    addGroup(item?.group_id, meta.group_id, meta.groupId);
+    addProductionTeam(
+        item?.production_team_id,
+        item?.team_id,
+        meta.production_team_id,
+        meta.productionTeamId,
+        meta.team_id,
+        meta.teamId,
+    );
+    addStudio(item?.studio_id, meta.studio_id, meta.studioId);
+    addGig(item?.gig_id, meta.gig_id, meta.gigId);
+
+    return refs;
+};
+
+const addLookupCandidate = (
+    target: Map<string, string[]>,
+    key: unknown,
+    rawImage: unknown,
+) => {
+    const normalizedKey = readStringId(key);
+    if (!normalizedKey) return;
+
+    const candidates = collectNotificationImageCandidates(rawImage, []);
+    if (candidates.length === 0) return;
+
+    const existing = target.get(normalizedKey) || [];
+    candidates.forEach((candidate) => {
+        if (!existing.includes(candidate)) {
+            existing.push(candidate);
+        }
+    });
+    target.set(normalizedKey, existing);
+};
+
+const buildHydratedImageCandidates = (
+    item: any,
+    lookup: NotificationImageLookup,
+    currentUserId?: string | null,
+) => {
+    const refs = collectNotificationEntityRefs(item, currentUserId);
+    const candidates: string[] = [];
+    const append = (source: Map<string, string[]>, ids: string[]) => {
+        ids.forEach((id) => {
+            (source.get(id) || []).forEach((image) => {
+                if (!candidates.includes(image)) candidates.push(image);
+            });
+        });
+    };
+
+    append(lookup.productionTeams, refs.productionTeamIds);
+    append(lookup.groups, refs.groupIds);
+    append(lookup.studios, refs.studioIds);
+    append(lookup.gigs, refs.gigIds);
+    append(lookup.profiles, refs.profileIds);
+
+    return candidates;
+};
+
 const getSupabaseBaseUrl = () => {
     const envBase = (process.env.EXPO_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || '').trim();
     return envBase.endsWith('/') ? envBase.slice(0, -1) : envBase;
@@ -148,6 +309,7 @@ export default function NotificationsScreen() {
     const queryClient = useQueryClient();
     const { contentBottomPadding } = useBottomBarClearance(24);
     const [notifications, setNotifications] = useState<any[]>([]);
+    const [notificationImageOverrides, setNotificationImageOverrides] = useState<Record<string, string[]>>({});
     const [refreshing, setRefreshing] = useState(false);
     const [processingTransferId, setProcessingTransferId] = useState<string | null>(null);
     const [alertVisible, setAlertVisible] = useState(false);
@@ -195,6 +357,147 @@ export default function NotificationsScreen() {
         setNotifications(queriedNotifications);
     }, [queriedNotifications]);
 
+    useEffect(() => {
+        let cancelled = false;
+
+        const hydrateNotificationImages = async () => {
+            const notificationRows = queriedNotifications.filter((item: any) => item?.id);
+            if (notificationRows.length === 0) {
+                setNotificationImageOverrides({});
+                return;
+            }
+
+            const profileIds = new Set<string>();
+            const groupIds = new Set<string>();
+            const productionTeamIds = new Set<string>();
+            const studioIds = new Set<string>();
+            const gigIds = new Set<string>();
+
+            notificationRows.forEach((item: any) => {
+                const refs = collectNotificationEntityRefs(item, userId);
+                refs.profileIds.forEach((id) => profileIds.add(id));
+                refs.groupIds.forEach((id) => groupIds.add(id));
+                refs.productionTeamIds.forEach((id) => productionTeamIds.add(id));
+                refs.studioIds.forEach((id) => studioIds.add(id));
+                refs.gigIds.forEach((id) => gigIds.add(id));
+            });
+
+            const lookup: NotificationImageLookup = {
+                profiles: new Map(),
+                groups: new Map(),
+                productionTeams: new Map(),
+                studios: new Map(),
+                gigs: new Map(),
+            };
+
+            const [
+                profileResult,
+                groupMediaResult,
+                productionTeamResult,
+                studioMediaResult,
+                gigMediaResult,
+            ] = await Promise.all([
+                profileIds.size > 0
+                    ? supabase
+                        .from('profiles')
+                        .select('id, avatar_url')
+                        .in('id', Array.from(profileIds))
+                    : Promise.resolve({ data: [], error: null } as any),
+                groupIds.size > 0
+                    ? supabase
+                        .from('group_media')
+                        .select('group_id, media_url, sort_order, created_at')
+                        .in('group_id', Array.from(groupIds))
+                        .eq('media_type', 'image')
+                        .order('sort_order', { ascending: true })
+                        .order('created_at', { ascending: true })
+                    : Promise.resolve({ data: [], error: null } as any),
+                productionTeamIds.size > 0
+                    ? supabase
+                        .from('production_teams')
+                        .select('id, logo_url')
+                        .in('id', Array.from(productionTeamIds))
+                    : Promise.resolve({ data: [], error: null } as any),
+                studioIds.size > 0
+                    ? supabase
+                        .from('studio_media')
+                        .select('studio_id, media_url, sort_order, created_at')
+                        .in('studio_id', Array.from(studioIds))
+                        .eq('media_type', 'image')
+                        .order('sort_order', { ascending: true })
+                        .order('created_at', { ascending: true })
+                    : Promise.resolve({ data: [], error: null } as any),
+                gigIds.size > 0
+                    ? supabase
+                        .from('gig_media')
+                        .select('gig_id, media_url, sort_order, created_at')
+                        .in('gig_id', Array.from(gigIds))
+                        .eq('media_type', 'image')
+                        .order('sort_order', { ascending: true })
+                        .order('created_at', { ascending: true })
+                    : Promise.resolve({ data: [], error: null } as any),
+            ]);
+
+            if (cancelled) return;
+
+            if (profileResult.error) {
+                console.warn('Failed to hydrate notification profile images:', profileResult.error);
+            } else {
+                (profileResult.data || []).forEach((row: any) =>
+                    addLookupCandidate(lookup.profiles, row?.id, row?.avatar_url),
+                );
+            }
+
+            if (groupMediaResult.error) {
+                console.warn('Failed to hydrate notification group images:', groupMediaResult.error);
+            } else {
+                (groupMediaResult.data || []).forEach((row: any) =>
+                    addLookupCandidate(lookup.groups, row?.group_id, row?.media_url),
+                );
+            }
+
+            if (productionTeamResult.error) {
+                console.warn('Failed to hydrate notification production team images:', productionTeamResult.error);
+            } else {
+                (productionTeamResult.data || []).forEach((row: any) =>
+                    addLookupCandidate(lookup.productionTeams, row?.id, row?.logo_url),
+                );
+            }
+
+            if (studioMediaResult.error) {
+                console.warn('Failed to hydrate notification studio images:', studioMediaResult.error);
+            } else {
+                (studioMediaResult.data || []).forEach((row: any) =>
+                    addLookupCandidate(lookup.studios, row?.studio_id, row?.media_url),
+                );
+            }
+
+            if (gigMediaResult.error) {
+                console.warn('Failed to hydrate notification gig images:', gigMediaResult.error);
+            } else {
+                (gigMediaResult.data || []).forEach((row: any) =>
+                    addLookupCandidate(lookup.gigs, row?.gig_id, row?.media_url),
+                );
+            }
+
+            const nextOverrides: Record<string, string[]> = {};
+            notificationRows.forEach((item: any) => {
+                const candidates = buildHydratedImageCandidates(item, lookup, userId);
+                if (candidates.length > 0) {
+                    nextOverrides[item.id] = candidates;
+                }
+            });
+
+            setNotificationImageOverrides(nextOverrides);
+        };
+
+        void hydrateNotificationImages();
+
+        return () => {
+            cancelled = true;
+        };
+    }, [queriedNotifications, userId]);
+
     const resolveNotificationImages = useCallback((item: any) => {
         const rawCandidates = [
             item?.image,
@@ -221,11 +524,12 @@ export default function NotificationsScreen() {
             item?.meta?.gig_images,
             item?.meta?.group_image,
             item?.meta?.group_images,
+            notificationImageOverrides[item?.id],
         ];
 
         const candidates = rawCandidates.flatMap((raw) => collectNotificationImageCandidates(raw, []));
         return [...candidates, DEFAULT_NOTIFICATION_IMAGE].filter((candidate, index, all) => all.indexOf(candidate) === index);
-    }, []);
+    }, [notificationImageOverrides]);
 
     const onRefresh = React.useCallback(async () => {
         setRefreshing(true);

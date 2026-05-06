@@ -24,15 +24,21 @@ import {
     hasValidCoordinates,
     openNavigationDirections,
 } from "../src/utils/navigation";
+import { formatDashedNumericDate } from "../src/utils/friendlyDateTime";
 
 import { useLocalSearchParams } from "expo-router";
+
+const GROUP_TABS = ["About", "Applications", "Review"];
 
 export default function GroupDetailsScreen() {
   const { colors, isDark } = useTheme();
   const { isSystemLocked, showLockAlert } = useAuth();
-  const { id } = useLocalSearchParams();
+  const { id, tab } = useLocalSearchParams<{ id?: string | string[]; tab?: string | string[] }>();
+  const requestedTab = Array.isArray(tab) ? tab[0] : tab;
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState("About");
+  const [activeTab, setActiveTab] = useState(
+    GROUP_TABS.includes(requestedTab || "") ? requestedTab || "About" : "About",
+  );
   const [modalVisible, setModalVisible] = useState(false);
   const [modalTitle, setModalTitle] = useState("");
   const [modalMessage, setModalMessage] = useState("");
@@ -50,6 +56,12 @@ export default function GroupDetailsScreen() {
   const [applications, setApplications] = useState<any[]>([]);
   const [reviews, setReviews] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (requestedTab && GROUP_TABS.includes(requestedTab) && requestedTab !== activeTab) {
+      setActiveTab(requestedTab);
+    }
+  }, [activeTab, requestedTab]);
   const [alertVisible, setAlertVisible] = useState(false);
   const [alertConfig, setAlertConfig] = useState<{
     type: AlertType;
@@ -435,7 +447,7 @@ export default function GroupDetailsScreen() {
     }
   };
 
-  const tabs = ["About", "Applications", "Review"];
+  const tabs = GROUP_TABS;
   const hasSyncedMembers = groupMembers.length > 0;
   const displayMembers = hasSyncedMembers ? groupMembers : group?.members || [];
   const displayMemberCount = hasSyncedMembers
@@ -937,7 +949,7 @@ export default function GroupDetailsScreen() {
                         <Text style={{ color: colors.textSecondary }}>
                           Applied on:{" "}
                           {app.created_at
-                            ? new Date(app.created_at).toLocaleDateString()
+                            ? formatDashedNumericDate(app.created_at)
                             : "N/A"}
                         </Text>
                       </View>
@@ -1011,7 +1023,7 @@ export default function GroupDetailsScreen() {
                             fontFamily: "Poppins_400Regular",
                           }}
                         >
-                          {new Date(review.created_at).toLocaleDateString()}
+                          {formatDashedNumericDate(review.created_at)}
                         </Text>
                       </View>
                       <View style={[styles.starsRow, { marginBottom: 8 }]}>

@@ -30,22 +30,6 @@ const buildWeeklyScheduleReason = (source: any): string =>
 const buildDateOverrideReason = (source: any): string =>
     `Custom schedule [session_type:${normalizeScheduleSessionType(source?.session_type ?? source?.sessionType)}]`
 
-function decodeJwtPayload(token: string): { sub?: string; email?: string } | null {
-    try {
-        const parts = token.replace('Bearer ', '').split('.')
-        if (parts.length !== 3) return null
-        let base64 = parts[1].replace(/-/g, '+').replace(/_/g, '/')
-        while (base64.length % 4) {
-            base64 += '='
-        }
-        const payload = JSON.parse(atob(base64))
-        return payload
-    } catch (e) {
-        console.error('JWT decode error:', e)
-        return null
-    }
-}
-
 serve(async (req: Request) => {
     if (req.method === 'OPTIONS') {
         return new Response('ok', { headers: corsHeaders })
@@ -60,16 +44,6 @@ serve(async (req: Request) => {
             })
         }
 
-        const jwtPayload = decodeJwtPayload(authHeader)
-        if (!jwtPayload || !jwtPayload.sub) {
-            return new Response(JSON.stringify({ error: 'Invalid token' }), {
-                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-                status: 401,
-            })
-        }
-
-        const authenticatedUserId = jwtPayload.sub
-
         const sbUrl = Deno.env.get('SUPABASE_URL');
         const sbKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 
@@ -83,6 +57,20 @@ serve(async (req: Request) => {
         }
 
         const supabaseClient = createClient(sbUrl, sbKey)
+        const token = authHeader.replace(/^Bearer\s+/i, '')
+        const {
+            data: { user: authUser },
+            error: authUserError,
+        } = await supabaseClient.auth.getUser(token)
+
+        if (authUserError || !authUser) {
+            return new Response(JSON.stringify({ error: 'Invalid token' }), {
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                status: 401,
+            })
+        }
+
+        const authenticatedUserId = authUser.id
 
         const body = await req.json()
         const { action, ...params } = body
@@ -343,10 +331,10 @@ serve(async (req: Request) => {
 
             if (type === 'studio') {
                 const validStudioColumns = [
-                    'name', 'address', 'hourly_rate', 'description', 'amenities',
-                    'images', 'latitude', 'longitude', 'rate', 'contract_url',
-                    'availability', 'instruments', 'type', 'types', 'rehearsal_rate',
-                    'recording_rate', 'open_dates', 'pax', 'business_permit_url'
+                    'name', 'address', 'hourly_rate', 'description',
+                    'latitude', 'longitude', 'rate', 'contract_url',
+                    'availability', 'rehearsal_rate',
+                    'recording_rate', 'pax', 'business_permit_url'
                 ];
                 const filteredPayload: any = {};
                 for (const key of validStudioColumns) {
@@ -365,26 +353,47 @@ serve(async (req: Request) => {
 
                 const { data: gigData, error: gigError } = await supabaseClient
                     .from('gigs')
-                    .select('reapplication_cooldown_days, requirements, slots_filled, total_slots_filled, status')
+                    .select('reapplication_cooldown_days, total_slots_filled, status')
                     .eq('id', gig_id)
                     .single();
 
                 if (gigError) throw gigError;
 
+                const { data: gigLegacyProjection, error: gigLegacyProjectionError } = await supabaseClient
+                    .from('gigs_legacy_projection')
+                    .select('requirements')
+                    .eq('id', gig_id)
+                    .single();
+
+                if (gigLegacyProjectionError) throw gigLegacyProjectionError;
+                const gigRequirements = gigLegacyProjection?.requirements || {};
+
                 if (gigData.status !== 'open') {
                     throw new Error('This gig is no longer accepting applications.');
                 }
 
-                const totalSlotsNeeded = gigData.requirements?.total_slots_needed || 999;
+                const totalSlotsNeeded = gigRequirements?.total_slots_needed || 999;
                 const totalSlotsFilled = gigData.total_slots_filled || 0;
 
                 if (totalSlotsFilled >= totalSlotsNeeded) {
                     throw new Error('All performer slots for this gig have been filled.');
                 }
 
-                if (slot_type && gigData.requirements?.slots?.[slot_type]) {
-                    const slotNeeded = gigData.requirements.slots[slot_type]?.needed || 0;
-                    const slotFilled = gigData.slots_filled?.[slot_type]?.accepted || 0;
+                if (slot_type && gigRequirements?.slots?.[slot_type]) {
+                    const slotNeeded = gigRequirements.slots[slot_type]?.needed || 0;
+                    let slotFilled = 0;
+
+                    if (slotNeeded > 0) {
+                        const { data: slotSummary, error: slotSummaryError } = await supabaseClient
+                            .from('gig_slot_fill_summary')
+                            .select('accepted_count')
+                            .eq('gig_id', gig_id)
+                            .eq('slot_type', slot_type)
+                            .maybeSingle();
+
+                        if (slotSummaryError) throw slotSummaryError;
+                        slotFilled = slotSummary?.accepted_count || 0;
+                    }
 
                     if (slotNeeded > 0 && slotFilled >= slotNeeded) {
                         throw new Error(`All ${slot_type} slots have been filled. Try applying for a different slot type.`);
@@ -454,7 +463,7 @@ serve(async (req: Request) => {
             if (type === 'gig') {
                 const validGigColumns = [
                     'name', 'location', 'budget', 'description', 'event_date',
-                    'requirements', 'images', 'documents', 'status', 'latitude',
+                    'status', 'latitude',
                     'longitude', 'contract_url', 'business_permit_url',
                     'reapplication_cooldown_days'
                 ];
@@ -614,10 +623,10 @@ serve(async (req: Request) => {
 
             if (type === 'studio') {
                 const validStudioColumns = [
-                    'name', 'address', 'hourly_rate', 'description', 'amenities',
-                    'images', 'latitude', 'longitude', 'rate', 'contract_url',
-                    'availability', 'instruments', 'type', 'types', 'rehearsal_rate',
-                    'recording_rate', 'open_dates', 'pax', 'business_permit_url'
+                    'name', 'address', 'hourly_rate', 'description',
+                    'latitude', 'longitude', 'rate', 'contract_url',
+                    'availability', 'rehearsal_rate',
+                    'recording_rate', 'pax', 'business_permit_url'
                 ];
                 const filteredPayload: any = {};
                 for (const key of validStudioColumns) {
@@ -632,6 +641,7 @@ serve(async (req: Request) => {
 
             if (type === 'studio' && updatePayload.availability) {
                 studioAvailability = updatePayload.availability;
+                delete updatePayload.availability;
             }
 
             if (type === 'studio' && updatePayload.calendar_availability) {
@@ -647,7 +657,7 @@ serve(async (req: Request) => {
             if (type === 'gig') {
                 const validGigColumns = [
                     'name', 'location', 'budget', 'description', 'event_date',
-                    'requirements', 'images', 'documents', 'status', 'latitude',
+                    'status', 'latitude',
                     'longitude', 'contract_url', 'business_permit_url',
                     'reapplication_cooldown_days'
                 ];

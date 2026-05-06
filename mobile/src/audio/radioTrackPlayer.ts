@@ -168,7 +168,7 @@ const getStationAnchorTimestampMs = (stationData: any) => {
     ? stationSlots
         .flatMap((slot: any) => [slot?.updated_at, slot?.created_at, slot?.starts_at])
         .map(readTimestampMs)
-        .filter((value): value is number => value !== null)
+        .filter((value: number | null): value is number => value !== null)
     : [];
 
   const stationTimestamps = [
@@ -396,6 +396,7 @@ export const getLiveStationCursor = (
       isSynchronized: false,
     };
   }
+  const resolvedTrackDurations = trackDurations as number[];
 
   const anchorTimestampMs = getStationAnchorTimestampMs(stationData);
   if (!anchorTimestampMs) {
@@ -406,7 +407,10 @@ export const getLiveStationCursor = (
     };
   }
 
-  const loopDurationSeconds = trackDurations.reduce((sum, duration) => sum + (duration || 0), 0);
+  const loopDurationSeconds = resolvedTrackDurations.reduce(
+    (sum, duration) => sum + duration,
+    0,
+  );
   if (loopDurationSeconds <= 0) {
     return {
       queueIndex: 0,
@@ -418,8 +422,8 @@ export const getLiveStationCursor = (
   const elapsedSeconds = Math.max(0, Math.floor((nowMs - anchorTimestampMs) / 1000));
   let remainingOffsetSeconds = elapsedSeconds % loopDurationSeconds;
 
-  for (let index = 0; index < trackDurations.length; index += 1) {
-    const durationSeconds = trackDurations[index] || 0;
+  for (let index = 0; index < resolvedTrackDurations.length; index += 1) {
+    const durationSeconds = resolvedTrackDurations[index];
     if (remainingOffsetSeconds < durationSeconds) {
       return {
         queueIndex: index,

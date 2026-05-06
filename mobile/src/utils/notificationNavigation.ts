@@ -147,6 +147,32 @@ export const resolveNotificationNavigationTarget = (
     return { pathname: "/bookings", params: { tab: "Pending" } };
   }
 
+  if (notificationType === "listing_connection_request") {
+    const status = readStringId(meta.status, record.status)?.toLowerCase();
+    const tab = status && status !== "pending" ? "History" : "Pending";
+    return { pathname: "/bookings", params: { tab } };
+  }
+
+  if (notificationType) {
+    const status = readStringId(meta.status, record.status)?.toLowerCase();
+    const isTerminal =
+      notificationType.includes("cancelled") ||
+      notificationType.includes("canceled") ||
+      notificationType.includes("fired") ||
+      ["cancelled", "canceled", "fired", "rejected", "declined"].includes(status || "");
+
+    if (isTerminal) {
+      return { pathname: "/bookings", params: { tab: "History" } };
+    }
+
+    if (notificationType.includes("application")) {
+      return {
+        pathname: "/bookings",
+        params: { tab: status && status !== "pending" ? "History" : "Pending" },
+      };
+    }
+  }
+
   if (explicitPath) {
     return explicitParams
       ? { pathname: explicitPath, params: explicitParams }

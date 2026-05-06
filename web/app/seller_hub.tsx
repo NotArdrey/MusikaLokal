@@ -26,6 +26,7 @@ import SmoothTabTransition from "../src/components/SmoothTabTransition";
 import { useAuth } from "../src/context/AuthContext";
 import { emitToast } from "../src/events/toastBus";
 import { useTheme } from "../src/context/ThemeContext";
+import { formatDashedNumericDate } from "../src/utils/friendlyDateTime";
 
 const moderateScale = (size: number, factor = 0.3) => {
   const w = Math.min(Dimensions.get("window").width, 600);
@@ -105,6 +106,7 @@ export default function SellerHubScreen() {
     setRefreshing(true);
     fetchData();
   };
+
 
   const handleAddProduct = async () => {
     if (!productTitle.trim()) {
@@ -282,7 +284,7 @@ export default function SellerHubScreen() {
             </View>
           </View>
           <Text style={{ color: colors.textSecondary, fontSize: 12, marginTop: 4 }}>
-            {(item.buyer_name || "Buyer") + " • " + new Date(item.created_at).toLocaleDateString()}
+            {(item.buyer_name || "Buyer") + " • " + formatDashedNumericDate(item.created_at)}
           </Text>
           <Text style={{ color: colors.text, fontSize: 14, fontWeight: "700", marginTop: 6 }}>?{Number(item.total_amount || item.total || 0).toLocaleString()}</Text>
         </TouchableOpacity>
@@ -378,7 +380,7 @@ export default function SellerHubScreen() {
                 </TouchableOpacity>
               ))}
             </View>
-            <TouchableOpacity activeOpacity={1} style={[styles.submitBtn, { backgroundColor: isProductFormReady ? colors.primary : colors.border, opacity: submitting ? 0.6 : 1 }]} onPress={handleAddProduct} disabled={submitting || !isProductFormReady}>
+            <TouchableOpacity activeOpacity={submitting || !isProductFormReady ? 1 : 0.78} style={[styles.submitBtn, { backgroundColor: isProductFormReady ? colors.primary : colors.border, opacity: submitting || !isProductFormReady ? 0.6 : 1 }]} onPress={handleAddProduct} disabled={submitting || !isProductFormReady}>
               {submitting ? <ActivityIndicator size="small" color="#fff" /> : <Text style={{ color: isProductFormReady ? "#fff" : colors.textSecondary, fontWeight: "700" }}>Create Product</Text>}
             </TouchableOpacity>
           </View>

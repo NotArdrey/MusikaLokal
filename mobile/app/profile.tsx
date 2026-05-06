@@ -39,7 +39,6 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { supabase, supabaseAnonKey, supabaseUrl } from "../lib/supabase";
 import CustomAlert, { AlertType } from "../src/components/CustomAlert";
 import ReportModal from "../src/components/ReportModal";
-import { isTrackPlayerAvailable } from "../src/audio/safeTrackPlayer";
 import GuestSignInGate from "../src/components/GuestSignInGate";
 import Header from "../src/components/header";
 import Navbar from "../src/components/navbar";
@@ -66,6 +65,7 @@ import { screenUploadsWithAi } from "../src/services/uploadSafetyScreen";
 import { buildSocialFollowKey } from "../src/utils/socialFollow";
 import { getSmoothTabIndex, setSmoothTab } from "../src/utils/smoothTabs";
 import { bottomSheetSpringConfig, motion } from "../src/utils/motion";
+import { isFanUserRole } from "../src/utils/roleRouting";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const PROFILE_CONTENT_HORIZONTAL_PADDING = 24;
@@ -802,6 +802,7 @@ export default function ProfileScreen() {
   }, [params.userId]);
 
   const [profile, setProfile] = useState<any>(null);
+  const isFan = isFanUserRole(userRole || profile?.role);
   const [loading, setLoading] = useState(true);
   const [isOwner, setIsOwner] = useState(false);
   const [, setGigStats] = useState({ active: 0, upcoming: 0, done: 0 });
@@ -1765,7 +1766,7 @@ export default function ProfileScreen() {
 
   const MENU_ITEMS = [
     { label: "Edit Profile", icon: "person-outline", route: "/edit_profile" },
-    { label: "Wallet", icon: "wallet-outline", route: "/wallet" },
+    ...(!isFan ? [{ label: "Wallet", icon: "wallet-outline", route: "/wallet" }] : []),
     { label: "Identity Verification", icon: "card-outline", route: "/identity_verification" },
     { label: "Settings", icon: "settings-outline", route: "/settings" },
   ];
@@ -2455,7 +2456,7 @@ export default function ProfileScreen() {
   const stationIsCurrentSource = Boolean(
     hasStation && activeStation?.id && activeStation.id === userStation?.id,
   );
-  const canPlayStationFromProfile = stationIsLive && isTrackPlayerAvailable;
+  const canPlayStationFromProfile = stationIsLive;
   const loadProfileFollowState = useCallback(async () => {
     if (!canFollowProfile || !profileFollowKey) {
       setIsProfileFollowing(false);

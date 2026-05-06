@@ -198,7 +198,6 @@ export default function AddGigScreen() {
   const [genreSearch, setGenreSearch] = useState("");
   const [requiredInstruments, setRequiredInstruments] = useState<string[]>([]);
   const [newInstrument, setNewInstrument] = useState("");
-  const [experienceLevel, setExperienceLevel] = useState("");
   const [musicianType, setMusicianType] = useState<"solo" | "group" | "both">(
     "both",
   );
@@ -454,12 +453,14 @@ export default function AddGigScreen() {
 
   const handleBack = () => {
     if (step > 1) setStep(step - 1);
-    else router.back();
+    else router.replace("/my_venue");
   };
 
   const createGig = async () => {
     if (creating) return;
     setCreating(true);
+    let createdGigId: string | null = null;
+    let createdGigOwnerId: string | null = null;
 
     try {
       // Get current session (auto-refresh is handled by Supabase client)
@@ -472,7 +473,11 @@ export default function AddGigScreen() {
         router.replace("/");
         return;
       }
+      createdGigOwnerId = session.user.id;
 
+      const orderedImages = images.length > 0 && images[thumbnailIndex]
+        ? [images[thumbnailIndex], ...images.filter((_, i) => i !== thumbnailIndex)]
+        : images;
       const normalizedSchedules = getNormalizedEventSchedules();
       const primarySchedule = normalizedSchedules[0];
 
@@ -482,7 +487,7 @@ export default function AddGigScreen() {
         location: address,
         budget: parseFloat(cost) || 0,
         status: "open",
-        images: images,
+        images: orderedImages,
         contract_url: contractUrl || null,
         latitude,
         longitude,
@@ -491,7 +496,6 @@ export default function AddGigScreen() {
         requirements: {
           genres: requiredGenres,
           instruments: requiredInstruments,
-          experience_level: experienceLevel || null,
           event_start_time: primarySchedule?.start_time || eventStartTime,
           event_end_time: primarySchedule?.end_time || eventEndTime,
           event_schedules: normalizedSchedules,
@@ -553,6 +557,7 @@ export default function AddGigScreen() {
         showAlert("warning", "Couldn't Create Gig", alertMessage);
         return;
       }
+      createdGigId = data.id;
 
       const requirementRows = Object.entries(payload.requirements || {})
         .filter(([, requirement_value]) => requirement_value !== null && requirement_value !== undefined)
@@ -590,6 +595,24 @@ export default function AddGigScreen() {
       setNewGigId(data.id);
       setModalVisible(true);
     } catch (e: any) {
+      if (createdGigId && createdGigOwnerId) {
+        const { error: rollbackError } = await supabase
+          .from('gigs')
+          .delete()
+          .eq('id', createdGigId)
+          .eq('organizer_id', createdGigOwnerId);
+
+        if (rollbackError) {
+          console.error("Failed to roll back partial gig create", {
+            gigId: createdGigId,
+            ownerId: createdGigOwnerId,
+            message: rollbackError.message,
+            code: rollbackError.code,
+            details: rollbackError.details,
+            hint: rollbackError.hint,
+          });
+        }
+      }
       console.error("❌ Error creating gig:", e);
       console.error("❌ Error message:", e?.message);
       console.error("❌ Error stack:", e?.stack);
@@ -1151,7 +1174,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
         />
       )}
       <View style={[styles.flex1, { backgroundColor: colors.background }]}>
-        <Header title="Create Gig" />
+        <Header title="Create Gig" onBackPress={handleBack} />
 
         {/* Enhanced Step Indicator (Fixed at top) */}
         <View style={styles.stepIndicatorContainer}>
@@ -1359,7 +1382,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                     </View>
                   </View>
                 ) : (
-                  <TouchableOpacity activeOpacity={1}
+                  <TouchableOpacity activeOpacity={addressVerificationLoading ? 1 : 0.78}
                     onPress={startAddressVerification}
                     disabled={addressVerificationLoading}
                     style={[
@@ -1762,7 +1785,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                   <TouchableOpacity
                     onPress={handleContractUpload}
                     disabled={uploadingContract}
-                    activeOpacity={1}
+                    activeOpacity={uploadingContract ? 1 : 0.78}
                     style={[
                       styles.uploadContractBtn,
                       {
@@ -1937,56 +1960,6 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                     ))}
                   </View>
                 )}
-              </View>
-
-              {/* Experience Level */}
-              <View style={styles.inputContainer}>
-                <Text
-                  style={[styles.inputLabel, { color: colors.textSecondary }]}
-                >
-                  Experience Level
-                </Text>
-                <View style={styles.experienceLevelContainer}>
-                  {["Beginner", "Intermediate", "Advanced", "Professional"].map(
-                    (level) => (
-                      <TouchableOpacity activeOpacity={1}
-                        key={level}
-                        onPress={() => setExperienceLevel(level)}
-                        style={[
-                          styles.experienceButton,
-                          {
-                            backgroundColor:
-                              experienceLevel === level
-                                ? colors.primary
-                                : isDark
-                                  ? "#1F2937"
-                                  : "#F9FAFB",
-                            borderColor:
-                              experienceLevel === level
-                                ? colors.primary
-                                : isDark
-                                  ? "#374151"
-                                  : "#E5E7EB",
-                          },
-                        ]}
-                      >
-                        <Text
-                          style={[
-                            styles.experienceButtonText,
-                            {
-                              color:
-                                experienceLevel === level
-                                  ? "#fff"
-                                  : colors.text,
-                            },
-                          ]}
-                        >
-                          {level}
-                        </Text>
-                      </TouchableOpacity>
-                    ),
-                  )}
-                </View>
               </View>
 
               {/* Looking For */}
@@ -2766,8 +2739,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                 </View>
 
                 {(requiredGenres.length > 0 ||
-                  requiredInstruments.length > 0 ||
-                  experienceLevel) && (
+                  requiredInstruments.length > 0) && (
                     <>
                       <View
                         style={[
@@ -2804,21 +2776,6 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                             </Text>
                             <Text style={{ color: colors.text }}>
                               {requiredInstruments.join(", ")}
-                            </Text>
-                          </View>
-                        )}
-                        {experienceLevel && (
-                          <View>
-                            <Text
-                              style={[
-                                styles.requirementSubLabel,
-                                { color: colors.textSecondary },
-                              ]}
-                            >
-                              Experience Level:
-                            </Text>
-                            <Text style={{ color: colors.text }}>
-                              {experienceLevel}
                             </Text>
                           </View>
                         )}
@@ -2892,28 +2849,6 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                 )}
               </View>
 
-              {/* Partnership Proposal Entry Point */}
-              <View style={{ marginTop: 16, padding: 14, borderRadius: 12, borderWidth: 1, borderColor: isDark ? "#374151" : "#E5E7EB", backgroundColor: isDark ? "#1F2937" : "#F9FAFB" }}>
-                <View style={{ flexDirection: "row", alignItems: "center", marginBottom: 8 }}>
-                  <Ionicons name="people-outline" size={20} color={colors.primary} />
-                  <Text style={{ fontFamily: "Poppins_600SemiBold", fontSize: 14, color: colors.text, marginLeft: 8 }}>
-                    Production Partnership
-                  </Text>
-                </View>
-                <Text style={{ fontFamily: "Poppins_400Regular", fontSize: 12, color: colors.textSecondary, marginBottom: 10 }}>
-                  After creating this gig, you can coordinate venue partnerships with a production team from your production workspace.
-                </Text>
-                <TouchableOpacity activeOpacity={1}
-                  onPress={() => router.push("/production_team" as any)}
-                  style={{ flexDirection: "row", alignItems: "center" }}
-                >
-                  <Text style={{ fontFamily: "Poppins_500Medium", fontSize: 13, color: colors.primary }}>
-                    Manage Production Teams
-                  </Text>
-                  <Ionicons name="arrow-forward" size={14} color={colors.primary} style={{ marginLeft: 4 }} />
-                </TouchableOpacity>
-              </View>
-
               <Text style={styles.termsText}>
                 By tapping Create Gig, you agree to our Terms and Conditions.
               </Text>
@@ -2925,7 +2860,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
             <TouchableOpacity
               onPress={handleBack}
               disabled={creating}
-              activeOpacity={1}
+              activeOpacity={creating ? 1 : 0.78}
               style={[
                 styles.backBtn,
                 {
@@ -2942,14 +2877,14 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
             <TouchableOpacity
               onPress={handleNext}
               disabled={creating || !isCurrentStepComplete}
-              activeOpacity={1}
+              activeOpacity={creating || !isCurrentStepComplete ? 1 : 0.78}
               style={[
                 styles.nextBtn,
                 {
                   flex: 1,
                   backgroundColor: isCurrentStepComplete ? colors.primary : colors.border,
                   shadowColor: colors.primary,
-                  opacity: creating ? 0.7 : 1,
+                  opacity: creating || !isCurrentStepComplete ? 0.6 : 1,
                 },
               ]}
             >
@@ -3307,26 +3242,6 @@ const styles = StyleSheet.create({
   chipText: {
     fontSize: 13,
     fontFamily: "Poppins_400Regular",
-  },
-  experienceLevelContainer: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    justifyContent: "space-between",
-    rowGap: 12,
-  },
-  experienceButton: {
-    width: "48%",
-    minHeight: 56,
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    borderRadius: 12,
-    borderWidth: 1,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  experienceButtonText: {
-    fontSize: 13,
-    fontFamily: "Poppins_500Medium",
   },
   termsText: {
     textAlign: "center",

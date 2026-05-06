@@ -6,7 +6,7 @@ import { Animated as RNAnimated, Easing, Platform, StyleSheet, Text, TouchableOp
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
-import { resolveRoleManageRoute } from '../utils/roleRouting';
+import { isFanUserRole, resolveRoleManageRoute } from '../utils/roleRouting';
 
 export const NAVBAR_BOTTOM_OFFSET = 24;
 export const NAVBAR_HEIGHT = 72;
@@ -171,12 +171,13 @@ type NavItem = {
 type NavTabProps = {
     active: boolean;
     colors: ReturnType<typeof useTheme>['colors'];
+    compact?: boolean;
     isDark: boolean;
     item: NavItem;
     onPress: (item: NavItem) => void;
 };
 
-function NavTab({ active, colors, isDark, item, onPress }: NavTabProps) {
+function NavTab({ active, colors, compact = false, isDark, item, onPress }: NavTabProps) {
     const progress = useRef(new RNAnimated.Value(active ? 1 : 0)).current;
 
     useEffect(() => {
@@ -204,9 +205,11 @@ function NavTab({ active, colors, isDark, item, onPress }: NavTabProps) {
             accessibilityState={{ selected: active }}
             style={[
                 styles.tabButton,
+                compact ? styles.compactTabButton : null,
                 { transform: [{ scale: tabScale }] },
                 active ? [
                     styles.activeTabButton,
+                    compact ? styles.compactActiveTabButton : null,
                     {
                         backgroundColor: isDark ? 'rgba(99, 102, 241, 0.18)' : colors.primaryLight,
                         borderColor: isDark ? 'rgba(129, 140, 248, 0.32)' : 'rgba(79, 70, 229, 0.16)',
@@ -245,13 +248,14 @@ export function GlobalNavbar({ forceVisible = false }: Pick<NavbarProps, 'forceV
     const [manageRoute, setManageRoute] = useState('/manage'); // Fallback
     const [optimisticActiveTab, setOptimisticActiveTab] = useState<string | null>(null);
     const pendingNavigationFrameRef = useRef<number | null>(null);
+    const isFan = isFanUserRole(userRole);
     const routeName = pathname.replace(/^\/+/, '').split('/')[0] || '';
     const shouldRenderGlobalNavbar = forceVisible
         || GLOBAL_NAVBAR_ROUTES.has(pathname)
         || GLOBAL_NAVBAR_ROUTE_NAMES.has(routeName);
 
     useEffect(() => {
-        if (isGuest || !session?.user?.id) {
+        if (isGuest || isFan || !session?.user?.id) {
             setManageRoute('/manage');
             return;
         }
@@ -262,7 +266,7 @@ export function GlobalNavbar({ forceVisible = false }: Pick<NavbarProps, 'forceV
         }
 
         setManageRoute(resolveRoleManageRoute(userRole));
-    }, [isGuest, roleResolved, session?.user?.id, userRole]);
+    }, [isFan, isGuest, roleResolved, session?.user?.id, userRole]);
 
     const activeTab = useMemo(() => {
         if (pathname.includes('feed') || pathname.includes('home')) return 'home';
@@ -307,9 +311,9 @@ export function GlobalNavbar({ forceVisible = false }: Pick<NavbarProps, 'forceV
 
     const navItems = useMemo(
         () => {
-            if (isGuest) {
+            if (isGuest || isFan) {
                 return [
-                    { id: 'home', icon: 'home', label: 'Home', route: '/home' },
+                    { id: 'home', icon: 'home', label: 'Home', route: '/feed' },
                     { id: 'profile', icon: 'person', label: 'Profile', route: '/profile' },
                 ];
             }
@@ -323,8 +327,9 @@ export function GlobalNavbar({ forceVisible = false }: Pick<NavbarProps, 'forceV
                 { id: 'profile', icon: 'person', label: 'Profile', route: '/profile' }
             ];
         },
-        [isGuest, manageRoute],
+        [isFan, isGuest, manageRoute],
     );
+    const useCompactFanNavbar = isFan && !isGuest;
     const displayedActiveTab = optimisticActiveTab ?? activeTab;
 
     useEffect(() => {
@@ -388,7 +393,13 @@ export function GlobalNavbar({ forceVisible = false }: Pick<NavbarProps, 'forceV
                 { bottom: NAVBAR_BOTTOM_OFFSET + insets.bottom },
             ]}
         >
-            <View collapsable={false} style={styles.navbarSurface}>
+            <View
+                collapsable={false}
+                style={[
+                    styles.navbarSurface,
+                    useCompactFanNavbar ? styles.compactNavbarSurface : null,
+                ]}
+            >
                 <BlurView
                     intensity={Platform.OS === 'ios' ? 80 : 100}
                     tint={isDark ? "systemMaterialDark" : "systemMaterialLight"}
@@ -400,12 +411,13 @@ export function GlobalNavbar({ forceVisible = false }: Pick<NavbarProps, 'forceV
                         }
                     ]}
                 >
-                    <View style={styles.container}>
+                    <View style={[styles.container, useCompactFanNavbar ? styles.compactContainer : null]}>
                         {navItems.map((item) => {
                             const isActive = displayedActiveTab === item.id;
                             return (
                                 <NavTab
                                     active={isActive}
+                                    compact={useCompactFanNavbar}
                                     colors={colors}
                                     isDark={isDark}
                                     item={item}
@@ -448,6 +460,10 @@ const styles = StyleSheet.create({
         elevation: NAVBAR_SURFACE_ELEVATION,
         overflow: 'visible',
     },
+    compactNavbarSurface: {
+        width: 216,
+        maxWidth: '62%',
+    },
     blurContainer: {
         borderRadius: 22,
         overflow: 'hidden',
@@ -461,6 +477,11 @@ const styles = StyleSheet.create({
         paddingHorizontal: 8,
         gap: 3,
     },
+    compactContainer: {
+        justifyContent: 'center',
+        paddingHorizontal: 7,
+        gap: 6,
+    },
     tabButton: {
         minWidth: 40,
         height: 48,
@@ -472,11 +493,19 @@ const styles = StyleSheet.create({
         borderWidth: 1,
         borderColor: 'transparent',
     },
+    compactTabButton: {
+        minWidth: 48,
+        paddingHorizontal: 11,
+    },
     activeTabButton: {
         minWidth: 84,
         maxWidth: 108,
         paddingHorizontal: 12,
         gap: 6,
+    },
+    compactActiveTabButton: {
+        minWidth: 96,
+        maxWidth: 116,
     },
     activeLabel: {
         flexShrink: 1,

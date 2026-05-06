@@ -454,12 +454,14 @@ export default function AddGigScreen() {
 
   const handleBack = () => {
     if (step > 1) setStep(step - 1);
-    else router.back();
+    else router.replace("/my_venue");
   };
 
   const createGig = async () => {
     if (creating) return;
     setCreating(true);
+    let createdGigId: string | null = null;
+    let createdGigOwnerId: string | null = null;
 
     try {
       // Get current session (auto-refresh is handled by Supabase client)
@@ -472,7 +474,11 @@ export default function AddGigScreen() {
         router.replace("/");
         return;
       }
+      createdGigOwnerId = session.user.id;
 
+      const orderedImages = images.length > 0 && images[thumbnailIndex]
+        ? [images[thumbnailIndex], ...images.filter((_, i) => i !== thumbnailIndex)]
+        : images;
       const normalizedSchedules = getNormalizedEventSchedules();
       const primarySchedule = normalizedSchedules[0];
 
@@ -482,7 +488,7 @@ export default function AddGigScreen() {
         location: address,
         budget: parseFloat(cost) || 0,
         status: "open",
-        images: images,
+        images: orderedImages,
         contract_url: contractUrl || null,
         latitude,
         longitude,
@@ -563,6 +569,7 @@ export default function AddGigScreen() {
         showAlert("warning", "Couldn't Create Gig", alertMessage);
         return;
       }
+      createdGigId = data.id;
 
       const requirementRows = Object.entries(payload.requirements || {})
         .filter(([, requirement_value]) => requirement_value !== null && requirement_value !== undefined)
@@ -601,6 +608,24 @@ export default function AddGigScreen() {
       setModalVisible(true);
       console.log("? Gig Created successfully");
     } catch (e: any) {
+      if (createdGigId && createdGigOwnerId) {
+        const { error: rollbackError } = await supabase
+          .from('gigs')
+          .delete()
+          .eq('id', createdGigId)
+          .eq('organizer_id', createdGigOwnerId);
+
+        if (rollbackError) {
+          console.error("Failed to roll back partial gig create", {
+            gigId: createdGigId,
+            ownerId: createdGigOwnerId,
+            message: rollbackError.message,
+            code: rollbackError.code,
+            details: rollbackError.details,
+            hint: rollbackError.hint,
+          });
+        }
+      }
       console.error("? Error creating gig:", e);
       console.error("? Error message:", e?.message);
       console.error("? Error stack:", e?.stack);
@@ -1168,7 +1193,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
         />
       )}
       <View style={[styles.flex1, { backgroundColor: colors.background }]}>
-        <Header title="Create Gig" />
+        <Header title="Create Gig" onBackPress={handleBack} />
 
         {/* Enhanced Step Indicator (Fixed at top) */}
         <View style={styles.stepIndicatorContainer}>
@@ -1376,7 +1401,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                     </View>
                   </View>
                 ) : (
-                  <TouchableOpacity activeOpacity={1}
+                  <TouchableOpacity activeOpacity={addressVerificationLoading ? 1 : 0.78}
                     onPress={startAddressVerification}
                     disabled={addressVerificationLoading}
                     style={[
@@ -1779,7 +1804,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                   <TouchableOpacity
                     onPress={handleContractUpload}
                     disabled={uploadingContract}
-                    activeOpacity={1}
+                    activeOpacity={uploadingContract ? 1 : 0.78}
                     style={[
                       styles.uploadContractBtn,
                       {
@@ -2939,7 +2964,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
             <TouchableOpacity
               onPress={handleBack}
               disabled={creating}
-              activeOpacity={1}
+              activeOpacity={creating ? 1 : 0.78}
               style={[
                 styles.backBtn,
                 {
@@ -2956,14 +2981,14 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
             <TouchableOpacity
               onPress={handleNext}
               disabled={creating || !isCurrentStepComplete}
-              activeOpacity={1}
+              activeOpacity={creating || !isCurrentStepComplete ? 1 : 0.78}
               style={[
                 styles.nextBtn,
                 {
                   flex: 1,
                   backgroundColor: isCurrentStepComplete ? colors.primary : colors.border,
                   shadowColor: colors.primary,
-                  opacity: creating ? 0.7 : 1,
+                  opacity: creating || !isCurrentStepComplete ? 0.6 : 1,
                 },
               ]}
             >

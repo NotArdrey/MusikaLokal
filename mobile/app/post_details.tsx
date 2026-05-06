@@ -338,8 +338,8 @@ export default function PostDetailsScreen() {
           multiline
           maxLength={1000}
         />
-        <TouchableOpacity activeOpacity={1}
-          style={[styles.sendBtn, { backgroundColor: canSubmitComment ? colors.primary : colors.border, opacity: submitting ? 0.6 : 1 }]}
+        <TouchableOpacity activeOpacity={submitting || !canSubmitComment ? 1 : 0.78}
+          style={[styles.sendBtn, { backgroundColor: canSubmitComment ? colors.primary : colors.border, opacity: submitting || !canSubmitComment ? 0.6 : 1 }]}
           onPress={handleAddComment}
           disabled={submitting || !canSubmitComment}
         >

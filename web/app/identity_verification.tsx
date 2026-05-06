@@ -10,6 +10,7 @@ import Header from '../src/components/header';
 import Navbar from '../src/components/navbar';
 import { useAuth } from '../src/context/AuthContext';
 import { useTheme } from '../src/context/ThemeContext';
+import { formatDashedNumericDate } from '../src/utils/friendlyDateTime';
 
 type IdentityProfile = {
   is_verified: boolean | null;
@@ -58,7 +59,7 @@ const formatDate = (value: string | null): string => {
   if (!value) return 'Not available';
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return 'Not available';
-  return date.toLocaleDateString();
+  return formatDashedNumericDate(date);
 };
 
 const identityExpiryLabel = (profile: IdentityProfile | null): string => {
@@ -411,13 +412,14 @@ export default function IdentityVerificationScreen() {
                 ]}
               >
             <TouchableOpacity
-              activeOpacity={1}
+              activeOpacity={!canStartVerification ? 1 : 0.78}
               disabled={!canStartVerification}
               onPress={handleStartVerification}
               style={[
                 styles.actionButton,
                 {
                   backgroundColor: canStartVerification ? colors.primary : isDark ? '#374151' : '#D1D5DB',
+                  opacity: canStartVerification ? 1 : 0.6,
                 },
               ]}
             >

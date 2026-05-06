@@ -11,6 +11,7 @@ type InvalidateScope =
   | "details"
   | "feed"
   | "home"
+  | "marketplace"
   | "notifications"
   | "search"
   | "wallet";
@@ -28,6 +29,9 @@ const tableScopes: Record<string, InvalidateScope[]> = {
   payout_methods: ["wallet"],
   post_media: ["feed"],
   post_reactions: ["feed"],
+  product_media: ["marketplace"],
+  product_variants: ["marketplace"],
+  products: ["marketplace"],
   profile_genres: ["home", "search"],
   profile_skills: ["home", "search"],
   profiles: ["bookings", "details", "feed", "home", "search", "wallet"],
@@ -63,6 +67,11 @@ const invalidateScope = (
 
   if (scope === "home") {
     void queryClient.invalidateQueries({ queryKey: ["home"] });
+    return;
+  }
+
+  if (scope === "marketplace") {
+    void queryClient.invalidateQueries({ queryKey: ["marketplace"] });
     return;
   }
 

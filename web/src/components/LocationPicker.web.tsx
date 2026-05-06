@@ -220,7 +220,7 @@ export default function LocationPicker({ visible, onClose, onSelect, initialLoca
                             <Text style={styles.searchBtnText}>Search</Text>
                         </TouchableOpacity>
                         <TouchableOpacity
-                            activeOpacity={1}
+                            activeOpacity={gettingLocation ? 1 : 0.78}
                             onPress={handleGetCurrentAddress}
                             style={styles.currentLocationBtn}
                             disabled={gettingLocation}
@@ -261,8 +261,8 @@ export default function LocationPicker({ visible, onClose, onSelect, initialLoca
 
                     {/* Footer */}
                     <View style={styles.footer}>
-                        <TouchableOpacity activeOpacity={1}
-                            style={[styles.confirmBtn, !currentSelection && styles.disabledBtn]}
+                        <TouchableOpacity activeOpacity={!currentSelection ? 1 : 0.78}
+                            style={[styles.confirmBtn, !currentSelection && styles.disabledBtn, { opacity: currentSelection ? 1 : 0.6 }]}
                             onPress={() => currentSelection && onSelect(currentSelection)}
                             disabled={!currentSelection}
                         >

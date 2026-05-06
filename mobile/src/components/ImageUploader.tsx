@@ -425,10 +425,10 @@ export default function ImageUploader({
         <View style={styles.imagesRow}>
           {/* Add Image Button */}
           <TouchableOpacity
-            style={[styles.addImageButton, { borderColor: colors.border, backgroundColor: isDark ? colors.card : '#F3F4F6' }]}
+            style={[styles.addImageButton, { borderColor: colors.border, backgroundColor: isDark ? colors.card : '#F3F4F6', opacity: uploading || images.length >= maxImages ? 0.6 : 1 }]}
             onPress={pickAndUploadImages}
             disabled={uploading || images.length >= maxImages}
-            activeOpacity={1}
+            activeOpacity={uploading || images.length >= maxImages ? 1 : 0.78}
           >
             {uploading ? (
               <ActivityIndicator size="small" color={colors.primary} />

@@ -43,6 +43,8 @@ interface TeamMember {
   avatar_url: string | null;
 }
 
+const PRODUCTION_TABS: ("About" | "Members" | "Reviews")[] = ["About", "Members", "Reviews"];
+
 const logFunctionInvokeError = (
   functionName: string,
   error: any,
@@ -64,8 +66,12 @@ export default function ProductionTeamScreen() {
   const { contentBottomPadding } = useBottomBarClearance(24);
   const { isAuthenticated, loading: authLoading, userId } = useRequireAuth();
   const { userRole } = useAuth();
-  const params = useLocalSearchParams<{ teamId?: string }>();
+  const params = useLocalSearchParams<{ teamId?: string; tab?: string }>();
   const routeTeamId = Array.isArray(params.teamId) ? params.teamId[0] : params.teamId;
+  const routeTab = Array.isArray(params.tab) ? params.tab[0] : params.tab;
+  const requestedTab = PRODUCTION_TABS.includes(routeTab as any)
+    ? routeTab as "About" | "Members" | "Reviews"
+    : "About";
   const isProducer = userRole === "producer";
 
   const [teams, setTeams] = useState<Team[]>([]);
@@ -80,7 +86,7 @@ export default function ProductionTeamScreen() {
 
   // Team detail view
   const [selectedTeam, setSelectedTeam] = useState<Team | null>(null);
-  const [activeTab, setActiveTab] = useState<"About" | "Members" | "Reviews">("About");
+  const [activeTab, setActiveTab] = useState<"About" | "Members" | "Reviews">(requestedTab);
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
   const [loadingMembers, setLoadingMembers] = useState(false);
   const [fireModalVisible, setFireModalVisible] = useState(false);
@@ -263,7 +269,7 @@ export default function ProductionTeamScreen() {
         ...data,
         member_role: data.owner_id === userId ? "owner" : membershipData?.role || "viewer",
       });
-      setActiveTab("About");
+      setActiveTab(requestedTab);
       await fetchTeamMembers(teamId);
     } catch (e: any) {
       showAlert("error", "Error", e.message || "Failed to fetch team");
@@ -271,7 +277,7 @@ export default function ProductionTeamScreen() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [fetchTeamMembers, userId]);
+  }, [fetchTeamMembers, requestedTab, userId]);
 
   useFocusEffect(
     useCallback(() => {
@@ -326,6 +332,8 @@ export default function ProductionTeamScreen() {
   const isCreateTeamReady =
     normalizeVisibleInput(newTeamName).length > 0 &&
     normalizeVisibleInput(newTeamDescription).length > 0;
+  const isInviteSubmitDisabled = sendingInvites || selectedInviteTargets.length === 0;
+  const isCreateTeamSubmitDisabled = creating || !isCreateTeamReady;
 
   const openFireMemberModal = (member: TeamMember) => {
     setMemberToFire(member);
@@ -463,7 +471,7 @@ export default function ProductionTeamScreen() {
 
   // Team detail view
   if (selectedTeam) {
-    const tabs: ("About" | "Members" | "Reviews")[] = ["About", "Members", "Reviews"];
+    const tabs = PRODUCTION_TABS;
     const canManage =
       selectedTeam.member_role === "owner" ||
       selectedTeam.member_role === "manager";
@@ -646,7 +654,7 @@ export default function ProductionTeamScreen() {
           inputPlaceholder="Reason for firing"
           inputValue={fireReason}
           onInputChange={setFireReason}
-          confirmDisabled={!normalizeVisibleInput(fireReason) || firingMember}
+          confirmDisabled={firingMember}
           loading={firingMember}
           loadingMessage="Removing member and sending notification..."
         />
@@ -669,15 +677,15 @@ export default function ProductionTeamScreen() {
               />
 
               <TouchableOpacity
-                activeOpacity={1}
+                activeOpacity={isInviteSubmitDisabled ? 1 : 0.78}
                 onPress={handleSendMemberInvites}
-                disabled={sendingInvites || selectedInviteTargets.length === 0}
+                disabled={isInviteSubmitDisabled}
                 style={[
                   styles.submitBtn,
                   {
                     backgroundColor:
                       selectedInviteTargets.length > 0 ? colors.primary : colors.border,
-                    opacity: sendingInvites ? 0.6 : 1,
+                    opacity: isInviteSubmitDisabled ? 0.6 : 1,
                   },
                 ]}
               >
@@ -829,10 +837,10 @@ export default function ProductionTeamScreen() {
             numberOfLines={3}
           />
 
-          <TouchableOpacity activeOpacity={1}
+          <TouchableOpacity activeOpacity={isCreateTeamSubmitDisabled ? 1 : 0.78}
             onPress={handleCreateTeam}
-            disabled={creating || !isCreateTeamReady}
-            style={[styles.submitBtn, { backgroundColor: isCreateTeamReady ? colors.primary : colors.border, opacity: creating ? 0.6 : 1 }]}
+            disabled={isCreateTeamSubmitDisabled}
+            style={[styles.submitBtn, { backgroundColor: isCreateTeamReady ? colors.primary : colors.border, opacity: isCreateTeamSubmitDisabled ? 0.6 : 1 }]}
           >
             {creating ? (
               <ActivityIndicator size="small" color="#fff" />

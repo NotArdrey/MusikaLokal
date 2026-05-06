@@ -16,6 +16,13 @@ const corsHeaders = {
 
 const GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions";
 const ENV_GROQ_API_KEY = Deno.env.get("GROQ_API_KEY")?.trim() || "";
+const GROQ_MODEL_CANDIDATES = [
+    "llama-3.3-70b-versatile",
+    "llama-3.1-8b-instant",
+    "openai/gpt-oss-120b",
+    "openai/gpt-oss-20b",
+];
+const GROQ_RETRYABLE_STATUS_CODES = new Set([403, 404, 408, 409, 429, 498, 500, 502, 503, 504]);
 const LOCAL_ONLY_MODE = true;
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY") ?? "";
@@ -255,10 +262,8 @@ const rankWithGroq = async (
         `Candidates: ${JSON.stringify(compactCandidates)}`,
     ].join("\n");
 
-    const modelCandidates = ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"];
-
     try {
-        for (const model of modelCandidates) {
+        for (const model of GROQ_MODEL_CANDIDATES) {
             for (const useJsonMode of [true, false]) {
                 const requestPayload: Record<string, unknown> = {
                     model,
@@ -267,7 +272,7 @@ const rankWithGroq = async (
                         { role: "user", content: userPrompt },
                     ],
                     temperature: 0.4,
-                    max_tokens: 1200,
+                    max_completion_tokens: 1200,
                 };
 
                 if (useJsonMode) {
@@ -286,6 +291,9 @@ const rankWithGroq = async (
                 if (!response.ok) {
                     const errorBody = await response.text();
                     console.error("home-feed groq error:", { model, useJsonMode, status: response.status, errorBody });
+                    if (!GROQ_RETRYABLE_STATUS_CODES.has(response.status)) {
+                        return null;
+                    }
                     continue;
                 }
 
@@ -334,7 +342,10 @@ const rankWithGroq = async (
                     ranked.push(fallback);
                 }
 
-                return ranked.slice(0, limit);
+                return {
+                    ranked: ranked.slice(0, limit),
+                    provider: model,
+                };
             }
         }
 
@@ -549,11 +560,11 @@ const getRecommendations = async (
 
     const aiRank = await rankWithGroq(groqApiKey, profile, mode, deterministicRank, limit);
 
-    if (aiRank && aiRank.length > 0) {
+    if (aiRank && aiRank.ranked.length > 0) {
         return {
-            recommendations: buildRecommendationResponse(aiRank, true, "Groq Llama 3.3"),
+            recommendations: buildRecommendationResponse(aiRank.ranked, true, aiRank.provider),
             aiPowered: true,
-            aiProvider: "Groq Llama 3.3",
+            aiProvider: aiRank.provider,
             message: mode === "for-you"
                 ? "AI-ranked For You feed is active."
                 : "AI-ranked skill suggestions are active.",

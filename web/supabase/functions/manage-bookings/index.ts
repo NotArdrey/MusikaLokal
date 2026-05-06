@@ -18,6 +18,61 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform",
 };
 
+function uniqueStrings(values: unknown[]) {
+  return Array.from(
+    new Set(
+      values.filter((value): value is string => typeof value === "string" && value.trim().length > 0),
+    ),
+  );
+}
+
+async function loadStudioLegacyById(supabaseAdmin: any, studioIds: string[]) {
+  const ids = uniqueStrings(studioIds);
+  const legacyById = new Map<string, any>();
+  if (ids.length === 0) return legacyById;
+
+  const { data, error } = await supabaseAdmin
+    .from("studios_with_stats")
+    .select("id, images, location, hourly_rate, rate")
+    .in("id", ids);
+
+  if (error) throw error;
+
+  (data || []).forEach((row: any) => legacyById.set(row.id, row));
+  return legacyById;
+}
+
+async function hydrateStudioBookingLegacy(supabaseAdmin: any, rows: any[]) {
+  const legacyById = await loadStudioLegacyById(
+    supabaseAdmin,
+    rows.map((row: any) => row?.studio?.id || row?.studio_id),
+  );
+
+  return rows.map((row: any) => {
+    const studioId = row?.studio?.id || row?.studio_id || null;
+    const legacy = studioId ? legacyById.get(studioId) : null;
+
+    return {
+      ...row,
+      studio: row?.studio
+        ? {
+            ...row.studio,
+            id: studioId,
+            images: Array.isArray(legacy?.images) ? legacy.images : [],
+            location: legacy?.location || row.studio.location || row.studio.address || null,
+            rate_per_hour:
+              row.studio.rate_per_hour ??
+              legacy?.hourly_rate ??
+              row.studio.hourly_rate ??
+              legacy?.rate ??
+              row.studio.rate ??
+              null,
+          }
+        : row?.studio,
+    };
+  });
+}
+
 function getManilaNowParts() {
   const now = new Date();
   const parts = new Intl.DateTimeFormat("en-US", {
@@ -2685,17 +2740,21 @@ serve(async (req: Request) => {
             // For Studio Bookings
             const { data: bookingInfo } = await supabaseClient
               .from("studio_bookings")
-              .select("user_id, studio:studios(name, images, owner_id)")
+              .select("user_id, studio_id, studio:studios(id, name, address, owner_id, hourly_rate, rate)")
               .eq("id", booking_id)
               .single();
 
-            if (bookingInfo) {
-              notificationImage = Array.isArray(bookingInfo.studio?.images)
-                ? bookingInfo.studio.images[0] || null
+            const [bookingInfoWithLegacy] = bookingInfo
+              ? await hydrateStudioBookingLegacy(supabaseAdmin, [bookingInfo])
+              : [];
+
+            if (bookingInfoWithLegacy) {
+              notificationImage = Array.isArray(bookingInfoWithLegacy.studio?.images)
+                ? bookingInfoWithLegacy.studio.images[0] || null
                 : null;
 
-              const studioOwnerId = bookingInfo.studio?.owner_id || null;
-              const cancelledByMusician = authUser.id === bookingInfo.user_id;
+              const studioOwnerId = bookingInfoWithLegacy.studio?.owner_id || null;
+              const cancelledByMusician = authUser.id === bookingInfoWithLegacy.user_id;
               const cancelledByOwner = Boolean(studioOwnerId && authUser.id === studioOwnerId);
               const reasonSuffix = cancellation_reason
                 ? ` Reason: ${cancellation_reason}`
@@ -2705,20 +2764,20 @@ serve(async (req: Request) => {
                 if (cancelledByMusician && studioOwnerId) {
                   targetUserId = studioOwnerId;
                   notificationTitle = "Booking Cancelled";
-                  notificationMessage = `A musician cancelled their booking at ${bookingInfo.studio.name}.${reasonSuffix}`;
+                  notificationMessage = `A musician cancelled their booking at ${bookingInfoWithLegacy.studio.name}.${reasonSuffix}`;
                   notificationType = "warning";
                   cancellationActorRole = "musician";
                 } else {
-                  targetUserId = bookingInfo.user_id;
+                  targetUserId = bookingInfoWithLegacy.user_id;
                   notificationTitle = "Booking Declined";
-                  notificationMessage = `Your booking at ${bookingInfo.studio.name} has been declined/cancelled.${reasonSuffix}`;
+                  notificationMessage = `Your booking at ${bookingInfoWithLegacy.studio.name} has been declined/cancelled.${reasonSuffix}`;
                   notificationType = "error";
                   cancellationActorRole = cancelledByOwner ? "studio_owner" : "unknown";
                 }
               } else if (new_status === "confirmed") {
-                targetUserId = bookingInfo.user_id;
+                targetUserId = bookingInfoWithLegacy.user_id;
                 notificationTitle = "Booking Confirmed!";
-                notificationMessage = `Your booking at ${bookingInfo.studio.name} has been confirmed.`;
+                notificationMessage = `Your booking at ${bookingInfoWithLegacy.studio.name} has been confirmed.`;
                 notificationType = "success";
               }
             }
@@ -2731,7 +2790,7 @@ serve(async (req: Request) => {
 
             if (application) {
               const { data: gigRow, error: gigRowError } = await supabaseAdmin
-                .from("gigs")
+                .from("gigs_with_stats")
                 .select("name, images, organizer_id")
                 .eq("id", application.gig_id)
                 .maybeSingle();

@@ -30,6 +30,24 @@ export const queryKeys = {
       isGuest: boolean,
     ) => ["home", "mobile", userId || "guest", userRole || "guest", isGuest] as const,
   },
+  marketplace: {
+    products: (
+      category: string | null | undefined,
+      includeSold: boolean,
+      limit?: number,
+    ) =>
+      [
+        "marketplace",
+        "products",
+        category || "all",
+        includeSold ? "include-sold" : "active-only",
+        limit || "default",
+      ] as const,
+    product: (productId: string | null | undefined) =>
+      ["marketplace", "product", productId || "none"] as const,
+    sellerProducts: (userId: string | null | undefined) =>
+      ["marketplace", "seller-products", userId || "guest"] as const,
+  },
   notifications: {
     list: (userId: string | null | undefined) => ["notifications", userId || "guest"] as const,
   },

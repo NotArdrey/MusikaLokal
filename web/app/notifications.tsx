@@ -22,6 +22,7 @@ import {
     buildNotificationRouteMeta,
     resolveNotificationNavigationTarget,
 } from '../src/utils/notificationNavigation';
+import { formatDashedNumericDate } from '../src/utils/friendlyDateTime';
 
 
 const DEFAULT_NOTIFICATION_IMAGE = 'https://images.unsplash.com/photo-1598488035139-bdbb2231ce04?w=100&h=100&fit=crop';
@@ -538,7 +539,7 @@ export default function NotificationsScreen() {
             }
             return `${Math.floor(diffHrs)}h ago`;
         }
-        return date.toLocaleDateString();
+        return formatDashedNumericDate(date);
     };
 
     const today = new Date().toDateString();

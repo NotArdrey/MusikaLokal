@@ -24,8 +24,10 @@ import {
     hasValidCoordinates,
     openNavigationDirections,
 } from "../src/utils/navigation";
+import { formatDashedNumericDate } from "../src/utils/friendlyDateTime";
 
 const CUSTOM_DATE_PREVIEW_LIMIT = 5;
+const STUDIO_TABS = ["About", "Setup", "Bookings", "Review"];
 
 const canonicalizeStudioType = (
   value: unknown,
@@ -54,8 +56,11 @@ const inferStudioTypeFromRows = (rows: unknown[]): "Rehearsal" | "Recording" | "
 
 export default function StudioDetailsScreen() {
   const { colors, isDark } = useTheme();
-  const { id } = useLocalSearchParams(); // Get Studio ID
-  const [activeTab, setActiveTab] = useState("About");
+  const { id, tab } = useLocalSearchParams<{ id?: string | string[]; tab?: string | string[] }>(); // Get Studio ID
+  const requestedTab = Array.isArray(tab) ? tab[0] : tab;
+  const [activeTab, setActiveTab] = useState(
+    STUDIO_TABS.includes(requestedTab || "") ? requestedTab || "About" : "About",
+  );
   const [modalVisible, setModalVisible] = useState(false);
   const [modalTitle, setModalTitle] = useState("");
   const [modalMessage, setModalMessage] = useState("");
@@ -89,6 +94,14 @@ export default function StudioDetailsScreen() {
     title: "",
     message: "",
   });
+
+  useFocusEffect(
+    React.useCallback(() => {
+      if (requestedTab && STUDIO_TABS.includes(requestedTab) && requestedTab !== activeTab) {
+        setActiveTab(requestedTab);
+      }
+    }, [activeTab, requestedTab]),
+  );
 
   const showAlert = (
     type: AlertType,
@@ -584,7 +597,7 @@ export default function StudioDetailsScreen() {
     }
   };
 
-  const tabs = ["About", "Setup", "Bookings", "Review"];
+  const tabs = STUDIO_TABS;
   const isRecordingOnlyStudio = studio?.type === "Recording";
   const isRehearsalOnlyStudio = studio?.type === "Rehearsal";
   const rehearsalRateValue = Number(studio?.rehearsal_rate || 0);
@@ -1001,7 +1014,7 @@ export default function StudioDetailsScreen() {
                         onPress={() =>
                           router.push({
                             pathname: "/edit_studio",
-                            params: { id: studio?.id },
+                            params: { id: studio?.id, returnTab: "About" },
                           })
                         }
                         style={{ marginTop: 8 }}
@@ -1152,7 +1165,7 @@ export default function StudioDetailsScreen() {
                                 color: colors.text,
                               }}
                             >
-                              {new Date(entry.date).toLocaleDateString()}
+                              {formatDashedNumericDate(entry.date)}
                             </Text>
                             <Text
                               style={{
@@ -1235,7 +1248,7 @@ export default function StudioDetailsScreen() {
                           {studio.booking_settings.peak_season_dates
                             .map(
                               (d: any) =>
-                                `${new Date(d.start).toLocaleDateString()} - ${new Date(d.end).toLocaleDateString()}`,
+                                `${formatDashedNumericDate(d.start)} - ${formatDashedNumericDate(d.end)}`,
                             )
                             .join("; ")}
                         </Text>
@@ -1260,7 +1273,7 @@ export default function StudioDetailsScreen() {
                           {studio.booking_settings.off_peak_dates
                             .map(
                               (d: any) =>
-                                `${new Date(d.start).toLocaleDateString()} - ${new Date(d.end).toLocaleDateString()}`,
+                                `${formatDashedNumericDate(d.start)} - ${formatDashedNumericDate(d.end)}`,
                             )
                             .join("; ")}
                         </Text>
@@ -1277,7 +1290,7 @@ export default function StudioDetailsScreen() {
                   onPress={() =>
                     router.push({
                       pathname: "/edit_studio",
-                      params: { id: studio?.id },
+                      params: { id: studio?.id, returnTab: "Setup" },
                     })
                   }
                   style={[
@@ -1684,15 +1697,9 @@ export default function StudioDetailsScreen() {
                           <Text
                             style={[styles.bookingDate, { color: colors.text }]}
                           >
-                            {booking.raw_date
-                              ? new Date(booking.raw_date).toLocaleDateString()
-                              : booking.booking_date
-                                ? new Date(
-                                  booking.booking_date,
-                                ).toLocaleDateString()
-                                : new Date(
-                                  booking.start_time,
-                                ).toLocaleDateString()}
+                            {formatDashedNumericDate(
+                              booking.raw_date || booking.booking_date || booking.start_time,
+                            )}
                           </Text>
                         </View>
 
@@ -1913,7 +1920,7 @@ export default function StudioDetailsScreen() {
                           fontFamily: "Poppins_400Regular",
                         }}
                       >
-                        {new Date(review.created_at).toLocaleDateString()}
+                        {formatDashedNumericDate(review.created_at)}
                       </Text>
                     </View>
                     <View style={[styles.starsRow, { marginBottom: 8 }]}>

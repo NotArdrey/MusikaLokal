@@ -113,7 +113,7 @@ const GroupConnectTab = ({
                 ]}
               >
                 <Text style={[styles.infoText, { color: "#B91C1C" }]}>
-                  You don't have any venues listed. Please create a venue to send invites.
+                  {"You don't have any venues listed. Please create a venue to send invites."}
                 </Text>
               </View>
             )}
@@ -153,10 +153,10 @@ const GroupConnectTab = ({
           </TouchableOpacity>
 
           <TouchableOpacity
-            style={[styles.primaryBtn, { backgroundColor: colors.primary }]}
+            style={[styles.primaryBtn, { backgroundColor: colors.primary, opacity: checkingVenue || isSendingRequest ? 0.6 : 1 }]}
             onPress={handleSendBookingRequest}
             disabled={checkingVenue || isSendingRequest}
-            activeOpacity={1}
+            activeOpacity={checkingVenue || isSendingRequest ? 1 : 0.78}
           >
             {isSendingRequest ? (
               <ActivityIndicator color="#FFF" />
@@ -173,12 +173,7 @@ const GroupConnectTab = ({
     {currentUserRole === "musician" &&
       group.requirements?.audition && (
         <View
-          style={[
-            styles.section,
-            currentUserRole === "venue-owner" && {
-              marginTop: 32,
-            },
-          ]}
+          style={styles.section}
         >
           {currentUserRole === "musician" && (
             <>

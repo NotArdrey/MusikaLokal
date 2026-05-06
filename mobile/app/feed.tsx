@@ -7,7 +7,6 @@ import {
   ActivityIndicator,
   Dimensions,
   FlatList,
-  Image,
   InteractionManager,
   Modal,
   RefreshControl,
@@ -23,7 +22,6 @@ import { supabase } from "../lib/supabase";
 import CachedImage from "../src/components/CachedImage";
 import GuestSignInGate from "../src/components/GuestSignInGate";
 import Header from "../src/components/header";
-import ListingCard from "../src/components/ListingCard";
 import ListingDetailsSheet from "../src/components/ListingDetailsSheet";
 import { normalizeVisibleInput } from "../src/components/modal";
 import Navbar, {
@@ -36,20 +34,18 @@ import SearchBottomSheet from "../src/components/SearchBottomSheet";
 import Skeleton from "../src/components/Skeleton";
 import SlidingTabBar from "../src/components/SlidingTabBar";
 import CustomAlert, { AlertType } from "../src/components/CustomAlert";
-import { isTrackPlayerAvailable } from "../src/audio/safeTrackPlayer";
 import { useAuth } from "../src/context/AuthContext";
+import { formatDashedNumericDate } from "../src/utils/friendlyDateTime";
 import { useBottomOverlay, useBottomOverlayVisibility } from "../src/context/BottomOverlayContext";
 import {
   RADIO_MINI_PLAYER_HEIGHT,
   RADIO_MINI_PLAYER_STACK_GAP,
-  useRadioPlayerActions,
-  useRadioPlayerPlayback,
+  useRadioPlayer,
   useRadioPlayerPresence,
 } from "../src/context/RadioPlayerContext";
 import { emitToast } from "../src/events/toastBus";
 import { useFeedQuery } from "../src/data/hooks";
 import { useTheme } from "../src/context/ThemeContext";
-import { getGroupTypeLabel } from "../src/utils/groupMembers";
 import {
   buildSocialFollowKey,
   getListingSocialFollowTarget,
@@ -88,11 +84,6 @@ type FeedCacheEntry = {
   aiFeedProvider: string;
   hasMore: boolean;
   loaded: boolean;
-};
-
-type LiveStationsCacheEntry = {
-  stations: any[];
-  fetchedAt: number;
 };
 
 const createEmptyFeedCacheEntry = (provider: string): FeedCacheEntry => ({
@@ -137,9 +128,9 @@ const logFeedInvokeError = (
 const FEED_PAGE_SIZE = 12;
 const AI_CARD_LIMIT = 20;
 const FEED_FOCUS_REFRESH_COOLDOWN_MS = 30000;
-const LIVE_STATIONS_FOCUS_REFRESH_COOLDOWN_MS = 30000;
+const SOCIAL_MEDIA_ASPECT_RATIO = 1.45;
+const PESO_SIGN = "\u20B1";
 const feedScreenCache = createFeedCache(getGroqModelInfo().modelLabel);
-const liveStationsScreenCache = new Map<string, LiveStationsCacheEntry>();
 const FEED_FALLBACK_IMAGES: Record<string, string[]> = {
   Artist: [
     "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=900&q=75",
@@ -295,71 +286,6 @@ const formatProfileRoleLabel = (role: unknown) => {
     .join(" ");
 };
 
-const getLiveStationCreatorCtaLabel = (station: any) => {
-  const creatorTarget = station?.creator_target;
-  if (!creatorTarget?.id) {
-    return "";
-  }
-
-  if (creatorTarget.kind === "group") {
-    const creatorGroupLabel = getGroupTypeLabel(creatorTarget?.group_type);
-    if (creatorGroupLabel === "Solo") {
-      return creatorTarget.isOwner ? "View Profile" : "View Musician";
-    }
-
-    if (creatorTarget.isOwner) {
-      return creatorGroupLabel === "Duo" ? "Manage Duo" : "Manage Group";
-    }
-
-    return creatorGroupLabel === "Duo" ? "View Duo" : "View Group";
-  }
-
-  return "View Musician";
-};
-
-const getLiveStationCreatorLabel = (station: any) => {
-  const targetName = typeof station?.creator_target?.name === "string"
-    ? station.creator_target.name.trim()
-    : "";
-  if (targetName) {
-    return targetName;
-  }
-
-  const creatorName = typeof station?.creator?.full_name === "string"
-    ? station.creator.full_name.trim()
-    : "";
-  return creatorName || "Unknown";
-};
-
-const getLiveStationGenreLabel = (station: any) => {
-  const resolvedGenre = typeof station?.resolved_genre === "string"
-    ? station.resolved_genre.trim()
-    : "";
-  if (resolvedGenre) {
-    return resolvedGenre;
-  }
-
-  const stationGenre = typeof station?.genre === "string" ? station.genre.trim() : "";
-  return stationGenre;
-};
-
-const getLiveStationCoverImageCandidates = (station: any) => {
-  const rawCandidates = [
-    station?.cover_image_url,
-    ...(Array.isArray(station?.creator_target?.images) ? station.creator_target.images : []),
-    station?.creator?.avatar_url,
-    ...(Array.isArray(station?.slots)
-      ? station.slots.map((slot: any) => slot?.playlist?.cover_image_url)
-      : []),
-  ];
-
-  return Array.from(new Set(
-    rawCandidates
-      .map((value) => resolveFeedMediaUrl(typeof value === "string" ? value : ""))
-      .filter((value) => value.length > 0),
-  ));
-};
-
 const normalizeFollowingEntity = (row: any, ownerAvatarById: Map<string, string> = new Map()) => {
   const followedType = normalizeSocialFollowTargetType(row?.followed_type);
 
@@ -411,6 +337,49 @@ const normalizeFollowingEntity = (row: any, ownerAvatarById: Map<string, string>
     role: followed?.role || "",
     created_at: row?.created_at || null,
   };
+};
+
+const getFeedItemStableKey = (item: any) => {
+  const kind = item?.__feedKind || "post";
+  const id = typeof item?.id === "string" && item.id.length > 0 ? item.id : "";
+  if (!id) return "";
+
+  if (kind === "ai_card") {
+    const type = typeof item?.type === "string" && item.type.length > 0 ? item.type : "item";
+    return `${kind}:${type}:${id}`;
+  }
+
+  if (kind === "following_entity") {
+    const followedType =
+      typeof item?.followed_type === "string" && item.followed_type.length > 0
+        ? item.followed_type
+        : "entity";
+    return `${kind}:${followedType}:${id}`;
+  }
+
+  return `${kind}:${id}`;
+};
+
+const getFeedItemListKey = (item: any, index: number) =>
+  getFeedItemStableKey(item) || `row:${index}`;
+
+const dedupeFeedItems = (items: any[]) => {
+  const seen = new Set<string>();
+  const uniqueItems: any[] = [];
+
+  for (const item of items) {
+    const key = getFeedItemStableKey(item);
+    if (key) {
+      if (seen.has(key)) {
+        continue;
+      }
+      seen.add(key);
+    }
+
+    uniqueItems.push(item);
+  }
+
+  return uniqueItems;
 };
 
 const normalizeSignal = (value: unknown) => {
@@ -565,13 +534,839 @@ const isGroqQuotaExhaustedMessage = (value: unknown) => {
   );
 };
 
+const getPositiveInteger = (value: unknown) => {
+  if (value === null || value === undefined || value === "") return 0;
+  const parsed =
+    typeof value === "number"
+      ? value
+      : Number.parseInt(String(value).replace(/[^\d]/g, ""), 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+};
+
+const formatCompactPostType = (value: unknown) => {
+  const raw = typeof value === "string" ? value.trim() : "";
+  if (!raw) return "Update";
+  return raw
+    .replace(/_/g, " ")
+    .split(" ")
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+};
+
+const formatFeedPrice = (amount: number, unit = "", label = "") => {
+  const formatted = `${PESO_SIGN}${amount.toLocaleString()}`;
+  return `${formatted}${unit}${label ? ` ${label}` : ""}`;
+};
+
+const getFeedPriceChips = (item: any) => {
+  const chips: string[] = [];
+  const type = item?.type;
+  const rehearsalRate = getPositiveInteger(item?.rehearsal_rate);
+  const recordingRate = getPositiveInteger(item?.recording_rate);
+  const hourlyRate = getPositiveInteger(item?.hourly_rate);
+  const budget = getPositiveInteger(item?.budget);
+  const numericRate = getPositiveInteger(item?.rate);
+
+  if (type === "Studio") {
+    if (rehearsalRate > 0) chips.push(formatFeedPrice(rehearsalRate, "/hr", "Rehearsal"));
+    if (recordingRate > 0) chips.push(formatFeedPrice(recordingRate, "/song", "Recording"));
+    if (chips.length === 0 && hourlyRate > 0) chips.push(formatFeedPrice(hourlyRate, "/hr"));
+  } else if (budget > 0) {
+    chips.push(formatFeedPrice(budget, "", "Budget"));
+  } else if (numericRate > 0) {
+    chips.push(formatFeedPrice(numericRate));
+  } else if (typeof item?.rate === "string" && item.rate.trim() && item.rate !== "0") {
+    const rawRate = item.rate.trim();
+    chips.push(rawRate.startsWith(PESO_SIGN) ? rawRate : `${PESO_SIGN}${rawRate}`);
+  }
+
+  const productPrice = getPositiveInteger(item?.linked_product?.price || item?.linked_product?.amount);
+  if (chips.length === 0 && productPrice > 0) {
+    chips.push(formatFeedPrice(productPrice));
+  }
+
+  return chips.slice(0, 2);
+};
+
+const getFeedServiceBadges = (item: any) => {
+  const badges: string[] = [];
+  const type = item?.type;
+  const studioType = typeof item?.studio_type === "string" ? item.studio_type : "";
+
+  if (type === "Studio") {
+    badges.push("Live Room");
+    if (/rehearsal/i.test(studioType) || getPositiveInteger(item?.rehearsal_rate) > 0) {
+      badges.push("Rehearsal");
+    }
+    if (/recording/i.test(studioType) || getPositiveInteger(item?.recording_rate) > 0) {
+      badges.push("Recording");
+    }
+  } else if (type === "Gig") {
+    badges.push("Live Gig");
+  } else if (type === "Production") {
+    badges.push("Production");
+  } else if (type === "Group") {
+    badges.push(formatGroupTypeLabel(item?.group_type));
+  } else if (type === "Artist") {
+    badges.push("Artist");
+  }
+
+  if (item?.linked_playlist) badges.push("Playlist");
+  if (item?.linked_product) badges.push("Merch");
+
+  return Array.from(new Set(badges.filter(Boolean))).slice(0, 3);
+};
+
+const getFeedMediaUrls = (item: any) => {
+  const mediaUrls = Array.isArray(item?.media)
+    ? item.media
+        .map((media: any) => resolveFeedMediaUrl(media?.url || media?.storage_path || media?.public_url))
+        .filter((value: string) => value.length > 0)
+    : [];
+  if (mediaUrls.length > 0) return mediaUrls;
+
+  const imageUrls = Array.isArray(item?.images)
+    ? item.images
+        .map((image: unknown) => resolveFeedMediaUrl(typeof image === "string" ? image : ""))
+        .filter((value: string) => value.length > 0)
+    : [];
+  const primaryImage = resolveFeedMediaUrl(typeof item?.image === "string" ? item.image : "");
+  return Array.from(new Set([primaryImage, ...imageUrls].filter((value) => value.length > 0)));
+};
+
+const getFeedAvatarUri = (item: any) => {
+  const avatar = resolveFeedMediaUrl(item?.author_avatar || item?.avatar_url || item?.logo_url || "");
+  if (avatar) return avatar;
+  return getFeedMediaUrls(item)[0] || getFeedFallbackImage(item?.type || "Artist", item?.id);
+};
+
+const getFeedDisplayName = (item: any) =>
+  item?.__feedKind === "ai_card"
+    ? item?.name || "MusikaLokal"
+    : item?.author_name || "MusikaLokal";
+
+const getFeedMetaLabel = (item: any) => {
+  if (item?.__feedKind !== "ai_card") {
+    return formatCompactPostType(item?.post_type);
+  }
+
+  const location = typeof item?.location === "string" ? item.location.trim() : "";
+  const genre = typeof item?.genre === "string" ? item.genre.trim() : "";
+  return location || genre || item?.type || "Featured";
+};
+
+const getFeedCaption = (item: any) => {
+  if (item?.__feedKind !== "ai_card") {
+    return item?.body || "Shared an update on MusikaLokal.";
+  }
+
+  const description = typeof item?.description === "string" ? item.description.trim() : "";
+  if (description) return description;
+  const aiReason = typeof item?.aiReason === "string" ? item.aiReason.trim() : "";
+  if (aiReason) return aiReason;
+  const type = item?.type === "Studio" ? "studio" : String(item?.type || "listing").toLowerCase();
+  return `Featured ${type} from the local music community.`;
+};
+
+const getFeedTimestampLabel = (item: any, formatter: (value: string) => string) => {
+  const timestamp = item?.created_at || item?.updated_at;
+  if (typeof timestamp === "string" && timestamp.length > 0) return formatter(timestamp);
+  return item?.__feedKind === "ai_card" ? "Featured now" : "Just now";
+};
+
+const getFeedPrimaryCtaLabel = (item: any) => {
+  if (item?.__feedKind !== "ai_card") return "View Post";
+  if (item?.type === "Studio") return "View Studio";
+  if (item?.type === "Artist") return "View Profile";
+  if (item?.type === "Group") return "View Group";
+  if (item?.type === "Gig") return "View Gig";
+  if (item?.type === "Production") return "View Team";
+  return "View Details";
+};
+
+const getFeedEngagementCounts = (item: any) => ({
+  likes: Number(item?.reaction_count || item?.review_count || 0),
+  comments: Number(item?.comment_count || 0),
+  shares: Number(item?.share_count || 0),
+});
+
+const DEMO_RADIO_STATION = {
+  id: "musikalokal-demo-radio",
+  name: "MusikaLokal Demo Radio",
+  description: "Preview track while local stations are warming up",
+  genre: "OPM / Indie",
+  is_active: true,
+  __queueReady: true,
+  __isDemoStation: true,
+  created_at: "2026-01-01T00:00:00.000Z",
+  updated_at: "2026-01-01T00:00:00.000Z",
+  live_anchor_at: "2026-01-01T00:00:00.000Z",
+  rotation_interval_minutes: 15,
+  slot_count: 1,
+  creator: {
+    full_name: "MusikaLokal",
+  },
+  live_slots: [
+    {
+      id: "musikalokal-demo-slot",
+      station_id: "musikalokal-demo-radio",
+      position: 0,
+      label: "Local artist spotlight",
+      created_at: "2026-01-01T00:00:00.000Z",
+      updated_at: "2026-01-01T00:00:00.000Z",
+      playlist: {
+        id: "musikalokal-demo-playlist",
+        title: "Local artist spotlight",
+        track_count: 1,
+        items: [
+          {
+            id: "musikalokal-demo-track",
+            title: "Local Groove Preview",
+            artist_name: "MusikaLokal",
+            duration_seconds: 372,
+            audio_url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3",
+          },
+        ],
+      },
+    },
+  ],
+};
+
+const getStationSlots = (station: any) => {
+  if (Array.isArray(station?.live_slots) && station.live_slots.length > 0) {
+    return station.live_slots;
+  }
+
+  return Array.isArray(station?.slots) ? station.slots : [];
+};
+
+const getStationSlotCount = (station: any) => Number(
+  station?.slot_count ?? station?.slot_playlist_ids?.length ?? getStationSlots(station).length ?? 0,
+);
+
+const getStationTrackCount = (station: any) =>
+  getStationSlots(station).reduce((total: number, slot: any) => {
+    const items = Array.isArray(slot?.playlist?.items) ? slot.playlist.items : [];
+    const playlistCount = Number(slot?.playlist?.track_count || 0);
+    return total + Math.max(items.length, playlistCount);
+  }, 0);
+
+const getStationPlayableTrackCount = (station: any) =>
+  getStationSlots(station).reduce((total: number, slot: any) => {
+    const items = Array.isArray(slot?.playlist?.items) ? slot.playlist.items : [];
+    return total + items.filter((item: any) => (
+      typeof item?.audio_url === "string" && item.audio_url.trim().length > 0
+    ) || (
+      typeof item?.teaser?.storage_path === "string" && item.teaser.storage_path.trim().length > 0
+    )).length;
+  }, 0);
+
+const getStationNowPlayingTitle = (station: any, slotIndex = 0) => {
+  const slots = getStationSlots(station);
+  const slot = slots[slotIndex] || slots[0] || null;
+  const firstItem = Array.isArray(slot?.playlist?.items) ? slot.playlist.items[0] : null;
+
+  return (
+    firstItem?.title ||
+    slot?.playlist?.title ||
+    slot?.label ||
+    "Local artist spotlight"
+  );
+};
+
+type LiveRadioCardProps = {
+  borderColor: string;
+  cardColor: string;
+  isDark: boolean;
+  primaryColor: string;
+  textColor: string;
+  mutedTextColor: string;
+};
+
+const LiveRadioCard = React.memo(function LiveRadioCard({
+  borderColor,
+  cardColor,
+  isDark,
+  primaryColor,
+  textColor,
+  mutedTextColor,
+}: LiveRadioCardProps) {
+  const {
+    activeStation,
+    currentSlotIndex,
+    currentTrack,
+    isPlaying,
+    loadingStationId,
+    togglePlayPause,
+    tuneIn,
+  } = useRadioPlayer();
+  const [featuredStation, setFeaturedStation] = useState<any | null>(null);
+  const [loadingStation, setLoadingStation] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const fetchLiveStation = async () => {
+      setLoadingStation(true);
+
+      try {
+        const fetchStations = async (featuredOnly: boolean) => {
+          const { data, error } = await supabase.functions.invoke("manage-playlists", {
+            body: {
+              action: "browse_stations",
+              featured_only: featuredOnly,
+              include_items: true,
+              limit: 1,
+            },
+          });
+
+          if (error) {
+            throw error;
+          }
+
+          return Array.isArray(data?.data) ? data.data : [];
+        };
+
+        const featuredStations = await fetchStations(true);
+        const stations = featuredStations.length > 0 ? featuredStations : await fetchStations(false);
+
+        if (!cancelled) {
+          setFeaturedStation(stations[0] || null);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          console.warn("Live radio station fetch error:", error);
+          setFeaturedStation(null);
+        }
+      } finally {
+        if (!cancelled) {
+          setLoadingStation(false);
+        }
+      }
+    };
+
+    void fetchLiveStation();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const liveFeaturedStation = featuredStation && getStationPlayableTrackCount(featuredStation) > 0
+    ? featuredStation
+    : null;
+  const displayStation = activeStation || liveFeaturedStation || DEMO_RADIO_STATION;
+  const stationSlots = getStationSlots(displayStation);
+  const stationSlotCount = getStationSlotCount(displayStation);
+  const stationTrackCount = getStationTrackCount(displayStation);
+  const isCurrentStation = Boolean(
+    displayStation?.id && activeStation?.id && displayStation.id === activeStation.id,
+  );
+  const isTuneInLoading = Boolean(
+    displayStation?.id && loadingStationId === displayStation.id,
+  );
+  const canTuneIn = Boolean(displayStation?.id && displayStation?.is_active !== false && stationSlotCount > 0);
+  const stationName =
+    typeof displayStation?.name === "string" && displayStation.name.trim().length > 0
+      ? displayStation.name.trim()
+      : "MusikaLokal Radio";
+  const stationSubtitle =
+    typeof displayStation?.description === "string" && displayStation.description.trim().length > 0
+      ? displayStation.description.trim()
+      : "Stream local music and artist features";
+  const isDemoStation = displayStation?.__isDemoStation === true;
+  const nowPlayingTitle = isCurrentStation
+    ? currentTrack?.title || getStationNowPlayingTitle(displayStation, currentSlotIndex)
+    : getStationNowPlayingTitle(displayStation, 0);
+  const rotationSummary = stationTrackCount > 0
+    ? `${stationTrackCount} track${stationTrackCount === 1 ? "" : "s"}`
+    : stationSlotCount > 0
+      ? `${stationSlotCount} playlist${stationSlotCount === 1 ? "" : "s"}`
+      : "No station";
+  const playButtonLabel = loadingStation || isTuneInLoading
+    ? "Loading"
+    : !canTuneIn
+      ? "Offline"
+      : isCurrentStation && isPlaying
+        ? "Pause"
+        : isCurrentStation
+          ? "Resume"
+          : "Listen";
+  const playIcon = loadingStation || isTuneInLoading
+    ? null
+    : isCurrentStation && isPlaying
+      ? "pause"
+      : "play";
+  const statusBadgeLabel = loadingStation ? "LOADING" : canTuneIn ? "LIVE" : "OFF AIR";
+
+  const openStationDetails = useCallback(() => {
+    if (!displayStation?.id || displayStation?.__isDemoStation) return;
+
+    router.push({
+      pathname: "/station_details" as any,
+      params: { station_id: String(displayStation.id) },
+    });
+  }, [displayStation?.id]);
+
+  const handlePlayPress = useCallback(async () => {
+    if (!displayStation || loadingStation || isTuneInLoading) {
+      return;
+    }
+
+    if (!canTuneIn) {
+      emitToast({
+        type: "info",
+        title: "Station offline",
+        message: "This station needs at least one playlist on air before it can play.",
+      });
+      return;
+    }
+
+    try {
+      if (isCurrentStation) {
+        await togglePlayPause();
+        return;
+      }
+
+      await tuneIn({
+        ...displayStation,
+        __queueReady: displayStation.__queueReady === true,
+      });
+    } catch (error: any) {
+      emitToast({
+        type: "error",
+        title: "Radio unavailable",
+        message: error?.message || "Unable to start this station right now.",
+      });
+    }
+  }, [
+    canTuneIn,
+    displayStation,
+    isCurrentStation,
+    isTuneInLoading,
+    loadingStation,
+    togglePlayPause,
+    tuneIn,
+  ]);
+
+  return (
+    <View style={styles.liveRadioWrap}>
+      <View
+        style={[
+          styles.liveRadioCard,
+          {
+            backgroundColor: cardColor,
+            borderColor,
+            shadowOpacity: isDark ? 0 : 0.06,
+          },
+        ]}
+      >
+        <View style={[styles.liveRadioArtwork, { backgroundColor: primaryColor + (isDark ? "26" : "18") }]}>
+          <View style={[styles.liveRadioArtworkInner, { borderColor: primaryColor + "55" }]}>
+            <Ionicons name={isCurrentStation && isPlaying ? "volume-high" : "musical-notes"} size={22} color={primaryColor} />
+          </View>
+        </View>
+
+        <View style={styles.liveRadioContent}>
+          <View style={styles.liveRadioTitleRow}>
+            <Text style={[styles.liveRadioTitle, { color: textColor }]} numberOfLines={1}>
+              Live Radio
+            </Text>
+            <View style={[styles.liveRadioBadge, !canTuneIn && styles.liveRadioBadgeMuted]}>
+              <View style={styles.liveRadioBadgeDot} />
+              <Text style={styles.liveRadioBadgeText}>{statusBadgeLabel}</Text>
+            </View>
+          </View>
+
+          <TouchableOpacity
+            activeOpacity={displayStation?.id ? 0.78 : 1}
+            disabled={!displayStation?.id}
+            onPress={openStationDetails}
+          >
+            <Text style={[styles.liveRadioStation, { color: textColor }]} numberOfLines={1}>
+              {loadingStation ? "Finding live stations..." : stationName}
+            </Text>
+            <Text style={[styles.liveRadioSubtitle, { color: mutedTextColor }]} numberOfLines={2}>
+              {loadingStation ? "Checking the local radio rotation" : isDemoStation ? "A playable preview while your local station queue is empty" : stationSubtitle}
+            </Text>
+          </TouchableOpacity>
+
+          <View style={styles.liveRadioMetaRow}>
+            <View style={styles.liveRadioNowPlaying}>
+              <Text style={[styles.liveRadioMetaLabel, { color: mutedTextColor }]} numberOfLines={1}>
+                Now playing
+              </Text>
+              <Text style={[styles.liveRadioMetaValue, { color: textColor }]} numberOfLines={1}>
+                {loadingStation ? "Loading rotation" : nowPlayingTitle}
+              </Text>
+            </View>
+            <View style={styles.liveRadioListeners}>
+              <Ionicons name={stationSlots.length > 0 ? "musical-notes-outline" : "cloud-offline-outline"} size={14} color={mutedTextColor} />
+              <Text style={[styles.liveRadioListenerText, { color: mutedTextColor }]} numberOfLines={1}>
+                {rotationSummary}
+              </Text>
+            </View>
+          </View>
+        </View>
+
+        <TouchableOpacity
+          activeOpacity={0.78}
+          accessibilityRole="button"
+          accessibilityLabel={`${playButtonLabel} Live Radio`}
+          disabled={loadingStation || isTuneInLoading}
+          onPress={handlePlayPress}
+          style={[
+            styles.liveRadioPlayButton,
+            {
+              backgroundColor: canTuneIn ? primaryColor : (isDark ? "#334155" : "#CBD5E1"),
+              opacity: loadingStation || isTuneInLoading ? 0.8 : 1,
+            },
+          ]}
+        >
+          {loadingStation || isTuneInLoading ? (
+            <ActivityIndicator size="small" color="#FFFFFF" />
+          ) : (
+            <Ionicons name={playIcon as any} size={16} color="#FFFFFF" />
+          )}
+          <Text style={styles.liveRadioPlayText}>{playButtonLabel}</Text>
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
+});
+
+type SocialFeedCardProps = {
+  item: any;
+  borderColor: string;
+  cardColor: string;
+  colors: any;
+  followBusy: boolean;
+  followTarget: { id: string; type: SocialFollowTargetType } | null;
+  isDark: boolean;
+  isFollowing: boolean;
+  mediaWidth: number;
+  onFollow: (id: string, targetType: SocialFollowTargetType, isFollowing: boolean) => void;
+  onOpenListing: (listingId: string) => void;
+  onOpenPost: (postId: string) => void;
+  onOpenProduct: (productId: string) => void;
+  onOpenProfile: (profileId: string) => void;
+  onOpenProductionTeam: (teamId: string) => void;
+  onOpenPlaylist: (playlistId: string) => void;
+  onReaction: (postId: string, currentReaction: string | null) => void;
+  showAuthorFollow: boolean;
+  timeAgo: (value: string) => string;
+};
+
+const SocialFeedCard = React.memo(function SocialFeedCard({
+  item,
+  borderColor,
+  cardColor,
+  colors,
+  followBusy,
+  followTarget,
+  isDark,
+  isFollowing,
+  mediaWidth,
+  onFollow,
+  onOpenListing,
+  onOpenPost,
+  onOpenProduct,
+  onOpenProfile,
+  onOpenProductionTeam,
+  onOpenPlaylist,
+  onReaction,
+  showAuthorFollow,
+  timeAgo,
+}: SocialFeedCardProps) {
+  const isSuggestion = item?.__feedKind === "ai_card";
+  const mediaUrls = useMemo(() => getFeedMediaUrls(item), [item]);
+  const badges = useMemo(() => getFeedServiceBadges(item), [item]);
+  const priceChips = useMemo(() => getFeedPriceChips(item), [item]);
+  const engagement = useMemo(() => getFeedEngagementCounts(item), [item]);
+  const avatarUri = useMemo(() => getFeedAvatarUri(item), [item]);
+  const displayName = getFeedDisplayName(item);
+  const metaLabel = getFeedMetaLabel(item);
+  const caption = getFeedCaption(item);
+  const timestamp = getFeedTimestampLabel(item, timeAgo);
+  const primaryCtaLabel = getFeedPrimaryCtaLabel(item);
+  const primaryMediaUri = mediaUrls[0] || "";
+  const mediaHeight = Math.round(mediaWidth / SOCIAL_MEDIA_ASPECT_RATIO);
+
+  const handleOpenPrimary = useCallback(() => {
+    if (isSuggestion) {
+      if (item?.type === "Production") {
+        onOpenProductionTeam(item.id);
+        return;
+      }
+      if (item?.type === "Artist") {
+        onOpenProfile(item.id);
+        return;
+      }
+      onOpenListing(item.id);
+      return;
+    }
+
+    onOpenPost(item.id);
+  }, [isSuggestion, item?.id, item?.type, onOpenListing, onOpenPost, onOpenProductionTeam, onOpenProfile]);
+
+  const handleFollow = useCallback(() => {
+    if (!followTarget?.id || !followTarget?.type) return;
+    onFollow(followTarget.id, followTarget.type, isFollowing);
+  }, [followTarget, isFollowing, onFollow]);
+
+  const handleReaction = useCallback(() => {
+    if (isSuggestion) return;
+    onReaction(item.id, item.my_reaction);
+  }, [isSuggestion, item?.id, item?.my_reaction, onReaction]);
+
+  const handleComment = useCallback(() => {
+    if (!isSuggestion) {
+      onOpenPost(item.id);
+    }
+  }, [isSuggestion, item?.id, onOpenPost]);
+
+  const handleLinkedPlaylist = useCallback(() => {
+    if (item?.linked_playlist?.id) {
+      onOpenPlaylist(item.linked_playlist.id);
+    }
+  }, [item?.linked_playlist?.id, onOpenPlaylist]);
+
+  const handleLinkedProduct = useCallback(() => {
+    if (item?.linked_product?.id) {
+      onOpenProduct(item.linked_product.id);
+    }
+  }, [item?.linked_product?.id, onOpenProduct]);
+
+  return (
+    <View
+      style={[
+        styles.socialPostCard,
+        {
+          backgroundColor: cardColor,
+          borderColor,
+          shadowOpacity: isDark ? 0 : 0.07,
+        },
+      ]}
+    >
+      <View style={styles.socialPostHeader}>
+        <TouchableOpacity activeOpacity={0.78} onPress={handleOpenPrimary} style={styles.socialAvatarWrap}>
+          {avatarUri ? (
+            <CachedImage
+              uri={avatarUri}
+              style={styles.socialAvatar}
+              width={44}
+              height={44}
+              priority="high"
+            />
+          ) : (
+            <View style={[styles.socialAvatarFallback, { backgroundColor: colors.primary + "18" }]}>
+              <Ionicons name="musical-notes" size={20} color={colors.primary} />
+            </View>
+          )}
+        </TouchableOpacity>
+
+        <TouchableOpacity activeOpacity={0.78} onPress={handleOpenPrimary} style={styles.socialHeaderText}>
+          <Text style={[styles.socialName, { color: colors.text }]} numberOfLines={1}>
+            {displayName}
+          </Text>
+          <View style={styles.socialMetaRow}>
+            <Text style={[styles.socialMetaText, { color: colors.textSecondary }]} numberOfLines={1}>
+              {metaLabel}
+            </Text>
+            <Text style={[styles.socialMetaDot, { color: colors.textSecondary }]}>•</Text>
+            <Text style={[styles.socialMetaText, { color: colors.textSecondary }]} numberOfLines={1}>
+              {timestamp}
+            </Text>
+          </View>
+        </TouchableOpacity>
+
+        {showAuthorFollow ? (
+          <TouchableOpacity
+            activeOpacity={followBusy ? 1 : 0.78}
+            disabled={followBusy}
+            onPress={handleFollow}
+            style={[
+              styles.socialFollowButton,
+              {
+                backgroundColor: isFollowing ? (isDark ? "#111827" : "#FFFFFF") : colors.primary,
+                borderColor: isFollowing ? borderColor : colors.primary,
+                opacity: followBusy ? 0.7 : 1,
+              },
+            ]}
+          >
+            {followBusy ? (
+              <ActivityIndicator size="small" color={isFollowing ? colors.textSecondary : "#FFFFFF"} />
+            ) : (
+              <Text style={[styles.socialFollowText, { color: isFollowing ? colors.textSecondary : "#FFFFFF" }]}>
+                {isFollowing ? "Following" : "Follow"}
+              </Text>
+            )}
+          </TouchableOpacity>
+        ) : null}
+
+        <TouchableOpacity activeOpacity={0.78} accessibilityRole="button" accessibilityLabel="More options" style={styles.socialMenuButton}>
+          <Ionicons name="ellipsis-horizontal" size={20} color={colors.textSecondary} />
+        </TouchableOpacity>
+      </View>
+
+      <TouchableOpacity activeOpacity={0.9} onPress={handleOpenPrimary}>
+        <Text style={[styles.socialCaption, { color: colors.text }]} numberOfLines={3}>
+          {caption}
+        </Text>
+      </TouchableOpacity>
+
+      {primaryMediaUri ? (
+        <TouchableOpacity activeOpacity={0.92} onPress={handleOpenPrimary} style={styles.socialMediaWrap}>
+          <CachedImage
+            uri={primaryMediaUri}
+            style={[styles.socialMedia, { height: mediaHeight }]}
+            width={Math.round(mediaWidth)}
+            height={mediaHeight}
+            priority="normal"
+          />
+          {mediaUrls.length > 1 ? (
+            <View style={styles.socialMediaCount}>
+              <Ionicons name="albums-outline" size={12} color="#FFFFFF" />
+              <Text style={styles.socialMediaCountText}>1/{mediaUrls.length}</Text>
+            </View>
+          ) : null}
+        </TouchableOpacity>
+      ) : null}
+
+      {badges.length > 0 || priceChips.length > 0 ? (
+        <View style={styles.socialChipRow}>
+          {badges.map((badge) => (
+            <View key={`badge-${badge}`} style={[styles.socialBadgeChip, { backgroundColor: colors.primary + "12" }]}>
+              <Text style={[styles.socialBadgeText, { color: colors.primary }]} numberOfLines={1}>
+                {badge}
+              </Text>
+            </View>
+          ))}
+          {priceChips.map((price) => (
+            <View key={`price-${price}`} style={[styles.socialPriceChip, { borderColor: colors.primary + "55" }]}>
+              <Text style={[styles.socialPriceText, { color: colors.primary }]} numberOfLines={1}>
+                {price}
+              </Text>
+            </View>
+          ))}
+        </View>
+      ) : null}
+
+      {item?.linked_playlist ? (
+        <TouchableOpacity
+          activeOpacity={0.78}
+          style={[styles.socialLinkedCard, { backgroundColor: isDark ? "#111827" : "#F5F3FF", borderColor }]}
+          onPress={handleLinkedPlaylist}
+        >
+          <Ionicons name="musical-notes" size={15} color={colors.primary} />
+          <Text style={[styles.socialLinkedText, { color: colors.primary }]} numberOfLines={1}>
+            {item.linked_playlist.title}
+          </Text>
+          <Ionicons name="chevron-forward" size={14} color={colors.primary} />
+        </TouchableOpacity>
+      ) : null}
+
+      {item?.linked_product ? (
+        <TouchableOpacity
+          activeOpacity={0.78}
+          style={[styles.socialLinkedCard, { backgroundColor: isDark ? "#111827" : "#F0FDF4", borderColor }]}
+          onPress={handleLinkedProduct}
+        >
+          <Ionicons name="cart" size={15} color="#22C55E" />
+          <Text style={[styles.socialLinkedText, { color: "#22C55E" }]} numberOfLines={1}>
+            {item.linked_product.title}
+          </Text>
+          <Ionicons name="chevron-forward" size={14} color="#22C55E" />
+        </TouchableOpacity>
+      ) : null}
+
+      <View style={[styles.socialEngagementRow, { borderBottomColor: borderColor }]}>
+        <View style={styles.socialEngagementLeft}>
+          <View style={styles.socialLikeBubble}>
+            <Ionicons name="heart" size={10} color="#FFFFFF" />
+          </View>
+          <Text style={[styles.socialEngagementText, { color: colors.textSecondary }]}>
+            {engagement.likes} likes
+          </Text>
+        </View>
+        <Text style={[styles.socialEngagementText, { color: colors.textSecondary }]} numberOfLines={1}>
+          {engagement.comments} comments • {engagement.shares} shares
+        </Text>
+      </View>
+
+      <View style={styles.socialActionRow}>
+        <TouchableOpacity
+          activeOpacity={isSuggestion ? 1 : 0.78}
+          disabled={isSuggestion}
+          onPress={handleReaction}
+          style={styles.socialActionButton}
+        >
+          <Ionicons
+            name={item?.my_reaction ? "heart" : "heart-outline"}
+            size={18}
+            color={item?.my_reaction ? "#EF4444" : colors.textSecondary}
+          />
+          <Text style={[styles.socialActionText, { color: item?.my_reaction ? "#EF4444" : colors.textSecondary }]}>
+            Like
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          activeOpacity={isSuggestion ? 1 : 0.78}
+          disabled={isSuggestion}
+          onPress={handleComment}
+          style={styles.socialActionButton}
+        >
+          <Ionicons name="chatbubble-outline" size={17} color={colors.textSecondary} />
+          <Text style={[styles.socialActionText, { color: colors.textSecondary }]}>Comment</Text>
+        </TouchableOpacity>
+        <TouchableOpacity activeOpacity={0.78} style={styles.socialActionButton}>
+          <Ionicons name="share-outline" size={18} color={colors.textSecondary} />
+          <Text style={[styles.socialActionText, { color: colors.textSecondary }]}>Share</Text>
+        </TouchableOpacity>
+      </View>
+
+      <View style={styles.socialCtaRow}>
+        <TouchableOpacity
+          activeOpacity={0.78}
+          onPress={handleOpenPrimary}
+          style={[styles.socialPrimaryCta, { backgroundColor: colors.primary }]}
+        >
+          <Text style={styles.socialPrimaryCtaText}>{primaryCtaLabel}</Text>
+        </TouchableOpacity>
+
+        {isSuggestion && followTarget ? (
+          <TouchableOpacity
+            activeOpacity={followBusy ? 1 : 0.78}
+            disabled={followBusy}
+            onPress={handleFollow}
+            style={[
+              styles.socialSecondaryCta,
+              {
+                borderColor,
+                opacity: followBusy ? 0.7 : 1,
+              },
+            ]}
+          >
+            {followBusy ? (
+              <ActivityIndicator size="small" color={colors.textSecondary} />
+            ) : (
+              <Text style={[styles.socialSecondaryCtaText, { color: colors.textSecondary }]}>
+                {isFollowing ? "Following" : "Follow"}
+              </Text>
+            )}
+          </TouchableOpacity>
+        ) : null}
+      </View>
+    </View>
+  );
+});
+
 export default function FeedScreen() {
   const { colors, isDark } = useTheme();
   const { session, userId, isGuest, loading: authLoading } = useAuth();
   const { clearBottomOverlays } = useBottomOverlay();
   const { activeStation } = useRadioPlayerPresence();
-  const { isPlaying, loadingStationId } = useRadioPlayerPlayback();
-  const { syncStationData, tuneIn } = useRadioPlayerActions();
   const insets = useSafeAreaInsets();
   const groqModelLabel = getGroqModelInfo().modelLabel;
 
@@ -600,7 +1395,6 @@ export default function FeedScreen() {
   const searchSheetRef = React.useRef<import("@gorhom/bottom-sheet").BottomSheetModal>(null);
   const bottomSheetRef = React.useRef<import("@gorhom/bottom-sheet").BottomSheetModal>(null);
   const productionTeamSheetRef = React.useRef<import("@gorhom/bottom-sheet").BottomSheetModal>(null);
-  const activeStationIdRef = React.useRef<string | null>(activeStation?.id || null);
   const activeTabRef = React.useRef<FeedTab>(tab);
   const feedCacheRef = React.useRef<Record<FeedTab, FeedCacheEntry>>(feedScreenCache);
   const feedInFlightRef = React.useRef<Record<FeedTab, boolean>>({ for_you: false, following: false });
@@ -611,9 +1405,6 @@ export default function FeedScreen() {
   const [selectedListingId, setSelectedListingId] = useState<string | null>(null);
   const [selectedProductionTeamId, setSelectedProductionTeamId] = useState<string | null>(null);
   const [pendingReopenListingId, setPendingReopenListingId] = useState<string | null>(null);
-
-  const [liveStations, setLiveStations] = useState<any[]>([]);
-  const [isLiveStationsLoading, setIsLiveStationsLoading] = useState(true);
 
   const forYouFeedQuery = useFeedQuery({
     enabled: false,
@@ -646,7 +1437,6 @@ export default function FeedScreen() {
     counts: {
       aiCards: aiCards.length,
       followingEntities: followingEntities.length,
-      liveStations: liveStations.length,
       posts: posts.length,
     },
     details: {
@@ -663,10 +1453,6 @@ export default function FeedScreen() {
     ready: !authLoading && !loading,
     refreshing,
   });
-
-  useEffect(() => {
-    activeStationIdRef.current = activeStation?.id || null;
-  }, [activeStation?.id]);
 
   useEffect(() => {
     activeTabRef.current = tab;
@@ -825,29 +1611,6 @@ export default function FeedScreen() {
     [openProductionTeamSheet],
   );
 
-  const openLiveStationCreator = useCallback((station: any) => {
-    const creatorTarget = station?.creator_target;
-
-    if (creatorTarget?.kind === "group" && creatorTarget?.id) {
-      if (creatorTarget.isOwner) {
-        router.push({ pathname: "/manage_group", params: { id: creatorTarget.id } });
-        return;
-      }
-
-      router.push({ pathname: "/group_details", params: { id: creatorTarget.id } });
-      return;
-    }
-
-    const creatorId = typeof creatorTarget?.id === "string" && creatorTarget.kind === "profile"
-      ? creatorTarget.id.trim()
-      : typeof station?.creator?.id === "string"
-        ? station.creator.id.trim()
-        : "";
-    if (creatorId) {
-      router.push({ pathname: "/profile", params: { userId: creatorId } });
-    }
-  }, []);
-
   const handleSearchSheetClose = useCallback(() => {
     clearBottomOverlays();
   }, [clearBottomOverlays]);
@@ -862,21 +1625,6 @@ export default function FeedScreen() {
     clearBottomOverlays();
     setSelectedProductionTeamId(null);
   }, [clearBottomOverlays]);
-
-  const handleLiveStationPress = useCallback(async (station: any) => {
-    try {
-      await tuneIn(station);
-    } catch (error: any) {
-      console.error("Feed live station playback error:", error);
-      emitToast({
-        type: "error",
-        title: "Playback Error",
-        message: typeof error?.message === "string"
-          ? error.message
-          : "Unable to play this live station right now.",
-      });
-    }
-  }, [tuneIn]);
 
   useEffect(() => {
     if (!pendingReopenListingId) return;
@@ -1516,201 +2264,6 @@ export default function FeedScreen() {
     session,
   ]);
 
-  // ── Radio station helpers ──────────────────────────────────────
-  const fetchLiveStations = useCallback(async (options: { force?: boolean } = {}) => {
-    const cacheKey = userId || "guest";
-    const cached = liveStationsScreenCache.get(cacheKey);
-
-    if (
-      !options.force &&
-      cached &&
-      Date.now() - cached.fetchedAt < LIVE_STATIONS_FOCUS_REFRESH_COOLDOWN_MS
-    ) {
-      setLiveStations(cached.stations);
-      setIsLiveStationsLoading(false);
-
-      const nextActiveStation = cached.stations.find((station: any) => station.id === activeStationIdRef.current);
-      if (nextActiveStation) {
-        syncStationData(nextActiveStation);
-      }
-      return;
-    }
-
-    if (cached) {
-      setLiveStations(cached.stations);
-    }
-    setIsLiveStationsLoading(!cached);
-
-    try {
-      const { data, error } = await supabase.functions.invoke("manage-playlists", {
-        body: { action: "browse_stations", limit: 10 },
-      });
-
-      if (error) {
-        throw error;
-      }
-
-      const stations = (data?.data || []).filter((station: any) => (station.slots || []).length > 0);
-      const creatorIds = Array.from(new Set(
-        stations
-          .map((station: any) => (typeof station?.creator?.id === "string" ? station.creator.id.trim() : ""))
-          .filter((creatorId: string) => creatorId.length > 0),
-      ));
-
-      const playlistIds = Array.from(new Set(
-        stations
-          .flatMap((station: any) => Array.isArray(station?.slots) ? station.slots : [])
-          .map((slot: any) => (typeof slot?.playlist?.id === "string" ? slot.playlist.id.trim() : ""))
-          .filter((playlistId: string) => playlistId.length > 0),
-      ));
-
-      let creatorGenresById = new Map<string, string[]>();
-      let groupIdsByPlaylistId = new Map<string, Set<string>>();
-      let groupsById = new Map<string, any>();
-
-      const [creatorGenresResult, groupPlaylistLinksResult] = await Promise.all([
-        creatorIds.length > 0
-          ? supabase
-              .from("profile_genres")
-              .select("profile_id, genre")
-              .in("profile_id", creatorIds)
-          : Promise.resolve({ data: [], error: null } as any),
-        playlistIds.length > 0
-          ? supabase
-              .from("group_playlists")
-              .select("group_id, playlist_id")
-              .in("playlist_id", playlistIds)
-          : Promise.resolve({ data: [], error: null } as any),
-      ]);
-
-      if (creatorGenresResult.error) {
-        console.warn("Live station creator genre lookup failed:", creatorGenresResult.error);
-      } else {
-        for (const row of creatorGenresResult.data || []) {
-          if (typeof row?.profile_id !== "string" || typeof row?.genre !== "string") {
-            continue;
-          }
-
-          const nextGenres = creatorGenresById.get(row.profile_id) || [];
-          nextGenres.push(row.genre);
-          creatorGenresById.set(row.profile_id, nextGenres);
-        }
-      }
-
-      if (groupPlaylistLinksResult.error) {
-        console.warn("Live station group playlist lookup failed:", groupPlaylistLinksResult.error);
-      } else {
-        for (const row of groupPlaylistLinksResult.data || []) {
-          const playlistId = typeof row?.playlist_id === "string" ? row.playlist_id.trim() : "";
-          const groupId = typeof row?.group_id === "string" ? row.group_id.trim() : "";
-          if (!playlistId || !groupId) {
-            continue;
-          }
-
-          const nextGroupIds = groupIdsByPlaylistId.get(playlistId) || new Set<string>();
-          nextGroupIds.add(groupId);
-          groupIdsByPlaylistId.set(playlistId, nextGroupIds);
-        }
-
-        const uniqueGroupIds = Array.from(new Set(
-          Array.from(groupIdsByPlaylistId.values())
-            .flatMap((value) => Array.from(value))
-            .filter((groupId) => groupId.length > 0),
-        ));
-
-        if (uniqueGroupIds.length > 0) {
-          const { data: creatorGroups, error: creatorGroupsError } = await supabase
-            .from("groups_with_stats")
-            .select("id, owner_id, name, group_type, genre, images")
-            .in("id", uniqueGroupIds);
-
-          if (creatorGroupsError) {
-            console.warn("Live station creator group lookup failed:", creatorGroupsError);
-          } else {
-            groupsById = new Map(
-              (creatorGroups || [])
-                .filter((group: any) => typeof group?.id === "string")
-                .map((group: any) => [group.id, group]),
-            );
-          }
-        }
-      }
-
-      const enrichedStations = stations.map((station: any) => {
-        const creatorId = typeof station?.creator?.id === "string" ? station.creator.id.trim() : "";
-        const stationPlaylistIds = Array.from(new Set<string>(
-          (Array.isArray(station?.slots) ? station.slots : [])
-            .map((slot: any) => (typeof slot?.playlist?.id === "string" ? slot.playlist.id.trim() : ""))
-            .filter((playlistId: string) => playlistId.length > 0),
-        ));
-        const linkedGroupIds = Array.from(new Set<string>(
-          stationPlaylistIds.flatMap((playlistId) => Array.from(groupIdsByPlaylistId.get(playlistId) || [])),
-        ));
-        const soleLinkedGroupId = linkedGroupIds.length === 1 ? linkedGroupIds[0] : "";
-        const allPlaylistsLinkedToSameGroup =
-          stationPlaylistIds.length > 0 &&
-          soleLinkedGroupId.length > 0 &&
-          stationPlaylistIds.every((playlistId) => {
-            const playlistGroupIds = Array.from(groupIdsByPlaylistId.get(playlistId) || []);
-            return playlistGroupIds.length === 1 && playlistGroupIds[0] === soleLinkedGroupId;
-          });
-        const creatorGroup = allPlaylistsLinkedToSameGroup
-          ? groupsById.get(soleLinkedGroupId) || null
-          : null;
-        const creatorGenres = creatorGenresById.get(creatorId) || [];
-        const resolvedGenre = typeof station?.genre === "string" && station.genre.trim().length > 0
-          ? station.genre.trim()
-          : typeof creatorGroup?.genre === "string" && creatorGroup.genre.trim().length > 0
-            ? creatorGroup.genre.trim()
-            : creatorGenres[0] || "";
-
-        return {
-          ...station,
-          creator_group: creatorGroup,
-          creator_target: creatorGroup
-            ? {
-                kind: "group",
-                id: creatorGroup.id,
-                name: creatorGroup.name || formatGroupTypeLabel(creatorGroup.group_type),
-                group_type: creatorGroup.group_type || null,
-                genre: creatorGroup.genre || null,
-                images: Array.isArray(creatorGroup.images) ? creatorGroup.images : [],
-                isOwner: creatorGroup.owner_id === userId,
-              }
-            : creatorId
-              ? {
-                  kind: "profile",
-                  id: creatorId,
-                  name: station?.creator?.full_name || "Unknown",
-                  genre: creatorGenres[0] || null,
-                  images: typeof station?.creator?.avatar_url === "string" && station.creator.avatar_url.trim().length > 0
-                    ? [station.creator.avatar_url]
-                    : [],
-                  isOwner: creatorId === userId,
-                }
-              : null,
-          resolved_genre: resolvedGenre,
-        };
-      });
-
-      liveStationsScreenCache.set(cacheKey, {
-        stations: enrichedStations,
-        fetchedAt: Date.now(),
-      });
-      setLiveStations(enrichedStations);
-      const nextActiveStation = enrichedStations.find((station: any) => station.id === activeStationIdRef.current);
-      if (nextActiveStation) {
-        syncStationData(nextActiveStation);
-      }
-    } catch (_) {
-      if (!cached) {
-        setLiveStations([]);
-      }
-    } finally {
-      setIsLiveStationsLoading(false);
-    }
-  }, [syncStationData, userId]);
-
   useFocusEffect(useCallback(() => {
     if (authLoading) {
       return;
@@ -1747,26 +2300,9 @@ export default function FeedScreen() {
       setRefreshing(false);
     }
 
-    const liveStationsCacheKey = userId || "guest";
-    const cachedLiveStations = liveStationsScreenCache.get(liveStationsCacheKey);
-    const shouldRefreshLiveStations =
-      !cachedLiveStations ||
-      Date.now() - cachedLiveStations.fetchedAt >= LIVE_STATIONS_FOCUS_REFRESH_COOLDOWN_MS;
-
-    if (cachedLiveStations) {
-      setLiveStations(cachedLiveStations.stations);
-      setIsLiveStationsLoading(false);
-    } else {
-      setIsLiveStationsLoading(true);
-    }
-
     const focusRefreshTask = InteractionManager.runAfterInteractions(() => {
       if (shouldRefreshFeed) {
         void fetchFeed(currentTab);
-      }
-
-      if (shouldRefreshLiveStations) {
-        void fetchLiveStations();
       }
     });
 
@@ -1785,7 +2321,7 @@ export default function FeedScreen() {
     return () => {
       focusRefreshTask.cancel();
     };
-  }, [authLoading, clearBottomOverlays, fetchFeed, fetchLiveStations, hydrateCachedFeed, isEmptyForYouSnapshot, userId]));
+  }, [authLoading, clearBottomOverlays, fetchFeed, hydrateCachedFeed, isEmptyForYouSnapshot]));
 
   useEffect(() => {
     if (authLoading || !hasFocusedFeedRef.current) {
@@ -1839,8 +2375,7 @@ export default function FeedScreen() {
       setIsAiCardsLoading(true);
     }
     void fetchFeed(tab);
-    void fetchLiveStations({ force: true });
-  }, [aiCards.length, authLoading, fetchFeed, fetchLiveStations, posts.length, tab]);
+  }, [aiCards.length, authLoading, fetchFeed, posts.length, tab]);
 
   const loadMore = useCallback(() => {
     if (
@@ -1986,6 +2521,26 @@ export default function FeedScreen() {
 
   /* ── Renderers ── */
 
+  const openPostDetails = useCallback((postId: string) => {
+    if (!postId) return;
+    router.push({ pathname: "/post_details", params: { post_id: postId } });
+  }, []);
+
+  const openProfileDetails = useCallback((profileId: string) => {
+    if (!profileId) return;
+    router.push({ pathname: "/profile", params: { userId: profileId } });
+  }, []);
+
+  const openPlaylistDetails = useCallback((playlistId: string) => {
+    if (!playlistId) return;
+    router.push({ pathname: "/playlist_details", params: { playlist_id: playlistId } });
+  }, []);
+
+  const openProductDetails = useCallback((productId: string) => {
+    if (!productId) return;
+    router.push({ pathname: "/product_details", params: { product_id: productId } });
+  }, []);
+
   const timeAgo = useCallback((dateStr: string) => {
     const diff = Date.now() - new Date(dateStr).getTime();
     const mins = Math.floor(diff / 60_000);
@@ -1995,7 +2550,7 @@ export default function FeedScreen() {
     if (hrs < 24) return `${hrs}h`;
     const days = Math.floor(hrs / 24);
     if (days < 7) return `${days}d`;
-    return new Date(dateStr).toLocaleDateString();
+    return formatDashedNumericDate(dateStr);
   }, []);
 
   const renderPost = useCallback(({ item: post }: { item: any }) => {
@@ -2105,188 +2660,69 @@ export default function FeedScreen() {
       const followKey = followTarget
         ? buildSocialFollowKey(followTarget.type, followTarget.id)
         : "";
-      const canFollowSuggestion = Boolean(followTarget && followKey);
       const isFollowingSuggestion = followKey ? followingKeys.has(followKey) : false;
       const isFollowBusy = followKey ? followBusyByKey[followKey] === true : false;
 
       return (
-        <View style={styles.aiCardContainer}>
-          <ListingCard
-            item={post}
-            onPress={(item: any) => {
-              const nextId = item?.id || post.id;
-              if (item?.type === "Production" && nextId) {
-                openProductionTeamDetails(nextId);
-                return;
-              }
-
-              openListingDetails(nextId);
-            }}
-            showGigSummary={false}
-            variant="feed"
-            style={[
-              styles.aiListingCard,
-              { borderColor: isDark ? "#334155" : "#EEF0F4" },
-            ]}
-            actionSlot={
-              canFollowSuggestion ? (
-                <TouchableOpacity
-                  activeOpacity={1}
-                  accessibilityLabel={isFollowingSuggestion ? "Unfollow listing" : "Follow listing"}
-                  accessibilityRole="button"
-                  disabled={isFollowBusy}
-                  onPress={() => {
-                    if (!followTarget) return;
-                    handleFollow(followTarget.id, followTarget.type, isFollowingSuggestion);
-                  }}
-                  style={[
-                    styles.aiFollowBtn,
-                    {
-                      backgroundColor: isFollowingSuggestion ? (isDark ? "#0F172A" : "#FFFFFF") : colors.primary,
-                      borderColor: isFollowingSuggestion ? (isDark ? "#334155" : "#CBD5E1") : colors.primary,
-                      opacity: isFollowBusy ? 0.7 : 1,
-                    },
-                  ]}
-                >
-                  {isFollowBusy ? (
-                    <ActivityIndicator size="small" color={isFollowingSuggestion ? colors.textSecondary : "#FFFFFF"} />
-                  ) : (
-                    <Text
-                      style={[
-                        styles.aiFollowText,
-                        { color: isFollowingSuggestion ? colors.textSecondary : "#FFFFFF" },
-                      ]}
-                    >
-                      {isFollowingSuggestion ? "Following" : "Follow"}
-                    </Text>
-                  )}
-                </TouchableOpacity>
-              ) : null
-            }
-          />
-        </View>
+        <SocialFeedCard
+          item={post}
+          borderColor={isDark ? "#334155" : "#EEF0F4"}
+          cardColor={isDark ? "#1E293B" : "#FFFFFF"}
+          colors={colors}
+          followBusy={isFollowBusy}
+          followTarget={followTarget}
+          isDark={isDark}
+          isFollowing={isFollowingSuggestion}
+          mediaWidth={Math.max(260, SCREEN_WIDTH - 60)}
+          onFollow={handleFollow}
+          onOpenListing={openListingDetails}
+          onOpenPost={openPostDetails}
+          onOpenProduct={openProductDetails}
+          onOpenProfile={openProfileDetails}
+          onOpenProductionTeam={openProductionTeamDetails}
+          onOpenPlaylist={openPlaylistDetails}
+          onReaction={handleReaction}
+          showAuthorFollow={false}
+          timeAgo={timeAgo}
+        />
       );
     }
 
     const cardBg = isDark ? "#1E293B" : "#FFFFFF";
-    const divider = isDark ? "#334155" : "#E2E8F0";
+    const borderColor = isDark ? "#334155" : "#EEF0F4";
+    const authorFollowTarget =
+      post.author_id && post.author_id !== userId
+        ? { id: post.author_id, type: "profile" as SocialFollowTargetType }
+        : null;
+    const authorFollowKey = authorFollowTarget
+      ? buildSocialFollowKey(authorFollowTarget.type, authorFollowTarget.id)
+      : "";
     const isFollowingAuthor = Boolean(
       post.is_following || followingKeys.has(buildSocialFollowKey("profile", post.author_id)),
     );
+    const isAuthorFollowBusy = authorFollowKey ? followBusyByKey[authorFollowKey] === true : false;
     return (
-      <View
-        style={[
-          styles.postCard,
-          {
-            backgroundColor: cardBg,
-            borderColor: isDark ? "#334155" : "#EEF0F4",
-          },
-        ]}
-      >
-        {/* Author header */}
-        <View style={styles.authorRow}>
-          <TouchableOpacity activeOpacity={1} style={styles.avatarWrap}>
-            <CachedImage
-              uri={post.author_avatar || "https://via.placeholder.com/40"}
-              style={styles.authorAvatar}
-              width={40}
-              height={40}
-              priority="high"
-            />
-          </TouchableOpacity>
-          <View style={{ flex: 1, marginLeft: 10 }}>
-            <Text style={[styles.authorName, { color: colors.text }]}>{post.author_name || "User"}</Text>
-            <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
-              <Text style={[styles.postTime, { color: colors.textSecondary }]}>{timeAgo(post.created_at)}</Text>
-              <Ionicons name={post.visibility === "followers" ? "people" : "globe-outline"} size={11} color={colors.textSecondary} />
-            </View>
-          </View>
-          {post.author_id !== userId && (
-            <TouchableOpacity activeOpacity={1} onPress={() => handleFollow(post.author_id, "profile", isFollowingAuthor)} style={[styles.followBtn, { backgroundColor: isFollowingAuthor ? "transparent" : colors.primary, borderColor: isFollowingAuthor ? colors.border : colors.primary }]}>
-              <Text style={{ color: isFollowingAuthor ? colors.textSecondary : "#fff", fontSize: moderateScale(11), fontWeight: "600" }}>{isFollowingAuthor ? "Following" : "Follow"}</Text>
-            </TouchableOpacity>
-          )}
-        </View>
-
-        {/* Body */}
-        <TouchableOpacity activeOpacity={1} onPress={() => router.push({ pathname: "/post_details", params: { post_id: post.id } })}>
-          <Text style={[styles.postBody, { color: colors.text }]}>{post.body}</Text>
-        </TouchableOpacity>
-
-        {/* Media gallery */}
-        {post.media && post.media.length > 0 && (
-          <View style={styles.mediaContainer}>
-            {post.media.length === 1 ? (
-              <CachedImage
-                uri={post.media[0].url}
-                style={styles.mediaSingle}
-                width={Math.round(SCREEN_WIDTH - 60)}
-                height={280}
-                priority="high"
-              />
-            ) : (
-              <View style={styles.mediaGrid}>
-                {post.media.slice(0, 4).map((m: any, idx: number) => (
-                  <CachedImage
-                    key={idx}
-                    uri={m.url}
-                    style={[styles.mediaGridItem, { borderWidth: 1, borderColor: cardBg }]}
-                    width={Math.round((SCREEN_WIDTH - 60) / 2)}
-                    height={180}
-                    priority={idx < 2 ? "high" : "normal"}
-                  />
-                ))}
-              </View>
-            )}
-          </View>
-        )}
-
-        {/* Linked items */}
-        {post.linked_playlist && (
-          <TouchableOpacity activeOpacity={1} style={[styles.linkedCard, { backgroundColor: isDark ? "#1a2436" : "#f0f5ff", borderColor: divider }]} onPress={() => router.push({ pathname: "/playlist_details", params: { playlist_id: post.linked_playlist.id } })}>
-            <Ionicons name="musical-notes" size={16} color={colors.primary} />
-            <Text style={[styles.linkedText, { color: colors.primary }]} numberOfLines={1}>{post.linked_playlist.title}</Text>
-            <Ionicons name="chevron-forward" size={14} color={colors.primary} />
-          </TouchableOpacity>
-        )}
-        {post.linked_product && (
-          <TouchableOpacity activeOpacity={1} style={[styles.linkedCard, { backgroundColor: isDark ? "#1a2436" : "#f0fff4", borderColor: divider }]} onPress={() => router.push({ pathname: "/product_details", params: { product_id: post.linked_product.id } })}>
-            <Ionicons name="cart" size={16} color="#22c55e" />
-            <Text style={[styles.linkedText, { color: "#22c55e" }]} numberOfLines={1}>{post.linked_product.title}</Text>
-            <Ionicons name="chevron-forward" size={14} color="#22c55e" />
-          </TouchableOpacity>
-        )}
-
-        {/* Reaction summary */}
-        {(post.reaction_count > 0 || post.comment_count > 0) && (
-          <View style={[styles.reactionSummary, { borderBottomColor: divider }]}>
-            {post.reaction_count > 0 && (
-              <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
-                <View style={styles.likeBadge}><Ionicons name="heart" size={10} color="#fff" /></View>
-                <Text style={[styles.summaryText, { color: colors.textSecondary }]}>{post.reaction_count}</Text>
-              </View>
-            )}
-            <View style={{ flex: 1 }} />
-            {post.comment_count > 0 && <Text style={[styles.summaryText, { color: colors.textSecondary }]}>{post.comment_count} comments</Text>}
-          </View>
-        )}
-
-        {/* Action bar (Like · Comment · Share) */}
-        <View style={[styles.actionBar, { borderTopColor: divider }]}>
-          <TouchableOpacity activeOpacity={1} style={styles.actionBtn} onPress={() => handleReaction(post.id, post.my_reaction)}>
-            <Ionicons name={post.my_reaction ? "heart" : "heart-outline"} size={20} color={post.my_reaction ? "#ef4444" : colors.textSecondary} />
-            <Text style={[styles.actionLabel, { color: post.my_reaction ? "#ef4444" : colors.textSecondary }]}>Like</Text>
-          </TouchableOpacity>
-          <TouchableOpacity activeOpacity={1} style={styles.actionBtn} onPress={() => router.push({ pathname: "/post_details", params: { post_id: post.id } })}>
-            <Ionicons name="chatbubble-outline" size={18} color={colors.textSecondary} />
-            <Text style={[styles.actionLabel, { color: colors.textSecondary }]}>Comment</Text>
-          </TouchableOpacity>
-          <TouchableOpacity activeOpacity={1} style={styles.actionBtn}>
-            <Ionicons name="share-outline" size={18} color={colors.textSecondary} />
-            <Text style={[styles.actionLabel, { color: colors.textSecondary }]}>Share</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
+      <SocialFeedCard
+        item={post}
+        borderColor={borderColor}
+        cardColor={cardBg}
+        colors={colors}
+        followBusy={isAuthorFollowBusy}
+        followTarget={authorFollowTarget}
+        isDark={isDark}
+        isFollowing={isFollowingAuthor}
+        mediaWidth={Math.max(260, SCREEN_WIDTH - 60)}
+        onFollow={handleFollow}
+        onOpenListing={openListingDetails}
+        onOpenPost={openPostDetails}
+        onOpenProduct={openProductDetails}
+        onOpenProfile={openProfileDetails}
+        onOpenProductionTeam={openProductionTeamDetails}
+        onOpenPlaylist={openPlaylistDetails}
+        onReaction={handleReaction}
+        showAuthorFollow={Boolean(authorFollowTarget)}
+        timeAgo={timeAgo}
+      />
     );
   }, [
     colors.border,
@@ -2299,6 +2735,10 @@ export default function FeedScreen() {
     handleReaction,
     isDark,
     openListingDetails,
+    openPlaylistDetails,
+    openPostDetails,
+    openProductDetails,
+    openProfileDetails,
     openProductionTeamDetails,
     timeAgo,
     userId,
@@ -2306,8 +2746,6 @@ export default function FeedScreen() {
 
   const renderHeader = useCallback(() => {
     const cardBg = isDark ? "#1E293B" : "#FFFFFF";
-    const skeletonBorder = isDark ? "#334155" : "#E2E8F0";
-    const showRadioStationSkeleton = isLiveStationsLoading && liveStations.length === 0;
 
     return (
       <>
@@ -2340,141 +2778,14 @@ export default function FeedScreen() {
           </TouchableOpacity>
         </View>
 
-        {/* Live Radio Section */}
-        {showRadioStationSkeleton ? (
-          <View style={[styles.feedSkeletonRadioWrap, { backgroundColor: cardBg }]}>
-            <Skeleton width={164} height={18} style={{ marginLeft: 14, marginBottom: 10 }} />
-            <View style={styles.feedSkeletonRadioRow}>
-              {[1, 2, 3].map((item) => (
-                <View
-                  key={`header-radio-skeleton-${item}`}
-                  style={[styles.feedSkeletonRadioCard, { backgroundColor: isDark ? "#0F172A" : "#F8FAFC", borderColor: skeletonBorder }]}
-                >
-                  <Skeleton width="100%" height={110} borderRadius={0} />
-                  <View style={{ padding: 12 }}>
-                    <Skeleton width="86%" height={14} style={{ marginBottom: 6 }} />
-                    <Skeleton width="54%" height={12} style={{ marginBottom: 10 }} />
-                    <Skeleton width="100%" height={32} borderRadius={10} style={{ marginTop: 4 }} />
-                  </View>
-                </View>
-              ))}
-            </View>
-          </View>
-        ) : liveStations.length > 0 ? (
-          <View style={{ paddingVertical: 10, backgroundColor: cardBg }}>
-            <View style={{ flexDirection: "row", alignItems: "center", paddingHorizontal: 14, marginBottom: 10, flexWrap: "wrap", gap: 6 }}>
-              <Ionicons name="radio" size={18} color="#ef4444" />
-              <Text style={{ color: colors.text, fontSize: moderateScale(14), fontWeight: "700" }}>Radio Station Playlists</Text>
-              <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: "#22c55e" }} />
-              <View
-                style={{
-                  marginLeft: 4,
-                  borderRadius: 999,
-                  paddingHorizontal: 8,
-                  paddingVertical: 4,
-                  backgroundColor: isDark ? "#111827" : "#EEF2FF",
-                  borderWidth: 1,
-                  borderColor: isDark ? "#334155" : "#DBEAFE",
-                }}
-              >
-                <Text style={{ color: colors.textSecondary, fontSize: moderateScale(9.5), fontWeight: "600" }}>
-                  Tap a card to listen
-                </Text>
-              </View>
-            </View>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 14, gap: 10 }}>
-              {liveStations.map((st: any) => {
-                const isActive = activeStation?.id === st.id;
-                const isStationPlaying = isActive && isPlaying;
-                const isLoadingStation = loadingStationId === st.id;
-                const creatorCtaLabel = getLiveStationCreatorCtaLabel(st);
-                const creatorLabel = getLiveStationCreatorLabel(st);
-                const genreLabel = getLiveStationGenreLabel(st);
-                const coverImageCandidates = getLiveStationCoverImageCandidates(st);
-                const coverImageUrl = coverImageCandidates[0] || "";
-                const fallbackCoverImageUrl = coverImageCandidates[1] || "";
-                return (
-                  <TouchableOpacity
-                    key={st.id}
-                    activeOpacity={1}
-                    onPress={() => void handleLiveStationPress(st)}
-                    style={[
-                      styles.radioCard,
-                      {
-                        backgroundColor: isActive ? (colors.primary + "18") : (isDark ? "#0F172A" : "#F8FAFC"),
-                        borderColor: isActive ? colors.primary : (isDark ? "#334155" : "#E2E8F0"),
-                      },
-                    ]}
-                  >
-                    <View style={styles.radioCardArtworkFrame}>
-                      <View style={[StyleSheet.absoluteFillObject, styles.radioCardArtworkPlaceholder, { backgroundColor: colors.primary + "12" }]}>
-                        <Ionicons name="radio" size={30} color={colors.primary} />
-                      </View>
-                      {coverImageUrl || fallbackCoverImageUrl ? (
-                        <CachedImage
-                          uri={coverImageUrl || undefined}
-                          fallbackUri={fallbackCoverImageUrl || undefined}
-                          style={styles.radioCardArtwork}
-                          contentFit="cover"
-                          transition={0}
-                          disableRecyclingKey
-                          width={320}
-                          height={220}
-                        />
-                      ) : null}
-                      {isLoadingStation ? (
-                        <View style={{ position: "absolute", top: 8, right: 8 }}>
-                          <ActivityIndicator size="small" color={colors.primary} />
-                        </View>
-                      ) : null}
-                      {isStationPlaying && (
-                        <View style={{ position: "absolute", top: 8, right: 8, backgroundColor: "#ef4444", borderRadius: 999, paddingHorizontal: 8, paddingVertical: 4, flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                          <View style={{ width: 4, height: 4, backgroundColor: '#fff', borderRadius: 2 }} />
-                          <Text style={{ color: "#fff", fontSize: 9, fontWeight: "800", letterSpacing: 0.5 }}>LIVE</Text>
-                        </View>
-                      )}
-                      {genreLabel ? (
-                        <View style={{ position: 'absolute', bottom: 8, left: 8, backgroundColor: 'rgba(0,0,0,0.65)', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 4 }}>
-                          <Text style={{ color: '#fff', fontSize: moderateScale(9), fontWeight: "600", letterSpacing: 0.2 }}>{genreLabel}</Text>
-                        </View>
-                      ) : null}
-                    </View>
-                    
-                    <View style={styles.radioCardContent}>
-                      <Text style={{ color: colors.text, fontSize: moderateScale(13), fontWeight: "700", marginBottom: 2 }} numberOfLines={1}>{st.name}</Text>
-                      <Text style={{ color: colors.textSecondary, fontSize: moderateScale(11) }} numberOfLines={1}>
-                        {creatorLabel}
-                      </Text>
-                      <Text style={{ color: colors.textSecondary, fontSize: moderateScale(10), marginTop: 2, marginBottom: 8 }} numberOfLines={1}>
-                        {st.slot_count || 0} playlist{st.slot_count === 1 ? "" : "s"}
-                      </Text>
-
-                      {creatorCtaLabel ? (
-                        <TouchableOpacity
-                          activeOpacity={1}
-                          onPress={(event) => {
-                            event.stopPropagation();
-                            openLiveStationCreator(st);
-                          }}
-                          style={[
-                            styles.radioCardLink,
-                            {
-                              backgroundColor: isDark ? "#1E293B" : "#E2E8F0",
-                            },
-                          ]}
-                        >
-                          <Text style={[styles.radioCardLinkText, { color: isDark ? "#E2E8F0" : "#0F172A" }]} numberOfLines={1}>
-                            {creatorCtaLabel}
-                          </Text>
-                        </TouchableOpacity>
-                      ) : null}
-                    </View>
-                  </TouchableOpacity>
-                );
-              })}
-            </ScrollView>
-          </View>
-        ) : null}
+        <LiveRadioCard
+          borderColor={colors.border}
+          cardColor={isDark ? "#0F172A" : "#F8FAFC"}
+          isDark={isDark}
+          primaryColor={colors.primary}
+          textColor={colors.text}
+          mutedTextColor={colors.textSecondary}
+        />
 
         {/* ── Feed tabs ── */}
         <SlidingTabBar
@@ -2491,17 +2802,11 @@ export default function FeedScreen() {
       </>
     );
   }, [
-    activeStation?.id,
+    colors.border,
     colors.primary,
     colors.text,
     colors.textSecondary,
-    handleLiveStationPress,
     isDark,
-    isLiveStationsLoading,
-    isPlaying,
-    liveStations,
-    loadingStationId,
-    openLiveStationCreator,
     openSearchSheet,
     tab,
   ]);
@@ -2523,22 +2828,14 @@ export default function FeedScreen() {
           <Skeleton width="100%" height={48} borderRadius={16} />
         </View>
 
-        <View style={[styles.feedSkeletonRadioWrap, { backgroundColor: cardBg }]}>
-          <Skeleton width={118} height={18} style={{ marginLeft: 14, marginBottom: 10 }} />
-          <View style={styles.feedSkeletonRadioRow}>
-            {[1, 2, 3].map((item) => (
-              <View
-                key={`feed-radio-skeleton-${item}`}
-                style={[styles.feedSkeletonRadioCard, { backgroundColor: isDark ? "#0F172A" : "#F8FAFC", borderColor: skeletonBorder }]}
-              >
-                <Skeleton width="100%" height={110} borderRadius={0} />
-                <View style={{ padding: 12 }}>
-                  <Skeleton width="86%" height={14} style={{ marginBottom: 6 }} />
-                  <Skeleton width="54%" height={12} style={{ marginBottom: 10 }} />
-                  <Skeleton width="100%" height={32} borderRadius={10} style={{ marginTop: 4 }} />
-                </View>
-              </View>
-            ))}
+        <View style={[styles.feedSkeletonLiveRadioWrap, { backgroundColor: cardBg }]}>
+          <View style={[styles.feedSkeletonLiveRadioCard, { backgroundColor: isDark ? "#0F172A" : "#F8FAFC", borderColor: skeletonBorder }]}>
+            <View style={{ flex: 1 }}>
+              <Skeleton width={92} height={14} style={{ marginBottom: 10 }} />
+              <Skeleton width="62%" height={18} style={{ marginBottom: 8 }} />
+              <Skeleton width="82%" height={12} />
+            </View>
+            <Skeleton width={86} height={40} borderRadius={999} />
           </View>
         </View>
 
@@ -2593,22 +2890,32 @@ export default function FeedScreen() {
     );
   };
 
+  const postAuthorIdsWithPosts = useMemo(
+    () =>
+      new Set(
+        posts
+          .map((post) => post?.author_id)
+          .filter((authorId): authorId is string => typeof authorId === "string" && authorId.length > 0),
+      ),
+    [posts],
+  );
+
   const feedItems = useMemo(() => {
     if (loading) return [];
     if (tab === "for_you" && posts.length === 0 && aiCards.length > 0) {
-      return aiCards;
+      return dedupeFeedItems(aiCards);
     }
     if (tab === "following" && followingEntities.length > 0) {
       const entitiesWithoutPosts = followingEntities.filter(
-        (entity) => entity.followed_type !== "profile" || !posts.some((post) => post.author_id === entity.id),
+        (entity) => entity.followed_type !== "profile" || !postAuthorIdsWithPosts.has(entity.id),
       );
 
       if (entitiesWithoutPosts.length > 0) {
-        return [...entitiesWithoutPosts, ...posts];
+        return dedupeFeedItems([...entitiesWithoutPosts, ...posts]);
       }
     }
-    return posts;
-  }, [aiCards, followingEntities, loading, posts, tab]);
+    return dedupeFeedItems(posts);
+  }, [aiCards, followingEntities, loading, postAuthorIdsWithPosts, posts, tab]);
 
   const isShowingAiCards = tab === "for_you" && posts.length === 0 && aiCards.length > 0;
   const showRecommendationLoadingState = tab === "for_you" && isAiCardsLoading;
@@ -2619,7 +2926,7 @@ export default function FeedScreen() {
     : NAVBAR_CLEARANCE + insets.bottom;
   const feedListHeader = useMemo(() => renderHeader(), [renderHeader]);
   const feedKeyExtractor = useCallback(
-    (item: any, index: number) => `${item.id || "row"}-${item.__feedKind || "post"}-${index}`,
+    (item: any, index: number) => getFeedItemListKey(item, index),
     [],
   );
   const feedSeparator = useCallback(
@@ -2736,8 +3043,8 @@ export default function FeedScreen() {
             <View style={styles.modalHeader}>
               <TouchableOpacity activeOpacity={1} onPress={() => setShowCreate(false)}><Ionicons name="close" size={24} color={colors.text} /></TouchableOpacity>
               <Text style={[styles.modalTitle, { color: colors.text }]}>Create Post</Text>
-              <TouchableOpacity activeOpacity={1}
-                style={[styles.postBtn, { backgroundColor: normalizeVisibleInput(postBody) ? colors.primary : colors.border, opacity: creating ? 0.6 : 1 }]}
+              <TouchableOpacity activeOpacity={creating || !normalizeVisibleInput(postBody) ? 1 : 0.78}
+                style={[styles.postBtn, { backgroundColor: normalizeVisibleInput(postBody) ? colors.primary : colors.border, opacity: creating || !normalizeVisibleInput(postBody) ? 0.6 : 1 }]}
                 onPress={handleCreatePost}
                 disabled={creating || !normalizeVisibleInput(postBody)}
               >
@@ -2810,21 +3117,18 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 10,
   },
-  feedSkeletonRadioWrap: {
-    paddingTop: 10,
-    paddingBottom: 12,
-  },
-  feedSkeletonRadioRow: {
-    flexDirection: "row",
-    gap: 10,
+  feedSkeletonLiveRadioWrap: {
     paddingHorizontal: 14,
+    paddingBottom: 10,
   },
-  feedSkeletonRadioCard: {
-    width: 160,
-    height: 190,
-    borderRadius: 16,
+  feedSkeletonLiveRadioCard: {
+    minHeight: 112,
+    borderRadius: 18,
     borderWidth: 1,
-    overflow: "hidden",
+    padding: 14,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
   },
   feedSkeletonTab: {
     flex: 1,
@@ -2886,107 +3190,383 @@ const styles = StyleSheet.create({
   composerFilterButton: { width: 48, height: 48, borderRadius: 16, alignItems: "center", justifyContent: "center" },
   composerMediaBtn: { padding: 4 },
 
+  liveRadioWrap: {
+    paddingHorizontal: 14,
+    paddingBottom: 10,
+  },
+  liveRadioCard: {
+    borderRadius: 16,
+    borderWidth: 1,
+    padding: 12,
+    flexDirection: "row",
+    alignItems: "stretch",
+    gap: 10,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 8 },
+    shadowRadius: 18,
+    elevation: 2,
+  },
+  liveRadioArtwork: {
+    width: 58,
+    borderRadius: 14,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  liveRadioArtworkInner: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  liveRadioContent: {
+    flex: 1,
+    minWidth: 0,
+  },
+  liveRadioTitleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    marginBottom: 6,
+  },
+  liveRadioIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  liveRadioTitle: {
+    flex: 1,
+    fontSize: moderateScale(12),
+    fontFamily: "Poppins_700Bold",
+    textTransform: "uppercase",
+    letterSpacing: 0,
+  },
+  liveRadioBadge: {
+    borderRadius: 999,
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    backgroundColor: "#EF4444",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+  },
+  liveRadioBadgeMuted: {
+    backgroundColor: "#64748B",
+  },
+  liveRadioBadgeDot: {
+    width: 5,
+    height: 5,
+    borderRadius: 2.5,
+    backgroundColor: "#FFFFFF",
+  },
+  liveRadioBadgeText: {
+    color: "#FFFFFF",
+    fontSize: moderateScale(8),
+    fontFamily: "Poppins_700Bold",
+  },
+  liveRadioStation: {
+    fontSize: moderateScale(16),
+    fontFamily: "Poppins_700Bold",
+    lineHeight: 21,
+  },
+  liveRadioSubtitle: {
+    fontSize: moderateScale(11),
+    fontFamily: "Poppins_400Regular",
+    lineHeight: 16,
+    marginTop: 2,
+  },
+  liveRadioMetaRow: {
+    marginTop: 9,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  liveRadioNowPlaying: {
+    flex: 1,
+    minWidth: 0,
+  },
+  liveRadioMetaLabel: {
+    fontSize: moderateScale(9),
+    fontFamily: "Poppins_500Medium",
+  },
+  liveRadioMetaValue: {
+    fontSize: moderateScale(11),
+    fontFamily: "Poppins_600SemiBold",
+    marginTop: 1,
+  },
+  liveRadioListeners: {
+    maxWidth: 94,
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    backgroundColor: "rgba(124,58,237,0.10)",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+  },
+  liveRadioListenerText: {
+    flexShrink: 1,
+    fontSize: moderateScale(9),
+    fontFamily: "Poppins_600SemiBold",
+  },
+  liveRadioPlayButton: {
+    width: 76,
+    minHeight: 44,
+    borderRadius: 14,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 4,
+    alignSelf: "center",
+  },
+  liveRadioPlayText: {
+    color: "#FFFFFF",
+    fontSize: moderateScale(11),
+    fontFamily: "Poppins_700Bold",
+  },
+
   /* Tabs */
   tabRow: { flexDirection: "row", borderBottomWidth: 1, marginTop: 6 },
   tab: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", paddingVertical: 12 },
   tabText: { fontSize: moderateScale(13), fontWeight: "600" },
 
-  aiCardContainer: {
+  socialPostCard: {
     marginHorizontal: 16,
-    marginTop: 4,
-  },
-  aiListingCard: {
-    width: "100%",
-    marginBottom: 12,
-  },
-  aiCardHeader: {
-    paddingHorizontal: 14,
+    borderRadius: 18,
+    borderWidth: 1,
     paddingTop: 12,
     paddingBottom: 10,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 6 },
+    shadowRadius: 16,
+    elevation: 2,
+  },
+  socialPostHeader: {
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
-    gap: 8,
+    paddingHorizontal: 12,
+    gap: 9,
   },
-  aiChip: {
+  socialAvatarWrap: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+  },
+  socialAvatar: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+  },
+  socialAvatarFallback: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  socialHeaderText: {
+    flex: 1,
+    minWidth: 0,
+  },
+  socialName: {
+    fontSize: moderateScale(14),
+    fontFamily: "Poppins_700Bold",
+    lineHeight: 19,
+  },
+  socialMetaRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    marginTop: 1,
+  },
+  socialMetaText: {
+    maxWidth: "48%",
+    fontSize: moderateScale(11),
+    fontFamily: "Poppins_400Regular",
+    lineHeight: 15,
+  },
+  socialMetaDot: {
+    fontSize: moderateScale(10),
+    lineHeight: 14,
+  },
+  socialFollowButton: {
+    minWidth: 68,
+    height: 32,
+    borderRadius: 999,
     borderWidth: 1,
+    paddingHorizontal: 10,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  socialFollowText: {
+    fontSize: moderateScale(10),
+    fontFamily: "Poppins_700Bold",
+  },
+  socialMenuButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  socialCaption: {
+    paddingHorizontal: 12,
+    paddingTop: 10,
+    fontSize: moderateScale(14),
+    fontFamily: "Poppins_400Regular",
+    lineHeight: 20,
+  },
+  socialMediaWrap: {
+    marginHorizontal: 12,
+    marginTop: 10,
+    borderRadius: 14,
+    overflow: "hidden",
+    backgroundColor: "#E2E8F0",
+    position: "relative",
+  },
+  socialMedia: {
+    width: "100%",
+    resizeMode: "cover",
+  },
+  socialMediaCount: {
+    position: "absolute",
+    right: 10,
+    top: 10,
     borderRadius: 999,
     paddingHorizontal: 8,
-    paddingVertical: 4,
+    paddingVertical: 5,
+    backgroundColor: "rgba(15,23,42,0.72)",
     flexDirection: "row",
     alignItems: "center",
     gap: 4,
   },
-  aiChipText: {
+  socialMediaCountText: {
+    color: "#FFFFFF",
     fontSize: moderateScale(10),
-    fontWeight: "700",
+    fontFamily: "Poppins_700Bold",
   },
-  aiScoreText: {
+  socialChipRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingTop: 10,
+  },
+  socialBadgeChip: {
+    borderRadius: 999,
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+  },
+  socialBadgeText: {
     fontSize: moderateScale(10),
-    fontWeight: "600",
+    fontFamily: "Poppins_700Bold",
   },
-  aiReasonText: {
-    paddingHorizontal: 14,
-    paddingBottom: 10,
-    fontSize: moderateScale(12),
-    lineHeight: 18,
-  },
-  aiFollowBtn: {
-    minHeight: 40,
-    borderRadius: 14,
+  socialPriceChip: {
+    borderRadius: 999,
     borderWidth: 1,
-    paddingHorizontal: 14,
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+    backgroundColor: "rgba(124,58,237,0.06)",
+  },
+  socialPriceText: {
+    fontSize: moderateScale(10),
+    fontFamily: "Poppins_700Bold",
+  },
+  socialLinkedCard: {
+    marginHorizontal: 12,
+    marginTop: 9,
+    borderRadius: 12,
+    borderWidth: 1,
+    paddingHorizontal: 10,
+    paddingVertical: 9,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  socialLinkedText: {
+    flex: 1,
+    fontSize: moderateScale(12),
+    fontFamily: "Poppins_600SemiBold",
+  },
+  socialEngagementRow: {
+    marginHorizontal: 12,
+    paddingTop: 10,
+    paddingBottom: 8,
+    borderBottomWidth: 1,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: 8,
+  },
+  socialEngagementLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+  },
+  socialLikeBubble: {
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: "#EF4444",
     alignItems: "center",
     justifyContent: "center",
-    alignSelf: "stretch",
   },
-  aiFollowText: {
+  socialEngagementText: {
+    fontSize: moderateScale(11),
+    fontFamily: "Poppins_400Regular",
+  },
+  socialActionRow: {
+    flexDirection: "row",
+    paddingHorizontal: 6,
+    paddingTop: 3,
+  },
+  socialActionButton: {
+    flex: 1,
+    minHeight: 38,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    borderRadius: 10,
+  },
+  socialActionText: {
     fontSize: moderateScale(12),
-    lineHeight: moderateScale(16),
-    fontWeight: "700",
-    includeFontPadding: false,
-    textAlignVertical: "center",
+    fontFamily: "Poppins_600SemiBold",
   },
-
-  /* Post card */
-  postCard: {
-    marginTop: 0,
-    marginHorizontal: 16,
-    borderRadius: 22,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.035,
-    shadowRadius: 10,
-    elevation: 1,
+  socialCtaRow: {
+    flexDirection: "row",
+    gap: 8,
+    paddingHorizontal: 12,
+    paddingTop: 8,
+  },
+  socialPrimaryCta: {
+    flex: 1,
+    minHeight: 38,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 12,
+  },
+  socialPrimaryCtaText: {
+    color: "#FFFFFF",
+    fontSize: moderateScale(12),
+    fontFamily: "Poppins_700Bold",
+  },
+  socialSecondaryCta: {
+    minWidth: 90,
+    minHeight: 38,
+    borderRadius: 12,
     borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 12,
   },
-  authorRow: { flexDirection: "row", alignItems: "center", padding: 14, paddingBottom: 6 },
-  avatarWrap: {},
-  authorAvatar: { width: 40, height: 40, borderRadius: 20 },
-  authorName: { fontSize: moderateScale(14), fontWeight: "700" },
-  postTime: { fontSize: moderateScale(11) },
-  followBtn: { borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 6 },
-  postBody: { fontSize: moderateScale(14), lineHeight: 22, paddingHorizontal: 14, paddingBottom: 10 },
-
-  /* Media */
-  mediaContainer: { marginHorizontal: 14, marginTop: 4, marginBottom: 8 },
-  mediaSingle: { width: "100%", height: 280, resizeMode: "cover", borderRadius: 16 },
-  mediaGrid: { flexDirection: "row", flexWrap: "wrap", borderRadius: 16, overflow: "hidden" },
-  mediaGridItem: { width: "50%", height: 180 },
-
-  /* Linked items */
-  linkedCard: { flexDirection: "row", alignItems: "center", marginHorizontal: 14, marginVertical: 6, padding: 10, borderWidth: 1, borderRadius: 10, gap: 8 },
-  linkedText: { fontSize: moderateScale(12), fontWeight: "600", flex: 1 },
-
-  /* Reaction summary row */
-  reactionSummary: { flexDirection: "row", alignItems: "center", paddingHorizontal: 14, paddingVertical: 8, borderBottomWidth: 0.5 },
-  likeBadge: { width: 18, height: 18, borderRadius: 9, backgroundColor: "#ef4444", alignItems: "center", justifyContent: "center" },
-  summaryText: { fontSize: moderateScale(12) },
-
-  /* Action bar */
-  actionBar: { flexDirection: "row", borderTopWidth: 0.5, paddingVertical: 4 },
-  actionBtn: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", paddingVertical: 8, gap: 5 },
-  actionLabel: { fontSize: moderateScale(12), fontWeight: "500" },
+  socialSecondaryCtaText: {
+    fontSize: moderateScale(12),
+    fontFamily: "Poppins_700Bold",
+  },
 
   /* Create-post modal (Facebook style) */
   modalOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "flex-end" },
@@ -3126,47 +3706,5 @@ const styles = StyleSheet.create({
   followingProfileBtnText: {
     fontSize: moderateScale(11),
     fontFamily: "Poppins_600SemiBold",
-  },
-
-  /* Radio cards */
-  radioCard: {
-    width: 160,
-    borderRadius: 16,
-    borderWidth: 1,
-    overflow: "hidden", // clip internal content nicely
-  },
-  radioCardArtworkFrame: {
-    width: "100%",
-    height: 110,
-    position: "relative",
-    backgroundColor: '#E2E8F0', // fallback loader background
-  },
-  radioCardArtwork: {
-    width: "100%",
-    height: "100%",
-    resizeMode: "cover",
-  },
-  radioCardArtworkPlaceholder: {
-    width: "100%",
-    height: "100%",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  radioCardContent: {
-    padding: 12,
-    paddingTop: 10,
-  },
-  radioCardLink: {
-    marginTop: 4,
-    minHeight: 38,
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  radioCardLinkText: {
-    fontSize: moderateScale(11),
-    fontFamily: "Poppins_600SemiBold",
-    textAlign: "center",
   },
 });

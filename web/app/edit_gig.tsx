@@ -189,7 +189,15 @@ export default function EditGigScreen() {
   const { id, reapply } = useLocalSearchParams<{
     id?: string | string[];
     reapply?: string | string[];
+    returnTab?: string | string[];
   }>();
+  const returnTab = useLocalSearchParams<{
+    returnTab?: string | string[];
+  }>().returnTab;
+  const returnTabParam = Array.isArray(returnTab) ? returnTab[0] : returnTab;
+  const normalizedReturnTab = ["About", "Applicants", "Review"].includes(returnTabParam || "")
+    ? returnTabParam || "About"
+    : "About";
   const reapplyParam = Array.isArray(reapply) ? reapply[0] : reapply;
   const isReapplyRequested =
     reapplyParam === "1" || reapplyParam === "true";
@@ -240,6 +248,19 @@ export default function EditGigScreen() {
     setAlertVisible(true);
   };
 
+  const handleReturnToTabs = useCallback(() => {
+    const gigId = Array.isArray(id) ? id[0] : id;
+    if (gigId) {
+      router.replace({
+        pathname: "/manage_gig",
+        params: { id: gigId, tab: normalizedReturnTab },
+      });
+      return;
+    }
+
+    router.replace("/my_venue");
+  }, [id, normalizedReturnTab]);
+
   const handleAttemptLeave = useCallback(() => {
     if (saving) return;
 
@@ -249,10 +270,10 @@ export default function EditGigScreen() {
       "Your current edits won't be saved unless you tap Save Changes.",
       [
         { text: "Stay", style: "cancel" },
-        { text: "Leave", style: "destructive", onPress: () => router.back() },
+        { text: "Leave", style: "destructive", onPress: handleReturnToTabs },
       ],
     );
-  }, [saving]);
+  }, [handleReturnToTabs, saving]);
 
   // Mock Data
   const [documents, setDocuments] = useState(["Contract.pdf", "Rider_v2.pdf"]);
@@ -593,8 +614,8 @@ export default function EditGigScreen() {
       setAddress(data.location);
       console.log('🔧 setAddress:', data.location);
 
-      setLatitude(data.latitude || null);
-      setLongitude(data.longitude || null);
+      setLatitude(data.latitude === null || data.latitude === undefined ? null : Number(data.latitude));
+      setLongitude(data.longitude === null || data.longitude === undefined ? null : Number(data.longitude));
       setCost(data.budget?.toString() || "");
       const schedulesFromRequirements = Array.isArray(data.requirements?.event_schedules)
         ? data.requirements.event_schedules
@@ -710,11 +731,11 @@ export default function EditGigScreen() {
       showAlert("error", "Required Field", "Please enter a description");
       return false;
     }
-    if (!address || !latitude || !longitude) {
+    if (!address.trim()) {
       showAlert(
         "error",
         "Required Field",
-        "Please select a location on the map",
+        "Please enter a venue address",
       );
       return false;
     }
@@ -748,7 +769,7 @@ export default function EditGigScreen() {
   const isFormComplete =
     gigName.trim().length > 0 &&
     description.trim().length > 0 &&
-    Boolean(address && latitude && longitude) &&
+    address.trim().length > 0 &&
     cost.trim().length > 0 &&
     Number.parseFloat(cost) > 0 &&
     images.length > 0 &&
@@ -1061,7 +1082,7 @@ export default function EditGigScreen() {
         {
           text: "OK",
           onPress: () => {
-            router.replace({ pathname: "/my_venue", params: { refresh: String(Date.now()) } });
+            handleReturnToTabs();
           },
         },
       ]);
@@ -2811,7 +2832,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
               <TouchableOpacity
                 onPress={handleContractUpload}
                 disabled={uploadingContract}
-                activeOpacity={1}
+                activeOpacity={uploadingContract ? 1 : 0.78}
                 style={[
                   styles.uploadContractBtn,
                   {
@@ -2855,12 +2876,13 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                     : isFormComplete
                       ? colors.primary
                       : colors.border,
+                  opacity: saving || !isFormComplete ? 0.6 : 1,
                   shadowColor: colors.primary,
                 },
               ]}
               onPress={handleSave}
               disabled={saving || !isFormComplete}
-              activeOpacity={1}
+              activeOpacity={saving || !isFormComplete ? 1 : 0.78}
             >
               {saving ? (
                 <ActivityIndicator size="small" color="#fff" />
@@ -2919,7 +2941,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
           setLocationPickerVisible(false);
         }}
         initialLocation={
-          latitude && longitude ? { lat: latitude, lng: longitude } : undefined
+          latitude !== null && longitude !== null ? { lat: latitude, lng: longitude } : undefined
         }
       />
     </>

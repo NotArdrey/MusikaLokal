@@ -44,6 +44,7 @@ import { emitFavoriteChanged } from "../utils/favoriteEvents";
 import { submitListingRequest, uploadListingRequestDocument } from "../utils/listingRequests";
 import { usePageLoadLogger } from "../utils/loadTimeLogger";
 import { bottomSheetSpringConfig } from "../utils/motion";
+import { isFanUserRole } from "../utils/roleRouting";
 import { getSmoothTabIndex, setSmoothTab } from "../utils/smoothTabs";
 import CustomAlert from "./CustomAlert";
 import DocumentUploader from "./DocumentUploader";
@@ -57,7 +58,6 @@ import GroupAboutTab from "./listingDetails/GroupAboutTab";
 import GroupConnectTab from "./listingDetails/GroupConnectTab";
 import GroupSetupTab from "./listingDetails/GroupSetupTab";
 import GroupTimelineTab from "./listingDetails/GroupTimelineTab";
-import ListingBottomBar from "./listingDetails/ListingBottomBar";
 import ListingContentBody from "./listingDetails/ListingContentBody";
 import ListingHeroSection from "./listingDetails/ListingHeroSection";
 import ReviewsTab from "./listingDetails/ReviewsTab";
@@ -93,6 +93,12 @@ interface ListingDetailsSheetProps {
   listingId: string | null;
   onDismiss?: () => void;
 }
+
+type ConfirmationSummaryItem = {
+  label: string;
+  value: string | number | null | undefined;
+  icon?: keyof typeof Ionicons.glyphMap;
+};
 
 const formatTime12 = (time24: string) => {
   if (!time24) return "";
@@ -439,6 +445,7 @@ const ListingDetailsSheet = forwardRef<
   const [confirmRequireTerms, setConfirmRequireTerms] = useState(false);
   const [confirmContractUrl, setConfirmContractUrl] = useState<string | null>(null);
   const [confirmContractName, setConfirmContractName] = useState<string | undefined>(undefined);
+  const [confirmSummaryItems, setConfirmSummaryItems] = useState<ConfirmationSummaryItem[]>([]);
 
   // BackHandler Logic
   const [sheetIndex, setSheetIndex] = useState(-1);
@@ -606,7 +613,12 @@ const ListingDetailsSheet = forwardRef<
     action: () => void,
     title: string,
     message: string,
-    options?: { requireTerms?: boolean; contractUrl?: string | null; contractName?: string },
+    options?: {
+      requireTerms?: boolean;
+      contractUrl?: string | null;
+      contractName?: string;
+      summaryItems?: ConfirmationSummaryItem[];
+    },
   ) => {
     debugLog("🔵 handleConfirm called");
 
@@ -653,6 +665,7 @@ const ListingDetailsSheet = forwardRef<
     setConfirmRequireTerms(Boolean(options?.requireTerms));
     setConfirmContractUrl(options?.contractUrl ?? null);
     setConfirmContractName(options?.contractName);
+    setConfirmSummaryItems(options?.summaryItems || []);
     setModalVisible(true);
     debugLog("Modal should now be visible");
   };
@@ -1029,11 +1042,16 @@ const ListingDetailsSheet = forwardRef<
     if (group.type === "Group") {
       try {
         const { data, error } = await supabase
-          .from("notifications")
-          .select("id, created_at")
-          .eq("user_id", userId)
-          .eq("title", "Group Application Submitted")
-          .contains("meta", { group_listing_id: listingId })
+          .from("booking_requests")
+          .select("id, created_at, status, event_details")
+          .eq("sender_id", userId)
+          .eq("group_id", listingId)
+          .in("status", ["pending", "accepted", "approved", "connected"])
+          .contains("event_details", {
+            type: "listing_connection_request",
+            request_kind: "application",
+            application_scope: "group_member",
+          })
           .order("created_at", { ascending: false })
           .limit(1)
           .maybeSingle();
@@ -1045,7 +1063,7 @@ const ListingDetailsSheet = forwardRef<
 
         if (data) {
           setHasExistingApplication(true);
-          setExistingApplicationStatus("pending");
+          setExistingApplicationStatus(data.status || "pending");
         } else {
           setHasExistingApplication(false);
           setExistingApplicationStatus(null);
@@ -2637,6 +2655,7 @@ const ListingDetailsSheet = forwardRef<
 
   const isGroupListing = group?.type === "Group";
   const effectiveUserRole = userRole || currentUserRole;
+  const isFan = isFanUserRole(effectiveUserRole);
   const isMusicianUser = effectiveUserRole === "musician";
   const hasStructuredConnectionTab =
     !isGuest &&
@@ -3454,10 +3473,10 @@ const ListingDetailsSheet = forwardRef<
             contextPlaceholder: "Share the project scope, schedule, and the kind of collaboration you want.",
           })}
           <TouchableOpacity
-            activeOpacity={1}
+            activeOpacity={isSendingRequest || loadingProductionTeams ? 1 : 0.78}
             onPress={handleInviteGroupToTeam}
             disabled={isSendingRequest || loadingProductionTeams}
-            style={[styles.primaryBtn, { backgroundColor: colors.primary, marginTop: 12 }]}
+            style={[styles.primaryBtn, { backgroundColor: colors.primary, marginTop: 12, opacity: isSendingRequest || loadingProductionTeams ? 0.6 : 1 }]}
           >
             {isSendingRequest ? (
               <View style={styles.loadingButtonContent}>
@@ -3485,10 +3504,10 @@ const ListingDetailsSheet = forwardRef<
             showRosterSelector: true,
           })}
           <TouchableOpacity
-            activeOpacity={1}
+            activeOpacity={isSendingRequest || loadingProductionTeams ? 1 : 0.78}
             onPress={handleApplyTeamToVenue}
             disabled={isSendingRequest || loadingProductionTeams}
-            style={[styles.primaryBtn, { backgroundColor: colors.primary, marginTop: 12 }]}
+            style={[styles.primaryBtn, { backgroundColor: colors.primary, marginTop: 12, opacity: isSendingRequest || loadingProductionTeams ? 0.6 : 1 }]}
           >
             {isSendingRequest ? (
               <View style={styles.loadingButtonContent}>
@@ -3667,7 +3686,7 @@ const ListingDetailsSheet = forwardRef<
               onToggleFavorite={toggleFavorite}
               onReport={handleReport}
               onShare={handleShare}
-              onChat={isGuest ? undefined : openListingChat}
+              onChat={isGuest || isFan ? undefined : openListingChat}
             />
 
             {/* TABS SELECTOR */}
@@ -3691,23 +3710,6 @@ const ListingDetailsSheet = forwardRef<
               renderGigInfo={renderGigInfo}
               renderGigApply={renderGigApply}
             />
-
-            {/* Bottom Bar for GROUP/Default only - Tabs have their own CTAs */}
-            {!isGuest && !showTabs && (
-              <ListingBottomBar
-                styles={styles}
-                colors={colors}
-                displayRate={effectiveDisplayRate}
-                labels={labels}
-                onReserve={() =>
-                  handleConfirm(
-                    () => debugLog("Group Reserved"),
-                    "Reserve Artist",
-                    "Confirm reservation request?",
-                  )
-                }
-              />
-            )}
           </BottomSheetScrollView>
         ) : null}
       </TrackedBottomSheetModal>
@@ -3754,6 +3756,7 @@ const ListingDetailsSheet = forwardRef<
           setConfirmRequireTerms(false);
           setConfirmContractUrl(null);
           setConfirmContractName(undefined);
+          setConfirmSummaryItems([]);
           setConfirmAction(() => () => { });
           setConfirmTitle("");
           setConfirmMessage("");
@@ -3766,6 +3769,7 @@ const ListingDetailsSheet = forwardRef<
           setConfirmRequireTerms(false);
           setConfirmContractUrl(null);
           setConfirmContractName(undefined);
+          setConfirmSummaryItems([]);
           setConfirmAction(() => () => { });
           setConfirmTitle("");
           setConfirmMessage("");
@@ -3783,6 +3787,7 @@ const ListingDetailsSheet = forwardRef<
         requireTermsAcceptance={confirmRequireTerms}
         contractUrl={confirmContractUrl}
         contractName={confirmContractName}
+        summaryItems={confirmSummaryItems}
       />
 
       {/* Payment Option Modal */}

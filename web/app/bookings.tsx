@@ -30,7 +30,7 @@ import SmoothTabTransition from "../src/components/SmoothTabTransition";
 import { useAuth } from "../src/context/AuthContext";
 import { useTheme } from "../src/context/ThemeContext";
 import { createBookingCheckout } from "../src/services/paymongo";
-import { formatFriendlyDateTime } from "../src/utils/friendlyDateTime";
+import { formatDashedNumericDate, formatFriendlyDateTime } from "../src/utils/friendlyDateTime";
 import {
   formatRecordingHours,
   formatRecordingRuleShort,
@@ -1693,7 +1693,7 @@ export default function BookingsScreen() {
               type_id: "booking_request",
               created_at: request.created_at,
               raw_date: request.created_at,
-              date: new Date(request.created_at).toLocaleDateString(),
+              date: formatDashedNumericDate(request.created_at),
               name: counterpartyName,
               image: counterpartyProfile?.avatar_url || REQUEST_PLACEHOLDER_IMAGE,
               status: getConnectionRequestStatusLabel(request.status),
@@ -2948,7 +2948,7 @@ export default function BookingsScreen() {
     const timePart = timeValue.substring(0, 5);
     const parsed = new Date(`${dateValue}T${timePart}`);
     if (isNaN(parsed.getTime())) return `${dateValue} ${timePart}`;
-    return `${parsed.toLocaleDateString()} • ${parsed.toLocaleTimeString([], {
+    return `${formatDashedNumericDate(parsed)} • ${parsed.toLocaleTimeString([], {
       hour: "2-digit",
       minute: "2-digit",
       hour12: true,
@@ -4289,7 +4289,7 @@ export default function BookingsScreen() {
                         </Text>
                       ) : null}
                       <Text style={{ fontSize: moderateScale(11), color: colors.textSecondary, marginTop: moderateScale(6) }}>
-                        {new Date(item.created_at || item.raw_date).toLocaleDateString()}
+                        {formatDashedNumericDate(item.created_at || item.raw_date)}
                       </Text>
 
                       {!isHistoryTabView && (item.request_contract_url || item.request_cv_url || item.request_video_url) && (

@@ -6,7 +6,7 @@ import { supabase } from '../lib/supabase';
 import CachedImage from '../src/components/CachedImage';
 import CustomAlert, { AlertType } from '../src/components/CustomAlert';
 import Header from '../src/components/header';
-import Modal from '../src/components/modal';
+import Modal, { normalizeConfirmationInput } from '../src/components/modal';
 import Navbar from '../src/components/navbar';
 import { useRequireAuth } from '../src/context/AuthContext';
 import { useTheme } from '../src/context/ThemeContext';
@@ -20,14 +20,6 @@ const normalizePermitStatus = (permitStatus: string | null | undefined) => {
     if (['rejected', 'declined'].includes(normalizedPermitStatus)) return 'rejected';
     return normalizedPermitStatus;
 };
-
-const normalizeDeleteConfirmation = (value: string) =>
-    String(value || '')
-        .normalize('NFKC')
-        .replace(/[\u200B-\u200D\uFEFF]/g, '')
-        .replace(/\s+/g, ' ')
-        .trim()
-        .toLowerCase();
 
 export default function MyStudioScreen() {
     const { colors, isDark } = useTheme();
@@ -208,8 +200,8 @@ export default function MyStudioScreen() {
     };
 
     const isDeleteConfirmed =
-        normalizeDeleteConfirmation(deleteConfirmationText) ===
-        normalizeDeleteConfirmation(selectedName);
+        normalizeConfirmationInput(deleteConfirmationText) ===
+        normalizeConfirmationInput(selectedName);
 
     const handleDelete = async () => {
         if (!selectedId || !userId || deleting) return;
@@ -425,6 +417,7 @@ export default function MyStudioScreen() {
                 inputPlaceholder="Type studio name"
                 inputValue={deleteConfirmationText}
                 onInputChange={setDeleteConfirmationText}
+                requiredInputValue={selectedName}
                 confirmDisabled={!isDeleteConfirmed || deleting}
             />
             <CustomAlert

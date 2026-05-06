@@ -868,10 +868,13 @@ const GigApplyTab = ({
         </View>
       )}
 
-      <TouchableOpacity activeOpacity={1}
+      <TouchableOpacity activeOpacity={isSubmitDisabled ? 1 : 0.78}
         style={[
           styles.primaryBtn,
-          { backgroundColor: isSubmitDisabled ? colors.border : colors.primary },
+          {
+            backgroundColor: isSubmitDisabled ? colors.border : colors.primary,
+            opacity: isSubmitDisabled ? 0.6 : 1,
+          },
         ]}
         onPress={() => {
           debugLog("🟡 SUBMIT APPLICATION BUTTON PRESSED - Validating...");

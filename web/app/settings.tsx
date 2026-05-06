@@ -9,6 +9,7 @@ import Modal from '../src/components/modal';
 import Navbar from '../src/components/navbar';
 import { useAuth } from '../src/context/AuthContext';
 import { useTheme } from '../src/context/ThemeContext';
+import { isFanUserRole } from '../src/utils/roleRouting';
 
 const RECENTLY_VIEWED_STORAGE_KEY = 'recently_viewed_items';
 const PENDING_REOPEN_LISTING_STORAGE_KEY = 'pending_reopen_listing_id';
@@ -128,8 +129,7 @@ export default function SettingsScreen() {
     router.replace('/');
   };
 
-  // Check if user is studio/venue owner (shows wallet)
-  const isOwner = userRole === 'studio-owner' || userRole === 'venue-owner';
+  const isFan = isFanUserRole(userRole);
 
   const settingsSections: Array<{
     title: string;
@@ -142,9 +142,7 @@ export default function SettingsScreen() {
       items: [
         { label: 'Account Security', icon: 'shield-outline', route: '/account_details' },
         { label: 'Identity Verification', icon: 'card-outline', route: '/identity_verification' },
-        ...(isOwner
-          ? [{ label: 'Wallet', icon: 'wallet-outline', route: '/wallet' }]
-          : [{ label: 'Wallet', icon: 'wallet-outline', route: '/wallet' }]),
+        ...(!isFan ? [{ label: 'Wallet', icon: 'wallet-outline', route: '/wallet' }] : []),
       ],
     });
   }

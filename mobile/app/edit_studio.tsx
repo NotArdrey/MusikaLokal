@@ -28,6 +28,7 @@ import Modal from "../src/components/modal";
 import Navbar from "../src/components/navbar";
 import { useTheme } from "../src/context/ThemeContext";
 import { buildNotificationRouteMeta } from "../src/utils/notificationNavigation";
+import { formatDashedNumericDate } from "../src/utils/friendlyDateTime";
 import {
   formatRecordingRuleSentence,
   formatRecordingRuleShort,
@@ -98,6 +99,31 @@ const formatTimeInput = (text: string): string => {
 const TITLE_MAX_LENGTH = 120;
 const DESCRIPTION_MAX_LENGTH = 1000;
 
+const formatSupabaseError = (error: any): string => {
+  const parts = [
+    error?.message,
+    error?.details ? `Details: ${error.details}` : null,
+    error?.hint ? `Hint: ${error.hint}` : null,
+    error?.code ? `Code: ${error.code}` : null,
+  ].filter(Boolean);
+
+  return parts.join("\n") || "Unknown error";
+};
+
+const logActionError = (
+  context: string,
+  error: any,
+  extra?: Record<string, unknown>,
+) => {
+  console.error(`[${context}]`, {
+    message: error?.message || String(error),
+    code: error?.code,
+    details: error?.details,
+    hint: error?.hint,
+    extra,
+  });
+};
+
 const canonicalizeStudioType = (
   value: unknown,
 ): "Rehearsal" | "Recording" | null => {
@@ -117,6 +143,16 @@ const resolveStudioTypeRows = (value: unknown): ("Rehearsal" | "Recording")[] =>
 
   const singleType = canonicalizeStudioType(value);
   return singleType ? [singleType] : [];
+};
+
+const normalizeStudioTypeColumnValue = (
+  value: unknown,
+): "Rehearsal" | "Recording" | "Both" | null => {
+  if (typeof value === "string" && value.trim().toLowerCase() === "both") {
+    return "Both";
+  }
+
+  return canonicalizeStudioType(value);
 };
 
 const parsePositiveInteger = (value: unknown): number | null => {
@@ -188,11 +224,6 @@ const insertStudioInstrumentRows = async (
     return error;
   }
 
-  console.warn(
-    "studio_instruments detail columns are missing in the live schema; retrying without quantity/description.",
-    error,
-  );
-
   const { error: fallbackError } = await supabase
     .from("studio_instruments")
     .insert(buildStudioInstrumentRows(studioId, instruments, false));
@@ -254,7 +285,7 @@ const buildPromotionDescription = (
 
 const getAllowedPromotionTargets = (
   type: "Rehearsal" | "Recording" | "Both",
-): Array<"rehearsal" | "recording" | "both"> => {
+): ("rehearsal" | "recording" | "both")[] => {
   if (type === "Rehearsal") return ["rehearsal"];
   if (type === "Recording") return ["recording"];
   return ["both", "rehearsal", "recording"];
@@ -358,6 +389,13 @@ export default function EditStudioScreen() {
   const { id } = useLocalSearchParams<{
     id?: string | string[];
   }>();
+  const returnTab = useLocalSearchParams<{
+    returnTab?: string | string[];
+  }>().returnTab;
+  const returnTabParam = Array.isArray(returnTab) ? returnTab[0] : returnTab;
+  const normalizedReturnTab = ["About", "Setup", "Bookings", "Review"].includes(returnTabParam || "")
+    ? returnTabParam || "About"
+    : "About";
   const [studioName, setStudioName] = useState("");
   const [description, setDescription] = useState("");
   const [address, setAddress] = useState("");
@@ -444,6 +482,19 @@ export default function EditStudioScreen() {
     setAlertVisible(true);
   };
 
+  const handleReturnToTabs = useCallback(() => {
+    const studioId = Array.isArray(id) ? id[0] : id;
+    if (studioId) {
+      router.replace({
+        pathname: "/manage_studio",
+        params: { id: studioId, tab: normalizedReturnTab },
+      });
+      return;
+    }
+
+    router.replace("/my_studio");
+  }, [id, normalizedReturnTab]);
+
   const handleAttemptLeave = useCallback(() => {
     if (saving) return;
 
@@ -453,10 +504,10 @@ export default function EditStudioScreen() {
       "Your current edits won't be saved unless you tap Save Changes.",
       [
         { text: "Stay", style: "cancel" },
-        { text: "Leave", style: "destructive", onPress: () => router.back() },
+        { text: "Leave", style: "destructive", onPress: handleReturnToTabs },
       ],
     );
-  }, [saving]);
+  }, [handleReturnToTabs, saving]);
 
   const toggleCalendarDate = (dateStr: string) => {
     setSelectedDates((prev) => {
@@ -1042,6 +1093,7 @@ export default function EditStudioScreen() {
       if (studioMediaError) throw studioMediaError;
       if (studioSettingsError) throw studioSettingsError;
       if (operatingHoursError) throw operatingHoursError;
+      if (studioPromotionsError) throw studioPromotionsError;
 
       const dayIndexToName = [
         'Sunday',
@@ -1354,7 +1406,11 @@ export default function EditStudioScreen() {
         .order("slot_order", { ascending: true })
         .gte("override_date", new Date().toISOString().split("T")[0]); // Only future dates
 
-      if (!overridesError && dateOverrides && dateOverrides.length > 0) {
+      if (overridesError) {
+        throw overridesError;
+      }
+
+      if (dateOverrides && dateOverrides.length > 0) {
         // Helper function to convert 24-hour to 12-hour format
         const convertTo12Hour = (time24: string) => {
           if (!time24 || !time24.includes(":")) return "09:00 AM";
@@ -1497,12 +1553,14 @@ export default function EditStudioScreen() {
       } else {
       }
     } catch (e) {
-      console.error("❌ ===== FETCH STUDIO DETAILS FAILED =====");
-      console.error("❌ Error timestamp:", new Date().toISOString());
-      console.error("❌ Error object:", e);
-      console.error("❌ Error message:", (e as any)?.message);
-      console.error("❌ Error stack:", (e as any)?.stack);
-      showAlert("warning", "Couldn't Load Details", "Failed to load studio details.");
+      logActionError("edit_studio.fetch_details_failed", e, {
+        studioId: Array.isArray(id) ? id[0] : id,
+      });
+      showAlert(
+        "warning",
+        "Couldn't Load Details",
+        `Failed to load studio details: ${formatSupabaseError(e)}`,
+      );
       router.replace("/home");
     } finally {
       setLoading(false);
@@ -2088,11 +2146,13 @@ export default function EditStudioScreen() {
 
       await executeSave();
     } catch (e: any) {
-      console.error("❌ Error checking bookings:", e);
+      logActionError("edit_studio.preflight_failed", e, {
+        studioId: Array.isArray(id) ? id[0] : id,
+      });
       showAlert(
         "warning",
         "Couldn't Save Studio",
-        `Failed to save: ${e?.message || "Unknown error"}`,
+        `Failed to save: ${formatSupabaseError(e)}`,
       );
       setSaving(false);
     }
@@ -2272,16 +2332,24 @@ export default function EditStudioScreen() {
             (c) => c.id === resolution.bookingId,
           );
           if (conflict) {
-            await supabase.from("notifications").insert({
+            const { error: notificationError } = await supabase.from("notifications").insert({
               user_id: conflict.user_id,
               type: "warning",
               title: "Booking Cancelled",
-              message: `Your booking at ${studioName} on ${new Date(conflict.booking_date).toLocaleDateString()} has been cancelled due to schedule changes. You will receive a refund.`,
+              message: `Your booking at ${studioName} on ${formatDashedNumericDate(conflict.booking_date)} has been cancelled due to schedule changes. You will receive a refund.`,
               meta: buildNotificationRouteMeta("/bookings", undefined, {
                 bookingId: resolution.bookingId,
                 studioId,
               }),
             });
+            if (notificationError) {
+              logActionError("edit_studio.cancel_booking_notification_failed", notificationError, {
+                bookingId: resolution.bookingId,
+                studioId,
+                userId: conflict.user_id,
+              });
+              throw new Error(`Failed to notify booking customer: ${formatSupabaseError(notificationError)}`);
+            }
           }
         } else if (resolution.action === "move" && resolution.newSlot) {
           const targetSlots = getEditedAvailableSlotsForDate(
@@ -2369,7 +2437,7 @@ export default function EditStudioScreen() {
 
           if (hasHoldOverlap) {
             throw new Error(
-              "Selected move slot is currently reserved in another user's checkout hold.",
+              "Selected move slot is currently held in another user's checkout.",
             );
           }
 
@@ -2401,11 +2469,11 @@ export default function EditStudioScreen() {
             (c) => c.id === resolution.bookingId,
           );
           if (conflict) {
-            await supabase.from("notifications").insert({
+            const { error: notificationError } = await supabase.from("notifications").insert({
               user_id: conflict.user_id,
               type: "warning",
               title: "Booking Relocation Request",
-              message: `Your booking at ${studioName} needs relocation to ${new Date(resolution.newSlot.date).toLocaleDateString()} at ${resolution.newSlot.start_time}. Please accept within 24 hours or your booking will be cancelled and refunded.`,
+              message: `Your booking at ${studioName} needs relocation to ${formatDashedNumericDate(resolution.newSlot.date)} at ${resolution.newSlot.start_time}. Please accept within 24 hours or your booking will be cancelled and refunded.`,
               meta: buildNotificationRouteMeta("/bookings", undefined, {
                 bookingId: resolution.bookingId,
                 studioId,
@@ -2418,6 +2486,14 @@ export default function EditStudioScreen() {
                 },
               }),
             });
+            if (notificationError) {
+              logActionError("edit_studio.relocation_notification_failed", notificationError, {
+                bookingId: resolution.bookingId,
+                studioId,
+                userId: conflict.user_id,
+              });
+              throw new Error(`Failed to notify booking customer: ${formatSupabaseError(notificationError)}`);
+            }
           }
         }
       }
@@ -2429,11 +2505,13 @@ export default function EditStudioScreen() {
       // Now save the studio changes
       await executeSave();
     } catch (e: any) {
-      console.error("Error resolving conflicts:", e);
+      logActionError("edit_studio.resolve_conflicts_failed", e, {
+        studioId: Array.isArray(id) ? id[0] : id,
+      });
       showAlert(
         "warning",
         "Couldn't Save Studio",
-        `Failed to resolve conflicts: ${e?.message || "Unknown error"}`,
+        `Failed to resolve conflicts: ${formatSupabaseError(e)}`,
       );
       setSaving(false);
     }
@@ -2618,6 +2696,7 @@ export default function EditStudioScreen() {
           permit_admin_notes: null,
           permit_reviewed_by: null,
           permit_reviewed_at: null,
+          studio_type: normalizeStudioTypeColumnValue(payload.type),
         })
         .eq('id', studioId)
         .eq('owner_id', user.id)
@@ -2626,7 +2705,11 @@ export default function EditStudioScreen() {
 
 
       if (updateError) {
-        console.error("❌ Error details:", JSON.stringify(updateError, null, 2));
+        logActionError("edit_studio.update_base_failed", updateError, {
+          studioId,
+          userId: user.id,
+          studioType: payload.type,
+        });
         let alertMessage = `Failed to update studio: ${updateError.message}`;
         if (updateError.hint) alertMessage += `\n\nHint: ${updateError.hint}`;
         if (updateError.details) alertMessage += `\n\nDetails: ${updateError.details}`;
@@ -2636,7 +2719,14 @@ export default function EditStudioScreen() {
       setPermitStatus("approved");
       setPermitRejectionReason("");
 
-      await supabase.from('studio_types').delete().eq('studio_id', studioId);
+      const { error: deleteTypesError } = await supabase
+        .from('studio_types')
+        .delete()
+        .eq('studio_id', studioId);
+      if (deleteTypesError) {
+        logActionError("edit_studio.clear_types_failed", deleteTypesError, { studioId });
+        throw new Error(`Failed to clear studio types: ${formatSupabaseError(deleteTypesError)}`);
+      }
       const normalizedTypes = resolveStudioTypeRows(payload.type);
       if (normalizedTypes.length > 0) {
         const { error: typeError } = await supabase
@@ -2648,11 +2738,22 @@ export default function EditStudioScreen() {
             })),
           );
         if (typeError) {
-          throw new Error(`Failed to sync studio types: ${typeError.message}`);
+          logActionError("edit_studio.save_types_failed", typeError, {
+            studioId,
+            types: normalizedTypes,
+          });
+          throw new Error(`Failed to sync studio types: ${formatSupabaseError(typeError)}`);
         }
       }
 
-      await supabase.from('studio_amenities').delete().eq('studio_id', studioId);
+      const { error: deleteAmenitiesError } = await supabase
+        .from('studio_amenities')
+        .delete()
+        .eq('studio_id', studioId);
+      if (deleteAmenitiesError) {
+        logActionError("edit_studio.clear_amenities_failed", deleteAmenitiesError, { studioId });
+        throw new Error(`Failed to clear studio amenities: ${formatSupabaseError(deleteAmenitiesError)}`);
+      }
       if ((payload.amenities || []).length > 0) {
         const { error: amenitiesError } = await supabase
           .from('studio_amenities')
@@ -2663,22 +2764,45 @@ export default function EditStudioScreen() {
             })),
           );
         if (amenitiesError) {
-          throw new Error(`Failed to sync studio amenities: ${amenitiesError.message}`);
+          logActionError("edit_studio.save_amenities_failed", amenitiesError, {
+            studioId,
+            amenities: payload.amenities,
+          });
+          throw new Error(`Failed to sync studio amenities: ${formatSupabaseError(amenitiesError)}`);
         }
       }
 
-      await supabase.from('studio_instruments').delete().eq('studio_id', studioId);
+      const { error: deleteInstrumentsError } = await supabase
+        .from('studio_instruments')
+        .delete()
+        .eq('studio_id', studioId);
+      if (deleteInstrumentsError) {
+        logActionError("edit_studio.clear_instruments_failed", deleteInstrumentsError, { studioId });
+        throw new Error(`Failed to clear studio instruments: ${formatSupabaseError(deleteInstrumentsError)}`);
+      }
       if ((payload.instruments || []).length > 0) {
         const instrumentsError = await insertStudioInstrumentRows(
           studioId,
           payload.instruments,
         );
         if (instrumentsError) {
-          throw new Error(`Failed to sync studio instruments: ${instrumentsError.message}`);
+          logActionError("edit_studio.save_instruments_failed", instrumentsError, {
+            studioId,
+            count: payload.instruments.length,
+          });
+          throw new Error(`Failed to sync studio instruments: ${formatSupabaseError(instrumentsError)}`);
         }
       }
 
-      await supabase.from('studio_media').delete().eq('studio_id', studioId).eq('media_type', 'image');
+      const { error: deleteMediaError } = await supabase
+        .from('studio_media')
+        .delete()
+        .eq('studio_id', studioId)
+        .eq('media_type', 'image');
+      if (deleteMediaError) {
+        logActionError("edit_studio.clear_images_failed", deleteMediaError, { studioId });
+        throw new Error(`Failed to clear studio images: ${formatSupabaseError(deleteMediaError)}`);
+      }
       if ((payload.images || []).length > 0) {
         const { error: mediaError } = await supabase
           .from('studio_media')
@@ -2691,12 +2815,16 @@ export default function EditStudioScreen() {
             })),
           );
         if (mediaError) {
-          throw new Error(`Failed to sync studio images: ${mediaError.message}`);
+          logActionError("edit_studio.save_images_failed", mediaError, {
+            studioId,
+            imageCount: payload.images.length,
+          });
+          throw new Error(`Failed to sync studio images: ${formatSupabaseError(mediaError)}`);
         }
       }
 
       // Update studio settings
-      await supabase
+      const { error: settingsError } = await supabase
         .from('studio_settings')
         .upsert({
           studio_id: studioId,
@@ -2719,9 +2847,20 @@ export default function EditStudioScreen() {
             3,
           recording_rate_negotiable: false,
         }, { onConflict: 'studio_id' });
+      if (settingsError) {
+        logActionError("edit_studio.save_settings_failed", settingsError, { studioId });
+        throw new Error(`Failed to save booking settings: ${formatSupabaseError(settingsError)}`);
+      }
 
       // Update promotions (delete-and-re-insert)
-      await supabase.from('studio_promotions').delete().eq('studio_id', studioId);
+      const { error: deletePromotionsError } = await supabase
+        .from('studio_promotions')
+        .delete()
+        .eq('studio_id', studioId);
+      if (deletePromotionsError) {
+        logActionError("edit_studio.clear_promotions_failed", deletePromotionsError, { studioId });
+        throw new Error(`Failed to clear promotions: ${formatSupabaseError(deletePromotionsError)}`);
+      }
       if (promotions.length > 0) {
         const { error: promosError } = await supabase
           .from('studio_promotions')
@@ -2745,7 +2884,11 @@ export default function EditStudioScreen() {
             })),
           );
         if (promosError) {
-          console.warn("Failed to save promotions:", promosError.message);
+          logActionError("edit_studio.save_promotions_failed", promosError, {
+            studioId,
+            count: promotions.length,
+          });
+          throw new Error(`Failed to save promotions: ${formatSupabaseError(promosError)}`);
         }
       }
 
@@ -2755,8 +2898,9 @@ export default function EditStudioScreen() {
         .delete()
         .eq('studio_id', studioId);
       if (deleteOperatingHoursError) {
+        logActionError("edit_studio.clear_operating_hours_failed", deleteOperatingHoursError, { studioId });
         throw new Error(
-          `Failed to clear weekly schedule: ${deleteOperatingHoursError.message}`,
+          `Failed to clear weekly schedule: ${formatSupabaseError(deleteOperatingHoursError)}`,
         );
       }
 
@@ -2794,8 +2938,12 @@ export default function EditStudioScreen() {
           .from('studio_operating_hours')
           .insert(operatingHours);
         if (operatingHoursError) {
+          logActionError("edit_studio.save_operating_hours_failed", operatingHoursError, {
+            studioId,
+            rowCount: operatingHours.length,
+          });
           throw new Error(
-            `Failed to save weekly schedule: ${operatingHoursError.message}`,
+            `Failed to save weekly schedule: ${formatSupabaseError(operatingHoursError)}`,
           );
         }
       }
@@ -2806,8 +2954,9 @@ export default function EditStudioScreen() {
         .delete()
         .eq('studio_id', studioId);
       if (deleteDateOverridesError) {
+        logActionError("edit_studio.clear_date_overrides_failed", deleteDateOverridesError, { studioId });
         throw new Error(
-          `Failed to clear calendar availability: ${deleteDateOverridesError.message}`,
+          `Failed to clear calendar availability: ${formatSupabaseError(deleteDateOverridesError)}`,
         );
       }
 
@@ -2839,8 +2988,12 @@ export default function EditStudioScreen() {
             .from('studio_date_overrides')
             .insert(dateOverrides);
           if (dateOverridesError) {
+            logActionError("edit_studio.save_date_overrides_failed", dateOverridesError, {
+              studioId,
+              rowCount: dateOverrides.length,
+            });
             throw new Error(
-              `Failed to save calendar availability: ${dateOverridesError.message}`,
+              `Failed to save calendar availability: ${formatSupabaseError(dateOverridesError)}`,
             );
           }
         }
@@ -2859,22 +3012,18 @@ export default function EditStudioScreen() {
         {
           text: "OK",
           onPress: () => {
-            router.replace({ pathname: "/my_studio", params: { refresh: String(Date.now()) } });
+            handleReturnToTabs();
           },
         },
       ]);
     } catch (e: any) {
-      console.error("❌ Error updating studio:", e);
-      console.error("❌ Error message:", e?.message);
-      console.error("❌ Error stack:", e?.stack);
-      console.error(
-        "❌ Full error object:",
-        JSON.stringify(e, Object.getOwnPropertyNames(e), 2),
-      );
+      logActionError("edit_studio.save_failed", e, {
+        studioId: Array.isArray(id) ? id[0] : id,
+      });
       showAlert(
         "warning",
         "Couldn't Save Studio",
-        `Failed to update studio: ${e?.message || "Unknown error"}`,
+        `Failed to update studio: ${formatSupabaseError(e)}`,
       );
     } finally {
       setSaving(false);
@@ -3141,8 +3290,7 @@ export default function EditStudioScreen() {
 
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: "images",
-        allowsEditing: true,
-        aspect: [1, 1],
+        allowsEditing: false,
         quality: 0.8,
       });
 
@@ -3527,6 +3675,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                       minWidth: 80,
                       textAlign: "center",
                       paddingVertical: 16,
+                      textAlignVertical: "center",
                     }}
                   />
                   <Text
@@ -3598,6 +3747,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                       minWidth: 80,
                       textAlign: "center",
                       paddingVertical: 16,
+                      textAlignVertical: "center",
                     }}
                   />
                   <Text
@@ -3654,6 +3804,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                         fontFamily: "Poppins_500Medium",
                         fontSize: 15,
                         paddingVertical: 14,
+                        textAlignVertical: "center",
                       }}
                     />
                     <Text
@@ -3718,6 +3869,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                         fontFamily: "Poppins_500Medium",
                         fontSize: 15,
                         paddingVertical: 14,
+                        textAlignVertical: "center",
                       }}
                     />
                     <Text
@@ -3877,6 +4029,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                     fontFamily: "Poppins_500Medium",
                     fontSize: 14,
                     marginBottom: 12,
+                    textAlignVertical: "center",
                   }}
                 />
 
@@ -3923,6 +4076,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                     fontFamily: "Poppins_500Medium",
                     fontSize: 14,
                     marginBottom: 12,
+                    textAlignVertical: "center",
                   }}
                 />
 
@@ -3951,6 +4105,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                         color: colors.text,
                         fontFamily: "Poppins_500Medium",
                         fontSize: 14,
+                        textAlignVertical: "center",
                       }}
                     />
                   </View>
@@ -3978,6 +4133,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                         color: colors.text,
                         fontFamily: "Poppins_500Medium",
                         fontSize: 14,
+                        textAlignVertical: "center",
                       }}
                     />
                   </View>
@@ -4047,6 +4203,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                       color: colors.text,
                       fontFamily: "Poppins_500Medium",
                       fontSize: 14,
+                      textAlignVertical: "center",
                     }}
                   />
                   {promotionForm.discount_type === "percentage" && (
@@ -4299,6 +4456,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                   fontSize: 16,
                   textAlign: "left",
                   paddingVertical: 16,
+                  textAlignVertical: "center",
                 }}
               />
               <Text
@@ -4374,7 +4532,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
               <TouchableOpacity
                 onPress={handleContractUpload}
                 disabled={uploadingContract}
-                activeOpacity={1}
+                activeOpacity={uploadingContract ? 1 : 0.78}
                 style={[
                   styles.uploadContractBtn,
                   {
@@ -5611,12 +5769,13 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                     : isFormComplete
                       ? colors.primary
                       : colors.border,
+                  opacity: saving || !isFormComplete ? 0.6 : 1,
                   shadowColor: colors.primary,
                 },
               ]}
               onPress={handleSave}
               disabled={saving || !isFormComplete}
-              activeOpacity={1}
+              activeOpacity={saving || !isFormComplete ? 1 : 0.78}
             >
               {saving ? (
                 <ActivityIndicator size="small" color="#fff" />
@@ -5762,6 +5921,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                     fontFamily: "Poppins_400Regular",
                     borderWidth: 1,
                     borderColor: isDark ? "#374151" : "#E5E7EB",
+                    textAlignVertical: "center",
                   }}
                 />
               </View>
@@ -5797,6 +5957,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                     fontFamily: "Poppins_400Regular",
                     borderWidth: 1,
                     borderColor: isDark ? "#374151" : "#E5E7EB",
+                    textAlignVertical: "center",
                   }}
                 />
               </View>
@@ -5874,7 +6035,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                   <TouchableOpacity
                     onPress={pickEquipmentImage}
                     disabled={uploadingEquipmentImage}
-                    activeOpacity={1}
+                    activeOpacity={uploadingEquipmentImage ? 1 : 0.78}
                     style={{
                       backgroundColor: colors.inputBackground,
                       borderRadius: 12,

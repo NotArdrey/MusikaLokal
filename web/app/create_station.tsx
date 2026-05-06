@@ -144,6 +144,7 @@ export default function CreateStationScreen() {
   };
 
   const isSaveReady = canManageStations && name.trim().length > 0;
+  const isSaveDisabled = saving || !isSaveReady;
 
   if (loading) {
     return (
@@ -227,16 +228,16 @@ export default function CreateStationScreen() {
               </Text>
 
               <TouchableOpacity
-                activeOpacity={1}
+                activeOpacity={isSaveDisabled ? 1 : 0.78}
                 style={[
                   styles.saveBtn,
                   {
                     backgroundColor: isSaveReady ? colors.primary : colors.border,
-                    opacity: saving ? 0.6 : 1,
+                    opacity: isSaveDisabled ? 0.6 : 1,
                   },
                 ]}
                 onPress={handleSave}
-                disabled={saving || !isSaveReady}
+                disabled={isSaveDisabled}
               >
                 {saving ? (
                   <ActivityIndicator color="#fff" />

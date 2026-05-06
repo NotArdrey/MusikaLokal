@@ -18,7 +18,6 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { supabase } from '../lib/supabase';
 import CustomAlert, { AlertType } from '../src/components/CustomAlert';
 import GroupLinkedPlaylistsSection from '../src/components/GroupLinkedPlaylistsSection';
-import Modal from '../src/components/modal';
 import ReportModal from '../src/components/ReportModal';
 import Skeleton from '../src/components/Skeleton';
 import { useAuth } from '../src/context/AuthContext';
@@ -44,7 +43,6 @@ export default function GroupDetailsScreen() {
   const [loadingGroupPlaylists, setLoadingGroupPlaylists] = useState(false);
   const [isFavorited, setIsFavorited] = useState(false);
   const [favoriteCount, setFavoriteCount] = useState(0);
-  const [modalVisible, setModalVisible] = useState(false);
   const [alertVisible, setAlertVisible] = useState(false);
   const [showReportModal, setShowReportModal] = useState(false);
   const [alertConfig, setAlertConfig] = useState<{
@@ -333,6 +331,29 @@ export default function GroupDetailsScreen() {
   if (!group) return null;
 
   const isOwner = !!userId && group?.owner_id === userId;
+  const normalizedLinkedMembers = Array.isArray(group?.auxiliary?.group_members)
+    ? group.auxiliary.group_members.map((row: any) => {
+        const legacyMember = Array.isArray(group?.members)
+          ? group.members.find((member: any) => member?.user_id === row?.user_id)
+          : null;
+        const isLeader = row?.role === 'owner' || row?.user_id === group?.owner_id;
+
+        return {
+          user_id: row?.user_id,
+          name: row?.profiles?.full_name || legacyMember?.name || 'Member',
+          avatar_url: row?.profiles?.avatar_url || legacyMember?.avatar_url || null,
+          instrument: legacyMember?.instrument || (isLeader ? 'Leader' : row?.role || 'Member'),
+          role: isLeader ? 'Leader' : 'Member',
+        };
+      })
+    : [];
+  const displayMembers =
+    normalizedLinkedMembers.length > 0
+      ? normalizedLinkedMembers.sort((a: any, b: any) => (a.role === 'Leader' ? -1 : 1) - (b.role === 'Leader' ? -1 : 1))
+      : Array.isArray(group.members)
+        ? group.members
+        : [];
+  const displayMemberCount = displayMembers.length || Number(group.member_count || group.members_count || 0) || 0;
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
@@ -451,7 +472,7 @@ export default function GroupDetailsScreen() {
               <View style={styles.featureItem}>
                 <Ionicons name="people-outline" size={24} color={colors.text} />
                 <Text style={[styles.featureText, { color: colors.textSecondary }]}>
-                  {getGroupTypeLabel(group.group_type)} ({group.members?.length || '2'} Members)
+                  {getGroupTypeLabel(group.group_type)} ({displayMemberCount} Member{displayMemberCount === 1 ? '' : 's'})
                 </Text>
               </View>
             </View>
@@ -474,15 +495,15 @@ export default function GroupDetailsScreen() {
           <View style={[styles.divider, { backgroundColor: colors.border }]} />
 
           {/* Group Members Section */}
-          {group.members && group.members.length > 0 && (
+          {displayMembers.length > 0 && (
             <>
               <View style={styles.section}>
                 <Text style={[styles.sectionTitle, { color: colors.text }]}>{getGroupMembersLabel(group.group_type)}</Text>
                 <View style={{ gap: 12 }}>
-                  {group.members.map((member: any, index: number) => {
+                  {displayMembers.map((member: any, index: number) => {
                     const isLeader = isGroupLeaderMember(member, group.owner_id);
                     const memberName = typeof member === 'string' ? member : member.name;
-                    const memberInstrument = typeof member === 'string' ? member : member.instrument;
+                    const memberInstrument = typeof member === 'string' ? 'Member' : member.instrument;
                     return (
                       <View key={index} style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
                         <View style={{ 
@@ -526,31 +547,6 @@ export default function GroupDetailsScreen() {
             </Text>
           </View>
 
-          {/* Sticky Bottom Bar */}
-          <View style={[styles.bottomBar, { backgroundColor: colors.background, borderTopColor: colors.border, paddingBottom: insets.bottom + 16 }]}>
-            <View style={styles.priceContainer}>
-              <Text style={[styles.priceText, { color: colors.text }]}>
-                ₱{group.rate || '1,500'} <Text style={{ fontSize: 14, fontWeight: '400', color: colors.textSecondary }}>night</Text>
-              </Text>
-              <Text style={{ fontSize: 12, textDecorationLine: 'underline', color: colors.text, fontFamily: 'Poppins_600SemiBold' }}>
-                Oct 25 - 30
-              </Text>
-            </View>
-            <TouchableOpacity activeOpacity={1}
-              style={[styles.bookBtn, { backgroundColor: colors.primary }]}
-              onPress={() => setModalVisible(true)}
-            >
-              <Text style={styles.bookBtnText}>Reserve</Text>
-            </TouchableOpacity>
-          </View>
-
-          <Modal
-            visible={modalVisible}
-            onClose={() => setModalVisible(false)}
-            title="Confirm Booking"
-            message="This will send a booking request to the artist."
-            buttonText="Send Request"
-          />
           <CustomAlert
             visible={alertVisible}
             type={alertConfig.type}
@@ -583,7 +579,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   scrollContent: {
-    paddingBottom: 120, // Space for bottom bar
+    paddingBottom: 32,
   },
   imageContainer: {
     height: IMG_HEIGHT,

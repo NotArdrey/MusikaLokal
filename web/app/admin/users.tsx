@@ -96,9 +96,9 @@ const readErrorContextMessage = async (context: unknown): Promise<string | null>
 
 type Tab = 'dashboard' | 'users' | 'reports' | 'audit' | 'posts' | 'products';
 
-type UserRole = 'musician' | 'studio-owner' | 'venue-owner' | 'producer' | 'admin';
+type UserRole = 'fan' | 'musician' | 'studio-owner' | 'venue-owner' | 'producer' | 'admin';
 
-type UserFilter = 'all' | 'musicians' | 'studio-owner' | 'venue-owner' | 'producer';
+type UserFilter = 'all' | 'fan' | 'musicians' | 'studio-owner' | 'venue-owner' | 'producer';
 
 const adminTabRoutes: Record<Tab, string> = {
   dashboard: '/admin',
@@ -116,6 +116,12 @@ interface UserEntry {
   full_name: string;
   email: string;
   role: string;
+  contact_number?: string | null;
+  address?: string | null;
+  location?: string | null;
+  bio?: string | null;
+  skills?: string[] | null;
+  genres?: string[] | null;
   is_verified: boolean;
   verification_status?: string | null;
   created_at: string;
@@ -137,10 +143,39 @@ type AdminAlertButton = {
   style?: 'default' | 'cancel' | 'destructive';
 };
 
-const userRoleOptions: UserRole[] = ['musician', 'studio-owner', 'venue-owner', 'producer', 'admin'];
+const userRoleOptions: UserRole[] = ['fan', 'musician', 'studio-owner', 'venue-owner', 'producer', 'admin'];
+
+const normalizeDelimitedList = (value: string) => {
+  const seen = new Set<string>();
+  const items: string[] = [];
+
+  value.split(/[,;\n]/).forEach((item) => {
+    const trimmed = item.trim();
+    const key = trimmed.toLowerCase();
+    if (!trimmed || seen.has(key)) return;
+    seen.add(key);
+    items.push(trimmed);
+  });
+
+  return items;
+};
+
+const formatListForInput = (value: unknown) => (
+  Array.isArray(value)
+    ? value.map((item) => String(item || '').trim()).filter(Boolean).join(', ')
+    : typeof value === 'string'
+      ? value
+      : ''
+);
+
+const formatRoleLabel = (role: UserRole | string) => String(role || '')
+  .split('-')
+  .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+  .join(' ');
 
 const userFilters: { value: UserFilter; label: string }[] = [
   { value: 'all', label: 'all' },
+  { value: 'fan', label: 'fans' },
   { value: 'musicians', label: 'musicians' },
   { value: 'studio-owner', label: 'studio owner' },
   { value: 'venue-owner', label: 'venue owner' },
@@ -382,8 +417,43 @@ const styles = StyleSheet.create({
     gap: 8,
     paddingVertical: 2,
   },
+  fieldErrorText: {
+    color: '#EF4444',
+    fontSize: 11,
+    fontFamily: 'Poppins_500Medium',
+  },
+  fieldGroup: {
+    gap: 6,
+  },
+  fieldLabel: {
+    fontSize: 11,
+    fontFamily: 'Poppins_600SemiBold',
+    textTransform: 'uppercase',
+  },
   flex1: {
     flex: 1,
+  },
+  formSection: {
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 12,
+    gap: 10,
+  },
+  formSectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  formSectionIcon: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  formSectionTitle: {
+    fontSize: 13,
+    fontFamily: 'Poppins_700Bold',
   },
   formLabel: {
     fontSize: 12,
@@ -432,6 +502,7 @@ const styles = StyleSheet.create({
   modalCard: {
     width: '100%',
     maxWidth: 560,
+    maxHeight: '92%',
     borderRadius: 16,
     borderWidth: 1,
     padding: 16,
@@ -469,6 +540,18 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontFamily: 'Poppins_400Regular',
   },
+  modalInputMultiline: {
+    borderWidth: 1,
+    borderRadius: 10,
+    minHeight: 84,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 13,
+    fontFamily: 'Poppins_400Regular',
+  },
+  inputInvalid: {
+    borderWidth: 1.5,
+  },
   modalTitle: {
     fontSize: 18,
     fontFamily: 'Poppins_700Bold',
@@ -491,6 +574,9 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 12,
     fontFamily: 'Poppins_600SemiBold',
+  },
+  requiredMark: {
+    color: '#EF4444',
   },
   scrollContent: {
     paddingHorizontal: 20,
@@ -555,6 +641,13 @@ const styles = StyleSheet.create({
     fontFamily: 'Poppins_600SemiBold',
     textTransform: 'capitalize',
   },
+  userFormScroll: {
+    maxHeight: 560,
+  },
+  userFormScrollContent: {
+    gap: 10,
+    paddingBottom: 4,
+  },
 });
 
 const tabItems: { key: Tab; label: string; icon: string }[] = [
@@ -585,11 +678,18 @@ export default function AdminUsersPage() {
   const [editingUserId, setEditingUserId] = useState<string | null>(null);
   const [userFormFullName, setUserFormFullName] = useState('');
   const [userFormEmail, setUserFormEmail] = useState('');
-  const [userFormRole, setUserFormRole] = useState<UserRole>('musician');
+  const [userFormRole, setUserFormRole] = useState<UserRole>('fan');
+  const [userFormContactNumber, setUserFormContactNumber] = useState('');
+  const [userFormAddress, setUserFormAddress] = useState('');
+  const [userFormSkills, setUserFormSkills] = useState('');
+  const [userFormGenres, setUserFormGenres] = useState('');
+  const [userFormBio, setUserFormBio] = useState('');
   const [userFormPassword, setUserFormPassword] = useState('');
+  const [userFormConfirmPassword, setUserFormConfirmPassword] = useState('');
   const [userFormIsVerified, setUserFormIsVerified] = useState(false);
   const [userFormEmailConfirmed, setUserFormEmailConfirmed] = useState(false);
   const [userFormSubmitting, setUserFormSubmitting] = useState(false);
+  const [userFormSubmitAttempted, setUserFormSubmitAttempted] = useState(false);
   const [userDetailsTarget, setUserDetailsTarget] = useState<UserDetailsEntry | null>(null);
   const [alertState, setAlertState] = useState<{
     visible: boolean;
@@ -605,6 +705,42 @@ export default function AdminUsersPage() {
   });
 
   const showInlineTabNav = !(Platform.OS === 'web' && width >= 768);
+
+  const userFormErrors = useMemo(() => {
+    const errors: Record<string, string> = {};
+    const email = userFormEmail.trim();
+    const password = userFormPassword.trim();
+
+    if (!userFormFullName.trim()) {
+      errors.fullName = 'Full name is required.';
+    }
+
+    if (!email) {
+      errors.email = 'Email address is required.';
+    } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      errors.email = 'Enter a valid email address.';
+    }
+
+    if (userModalMode === 'create') {
+      if (password.length < 6) {
+        errors.password = 'Password must be at least 6 characters.';
+      }
+
+      if (userFormPassword !== userFormConfirmPassword) {
+        errors.confirmPassword = 'Passwords do not match.';
+      }
+    }
+
+    return errors;
+  }, [
+    userFormEmail,
+    userFormFullName,
+    userFormPassword,
+    userFormConfirmPassword,
+    userModalMode,
+  ]);
+
+  const userFormHasErrors = Object.keys(userFormErrors).length > 0;
 
   const showAlert = useCallback((type: AlertType, title: string, message: string) => {
     setAlertState({ visible: true, type, title, message, buttons: undefined });
@@ -709,10 +845,17 @@ export default function AdminUsersPage() {
   const resetUserForm = useCallback(() => {
     setUserFormFullName('');
     setUserFormEmail('');
-    setUserFormRole('musician');
+    setUserFormRole('fan');
+    setUserFormContactNumber('');
+    setUserFormAddress('');
+    setUserFormSkills('');
+    setUserFormGenres('');
+    setUserFormBio('');
     setUserFormPassword('');
+    setUserFormConfirmPassword('');
     setUserFormIsVerified(false);
     setUserFormEmailConfirmed(false);
+    setUserFormSubmitAttempted(false);
   }, []);
 
   const openCreateUserModal = useCallback(() => {
@@ -728,7 +871,13 @@ export default function AdminUsersPage() {
     setUserFormFullName(targetUser.full_name || '');
     setUserFormEmail(targetUser.email || '');
     setUserFormRole(normalizeUserRole(targetUser.role));
+    setUserFormContactNumber(targetUser.contact_number || '');
+    setUserFormAddress(targetUser.address || targetUser.location || '');
+    setUserFormSkills(formatListForInput(targetUser.skills));
+    setUserFormGenres(formatListForInput(targetUser.genres));
+    setUserFormBio(targetUser.bio || '');
     setUserFormPassword('');
+    setUserFormConfirmPassword('');
     setUserFormIsVerified(Boolean(targetUser.is_verified));
     setUserFormEmailConfirmed(false);
     setUserModalVisible(true);
@@ -811,6 +960,7 @@ export default function AdminUsersPage() {
     if (userFormSubmitting) return;
     setUserModalVisible(false);
     setEditingUserId(null);
+    setUserFormSubmitAttempted(false);
   }, [userFormSubmitting]);
 
   const closeUserDetailsModal = useCallback(() => {
@@ -818,16 +968,25 @@ export default function AdminUsersPage() {
   }, []);
 
   const submitUserForm = useCallback(async () => {
+    setUserFormSubmitAttempted(true);
+
     const email = userFormEmail.trim().toLowerCase();
     const fullName = userFormFullName.trim();
+    const contactNumber = userFormContactNumber.trim();
+    const address = userFormAddress.trim();
+    const bio = userFormBio.trim();
+    const skills = normalizeDelimitedList(userFormSkills);
+    const genres = normalizeDelimitedList(userFormGenres);
 
-    if (!email) {
-      showAlert('warning', 'Email required', 'Please provide an email address.');
-      return;
-    }
-
-    if (userModalMode === 'create' && userFormPassword.trim().length < 8) {
-      showAlert('warning', 'Weak password', 'Password must be at least 8 characters long.');
+    if (userFormHasErrors) {
+      const missingFields = Object.values(userFormErrors);
+      showAlert(
+        'warning',
+        'Check required fields',
+        missingFields.length > 0
+          ? missingFields.join(' ')
+          : 'Please complete the highlighted fields before saving.',
+      );
       return;
     }
 
@@ -840,11 +999,16 @@ export default function AdminUsersPage() {
           password: userFormPassword,
           fullName,
           role: userFormRole,
+          contactNumber,
+          address,
+          skills,
+          genres,
+          bio,
           isVerified: userFormIsVerified,
           emailConfirmed: userFormEmailConfirmed,
         });
 
-        showAlert('success', 'User created', 'The account was created successfully.');
+        showAlert('success', 'User created', `${fullName} was created as ${formatRoleLabel(userFormRole)}.`);
       } else {
         if (!editingUserId) {
           throw new Error('Missing user id for update.');
@@ -856,10 +1020,15 @@ export default function AdminUsersPage() {
           email,
           fullName,
           role: userFormRole,
+          contactNumber,
+          address,
+          skills,
+          genres,
+          bio,
           isVerified: userFormIsVerified,
         });
 
-        showAlert('success', 'User updated', 'User details have been updated.');
+        showAlert('success', 'User updated', `${fullName}'s account and profile details were saved.`);
       }
 
       invalidateAdminPageCache();
@@ -876,6 +1045,11 @@ export default function AdminUsersPage() {
   }, [
     userFormEmail,
     userFormFullName,
+    userFormContactNumber,
+    userFormAddress,
+    userFormSkills,
+    userFormGenres,
+    userFormBio,
     userModalMode,
     userFormPassword,
     userFormRole,
@@ -886,6 +1060,8 @@ export default function AdminUsersPage() {
     resetUserForm,
     fetchUsers,
     invokeAdminUsersManagement,
+    userFormErrors,
+    userFormHasErrors,
   ]);
 
   const deleteUser = useCallback(
@@ -1251,116 +1427,307 @@ export default function AdminUsersPage() {
               {userModalMode === 'create' ? 'Create User' : 'Edit User'}
             </Text>
 
-            <TextInput
-              value={userFormFullName}
-              onChangeText={setUserFormFullName}
-              placeholder="Full name (optional)"
-              placeholderTextColor={colors.textSecondary}
-              style={[
-                styles.modalInputCompact,
-                {
-                  color: colors.text,
-                  backgroundColor: colors.inputBackground,
-                  borderColor: colors.inputBorder,
-                },
-              ]}
-            />
+            <ScrollView
+              style={styles.userFormScroll}
+              contentContainerStyle={styles.userFormScrollContent}
+              showsVerticalScrollIndicator={false}
+            >
+              <View style={[styles.formSection, { borderColor: colors.border, backgroundColor: isDark ? '#0F172A' : '#F8FAFC' }]}>
+                <View style={styles.formSectionHeader}>
+                  <View style={[styles.formSectionIcon, { backgroundColor: `${colors.primary}18` }]}>
+                    <Ionicons name="person-outline" size={16} color={colors.primary} />
+                  </View>
+                  <Text style={[styles.formSectionTitle, { color: colors.text }]}>Account</Text>
+                </View>
 
-            <TextInput
-              value={userFormEmail}
-              onChangeText={setUserFormEmail}
-              placeholder="Email address"
-              autoCapitalize="none"
-              keyboardType="email-address"
-              placeholderTextColor={colors.textSecondary}
-              style={[
-                styles.modalInputCompact,
-                {
-                  color: colors.text,
-                  backgroundColor: colors.inputBackground,
-                  borderColor: colors.inputBorder,
-                },
-              ]}
-            />
-
-            <Text style={[styles.formLabel, { color: colors.textSecondary }]}>Role</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterRow}>
-              {userRoleOptions.map((role) => {
-                const active = userFormRole === role;
-                return (
-                  <TouchableOpacity
-                    key={role}
-                    activeOpacity={1}
-                    onPress={() => setUserFormRole(role)}
+                <View style={styles.fieldGroup}>
+                  <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>
+                    Full name <Text style={styles.requiredMark}>*</Text>
+                  </Text>
+                  <TextInput
+                    value={userFormFullName}
+                    onChangeText={setUserFormFullName}
+                    placeholder="Full name"
+                    placeholderTextColor={colors.textSecondary}
                     style={[
-                      styles.filterChip,
+                      styles.modalInputCompact,
+                      userFormSubmitAttempted && userFormErrors.fullName ? styles.inputInvalid : null,
                       {
-                        backgroundColor: active ? colors.primary : (isDark ? '#1E293B' : '#FFFFFF'),
-                        borderColor: active ? colors.primary : colors.border,
+                        color: colors.text,
+                        backgroundColor: colors.inputBackground,
+                        borderColor: userFormSubmitAttempted && userFormErrors.fullName ? '#EF4444' : colors.inputBorder,
+                      },
+                    ]}
+                  />
+                  {userFormSubmitAttempted && userFormErrors.fullName ? (
+                    <Text style={styles.fieldErrorText}>{userFormErrors.fullName}</Text>
+                  ) : null}
+                </View>
+
+                <View style={styles.fieldGroup}>
+                  <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>
+                    Email address <Text style={styles.requiredMark}>*</Text>
+                  </Text>
+                  <TextInput
+                    value={userFormEmail}
+                    onChangeText={setUserFormEmail}
+                    placeholder="Email address"
+                    autoCapitalize="none"
+                    keyboardType="email-address"
+                    placeholderTextColor={colors.textSecondary}
+                    style={[
+                      styles.modalInputCompact,
+                      userFormSubmitAttempted && userFormErrors.email ? styles.inputInvalid : null,
+                      {
+                        color: colors.text,
+                        backgroundColor: colors.inputBackground,
+                        borderColor: userFormSubmitAttempted && userFormErrors.email ? '#EF4444' : colors.inputBorder,
+                      },
+                    ]}
+                  />
+                  {userFormSubmitAttempted && userFormErrors.email ? (
+                    <Text style={styles.fieldErrorText}>{userFormErrors.email}</Text>
+                  ) : null}
+                </View>
+
+                <View style={styles.fieldGroup}>
+                  <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>
+                    {userModalMode === 'create' ? 'Register as' : 'Role'}
+                  </Text>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterRow}>
+                    {userRoleOptions.map((role) => {
+                      const active = userFormRole === role;
+                      return (
+                        <TouchableOpacity
+                          key={role}
+                          activeOpacity={1}
+                          onPress={() => setUserFormRole(role)}
+                          style={[
+                            styles.filterChip,
+                            {
+                              backgroundColor: active ? colors.primary : (isDark ? '#1E293B' : '#FFFFFF'),
+                              borderColor: active ? colors.primary : colors.border,
+                            },
+                          ]}
+                        >
+                          <Text style={[styles.filterChipText, { color: active ? '#FFFFFF' : colors.textSecondary }]}>
+                            {formatRoleLabel(role)}
+                          </Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </ScrollView>
+                </View>
+              </View>
+
+              <View style={[styles.formSection, { borderColor: colors.border, backgroundColor: isDark ? '#0F172A' : '#F8FAFC' }]}>
+                <View style={styles.formSectionHeader}>
+                  <View style={[styles.formSectionIcon, { backgroundColor: `${colors.primary}18` }]}>
+                    <Ionicons name="musical-notes-outline" size={16} color={colors.primary} />
+                  </View>
+                  <Text style={[styles.formSectionTitle, { color: colors.text }]}>Profile Details</Text>
+                </View>
+
+                <View style={styles.fieldGroup}>
+                  <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>Contact number</Text>
+                  <TextInput
+                    value={userFormContactNumber}
+                    onChangeText={setUserFormContactNumber}
+                    placeholder="Contact number"
+                    keyboardType="phone-pad"
+                    placeholderTextColor={colors.textSecondary}
+                    style={[
+                      styles.modalInputCompact,
+                      {
+                        color: colors.text,
+                        backgroundColor: colors.inputBackground,
+                        borderColor: colors.inputBorder,
+                      },
+                    ]}
+                  />
+                </View>
+
+                <View style={styles.fieldGroup}>
+                  <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>Address</Text>
+                  <TextInput
+                    value={userFormAddress}
+                    onChangeText={setUserFormAddress}
+                    placeholder="Address"
+                    placeholderTextColor={colors.textSecondary}
+                    style={[
+                      styles.modalInputCompact,
+                      {
+                        color: colors.text,
+                        backgroundColor: colors.inputBackground,
+                        borderColor: colors.inputBorder,
+                      },
+                    ]}
+                  />
+                </View>
+
+                <View style={styles.fieldGroup}>
+                  <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>Roles & instruments</Text>
+                  <TextInput
+                    value={userFormSkills}
+                    onChangeText={setUserFormSkills}
+                    placeholder="Vocalist, Guitarist, Producer"
+                    placeholderTextColor={colors.textSecondary}
+                    style={[
+                      styles.modalInputCompact,
+                      {
+                        color: colors.text,
+                        backgroundColor: colors.inputBackground,
+                        borderColor: colors.inputBorder,
+                      },
+                    ]}
+                  />
+                </View>
+
+                <View style={styles.fieldGroup}>
+                  <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>Genres</Text>
+                  <TextInput
+                    value={userFormGenres}
+                    onChangeText={setUserFormGenres}
+                    placeholder="OPM, Rock, Jazz"
+                    placeholderTextColor={colors.textSecondary}
+                    style={[
+                      styles.modalInputCompact,
+                      {
+                        color: colors.text,
+                        backgroundColor: colors.inputBackground,
+                        borderColor: colors.inputBorder,
+                      },
+                    ]}
+                  />
+                </View>
+
+                <View style={styles.fieldGroup}>
+                  <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>Bio</Text>
+                  <TextInput
+                    value={userFormBio}
+                    onChangeText={setUserFormBio}
+                    placeholder="Short profile bio"
+                    multiline
+                    numberOfLines={3}
+                    textAlignVertical="top"
+                    placeholderTextColor={colors.textSecondary}
+                    style={[
+                      styles.modalInputMultiline,
+                      {
+                        color: colors.text,
+                        backgroundColor: colors.inputBackground,
+                        borderColor: colors.inputBorder,
+                      },
+                    ]}
+                  />
+                </View>
+              </View>
+
+            {userModalMode === 'create' && (
+              <View style={[styles.formSection, { borderColor: colors.border, backgroundColor: isDark ? '#0F172A' : '#F8FAFC' }]}>
+                <View style={styles.formSectionHeader}>
+                  <View style={[styles.formSectionIcon, { backgroundColor: `${colors.primary}18` }]}>
+                    <Ionicons name="lock-closed-outline" size={16} color={colors.primary} />
+                  </View>
+                  <Text style={[styles.formSectionTitle, { color: colors.text }]}>Security</Text>
+                </View>
+
+                <View style={styles.fieldGroup}>
+                  <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>
+                    Password <Text style={styles.requiredMark}>*</Text>
+                  </Text>
+                  <TextInput
+                    value={userFormPassword}
+                    onChangeText={setUserFormPassword}
+                    placeholder="Password"
+                    secureTextEntry
+                    autoCapitalize="none"
+                    placeholderTextColor={colors.textSecondary}
+                    style={[
+                      styles.modalInputCompact,
+                      userFormSubmitAttempted && userFormErrors.password ? styles.inputInvalid : null,
+                      {
+                        color: colors.text,
+                        backgroundColor: colors.inputBackground,
+                        borderColor: userFormSubmitAttempted && userFormErrors.password ? '#EF4444' : colors.inputBorder,
+                      },
+                    ]}
+                  />
+                  {userFormSubmitAttempted && userFormErrors.password ? (
+                    <Text style={styles.fieldErrorText}>{userFormErrors.password}</Text>
+                  ) : null}
+                </View>
+
+                <View style={styles.fieldGroup}>
+                  <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>
+                    Confirm password <Text style={styles.requiredMark}>*</Text>
+                  </Text>
+                  <TextInput
+                    value={userFormConfirmPassword}
+                    onChangeText={setUserFormConfirmPassword}
+                    placeholder="Confirm password"
+                    secureTextEntry
+                    autoCapitalize="none"
+                    placeholderTextColor={colors.textSecondary}
+                    style={[
+                      styles.modalInputCompact,
+                      userFormSubmitAttempted && userFormErrors.confirmPassword ? styles.inputInvalid : null,
+                      {
+                        color: colors.text,
+                        backgroundColor: colors.inputBackground,
+                        borderColor: userFormSubmitAttempted && userFormErrors.confirmPassword ? '#EF4444' : colors.inputBorder,
+                      },
+                    ]}
+                  />
+                  {userFormSubmitAttempted && userFormErrors.confirmPassword ? (
+                    <Text style={styles.fieldErrorText}>{userFormErrors.confirmPassword}</Text>
+                  ) : null}
+                </View>
+              </View>
+            )}
+
+              <View style={[styles.formSection, { borderColor: colors.border, backgroundColor: isDark ? '#0F172A' : '#F8FAFC' }]}>
+                <View style={styles.formSectionHeader}>
+                  <View style={[styles.formSectionIcon, { backgroundColor: `${colors.primary}18` }]}>
+                    <Ionicons name="shield-checkmark-outline" size={16} color={colors.primary} />
+                  </View>
+                  <Text style={[styles.formSectionTitle, { color: colors.text }]}>Verification</Text>
+                </View>
+
+                <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>Verified</Text>
+                <View style={styles.booleanToggleRow}>
+                  <TouchableOpacity
+                    activeOpacity={1}
+                    onPress={() => setUserFormIsVerified(true)}
+                    style={[
+                      styles.booleanToggleButton,
+                      {
+                        backgroundColor: userFormIsVerified ? '#16A34A' : (isDark ? '#1E293B' : '#FFFFFF'),
+                        borderColor: userFormIsVerified ? '#16A34A' : colors.border,
                       },
                     ]}
                   >
-                    <Text style={[styles.filterChipText, { color: active ? '#FFFFFF' : colors.textSecondary }]}>
-                      {role}
-                    </Text>
+                    <Text style={[styles.booleanToggleButtonText, { color: userFormIsVerified ? '#FFFFFF' : colors.textSecondary }]}>Yes</Text>
                   </TouchableOpacity>
-                );
-              })}
-            </ScrollView>
 
-            {userModalMode === 'create' && (
-              <TextInput
-                value={userFormPassword}
-                onChangeText={setUserFormPassword}
-                placeholder="Password (minimum 8 characters)"
-                secureTextEntry
-                autoCapitalize="none"
-                placeholderTextColor={colors.textSecondary}
-                style={[
-                  styles.modalInputCompact,
-                  {
-                    color: colors.text,
-                    backgroundColor: colors.inputBackground,
-                    borderColor: colors.inputBorder,
-                  },
-                ]}
-              />
-            )}
+                  <TouchableOpacity
+                    activeOpacity={1}
+                    onPress={() => setUserFormIsVerified(false)}
+                    style={[
+                      styles.booleanToggleButton,
+                      {
+                        backgroundColor: !userFormIsVerified ? '#DC2626' : (isDark ? '#1E293B' : '#FFFFFF'),
+                        borderColor: !userFormIsVerified ? '#DC2626' : colors.border,
+                      },
+                    ]}
+                  >
+                    <Text style={[styles.booleanToggleButtonText, { color: !userFormIsVerified ? '#FFFFFF' : colors.textSecondary }]}>No</Text>
+                  </TouchableOpacity>
+                </View>
 
-            <Text style={[styles.formLabel, { color: colors.textSecondary }]}>Verified</Text>
-            <View style={styles.booleanToggleRow}>
-              <TouchableOpacity
-                activeOpacity={1}
-                onPress={() => setUserFormIsVerified(true)}
-                style={[
-                  styles.booleanToggleButton,
-                  {
-                    backgroundColor: userFormIsVerified ? '#16A34A' : (isDark ? '#1E293B' : '#FFFFFF'),
-                    borderColor: userFormIsVerified ? '#16A34A' : colors.border,
-                  },
-                ]}
-              >
-                <Text style={[styles.booleanToggleButtonText, { color: userFormIsVerified ? '#FFFFFF' : colors.textSecondary }]}>Yes</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                activeOpacity={1}
-                onPress={() => setUserFormIsVerified(false)}
-                style={[
-                  styles.booleanToggleButton,
-                  {
-                    backgroundColor: !userFormIsVerified ? '#DC2626' : (isDark ? '#1E293B' : '#FFFFFF'),
-                    borderColor: !userFormIsVerified ? '#DC2626' : colors.border,
-                  },
-                ]}
-              >
-                <Text style={[styles.booleanToggleButtonText, { color: !userFormIsVerified ? '#FFFFFF' : colors.textSecondary }]}>No</Text>
-              </TouchableOpacity>
-            </View>
-
-            {userModalMode === 'create' && (
-              <>
-                <Text style={[styles.formLabel, { color: colors.textSecondary }]}>Email Confirmed</Text>
+                {userModalMode === 'create' && (
+                  <>
+                    <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>Email confirmed</Text>
                 <View style={styles.booleanToggleRow}>
                   <TouchableOpacity
                     activeOpacity={1}
@@ -1390,8 +1757,10 @@ export default function AdminUsersPage() {
                     <Text style={[styles.booleanToggleButtonText, { color: !userFormEmailConfirmed ? '#FFFFFF' : colors.textSecondary }]}>No</Text>
                   </TouchableOpacity>
                 </View>
-              </>
-            )}
+                  </>
+                )}
+              </View>
+            </ScrollView>
 
             <View style={styles.modalActionsRow}>
               <TouchableOpacity
@@ -1407,7 +1776,13 @@ export default function AdminUsersPage() {
                 activeOpacity={1}
                 onPress={() => void submitUserForm()}
                 disabled={userFormSubmitting}
-                style={[styles.modalButton, { backgroundColor: colors.primary, opacity: userFormSubmitting ? 0.6 : 1 }]}
+                style={[
+                  styles.modalButton,
+                  {
+                    backgroundColor: colors.primary,
+                    opacity: userFormSubmitting ? 0.6 : 1,
+                  },
+                ]}
               >
                 {userFormSubmitting ? (
                   <ActivityIndicator size="small" color="#FFFFFF" />

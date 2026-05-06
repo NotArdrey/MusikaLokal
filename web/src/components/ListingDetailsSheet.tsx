@@ -42,6 +42,7 @@ import { useListingSheetDerived } from "../hooks/useListingSheetDerived";
 import { useListingSheetEffects } from "../hooks/useListingSheetEffects";
 import { useProfileCompletion } from "../hooks/useProfileCompletion";
 import { submitListingRequest, uploadListingRequestDocument } from "../utils/listingRequests";
+import { isFanUserRole } from "../utils/roleRouting";
 import CustomAlert from "./CustomAlert";
 import DocumentUploader from "./DocumentUploader";
 import ReportModal from "./ReportModal";
@@ -2473,6 +2474,7 @@ const ListingDetailsSheet = forwardRef<
   const showReportButton = !!group && !isOwnListing && !isGuest;
   const isGroupListing = group?.type === "Group";
   const effectiveUserRole = userRole || currentUserRole;
+  const isFan = isFanUserRole(effectiveUserRole);
   const isMusicianUser = effectiveUserRole === "musician";
   const hasStructuredConnectionTab =
     !isGuest &&
@@ -3300,10 +3302,10 @@ const ListingDetailsSheet = forwardRef<
             contextPlaceholder: "Share the project scope, schedule, and the kind of collaboration you want.",
           })}
           <TouchableOpacity
-            activeOpacity={1}
+            activeOpacity={isSendingRequest || loadingProductionTeams ? 1 : 0.78}
             onPress={handleInviteGroupToTeam}
             disabled={isSendingRequest || loadingProductionTeams}
-            style={[styles.primaryBtn, { backgroundColor: colors.primary, marginTop: 12 }]}
+            style={[styles.primaryBtn, { backgroundColor: colors.primary, marginTop: 12, opacity: isSendingRequest || loadingProductionTeams ? 0.6 : 1 }]}
           >
             {isSendingRequest ? (
               <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8 }}>
@@ -3331,10 +3333,10 @@ const ListingDetailsSheet = forwardRef<
             showRosterSelector: true,
           })}
           <TouchableOpacity
-            activeOpacity={1}
+            activeOpacity={isSendingRequest || loadingProductionTeams ? 1 : 0.78}
             onPress={handleApplyTeamToVenue}
             disabled={isSendingRequest || loadingProductionTeams}
-            style={[styles.primaryBtn, { backgroundColor: colors.primary, marginTop: 12 }]}
+            style={[styles.primaryBtn, { backgroundColor: colors.primary, marginTop: 12, opacity: isSendingRequest || loadingProductionTeams ? 0.6 : 1 }]}
           >
             {isSendingRequest ? (
               <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8 }}>
@@ -3499,7 +3501,7 @@ const ListingDetailsSheet = forwardRef<
         onToggleFavorite={toggleFavorite}
         onReport={handleReport}
         onShare={handleShare}
-        onChat={isGuest ? undefined : openListingChat}
+        onChat={isGuest || isFan ? undefined : openListingChat}
       />
 
       {/* TABS SELECTOR */}

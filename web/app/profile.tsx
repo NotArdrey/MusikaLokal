@@ -31,6 +31,7 @@ import { DEFAULT_AVATAR } from "../src/constants/Images";
 import { useAuth } from "../src/context/AuthContext";
 import { useTheme } from "../src/context/ThemeContext";
 import { screenUploadsWithAi } from "../src/services/uploadSafetyScreen";
+import { isFanUserRole } from "../src/utils/roleRouting";
 
 const GRID_GAP = 8;
 const NUM_COLUMNS = 3;
@@ -445,7 +446,7 @@ export default function ProfileScreen() {
       ? "#1E2C48"
       : "#D8E3F2"
     : colors.border;
-  const { loading: authLoading, userId: currentUserId, isGuest } = useAuth();
+  const { loading: authLoading, userId: currentUserId, isGuest, userRole } = useAuth();
   const params = useLocalSearchParams<{
     userId?: string;
     returnToHome?: string;
@@ -454,6 +455,7 @@ export default function ProfileScreen() {
   const normalizedParamUserId = Array.isArray(params.userId) ? params.userId[0] : params.userId;
 
   const [profile, setProfile] = useState<any>(null);
+  const isFan = isFanUserRole(userRole || profile?.role);
   const [loading, setLoading] = useState(true);
   const [isOwner, setIsOwner] = useState(false);
   const [gigStats, setGigStats] = useState({ active: 0, upcoming: 0, done: 0 });
@@ -1012,7 +1014,7 @@ export default function ProfileScreen() {
 
   const MENU_ITEMS = [
     { label: "Edit Profile", icon: "person-outline", route: "/edit_profile" },
-    { label: "Wallet", icon: "wallet-outline", route: "/wallet" },
+    ...(!isFan ? [{ label: "Wallet", icon: "wallet-outline", route: "/wallet" }] : []),
     { label: "Identity Verification", icon: "card-outline", route: "/identity_verification" },
     { label: "Settings", icon: "settings-outline", route: "/settings" },
   ];

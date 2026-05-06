@@ -23,16 +23,21 @@ import {
     hasValidCoordinates,
     openNavigationDirections,
 } from "../src/utils/navigation";
+import { formatDashedNumericDate } from "../src/utils/friendlyDateTime";
 
 const { width: screenWidth } = Dimensions.get("window");
 const PORTFOLIO_ITEM_SIZE = (screenWidth - 48 - 8) / 3; // 3 columns with gaps
+const GIG_TABS = ["About", "Applicants", "Review"];
 
 import { useLocalSearchParams } from "expo-router";
 
 export default function GigDetailsScreen() {
   const { colors, isDark } = useTheme();
-  const { id } = useLocalSearchParams();
-  const [activeTab, setActiveTab] = useState("About");
+  const { id, tab } = useLocalSearchParams<{ id?: string | string[]; tab?: string | string[] }>();
+  const requestedTab = Array.isArray(tab) ? tab[0] : tab;
+  const [activeTab, setActiveTab] = useState(
+    GIG_TABS.includes(requestedTab || "") ? requestedTab || "About" : "About",
+  );
   const [modalVisible, setModalVisible] = useState(false);
   const [modalTitle, setModalTitle] = useState("");
   const [modalMessage, setModalMessage] = useState("");
@@ -48,6 +53,12 @@ export default function GigDetailsScreen() {
   const [applications, setApplications] = useState<any[]>([]);
   const [reviews, setReviews] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (requestedTab && GIG_TABS.includes(requestedTab) && requestedTab !== activeTab) {
+      setActiveTab(requestedTab);
+    }
+  }, [activeTab, requestedTab]);
   const [alertVisible, setAlertVisible] = useState(false);
   const [alertConfig, setAlertConfig] = useState<{
     type: AlertType;
@@ -336,7 +347,7 @@ export default function GigDetailsScreen() {
     setModalVisible(true);
   };
 
-  const tabs = ["About", "Applicants", "Review"];
+  const tabs = GIG_TABS;
 
   const formatMusicianType = (requirements?: any) => {
     const slots = requirements?.slots || {};
@@ -420,7 +431,7 @@ export default function GigDetailsScreen() {
               style={[styles.headerLocation, { color: colors.textSecondary }]}
             >
               {gig?.event_date
-                ? new Date(gig.event_date).toLocaleDateString()
+                ? formatDashedNumericDate(gig.event_date)
                 : "Date TBA"}
               {gig?.requirements?.event_start_time &&
                 gig?.requirements?.event_end_time
@@ -842,7 +853,7 @@ export default function GigDetailsScreen() {
                         onPress={() =>
                           router.push({
                             pathname: "/edit_gig",
-                            params: { id: gig?.id },
+                            params: { id: gig?.id, returnTab: "About" },
                           })
                         }
                         style={{ marginTop: 8 }}
@@ -1608,7 +1619,7 @@ export default function GigDetailsScreen() {
                             fontFamily: "Poppins_400Regular",
                           }}
                         >
-                          {new Date(review.created_at).toLocaleDateString()}
+                          {formatDashedNumericDate(review.created_at)}
                         </Text>
                       </View>
                       <View style={[styles.starsRow, { marginBottom: 8 }]}>

@@ -6,19 +6,11 @@ import { supabase } from '../lib/supabase';
 import CachedImage from '../src/components/CachedImage';
 import CustomAlert, { AlertType } from '../src/components/CustomAlert';
 import Header from '../src/components/header';
-import Modal from '../src/components/modal';
+import Modal, { normalizeConfirmationInput } from '../src/components/modal';
 import MusicianWorkspaceTabs from '../src/components/MusicianWorkspaceTabs';
 import Navbar from '../src/components/navbar';
 import { useAuth, useRequireAuth } from '../src/context/AuthContext';
 import { useTheme } from '../src/context/ThemeContext';
-
-const normalizeDeleteConfirmation = (value: string) =>
-    String(value || '')
-        .normalize('NFKC')
-        .replace(/[\u200B-\u200D\uFEFF]/g, '')
-        .replace(/\s+/g, ' ')
-        .trim()
-        .toLowerCase();
 
 export default function MyGroupScreen() {
     const { colors, isDark } = useTheme();
@@ -267,8 +259,8 @@ export default function MyGroupScreen() {
     };
 
     const isDeleteConfirmed =
-        normalizeDeleteConfirmation(deleteConfirmationText) ===
-        normalizeDeleteConfirmation(selectedName);
+        normalizeConfirmationInput(deleteConfirmationText) ===
+        normalizeConfirmationInput(selectedName);
 
     const handleDelete = async () => {
         if (!selectedId || !userId || deleting) return;
@@ -469,6 +461,7 @@ export default function MyGroupScreen() {
                 inputPlaceholder="Type group name"
                 inputValue={deleteConfirmationText}
                 onInputChange={setDeleteConfirmationText}
+                requiredInputValue={selectedName}
                 confirmDisabled={!isDeleteConfirmed || deleting}
             />
             <CustomAlert

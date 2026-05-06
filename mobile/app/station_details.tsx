@@ -634,7 +634,7 @@ export default function StationDetailsScreen() {
               <TouchableOpacity activeOpacity={1} style={[styles.modalBtn, { borderColor: isDark ? "#334155" : "#E2E8F0" }]} onPress={() => setEditModalVisible(false)}>
                 <Text style={{ color: colors.textSecondary, fontWeight: "600" }}>Cancel</Text>
               </TouchableOpacity>
-              <TouchableOpacity activeOpacity={1} style={[styles.modalBtn, { backgroundColor: isEditStationReady ? colors.primary : colors.border }]} onPress={handleEditSave} disabled={saving || !isEditStationReady}>
+              <TouchableOpacity activeOpacity={saving || !isEditStationReady ? 1 : 0.78} style={[styles.modalBtn, { backgroundColor: isEditStationReady ? colors.primary : colors.border, opacity: saving || !isEditStationReady ? 0.6 : 1 }]} onPress={handleEditSave} disabled={saving || !isEditStationReady}>
                 {saving ? <ActivityIndicator color="#fff" size="small" /> : <Text style={{ color: isEditStationReady ? "#fff" : colors.textSecondary, fontWeight: "700" }}>Save</Text>}
               </TouchableOpacity>
             </View>

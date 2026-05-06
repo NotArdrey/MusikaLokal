@@ -6,6 +6,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
+import { isFanUserRole, resolveRoleManageRoute } from '../utils/roleRouting';
 
 interface HeaderProps {
     title: string;
@@ -18,10 +19,11 @@ interface HeaderProps {
 
 function Header({ title, transparent, onBackPress, hideBackButton = false, leftComponent, rightComponent }: HeaderProps) {
     const { colors, isDark } = useTheme();
-    const { isGuest, setGuestMode } = useAuth();
+    const { isGuest, setGuestMode, userRole } = useAuth();
     const insets = useSafeAreaInsets();
     const { width } = useWindowDimensions();
     const isWebDesktop = Platform.OS === 'web' && width >= 768;
+    const isFan = isFanUserRole(userRole);
 
     const pathname = usePathname();
     const [hasUnread, setHasUnread] = useState(false);
@@ -45,12 +47,7 @@ function Header({ title, transparent, onBackPress, hideBackButton = false, leftC
         [pathname],
     );
 
-    const isManageDetailPath = useMemo(
-        () => pathname === "/manage_studio" || pathname === "/manage_gig" || pathname === "/manage_group",
-        [pathname],
-    );
-
-    const backVisible = !hideBackButton && (!!onBackPress || !(isMainNavPath || isSettingsOrProfile || isMyListingPath || isManageDetailPath));
+    const backVisible = !hideBackButton && (!!onBackPress || !(isMainNavPath || isSettingsOrProfile || isMyListingPath));
     const notifVisible = isMainNavPath && !isGuest && !isWebDesktop;
     const addbtnvisible = isMyListingPath;
 
@@ -60,6 +57,35 @@ function Header({ title, transparent, onBackPress, hideBackButton = false, leftC
         if (pathname === "/my_production") return '/add_production';
         return '/add_group';
     }, [pathname]);
+
+    const defaultBackRoute = useMemo(() => {
+        if (pathname === "/edit_profile") return "/profile";
+        if (pathname === "/add_gig" || pathname === "/edit_gig") return "/my_venue";
+        if (pathname === "/add_group" || pathname === "/add_duo" || pathname === "/edit_group") return "/my_group";
+        if (pathname === "/add_studio" || pathname === "/edit_studio") return "/my_studio";
+        if (pathname === "/add_production" || pathname === "/edit_production") return "/my_production";
+        if (pathname === "/manage_gig") return "/my_venue";
+        if (pathname === "/manage_group") return "/my_group";
+        if (pathname === "/manage_studio") return "/my_studio";
+        if (pathname.startsWith("/add_") || pathname.startsWith("/edit_")) {
+            return resolveRoleManageRoute(userRole);
+        }
+        return null;
+    }, [pathname, userRole]);
+
+    const handleBackPress = useCallback(() => {
+        if (onBackPress) {
+            onBackPress();
+            return;
+        }
+
+        if (defaultBackRoute) {
+            router.replace(defaultBackRoute as any);
+            return;
+        }
+
+        router.back();
+    }, [defaultBackRoute, onBackPress]);
 
     const closeGuestMenu = useCallback(() => {
         setGuestMenuVisible(false);
@@ -125,7 +151,7 @@ function Header({ title, transparent, onBackPress, hideBackButton = false, leftC
                             leftComponent
                         ) : (
                             <TouchableOpacity activeOpacity={1}
-                                onPress={() => (onBackPress ? onBackPress() : router.back())}
+                                onPress={handleBackPress}
                                 style={[styles.backButton, {
                                     backgroundColor: isDark ? colors.surface : '#F3F4F6',
                                     padding: isWebDesktop ? 12 : 8,
@@ -168,13 +194,14 @@ function Header({ title, transparent, onBackPress, hideBackButton = false, leftC
                         </TouchableOpacity>
                     ) : notifVisible ? (
                         <View style={styles.iconRow}>
-                            {/* Chat Button */}
-                            <TouchableOpacity activeOpacity={1} onPress={() => router.push('/chat')} style={[styles.iconButton, {
-                                backgroundColor: isDark ? colors.surface : '#F3F4F6',
-                                padding: isWebDesktop ? 12 : 8,
-                            }]}>
-                                <Ionicons name="chatbubbles" size={isWebDesktop ? 26 : 24} color={colors.text} />
-                            </TouchableOpacity>
+                            {!isFan && (
+                                <TouchableOpacity activeOpacity={1} onPress={() => router.push('/chat')} style={[styles.iconButton, {
+                                    backgroundColor: isDark ? colors.surface : '#F3F4F6',
+                                    padding: isWebDesktop ? 12 : 8,
+                                }]}>
+                                    <Ionicons name="chatbubbles" size={isWebDesktop ? 26 : 24} color={colors.text} />
+                                </TouchableOpacity>
+                            )}
                             {/* Notifications Button */}
                             <TouchableOpacity activeOpacity={1} onPress={() => router.push('/notifications')} style={[styles.iconButton, {
                                 backgroundColor: isDark ? colors.surface : '#F3F4F6',

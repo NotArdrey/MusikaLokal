@@ -141,7 +141,7 @@ export default function PostDetailsScreen() {
       </ScrollView>
       <View style={[styles.inputRow, { backgroundColor: cardBg, borderTopColor: borderCol }]}>
         <TextInput style={[styles.commentInput, { color: colors.text, borderColor: borderCol }]} placeholder="Add a comment..." placeholderTextColor={colors.textSecondary} value={commentText} onChangeText={setCommentText} multiline maxLength={1000} />
-        <TouchableOpacity activeOpacity={1} style={[styles.sendBtn, { backgroundColor: canSubmitComment ? colors.primary : colors.border, opacity: submitting ? 0.6 : 1 }]} onPress={handleAddComment} disabled={submitting || !canSubmitComment}>
+        <TouchableOpacity activeOpacity={submitting || !canSubmitComment ? 1 : 0.78} style={[styles.sendBtn, { backgroundColor: canSubmitComment ? colors.primary : colors.border, opacity: submitting || !canSubmitComment ? 0.6 : 1 }]} onPress={handleAddComment} disabled={submitting || !canSubmitComment}>
           {submitting ? <ActivityIndicator size="small" color="#fff" /> : <Ionicons name="send" size={18} color={canSubmitComment ? "#fff" : colors.textSecondary} />}
         </TouchableOpacity>
       </View>

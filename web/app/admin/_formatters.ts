@@ -100,6 +100,7 @@ const valueOverrides: Record<string, string> = {
   dismissed: 'Dismissed',
   draft: 'Draft',
   expired: 'Expired',
+  fan: 'Fan',
   gig: 'Gig',
   group: 'Group',
   manual_review: 'Manual review',

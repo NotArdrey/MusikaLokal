@@ -219,7 +219,7 @@ export default function EditProfileScreen() {
         {
           text: "Leave",
           style: "destructive",
-          onPress: () => router.back(),
+          onPress: () => router.replace("/profile"),
         },
       ],
     );
@@ -237,7 +237,7 @@ export default function EditProfileScreen() {
       } = await supabase.auth.getUser();
       if (!user) {
         showAlert("error", "Error", "Please log in first");
-        router.back();
+        router.replace("/");
         return;
       }
 
@@ -614,7 +614,7 @@ export default function EditProfileScreen() {
       };
 
       showAlert("success", "Success", "Profile updated!", [
-        { text: "OK", onPress: () => router.back() },
+        { text: "OK", onPress: () => router.replace("/profile") },
       ]);
     } catch (error: any) {
       showAlert("error", "Error", error?.message || "Failed to save");
@@ -662,10 +662,10 @@ export default function EditProfileScreen() {
               style={[styles.avatar, { borderColor: colors.primary }]}
             />
             <TouchableOpacity
-              style={[styles.cameraBtn, { backgroundColor: colors.primary }]}
+              style={[styles.cameraBtn, { backgroundColor: colors.primary, opacity: uploadingPhoto ? 0.6 : 1 }]}
               onPress={handleChangePhoto}
               disabled={uploadingPhoto}
-              activeOpacity={1}
+              activeOpacity={uploadingPhoto ? 1 : 0.78}
             >
               {uploadingPhoto ? (
                 <ActivityIndicator size="small" color="#fff" />
@@ -978,7 +978,7 @@ export default function EditProfileScreen() {
             placeholderTextColor={colors.textSecondary}
             multiline
             numberOfLines={4}
-            textAlignVertical="top"
+            textAlignVertical="center"
           />
         </View>
 
@@ -1006,11 +1006,12 @@ export default function EditProfileScreen() {
                 saving || hasIncompleteRequiredFields
                   ? colors.textSecondary
                   : colors.primary,
+              opacity: saving || hasIncompleteRequiredFields ? 0.6 : 1,
             },
           ]}
           onPress={handleSave}
           disabled={saving || hasIncompleteRequiredFields}
-          activeOpacity={1}
+          activeOpacity={saving || hasIncompleteRequiredFields ? 1 : 0.78}
         >
           {saving ? (
             <ActivityIndicator size="small" color="#fff" />
@@ -1023,7 +1024,7 @@ export default function EditProfileScreen() {
           style={[styles.cancelBtn, { borderColor: borderSoft }]}
           onPress={handleAttemptLeave}
           disabled={saving}
-          activeOpacity={1}
+          activeOpacity={saving ? 1 : 0.78}
         >
           <Text style={[styles.cancelBtnText, { color: colors.text }]}>
             Cancel
@@ -1154,6 +1155,7 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontFamily: "Poppins_400Regular",
     minHeight: 100,
+    textAlignVertical: "center",
   },
   chips: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   chip: {

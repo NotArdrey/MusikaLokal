@@ -7,6 +7,8 @@ export const normalizeUserRole = (role: unknown): string | null => {
     return normalizedRole.length > 0 ? normalizedRole : null;
 };
 
+export const isFanUserRole = (role: unknown): boolean => normalizeUserRole(role) === 'fan';
+
 type ResolveRoleRouteOptions = {
     fallback?: string;
     adminRoute?: string;

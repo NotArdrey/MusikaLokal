@@ -924,7 +924,7 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
                         style={[styles.inputAction, uploading && styles.inputActionDisabled]}
                         onPress={() => setShowAttachmentPicker(true)}
                         disabled={uploading}
-                        activeOpacity={1}
+                        activeOpacity={uploading ? 1 : 0.78}
                     >
                         {uploading ? (
                             <ActivityIndicator size="small" color={colors.primary} />
@@ -954,12 +954,12 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
                                 onPress={handleSend}
                                 disabled={!hasMessageText}
                                 style={[styles.sendButton, { backgroundColor: colors.primary }]}
-                                activeOpacity={1}
+                                activeOpacity={!hasMessageText ? 1 : 0.78}
                             >
                                 <Ionicons name="send" size={19} color="#FFF" style={{ marginLeft: 2 }} />
                             </TouchableOpacity>
                         ) : (
-                            <TouchableOpacity style={styles.thumbsUpButton} onPress={handleQuickLike} activeOpacity={1}>
+                            <TouchableOpacity style={styles.thumbsUpButton} onPress={handleQuickLike} activeOpacity={0.78}>
                                 <Ionicons name="thumbs-up" size={28} color={colors.primary} />
                             </TouchableOpacity>
                         )}

@@ -19,6 +19,7 @@ import { useTheme } from "../context/ThemeContext";
 import { supabase } from "../../lib/supabase";
 import { getGigApplicationDeadlineInfo } from "../utils/gigApplication";
 import { addFavoriteChangedListener, emitFavoriteChanged } from "../utils/favoriteEvents";
+import { isFanUserRole } from "../utils/roleRouting";
 import CachedImage from "./CachedImage";
 import PagerView from "./PagerView";
 
@@ -136,6 +137,7 @@ const ListingCard: React.FC<ListingCardProps> = ({
 }) => {
   const { colors, isDark } = useTheme();
   const { userRole, userId } = useAuth(); // To avoid showing warning to owners
+  const isFan = isFanUserRole(userRole);
   const [isBookmarked, setIsBookmarked] = useState(false);
   const [bookmarkBusy, setBookmarkBusy] = useState(false);
   const [pageIndex, setPageIndex] = useState(0);
@@ -561,8 +563,8 @@ const ListingCard: React.FC<ListingCardProps> = ({
 
   // Determine if chat button should be shown (not for own items)
   const canChat = useMemo(
-    () => onChat && item.owner_id !== userId && item.organizer_id !== userId,
-    [item.organizer_id, item.owner_id, onChat, userId],
+    () => !isFan && onChat && item.owner_id !== userId && item.organizer_id !== userId,
+    [isFan, item.organizer_id, item.owner_id, onChat, userId],
   );
 
   const shouldShowGigSummary = useMemo(
@@ -582,6 +584,9 @@ const ListingCard: React.FC<ListingCardProps> = ({
       item.owner_id !== userId,
     [item.open_group_applications, item.owner_id, item.type, userId, userRole],
   );
+
+  const showCustomContractBadge = Boolean(item?.contract_url);
+  const showAgreementBadge = item.type === "Gig";
 
   const viewActionLabel = useMemo(() => {
     if (item.type === "Artist") return "View Musician";
@@ -1022,6 +1027,18 @@ const ListingCard: React.FC<ListingCardProps> = ({
                 {showOpenApplicationsBadge && (
                   <View style={[styles.tagBadge, { backgroundColor: "#10B981" }]}>
                     <Text style={styles.tagText}>Open Applications</Text>
+                  </View>
+                )}
+                {showCustomContractBadge && (
+                  <View style={[styles.tagBadge, styles.contractBadge]}>
+                    <Ionicons name="document-text-outline" size={11} color="#FFFFFF" />
+                    <Text style={styles.tagText}>Custom Contract</Text>
+                  </View>
+                )}
+                {showAgreementBadge && (
+                  <View style={[styles.tagBadge, styles.agreementBadge]}>
+                    <Ionicons name="shield-checkmark-outline" size={11} color="#FFFFFF" />
+                    <Text style={styles.tagText}>Agreement Required</Text>
                   </View>
                 )}
                 {/* Total Slots Badge for Gigs without detailed slots */}
@@ -1516,6 +1533,30 @@ const ListingCard: React.FC<ListingCardProps> = ({
                   <Text style={[styles.tagText, { fontSize: 10 }]}>Open Applications</Text>
                 </View>
               )}
+              {showCustomContractBadge && (
+                <View
+                  style={[
+                    styles.tagBadge,
+                    styles.tagBadgeSmall,
+                    styles.contractBadge,
+                  ]}
+                >
+                  <Ionicons name="document-text-outline" size={11} color="#FFFFFF" />
+                  <Text style={[styles.tagText, { fontSize: 10 }]}>Custom Contract</Text>
+                </View>
+              )}
+              {showAgreementBadge && (
+                <View
+                  style={[
+                    styles.tagBadge,
+                    styles.tagBadgeSmall,
+                    styles.agreementBadge,
+                  ]}
+                >
+                  <Ionicons name="shield-checkmark-outline" size={11} color="#FFFFFF" />
+                  <Text style={[styles.tagText, { fontSize: 10 }]}>Agreement Required</Text>
+                </View>
+              )}
 
               {/* Seasonal Pricing Badge for Studios - Vertical */}
               {item.has_seasonal_pricing &&
@@ -1932,6 +1973,18 @@ const styles = StyleSheet.create({
     paddingVertical: 3,
     borderRadius: 6,
     marginBottom: 0,
+  },
+  contractBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: "#0F766E",
+  },
+  agreementBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: "#475569",
   },
   tagText: {
     color: "#FFF",

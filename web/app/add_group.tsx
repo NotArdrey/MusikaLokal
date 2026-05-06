@@ -483,7 +483,7 @@ export default function AddGroupScreen() {
 
   const handleBack = () => {
     if (step > 1) setStep(step - 1);
-    else router.back();
+    else router.replace("/my_group");
   };
 
   const createGroup = async () => {
@@ -640,7 +640,7 @@ export default function AddGroupScreen() {
     if (newGroupId) {
       router.replace({ pathname: "/manage_group", params: { id: newGroupId } });
     } else {
-      router.back();
+      router.replace("/my_group");
     }
   };
 
@@ -865,7 +865,7 @@ export default function AddGroupScreen() {
   return (
     <>
       <View style={[styles.flex1, { backgroundColor: colors.background }]}>
-        <Header title="Create Group" />
+        <Header title="Create Group" onBackPress={handleBack} />
 
         <View style={styles.contentFrame}>
 
@@ -1589,7 +1589,7 @@ export default function AddGroupScreen() {
                                     ]}
                                   />
                                   <TouchableOpacity
-                                    activeOpacity={1}
+                                    activeOpacity={!normalizeVisibleInput(currentInstrument) ? 1 : 0.78}
                                     onPress={() => finalizeMemberInstrument(index)}
                                     disabled={!normalizeVisibleInput(currentInstrument)}
                                     style={[
@@ -1601,6 +1601,7 @@ export default function AddGroupScreen() {
                                         backgroundColor: !normalizeVisibleInput(currentInstrument)
                                           ? "#9CA3AF"
                                           : colors.primary,
+                                        opacity: !normalizeVisibleInput(currentInstrument) ? 0.6 : 1,
                                       },
                                     ]}
                                   >
@@ -1801,7 +1802,7 @@ export default function AddGroupScreen() {
                 <TouchableOpacity
                   onPress={handleBack}
                   disabled={creating}
-                  activeOpacity={1}
+                  activeOpacity={creating ? 1 : 0.78}
                   style={[
                     styles.backBtn,
                     {
@@ -1824,7 +1825,7 @@ export default function AddGroupScreen() {
                 <TouchableOpacity
                   onPress={handleNext}
                   disabled={creating || !isCurrentStepComplete}
-                  activeOpacity={1}
+                  activeOpacity={creating || !isCurrentStepComplete ? 1 : 0.78}
                   style={[
                     styles.nextBtn,
                     {
@@ -1835,7 +1836,7 @@ export default function AddGroupScreen() {
                         : isCurrentStepComplete
                           ? colors.primary
                           : colors.border,
-                      opacity: creating ? 0.7 : 1,
+                      opacity: creating || !isCurrentStepComplete ? 0.6 : 1,
                       flex: 1
                     },
                   ]}

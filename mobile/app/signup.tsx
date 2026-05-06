@@ -1,26 +1,40 @@
 
 import { Ionicons } from '@expo/vector-icons';
+import {
+    BottomSheetBackdrop,
+    BottomSheetModal,
+    BottomSheetScrollView,
+    useBottomSheetSpringConfigs,
+} from '@gorhom/bottom-sheet';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useCameraPermissions } from 'expo-camera';
 import * as ImagePicker from 'expo-image-picker';
 import * as Linking from 'expo-linking';
 import { router, useLocalSearchParams } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Image, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { Calendar } from 'react-native-calendars';
 import type { DateData } from 'react-native-calendars';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { WebView } from 'react-native-webview';
 import { supabase } from '../lib/supabase';
-import BottomModal from '../src/components/BottomModal';
 import CustomAlert, { AlertType } from '../src/components/CustomAlert';
+import TrackedBottomSheetModal from '../src/components/TrackedBottomSheetModal';
 import { emitToast } from '../src/events/toastBus';
 import { useTheme } from '../src/context/ThemeContext';
+import { bottomSheetSpringConfig } from '../src/utils/motion';
 
 type OnboardingStep = 'details' | 'verification' | 'email_verification';
-type SignupRole = 'musician';
+type SignupRole = 'fan' | 'musician';
 type VerificationMode = 'didit' | 'manual';
+
+type SignupRoleOption = {
+    role: SignupRole;
+    title: string;
+    description: string;
+    icon: React.ComponentProps<typeof Ionicons>['name'];
+};
 
 type DocumentOption = {
     key: string;
@@ -39,7 +53,22 @@ type ManualUploadAsset = {
 
 type ManualImageTarget = 'front' | 'back' | 'selfie';
 
-const ALLOWED_SIGNUP_ROLES: SignupRole[] = ['musician'];
+const ALLOWED_SIGNUP_ROLES: SignupRole[] = ['fan', 'musician'];
+
+const SIGNUP_ROLE_OPTIONS: SignupRoleOption[] = [
+    {
+        role: 'fan',
+        title: 'Register as a Fan',
+        description: 'Follow artists, save favorites, and discover local music.',
+        icon: 'heart-outline',
+    },
+    {
+        role: 'musician',
+        title: 'Register as a Musician',
+        description: 'Create a music profile and join gigs, listings, and collaborations.',
+        icon: 'musical-notes-outline',
+    },
+];
 
 const PH_DOCUMENT_OPTIONS: DocumentOption[] = [
     { key: 'national_id', label: 'National ID card', diditSupported: true, diditDocumentType: 'id_card' },
@@ -82,6 +111,8 @@ const isAllowedSignupRole = (role: unknown): role is SignupRole => {
 const isAdminRole = (role: unknown): boolean => {
     return typeof role === 'string' && role.toLowerCase() === 'admin';
 };
+
+const getSignupRoleFallbackName = (role: SignupRole) => role === 'fan' ? 'Fan' : 'Musician';
 
 const isSupersededVerificationStatus = (status: unknown) => {
     const normalized = String(status || '').trim().toUpperCase();
@@ -186,6 +217,11 @@ const logDiditEmailFlowError = (stage: string, error: unknown, payload: Record<s
 export default function SignupScreen() {
     const { colors, isDark } = useTheme();
     const insets = useSafeAreaInsets();
+    const documentSheetRef = useRef<BottomSheetModal>(null);
+    const manualExpirationSheetRef = useRef<BottomSheetModal>(null);
+    const documentSheetSnapPoints = useMemo(() => ['88%'], []);
+    const manualCalendarSnapPoints = useMemo(() => ['70%'], []);
+    const bottomSheetAnimationConfigs = useBottomSheetSpringConfigs(bottomSheetSpringConfig);
 
     // State
     // State
@@ -205,10 +241,10 @@ export default function SignupScreen() {
     const [manualIdExpiration, setManualIdExpiration] = useState('');
     const [manualExpirationCalendarVisible, setManualExpirationCalendarVisible] = useState(false);
 
-    const { verified, session_id, check_verification } = useLocalSearchParams<{ verified: string; session_id: string; check_verification: string }>();
+    const { verified, session_id, check_verification, role } = useLocalSearchParams<{ verified: string; session_id: string; check_verification: string; role?: string }>();
 
     // Form Fields
-    const [selectedRole, setSelectedRole] = useState<SignupRole>('musician');
+    const [selectedRole, setSelectedRole] = useState<SignupRole>('fan');
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [confirmPassword, setConfirmPassword] = useState('');
@@ -282,7 +318,31 @@ export default function SignupScreen() {
     const Alert = { alert: showAlertNative };
 
     const [errors, setErrors] = useState<{ email?: string; password?: string; confirmPassword?: string; role?: string; document?: string }>({});
+
+    useEffect(() => {
+        const requestedRole = Array.isArray(role) ? role[0] : role;
+        if (isAllowedSignupRole(requestedRole)) {
+            setSelectedRole(requestedRole);
+        }
+    }, [role]);
+
     const selectedDocumentOption = useMemo(() => getDocumentOptionByKey(selectedDocumentKey), [selectedDocumentKey]);
+    const bottomSheetSurfaceColor = isDark ? '#1E2530' : '#FFFFFF';
+    const renderSignupSheetBackdrop = useCallback((props: any) => (
+        <BottomSheetBackdrop
+            {...props}
+            appearsOnIndex={0}
+            disappearsOnIndex={-1}
+            opacity={0.65}
+            pressBehavior="close"
+        />
+    ), []);
+    const handleDocumentSheetDismiss = useCallback(() => {
+        setDocumentModalVisible(false);
+    }, []);
+    const handleManualExpirationSheetDismiss = useCallback(() => {
+        setManualExpirationCalendarVisible(false);
+    }, []);
     const safeContentPadding = useMemo(() => ({
         paddingTop: Math.max(24, insets.top + 16),
         paddingBottom: Math.max(24, insets.bottom + 24),
@@ -297,6 +357,24 @@ export default function SignupScreen() {
     const safeModalPadding = useMemo(() => ({
         paddingBottom: Math.max(24, insets.bottom + 24),
     }), [insets.bottom]);
+
+    useEffect(() => {
+        if (documentModalVisible) {
+            documentSheetRef.current?.present();
+            return;
+        }
+
+        documentSheetRef.current?.dismiss();
+    }, [documentModalVisible]);
+
+    useEffect(() => {
+        if (manualExpirationCalendarVisible) {
+            manualExpirationSheetRef.current?.present();
+            return;
+        }
+
+        manualExpirationSheetRef.current?.dismiss();
+    }, [manualExpirationCalendarVisible]);
 
     // Reset session when email changes
     React.useEffect(() => {
@@ -657,6 +735,13 @@ export default function SignupScreen() {
         }
     };
 
+    const handleRoleSelect = (nextRole: SignupRole) => {
+        setSelectedRole(nextRole);
+        if (errors.role) {
+            setErrors((prev) => ({ ...prev, role: undefined }));
+        }
+    };
+
     const handleManualExpirationSelect = (day: DateData) => {
         if (day.dateString < todayDateString) {
             Alert.alert('Expired ID', 'Please choose an ID expiration date that is today or later.');
@@ -884,14 +969,14 @@ export default function SignupScreen() {
         }
 
         if (!isAllowedSignupRole(selectedRole) || isAdminRole(selectedRole)) {
-            Alert.alert('Unsupported Account Type', 'Only musician accounts can be registered right now.');
+            Alert.alert('Unsupported Account Type', 'Only fan and musician accounts can be registered right now.');
             setStep('details');
             return;
         }
 
         setLoading(true);
 
-        const fallbackName = email.split('@')[0] || 'Musician';
+        const fallbackName = email.split('@')[0] || getSignupRoleFallbackName(selectedRole);
 
         try {
             const emailRedirectTo = createEmailConfirmationRedirectUrl();
@@ -1056,7 +1141,7 @@ export default function SignupScreen() {
 
         if (!isAllowedSignupRole(selectedRole)) {
             setErrors({ role: 'Please select a valid account type.' });
-            Alert.alert('Unsupported Account Type', 'Only musician accounts can be registered right now.');
+            Alert.alert('Unsupported Account Type', 'Only fan and musician accounts can be registered right now.');
             setStep('details');
             return;
         }
@@ -1174,7 +1259,7 @@ export default function SignupScreen() {
                 selectedRole,
                 platform: Platform.OS,
             });
-            Alert.alert('Unsupported Account Type', 'Only musician accounts can be registered right now.');
+            Alert.alert('Unsupported Account Type', 'Only fan and musician accounts can be registered right now.');
             setStep('details');
             return;
         }
@@ -1260,7 +1345,7 @@ export default function SignupScreen() {
 
         // Fallback for name if Didit fails
         if (!verifiedName) {
-            verifiedName = email.split('@')[0] || 'Musician';
+            verifiedName = email.split('@')[0] || getSignupRoleFallbackName(selectedRole);
         }
 
         logDiditEmailFlow('verifiedName.resolved', {
@@ -1530,13 +1615,44 @@ export default function SignupScreen() {
      */
     const renderDetailsStep = () => (
         <View style={styles.stepContainer}>
-            <TouchableOpacity activeOpacity={1} onPress={() => router.back()} style={styles.backLink}>
-                <Ionicons name="arrow-back" size={20} color={colors.textSecondary} />
-                <Text style={themeStyles.textSecondary}>Back</Text>
-            </TouchableOpacity>
-
             <Text style={[styles.stepTitle, themeStyles.text]}>Create your account</Text>
             <Text style={[styles.stepSubtitle, themeStyles.textSecondary]}>Enter your credentials to get started.</Text>
+
+            <View style={styles.roleSectionContainer}>
+                <Text style={[styles.documentSectionTitle, themeStyles.text]}>Register as</Text>
+                <View style={styles.roleGrid}>
+                    {SIGNUP_ROLE_OPTIONS.map((option) => {
+                        const selected = selectedRole === option.role;
+
+                        return (
+                            <TouchableOpacity
+                                key={option.role}
+                                activeOpacity={1}
+                                accessibilityRole="button"
+                                accessibilityState={{ selected }}
+                                onPress={() => handleRoleSelect(option.role)}
+                                style={[
+                                    styles.roleCardBig,
+                                    {
+                                        backgroundColor: selected ? (isDark ? 'rgba(79, 70, 229, 0.18)' : 'rgba(79, 70, 229, 0.08)') : colors.surface,
+                                        borderColor: selected ? colors.primary : colors.border,
+                                    },
+                                ]}
+                            >
+                                <View style={[styles.roleIconBubble, { backgroundColor: selected ? colors.primary : (isDark ? '#111827' : '#F3F4F6') }]}>
+                                    <Ionicons name={option.icon} size={22} color={selected ? '#FFFFFF' : colors.textSecondary} />
+                                </View>
+                                <View style={styles.roleCopy}>
+                                    <Text style={[styles.roleLabelBig, themeStyles.text]}>{option.title}</Text>
+                                    <Text style={[styles.roleDescBig, themeStyles.textSecondary]}>{option.description}</Text>
+                                </View>
+                                {selected ? <Ionicons name="checkmark-circle" size={22} color={colors.primary} /> : null}
+                            </TouchableOpacity>
+                        );
+                    })}
+                </View>
+                {errors.role ? <Text style={{ color: 'red', fontSize: 12 }}>{errors.role}</Text> : null}
+            </View>
 
             <View style={styles.formGap}>
                 {/* Email */}
@@ -1620,49 +1736,68 @@ export default function SignupScreen() {
             <TouchableOpacity
                 onPress={handleNext}
                 disabled={loading || !isDetailsStepReady}
-                activeOpacity={1}
+                activeOpacity={loading || !isDetailsStepReady ? 1 : 0.78}
                 style={[
                     styles.nextButton,
                     { backgroundColor: isDetailsStepReady ? colors.primary : (isDark ? '#374151' : '#E5E7EB') },
+                    { opacity: loading || !isDetailsStepReady ? 0.6 : 1 },
                     !isDetailsStepReady ? styles.nextButtonDisabled : null,
                 ]}
             >
                 {loading ? <ActivityIndicator color="white" /> : <Text style={[styles.nextButtonText, { color: isDetailsStepReady ? "white" : colors.textSecondary }]}>Next</Text>}
             </TouchableOpacity>
 
-            <BottomModal
-                visible={documentModalVisible}
+            <View style={styles.authFooterLinkContainer}>
+                <Text style={[styles.authFooterText, themeStyles.textSecondary]}>
+                    Already have an account?{' '}
+                </Text>
+                <TouchableOpacity
+                    activeOpacity={0.65}
+                    onPress={() => router.push('/')}
+                    style={styles.authFooterLinkPressable}
+                >
+                    <Text style={[styles.authFooterLinkText, { color: colors.primary }]}>Log in</Text>
+                </TouchableOpacity>
+            </View>
+
+            <TrackedBottomSheetModal
+                ref={documentSheetRef}
                 overlayLabel="SignupDocumentTypeModal"
-                onClose={() => setDocumentModalVisible(false)}
-                closeOnBackdropPress
+                index={0}
+                snapPoints={documentSheetSnapPoints}
+                animationConfigs={bottomSheetAnimationConfigs}
+                animateOnMount
+                enableDynamicSizing={false}
+                enablePanDownToClose
+                backdropComponent={renderSignupSheetBackdrop}
+                backgroundStyle={{
+                    backgroundColor: bottomSheetSurfaceColor,
+                    borderTopLeftRadius: 28,
+                    borderTopRightRadius: 28,
+                }}
+                handleComponent={null}
+                onDismiss={handleDocumentSheetDismiss}
             >
-                    <View style={[styles.documentModalSheet, safeModalPadding, { backgroundColor: colors.background, borderColor: colors.border }]}>
-                        <View
-                            style={[
-                                styles.documentModalHandle,
-                                { backgroundColor: isDark ? "#4B5563" : "#E5E7EB" },
-                            ]}
-                        />
-                        <View style={[styles.documentModalHeader, { borderBottomColor: colors.border }]}>
-                            <View style={styles.documentModalHeaderCopy}>
-                                <Text style={[styles.documentModalTitle, themeStyles.text]}>Select ID type</Text>
-                                <Text style={[styles.documentModalSubtitle, themeStyles.textSecondary]}>
-                                    Choose the government ID you will use for verification.
-                                </Text>
-                            </View>
+                    <View style={[styles.documentModalSheet, safeModalPadding, { backgroundColor: bottomSheetSurfaceColor }]}>
+                        <View style={styles.documentModalHeader}>
                             <TouchableOpacity
                                 activeOpacity={1}
                                 onPress={() => setDocumentModalVisible(false)}
                                 style={[
                                     styles.documentModalCloseButton,
-                                    { backgroundColor: colors.card, borderColor: colors.border },
+                                    { backgroundColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)' },
                                 ]}
                             >
-                                <Ionicons name="close" size={18} color={colors.text} />
+                                <Ionicons name="close" size={22} color={colors.textSecondary} />
                             </TouchableOpacity>
+                            <Text style={[styles.documentModalTitle, themeStyles.text]}>Select ID type</Text>
+                            <View style={styles.documentModalHeaderSpacer} />
                         </View>
+                        <Text style={[styles.documentModalSubtitle, themeStyles.textSecondary]}>
+                            Choose the government ID you will use for verification.
+                        </Text>
 
-                        <ScrollView
+                        <BottomSheetScrollView
                             style={styles.documentModalBody}
                             contentContainerStyle={styles.documentModalList}
                             showsVerticalScrollIndicator={false}
@@ -1678,8 +1813,10 @@ export default function SignupScreen() {
                                         style={[
                                             styles.documentModalOption,
                                             {
-                                                backgroundColor: selected ? (isDark ? 'rgba(37, 99, 235, 0.16)' : 'rgba(37, 99, 235, 0.08)') : (isDark ? '#111827' : '#F9FAFB'),
-                                                borderColor: selected ? colors.primary : (isDark ? '#374151' : '#E5E7EB'),
+                                                backgroundColor: selected
+                                                    ? (isDark ? 'rgba(99,102,241,0.18)' : 'rgba(99,102,241,0.08)')
+                                                    : (isDark ? '#252D3A' : '#F7F8FA'),
+                                                borderColor: selected ? colors.primary : 'transparent',
                                             },
                                         ]}
                                     >
@@ -1712,9 +1849,9 @@ export default function SignupScreen() {
                                     </TouchableOpacity>
                                 );
                             })}
-                        </ScrollView>
+                        </BottomSheetScrollView>
                     </View>
-            </BottomModal>
+            </TrackedBottomSheetModal>
         </View>
     );
 
@@ -1918,12 +2055,13 @@ export default function SignupScreen() {
                         </View>
 
                         <TouchableOpacity
-                            activeOpacity={1}
+                            activeOpacity={loading || !isManualReviewReady ? 1 : 0.78}
                             onPress={() => void submitManualReviewSignup()}
                             disabled={loading || !isManualReviewReady}
                             style={[
                                 styles.nextButton,
                                 { backgroundColor: isManualReviewReady ? colors.primary : (isDark ? '#374151' : '#E5E7EB'), marginTop: 8 },
+                                { opacity: loading || !isManualReviewReady ? 0.6 : 1 },
                                 !isManualReviewReady ? styles.nextButtonDisabled : null,
                             ]}
                         >
@@ -1931,37 +2069,42 @@ export default function SignupScreen() {
                         </TouchableOpacity>
                     </ScrollView>
 
-                    <BottomModal
-                        visible={manualExpirationCalendarVisible}
+                    <TrackedBottomSheetModal
+                        ref={manualExpirationSheetRef}
                         overlayLabel="SignupManualExpirationCalendarModal"
-                        onClose={() => setManualExpirationCalendarVisible(false)}
-                        closeOnBackdropPress
+                        index={0}
+                        snapPoints={manualCalendarSnapPoints}
+                        animationConfigs={bottomSheetAnimationConfigs}
+                        animateOnMount
+                        enableDynamicSizing={false}
+                        enablePanDownToClose
+                        backdropComponent={renderSignupSheetBackdrop}
+                        backgroundStyle={{
+                            backgroundColor: bottomSheetSurfaceColor,
+                            borderTopLeftRadius: 28,
+                            borderTopRightRadius: 28,
+                        }}
+                        handleComponent={null}
+                        onDismiss={handleManualExpirationSheetDismiss}
                     >
-                        <View style={[styles.documentModalSheet, styles.manualCalendarSheet, safeModalPadding, { backgroundColor: colors.background, borderColor: colors.border }]}>
-                            <View
-                                style={[
-                                    styles.documentModalHandle,
-                                    { backgroundColor: isDark ? "#4B5563" : "#E5E7EB" },
-                                ]}
-                            />
-                            <View style={[styles.documentModalHeader, { borderBottomColor: colors.border }]}>
-                                <View style={styles.documentModalHeaderCopy}>
-                                    <Text style={[styles.documentModalTitle, themeStyles.text]}>ID expiration date</Text>
-                                    <Text style={[styles.documentModalSubtitle, themeStyles.textSecondary]}>
-                                        Select the date printed on your ID.
-                                    </Text>
-                                </View>
+                        <View style={[styles.documentModalSheet, styles.manualCalendarSheet, safeModalPadding, { backgroundColor: bottomSheetSurfaceColor }]}>
+                            <View style={styles.documentModalHeader}>
                                 <TouchableOpacity
                                     activeOpacity={1}
                                     onPress={() => setManualExpirationCalendarVisible(false)}
                                     style={[
                                         styles.documentModalCloseButton,
-                                        { backgroundColor: colors.card, borderColor: colors.border },
+                                        { backgroundColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)' },
                                     ]}
                                 >
-                                    <Ionicons name="close" size={18} color={colors.text} />
+                                    <Ionicons name="close" size={22} color={colors.textSecondary} />
                                 </TouchableOpacity>
+                                <Text style={[styles.documentModalTitle, themeStyles.text]}>ID expiration date</Text>
+                                <View style={styles.documentModalHeaderSpacer} />
                             </View>
+                            <Text style={[styles.documentModalSubtitle, themeStyles.textSecondary]}>
+                                Select the date printed on your ID.
+                            </Text>
 
                             <View style={styles.manualCalendarContainer}>
                                 <Calendar
@@ -1971,7 +2114,7 @@ export default function SignupScreen() {
                                     markedDates={manualExpirationMarkedDates}
                                     enableSwipeMonths
                                     theme={{
-                                        calendarBackground: colors.background,
+                                        calendarBackground: isDark ? '#1E2530' : '#FFFFFF',
                                         textSectionTitleColor: colors.textSecondary,
                                         dayTextColor: colors.text,
                                         monthTextColor: colors.text,
@@ -1983,7 +2126,7 @@ export default function SignupScreen() {
                                 />
                             </View>
                         </View>
-                    </BottomModal>
+                    </TrackedBottomSheetModal>
                 </View>
             );
         }
@@ -2179,12 +2322,15 @@ const styles = StyleSheet.create({
     stepContainer: { flex: 1, width: '100%', maxWidth: 500, alignSelf: 'center' },
     stepTitle: { fontSize: 28, fontWeight: 'bold', marginBottom: 8, fontFamily: 'Poppins_700Bold' },
     stepSubtitle: { fontSize: 16, marginBottom: 32, fontFamily: 'Poppins_400Regular' },
-    roleGrid: { gap: 16 },
+    roleSectionContainer: { marginBottom: 24, gap: 12 },
+    roleGrid: { gap: 12 },
     roleCardBig: {
-        flexDirection: 'row', alignItems: 'center', padding: 20, borderRadius: 16, borderWidth: 1, gap: 16
+        flexDirection: 'row', alignItems: 'center', padding: 16, borderRadius: 16, borderWidth: 1, gap: 14, minHeight: 88
     },
+    roleIconBubble: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
+    roleCopy: { flex: 1, gap: 4 },
     roleLabelBig: { fontSize: 18, fontWeight: '600', fontFamily: 'Poppins_600SemiBold' },
-    roleDescBig: { fontSize: 12, flex: 1, fontFamily: 'Poppins_400Regular' },
+    roleDescBig: { fontSize: 12, lineHeight: 18, fontFamily: 'Poppins_400Regular' },
     nextButton: {
         height: 56,
         borderRadius: 16,
@@ -2200,6 +2346,16 @@ const styles = StyleSheet.create({
     },
     nextButtonDisabled: { shadowOpacity: 0, shadowRadius: 0, elevation: 0 },
     nextButtonText: { color: 'white', fontSize: 16, fontWeight: '600', fontFamily: 'Poppins_600SemiBold' },
+    authFooterLinkContainer: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        flexWrap: 'wrap',
+        marginTop: 18,
+    },
+    authFooterText: { fontSize: 14, fontFamily: 'Poppins_400Regular' },
+    authFooterLinkPressable: { paddingVertical: 4, paddingHorizontal: 2 },
+    authFooterLinkText: { fontSize: 14, textAlign: 'center', fontFamily: 'Poppins_600SemiBold' },
     inputContainer: {
         flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, height: 56, borderRadius: 16, borderWidth: 1
     },
@@ -2230,55 +2386,48 @@ const styles = StyleSheet.create({
     documentSelectCopy: { flex: 1, gap: 2 },
     documentSelectValue: { fontSize: 14, lineHeight: 18, fontFamily: 'Poppins_600SemiBold' },
     documentSelectionMeta: { fontSize: 11, lineHeight: 14, fontFamily: 'Poppins_700Bold', textTransform: 'uppercase' },
-    documentModalOverlay: {
-        flex: 1,
-        backgroundColor: 'rgba(0,0,0,0.5)',
-        justifyContent: 'flex-end',
-    },
-    documentModalBackdrop: { flex: 1 },
     documentModalSheet: {
-        maxHeight: '88%',
-        borderTopLeftRadius: 32,
-        borderTopRightRadius: 32,
-        borderWidth: 1,
-        borderBottomWidth: 0,
+        flex: 1,
+        borderTopLeftRadius: 28,
+        borderTopRightRadius: 28,
+        paddingHorizontal: 20,
+        paddingTop: 12,
+        borderWidth: 0,
         overflow: 'hidden',
-    },
-    documentModalHandle: {
-        width: 40,
-        height: 5,
-        borderRadius: 999,
-        alignSelf: 'center',
-        marginTop: 10,
-        marginBottom: 10,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: -4 },
+        shadowOpacity: 0.2,
+        shadowRadius: 12,
+        elevation: 16,
     },
     documentModalHeader: {
         flexDirection: 'row',
         alignItems: 'center',
-        paddingHorizontal: 20,
-        paddingBottom: 14,
-        borderBottomWidth: 1,
+        justifyContent: 'space-between',
+        marginBottom: 10,
+        borderBottomWidth: 0,
     },
     documentModalHeaderCopy: { flex: 1, gap: 4, paddingRight: 16 },
-    documentModalTitle: { fontSize: 18, fontFamily: 'Poppins_600SemiBold' },
-    documentModalSubtitle: { fontSize: 12, lineHeight: 18, fontFamily: 'Poppins_400Regular' },
-    documentModalCloseButton: { width: 38, height: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center', borderWidth: 1 },
+    documentModalHeaderSpacer: { width: 38, height: 38 },
+    documentModalTitle: { flex: 1, fontSize: 18, textAlign: 'center', fontFamily: 'Poppins_700Bold' },
+    documentModalSubtitle: { fontSize: 13, lineHeight: 19, marginBottom: 16, textAlign: 'center', fontFamily: 'Poppins_400Regular' },
+    documentModalCloseButton: { width: 38, height: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center', borderWidth: 0 },
     documentModalBody: { flexGrow: 0 },
-    documentModalList: { gap: 8, paddingHorizontal: 20, paddingTop: 16, paddingBottom: 4 },
+    documentModalList: { gap: 8, paddingBottom: 4 },
     documentModalOption: {
         flexDirection: 'row',
         alignItems: 'center',
-        minHeight: 60,
+        minHeight: 58,
         borderRadius: 14,
-        borderWidth: 1,
-        paddingHorizontal: 12,
+        borderWidth: 1.5,
+        paddingHorizontal: 14,
         paddingVertical: 9,
-        gap: 10,
+        gap: 12,
     },
-    documentModalOptionIcon: { width: 34, height: 34, borderRadius: 11, alignItems: 'center', justifyContent: 'center' },
+    documentModalOptionIcon: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
     documentModalOptionCopy: { flex: 1, gap: 2 },
-    documentModalOptionTitle: { fontSize: 14, lineHeight: 18, fontFamily: 'Poppins_600SemiBold' },
-    documentModalOptionMeta: { fontSize: 11, lineHeight: 14, fontFamily: 'Poppins_700Bold', textTransform: 'uppercase' },
+    documentModalOptionTitle: { fontSize: 15, lineHeight: 20, fontFamily: 'Poppins_600SemiBold' },
+    documentModalOptionMeta: { fontSize: 11, lineHeight: 15, fontFamily: 'Poppins_700Bold', textTransform: 'uppercase' },
     documentModalOptionCheck: { width: 24, height: 24, alignItems: 'center', justifyContent: 'center' },
     manualFlowContainer: { paddingHorizontal: 20, paddingBottom: 28, gap: 16 },
     manualReviewIntroCard: {

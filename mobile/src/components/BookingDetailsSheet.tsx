@@ -204,7 +204,7 @@ const BookingDetailsSheet = forwardRef<
     try {
       const normalized = time.trim();
 
-      // Preserve already formatted values like "2:30 PM".
+      // Keep already formatted values like "2:30 PM".
       if (/\b(am|pm)\b/i.test(normalized)) {
         return normalized;
       }

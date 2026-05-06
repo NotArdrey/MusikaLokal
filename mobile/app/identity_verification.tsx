@@ -303,13 +303,14 @@ export default function IdentityVerificationScreen() {
 
           <View style={styles.sectionContainer}>
             <TouchableOpacity
-              activeOpacity={1}
+              activeOpacity={!canStartVerification ? 1 : 0.78}
               disabled={!canStartVerification}
               onPress={handleStartVerification}
               style={[
                 styles.actionButton,
                 {
                   backgroundColor: canStartVerification ? colors.primary : isDark ? '#374151' : '#D1D5DB',
+                  opacity: canStartVerification ? 1 : 0.6,
                 },
               ]}
             >

@@ -7,6 +7,7 @@ import { supabase } from '../lib/supabase';
 import CachedImage from '../src/components/CachedImage';
 import CustomAlert, { AlertType } from '../src/components/CustomAlert';
 import Header from '../src/components/header';
+import InlineErrorBanner from '../src/components/InlineErrorBanner';
 import Modal, { normalizeVisibleInput } from '../src/components/modal';
 import MusicianWorkspaceTabs from '../src/components/MusicianWorkspaceTabs';
 import Navbar from '../src/components/navbar';
@@ -14,7 +15,9 @@ import Skeleton from '../src/components/Skeleton';
 import { useBottomBarClearance } from '../src/hooks/useBottomBarClearance';
 import { useAuth, useRequireAuth } from '../src/context/AuthContext';
 import { useTheme } from '../src/context/ThemeContext';
+import { getActionErrorMessage, getResultErrorMessage, logActionError } from '../src/utils/actionError';
 import { formatFriendlyDateTime } from '../src/utils/friendlyDateTime';
+import { invalidateListingCaches } from '../src/utils/listingCacheInvalidation';
 
 const normalizePermitStatus = (permitStatus: string | null | undefined) => {
     const normalizedPermitStatus = String(permitStatus || '').trim().toLowerCase();
@@ -42,6 +45,7 @@ export default function MyVenueScreen() {
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
     const [deleting, setDeleting] = useState(false);
+    const [loadError, setLoadError] = useState<string | null>(null);
     const [alertVisible, setAlertVisible] = useState(false);
     const [alertConfig, setAlertConfig] = useState<{
         type: AlertType;
@@ -54,18 +58,19 @@ export default function MyVenueScreen() {
         message: '',
     });
 
-    const showAlert = (type: AlertType, title: string, message: string, buttons?: any[]) => {
+    const showAlert = useCallback((type: AlertType, title: string, message: string, buttons?: any[]) => {
         setAlertConfig({ type, title, message, buttons });
         setAlertVisible(true);
-    };
+    }, []);
 
-    const fetchGigs = useCallback(async () => {
+    const fetchGigs = useCallback(async (options?: { showAlertOnError?: boolean }) => {
         if (!userId) return;
+        setLoadError(null);
         try {
             let baseGigs: any[] = [];
 
             if (isMusicianView) {
-                const acceptedStatuses = ['accepted', 'confirmed', 'happening now', 'completed'];
+                const acceptedStatuses = ['accepted', 'approved', 'completed'];
 
                 const { data: groupMembershipRows, error: membershipError } = await supabase
                     .from('group_members')
@@ -73,6 +78,12 @@ export default function MyVenueScreen() {
                     .eq('user_id', userId);
 
                 if (membershipError) {
+                    const message = getActionErrorMessage(membershipError, 'Group memberships could not be loaded.');
+                    logActionError('MyVenue', 'fetch group_members', membershipError, { userId });
+                    setLoadError(`Solo gigs loaded, but group gigs could not be checked: ${message}`);
+                    if (options?.showAlertOnError) {
+                        showAlert('error', 'Could Not Load Group Gigs', message);
+                    }
                 }
 
                 const joinedGroupIds = Array.from(
@@ -209,11 +220,17 @@ export default function MyVenueScreen() {
                 };
             }));
         } catch (e) {
+            const message = getActionErrorMessage(e, 'Failed to load gigs.');
+            logActionError('MyVenue', 'fetchGigs', e, { userId, isMusicianView });
+            setLoadError(message);
+            if (options?.showAlertOnError) {
+                showAlert('error', 'Could Not Load Gigs', message);
+            }
         } finally {
             setLoading(false);
             setRefreshing(false);
         }
-    }, [isMusicianView, userId]);
+    }, [isMusicianView, showAlert, userId]);
 
     useFocusEffect(
         useCallback(() => {
@@ -226,7 +243,7 @@ export default function MyVenueScreen() {
                 }
             });
             const refreshInterval = setInterval(() => {
-                fetchGigs();
+                void fetchGigs();
             }, 30000);
 
             return () => {
@@ -246,7 +263,7 @@ export default function MyVenueScreen() {
                 'postgres_changes',
                 { event: '*', schema: 'public', table: 'gigs', filter: `organizer_id=eq.${userId}` },
                 () => {
-                    fetchGigs();
+                    void fetchGigs();
                 }
             )
             .subscribe();
@@ -258,7 +275,7 @@ export default function MyVenueScreen() {
 
     const onRefresh = () => {
         setRefreshing(true);
-        fetchGigs();
+        void fetchGigs({ showAlertOnError: true });
     };
 
     const closeDeleteModal = () => {
@@ -315,10 +332,11 @@ export default function MyVenueScreen() {
                     return;
                 }
 
-                throw new Error(result?.message || 'Delete failed');
+                throw new Error(getResultErrorMessage(result, 'Delete failed'));
             }
 
             setGigs(prev => prev.filter(g => g.id !== selectedId));
+            invalidateListingCaches(userId, ['bookings', 'details', 'home', 'search', 'notifications']);
             closeDeleteModal();
             const cancelledApplications = Number(result?.cancelled_applications || 0);
             const successMessage = cancelledApplications > 0
@@ -326,7 +344,9 @@ export default function MyVenueScreen() {
                 : 'Gig deleted successfully.';
             showAlert('success', 'Gig Deleted', successMessage);
         } catch (e) {
-            showAlert('error', 'Error', 'Failed to delete gig');
+            const message = getActionErrorMessage(e, 'Failed to delete gig.');
+            logActionError('MyVenue', 'delete gig', e, { gigId: selectedId, userId });
+            showAlert('error', 'Delete Failed', message);
         } finally {
             setDeleting(false);
         }
@@ -337,8 +357,8 @@ export default function MyVenueScreen() {
 
         try {
             await AsyncStorage.setItem('pending_reopen_listing_id', gigId);
-        } catch {
-            // Continue navigation even if caching fails.
+        } catch (error) {
+            logActionError('MyVenue', 'cache gig preview id', error, { gigId });
         }
 
         router.push('/feed');
@@ -373,6 +393,14 @@ export default function MyVenueScreen() {
                     {isMusicianView && (
                         <MusicianWorkspaceTabs activeKey="venue" />
                     )}
+
+                    <InlineErrorBanner
+                        message={loadError}
+                        onRetry={() => {
+                            if (gigs.length === 0) setLoading(true);
+                            void fetchGigs({ showAlertOnError: true });
+                        }}
+                    />
 
                     {loading ? (
                         <View style={styles.skeletonList}>
@@ -568,7 +596,9 @@ export default function MyVenueScreen() {
                 inputPlaceholder="Cancellation reason"
                 inputValue={cancellationReason}
                 onInputChange={setCancellationReason}
-                confirmDisabled={!normalizeVisibleInput(cancellationReason) || deleting}
+                confirmDisabled={deleting}
+                loading={deleting}
+                loadingMessage="Deleting gig and notifying applicants..."
             />
             <CustomAlert
                 visible={alertVisible}

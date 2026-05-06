@@ -7,7 +7,8 @@ import CustomAlert, { AlertType } from './CustomAlert';
 import { DEFAULT_AVATAR } from '../constants/Images';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
-import { resolveRoleManageRoute } from '../utils/roleRouting';
+import { isFanUserRole, resolveRoleManageRoute } from '../utils/roleRouting';
+import { formatDashedNumericDate } from '../utils/friendlyDateTime';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
     UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -183,6 +184,7 @@ export default function SidebarNav() {
         () => userRole === 'admin' || pathname === '/admin' || pathname.startsWith('/admin/'),
         [userRole, pathname],
     );
+    const isFan = isFanUserRole(userRole);
 
     const activeAdminTab = useMemo(() => resolveAdminTab(pathname), [pathname]);
 
@@ -212,7 +214,7 @@ export default function SidebarNav() {
     }, []);
 
     useEffect(() => {
-        if (isGuest || !session?.user?.id) {
+        if (isGuest || isFan || !session?.user?.id) {
             setManageRoute('/manage');
             return;
         }
@@ -223,7 +225,7 @@ export default function SidebarNav() {
         }
 
         setManageRoute(resolveRoleManageRoute(userRole, { adminRoute: isAdmin ? '/admin' : undefined }));
-    }, [isAdmin, isGuest, roleResolved, session?.user?.id, userRole]);
+    }, [isAdmin, isFan, isGuest, roleResolved, session?.user?.id, userRole]);
 
     const refreshSidebarState = useCallback(async () => {
         if (isGuest || !session?.user?.id) {
@@ -430,7 +432,7 @@ export default function SidebarNav() {
         if (diffMins < 1) return 'Just now';
         if (diffMins < 60) return `${diffMins}m ago`;
         if (diffHrs < 24) return `${diffHrs}h ago`;
-        return date.toLocaleDateString();
+        return formatDashedNumericDate(date);
     }, []);
 
     const panelUnreadCount = useMemo(
@@ -476,6 +478,13 @@ export default function SidebarNav() {
             ];
         }
 
+        if (isFan) {
+            return [
+                { id: 'home', icon: 'home', label: 'Home', route: '/feed' },
+                { id: 'profile', icon: 'person', label: 'Profile', route: '/profile' },
+            ];
+        }
+
         if (isGuest) {
             return [];
         }
@@ -487,7 +496,7 @@ export default function SidebarNav() {
             { id: 'activity', icon: 'calendar', label: 'Activity', route: '/bookings' },
             { id: 'manage', icon: 'briefcase', label: 'Manage', route: manageRoute },
         ];
-    }, [isAdminContext, isGuest, manageRoute]);
+    }, [isAdminContext, isFan, isGuest, manageRoute]);
 
     const handleUsersNavigation = useCallback((section: UsersSection) => {
         LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
@@ -715,18 +724,20 @@ export default function SidebarNav() {
                         <View style={styles.topActions}>
                             {!isGuest && (
                                 <View style={styles.topCommActions}>
-                                    <TouchableOpacity activeOpacity={1}
-                                        style={[
-                                            styles.topIconButton,
-                                            {
-                                                backgroundColor: isDark ? 'rgba(255,255,255,0.08)' : '#F1F5F9',
-                                                borderColor: colors.border,
-                                            },
-                                        ]}
-                                        onPress={() => router.push('/chat')}
-                                    >
-                                        <Ionicons name="chatbubbles-outline" size={19} color={colors.textSecondary} />
-                                    </TouchableOpacity>
+                                    {!isFan && (
+                                        <TouchableOpacity activeOpacity={1}
+                                            style={[
+                                                styles.topIconButton,
+                                                {
+                                                    backgroundColor: isDark ? 'rgba(255,255,255,0.08)' : '#F1F5F9',
+                                                    borderColor: colors.border,
+                                                },
+                                            ]}
+                                            onPress={() => router.push('/chat')}
+                                        >
+                                            <Ionicons name="chatbubbles-outline" size={19} color={colors.textSecondary} />
+                                        </TouchableOpacity>
+                                    )}
 
                                     <TouchableOpacity activeOpacity={1}
                                         style={[

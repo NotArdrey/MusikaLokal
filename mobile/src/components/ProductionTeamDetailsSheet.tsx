@@ -25,7 +25,9 @@ import { useTheme } from "../context/ThemeContext";
 import { useBottomBarClearance } from "../hooks/useBottomBarClearance";
 import { submitListingRequest, uploadListingRequestDocument } from "../utils/listingRequests";
 import { bottomSheetSpringConfig } from "../utils/motion";
+import { isFanUserRole } from "../utils/roleRouting";
 import { getSmoothTabIndex, setSmoothTab } from "../utils/smoothTabs";
+import { formatDashedNumericDate } from "../utils/friendlyDateTime";
 import CachedImage from "./CachedImage";
 import CustomAlert, { AlertType } from "./CustomAlert";
 import DocumentUploader from "./DocumentUploader";
@@ -107,7 +109,8 @@ const ProductionTeamDetailsSheet = forwardRef<
   ProductionTeamDetailsSheetProps
 >(function ProductionTeamDetailsSheet({ teamId, onDismiss }, ref) {
   const { colors, isDark } = useTheme();
-  const { userId } = useAuth();
+  const { userId, userRole } = useAuth();
+  const isFan = isFanUserRole(userRole);
   const { contentBottomPadding } = useBottomBarClearance(24);
   const snapPoints = useMemo(() => ["86%"], []);
   const animationConfigs = useBottomSheetSpringConfigs(bottomSheetSpringConfig);
@@ -519,7 +522,7 @@ const ProductionTeamDetailsSheet = forwardRef<
 
   const accentColor = "#F97316";
   const accentSoft = isDark ? "rgba(249, 115, 22, 0.18)" : "rgba(249, 115, 22, 0.12)";
-  const canMessageTeamOwner = Boolean(team?.owner_id && team.owner_id !== userId);
+  const canMessageTeamOwner = !isFan && Boolean(team?.owner_id && team.owner_id !== userId);
 
   useEffect(() => {
     if (!tabsToRender.includes(activeTab)) {
@@ -950,10 +953,10 @@ const ProductionTeamDetailsSheet = forwardRef<
         />
 
         <TouchableOpacity
-          activeOpacity={1}
+          activeOpacity={isSendingRequest ? 1 : 0.78}
           onPress={handleSendConnectionRequest}
           disabled={isSendingRequest}
-          style={[styles.primaryButton, { backgroundColor: colors.primary, marginTop: 16 }]}
+          style={[styles.primaryButton, { backgroundColor: colors.primary, marginTop: 16, opacity: isSendingRequest ? 0.6 : 1 }]}
         >
           {isSendingRequest ? (
             <ActivityIndicator color="#FFF" />
@@ -1012,7 +1015,7 @@ const ProductionTeamDetailsSheet = forwardRef<
                     {review.author?.full_name || "Anonymous"}
                   </Text>
                   <Text style={[styles.reviewDate, { color: colors.textSecondary }]}>
-                    {new Date(review.created_at).toLocaleDateString()}
+                    {formatDashedNumericDate(review.created_at)}
                   </Text>
                 </View>
               </View>

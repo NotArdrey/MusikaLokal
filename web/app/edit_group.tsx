@@ -78,6 +78,13 @@ const IS_WEB = Platform.OS === "web";
 export default function EditGroupScreen() {
   const { colors, isDark } = useTheme();
   const { id } = useLocalSearchParams();
+  const returnTab = useLocalSearchParams<{
+    returnTab?: string | string[];
+  }>().returnTab;
+  const returnTabParam = Array.isArray(returnTab) ? returnTab[0] : returnTab;
+  const normalizedReturnTab = ["About", "Applications", "Review"].includes(returnTabParam || "")
+    ? returnTabParam || "About"
+    : "About";
   const [groupName, setGroupName] = useState("");
   const [selectedGenres, setSelectedGenres] = useState<string[]>([]);
   const [showAllGenres, setShowAllGenres] = useState(false);
@@ -124,6 +131,19 @@ export default function EditGroupScreen() {
     setAlertVisible(true);
   };
 
+  const handleReturnToTabs = useCallback(() => {
+    const groupId = Array.isArray(id) ? id[0] : id;
+    if (groupId) {
+      router.replace({
+        pathname: "/manage_group",
+        params: { id: groupId, tab: normalizedReturnTab },
+      });
+      return;
+    }
+
+    router.replace("/my_group");
+  }, [id, normalizedReturnTab]);
+
   const isMissingRelationError = (error: any, relationName: string) => {
     const message = String(error?.message || "").toLowerCase();
     return error?.code === "42P01" && message.includes(relationName.toLowerCase());
@@ -138,10 +158,10 @@ export default function EditGroupScreen() {
       "Your current edits won't be saved unless you tap Save Changes.",
       [
         { text: "Stay", style: "cancel" },
-        { text: "Leave", style: "destructive", onPress: () => router.back() },
+        { text: "Leave", style: "destructive", onPress: handleReturnToTabs },
       ],
     );
-  }, [saving]);
+  }, [handleReturnToTabs, saving]);
 
   // Enhanced member structure: { name, instrument, role?, user_id?, avatar_url? }
   interface MemberDetail {
@@ -775,11 +795,7 @@ export default function EditGroupScreen() {
         {
           text: "OK",
           onPress: () => {
-            if (router.canGoBack()) {
-              router.back();
-            } else {
-              router.replace({ pathname: "/manage_group", params: { id: groupId } });
-            }
+            router.replace({ pathname: "/manage_group", params: { id: groupId, tab: normalizedReturnTab } });
           },
         },
       ]);
@@ -1741,7 +1757,7 @@ export default function EditGroupScreen() {
                       },
                     ]}
                   />
-                  <TouchableOpacity activeOpacity={1}
+                  <TouchableOpacity activeOpacity={!normalizeVisibleInput(newMemberInstrument) ? 1 : 0.78}
                     onPress={() => confirmAddMember(newMemberInstrument)}
                     disabled={!normalizeVisibleInput(newMemberInstrument)}
                     style={[
@@ -1755,6 +1771,7 @@ export default function EditGroupScreen() {
                         borderRadius: 8,
                         justifyContent: "center",
                         alignItems: "center",
+                        opacity: !normalizeVisibleInput(newMemberInstrument) ? 0.6 : 1,
                       },
                     ]}
                   >
@@ -1933,7 +1950,7 @@ export default function EditGroupScreen() {
                             ]}
                           />
                           <TouchableOpacity
-                            activeOpacity={1}
+                            activeOpacity={!normalizeVisibleInput(currentInstrument) ? 1 : 0.78}
                             onPress={() => finalizeMemberInstrument(index)}
                             disabled={!normalizeVisibleInput(currentInstrument)}
                             style={[
@@ -1945,6 +1962,7 @@ export default function EditGroupScreen() {
                                 backgroundColor: !normalizeVisibleInput(currentInstrument)
                                   ? "#9CA3AF"
                                   : colors.primary,
+                                opacity: !normalizeVisibleInput(currentInstrument) ? 0.6 : 1,
                               },
                             ]}
                           >
@@ -2134,12 +2152,13 @@ export default function EditGroupScreen() {
                     : isFormComplete
                       ? colors.primary
                       : colors.border,
+                  opacity: saving || !isFormComplete ? 0.6 : 1,
                   shadowColor: colors.primary,
                 },
               ]}
               onPress={handleSave}
               disabled={saving || !isFormComplete}
-              activeOpacity={1}
+              activeOpacity={saving || !isFormComplete ? 1 : 0.78}
             >
               {saving ? (
                 <ActivityIndicator size="small" color="#fff" />
@@ -2357,7 +2376,7 @@ export default function EditGroupScreen() {
                 ]}
                 onPress={initiateTransfer}
                 disabled={!selectedNewLeader || isTransferring}
-                activeOpacity={1}
+                activeOpacity={!selectedNewLeader || isTransferring ? 1 : 0.78}
               >
                 {isTransferring ? (
                   <ActivityIndicator color="white" size="small" />
@@ -2751,7 +2770,7 @@ const styles = StyleSheet.create({
     padding: 12,
     marginTop: 16,
     minHeight: 80,
-    textAlignVertical: "top",
+    textAlignVertical: "center",
     fontFamily: "Poppins_400Regular",
   },
   transferConfirmButton: {

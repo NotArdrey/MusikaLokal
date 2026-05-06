@@ -98,6 +98,13 @@ const formatConnectionEntityType = (value: unknown) =>
 const buildConnectionRequestTypeLabel = (eventDetails: any) => {
   const senderType = String(eventDetails?.sender_entity_type || "").trim().toLowerCase();
   const receiverType = String(eventDetails?.receiver_entity_type || "").trim().toLowerCase();
+  const requestKind = String(
+    eventDetails?.request_kind || eventDetails?.request_details?.request_kind || "",
+  ).trim().toLowerCase();
+
+  if (senderType === "group" && receiverType === "musician" && requestKind === "invite") {
+    return "Group Invite";
+  }
 
   if (senderType === "production_team" && receiverType === "venue") {
     return "Production Team Application";
@@ -113,6 +120,10 @@ const buildConnectionRequestTypeLabel = (eventDetails: any) => {
 
   if ((senderType === "musician" || senderType === "group") && receiverType === "production_team") {
     return "Production Team Application";
+  }
+
+  if ((senderType === "musician" || senderType === "group") && receiverType === "group") {
+    return "Group Application";
   }
 
   return `${formatConnectionEntityType(senderType || receiverType)} Request`;
@@ -413,6 +424,20 @@ const isProductionTeamInviteRequest = (item: any) =>
   item?.request_kind === "invite" &&
   Boolean(item?.production_team_id);
 
+const isGroupMemberApplicationRequest = (item: any) =>
+  item?.type_id === "booking_request" &&
+  item?.request_kind === "application" &&
+  item?.application_scope === "group_member" &&
+  item?.receiver_entity_type === "group";
+
+const isGroupMemberInviteRequest = (item: any) =>
+  item?.type_id === "booking_request" &&
+  item?.sender_entity_type === "group" &&
+  item?.receiver_entity_type === "musician" &&
+  item?.request_kind === "invite" &&
+  item?.application_scope === "group_member" &&
+  Boolean(item?.group_id);
+
 type Tab =
   | "Applicants"
   | "Active Musicians"
@@ -517,6 +542,43 @@ const getGigApplicationStatusLabel = (
 const canRenewGigApplication = (item: any) =>
   item?.type_id === "gig_application" &&
   String(item?.raw_status || item?.status || "").trim().toLowerCase() === "completed";
+
+const getActivityItemFilterLabel = (item: any) => {
+  if (item?.type_id === "booking_request") return "Requests";
+  if (item?.type_id === "gig_application") return "Applications";
+  if (item?.type_id === "studio_booking") return "Bookings";
+  return "Other";
+};
+
+const buildActivityItemSearchText = (item: any) =>
+  [
+    item?.name,
+    item?.counterparty_name,
+    item?.display_name,
+    item?.title,
+    item?.gig_title,
+    item?.studio_name,
+    item?.venue_name,
+    item?.type,
+    item?.status,
+    item?.display_status,
+    item?.message,
+    item?.request_application_context,
+    item?.request_context_title,
+    item?.request_kind,
+    item?.sender_entity_name,
+    item?.sender_entity_type,
+    item?.receiver_entity_name,
+    item?.receiver_entity_type,
+    item?.listing_type,
+    item?.request_slot_type,
+    item?.request_roster_entry_name,
+    item?.raw_date,
+    item?.date,
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
 
 export default function BookingsScreen() {
   const { colors, isDark } = useTheme();
@@ -1699,6 +1761,7 @@ export default function BookingsScreen() {
               listing_id: eventDetails.listing_id || null,
               listing_type: eventDetails.listing_type || null,
               request_kind: requestDetails.requestKind,
+              application_scope: eventDetails.application_scope || null,
               request_application_context: requestDetails.applicationContext,
               request_context_title: requestDetails.contextLabel,
               request_contract_url: requestDetails.contractUrl,
@@ -2446,6 +2509,82 @@ export default function BookingsScreen() {
           nextStatus === "accepted"
             ? `You accepted the production team invite from ${counterpartyName}.${rosterMessage}`
             : `You declined the production team invite from ${counterpartyName}.`,
+        );
+        return;
+      }
+
+      if (isGroupMemberApplicationRequest(item)) {
+        const { data, error } = await supabase.functions.invoke("group-members", {
+          body: {
+            action: "respond_group_application",
+            userId,
+            requestId: item.id,
+            decision: nextStatus,
+          },
+        });
+
+        if (error) {
+          console.error("respond_group_application failed", {
+            message: error.message,
+            status: (error as any).status,
+            code: (error as any).code,
+            details: (error as any).details,
+            hint: (error as any).hint,
+            context: (error as any).context,
+          });
+          throw error;
+        }
+
+        if (!data?.success) {
+          throw new Error(data?.error || "Failed to update the group application.");
+        }
+
+        await fetchBookings(userId);
+
+        showAlert(
+          "success",
+          nextStatus === "accepted" ? "Application accepted" : "Application declined",
+          nextStatus === "accepted"
+            ? `${counterpartyName} has been added to ${item.receiver_entity_name || "your group"}.`
+            : `You declined the group application from ${counterpartyName}.`,
+        );
+        return;
+      }
+
+      if (isGroupMemberInviteRequest(item)) {
+        const { data, error } = await supabase.functions.invoke("group-members", {
+          body: {
+            action: "respond_group_invite",
+            userId,
+            requestId: item.id,
+            decision: nextStatus,
+          },
+        });
+
+        if (error) {
+          console.error("respond_group_invite failed", {
+            message: error.message,
+            status: (error as any).status,
+            code: (error as any).code,
+            details: (error as any).details,
+            hint: (error as any).hint,
+            context: (error as any).context,
+          });
+          throw error;
+        }
+
+        if (!data?.success) {
+          throw new Error(data?.error || "Failed to update the group invite.");
+        }
+
+        await fetchBookings(userId);
+
+        showAlert(
+          "success",
+          nextStatus === "accepted" ? "Invite accepted" : "Invite declined",
+          nextStatus === "accepted"
+            ? `You joined ${item.sender_entity_name || "the group"}.`
+            : `You declined the group invite from ${item.sender_entity_name || "the group"}.`,
         );
         return;
       }
@@ -3656,13 +3795,6 @@ export default function BookingsScreen() {
     return 0;
   };
 
-  const getItemFilterLabel = (item: any) => {
-    if (item?.type_id === "booking_request") return "Requests";
-    if (item?.type_id === "gig_application") return "Applications";
-    if (item?.type_id === "studio_booking") return "Bookings";
-    return "Other";
-  };
-
   const [bookingRenderWindow, setBookingRenderWindow] = useState({
     key: "",
     limit: INITIAL_BOOKINGS_RENDER_COUNT,
@@ -3711,18 +3843,28 @@ export default function BookingsScreen() {
     [currentItems],
   );
 
+  const sortedCurrentItemMeta = React.useMemo(
+    () =>
+      sortedCurrentItems.map((item: any) => ({
+        filterLabel: getActivityItemFilterLabel(item),
+        item,
+        searchText: buildActivityItemSearchText(item),
+      })),
+    [sortedCurrentItems],
+  );
+
   const availableFilters = React.useMemo(
     () => [
       "All",
       ...Array.from(
         new Set(
-          sortedCurrentItems
-            .map((item: any) => getItemFilterLabel(item))
+          sortedCurrentItemMeta
+            .map((meta) => meta.filterLabel)
             .filter(Boolean),
         ),
       ),
     ],
-    [sortedCurrentItems],
+    [sortedCurrentItemMeta],
   );
 
   const normalizedSearchQuery = deferredSearchQuery.trim().toLowerCase();
@@ -3731,45 +3873,18 @@ export default function BookingsScreen() {
 
   const filteredItems = React.useMemo(
     () =>
-      sortedCurrentItems.filter((item: any) => {
-        const matchesFilter =
-          deferredActiveFilter === "All" || getItemFilterLabel(item) === deferredActiveFilter;
+      sortedCurrentItemMeta
+        .filter((meta) => {
+          const matchesFilter =
+            deferredActiveFilter === "All" || meta.filterLabel === deferredActiveFilter;
 
-        if (!matchesFilter) return false;
-        if (!normalizedSearchQuery) return true;
+          if (!matchesFilter) return false;
+          if (!normalizedSearchQuery) return true;
 
-        const searchableText = [
-          item?.name,
-          item?.counterparty_name,
-          item?.display_name,
-          item?.title,
-          item?.gig_title,
-          item?.studio_name,
-          item?.venue_name,
-          item?.type,
-          item?.status,
-          item?.display_status,
-          item?.message,
-          item?.request_application_context,
-          item?.request_context_title,
-          item?.request_kind,
-          item?.sender_entity_name,
-          item?.sender_entity_type,
-          item?.receiver_entity_name,
-          item?.receiver_entity_type,
-          item?.listing_type,
-          item?.request_slot_type,
-          item?.request_roster_entry_name,
-          item?.raw_date,
-          item?.date,
-        ]
-          .filter(Boolean)
-          .join(" ")
-          .toLowerCase();
-
-        return searchableText.includes(normalizedSearchQuery);
-      }),
-    [sortedCurrentItems, deferredActiveFilter, normalizedSearchQuery],
+          return meta.searchText.includes(normalizedSearchQuery);
+        })
+        .map((meta) => meta.item),
+    [sortedCurrentItemMeta, deferredActiveFilter, normalizedSearchQuery],
   );
   const bookingListKey = `${deferredActiveTab}|${deferredActiveAppTab}|${deferredActiveFilter}|${normalizedSearchQuery}`;
 
@@ -4579,6 +4694,30 @@ export default function BookingsScreen() {
                               </View>
                             </TouchableOpacity>
 
+                            {item.viewer_is_group_owner && isGroupMemberApplicationRequest(item) ? (
+                              <TouchableOpacity
+                                activeOpacity={1}
+                                onPress={(e) => {
+                                  e.stopPropagation();
+                                  router.push({ pathname: "/manage_group", params: { id: item.group_id } });
+                                }}
+                                style={[
+                                  styles.outlineButton,
+                                  {
+                                    flex: 1,
+                                    borderColor: colors.primary,
+                                    backgroundColor: isDark ? `${colors.primary}1A` : `${colors.primary}10`,
+                                  },
+                                ]}
+                              >
+                                <View style={styles.detailsButtonLabelContainer}>
+                                  <Text style={[styles.outlineButtonText, { color: colors.primary }]}>
+                                    Manage Group
+                                  </Text>
+                                </View>
+                              </TouchableOpacity>
+                            ) : null}
+
                             {canRespond ? (
                               <TouchableOpacity
                                 activeOpacity={1}
@@ -4629,6 +4768,31 @@ export default function BookingsScreen() {
                               </Text>
                             </TouchableOpacity>
                           ) : null}
+                          </View>
+                        )}
+
+                        {isHistoryTabView && (
+                          <View style={[styles.actionButtonsContainer, styles.compactActionRow]}>
+                            <TouchableOpacity
+                              activeOpacity={1}
+                              onPress={(e) => {
+                                e.stopPropagation();
+                                handleDetailsPress(item);
+                              }}
+                              style={[
+                                styles.outlineButton,
+                                {
+                                  flex: 1,
+                                  borderColor: colors.border,
+                                },
+                              ]}
+                            >
+                              <View style={styles.detailsButtonLabelContainer}>
+                                <Text style={[styles.outlineButtonText, { color: colors.textSecondary }]}>
+                                  View Details
+                                </Text>
+                              </View>
+                            </TouchableOpacity>
                           </View>
                         )}
                       </View>

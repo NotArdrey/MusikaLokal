@@ -356,14 +356,14 @@ export default function InstrumentSuggestionSheet({
             )}
             
             {/* Get Suggestions Button */}
-            <TouchableOpacity activeOpacity={1}
+            <TouchableOpacity activeOpacity={loading || selectedGenres.length === 0 ? 1 : 0.78}
                 onPress={fetchSuggestions}
                 disabled={loading || selectedGenres.length === 0}
                 style={[
                     styles.primaryButton,
                     { 
                         backgroundColor: selectedGenres.length > 0 ? colors.primary : colors.border,
-                        opacity: loading ? 0.7 : 1,
+                        opacity: loading || selectedGenres.length === 0 ? 0.6 : 1,
                     }
                 ]}
             >
@@ -428,10 +428,10 @@ export default function InstrumentSuggestionSheet({
             {suggestions.map((suggestion, index) => renderSuggestionCard(suggestion, index))}
             
             {/* Refresh Button */}
-            <TouchableOpacity activeOpacity={1}
+            <TouchableOpacity activeOpacity={loading ? 1 : 0.78}
                 onPress={fetchSuggestions}
                 disabled={loading}
-                style={[styles.secondaryButton, { borderColor: colors.primary }]}
+                style={[styles.secondaryButton, { borderColor: colors.primary, opacity: loading ? 0.6 : 1 }]}
             >
                 {loading ? (
                     <ActivityIndicator color={colors.primary} />

@@ -4,7 +4,7 @@ export type ToastPayload = {
   id?: string;
   dedupeKey?: string;
   title?: string;
-  message: string;
+  message?: string;
   type?: ToastType;
   duration?: number;
   source?: string;
@@ -41,13 +41,13 @@ class ToastBus {
   private recentKeys = new Map<string, number>();
 
   emit = (payload: ToastPayload) => {
-    const message = payload.message?.trim();
-    if (!message) {
+    const type = isToastType(payload.type) ? payload.type : "info";
+    const title = payload.title?.trim() || undefined;
+    const message = payload.message?.trim() || "";
+    if (!title && !message) {
       return false;
     }
 
-    const type = isToastType(payload.type) ? payload.type : "info";
-    const title = payload.title?.trim() || undefined;
     const now = Date.now();
     const dedupeKey = payload.dedupeKey?.trim() || payload.id?.trim() || "";
 

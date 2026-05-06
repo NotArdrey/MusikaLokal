@@ -393,8 +393,8 @@ export default function SellerHubScreen() {
               </TouchableOpacity>
             ))}
           </View>
-          <TouchableOpacity activeOpacity={1}
-            style={[styles.submitBtn, { backgroundColor: isProductFormReady ? colors.primary : colors.border, opacity: adding ? 0.6 : 1 }]}
+          <TouchableOpacity activeOpacity={adding || !isProductFormReady ? 1 : 0.78}
+            style={[styles.submitBtn, { backgroundColor: isProductFormReady ? colors.primary : colors.border, opacity: adding || !isProductFormReady ? 0.6 : 1 }]}
             onPress={handleAddProduct}
             disabled={adding || !isProductFormReady}
           >

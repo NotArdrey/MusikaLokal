@@ -148,6 +148,7 @@ export default function ReportModal({
     const selectedBg = isDark ? 'rgba(99,102,241,0.18)' : 'rgba(99,102,241,0.08)';
     const borderSelected = '#6366F1';
     const accent = colors.primary;
+    const isSubmitDisabled = submitting || !selectedReason;
 
     return (
         <BottomModal
@@ -290,12 +291,12 @@ export default function ReportModal({
                                         styles.submitBtn,
                                         {
                                             backgroundColor: selectedReason ? accent : (isDark ? '#374151' : '#E5E7EB'),
-                                            opacity: submitting ? 0.7 : 1,
+                                            opacity: isSubmitDisabled ? 0.6 : 1,
                                         },
                                     ]}
                                     onPress={handleSubmit}
-                                    disabled={submitting || !selectedReason}
-                                    activeOpacity={1}
+                                    disabled={isSubmitDisabled}
+                                    activeOpacity={isSubmitDisabled ? 1 : 0.78}
                                 >
                                     {submitting ? (
                                         <ActivityIndicator size="small" color="#FFF" />

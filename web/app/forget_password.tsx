@@ -85,19 +85,20 @@ export default function ForgetPasswordScreen() {
       const redirectUrl = getRedirectUrl();
       console.log("Password reset redirect URL:", redirectUrl);
 
-      const { error } = await supabase.auth.resetPasswordForEmail(
-        email.trim(),
-        {
+      const { data, error } = await supabase.functions.invoke("account-email", {
+        body: {
+          action: "send_password_reset",
+          email: email.trim(),
           redirectTo: redirectUrl,
         },
-      );
+      });
 
-      if (error) {
-        console.error("Password reset error:", error);
+      if (error || data?.error) {
+        console.error("Password reset error:", error || data?.error);
         showAlert(
           "error",
           "Error",
-          error.message || "Failed to send reset link. Please try again.",
+          data?.error || error?.message || "Failed to send reset link. Please try again.",
         );
       } else {
         setSuccessModalVisible(true);
@@ -115,6 +116,7 @@ export default function ForgetPasswordScreen() {
     router.back();
   };
   const canSubmitReset = validateEmail(email.trim());
+  const isSubmitDisabled = loading || !canSubmitReset;
 
   return (
     <>
@@ -216,12 +218,12 @@ export default function ForgetPasswordScreen() {
                 </View>
 
                 <View style={styles.buttonSection}>
-                  <TouchableOpacity
-                    activeOpacity={1}
+                    <TouchableOpacity
+                    activeOpacity={isSubmitDisabled ? 1 : 0.78}
                     style={[
                       styles.button,
                       { backgroundColor: canSubmitReset ? colors.primary : colors.border },
-                      loading && styles.buttonDisabled,
+                      isSubmitDisabled && styles.buttonDisabled,
                     ]}
                     onPress={() => {
                       if (!email.trim()) {
@@ -238,7 +240,7 @@ export default function ForgetPasswordScreen() {
                       }
                       setModalVisible(true);
                     }}
-                    disabled={loading || !canSubmitReset}
+                    disabled={isSubmitDisabled}
                   >
                     {loading ? (
                       <ActivityIndicator color="white" />

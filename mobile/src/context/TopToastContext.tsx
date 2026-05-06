@@ -1,6 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
 import { Portal } from "@gorhom/portal";
-import { BlurView } from "expo-blur";
 import * as Haptics from "expo-haptics";
 import React, {
   createContext,
@@ -68,40 +67,40 @@ const toastTypeConfig: Record<
   success: {
     icon: "checkmark-circle",
     accent: "#10B981",
-    lightBackground: "rgba(236, 253, 245, 0.92)",
-    darkBackground: "rgba(6, 78, 59, 0.78)",
+    lightBackground: "#ECFDF5",
+    darkBackground: "#064E3B",
     lightBorder: "#A7F3D0",
-    darkBorder: "rgba(52, 211, 153, 0.42)",
+    darkBorder: "#34D399",
     lightIconBg: "rgba(16, 185, 129, 0.14)",
     darkIconBg: "rgba(52, 211, 153, 0.18)",
   },
   error: {
     icon: "close-circle",
     accent: "#EF4444",
-    lightBackground: "rgba(254, 242, 242, 0.94)",
-    darkBackground: "rgba(127, 29, 29, 0.78)",
+    lightBackground: "#FEF2F2",
+    darkBackground: "#7F1D1D",
     lightBorder: "#FECACA",
-    darkBorder: "rgba(248, 113, 113, 0.42)",
+    darkBorder: "#F87171",
     lightIconBg: "rgba(239, 68, 68, 0.14)",
     darkIconBg: "rgba(248, 113, 113, 0.18)",
   },
   warning: {
     icon: "warning",
     accent: "#F59E0B",
-    lightBackground: "rgba(255, 251, 235, 0.94)",
-    darkBackground: "rgba(120, 53, 15, 0.76)",
+    lightBackground: "#FFFBEB",
+    darkBackground: "#78350F",
     lightBorder: "#FDE68A",
-    darkBorder: "rgba(251, 191, 36, 0.44)",
+    darkBorder: "#FBBF24",
     lightIconBg: "rgba(245, 158, 11, 0.14)",
     darkIconBg: "rgba(251, 191, 36, 0.18)",
   },
   info: {
     icon: "information-circle",
     accent: "#3B82F6",
-    lightBackground: "rgba(239, 246, 255, 0.94)",
-    darkBackground: "rgba(30, 58, 138, 0.76)",
+    lightBackground: "#EFF6FF",
+    darkBackground: "#1E3A8A",
     lightBorder: "#BFDBFE",
-    darkBorder: "rgba(96, 165, 250, 0.42)",
+    darkBorder: "#60A5FA",
     lightIconBg: "rgba(59, 130, 246, 0.14)",
     darkIconBg: "rgba(96, 165, 250, 0.18)",
   },
@@ -325,11 +324,6 @@ function ToastCard({
       ]}
       {...panResponder.panHandlers}
     >
-      <BlurView
-        intensity={isDark ? 38 : 28}
-        tint={isDark ? "dark" : "light"}
-        style={StyleSheet.absoluteFillObject}
-      />
       <View
         style={[
           StyleSheet.absoluteFillObject,
@@ -342,7 +336,7 @@ function ToastCard({
       />
 
       <Pressable
-        accessibilityLabel={`${title}. ${toast.message}`}
+        accessibilityLabel={toast.message ? `${title}. ${toast.message}` : title}
         accessibilityRole="alert"
         onPress={() => finishDismiss()}
         style={styles.touchableArea}
@@ -362,12 +356,14 @@ function ToastCard({
           <Text style={[styles.title, { color: colors.text }]} numberOfLines={1}>
             {title}
           </Text>
-          <Text
-            style={[styles.message, { color: colors.textSecondary }]}
-            numberOfLines={3}
-          >
-            {toast.message}
-          </Text>
+          {toast.message ? (
+            <Text
+              style={[styles.message, { color: colors.textSecondary }]}
+              numberOfLines={3}
+            >
+              {toast.message}
+            </Text>
+          ) : null}
         </View>
 
         <Ionicons

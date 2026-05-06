@@ -31,14 +31,18 @@ import { getSmoothTabIndex, setSmoothTab } from "../src/utils/smoothTabs";
 
 const { width: screenWidth } = Dimensions.get("window");
 const PORTFOLIO_ITEM_SIZE = (screenWidth - 48 - 8) / 3; // 3 columns with gaps
+const GIG_TABS = ["About", "Applicants", "Review"];
 
 import { useLocalSearchParams } from "expo-router";
 
 export default function GigDetailsScreen() {
   const { colors, isDark } = useTheme();
   const { contentBottomPadding } = useBottomBarClearance(24);
-  const { id } = useLocalSearchParams();
-  const [activeTab, setActiveTab] = useState("About");
+  const { id, tab } = useLocalSearchParams<{ id?: string | string[]; tab?: string | string[] }>();
+  const requestedTab = Array.isArray(tab) ? tab[0] : tab;
+  const [activeTab, setActiveTab] = useState(
+    GIG_TABS.includes(requestedTab || "") ? requestedTab || "About" : "About",
+  );
   const [modalVisible, setModalVisible] = useState(false);
   const [modalTitle, setModalTitle] = useState("");
   const [modalMessage, setModalMessage] = useState("");
@@ -67,6 +71,12 @@ export default function GigDetailsScreen() {
   });
   const [mediaViewerUrl, setMediaViewerUrl] = useState<string | null>(null);
   const [mediaViewerTitle, setMediaViewerTitle] = useState("Media");
+
+  useEffect(() => {
+    if (requestedTab && GIG_TABS.includes(requestedTab) && requestedTab !== activeTab) {
+      setActiveTab(requestedTab);
+    }
+  }, [activeTab, requestedTab]);
 
   const showAlert = (
     type: AlertType,
@@ -359,7 +369,7 @@ export default function GigDetailsScreen() {
     setModalVisible(true);
   };
 
-  const tabs = ["About", "Applicants", "Review"];
+  const tabs = GIG_TABS;
 
   const formatMusicianType = (requirements?: any) => {
     const slots = requirements?.slots || {};
@@ -377,6 +387,73 @@ export default function GigDetailsScreen() {
     if (!type) return "Not specified";
     return String(type).charAt(0).toUpperCase() + String(type).slice(1);
   };
+
+  const formatStatusLabel = (value?: unknown) => {
+    const raw = typeof value === "string" ? value : "";
+    if (!raw.trim()) return "Not submitted";
+    return raw
+      .split("_")
+      .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(" ");
+  };
+
+  const getEventSchedules = (sourceGig?: any) => {
+    const schedules = sourceGig?.requirements?.event_schedules;
+    if (Array.isArray(schedules) && schedules.length > 0) {
+      return schedules
+        .map((schedule: any, index: number) => ({
+          id: schedule?.id || `${schedule?.date || sourceGig?.event_date || "schedule"}-${index}`,
+          date: schedule?.date || sourceGig?.event_date,
+          start: schedule?.start || schedule?.start_time || sourceGig?.requirements?.event_start_time,
+          end: schedule?.end || schedule?.end_time || sourceGig?.requirements?.event_end_time,
+        }))
+        .filter((schedule: any) => schedule.date || schedule.start || schedule.end);
+    }
+
+    if (
+      sourceGig?.event_date ||
+      sourceGig?.requirements?.event_start_time ||
+      sourceGig?.requirements?.event_end_time
+    ) {
+      return [{
+        id: "primary-schedule",
+        date: sourceGig?.event_date,
+        start: sourceGig?.requirements?.event_start_time,
+        end: sourceGig?.requirements?.event_end_time,
+      }];
+    }
+
+    return [];
+  };
+
+  const getSlotGroups = (requirements?: any) => {
+    const slots = requirements?.slots || {};
+    const groups = [
+      { key: "solo", label: "Solo", data: slots.solo },
+      { key: "duo", label: "Duo", data: slots.duo },
+      { key: "band", label: "Group", data: slots.band },
+    ];
+
+    return groups
+      .map((group) => ({
+        ...group,
+        needed: Number(group.data?.needed || 0),
+        roles: Array.isArray(group.data?.roles) ? group.data.roles : [],
+        genres: Array.isArray(group.data?.preferred_genres)
+          ? group.data.preferred_genres
+          : [],
+        instruments: Array.isArray(group.data?.preferred_instruments)
+          ? group.data.preferred_instruments
+          : [],
+        groupTypes: Array.isArray(group.data?.preferred_group_types)
+          ? group.data.preferred_group_types
+          : [],
+      }))
+      .filter((group) => group.needed > 0);
+  };
+
+  const eventSchedules = getEventSchedules(gig);
+  const slotGroups = getSlotGroups(gig?.requirements);
 
   // Show loading while checking authorization
   if (checkingAuth) {
@@ -499,6 +576,51 @@ export default function GigDetailsScreen() {
                       { color: colors.text, marginBottom: 12 },
                     ]}
                   >
+                    Schedule
+                  </Text>
+                  {eventSchedules.length > 0 ? (
+                    <View style={styles.detailList}>
+                      {eventSchedules.map((schedule: any) => (
+                        <View
+                          key={schedule.id}
+                          style={[
+                            styles.detailCard,
+                            {
+                              backgroundColor: colors.surface,
+                              borderColor: colors.border,
+                            },
+                          ]}
+                        >
+                          <Ionicons name="calendar-outline" size={20} color={colors.primary} />
+                          <View style={{ flex: 1 }}>
+                            <Text style={[styles.detailCardTitle, { color: colors.text }]}>
+                              {schedule.date
+                                ? formatFriendlyDateTime(schedule.date, { forceDateOnly: true })
+                                : "Date TBA"}
+                            </Text>
+                            <Text style={[styles.detailCardText, { color: colors.textSecondary }]}>
+                              {schedule.start && schedule.end
+                                ? `${schedule.start} - ${schedule.end}`
+                                : "Time TBA"}
+                            </Text>
+                          </View>
+                        </View>
+                      ))}
+                    </View>
+                  ) : (
+                    <Text style={{ color: colors.textSecondary }}>
+                      No schedule set.
+                    </Text>
+                  )}
+                </View>
+
+                <View>
+                  <Text
+                    style={[
+                      styles.sectionTitle,
+                      { color: colors.text, marginBottom: 12 },
+                    ]}
+                  >
                     Needs
                   </Text>
 
@@ -605,26 +727,6 @@ export default function GigDetailsScreen() {
                           marginBottom: 6,
                         }}
                       >
-                        Experience Level
-                      </Text>
-                      <Text
-                        style={{
-                          fontFamily: "Poppins_500Medium",
-                          color: colors.text,
-                        }}
-                      >
-                        {gig?.requirements?.experience_level || "Not specified"}
-                      </Text>
-                    </View>
-
-                    <View>
-                      <Text
-                        style={{
-                          fontFamily: "Poppins_500Medium",
-                          color: colors.textSecondary,
-                          marginBottom: 6,
-                        }}
-                      >
                         Musician Type
                       </Text>
                       <Text
@@ -637,6 +739,66 @@ export default function GigDetailsScreen() {
                       </Text>
                     </View>
                   </View>
+                </View>
+
+                <View>
+                  <Text
+                    style={[
+                      styles.sectionTitle,
+                      { color: colors.text, marginBottom: 12 },
+                    ]}
+                  >
+                    Slot Details
+                  </Text>
+                  {slotGroups.length > 0 ? (
+                    <View style={styles.detailList}>
+                      {slotGroups.map((slotGroup) => (
+                        <View
+                          key={slotGroup.key}
+                          style={[
+                            styles.slotDetailCard,
+                            {
+                              backgroundColor: colors.surface,
+                              borderColor: colors.border,
+                            },
+                          ]}
+                        >
+                          <View style={styles.slotDetailHeader}>
+                            <Text style={[styles.slotDetailTitle, { color: colors.text }]}>
+                              {slotGroup.label}
+                            </Text>
+                            <Text style={[styles.slotDetailCount, { color: colors.primary }]}>
+                              {slotGroup.needed} needed
+                            </Text>
+                          </View>
+                          {slotGroup.roles.length > 0 ? (
+                            <Text style={[styles.detailCardText, { color: colors.textSecondary }]}>
+                              Roles: {slotGroup.roles.join(", ")}
+                            </Text>
+                          ) : null}
+                          {slotGroup.groupTypes.length > 0 ? (
+                            <Text style={[styles.detailCardText, { color: colors.textSecondary }]}>
+                              Preferred group types: {slotGroup.groupTypes.join(", ")}
+                            </Text>
+                          ) : null}
+                          {slotGroup.genres.length > 0 ? (
+                            <Text style={[styles.detailCardText, { color: colors.textSecondary }]}>
+                              Preferred genres: {slotGroup.genres.join(", ")}
+                            </Text>
+                          ) : null}
+                          {slotGroup.instruments.length > 0 ? (
+                            <Text style={[styles.detailCardText, { color: colors.textSecondary }]}>
+                              Preferred instruments: {slotGroup.instruments.join(", ")}
+                            </Text>
+                          ) : null}
+                        </View>
+                      ))}
+                    </View>
+                  ) : (
+                    <Text style={{ color: colors.textSecondary }}>
+                      No slot details configured.
+                    </Text>
+                  )}
                 </View>
 
                 {/* The Offer Card */}
@@ -816,7 +978,7 @@ export default function GigDetailsScreen() {
                         onPress={() =>
                           router.push({
                             pathname: "/edit_gig",
-                            params: { id: gig?.id },
+                            params: { id: gig?.id, returnTab: "About" },
                           })
                         }
                         style={{ marginTop: 8 }}
@@ -833,6 +995,60 @@ export default function GigDetailsScreen() {
                       </TouchableOpacity>
                     </View>
                   )}
+                </View>
+
+                <View>
+                  <Text
+                    style={[
+                      styles.sectionTitle,
+                      { color: colors.text, marginBottom: 12 },
+                    ]}
+                  >
+                    Business Permit
+                  </Text>
+                  <View
+                    style={[
+                      styles.documentMetaCard,
+                      {
+                        backgroundColor: colors.surface,
+                        borderColor: colors.border,
+                      },
+                    ]}
+                  >
+                    <View style={styles.documentMetaRow}>
+                      <View style={[styles.contractIcon, { backgroundColor: colors.primary }]}>
+                        <Ionicons name="shield-checkmark-outline" size={24} color="#fff" />
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={[styles.contractTitle, { color: colors.text }]}>
+                          {formatStatusLabel(gig?.permit_status)}
+                        </Text>
+                        {gig?.permit_rejection_reason ? (
+                          <Text style={[styles.contractSubtitle, { color: colors.textSecondary }]}>
+                            {gig.permit_rejection_reason}
+                          </Text>
+                        ) : (
+                          <Text style={[styles.contractSubtitle, { color: colors.textSecondary }]}>
+                            Permit status from the gig profile.
+                          </Text>
+                        )}
+                      </View>
+                    </View>
+                    {gig?.business_permit_url ? (
+                      <TouchableOpacity activeOpacity={1}
+                        onPress={() => openMediaOrExternal(gig.business_permit_url, "Business Permit")}
+                        style={[
+                          styles.mediaButton,
+                          { borderColor: colors.primary, marginBottom: 0, marginTop: 12 },
+                        ]}
+                      >
+                        <Ionicons name="open-outline" size={18} color={colors.primary} />
+                        <Text style={[styles.mediaButtonText, { color: colors.primary }]}>
+                          View Business Permit
+                        </Text>
+                      </TouchableOpacity>
+                    ) : null}
+                  </View>
                 </View>
               </View>
             )}
@@ -1706,6 +1922,47 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontFamily: "Poppins_600SemiBold",
   },
+  detailList: {
+    gap: 12,
+  },
+  detailCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 14,
+  },
+  detailCardTitle: {
+    fontFamily: "Poppins_600SemiBold",
+    fontSize: 14,
+  },
+  detailCardText: {
+    marginTop: 4,
+    fontFamily: "Poppins_400Regular",
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  slotDetailCard: {
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 14,
+  },
+  slotDetailHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: 12,
+    marginBottom: 8,
+  },
+  slotDetailTitle: {
+    fontFamily: "Poppins_600SemiBold",
+    fontSize: 15,
+  },
+  slotDetailCount: {
+    fontFamily: "Poppins_700Bold",
+    fontSize: 13,
+  },
   galleryContainer: {
     gap: 12,
   },
@@ -1908,6 +2165,20 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     borderWidth: 1,
     marginBottom: 12,
+  },
+  mediaButtonText: {
+    marginLeft: 8,
+    fontFamily: "Poppins_600SemiBold",
+  },
+  documentMetaCard: {
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 16,
+  },
+  documentMetaRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
   },
   portfolioLink: {
     flexDirection: "row",

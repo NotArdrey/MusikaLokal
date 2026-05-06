@@ -106,3 +106,17 @@ export const formatFriendlyDate = (
     forceDateOnly: true,
   });
 };
+
+export const formatDashedNumericDate = (
+  value: FriendlyDateInput,
+  fallback = DEFAULT_FALLBACK,
+) => {
+  const date =
+    typeof value === "string" && DATE_ONLY_PATTERN.test(value.trim())
+      ? new Date(`${value.trim()}T00:00:00`)
+      : toDate(value);
+
+  if (!date || Number.isNaN(date.getTime())) return fallback;
+
+  return `${date.getMonth() + 1}-${date.getDate()}-${date.getFullYear()}`;
+};

@@ -9,7 +9,7 @@ import BottomModal from '../src/components/BottomModal';
 import GuestSignInGate from '../src/components/GuestSignInGate';
 import Header from '../src/components/header';
 import CustomModal from '../src/components/modal';
-import Navbar from '../src/components/navbar';
+import AppNavbar from '../src/components/navbar';
 import { useBottomBarClearance } from '../src/hooks/useBottomBarClearance';
 import { emitToast } from '../src/events/toastBus';
 import { useTheme } from '../src/context/ThemeContext';
@@ -53,8 +53,10 @@ export default function WalletScreen() {
   const { colors, isDark } = useTheme();
   const { userId, isGuest } = useAuth();
   const { contentBottomPadding } = useBottomBarClearance(24);
-  const params = useLocalSearchParams<{ refresh?: string }>();
+  const params = useLocalSearchParams<{ refresh?: string; action?: string; withdraw?: string }>();
   const walletRefreshKey = Array.isArray(params.refresh) ? params.refresh[0] : params.refresh;
+  const walletAction = Array.isArray(params.action) ? params.action[0] : params.action;
+  const walletWithdrawParam = Array.isArray(params.withdraw) ? params.withdraw[0] : params.withdraw;
 
   // Withdrawal modal states
   const [withdrawModalVisible, setWithdrawModalVisible] = useState(false);
@@ -67,7 +69,7 @@ export default function WalletScreen() {
   const [loadingPayoutMethods, setLoadingPayoutMethods] = useState(false);
 
   // Add payout method states
-  const [newPayoutType, setNewPayoutType] = useState<'bank' | 'gcash' | 'maya' | 'paypal'>('gcash');
+  const [newPayoutType, setNewPayoutType] = useState<'bank' | 'gcash' | 'maya'>('gcash');
   const [newAccountName, setNewAccountName] = useState('');
   const [newAccountNumber, setNewAccountNumber] = useState('');
   const [newBankName, setNewBankName] = useState('');
@@ -88,11 +90,6 @@ export default function WalletScreen() {
 
   const [userRole, setUserRole] = useState<string | null>(null);
 
-  // Refund-based withdrawal state (no ID required)
-  const [hasRefundEligiblePayments, setHasRefundEligiblePayments] = useState(false);
-  const [maxRefundableAmount, setMaxRefundableAmount] = useState(0);
-  const [withdrawalMethod, setWithdrawalMethod] = useState<'payout' | 'refund'>('payout');
-  const [checkingRefundEligibility, setCheckingRefundEligibility] = useState(false);
   const [alertVisible, setAlertVisible] = useState(false);
   const [alertConfig, setAlertConfig] = useState<{
     type: AlertType;
@@ -106,6 +103,7 @@ export default function WalletScreen() {
   });
   const walletSummaryQuery = useWalletSummaryQuery(userId);
   const walletSummary = walletSummaryQuery.data as any;
+  const refetchWalletSummary = walletSummaryQuery.refetch;
 
   usePageLoadLogger({
     counts: {
@@ -162,15 +160,14 @@ export default function WalletScreen() {
     Number.isFinite(parsedWithdrawAmount) &&
     parsedWithdrawAmount >= 100 &&
     parsedWithdrawAmount <= balance &&
-    (
-      withdrawalMethod === 'payout'
-        ? Boolean(selectedPayoutMethod)
-        : hasRefundEligiblePayments && parsedWithdrawAmount <= maxRefundableAmount
-    );
+    Boolean(selectedPayoutMethod);
   const isPayoutMethodReady =
     newAccountName.trim().length > 0 &&
     newAccountNumber.trim().length > 0 &&
     (newPayoutType !== 'bank' || newBankName.trim().length > 0);
+  const isTopUpSubmitDisabled = isTopping || !isTopUpReady;
+  const isWithdrawSubmitDisabled = withdrawing || !isWithdrawReady;
+  const isPayoutMethodSubmitDisabled = addingPayoutMethod || !isPayoutMethodReady;
 
   const showAlert = (type: AlertType, title: string, message: string, buttons?: any[]) => {
     setAlertConfig({ type, title, message, buttons });
@@ -288,17 +285,10 @@ export default function WalletScreen() {
   };
 
   const showMerchantNotReadyAlert = (nextSteps?: string[]) => {
-    const buttons = hasRefundEligiblePayments
-      ? [
-        { text: 'Use Refund Method', onPress: () => setWithdrawalMethod('refund') },
-        { text: 'OK', style: 'cancel' as const },
-      ]
-      : [{ text: 'OK' }];
-
     Alert.alert(
       'Cashout Unavailable',
       formatMerchantOnboardingMessage(nextSteps),
-      buttons,
+      [{ text: 'OK' }],
     );
   };
 
@@ -321,14 +311,14 @@ export default function WalletScreen() {
   const fetchWallet = useCallback(async () => {
     try {
       setLoading(true);
-      await walletSummaryQuery.refetch();
+      await refetchWalletSummary();
     } catch {
       // Query state carries the error; keep the wallet screen usable.
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [walletSummaryQuery.refetch]);
+  }, [refetchWalletSummary]);
 
   // Fetch payout methods
   const fetchPayoutMethods = async () => {
@@ -348,27 +338,9 @@ export default function WalletScreen() {
         const defaultMethod = data.payout_methods.find((m: PayoutMethod) => m.is_default);
         if (defaultMethod) setSelectedPayoutMethod(defaultMethod);
       }
-    } catch (e) {
+    } catch {
     } finally {
       setLoadingPayoutMethods(false);
-    }
-  };
-
-  // Fetch withdrawals
-  const fetchWithdrawals = async () => {
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) return;
-
-      const { data, error } = await supabase.functions.invoke('withdrawals', {
-        body: { action: 'get_withdrawals' }
-      });
-
-      if (error) throw error;
-      if (data?.withdrawals) {
-        setWithdrawals(data.withdrawals);
-      }
-    } catch (e) {
     }
   };
 
@@ -429,7 +401,7 @@ export default function WalletScreen() {
   const handleTopUp = async () => {
     const amount = parseFloat(topUpAmount);
     if (!amount || amount < 50) {
-      Alert.alert('Invalid Amount', 'Minimum top-up amount is ?50.');
+      Alert.alert('Invalid Amount', 'Minimum top-up amount is PHP 50.');
       return;
     }
     try {
@@ -486,32 +458,18 @@ export default function WalletScreen() {
     fetchWallet();
   };
 
-  // Check if user has payments eligible for refund-based withdrawal
-  const checkRefundEligibility = async () => {
-    try {
-      setCheckingRefundEligibility(true);
-      const { data, error } = await supabase.functions.invoke('withdrawals', {
-        body: { action: 'get_refund_eligible_payments' }
-      });
-
-      if (!error && data?.success) {
-        setHasRefundEligiblePayments(data.has_eligible_payments || false);
-        setMaxRefundableAmount(data.max_refundable_amount || 0);
-      }
-    } catch (e) {
-    } finally {
-      setCheckingRefundEligibility(false);
-    }
-  };
-
   // Open withdraw modal
-  const openWithdrawModal = () => {
+  const openWithdrawModal = useCallback(() => {
     setWithdrawAmount('');
-    setWithdrawalMethod('payout'); // Default to payout method
     setWithdrawModalVisible(true);
-    // Check for refund eligibility in the background
-    checkRefundEligibility();
-  };
+  }, []);
+
+  useEffect(() => {
+    if (isGuest) return;
+    if (walletAction === 'withdraw' || walletWithdrawParam === '1' || walletWithdrawParam === 'true') {
+      openWithdrawModal();
+    }
+  }, [isGuest, openWithdrawModal, walletAction, walletWithdrawParam]);
 
   // Handle actual withdrawal request
   const handleWithdraw = async () => {
@@ -519,7 +477,7 @@ export default function WalletScreen() {
     const amount = parseFloat(withdrawAmount);
 
     if (!amount || amount < 100) {
-      Alert.alert('Invalid Amount', 'Minimum withdrawal amount is ?100');
+      Alert.alert('Invalid Amount', 'Minimum withdrawal amount is PHP 100');
       return;
     }
 
@@ -528,53 +486,6 @@ export default function WalletScreen() {
       return;
     }
 
-    // For refund-based withdrawal
-    if (withdrawalMethod === 'refund') {
-      if (amount > maxRefundableAmount) {
-        Alert.alert('Amount Too High', `Maximum refundable amount is ?${maxRefundableAmount.toLocaleString()}`);
-        return;
-      }
-
-      try {
-        setWithdrawing(true);
-
-        const { data, error } = await supabase.functions.invoke('withdrawals', {
-          body: {
-            action: 'request_withdrawal_refund',
-            amount: amount
-          }
-        });
-
-        if (error) {
-          await handleWithdrawalError('Withdrawal Failed', error);
-          return;
-        }
-
-        if (data?.error) {
-          await handleWithdrawalError('Withdrawal Failed', null, data as WithdrawalErrorPayload);
-          return;
-        }
-
-        Alert.alert(
-          'Withdrawal Successful! ??',
-          data?.message || 'The amount will be refunded to your original payment method.',
-          [{
-            text: 'OK', onPress: () => {
-              setWithdrawModalVisible(false);
-              setWithdrawAmount('');
-              fetchWallet(); // Refresh to update balance
-            }
-          }]
-        );
-      } catch (e: any) {
-        await handleWithdrawalError('Error', e);
-      } finally {
-        setWithdrawing(false);
-      }
-      return;
-    }
-
-    // For payout-based withdrawal (existing logic)
     if (!selectedPayoutMethod) {
       Alert.alert('No Payout Method', 'Please add a payout method first');
       return;
@@ -674,36 +585,6 @@ export default function WalletScreen() {
     }
   };
 
-  // Delete payout method
-  const handleDeletePayoutMethod = async (methodId: string) => {
-    Alert.alert(
-      'Delete Payout Method',
-      'Are you sure you want to remove this payout method?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              const { data, error } = await supabase.functions.invoke('withdrawals', {
-                body: {
-                  action: 'delete_payout_method',
-                  payout_method_id: methodId
-                }
-              });
-
-              if (error) throw error;
-              await fetchPayoutMethods();
-            } catch (e: any) {
-              Alert.alert('Error', e?.message || 'Failed to delete payout method');
-            }
-          }
-        }
-      ]
-    );
-  };
-
   // Cancel pending withdrawal
   const handleCancelWithdrawal = async (withdrawalId: string) => {
     Alert.alert(
@@ -770,9 +651,6 @@ export default function WalletScreen() {
     }
   };
 
-  // Check if user is studio/venue owner
-  const isOwner = userRole === 'studio-owner' || userRole === 'venue-owner';
-
   const pendingWithdrawals = useMemo(
     () => withdrawals.filter((w) => w.status === 'pending' || w.status === 'processing'),
     [withdrawals],
@@ -801,7 +679,7 @@ export default function WalletScreen() {
         <Header title="Wallet" />
         <GuestSignInGate message="Sign in to view your wallet and payment history." />
         <View style={styles.navbarContainer}>
-          <Navbar />
+          <AppNavbar />
         </View>
       </View>
     );
@@ -886,7 +764,7 @@ export default function WalletScreen() {
                     </View>
                   </View>
                   <Text style={styles.unpaidTotal}>
-                    ?{unpaidBookings.reduce((sum, b) => sum + (b.remaining_balance || 0), 0).toLocaleString()}
+                    PHP {unpaidBookings.reduce((sum, b) => sum + (b.remaining_balance || 0), 0).toLocaleString()}
                   </Text>
                 </View>
 
@@ -909,13 +787,13 @@ export default function WalletScreen() {
                         {formatFriendlyDateTime(booking.booking_date, { forceDateOnly: true })} at {booking.start_time?.slice(0, 5) || 'Time TBA'}
                       </Text>
                       <Text style={styles.unpaidAmount}>
-                        Balance: ?{booking.remaining_balance?.toLocaleString()}
+                        Balance: PHP {booking.remaining_balance?.toLocaleString()}
                       </Text>
                     </View>
-                    <TouchableOpacity activeOpacity={1}
+                    <TouchableOpacity activeOpacity={payingBookingId === booking.id ? 1 : 0.78}
                       onPress={() => handlePayBalance(booking)}
                       disabled={payingBookingId === booking.id}
-                      style={styles.payNowBtn}
+                      style={[styles.payNowBtn, { opacity: payingBookingId === booking.id ? 0.6 : 1 }]}
                     >
                       {payingBookingId === booking.id ? (
                         <ActivityIndicator size="small" color="white" />
@@ -971,7 +849,7 @@ export default function WalletScreen() {
                     </View>
                     <View style={styles.withdrawalRight}>
                       <Text style={[styles.transactionAmount, { color: '#D97706' }]}>
-                        -?{withdrawal.amount.toLocaleString()}
+                        -PHP {withdrawal.amount.toLocaleString()}
                       </Text>
                       {withdrawal.status === 'pending' && (
                         <TouchableOpacity activeOpacity={1} onPress={() => handleCancelWithdrawal(withdrawal.id)}>
@@ -1065,7 +943,7 @@ export default function WalletScreen() {
 
         </ScrollView>
         <View style={styles.navbarContainer}>
-          <Navbar />
+          <AppNavbar />
         </View>
       </View>
 
@@ -1106,7 +984,7 @@ export default function WalletScreen() {
                 />
               </View>
               <Text style={[styles.inputHint, { color: colors.textSecondary }]}>
-                Minimum top-up: ?50
+                Minimum top-up: PHP 50
               </Text>
             </View>
 
@@ -1127,20 +1005,21 @@ export default function WalletScreen() {
                     styles.quickAmountText,
                     { color: parseFloat(topUpAmount) === preset ? 'white' : colors.text }
                   ]}>
-                    ?{preset}
+                    PHP {preset}
                   </Text>
                 </TouchableOpacity>
               ))}
             </View>
 
-            <TouchableOpacity activeOpacity={1}
+            <TouchableOpacity activeOpacity={isTopUpSubmitDisabled ? 1 : 0.78}
               onPress={handleTopUp}
-              disabled={isTopping || !isTopUpReady}
+              disabled={isTopUpSubmitDisabled}
               style={[
                 styles.withdrawSubmitBtn,
                 {
                   backgroundColor: isTopUpReady ? colors.primary : colors.border,
                   marginTop: 24,
+                  opacity: isTopUpSubmitDisabled ? 0.6 : 1,
                 }
               ]}
             >
@@ -1165,7 +1044,7 @@ export default function WalletScreen() {
               <View>
                 <Text style={[styles.withdrawModalTitle, { color: colors.text }]}>Withdraw Funds</Text>
                 <Text style={[styles.withdrawModalSubtitle, { color: colors.textSecondary }]}>
-                  Available: ?{balance?.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                  Available: PHP {balance?.toLocaleString(undefined, { minimumFractionDigits: 2 })}
                 </Text>
               </View>
               <TouchableOpacity activeOpacity={1}
@@ -1192,7 +1071,7 @@ export default function WalletScreen() {
                   />
                 </View>
                 <Text style={[styles.inputHint, { color: colors.textSecondary }]}>
-                  Minimum withdrawal: ?100
+                  Minimum withdrawal: PHP 100
                 </Text>
               </View>
 
@@ -1214,95 +1093,13 @@ export default function WalletScreen() {
                       styles.quickAmountText,
                       { color: parseFloat(withdrawAmount) === amount ? 'white' : colors.text }
                     ]}>
-                      {idx === 3 ? 'Max' : `?${amount}`}
+                      {idx === 3 ? 'Max' : `PHP ${amount}`}
                     </Text>
                   </TouchableOpacity>
                 ))}
               </View>
 
-              {/* Withdrawal Method Selection */}
-              <View style={styles.inputSection}>
-                <Text style={[styles.inputLabel, { color: colors.text }]}>Withdrawal Method</Text>
-                <View style={{ flexDirection: 'row', gap: 10, marginTop: 8 }}>
-                  {/* Payout Method Option */}
-                  <TouchableOpacity activeOpacity={1}
-                    onPress={() => setWithdrawalMethod('payout')}
-                    style={[
-                      styles.methodOption,
-                      {
-                        backgroundColor: colors.surface,
-                        borderColor: withdrawalMethod === 'payout' ? colors.primary : colors.border,
-                        borderWidth: withdrawalMethod === 'payout' ? 2 : 1,
-                        flex: 1,
-                      }
-                    ]}
-                  >
-                    <Ionicons
-                      name="wallet-outline"
-                      size={24}
-                      color={withdrawalMethod === 'payout' ? colors.primary : colors.textSecondary}
-                    />
-                    <Text style={[
-                      styles.methodOptionTitle,
-                      { color: withdrawalMethod === 'payout' ? colors.primary : colors.text }
-                    ]}>
-                      Payout
-                    </Text>
-                    <Text style={[styles.methodOptionDesc, { color: colors.textSecondary }]}>
-                      GCash, Maya, Bank
-                    </Text>
-                    {withdrawalMethod === 'payout' && (
-                      <Ionicons name="checkmark-circle" size={18} color={colors.primary} style={{ position: 'absolute', top: 8, right: 8 }} />
-                    )}
-                  </TouchableOpacity>
-
-                  {/* Refund Method Option */}
-                  <TouchableOpacity activeOpacity={1}
-                    onPress={() => hasRefundEligiblePayments && setWithdrawalMethod('refund')}
-                    disabled={!hasRefundEligiblePayments && !checkingRefundEligibility}
-                    style={[
-                      styles.methodOption,
-                      {
-                        backgroundColor: colors.surface,
-                        borderColor: withdrawalMethod === 'refund' ? colors.primary : colors.border,
-                        borderWidth: withdrawalMethod === 'refund' ? 2 : 1,
-                        flex: 1,
-                        opacity: hasRefundEligiblePayments ? 1 : 0.5,
-                      }
-                    ]}
-                  >
-                    {checkingRefundEligibility ? (
-                      <ActivityIndicator size="small" color={colors.primary} />
-                    ) : (
-                      <Ionicons
-                        name="refresh-outline"
-                        size={24}
-                        color={withdrawalMethod === 'refund' ? colors.primary : colors.textSecondary}
-                      />
-                    )}
-                    <Text style={[
-                      styles.methodOptionTitle,
-                      { color: withdrawalMethod === 'refund' ? colors.primary : colors.text }
-                    ]}>
-                      Refund
-                    </Text>
-                    <Text style={[styles.methodOptionDesc, { color: colors.textSecondary }]}>
-                      {hasRefundEligiblePayments ? 'No ID required' : 'Not available'}
-                    </Text>
-                    {withdrawalMethod === 'refund' && (
-                      <Ionicons name="checkmark-circle" size={18} color={colors.primary} style={{ position: 'absolute', top: 8, right: 8 }} />
-                    )}
-                  </TouchableOpacity>
-                </View>
-                {hasRefundEligiblePayments && maxRefundableAmount > 0 && (
-                  <Text style={[styles.inputHint, { color: colors.primary, marginTop: 8 }]}>
-                    ?? Refund available up to ?{maxRefundableAmount.toLocaleString()} - goes back to your original payment method
-                  </Text>
-                )}
-              </View>
-
-              {/* Payout Method Section - Only show if payout method is selected */}
-              {withdrawalMethod === 'payout' && (
+              {/* Payout Method Section */}
                 <View style={styles.inputSection}>
                   <View style={styles.payoutMethodHeader}>
                     <Text style={[styles.inputLabel, { color: colors.text }]}>Payout Method</Text>
@@ -1358,33 +1155,22 @@ export default function WalletScreen() {
                     </View>
                   )}
                 </View>
-              )}
-
-              {/* Refund Info Section - Only show if refund method is selected */}
-              {withdrawalMethod === 'refund' && hasRefundEligiblePayments && (
-                <View style={[styles.noteCard, { backgroundColor: isDark ? colors.surface : '#DBEAFE' }]}>
-                  <Ionicons name="information-circle-outline" size={20} color="#2563EB" />
-                  <Text style={[styles.noteText, { color: isDark ? colors.textSecondary : '#1E40AF' }]}>
-                    The withdrawal will be processed as a refund to your original payment method (GCash, Maya, card, etc.). No ID verification required!
-                  </Text>
-                </View>
-              )}
 
               {/* Withdrawal Summary */}
               {withdrawAmount && parseFloat(withdrawAmount) >= 100 && (
                 <View style={[styles.summaryCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
                   <View style={styles.summaryRow}>
                     <Text style={[styles.summaryLabel, { color: colors.textSecondary }]}>Withdrawal Amount</Text>
-                    <Text style={[styles.summaryValue, { color: colors.text }]}>?{parseFloat(withdrawAmount).toLocaleString()}</Text>
+                    <Text style={[styles.summaryValue, { color: colors.text }]}>PHP {parseFloat(withdrawAmount).toLocaleString()}</Text>
                   </View>
                   <View style={styles.summaryRow}>
                     <Text style={[styles.summaryLabel, { color: colors.textSecondary }]}>Processing Fee</Text>
-                    <Text style={[styles.summaryValue, { color: colors.text }]}>?0.00</Text>
+                    <Text style={[styles.summaryValue, { color: colors.text }]}>PHP 0.00</Text>
                   </View>
                   <View style={[styles.summaryDivider, { backgroundColor: colors.border }]} />
                   <View style={styles.summaryRow}>
                     <Text style={[styles.summaryLabelBold, { color: colors.text }]}>{"You'll Receive"}</Text>
-                    <Text style={[styles.summaryValueBold, { color: colors.primary }]}>?{parseFloat(withdrawAmount).toLocaleString()}</Text>
+                    <Text style={[styles.summaryValueBold, { color: colors.primary }]}>PHP {parseFloat(withdrawAmount).toLocaleString()}</Text>
                   </View>
                 </View>
               )}
@@ -1393,23 +1179,20 @@ export default function WalletScreen() {
               <View style={[styles.noteCard, { backgroundColor: isDark ? colors.surface : '#FEF3C7' }]}>
                 <Ionicons name="time-outline" size={20} color="#D97706" />
                 <Text style={[styles.noteText, { color: isDark ? colors.textSecondary : '#92400E' }]}>
-                  {withdrawalMethod === 'refund'
-                    ? 'Refunds are typically processed within 5-7 business days depending on your payment provider.'
-                    : 'Withdrawals are processed within 1-3 business days. You\'ll be notified once the transfer is complete.'
-                  }
+                  Simulated withdrawals complete immediately and deduct from your real in-app wallet balance. No external money is sent.
                 </Text>
               </View>
             </ScrollView>
 
             {/* Submit Button */}
-            <TouchableOpacity activeOpacity={1}
+            <TouchableOpacity activeOpacity={isWithdrawSubmitDisabled ? 1 : 0.78}
               onPress={handleWithdraw}
-              disabled={withdrawing || !isWithdrawReady}
+              disabled={isWithdrawSubmitDisabled}
               style={[
                 styles.withdrawSubmitBtn,
                 {
                   backgroundColor: isWithdrawReady ? colors.primary : colors.border,
-                  opacity: withdrawing ? 0.7 : 1
+                  opacity: isWithdrawSubmitDisabled ? 0.6 : 1
                 }
               ]}
             >
@@ -1417,9 +1200,9 @@ export default function WalletScreen() {
                 <ActivityIndicator size="small" color="white" />
               ) : (
                 <>
-                  <Ionicons name={withdrawalMethod === 'refund' ? 'refresh' : 'arrow-down-circle'} size={20} color={isWithdrawReady ? "white" : colors.textSecondary} />
+                  <Ionicons name="arrow-down-circle" size={20} color={isWithdrawReady ? "white" : colors.textSecondary} />
                   <Text style={[styles.withdrawSubmitText, { color: isWithdrawReady ? "white" : colors.textSecondary }]}>
-                    {withdrawalMethod === 'refund' ? 'Request Refund' : 'Confirm Withdrawal'}
+                    Confirm Withdrawal
                   </Text>
                 </>
               )}
@@ -1450,7 +1233,7 @@ export default function WalletScreen() {
               <View style={styles.inputSection}>
                 <Text style={[styles.inputLabel, { color: colors.text }]}>Payout Type</Text>
                 <View style={styles.payoutTypeGrid}>
-                  {(['gcash', 'maya', 'bank', 'paypal'] as const).map((type) => (
+                  {(['gcash', 'maya', 'bank'] as const).map((type) => (
                     <TouchableOpacity activeOpacity={1}
                       key={type}
                       onPress={() => setNewPayoutType(type)}
@@ -1507,17 +1290,15 @@ export default function WalletScreen() {
               {/* Account Number */}
               <View style={styles.inputSection}>
                 <Text style={[styles.inputLabel, { color: colors.text }]}>
-                  {newPayoutType === 'gcash' || newPayoutType === 'maya' ? 'Mobile Number' :
-                    newPayoutType === 'paypal' ? 'PayPal Email' : 'Account Number'}
+                  {newPayoutType === 'gcash' || newPayoutType === 'maya' ? 'Mobile Number' : 'Account Number'}
                 </Text>
                 <TextInput
                   style={[styles.textInput, { backgroundColor: colors.surface, borderColor: colors.border, color: colors.text }]}
                   placeholder={
-                    newPayoutType === 'gcash' || newPayoutType === 'maya' ? '09XX XXX XXXX' :
-                      newPayoutType === 'paypal' ? 'email@example.com' : 'XXXX XXXX XXXX'
+                    newPayoutType === 'gcash' || newPayoutType === 'maya' ? '09XX XXX XXXX' : 'XXXX XXXX XXXX'
                   }
                   placeholderTextColor={colors.textSecondary}
-                  keyboardType={newPayoutType === 'paypal' ? 'email-address' : 'default'}
+                  keyboardType={newPayoutType === 'gcash' || newPayoutType === 'maya' ? 'phone-pad' : 'default'}
                   value={newAccountNumber}
                   onChangeText={setNewAccountNumber}
                 />
@@ -1525,10 +1306,10 @@ export default function WalletScreen() {
             </ScrollView>
 
             {/* Add Button */}
-            <TouchableOpacity activeOpacity={1}
+            <TouchableOpacity activeOpacity={isPayoutMethodSubmitDisabled ? 1 : 0.78}
               onPress={handleAddPayoutMethod}
-              disabled={addingPayoutMethod || !isPayoutMethodReady}
-              style={[styles.withdrawSubmitBtn, { backgroundColor: isPayoutMethodReady ? colors.primary : colors.border, opacity: addingPayoutMethod ? 0.7 : 1 }]}
+              disabled={isPayoutMethodSubmitDisabled}
+              style={[styles.withdrawSubmitBtn, { backgroundColor: isPayoutMethodReady ? colors.primary : colors.border, opacity: isPayoutMethodSubmitDisabled ? 0.6 : 1 }]}
             >
               {addingPayoutMethod ? (
                 <ActivityIndicator size="small" color="white" />

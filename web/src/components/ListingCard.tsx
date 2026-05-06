@@ -14,11 +14,11 @@ import {
 import { PH_MUSIC_GROUP_TYPES } from "../constants/groupTypes";
 import { useAuth } from "../context/AuthContext";
 import { useTheme } from "../context/ThemeContext";
+import { isFanUserRole } from "../utils/roleRouting";
 import CachedImage from "./CachedImage";
+import PagerView from "./PagerView";
 
 const debugLog = (..._args: unknown[]) => { };
-
-import PagerView from "./PagerView";
 
 interface ListingCardProps {
   item: any;
@@ -47,6 +47,7 @@ const ListingCard: React.FC<ListingCardProps> = ({
 }) => {
   const { colors, isDark } = useTheme();
   const { userRole, userId } = useAuth(); // To avoid showing warning to owners
+  const isFan = isFanUserRole(userRole);
   const [isLiked, setIsLiked] = useState(false);
   const [pageIndex, setPageIndex] = useState(0);
   const horizontalWebScrollRef = useRef<ScrollView | null>(null);
@@ -240,8 +241,8 @@ const ListingCard: React.FC<ListingCardProps> = ({
 
   // Determine if chat button should be shown (not for own items)
   const canChat = useMemo(
-    () => onChat && item.owner_id !== userId && item.organizer_id !== userId,
-    [item.organizer_id, item.owner_id, onChat, userId],
+    () => !isFan && onChat && item.owner_id !== userId && item.organizer_id !== userId,
+    [isFan, item.organizer_id, item.owner_id, onChat, userId],
   );
 
   const shouldShowGigSummary = useMemo(

@@ -16,6 +16,7 @@ const corsHeaders = {
 };
 
 const allowedRoles = new Set([
+  "fan",
   "musician",
   "studio-owner",
   "venue-owner",
@@ -114,6 +115,87 @@ function parseBoolean(raw: unknown): boolean | null {
   return null;
 }
 
+function normalizeTextField(raw: unknown): string | null {
+  const value = String(raw ?? "").trim();
+  return value.length > 0 ? value : null;
+}
+
+function normalizeStringList(raw: unknown): string[] {
+  const source = Array.isArray(raw) ? raw : String(raw ?? "").split(/[,;\n]/);
+  const seen = new Set<string>();
+  const items: string[] = [];
+
+  for (const item of source) {
+    const value = String(item ?? "").trim();
+    if (!value || seen.has(value.toLowerCase())) continue;
+    seen.add(value.toLowerCase());
+    items.push(value);
+  }
+
+  return items;
+}
+
+async function attachProfileLists(client: any, profiles: any[]) {
+  const items = Array.isArray(profiles) ? profiles : [];
+  const profileIds = items
+    .map((profile) => String(profile?.id || "").trim())
+    .filter((id) => id.length > 0);
+
+  if (profileIds.length === 0) return items;
+
+  const [{ data: skillRows, error: skillsError }, { data: genreRows, error: genresError }] = await Promise.all([
+    client.from("profile_skills").select("profile_id, skill").in("profile_id", profileIds),
+    client.from("profile_genres").select("profile_id, genre").in("profile_id", profileIds),
+  ]);
+
+  if (skillsError) throw skillsError;
+  if (genresError) throw genresError;
+
+  const skillsByProfile = new Map<string, string[]>();
+  const genresByProfile = new Map<string, string[]>();
+
+  for (const row of skillRows || []) {
+    const profileId = String(row?.profile_id || "");
+    if (!skillsByProfile.has(profileId)) skillsByProfile.set(profileId, []);
+    const skill = String(row?.skill || "").trim();
+    if (skill) skillsByProfile.get(profileId)?.push(skill);
+  }
+
+  for (const row of genreRows || []) {
+    const profileId = String(row?.profile_id || "");
+    if (!genresByProfile.has(profileId)) genresByProfile.set(profileId, []);
+    const genre = String(row?.genre || "").trim();
+    if (genre) genresByProfile.get(profileId)?.push(genre);
+  }
+
+  return items.map((profile) => ({
+    ...profile,
+    skills: skillsByProfile.get(String(profile?.id || "")) || [],
+    genres: genresByProfile.get(String(profile?.id || "")) || [],
+  }));
+}
+
+async function replaceProfileList(
+  client: any,
+  table: string,
+  valueColumn: string,
+  userId: string,
+  values: string[],
+) {
+  const { error: deleteError } = await client.from(table).delete().eq("profile_id", userId);
+  if (deleteError) throw deleteError;
+
+  if (values.length === 0) return;
+
+  const payload = values.map((value) => ({
+    profile_id: userId,
+    [valueColumn]: value,
+  }));
+
+  const { error: insertError } = await client.from(table).insert(payload);
+  if (insertError) throw insertError;
+}
+
 function maskEmailForLog(email: string) {
   const [name, domain] = String(email || "").split("@");
   if (!name || !domain) return "missing";
@@ -173,68 +255,36 @@ function getManualApprovalConfirmationRedirect() {
   return Deno.env.get("EMAIL_CONFIRM_REDIRECT_TO") || "musikalokal://?verified=true";
 }
 
-async function sendManualApprovalConfirmationEmail(
-  userEmail: string,
-  supabaseUrl: string,
-  anonKey: string,
-) {
-  if (!userEmail) {
-    return { sent: false, queued: false, provider: "none", error: "Missing recipient email" };
-  }
+async function generateManualApprovalConfirmationLink(client: any, userEmail: string) {
+  if (!userEmail) return { link: null as string | null, error: "Missing recipient email" };
 
-  if (!supabaseUrl || !anonKey) {
-    return { sent: false, queued: false, provider: "supabase_auth", error: "Missing SUPABASE_URL or SUPABASE_ANON_KEY" };
-  }
-
-  // Match the Didit confirmation flow: after Supabase verifies the link,
-  // send the user straight back into the app with the verified flag.
   const redirectTo = getManualApprovalConfirmationRedirect();
-
-  try {
-    const response = await fetch(`${supabaseUrl}/auth/v1/resend`, {
-      method: "POST",
-      headers: {
-        apikey: anonKey,
-        Authorization: `Bearer ${anonKey}`,
-        "Content-Type": "application/json",
+  const { data, error } = await client.auth.admin.generateLink({
+    type: "magiclink",
+    email: userEmail,
+    options: {
+      redirectTo,
+      data: {
+        is_verified: true,
+        verification_status: "APPROVED",
       },
-      body: JSON.stringify({
-        type: "signup",
-        email: userEmail,
-        options: {
-          email_redirect_to: redirectTo,
-        },
-      }),
-    });
+    },
+  });
 
-    if (response.ok) {
-      console.log("manual_identity_review_confirmation_email_sent", {
-        provider: "supabase_auth",
-        recipient: maskEmailForLog(userEmail),
-      });
-      return { sent: true, queued: false, provider: "supabase_auth" };
-    }
-
-    const errorText = await response.text().catch(() => "");
-    console.error("manual_identity_review_confirmation_email_failed", {
-      status: response.status,
-      body: errorText.slice(0, 500),
+  if (error) {
+    console.error("manual_identity_review_confirmation_link_failed", {
       recipient: maskEmailForLog(userEmail),
+      message: error.message,
     });
-    return {
-      sent: false,
-      queued: false,
-      provider: "supabase_auth",
-      error: `Supabase Auth ${response.status}: ${errorText.slice(0, 500)}`,
-    };
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    console.error("manual_identity_review_confirmation_email_exception", {
-      message,
-      recipient: maskEmailForLog(userEmail),
-    });
-    return { sent: false, queued: false, provider: "supabase_auth", error: message };
+    return { link: null, error: error.message };
   }
+
+  const link = String(data?.properties?.action_link || "").trim();
+  if (!link) {
+    return { link: null, error: "Generated confirmation link was empty" };
+  }
+
+  return { link, error: null };
 }
 
 async function sendDecisionEmail(
@@ -249,8 +299,11 @@ async function sendDecisionEmail(
 
   let fallbackReason = "";
   const normalizedDecision = decision === "APPROVED" ? "approved" : "declined";
+  const hasConfirmationStep = decision === "APPROVED" && Boolean(confirmationLink || confirmationLinkError);
   const subject = decision === "APPROVED"
-    ? "Identity Verified - Confirm Your Email - MusikaLokal"
+    ? hasConfirmationStep
+      ? "Identity Verified - Confirm Your Email - MusikaLokal"
+      : "Identity Verified - MusikaLokal"
     : "Identity Verification Update - MusikaLokal";
 
   const notesHtml = reviewNotes
@@ -258,7 +311,9 @@ async function sendDecisionEmail(
     : "";
   const confirmHtml = confirmationLink
     ? `<div style="text-align: center; margin: 30px 0;"><a href="${escapeHtml(confirmationLink)}" style="display: inline-block; background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%); color: #ffffff; text-decoration: none; padding: 14px 32px; border-radius: 8px; font-weight: 700;">Confirm Email and Continue</a></div>`
-    : `<p style="margin: 0 0 12px;">If you do not see a confirmation link, open MusikaLokal and use the resend confirmation option on the signup/login screen.</p>`;
+    : hasConfirmationStep
+      ? `<p style="margin: 0 0 12px;">If you do not see a confirmation link, open MusikaLokal and use the resend confirmation option on the signup/login screen.</p>`
+      : `<p style="margin: 0 0 12px;">Your email is already confirmed, so you can open MusikaLokal and sign in.</p>`;
   const confirmErrorHtml = confirmationLinkError
     ? `<p style="margin: 0 0 12px; color: #6B7280; font-size: 13px;">Confirmation link status: ${escapeHtml(confirmationLinkError)}</p>`
     : "";
@@ -266,12 +321,14 @@ async function sendDecisionEmail(
   const html = buildMusikaLokalEmail({
     title: decision === "APPROVED" ? "Identity Verification Approved!" : "Identity Verification Updated",
     subtitle: decision === "APPROVED"
-      ? "Your account is now ready for the final email confirmation step"
+      ? hasConfirmationStep
+        ? "Your account is now ready for the final email confirmation step"
+        : "Your account is ready to use"
       : "You can submit a new valid government ID to retry verification",
     bodyHtml: decision === "APPROVED"
       ? `
   <p style="margin: 0 0 12px;">Good news: your manual identity review has been <strong>${normalizedDecision}</strong>, and your MusikaLokal identity is now verified.</p>
-  <p style="margin: 0 0 12px;">One step remains before you can sign in: please confirm your email address.</p>
+  <p style="margin: 0 0 12px;">${hasConfirmationStep ? "One step remains before you can sign in: please confirm your email address." : "You can now sign in and use your verified account."}</p>
   ${confirmHtml}
   ${confirmErrorHtml}
   <ul style="background: #f8fafc; padding: 20px 20px 20px 40px; border-radius: 8px; border-left: 4px solid #6366f1; margin: 24px 0;">
@@ -390,7 +447,7 @@ serve(async (req: Request) => {
       const { data, error } = await client
         .from("profiles")
         .select(
-          "id, full_name, email, role, is_verified, verification_status, created_at",
+          "id, full_name, email, role, is_verified, verification_status, created_at, contact_number, address, location, bio",
         )
         .or("verification_status.is.null,verification_status.neq.DECLINED")
         .order("created_at", { ascending: false })
@@ -398,7 +455,9 @@ serve(async (req: Request) => {
 
       if (error) throw error;
 
-      return jsonResponse({ items: data || [] });
+      const items = await attachProfileLists(client, data || []);
+
+      return jsonResponse({ items });
     }
 
     if (action === "fetch_manual_identity_reviews") {
@@ -580,9 +639,18 @@ serve(async (req: Request) => {
       let decisionEmail;
 
       if (decision === "APPROVED") {
-        decisionEmail = emailAlreadyConfirmed
-          ? { sent: true, queued: false, provider: "email_already_confirmed", error: null }
-          : await sendManualApprovalConfirmationEmail(targetEmail, supabaseUrl, anonKey);
+        if (!emailAlreadyConfirmed) {
+          confirmationLinkResult = await generateManualApprovalConfirmationLink(client, targetEmail);
+        }
+
+        decisionEmail = await sendDecisionEmail(
+          client,
+          targetEmail,
+          decision as "APPROVED",
+          reviewNotes,
+          confirmationLinkResult.link,
+          confirmationLinkResult.error,
+        );
       } else {
         decisionEmail = await sendDecisionEmail(
           client,
@@ -638,8 +706,10 @@ serve(async (req: Request) => {
 
       if (profileError) throw profileError;
 
+      const [item] = await attachProfileLists(client, profile ? [profile] : []);
+
       return jsonResponse({
-        item: profile || null,
+        item: item || null,
       });
     }
 
@@ -652,13 +722,22 @@ serve(async (req: Request) => {
       const isVerified = parseBoolean(body?.isVerified) ?? false;
       const verificationStatus = isVerified ? "APPROVED" : "PENDING";
       const verifiedAt = isVerified ? new Date().toISOString() : null;
+      const contactNumber = normalizeTextField(body?.contactNumber);
+      const address = normalizeTextField(body?.address);
+      const bio = normalizeTextField(body?.bio);
+      const skills = normalizeStringList(body?.skills);
+      const genres = normalizeStringList(body?.genres);
 
       if (!email || !password || !role) {
         return jsonResponse({ error: "Missing required fields" }, 400);
       }
 
-      if (password.length < 8) {
-        return jsonResponse({ error: "Password must be at least 8 characters" }, 400);
+      if (!fullName) {
+        return jsonResponse({ error: "Full name is required" }, 400);
+      }
+
+      if (password.length < 6) {
+        return jsonResponse({ error: "Password must be at least 6 characters" }, 400);
       }
 
       const { data: createdUser, error: createUserError } = await client.auth.admin.createUser({
@@ -669,7 +748,7 @@ serve(async (req: Request) => {
           role,
           is_verified: isVerified,
           verification_status: verificationStatus,
-          full_name: fullName || null,
+          full_name: fullName,
         },
       });
 
@@ -685,8 +764,12 @@ serve(async (req: Request) => {
       const profilePayload = {
         id: userId,
         email,
-        full_name: fullName || null,
+        full_name: fullName,
         role,
+        contact_number: contactNumber,
+        address,
+        location: address,
+        bio,
         is_verified: isVerified,
         verification_status: verificationStatus,
         id_verified_at: verifiedAt,
@@ -695,7 +778,7 @@ serve(async (req: Request) => {
       const { data: profile, error: profileError } = await client
         .from("profiles")
         .upsert(profilePayload, { onConflict: "id" })
-        .select("id, full_name, email, role, is_verified, created_at")
+        .select("id, full_name, email, role, is_verified, verification_status, created_at, contact_number, address, location, bio")
         .maybeSingle();
 
       if (profileError) {
@@ -703,7 +786,21 @@ serve(async (req: Request) => {
         return jsonResponse({ error: profileError.message }, 400);
       }
 
-      return jsonResponse({ item: profile || profilePayload }, 200);
+      try {
+        await Promise.all([
+          replaceProfileList(client, "profile_skills", "skill", userId, skills),
+          replaceProfileList(client, "profile_genres", "genre", userId, genres),
+        ]);
+      } catch (listError) {
+        await client.from("profiles").delete().eq("id", userId);
+        await client.auth.admin.deleteUser(userId);
+        const message = listError instanceof Error ? listError.message : "Unable to save profile lists";
+        return jsonResponse({ error: message }, 400);
+      }
+
+      const [item] = await attachProfileLists(client, [profile || profilePayload]);
+
+      return jsonResponse({ item: item || profile || profilePayload }, 200);
     }
 
     if (action === "update_user") {
@@ -712,6 +809,11 @@ serve(async (req: Request) => {
       const maybeFullName = body?.fullName;
       const maybeEmail = body?.email;
       const maybeIsVerified = body?.isVerified;
+      const maybeContactNumber = body?.contactNumber;
+      const maybeAddress = body?.address;
+      const maybeBio = body?.bio;
+      const maybeSkills = body?.skills;
+      const maybeGenres = body?.genres;
 
       if (!userId) {
         return jsonResponse({ error: "Missing userId" }, 400);
@@ -743,7 +845,11 @@ serve(async (req: Request) => {
       }
 
       if (maybeFullName !== undefined) {
-        profileUpdates.full_name = String(maybeFullName || "").trim() || null;
+        const nextFullName = String(maybeFullName || "").trim();
+        if (!nextFullName) {
+          return jsonResponse({ error: "Full name is required" }, 400);
+        }
+        profileUpdates.full_name = nextFullName;
       }
 
       if (maybeEmail !== undefined) {
@@ -752,6 +858,20 @@ serve(async (req: Request) => {
           return jsonResponse({ error: "Email cannot be empty" }, 400);
         }
         profileUpdates.email = email;
+      }
+
+      if (maybeContactNumber !== undefined) {
+        profileUpdates.contact_number = normalizeTextField(maybeContactNumber);
+      }
+
+      if (maybeAddress !== undefined) {
+        const nextAddress = normalizeTextField(maybeAddress);
+        profileUpdates.address = nextAddress;
+        profileUpdates.location = nextAddress;
+      }
+
+      if (maybeBio !== undefined) {
+        profileUpdates.bio = normalizeTextField(maybeBio);
       }
 
       if (maybeIsVerified !== undefined) {
@@ -772,7 +892,9 @@ serve(async (req: Request) => {
         }
       }
 
-      if (Object.keys(profileUpdates).length === 0) {
+      const hasListUpdates = maybeSkills !== undefined || maybeGenres !== undefined;
+
+      if (Object.keys(profileUpdates).length === 0 && !hasListUpdates) {
         return jsonResponse({ error: "No updates provided" }, 400);
       }
 
@@ -812,24 +934,58 @@ serve(async (req: Request) => {
         return jsonResponse({ error: authUpdateError.message }, 400);
       }
 
-      const { data: updatedProfile, error: profileUpdateError } = await client
-        .from("profiles")
-        .update(profileUpdates)
-        .eq("id", userId)
-        .select(
-          "id, full_name, email, role, is_verified, created_at",
-        )
-        .maybeSingle();
+      let updatedProfile: any = null;
 
-      if (profileUpdateError) {
-        return jsonResponse({ error: profileUpdateError.message }, 400);
+      if (Object.keys(profileUpdates).length > 0) {
+        const { data, error: profileUpdateError } = await client
+          .from("profiles")
+          .update(profileUpdates)
+          .eq("id", userId)
+          .select(
+            "id, full_name, email, role, is_verified, verification_status, created_at, contact_number, address, location, bio",
+          )
+          .maybeSingle();
+
+        if (profileUpdateError) {
+          return jsonResponse({ error: profileUpdateError.message }, 400);
+        }
+
+        updatedProfile = data;
+      } else {
+        const { data, error: profileFetchError } = await client
+          .from("profiles")
+          .select("id, full_name, email, role, is_verified, verification_status, created_at, contact_number, address, location, bio")
+          .eq("id", userId)
+          .maybeSingle();
+
+        if (profileFetchError) {
+          return jsonResponse({ error: profileFetchError.message }, 400);
+        }
+
+        updatedProfile = data;
       }
 
       if (!updatedProfile) {
         return jsonResponse({ error: "Profile not found" }, 404);
       }
 
-      return jsonResponse({ item: updatedProfile }, 200);
+      try {
+        await Promise.all([
+          maybeSkills !== undefined
+            ? replaceProfileList(client, "profile_skills", "skill", userId, normalizeStringList(maybeSkills))
+            : Promise.resolve(),
+          maybeGenres !== undefined
+            ? replaceProfileList(client, "profile_genres", "genre", userId, normalizeStringList(maybeGenres))
+            : Promise.resolve(),
+        ]);
+      } catch (listError) {
+        const message = listError instanceof Error ? listError.message : "Unable to save profile lists";
+        return jsonResponse({ error: message }, 400);
+      }
+
+      const [item] = await attachProfileLists(client, [updatedProfile]);
+
+      return jsonResponse({ item: item || updatedProfile }, 200);
     }
 
     if (action === "delete_user") {

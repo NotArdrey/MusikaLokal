@@ -204,7 +204,7 @@ export default function ProductDetailsScreen() {
           <Text style={{ color: colors.textSecondary, fontSize: 12 }}>Total</Text>
           <Text style={{ color: colors.primary, fontSize: moderateScale(18), fontWeight: "800" }}>₱{Number(currentPrice).toLocaleString(undefined, { minimumFractionDigits: 2 })}</Text>
         </View>
-        <TouchableOpacity activeOpacity={1} style={[styles.buyBtn, { backgroundColor: colors.primary, opacity: ordering ? 0.6 : 1 }]} onPress={handleBuyNow} disabled={ordering}>
+        <TouchableOpacity activeOpacity={ordering ? 1 : 0.78} style={[styles.buyBtn, { backgroundColor: colors.primary, opacity: ordering ? 0.6 : 1 }]} onPress={handleBuyNow} disabled={ordering}>
           {ordering ? <ActivityIndicator size="small" color="#fff" /> : <Text style={{ color: "#fff", fontWeight: "700", fontSize: moderateScale(15) }}>Buy Now</Text>}
         </TouchableOpacity>
       </View>

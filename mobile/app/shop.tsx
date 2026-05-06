@@ -1,11 +1,9 @@
 import { Ionicons } from "@expo/vector-icons";
-import { useFocusEffect } from "@react-navigation/native";
 import { router } from "expo-router";
-import React, { useCallback, useState } from "react";
+import React, { useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Dimensions,
-  InteractionManager,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -14,11 +12,11 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import { supabase } from "../lib/supabase";
 import CachedImage from "../src/components/CachedImage";
 import Header from "../src/components/header";
 import Skeleton from "../src/components/Skeleton";
 import { useTheme } from "../src/context/ThemeContext";
+import { useMarketplaceProductsQuery } from "../src/data/hooks";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const moderateScale = (size: number, factor = 0.3) => {
@@ -28,129 +26,40 @@ const moderateScale = (size: number, factor = 0.3) => {
 
 const CARD_WIDTH = (SCREEN_WIDTH - 48) / 2;
 const SHOP_PAGE_SIZE = 20;
-const SHOP_FOCUS_REFRESH_COOLDOWN_MS = 30000;
-
-type ShopCachePayload = {
-  products: any[];
-  fetchedAt: number;
-  hasMoreProducts: boolean;
-};
-
-const shopScreenCache = new Map<string, ShopCachePayload>();
-
-const mergeProductsById = (currentProducts: any[], nextProducts: any[]) => {
-  const merged = new Map<string, any>();
-
-  currentProducts.forEach((product) => {
-    if (product?.id) {
-      merged.set(product.id, product);
-    }
-  });
-
-  nextProducts.forEach((product) => {
-    if (product?.id) {
-      merged.set(product.id, product);
-    }
-  });
-
-  return Array.from(merged.values());
-};
 
 export default function ShopScreen() {
   const { colors, isDark } = useTheme();
 
-  const [products, setProducts] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [loadingMore, setLoadingMore] = useState(false);
-  const [hasMoreProducts, setHasMoreProducts] = useState(false);
-  const [refreshing, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [category, setCategory] = useState<string | null>(null);
-  const shopCacheKey = category || "all";
 
   const categories = ["Merch", "Vinyl", "Digital", "Instruments", "Tickets"];
 
-  const fetchProducts = useCallback(async (options: { append?: boolean; offset?: number; showLoading?: boolean } = {}) => {
-    const append = options.append === true;
-    const offset = Math.max(0, options.offset || 0);
+  const productsQuery = useMarketplaceProductsQuery<any>({
+    category,
+    includeSold: true,
+    limit: SHOP_PAGE_SIZE,
+  });
 
-    if (append) {
-      setLoadingMore(true);
-    } else if (options.showLoading) {
-      setLoading(true);
-    }
-
-    try {
-      const body: any = { action: "browse_products", limit: SHOP_PAGE_SIZE + 1, offset };
-      if (category) body.category = category;
-
-      const { data } = await supabase.functions.invoke("manage-marketplace", { body });
-      const fetchedProducts = Array.isArray(data?.data) ? data.data : [];
-      const pageProducts = fetchedProducts.slice(0, SHOP_PAGE_SIZE);
-      const nextHasMoreProducts = fetchedProducts.length > SHOP_PAGE_SIZE;
-
-      setProducts((currentProducts) => {
-        const nextProducts = append
-          ? mergeProductsById(currentProducts, pageProducts)
-          : pageProducts;
-
-        shopScreenCache.set(shopCacheKey, {
-          products: nextProducts,
-          fetchedAt: Date.now(),
-          hasMoreProducts: nextHasMoreProducts,
-        });
-
-        return nextProducts;
-      });
-      setHasMoreProducts(nextHasMoreProducts);
-    } catch (e: any) {
-      console.error("Shop fetch error:", e);
-    } finally {
-      setLoading(false);
-      setLoadingMore(false);
-      setRefreshing(false);
-    }
-  }, [category, shopCacheKey]);
-
-  useFocusEffect(useCallback(() => {
-    const cached = shopScreenCache.get(shopCacheKey);
-    const cacheIsFresh =
-      cached &&
-      Date.now() - cached.fetchedAt < SHOP_FOCUS_REFRESH_COOLDOWN_MS;
-
-    if (cached) {
-      setProducts(cached.products);
-      setHasMoreProducts(Boolean(cached.hasMoreProducts));
-      setLoading(false);
-      setRefreshing(false);
-    } else {
-      setLoading(true);
-    }
-
-    let focusRefreshTask: ReturnType<typeof InteractionManager.runAfterInteractions> | null = null;
-
-    if (!cacheIsFresh) {
-      focusRefreshTask = InteractionManager.runAfterInteractions(() => {
-        void fetchProducts({ showLoading: !cached });
-      });
-    }
-
-    return () => {
-      focusRefreshTask?.cancel();
-    };
-  }, [fetchProducts, shopCacheKey]));
+  const products = useMemo(
+    () => productsQuery.data?.pages.flatMap((page) => page.items || page.data || []) ?? [],
+    [productsQuery.data],
+  );
+  const loading = productsQuery.isLoading;
+  const loadingMore = productsQuery.isFetchingNextPage;
+  const hasMoreProducts = productsQuery.hasNextPage;
+  const refreshing = productsQuery.isRefetching;
 
   const onRefresh = () => {
-    setRefreshing(true);
-    fetchProducts();
+    void productsQuery.refetch();
   };
 
   const loadMoreProducts = () => {
     if (loading || loadingMore || !hasMoreProducts) return;
-    fetchProducts({ append: true, offset: products.length });
+    void productsQuery.fetchNextPage();
   };
 
-  const visibleProducts = React.useMemo(() => {
+  const visibleProducts = useMemo(() => {
     const needle = searchQuery.trim().toLowerCase();
     if (!needle) return products;
 
@@ -218,7 +127,9 @@ export default function ShopScreen() {
           placeholderTextColor={colors.textSecondary}
           value={searchQuery}
           onChangeText={setSearchQuery}
-          onSubmitEditing={() => fetchProducts()}
+          onSubmitEditing={() => {
+            void productsQuery.refetch();
+          }}
           returnKeyType="search"
         />
       </View>

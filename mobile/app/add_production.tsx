@@ -14,6 +14,22 @@ import { emitToast } from '../src/events/toastBus';
 import { useTheme } from '../src/context/ThemeContext';
 import { ProductionInviteTarget, sendProductionTeamInvites } from '../src/utils/productionTeamInvites';
 
+const readFunctionErrorBody = async (error: any) => {
+  const response = error?.context;
+  if (!response) return null;
+
+  try {
+    const readableResponse = typeof response.clone === 'function' ? response.clone() : response;
+    if (typeof readableResponse.json === 'function') {
+      return await readableResponse.json();
+    }
+  } catch (parseError) {
+    console.warn('Failed to parse manage-production error response', parseError);
+  }
+
+  return null;
+};
+
 export default function AddProductionScreen() {
   const { colors, isDark } = useTheme();
   const { contentBottomPadding } = useBottomBarClearance(24);
@@ -41,14 +57,21 @@ export default function AddProductionScreen() {
   const invokeProduction = useCallback(async (body: Record<string, unknown>) => {
     const { data, error } = await supabase.functions.invoke('manage-production', { body });
     if (error) {
+      const responseBody = await readFunctionErrorBody(error);
       const status = Number((error as any)?.status || (error as any)?.context?.status || 0);
+      const message =
+        responseBody?.error ||
+        responseBody?.message ||
+        error.message ||
+        'Production request failed.';
       console.warn('manage-production failed', {
-        message: error.message,
+        message,
         status,
         code: (error as any).code,
         details: (error as any).details,
         hint: (error as any).hint,
         context: (error as any).context,
+        response: responseBody,
         body,
       });
 
@@ -58,8 +81,13 @@ export default function AddProductionScreen() {
         throw transientError;
       }
 
-      throw error;
+      throw new Error(message);
     }
+
+    if (data && typeof data === 'object' && (data as any).error && !(data as any).success) {
+      throw new Error(String((data as any).error));
+    }
+
     return data;
   }, []);
 
@@ -129,7 +157,7 @@ export default function AddProductionScreen() {
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}> 
-      <Header title="Add Production" onBackPress={() => router.back()} />
+      <Header title="Add Production" onBackPress={() => router.replace('/my_production')} />
 
       <ScrollView contentContainerStyle={[styles.content, { paddingBottom: contentBottomPadding }]} showsVerticalScrollIndicator={false}>
         <View style={[styles.heroCard, { backgroundColor: colors.surface, borderColor: isDark ? '#334155' : '#E2E8F0' }]}>
@@ -188,8 +216,8 @@ export default function AddProductionScreen() {
             <Text style={[styles.helperText, { color: '#F59E0B' }]}>Complete all required fields before creating your production team.</Text>
           ) : null}
 
-          <TouchableOpacity activeOpacity={1}
-            style={[styles.submitBtn, { backgroundColor: hasIncompleteRequiredFields ? colors.border : colors.primary, opacity: saving ? 0.65 : 1 }]}
+          <TouchableOpacity activeOpacity={saving || hasIncompleteRequiredFields ? 1 : 0.78}
+            style={[styles.submitBtn, { backgroundColor: hasIncompleteRequiredFields ? colors.border : colors.primary, opacity: saving || hasIncompleteRequiredFields ? 0.6 : 1 }]}
             onPress={handleSubmit}
             disabled={saving || hasIncompleteRequiredFields}
           >

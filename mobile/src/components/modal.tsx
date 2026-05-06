@@ -16,7 +16,7 @@ import InAppMediaViewer from './InAppMediaViewer';
 type CustomModalProps = {
   visible: boolean;
   onClose: () => void;
-  onConfirm?: () => void;
+  onConfirm?: () => void | Promise<void>;
   title?: string;
   message?: string;
   buttonText?: string;
@@ -26,6 +26,7 @@ type CustomModalProps = {
   inputValue?: string;
   inputPlaceholder?: string;
   inputMultiline?: boolean;
+  requiredInputValue?: string;
   confirmDisabled?: boolean;
   requireTermsAcceptance?: boolean;
   termsLabel?: string;
@@ -33,6 +34,7 @@ type CustomModalProps = {
   termsLinkLabel?: string;
   contractUrl?: string | null;
   contractName?: string;
+  summaryItems?: { label: string; value: string | number | null | undefined; icon?: keyof typeof Ionicons.glyphMap }[];
   loading?: boolean;
   loadingMessage?: string;
 };
@@ -40,8 +42,13 @@ type CustomModalProps = {
 export const normalizeVisibleInput = (value: unknown) =>
   String(value ?? '')
     .normalize('NFKC')
-    .replace(/[\u200B-\u200D\uFEFF]/g, '')
+    .replace(/[\u200B-\u200F\u202A-\u202E\u2060-\u206F\uFEFF]/g, '')
     .trim();
+
+export const normalizeConfirmationInput = (value: unknown) =>
+  normalizeVisibleInput(value)
+    .replace(/\s+/g, ' ')
+    .toLowerCase();
 
 const CustomModal: React.FC<CustomModalProps> = ({
   visible,
@@ -56,6 +63,7 @@ const CustomModal: React.FC<CustomModalProps> = ({
   inputValue,
   inputPlaceholder = 'Enter reason...',
   inputMultiline = true,
+  requiredInputValue,
   confirmDisabled = false,
   requireTermsAcceptance = false,
   termsLabel = 'I agree to the Terms and Conditions.',
@@ -63,6 +71,7 @@ const CustomModal: React.FC<CustomModalProps> = ({
   termsLinkLabel = 'Read Terms and Conditions',
   contractUrl,
   contractName,
+  summaryItems = [],
   loading = false,
   loadingMessage = 'Please wait...'
 }) => {
@@ -75,6 +84,7 @@ const CustomModal: React.FC<CustomModalProps> = ({
   const [canInteract, setCanInteract] = React.useState(false);
   const [mediaViewerUrl, setMediaViewerUrl] = React.useState<string | null>(null);
   const hasCustomContract = Boolean(contractUrl);
+  const confirmationLockedRef = React.useRef(false);
   const [rendered, setRendered] = React.useState(visible);
   const modalProgress = useSharedValue(visible ? 1 : 0);
   const wasVisibleRef = React.useRef(visible);
@@ -87,16 +97,24 @@ const CustomModal: React.FC<CustomModalProps> = ({
       setFeedbackVisible(false);
       setFeedbackMessage('');
       setCanInteract(false);
+      confirmationLockedRef.current = false;
       return;
     }
 
     setCanInteract(false);
+    confirmationLockedRef.current = false;
     const timeout = setTimeout(() => {
       setCanInteract(true);
     }, 180);
 
     return () => clearTimeout(timeout);
   }, [visible]);
+
+  React.useEffect(() => {
+    if (visible && !loading) {
+      confirmationLockedRef.current = false;
+    }
+  }, [loading, visible]);
 
   const finishDismiss = React.useCallback(() => {
     setRendered(false);
@@ -143,10 +161,18 @@ const CustomModal: React.FC<CustomModalProps> = ({
     opacity: interpolate(modalProgress.value, [0, 1], [0, 1]),
   }));
 
-  const hasEmptyRequiredInput = showInput && !normalizeVisibleInput(inputValue);
+  const hasRequiredInputValue = requiredInputValue !== undefined && requiredInputValue !== null;
+  const normalizedInput = normalizeVisibleInput(inputValue);
+  const hasEmptyRequiredInput = showInput && !normalizedInput;
+  const hasMismatchedRequiredInput =
+    showInput &&
+    hasRequiredInputValue &&
+    !hasEmptyRequiredInput &&
+    normalizeConfirmationInput(inputValue) !== normalizeConfirmationInput(requiredInputValue);
 
-  const hasUnmetConfirmRequirement =
+  const isConfirmDisabled =
     hasEmptyRequiredInput ||
+    hasMismatchedRequiredInput ||
     confirmDisabled ||
     (requireTermsAcceptance && !isTermsAccepted) ||
     (hasCustomContract && !isContractAccepted);
@@ -156,6 +182,12 @@ const CustomModal: React.FC<CustomModalProps> = ({
       return inputPlaceholder
         ? `Please fill in "${inputPlaceholder.replace(/\.+$/, '')}" before continuing.`
         : 'Please fill in the required field before continuing.';
+    }
+
+    if (hasMismatchedRequiredInput) {
+      return hasRequiredInputValue
+        ? `Please type "${requiredInputValue}" to confirm.`
+        : 'Please complete the confirmation requirement before continuing.';
     }
 
     if (requireTermsAcceptance && !isTermsAccepted) {
@@ -174,6 +206,10 @@ const CustomModal: React.FC<CustomModalProps> = ({
   };
 
   const handleConfirmPress = () => {
+    if (!canInteract || loading || confirmationLockedRef.current) {
+      return;
+    }
+
     const validationFeedback = getValidationFeedback();
     if (validationFeedback) {
       setFeedbackMessage(validationFeedback);
@@ -181,7 +217,16 @@ const CustomModal: React.FC<CustomModalProps> = ({
       return;
     }
 
-    (onConfirm || onClose)();
+    confirmationLockedRef.current = true;
+    try {
+      const result = onConfirm ? onConfirm() : onClose();
+      void Promise.resolve(result).finally(() => {
+        confirmationLockedRef.current = false;
+      });
+    } catch (error) {
+      confirmationLockedRef.current = false;
+      throw error;
+    }
   };
 
   const renderCheckbox = (checked: boolean) => (
@@ -238,6 +283,30 @@ const CustomModal: React.FC<CustomModalProps> = ({
               {title && <Text style={[styles.title, { color: colors.text }]}>{title}</Text>}
               <Text style={[styles.message, { color: colors.textSecondary }]}>{message}</Text>
 
+              {summaryItems.length > 0 && (
+                <View style={[styles.summaryCard, { backgroundColor: colors.background, borderColor: colors.border }]}>
+                  {summaryItems
+                    .filter((item) => item.value !== null && item.value !== undefined && String(item.value).trim().length > 0)
+                    .map((item, index) => (
+                      <View
+                        key={`${item.label}-${index}`}
+                        style={[
+                          styles.summaryRow,
+                          index > 0 && { borderTopColor: colors.border, borderTopWidth: 1 },
+                        ]}
+                      >
+                        <View style={styles.summaryLabelWrap}>
+                          {item.icon ? <Ionicons name={item.icon} size={15} color={colors.textSecondary} /> : null}
+                          <Text style={[styles.summaryLabel, { color: colors.textSecondary }]}>{item.label}</Text>
+                        </View>
+                        <Text style={[styles.summaryValue, { color: colors.text }]} numberOfLines={2}>
+                          {String(item.value)}
+                        </Text>
+                      </View>
+                    ))}
+                </View>
+              )}
+
               {showInput && (
                 <TextInput
                   style={[
@@ -245,7 +314,10 @@ const CustomModal: React.FC<CustomModalProps> = ({
                     {
                       color: colors.text,
                       borderColor: colors.border,
-                      backgroundColor: colors.background
+                      backgroundColor: colors.background,
+                      minHeight: inputMultiline ? 80 : 48,
+                      textAlign: inputMultiline ? 'left' : 'center',
+                      textAlignVertical: inputMultiline ? 'top' : 'center',
                     }
                   ]}
                   placeholder={inputPlaceholder}
@@ -333,22 +405,23 @@ const CustomModal: React.FC<CustomModalProps> = ({
 
               <View style={styles.buttonContainer}>
                 <TouchableOpacity
-                  activeOpacity={1}
+                  activeOpacity={!canInteract || loading || isConfirmDisabled ? 1 : 0.78}
+                  accessibilityState={{ disabled: isConfirmDisabled || loading }}
                   style={[
                     styles.confirmButton,
                     {
                       backgroundColor: danger ? '#EF4444' : colors.primary,
-                      opacity: hasUnmetConfirmRequirement ? 0.6 : 1
+                      opacity: isConfirmDisabled || loading ? 0.6 : 1
                     }
                   ]}
-                  disabled={!canInteract}
+                  disabled={!canInteract || loading || isConfirmDisabled}
                   onPress={handleConfirmPress}
                 >
                   <Text style={styles.confirmButtonText}>{buttonText}</Text>
                 </TouchableOpacity>
 
                 <TouchableOpacity
-                  activeOpacity={1}
+                  activeOpacity={!canInteract ? 1 : 0.78}
                   style={styles.cancelButton}
                   disabled={!canInteract}
                   onPress={onClose}
@@ -487,6 +560,38 @@ const styles = StyleSheet.create({
     minHeight: 80,
     textAlignVertical: 'top',
     fontFamily: 'Poppins_400Regular',
+  },
+  summaryCard: {
+    width: '100%',
+    borderWidth: 1,
+    borderRadius: 14,
+    marginBottom: 16,
+    overflow: 'hidden',
+  },
+  summaryRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  summaryLabelWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    flexShrink: 0,
+  },
+  summaryLabel: {
+    fontFamily: 'Poppins_500Medium',
+    fontSize: 12,
+  },
+  summaryValue: {
+    flex: 1,
+    textAlign: 'right',
+    fontFamily: 'Poppins_600SemiBold',
+    fontSize: 12,
+    lineHeight: 17,
   },
   agreementCard: {
     width: '100%',

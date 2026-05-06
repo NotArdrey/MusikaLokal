@@ -1,4 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
+import { useQueryClient } from "@tanstack/react-query";
 import { router, useLocalSearchParams } from "expo-router";
 import React, { useCallback, useEffect, useState } from "react";
 import {
@@ -20,6 +21,8 @@ import { useBottomBarClearance } from "../src/hooks/useBottomBarClearance";
 import { useAuth } from "../src/context/AuthContext";
 import { emitToast } from "../src/events/toastBus";
 import { useTheme } from "../src/context/ThemeContext";
+import { useMarketplaceProductDetailsQuery } from "../src/data/hooks";
+import { isFanUserRole } from "../src/utils/roleRouting";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const moderateScale = (size: number, factor = 0.3) => {
@@ -30,15 +33,19 @@ const moderateScale = (size: number, factor = 0.3) => {
 export default function ProductDetailsScreen() {
   const { colors, isDark } = useTheme();
   const { contentBottomPadding } = useBottomBarClearance(24);
-  const { isGuest, userId } = useAuth();
+  const { isGuest, userId, userRole } = useAuth();
+  const isFan = isFanUserRole(userRole);
   const { product_id } = useLocalSearchParams();
+  const productId = Array.isArray(product_id) ? product_id[0] : product_id;
+  const queryClient = useQueryClient();
 
-  const [product, setProduct] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
   const [selectedVariant, setSelectedVariant] = useState<any>(null);
   const [statusUpdating, setStatusUpdating] = useState(false);
   const [alert, setAlert] = useState<{ type: AlertType; title: string; message: string } | null>(null);
   const [showReportModal, setShowReportModal] = useState(false);
+  const productDetailsQuery = useMarketplaceProductDetailsQuery<any>(productId);
+  const product = productDetailsQuery.data?.data || null;
+  const loading = productDetailsQuery.isLoading;
 
   const invokeMarketplace = useCallback(async (body: Record<string, unknown>) => {
     const { data, error } = await supabase.functions.invoke("manage-marketplace", { body });
@@ -59,24 +66,21 @@ export default function ProductDetailsScreen() {
     return data;
   }, []);
 
-  const fetchProduct = useCallback(async () => {
-    if (!product_id) return;
-    try {
-      const data = await invokeMarketplace({ action: "get_product_details", product_id });
-      if (data?.data) {
-        setProduct(data.data);
-        if (data.data.variants?.length > 0) {
-          setSelectedVariant(data.data.variants[0]);
-        }
-      }
-    } catch (e: any) {
-      console.warn("ProductDetails fetch failed", e);
-    } finally {
-      setLoading(false);
+  useEffect(() => {
+    const variants = product?.variants;
+    if (!Array.isArray(variants) || variants.length === 0) {
+      setSelectedVariant(null);
+      return;
     }
-  }, [invokeMarketplace, product_id]);
 
-  useEffect(() => { fetchProduct(); }, [fetchProduct]);
+    setSelectedVariant((currentVariant: any) => {
+      if (currentVariant?.id && variants.some((variant: any) => variant?.id === currentVariant.id)) {
+        return currentVariant;
+      }
+
+      return variants[0];
+    });
+  }, [product]);
 
   const handleMessageSeller = async () => {
     if (product?.status === "sold_out") {
@@ -110,6 +114,7 @@ export default function ProductDetailsScreen() {
 
   const handleSellerStatus = async (action: "mark_product_sold" | "relist_product" | "publish_product") => {
     if (!product?.id) return;
+    if (statusUpdating) return;
 
     setStatusUpdating(true);
     try {
@@ -125,7 +130,8 @@ export default function ProductDetailsScreen() {
               ? "The listing is live again."
               : "The listing is now live.",
         });
-        fetchProduct();
+        void queryClient.invalidateQueries({ queryKey: ["marketplace"] });
+        void productDetailsQuery.refetch();
         return;
       }
 
@@ -276,7 +282,7 @@ export default function ProductDetailsScreen() {
           </View>
           <View style={styles.priceActionRow}>
             <Text style={[styles.price, { color: colors.primary, flex: 1 }]}>{formatPrice(displayPrice)}</Text>
-            {!isSeller && (
+            {!isSeller && !isFan && (
               <TouchableOpacity activeOpacity={1}
                 style={[
                   styles.inlineMessageBtn,
@@ -304,6 +310,8 @@ export default function ProductDetailsScreen() {
                   : "Once the item is gone, mark it sold so buyers stop messaging you about it."
               : isSold
                 ? "This listing has already been marked as sold."
+                : isFan
+                  ? "Review the listing details before arranging your purchase."
                 : "Questions, offers, and delivery details happen in chat."}
           </Text>
         </View>
@@ -314,7 +322,7 @@ export default function ProductDetailsScreen() {
             <Text style={[styles.sectionTitle, { color: colors.text }]}>Options</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false}>
               {variants.map((v: any) => (
-                <TouchableOpacity activeOpacity={1}
+                <TouchableOpacity activeOpacity={statusUpdating ? 1 : 0.78}
                   key={v.id}
                   style={[
                     styles.variantPill,
@@ -381,7 +389,7 @@ export default function ProductDetailsScreen() {
               </TouchableOpacity>
 
               {product.status === "active" && (
-                <TouchableOpacity activeOpacity={1}
+                <TouchableOpacity activeOpacity={statusUpdating ? 1 : 0.78}
                   style={[styles.primarySellerBtn, { backgroundColor: "#F97316", opacity: statusUpdating ? 0.65 : 1 }]}
                   disabled={statusUpdating}
                   onPress={() => handleSellerStatus("mark_product_sold")}
@@ -392,7 +400,7 @@ export default function ProductDetailsScreen() {
               )}
 
               {product.status === "sold_out" && (
-                <TouchableOpacity activeOpacity={1}
+                <TouchableOpacity activeOpacity={statusUpdating ? 1 : 0.78}
                   style={[styles.primarySellerBtn, { backgroundColor: colors.primary, opacity: statusUpdating ? 0.65 : 1 }]}
                   disabled={statusUpdating}
                   onPress={() => handleSellerStatus("relist_product")}

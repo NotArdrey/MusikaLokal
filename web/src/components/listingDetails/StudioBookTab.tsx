@@ -16,6 +16,7 @@ import {
   getRecordingRequiredHours,
   resolveRecordingRule,
 } from "../../utils/recordingRule";
+import { formatDashedNumericDate } from "../../utils/friendlyDateTime";
 
 const debugLog = (...args: unknown[]) => {
   if (__DEV__) {
@@ -354,9 +355,7 @@ const StudioBookTab = ({
     if (promo?.is_permanent) return "Always active";
     if (!promo?.start_date || !promo?.end_date) return "Limited-time promo";
 
-    return `Valid ${new Date(`${promo.start_date}T00:00:00`).toLocaleDateString()} - ${new Date(
-      `${promo.end_date}T00:00:00`,
-    ).toLocaleDateString()}`;
+    return `Valid ${formatDashedNumericDate(promo.start_date)} - ${formatDashedNumericDate(promo.end_date)}`;
   };
 
   const getLeadTimeViolationMessage = (
@@ -1103,11 +1102,11 @@ const StudioBookTab = ({
                 borderColor: !selectedSlot || !endTime ? colors.border : colors.primary,
                 backgroundColor: "transparent",
                 marginBottom: 16,
-                opacity: !selectedSlot || !endTime || isCheckingAvailability ? 0.5 : 1,
+                opacity: !selectedSlot || !endTime || isCheckingAvailability ? 0.6 : 1,
               },
             ]}
             disabled={!selectedSlot || !endTime || isCheckingAvailability}
-            activeOpacity={1}
+            activeOpacity={!selectedSlot || !endTime || isCheckingAvailability ? 1 : 0.78}
             onPress={async () => {
               if (date && endTime) {
                 setIsCheckingAvailability(true);
@@ -1311,7 +1310,7 @@ const StudioBookTab = ({
                       showAlert(
                         "success",
                         "Recording Session Updated",
-                        `Added time slot for ${new Date(`${bookingDate}T00:00:00`).toLocaleDateString()}. Total selected time: ${formatRecordingHours(totalHours)}h (minimum required: ${formatRecordingHours(requiredTotalHours)}h based on ${recordingRuleShort}).`,
+                        `Added time slot for ${formatDashedNumericDate(bookingDate)}. Total selected time: ${formatRecordingHours(totalHours)}h (minimum required: ${formatRecordingHours(requiredTotalHours)}h based on ${recordingRuleShort}).`,
                       );
                     } else {
                       const existingPrice = existingBooking.pricing?.final_price || 0;
@@ -1331,7 +1330,7 @@ const StudioBookTab = ({
                       showAlert(
                         "success",
                         "Session Added",
-                        `Added time slot to your booking for ${new Date(`${bookingDate}T00:00:00`).toLocaleDateString()}. You now have ${mergedSlots.length} slot(s) for this day.`,
+                        `Added time slot to your booking for ${formatDashedNumericDate(bookingDate)}. You now have ${mergedSlots.length} slot(s) for this day.`,
                       );
                     }
                   } else {
@@ -1497,12 +1496,12 @@ const StudioBookTab = ({
 
       {!(hasExistingStudioBooking && existingStudioBookingStatus === "unpaid") && (
         <>
-          <TouchableOpacity activeOpacity={1}
+          <TouchableOpacity activeOpacity={bookings.length === 0 || loading ? 1 : 0.78}
             style={[
               styles.primaryBtn,
               {
                 backgroundColor: bookings.length > 0 ? colors.primary : colors.border,
-                opacity: loading ? 0.6 : 1,
+                opacity: bookings.length === 0 || loading ? 0.6 : 1,
               },
             ]}
             disabled={bookings.length === 0 || loading}

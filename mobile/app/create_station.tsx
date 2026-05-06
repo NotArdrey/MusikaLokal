@@ -125,6 +125,7 @@ export default function CreateStationScreen() {
   };
 
   const isSaveReady = canManageStations && name.trim().length > 0;
+  const isSaveDisabled = saving || !isSaveReady;
 
   if (loading) {
     return (
@@ -210,10 +211,10 @@ export default function CreateStationScreen() {
         />
         <Text style={[styles.helperText, { color: colors.textSecondary }]}>How often the live lineup changes. Allowed range: 5 to 120 minutes.</Text>
 
-        <TouchableOpacity activeOpacity={1}
-          style={[styles.saveBtn, { backgroundColor: isSaveReady ? colors.primary : colors.border, opacity: saving ? 0.6 : 1 }]}
+        <TouchableOpacity activeOpacity={isSaveDisabled ? 1 : 0.78}
+          style={[styles.saveBtn, { backgroundColor: isSaveReady ? colors.primary : colors.border, opacity: isSaveDisabled ? 0.6 : 1 }]}
           onPress={handleSave}
-          disabled={saving || !isSaveReady}
+          disabled={isSaveDisabled}
         >
           {saving ? (
             <ActivityIndicator color="#fff" />

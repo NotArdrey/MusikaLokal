@@ -240,14 +240,12 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   }, []);
 
   useEffect(() => {
-    AsyncStorage.getItem("auth_guest_mode")
-      .then((value) => {
-        if (value === "1") {
-          setIsGuest(true);
-        }
+    AsyncStorage.removeItem("auth_guest_mode")
+      .then(() => {
+        setIsGuest(false);
       })
       .catch((e) => {
-        console.log("Failed to load guest mode:", e);
+        console.log("Failed to clear guest mode:", e);
       });
 
     // Helper to filter/block unverified sessions (prevents auto-login during signup)

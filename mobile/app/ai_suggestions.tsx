@@ -4,8 +4,11 @@ import { useLocalSearchParams } from 'expo-router';
 import React, { useCallback, useEffect, useState } from 'react';
 import {
     ActivityIndicator,
+    Dimensions,
     Image,
     InteractionManager,
+    KeyboardAvoidingView,
+    Platform,
     ScrollView,
     StyleSheet,
     Text,
@@ -37,6 +40,9 @@ import {
 } from '../src/types/instruments';
 
 const OFFLINE_PROFILE_CACHE_KEY = 'offline_instrument_profile_v1';
+const { height: SCREEN_HEIGHT } = Dimensions.get('window');
+const MAX_CHAT_PANEL_HEIGHT_RATIO = 0.78;
+const MAX_CHAT_MESSAGE_HEIGHT_RATIO = 0.42;
 
 interface CachedOfflineProfile {
     full_name: string;
@@ -52,11 +58,30 @@ interface FollowupChatMessage {
 }
 
 const FOLLOWUP_SCOPE_NOTICE = 'I can only help with your suggested instruments and related music guidance.';
+const FOLLOWUP_ERROR_NOTICE = 'AI chat could not respond right now. Please try again.';
+const REMOVED_PROVIDER_PATTERN = /qwen\/qwen3-32b/gi;
+
+function cleanAiText(text: string) {
+    return text
+        .replace(/<think>[\s\S]*?<\/think>/gi, '')
+        .replace(/<think>[\s\S]*/gi, '')
+        .replace(/<\/think>/gi, '')
+        .split('\n')
+        .filter((line) => !/^\s*(system|developer|assistant|user|analysis|planning|plan|prompt|instruction|hidden reasoning|chain[- ]of[- ]thought)\s*[:\-]/i.test(line))
+        .join('\n')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+function cleanProviderCopy(text: string | null | undefined) {
+    if (!text) return text ?? null;
+    return text.replace(REMOVED_PROVIDER_PATTERN, 'Groq AI');
+}
 
 export default function AiSuggestionsScreen() {
     const { colors, isDark } = useTheme();
     const { isGuest } = useAuth();
-    const { bottomBarClearance, contentBottomPadding } = useBottomBarClearance(24);
+    const { contentBottomPadding } = useBottomBarClearance(24);
     const params = useLocalSearchParams<{ refresh?: string }>();
     const refreshKey = Array.isArray(params.refresh) ? params.refresh[0] : params.refresh;
 
@@ -79,9 +104,14 @@ export default function AiSuggestionsScreen() {
     const [followupMessages, setFollowupMessages] = useState<FollowupChatMessage[]>([]);
     const [followupLoading, setFollowupLoading] = useState(false);
     const suggestionRequestIdRef = React.useRef(0);
+    const resultsScrollRef = React.useRef<ScrollView | null>(null);
+    const followupSectionYRef = React.useRef(0);
+    const followupMessagesScrollRef = React.useRef<ScrollView | null>(null);
     const groqInfo = getGroqModelInfo();
     const groqModelLabel = groqInfo.modelLabel;
     const groqConfigured = groqInfo.configured;
+    const isSuggestionFormReady = selectedGenres.length > 0 && Boolean(experienceLevel) && Boolean(purpose);
+    const isSuggestionSubmitDisabled = loading || !isSuggestionFormReady;
 
     // User profile data
     const [userRoles, setUserRoles] = useState<string[]>([]);
@@ -112,15 +142,21 @@ export default function AiSuggestionsScreen() {
         });
     }, []);
 
-    const toggleFollowupChat = useCallback(() => {
-        setIsFollowupChatOpen((prev) => {
-            const next = !prev;
-            if (next) {
-                ensureFollowupWelcome();
-            }
-            return next;
-        });
-    }, [ensureFollowupWelcome]);
+    const scrollToFollowupChat = useCallback(() => {
+        setTimeout(() => {
+            resultsScrollRef.current?.scrollTo({
+                y: Math.max(0, followupSectionYRef.current - 12),
+                animated: true,
+            });
+        }, 100);
+    }, []);
+
+    useEffect(() => {
+        if (step === 'results' && suggestions.length > 0) {
+            setIsFollowupChatOpen(true);
+            ensureFollowupWelcome();
+        }
+    }, [ensureFollowupWelcome, step, suggestions.length]);
 
     const sendFollowupQuestion = useCallback(
         async (presetQuestion?: string) => {
@@ -129,6 +165,10 @@ export default function AiSuggestionsScreen() {
             if (!question || followupLoading || suggestions.length === 0) {
                 return;
             }
+
+            setIsFollowupChatOpen(true);
+            ensureFollowupWelcome();
+            scrollToFollowupChat();
 
             const conversation = [
                 ...followupMessages
@@ -170,7 +210,7 @@ export default function AiSuggestionsScreen() {
                     {
                         id: createFollowupMessageId(),
                         role: 'assistant',
-                        text: result.answer,
+                        text: cleanAiText(result.answer) || FOLLOWUP_SCOPE_NOTICE,
                         blocked: result.blocked,
                     },
                 ]);
@@ -180,7 +220,7 @@ export default function AiSuggestionsScreen() {
                     {
                         id: createFollowupMessageId(),
                         role: 'assistant',
-                        text: FOLLOWUP_SCOPE_NOTICE,
+                        text: FOLLOWUP_ERROR_NOTICE,
                         blocked: true,
                     },
                 ]);
@@ -190,10 +230,12 @@ export default function AiSuggestionsScreen() {
         },
         [
             experienceLevel,
+            ensureFollowupWelcome,
             followupLoading,
             followupMessages,
             followupQuestion,
             purpose,
+            scrollToFollowupChat,
             selectedGenres,
             suggestions,
             userRoles,
@@ -352,6 +394,10 @@ export default function AiSuggestionsScreen() {
 
     // Fetch Groq-backed suggestions with local ranking fallback.
     const fetchSuggestions = async () => {
+        if (isSuggestionSubmitDisabled) {
+            return;
+        }
+
         const requestId = `ai-suggest-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
         const activeRequestId = suggestionRequestIdRef.current + 1;
         suggestionRequestIdRef.current = activeRequestId;
@@ -884,12 +930,12 @@ export default function AiSuggestionsScreen() {
             {/* Get Suggestions Button */}
             <TouchableOpacity activeOpacity={1}
                 onPress={fetchSuggestions}
-                disabled={loading || selectedGenres.length === 0}
+                disabled={isSuggestionSubmitDisabled}
                 style={[
                     styles.primaryButton,
                     {
-                        backgroundColor: selectedGenres.length > 0 ? colors.primary : colors.border,
-                        opacity: loading ? 0.7 : 1,
+                        backgroundColor: isSuggestionFormReady ? colors.primary : colors.border,
+                        opacity: isSuggestionSubmitDisabled ? 0.6 : 1,
                     }
                 ]}
             >
@@ -897,15 +943,15 @@ export default function AiSuggestionsScreen() {
                     <ActivityIndicator color="#FFFFFF" />
                 ) : (
                     <>
-                        <Ionicons name="sparkles" size={20} color="#FFFFFF" />
-                        <Text style={styles.primaryButtonText}>
+                        <Ionicons name="sparkles" size={20} color={isSuggestionFormReady ? "#FFFFFF" : colors.textSecondary} />
+                        <Text style={[styles.primaryButtonText, { color: isSuggestionFormReady ? "#FFFFFF" : colors.textSecondary }]}>
                             Get AI Suggestions
                         </Text>
                     </>
                 )}
             </TouchableOpacity>
 
-            {selectedGenres.length === 0 && (
+            {!isSuggestionFormReady && (
                 <Text style={[styles.helperText, { color: colors.textSecondary, textAlign: 'center' }]}>
                     Select at least one genre to get suggestions
                 </Text>
@@ -916,12 +962,17 @@ export default function AiSuggestionsScreen() {
     // Render results step
     const renderResultsStep = () => {
         const badgeColor = isAIPowered ? '#8B5CF6' : '#2563EB';
-        const providerLabel = aiProvider || (isAIPowered ? groqModelLabel : 'Local Ranker');
+        const providerLabel = cleanProviderCopy(aiProvider || (isAIPowered ? groqModelLabel : 'Local Ranker')) || 'Groq AI';
+        const visibleSuggestionMessage = cleanProviderCopy(suggestionMessage);
 
         return (
             <ScrollView
+                ref={resultsScrollRef}
                 style={styles.scrollView}
-                contentContainerStyle={[styles.scrollContent, { paddingBottom: contentBottomPadding }]}
+                contentContainerStyle={[
+                    styles.scrollContent,
+                    { paddingBottom: contentBottomPadding + 96 },
+                ]}
                 showsVerticalScrollIndicator={false}
             >
             {/* Back Button */}
@@ -948,6 +999,13 @@ export default function AiSuggestionsScreen() {
                 <Text style={[styles.aiHeaderSubtitle, { color: colors.textSecondary }]}>
                     Personalized from your profile and preferences
                 </Text>
+
+                <View style={[styles.aiStatusPill, { backgroundColor: badgeColor + '14', borderColor: badgeColor + '44' }]}>
+                    <Ionicons name={isAIPowered ? 'sparkles' : 'compass-outline'} size={13} color={badgeColor} />
+                    <Text style={[styles.aiStatusText, { color: badgeColor }]} numberOfLines={1}>
+                        {loading ? 'AI is refreshing' : providerLabel}
+                    </Text>
+                </View>
 
                 {/* User Role Badge */}
                 {userRoles.length > 0 && (
@@ -996,10 +1054,10 @@ export default function AiSuggestionsScreen() {
                     : 'Curated just for you based on your musical profile'}
             </Text>
             <Text style={[styles.resultsSubtitle, { color: colors.textSecondary, marginTop: -10 }]}>
-                {loading ? `${providerLabel} refresh in progress` : providerLabel}
+                {loading ? 'AI refresh in progress' : providerLabel}
             </Text>
 
-            {suggestionMessage && (
+            {visibleSuggestionMessage && (
                 <View
                     style={[
                         styles.fallbackInfoContainer,
@@ -1010,9 +1068,11 @@ export default function AiSuggestionsScreen() {
                     ]}
                 >
                     <Ionicons name={loading ? 'time-outline' : 'information-circle-outline'} size={16} color={badgeColor} />
-                    <Text style={[styles.fallbackInfoText, { color: badgeColor }]}>{suggestionMessage}</Text>
+                    <Text style={[styles.fallbackInfoText, { color: badgeColor }]}>{visibleSuggestionMessage}</Text>
                 </View>
             )}
+
+            {renderFollowupChatSection()}
 
             {/* Suggestion Cards */}
             {suggestions.map((suggestion, index) => renderSuggestionCard(suggestion, index))}
@@ -1021,7 +1081,7 @@ export default function AiSuggestionsScreen() {
             <TouchableOpacity activeOpacity={1}
                 onPress={fetchSuggestions}
                 disabled={loading}
-                style={[styles.secondaryButton, { borderColor: badgeColor, backgroundColor: badgeColor + '10' }]}
+                style={[styles.secondaryButton, { borderColor: badgeColor, backgroundColor: badgeColor + '10', opacity: loading ? 0.6 : 1 }]}
             >
                 {loading ? (
                     <ActivityIndicator color={badgeColor} />
@@ -1038,43 +1098,66 @@ export default function AiSuggestionsScreen() {
         );
     };
 
-    const renderFloatingFollowupChat = () => {
+    const renderFollowupChatSection = () => {
         if (step !== 'results' || suggestions.length === 0) {
             return null;
         }
 
         const accentColor = isAIPowered ? '#8B5CF6' : colors.primary;
-        const followupBottomOffset = bottomBarClearance + 12;
+        const normalizedQuestion = normalizeVisibleInput(followupQuestion);
+        const panelMaxHeight = Math.round(SCREEN_HEIGHT * MAX_CHAT_PANEL_HEIGHT_RATIO);
+        const messagesMaxHeight = Math.max(160, Math.round(SCREEN_HEIGHT * MAX_CHAT_MESSAGE_HEIGHT_RATIO));
 
         return (
-            <View pointerEvents="box-none" style={[styles.followupLayer, { bottom: followupBottomOffset }]}> 
-                {isFollowupChatOpen && (
-                    <View
-                        style={[
-                            styles.followupPanel,
-                            {
-                                backgroundColor: isDark ? '#111827' : '#FFFFFF',
-                                borderColor: accentColor,
-                            },
-                        ]}
+            <View
+                onLayout={(event) => {
+                    followupSectionYRef.current = event.nativeEvent.layout.y;
+                }}
+                style={[
+                    styles.followupPanel,
+                    styles.followupPanelInline,
+                    {
+                        backgroundColor: isDark ? '#111827' : '#FFFFFF',
+                        borderColor: accentColor,
+                        maxHeight: panelMaxHeight,
+                    },
+                ]}
+            >
+                <View style={styles.followupHeader}>
+                    <View style={[styles.followupHeaderIcon, { backgroundColor: accentColor + '22' }]}>
+                        <Ionicons name="chatbubble-ellipses" size={16} color={accentColor} />
+                    </View>
+                    <View style={styles.followupHeaderCopy}>
+                        <Text style={[styles.followupTitle, { color: colors.text }]}>Instrument AI Chat</Text>
+                        <Text style={[styles.followupSubtitle, { color: colors.textSecondary }]}>Only your suggested instruments</Text>
+                    </View>
+                    <TouchableOpacity
+                        activeOpacity={1}
+                        onPress={() => {
+                            setIsFollowupChatOpen((prev) => {
+                                const next = !prev;
+                                if (next) {
+                                    ensureFollowupWelcome();
+                                    scrollToFollowupChat();
+                                }
+                                return next;
+                            });
+                        }}
                     >
-                        <View style={styles.followupHeader}>
-                            <View style={[styles.followupHeaderIcon, { backgroundColor: accentColor + '22' }]}>
-                                <Ionicons name="chatbubble-ellipses" size={16} color={accentColor} />
-                            </View>
-                            <View style={styles.followupHeaderCopy}>
-                                <Text style={[styles.followupTitle, { color: colors.text }]}>Instrument AI Chat</Text>
-                                <Text style={[styles.followupSubtitle, { color: colors.textSecondary }]}>Only your suggested instruments</Text>
-                            </View>
-                            <TouchableOpacity activeOpacity={1} onPress={() => setIsFollowupChatOpen(false)}>
-                                <Ionicons name="close" size={18} color={colors.textSecondary} />
-                            </TouchableOpacity>
-                        </View>
+                        <Ionicons name={isFollowupChatOpen ? 'chevron-up' : 'chevron-down'} size={18} color={colors.textSecondary} />
+                    </TouchableOpacity>
+                </View>
 
+                {isFollowupChatOpen ? (
+                    <>
                         <ScrollView
-                            style={styles.followupMessages}
+                            ref={followupMessagesScrollRef}
+                            style={[styles.followupMessages, { maxHeight: messagesMaxHeight }]}
                             contentContainerStyle={styles.followupMessagesContent}
                             showsVerticalScrollIndicator={false}
+                            onContentSizeChange={() => {
+                                followupMessagesScrollRef.current?.scrollToEnd({ animated: true });
+                            }}
                         >
                             {followupMessages.map((message) => {
                                 const isUser = message.role === 'user';
@@ -1098,15 +1181,16 @@ export default function AiSuggestionsScreen() {
                                         ]}
                                     >
                                         <Text style={[styles.followupBubbleText, { color: bubbleTextColor }]}>
-                                            {message.text}
+                                            {isUser ? message.text : cleanAiText(message.text)}
                                         </Text>
                                     </View>
                                 );
                             })}
 
                             {followupLoading && (
-                                <View style={[styles.followupBubble, { alignSelf: 'flex-start', backgroundColor: isDark ? '#1F2937' : '#F3F4F6' }]}>
+                                <View style={[styles.followupBubble, styles.followupTypingBubble, { alignSelf: 'flex-start', backgroundColor: isDark ? '#1F2937' : '#F3F4F6' }]}>
                                     <ActivityIndicator size="small" color={accentColor} />
+                                    <Text style={[styles.followupTypingText, { color: colors.textSecondary }]}>Typing...</Text>
                                 </View>
                             )}
                         </ScrollView>
@@ -1115,6 +1199,7 @@ export default function AiSuggestionsScreen() {
                             horizontal
                             showsHorizontalScrollIndicator={false}
                             contentContainerStyle={styles.followupQuickRow}
+                            style={styles.followupQuickScroll}
                         >
                             {suggestions.slice(0, 3).map((suggestion) => (
                                 <TouchableOpacity
@@ -1151,7 +1236,7 @@ export default function AiSuggestionsScreen() {
                                 value={followupQuestion}
                                 onChangeText={setFollowupQuestion}
                                 style={[styles.followupInput, { color: colors.text }]}
-                                placeholder="Ask about these suggested instruments"
+                                placeholder="Ask about fit, budget, setup, or practice"
                                 placeholderTextColor={colors.textSecondary}
                                 multiline
                                 maxLength={220}
@@ -1160,41 +1245,47 @@ export default function AiSuggestionsScreen() {
                             <TouchableOpacity
                                 activeOpacity={1}
                                 onPress={() => sendFollowupQuestion()}
-                                disabled={followupLoading || !normalizeVisibleInput(followupQuestion)}
+                                disabled={followupLoading || !normalizedQuestion}
                                 style={[
                                     styles.followupSendButton,
                                     {
                                         backgroundColor:
-                                            followupLoading || !normalizeVisibleInput(followupQuestion)
+                                            followupLoading || !normalizedQuestion
                                                 ? colors.border
                                                 : accentColor,
+                                        opacity: followupLoading || !normalizedQuestion ? 0.6 : 1,
                                     },
                                 ]}
                             >
-                                <Ionicons name="send" size={16} color={normalizeVisibleInput(followupQuestion) ? "#FFFFFF" : colors.textSecondary} />
+                                <Ionicons name="send" size={16} color={normalizedQuestion ? "#FFFFFF" : colors.textSecondary} />
                             </TouchableOpacity>
                         </View>
-                    </View>
+                    </>
+                ) : (
+                    <TouchableOpacity
+                        activeOpacity={1}
+                        onPress={() => {
+                            setIsFollowupChatOpen(true);
+                            ensureFollowupWelcome();
+                            scrollToFollowupChat();
+                        }}
+                        style={[styles.followupFab, styles.followupInlineButton, { backgroundColor: accentColor }]}
+                    >
+                        <Ionicons name="chatbubble-ellipses" size={16} color="#FFFFFF" />
+                        <Text style={styles.followupFabText}>Ask AI Chat</Text>
+                    </TouchableOpacity>
                 )}
-
-                <TouchableOpacity
-                    activeOpacity={1}
-                    onPress={toggleFollowupChat}
-                    style={[styles.followupFab, { backgroundColor: accentColor }]}
-                >
-                    <Ionicons
-                        name={isFollowupChatOpen ? 'close-circle' : 'chatbubble-ellipses'}
-                        size={16}
-                        color="#FFFFFF"
-                    />
-                    <Text style={styles.followupFabText}>{isFollowupChatOpen ? 'Hide AI Chat' : 'Ask AI Chat'}</Text>
-                </TouchableOpacity>
             </View>
         );
     };
 
     return (
         <View style={[styles.container, { backgroundColor: colors.background }]}>
+            <KeyboardAvoidingView
+                style={styles.keyboardFrame}
+                behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+                keyboardVerticalOffset={Platform.OS === 'ios' ? 88 : 0}
+            >
             <Header title="AI Suggestions" />
 
             {isGuest ? (
@@ -1215,7 +1306,7 @@ export default function AiSuggestionsScreen() {
                 </>
             )}
 
-            {renderFloatingFollowupChat()}
+            </KeyboardAvoidingView>
 
             <Navbar />
         </View>
@@ -1224,6 +1315,9 @@ export default function AiSuggestionsScreen() {
 
 const styles = StyleSheet.create({
     container: {
+        flex: 1,
+    },
+    keyboardFrame: {
         flex: 1,
     },
     scrollView: {
@@ -1492,6 +1586,26 @@ const styles = StyleSheet.create({
         fontFamily: 'Poppins_400Regular',
         marginBottom: 12,
     },
+    aiStatusPill: {
+        minHeight: 30,
+        maxWidth: '100%',
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 6,
+        paddingHorizontal: 12,
+        borderRadius: 15,
+        borderWidth: 1,
+        marginBottom: 12,
+    },
+    aiStatusText: {
+        flexShrink: 1,
+        fontSize: 12,
+        lineHeight: 16,
+        fontFamily: 'Poppins_600SemiBold',
+        includeFontPadding: false,
+        textAlignVertical: 'center',
+    },
     llmConfigRow: {
         flexDirection: 'row',
         alignItems: 'center',
@@ -1542,6 +1656,7 @@ const styles = StyleSheet.create({
     resultsCountRow: {
         flexDirection: 'row',
         alignItems: 'center',
+        flexWrap: 'wrap',
         gap: 8,
         marginBottom: 4,
     },
@@ -1559,6 +1674,7 @@ const styles = StyleSheet.create({
         fontFamily: 'Poppins_700Bold',
     },
     resultsHeader: {
+        flexShrink: 1,
         fontSize: 18,
         fontFamily: 'Poppins_700Bold',
         marginBottom: 4,
@@ -1593,10 +1709,12 @@ const styles = StyleSheet.create({
     },
     cardHeader: {
         flexDirection: 'row',
+        alignItems: 'flex-start',
         marginBottom: 12,
     },
     headerInfo: {
         flex: 1,
+        minWidth: 0,
     },
     rankBadge: {
         position: 'absolute',
@@ -1635,7 +1753,9 @@ const styles = StyleSheet.create({
         marginBottom: 2,
     },
     instrumentName: {
+        flexShrink: 1,
         fontSize: 16,
+        lineHeight: 20,
         fontFamily: 'Poppins_700Bold',
     },
     headline: {
@@ -1675,6 +1795,7 @@ const styles = StyleSheet.create({
         marginBottom: 10,
     },
     perfectForText: {
+        flexShrink: 1,
         fontSize: 11,
         fontFamily: 'Poppins_600SemiBold',
         textTransform: 'uppercase',
@@ -1763,12 +1884,16 @@ const styles = StyleSheet.create({
     },
     errorContainer: {
         flexDirection: 'row',
-        alignItems: 'center',
+        alignItems: 'flex-start',
         gap: 8,
-        padding: 12,
+        paddingHorizontal: 14,
+        paddingVertical: 12,
         marginHorizontal: 16,
         marginTop: 8,
+        marginBottom: 8,
         borderRadius: 8,
+        borderWidth: 1,
+        borderColor: '#FCA5A5',
     },
     errorText: {
         flex: 1,
@@ -1788,14 +1913,22 @@ const styles = StyleSheet.create({
         width: '100%',
         maxWidth: 420,
         borderWidth: 1.5,
-        borderRadius: 16,
-        padding: 12,
+        borderRadius: 20,
+        padding: 14,
         marginBottom: 10,
         shadowColor: '#111827',
         shadowOffset: { width: 0, height: 8 },
         shadowOpacity: 0.18,
         shadowRadius: 14,
         elevation: 8,
+    },
+    followupPanelInline: {
+        alignSelf: 'stretch',
+        maxWidth: '100%',
+        marginTop: 2,
+        marginBottom: 16,
+        shadowOpacity: 0.08,
+        elevation: 2,
     },
     followupHeader: {
         flexDirection: 'row',
@@ -1822,7 +1955,7 @@ const styles = StyleSheet.create({
         fontFamily: 'Poppins_400Regular',
     },
     followupMessages: {
-        maxHeight: 190,
+        maxHeight: 240,
     },
     followupMessagesContent: {
         gap: 8,
@@ -1839,10 +1972,23 @@ const styles = StyleSheet.create({
         lineHeight: 18,
         fontFamily: 'Poppins_400Regular',
     },
+    followupTypingBubble: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+    },
+    followupTypingText: {
+        fontSize: 12,
+        lineHeight: 16,
+        fontFamily: 'Poppins_500Medium',
+    },
+    followupQuickScroll: {
+        marginHorizontal: -14,
+    },
     followupQuickRow: {
         gap: 8,
         paddingVertical: 8,
-        paddingRight: 4,
+        paddingHorizontal: 14,
     },
     followupQuickChip: {
         borderRadius: 16,
@@ -1856,10 +2002,10 @@ const styles = StyleSheet.create({
     },
     followupComposer: {
         flexDirection: 'row',
-        alignItems: 'flex-end',
+        alignItems: 'center',
         gap: 8,
         borderWidth: 1,
-        borderRadius: 12,
+        borderRadius: 16,
         paddingHorizontal: 8,
         paddingVertical: 8,
     },
@@ -1872,9 +2018,9 @@ const styles = StyleSheet.create({
         paddingVertical: 0,
     },
     followupSendButton: {
-        width: 32,
-        height: 32,
-        borderRadius: 16,
+        width: 36,
+        height: 36,
+        borderRadius: 18,
         alignItems: 'center',
         justifyContent: 'center',
     },
@@ -1900,6 +2046,11 @@ const styles = StyleSheet.create({
         fontFamily: 'Poppins_600SemiBold',
         includeFontPadding: false,
         textAlignVertical: 'center',
+    },
+    followupInlineButton: {
+        alignSelf: 'flex-start',
+        shadowOpacity: 0,
+        elevation: 0,
     },
 });
 

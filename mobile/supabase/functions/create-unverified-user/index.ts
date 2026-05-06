@@ -1,10 +1,17 @@
 // @ts-nocheck
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { sendEmailWithGmail } from '../_shared/gmailEmail.ts'
 
 const corsHeaders = {
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+}
+
+const allowedSignupRoles = new Set(['fan', 'musician'])
+
+function getDefaultDisplayNameForRole(role: unknown) {
+    return String(role || '').trim().toLowerCase() === 'fan' ? 'Fan' : 'Musician'
 }
 
 function escapeHtml(value: unknown) {
@@ -102,6 +109,24 @@ async function sendEmailConfirmationLink(
 <p><a href="${safeLink}">${safeLink}</a></p>
 <p>After confirming your email, return to MusikaLokal and log in.</p>`.trim()
 
+    const gmailDelivery = await sendEmailWithGmail({
+        to: email,
+        subject,
+        html,
+        recipientName: displayName || 'User',
+        source: 'create-unverified-user',
+    })
+
+    if (gmailDelivery.sent) {
+        return { sent: true, queued: false, provider: gmailDelivery.provider, supabaseAuthError }
+    }
+
+    const gmailError = gmailDelivery.error || 'Gmail sender is not configured'
+    console.error('email_confirmation_gmail_failed', {
+        provider: gmailDelivery.provider,
+        message: gmailError,
+    })
+
     const { error: queueError } = await supabaseAdmin.from('email_notifications').insert({
         recipient_email: email,
         recipient_name: displayName || 'User',
@@ -114,10 +139,10 @@ async function sendEmailConfirmationLink(
 
     if (queueError) {
         console.error('email_confirmation_queue_failed', { message: queueError.message })
-        return { sent: false, queued: false, provider: 'email_notifications', error: queueError.message, supabaseAuthError }
+        return { sent: false, queued: false, provider: 'email_notifications', error: `${gmailError}; ${queueError.message}`, supabaseAuthError }
     }
 
-    return { sent: false, queued: true, provider: 'email_notifications', supabaseAuthError }
+    return { sent: false, queued: true, provider: 'email_notifications', error: `${gmailError}; queued in email_notifications`, supabaseAuthError }
 }
 
 serve(async (req) => {
@@ -175,7 +200,7 @@ serve(async (req) => {
             const emailDelivery = await sendEmailConfirmationLink(
                 supabaseAdmin,
                 normalizedEmail,
-                existingUser.user_metadata?.full_name || existingUser.user_metadata?.name || normalizedEmail.split('@')[0] || 'Musician',
+                existingUser.user_metadata?.full_name || existingUser.user_metadata?.name || normalizedEmail.split('@')[0] || getDefaultDisplayNameForRole(existingUser.user_metadata?.role),
                 getConfirmationRedirect(redirectTo),
                 String(existingUser.user_metadata?.verification_status || 'APPROVED').toUpperCase(),
             )
@@ -195,10 +220,17 @@ serve(async (req) => {
 
         const normalizedEmail = String(email).trim().toLowerCase()
         const normalizedRole = String(role || 'musician').trim().toLowerCase()
+        if (!allowedSignupRoles.has(normalizedRole)) {
+            return new Response(JSON.stringify({ error: 'Invalid signup role.' }), {
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                status: 400,
+            })
+        }
+
         const normalizedVerificationStatus = String(verificationStatus || '').trim().toUpperCase()
         const approvedByDidit = Boolean(isVerified) || normalizedVerificationStatus === 'APPROVED'
         const pendingByDidit = normalizedVerificationStatus === 'PENDING_REVIEW'
-        const fallbackName = String(fullName || normalizedEmail.split('@')[0] || 'Musician').trim()
+        const fallbackName = String(fullName || normalizedEmail.split('@')[0] || getDefaultDisplayNameForRole(normalizedRole)).trim()
 
         let diditVerificationData: any = null
 

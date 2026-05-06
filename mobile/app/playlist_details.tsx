@@ -1110,8 +1110,8 @@ export default function PlaylistDetailsScreen() {
                 <Text style={{ color: colors.text, fontWeight: "600", fontSize: moderateScale(14) }}>Cancel</Text>
               </TouchableOpacity>
               <TouchableOpacity
-                activeOpacity={1}
-                style={[styles.modalBtn, { backgroundColor: isTrackFormReady ? colors.primary : colors.border, flex: 1 }]}
+                activeOpacity={addingTrack || !isTrackFormReady ? 1 : 0.78}
+                style={[styles.modalBtn, { backgroundColor: isTrackFormReady ? colors.primary : colors.border, flex: 1, opacity: addingTrack || !isTrackFormReady ? 0.6 : 1 }]}
                 onPress={handleSaveTrack}
                 disabled={addingTrack || !isTrackFormReady}
               >

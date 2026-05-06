@@ -1,6 +1,12 @@
 import { Ionicons } from "@expo/vector-icons";
+import {
+  BottomSheetBackdrop,
+  BottomSheetModal,
+  BottomSheetScrollView,
+  useBottomSheetSpringConfigs,
+} from "@gorhom/bottom-sheet";
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
     ActivityIndicator,
     BackHandler,
@@ -15,12 +21,14 @@ import {
 } from "react-native";
 import BottomModal from "../src/components/BottomModal";
 import CustomAlert, { AlertType } from "../src/components/CustomAlert";
+import GroupInviteSection from "../src/components/GroupInviteSection";
 import PlaylistSelectionSection from "../src/components/PlaylistSelectionSection";
 import Header from "../src/components/header";
 import ImageUploader from "../src/components/ImageUploader";
 import LocationPicker from "../src/components/LocationPicker";
 import Modal, { normalizeVisibleInput } from "../src/components/modal";
 import Navbar, { NAVBAR_CLEARANCE } from "../src/components/navbar";
+import TrackedBottomSheetModal from "../src/components/TrackedBottomSheetModal";
 import {
     isDuoGroupType,
     mapDbGroupTypeToUiGroupType,
@@ -33,12 +41,17 @@ import {
     getGroupTypeLabel,
     isGroupLeaderMember,
 } from "../src/utils/groupMembers";
+import { bottomSheetSpringConfig } from "../src/utils/motion";
 import {
   fetchGroupLinkedPlaylists,
   fetchUserOwnedPlaylists,
   syncGroupLinkedPlaylists,
 } from "../src/utils/groupPlaylists";
 import { buildNotificationRouteMeta } from "../src/utils/notificationNavigation";
+import {
+  GroupInviteTarget,
+  sendGroupMemberInvites,
+} from "../src/utils/groupMemberInvites";
 
 import { supabase } from "../lib/supabase";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -79,10 +92,53 @@ const GENRES = [
 const TITLE_MAX_LENGTH = 120;
 const DESCRIPTION_MAX_LENGTH = 1000;
 
+const formatSupabaseError = (error: any): string => {
+  const parts = [
+    error?.message,
+    error?.details ? `Details: ${error.details}` : null,
+    error?.hint ? `Hint: ${error.hint}` : null,
+    error?.code ? `Code: ${error.code}` : null,
+  ].filter(Boolean);
+
+  return parts.join("\n") || "Unknown error";
+};
+
+const logActionError = (
+  context: string,
+  error: any,
+  extra?: Record<string, unknown>,
+) => {
+  console.error(`[${context}]`, {
+    message: error?.message || String(error),
+    code: error?.code,
+    details: error?.details,
+    hint: error?.hint,
+    extra,
+  });
+};
+
+const getRosterMemberName = (member: any, index: number): string => {
+  const visibleName = String(member?.name || "").trim();
+  const roleName = String(member?.role || "").trim();
+  const instrumentName = String(member?.instrument || "").trim();
+
+  return visibleName || roleName || instrumentName || `Member ${index + 1}`;
+};
+
 export default function EditGroupScreen() {
   const { colors, isDark } = useTheme();
   const insets = useSafeAreaInsets();
+  const groupTypeSheetRef = useRef<BottomSheetModal>(null);
+  const groupTypeSheetSnapPoints = useMemo(() => ["78%"], []);
+  const groupTypeSheetAnimationConfigs = useBottomSheetSpringConfigs(bottomSheetSpringConfig);
   const { id } = useLocalSearchParams();
+  const returnTab = useLocalSearchParams<{
+    returnTab?: string | string[];
+  }>().returnTab;
+  const returnTabParam = Array.isArray(returnTab) ? returnTab[0] : returnTab;
+  const normalizedReturnTab = ["About", "Applications", "Review"].includes(returnTabParam || "")
+    ? returnTabParam || "About"
+    : "About";
   const [groupName, setGroupName] = useState("");
   const [selectedGenres, setSelectedGenres] = useState<string[]>([]);
   const [showAllGenres, setShowAllGenres] = useState(false);
@@ -129,6 +185,19 @@ export default function EditGroupScreen() {
     setAlertVisible(true);
   };
 
+  const handleReturnToTabs = useCallback(() => {
+    const groupId = Array.isArray(id) ? id[0] : id;
+    if (groupId) {
+      router.replace({
+        pathname: "/manage_group",
+        params: { id: groupId, tab: normalizedReturnTab },
+      });
+      return;
+    }
+
+    router.replace("/my_group");
+  }, [id, normalizedReturnTab]);
+
   const isMissingRelationError = (error: any, relationName: string) => {
     const message = String(error?.message || "").toLowerCase();
     return error?.code === "42P01" && message.includes(relationName.toLowerCase());
@@ -143,10 +212,10 @@ export default function EditGroupScreen() {
       "Your current edits won't be saved unless you tap Save Changes.",
       [
         { text: "Stay", style: "cancel" },
-        { text: "Leave", style: "destructive", onPress: () => router.back() },
+        { text: "Leave", style: "destructive", onPress: handleReturnToTabs },
       ],
     );
-  }, [saving]);
+  }, [handleReturnToTabs, saving]);
 
   // Enhanced member structure: { name, instrument, role?, user_id?, avatar_url? }
   interface MemberDetail {
@@ -164,10 +233,34 @@ export default function EditGroupScreen() {
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [pendingMember, setPendingMember] = useState<any>(null);
+  const [selectedInviteTargets, setSelectedInviteTargets] = useState<GroupInviteTarget[]>([]);
+  const [inviteMessage, setInviteMessage] = useState("");
 
   // Group type based on the constants
   const [groupType, setGroupType] = useState<string>(mapDbGroupTypeToUiGroupType("band"));
   const [groupTypeModalVisible, setGroupTypeModalVisible] = useState(false);
+  const groupTypeSheetSurfaceColor = isDark ? "#1E2530" : "#FFFFFF";
+  const renderGroupTypeSheetBackdrop = useCallback((props: any) => (
+    <BottomSheetBackdrop
+      {...props}
+      appearsOnIndex={0}
+      disappearsOnIndex={-1}
+      opacity={0.65}
+      pressBehavior="close"
+    />
+  ), []);
+  const handleGroupTypeSheetDismiss = useCallback(() => {
+    setGroupTypeModalVisible(false);
+  }, []);
+
+  useEffect(() => {
+    if (groupTypeModalVisible) {
+      groupTypeSheetRef.current?.present();
+      return;
+    }
+
+    groupTypeSheetRef.current?.dismiss();
+  }, [groupTypeModalVisible]);
 
   // Leadership Transfer State
   const [transferModalVisible, setTransferModalVisible] = useState(false);
@@ -253,8 +346,17 @@ export default function EditGroupScreen() {
         linkedPlaylists.map((playlist) => playlist.playlist_id),
       );
     } catch (playlistError) {
+      logActionError("edit_group.fetch_playlists_failed", playlistError, {
+        groupId,
+        currentUserId,
+      });
       setOwnedPlaylists([]);
       setSelectedPlaylistIds([]);
+      showAlert(
+        "warning",
+        "Couldn't Load Playlists",
+        `Linked playlists could not be loaded: ${formatSupabaseError(playlistError)}`,
+      );
     } finally {
       setLoadingPlaylists(false);
     }
@@ -343,6 +445,7 @@ export default function EditGroupScreen() {
         });
       }
     } catch (impactError) {
+      logActionError("edit_group.fetch_impact_failed", impactError, { groupId });
     }
   };
 
@@ -507,9 +610,13 @@ export default function EditGroupScreen() {
         .select("user_id, role, profiles:user_id(full_name, avatar_url)")
         .eq("group_id", groupId);
 
+      if (dbMembersError) {
+        throw dbMembersError;
+      }
+
       const membersFromDb: MemberDetail[] = [];
       const addedUserIds = new Set<string>();
-      const dbRows = dbMembersError ? [] : dbMembers || [];
+      const dbRows = dbMembers || [];
 
       dbRows.forEach((row: any) => {
         const matchedByUser = parsedMembers.find(
@@ -578,7 +685,14 @@ export default function EditGroupScreen() {
 
       fetchGroupImpactSummary(groupId);
     } catch (e) {
-      showAlert("warning", "Couldn't Load Details", "Failed to load group details.");
+      logActionError("edit_group.fetch_details_failed", e, {
+        groupId: Array.isArray(id) ? id[0] : id,
+      });
+      showAlert(
+        "warning",
+        "Couldn't Load Details",
+        `Failed to load group details: ${formatSupabaseError(e)}`,
+      );
       router.replace("/home");
     } finally {
       setLoading(false);
@@ -713,7 +827,7 @@ export default function EditGroupScreen() {
       };
 
       // Direct update to groups table
-      const { error } = await supabase
+      const { data: updatedGroup, error } = await supabase
         .from('groups')
         .update({
           name: payload.name,
@@ -725,20 +839,30 @@ export default function EditGroupScreen() {
           group_type: payload.group_type,
         })
         .eq('id', groupId)
-        .eq('owner_id', user.id);
+        .eq('owner_id', user.id)
+        .select('id')
+        .single();
 
-      if (error) {
-        console.error('❌ Update failed with error:', error);
-        const errorMsg = error.message || "Unknown error";
-        showAlert("warning", "Couldn't Save Group", `Failed to update group: ${errorMsg}`);
-        return;
+      if (error || !updatedGroup) {
+        logActionError("edit_group.update_base_failed", error, {
+          groupId,
+          userId: user.id,
+        });
+        throw new Error(`Failed to update group: ${formatSupabaseError(error)}`);
       }
 
-      await supabase.from('group_roster_members').delete().eq('group_id', groupId);
+      const { error: deleteRosterError } = await supabase
+        .from('group_roster_members')
+        .delete()
+        .eq('group_id', groupId);
+      if (deleteRosterError) {
+        logActionError("edit_group.clear_roster_failed", deleteRosterError, { groupId });
+        throw new Error(`Failed to clear group roster: ${formatSupabaseError(deleteRosterError)}`);
+      }
       const rosterRows = (payload.members || []).map((member: any, index: number) => ({
         group_id: groupId,
         user_id: member.user_id || null,
-        member_name: member.name || null,
+        member_name: getRosterMemberName(member, index),
         member_role: member.role || null,
         instrument: member.instrument || null,
         avatar_url: member.avatar_url || null,
@@ -753,12 +877,23 @@ export default function EditGroupScreen() {
           .from('group_roster_members')
           .insert(rosterRows);
         if (rosterError) {
-          showAlert("warning", "Sync Failed", `Group profile updated but failed to sync roster: ${rosterError.message || "Unknown error"}`);
-          return;
+          logActionError("edit_group.save_roster_failed", rosterError, {
+            groupId,
+            rowCount: rosterRows.length,
+          });
+          throw new Error(`Failed to sync group roster: ${formatSupabaseError(rosterError)}`);
         }
       }
 
-      await supabase.from('group_media').delete().eq('group_id', groupId).eq('media_type', 'image');
+      const { error: deleteMediaError } = await supabase
+        .from('group_media')
+        .delete()
+        .eq('group_id', groupId)
+        .eq('media_type', 'image');
+      if (deleteMediaError) {
+        logActionError("edit_group.clear_images_failed", deleteMediaError, { groupId });
+        throw new Error(`Failed to clear group images: ${formatSupabaseError(deleteMediaError)}`);
+      }
       const imageRows = (payload.images || []).map((media_url: string, index: number) => ({
         group_id: groupId,
         media_type: 'image',
@@ -770,8 +905,11 @@ export default function EditGroupScreen() {
           .from('group_media')
           .insert(imageRows);
         if (mediaError) {
-          showAlert("warning", "Sync Failed", `Group profile updated but failed to sync images: ${mediaError.message || "Unknown error"}`);
-          return;
+          logActionError("edit_group.save_images_failed", mediaError, {
+            groupId,
+            rowCount: imageRows.length,
+          });
+          throw new Error(`Failed to sync group images: ${formatSupabaseError(mediaError)}`);
         }
       }
 
@@ -799,12 +937,11 @@ export default function EditGroupScreen() {
         .upsert(membershipRows, { onConflict: "group_id,user_id" });
 
       if (upsertMembersError) {
-        showAlert(
-          "warning",
-          "Sync Failed",
-          `Group profile updated but failed to sync members: ${upsertMembersError.message || "Unknown error"}`,
-        );
-        return;
+        logActionError("edit_group.sync_members_failed", upsertMembersError, {
+          groupId,
+          userIds: desiredMemberUserIds,
+        });
+        throw new Error(`Failed to sync group members: ${formatSupabaseError(upsertMembersError)}`);
       }
 
       if (desiredMemberUserIds.length > 0) {
@@ -816,43 +953,72 @@ export default function EditGroupScreen() {
           .not("user_id", "in", inClause);
 
         if (deleteStaleMembersError) {
-          showAlert(
-            "warning",
-            "Sync Failed",
-            `Group profile updated but failed to remove stale members: ${deleteStaleMembersError.message || "Unknown error"}`,
+          logActionError("edit_group.remove_stale_members_failed", deleteStaleMembersError, {
+            groupId,
+            userIds: desiredMemberUserIds,
+          });
+          throw new Error(
+            `Failed to remove stale group members: ${formatSupabaseError(deleteStaleMembersError)}`,
           );
-          return;
         }
       }
 
       try {
         await syncGroupLinkedPlaylists(groupId, selectedPlaylistIds);
       } catch (playlistError: any) {
-        showAlert(
-          "warning",
-          "Playlists Not Synced",
-          `Group details were saved, but linked playlists could not be updated: ${playlistError?.message || "Unknown error"}`,
+        logActionError("edit_group.sync_playlists_failed", playlistError, {
+          groupId,
+          playlistIds: selectedPlaylistIds,
+        });
+        throw new Error(
+          `Group details were saved, but linked playlists could not be updated: ${formatSupabaseError(playlistError)}`,
         );
-        return;
       }
 
-      showAlert("success", "Success", "Group updated successfully!", [
+      let inviteSummaryMessage = "";
+      if (selectedInviteTargets.length > 0) {
+        const inviteSummary = await sendGroupMemberInvites({
+          currentUserId: user.id,
+          groupId,
+          groupName,
+          groupImageUrl: payload.images[0] || null,
+          inviteMessage,
+          inviteTargets: selectedInviteTargets,
+        });
+
+        inviteSummaryMessage =
+          inviteSummary.failedCount > 0
+            ? ` ${inviteSummary.sentCount} invite(s) sent, ${inviteSummary.failedCount} not sent.`
+            : ` ${inviteSummary.sentCount} invite(s) sent.`;
+        if (inviteSummary.failedCount > 0) {
+          console.error("[edit_group.send_invites_partial_failure]", {
+            groupId,
+            failures: inviteSummary.failures,
+          });
+        }
+        setSelectedInviteTargets([]);
+        setInviteMessage("");
+      }
+
+      showAlert("success", "Success", `Group updated successfully!${inviteSummaryMessage}`, [
         {
           text: "OK",
           onPress: () => {
-            if (router.canGoBack()) {
-              router.back();
-            } else {
-              router.replace({ pathname: "/manage_group", params: { id: groupId } });
-            }
+            router.replace({
+              pathname: "/manage_group",
+              params: { id: groupId, tab: normalizedReturnTab, refresh: String(Date.now()) },
+            });
           },
         },
       ]);
     } catch (e: any) {
+      logActionError("edit_group.save_failed", e, {
+        groupId: Array.isArray(id) ? id[0] : id,
+      });
       showAlert(
         "warning",
         "Couldn't Save Group",
-        `Failed to update group: ${e?.message || "Unknown error"}`,
+        `Failed to update group: ${formatSupabaseError(e)}`,
       );
     } finally {
       setSaving(false);
@@ -1250,17 +1416,15 @@ export default function EditGroupScreen() {
         .single();
 
       if (error) {
-        console.error("Error creating transfer request:", error);
-        showAlert(
-          "warning",
-          "Transfer Failed",
-          "Failed to send transfer request. " + (error.message || ""),
-        );
-        return;
+        logActionError("edit_group.create_transfer_failed", error, {
+          groupId,
+          toUserId: selectedNewLeader.user_id,
+        });
+        throw new Error(`Failed to send transfer request: ${formatSupabaseError(error)}`);
       }
 
       // Direct insert to notifications table
-      await supabase.from('notifications').insert({
+      const { error: notificationError } = await supabase.from('notifications').insert({
         user_id: selectedNewLeader.user_id,
         type: "info",
         title: "Leadership Transfer Request",
@@ -1273,6 +1437,14 @@ export default function EditGroupScreen() {
         }),
         read: false,
       });
+      if (notificationError) {
+        logActionError("edit_group.create_transfer_notification_failed", notificationError, {
+          groupId,
+          requestId: data.id,
+          toUserId: selectedNewLeader.user_id,
+        });
+        throw new Error(`Failed to notify new leader: ${formatSupabaseError(notificationError)}`);
+      }
 
       showAlert(
         "success",
@@ -1286,8 +1458,12 @@ export default function EditGroupScreen() {
       setTransferMessage("");
       fetchPendingTransfer();
     } catch (e) {
-      console.error("Error initiating transfer:", e);
-      showAlert("warning", "Transfer Failed", "Failed to send transfer request.");
+      logActionError("edit_group.initiate_transfer_failed", e);
+      showAlert(
+        "warning",
+        "Transfer Failed",
+        `Failed to send transfer request: ${formatSupabaseError(e)}`,
+      );
     } finally {
       setIsTransferring(false);
     }
@@ -1823,7 +1999,7 @@ export default function EditGroupScreen() {
                       },
                     ]}
                   />
-                  <TouchableOpacity activeOpacity={1}
+                  <TouchableOpacity activeOpacity={!normalizeVisibleInput(newMemberInstrument) ? 1 : 0.78}
                     onPress={() => confirmAddMember(newMemberInstrument)}
                     disabled={!normalizeVisibleInput(newMemberInstrument)}
                     style={[
@@ -1837,6 +2013,7 @@ export default function EditGroupScreen() {
                         borderRadius: 8,
                         justifyContent: "center",
                         alignItems: "center",
+                        opacity: !normalizeVisibleInput(newMemberInstrument) ? 0.6 : 1,
                       },
                     ]}
                   >
@@ -2015,7 +2192,7 @@ export default function EditGroupScreen() {
                             ]}
                           />
                           <TouchableOpacity
-                            activeOpacity={1}
+                            activeOpacity={!normalizeVisibleInput(currentInstrument) ? 1 : 0.78}
                             onPress={() => finalizeMemberInstrument(index)}
                             disabled={!normalizeVisibleInput(currentInstrument)}
                             style={[
@@ -2027,6 +2204,7 @@ export default function EditGroupScreen() {
                                 backgroundColor: !normalizeVisibleInput(currentInstrument)
                                   ? "#9CA3AF"
                                   : colors.primary,
+                                opacity: !normalizeVisibleInput(currentInstrument) ? 0.6 : 1,
                               },
                             ]}
                           >
@@ -2106,6 +2284,21 @@ export default function EditGroupScreen() {
               );
             })}
           </View>
+
+          {renderSectionHeader("Member Invites", "person-add")}
+
+          <GroupInviteSection
+            currentUserId={currentUserId}
+            groupId={Array.isArray(id) ? id[0] : id}
+            selectedTargets={selectedInviteTargets}
+            onSelectedTargetsChange={setSelectedInviteTargets}
+            inviteMessage={inviteMessage}
+            onInviteMessageChange={setInviteMessage}
+            excludedUserIds={members
+              .map((member) => member.user_id)
+              .filter((memberId): memberId is string => Boolean(memberId))}
+            disabled={saving}
+          />
 
           {renderSectionHeader("Playlists", "musical-notes")}
 
@@ -2232,12 +2425,13 @@ export default function EditGroupScreen() {
                     : isFormComplete
                       ? colors.primary
                       : colors.border,
+                  opacity: saving || !isFormComplete ? 0.6 : 1,
                   shadowColor: colors.primary,
                 },
               ]}
               onPress={handleSave}
               disabled={saving || !isFormComplete}
-              activeOpacity={1}
+              activeOpacity={saving || !isFormComplete ? 1 : 0.78}
             >
               {saving ? (
                 <ActivityIndicator size="small" color="#fff" />
@@ -2446,7 +2640,7 @@ export default function EditGroupScreen() {
                 ]}
                 onPress={initiateTransfer}
                 disabled={!selectedNewLeader || isTransferring}
-                activeOpacity={1}
+                activeOpacity={!selectedNewLeader || isTransferring ? 1 : 0.78}
               >
                 {isTransferring ? (
                   <ActivityIndicator color="white" size="small" />
@@ -2460,65 +2654,93 @@ export default function EditGroupScreen() {
           </View>
       </BottomModal>
 
-      <BottomModal
-        visible={groupTypeModalVisible}
+      <TrackedBottomSheetModal
+        ref={groupTypeSheetRef}
         overlayLabel="EditGroupTypeModal"
-        onClose={() => setGroupTypeModalVisible(false)}
-        backdropColor="rgba(0,0,0,0.58)"
-        closeOnBackdropPress
+        index={0}
+        snapPoints={groupTypeSheetSnapPoints}
+        animationConfigs={groupTypeSheetAnimationConfigs}
+        animateOnMount
+        enableDynamicSizing={false}
+        enablePanDownToClose
+        backdropComponent={renderGroupTypeSheetBackdrop}
+        backgroundStyle={{
+          backgroundColor: groupTypeSheetSurfaceColor,
+          borderTopLeftRadius: 28,
+          borderTopRightRadius: 28,
+        }}
+        handleComponent={null}
+        onDismiss={handleGroupTypeSheetDismiss}
       >
-          <View style={{
-            backgroundColor: colors.card,
-            borderTopLeftRadius: 24,
-            borderTopRightRadius: 24,
-            maxHeight: "80%",
-            padding: 24,
-            paddingBottom: 24,
-          }}>
-            <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-              <Text style={{ fontSize: 18, fontFamily: "Poppins_600SemiBold", color: colors.text }}>
+        <View
+          style={[
+            styles.groupTypeSheet,
+            {
+              backgroundColor: groupTypeSheetSurfaceColor,
+              paddingBottom: Math.max(24, insets.bottom + 24),
+            },
+          ]}
+        >
+            <View style={styles.groupTypeSheetHeader}>
+              <TouchableOpacity
+                activeOpacity={1}
+                onPress={() => setGroupTypeModalVisible(false)}
+                style={[
+                  styles.groupTypeSheetCloseButton,
+                  { backgroundColor: isDark ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.06)" },
+                ]}
+              >
+                <Ionicons name="close" size={22} color={colors.textSecondary} />
+              </TouchableOpacity>
+              <Text style={[styles.groupTypeSheetTitle, { color: colors.text }]}>
                 Select Group Type
               </Text>
-              <TouchableOpacity activeOpacity={1} onPress={() => setGroupTypeModalVisible(false)}>
-                <Ionicons name="close" size={24} color={colors.textSecondary} />
-              </TouchableOpacity>
+              <View style={styles.groupTypeSheetHeaderSpacer} />
             </View>
 
-            <ScrollView
+            <BottomSheetScrollView
               showsVerticalScrollIndicator={false}
               keyboardShouldPersistTaps="always"
+              contentContainerStyle={styles.groupTypeSheetList}
             >
-              {PH_MUSIC_GROUP_TYPES.map((type) => (
-                <TouchableOpacity activeOpacity={1}
-                  key={type.id}
-                  style={{
-                    flexDirection: "row",
-                    paddingVertical: 16,
-                    borderBottomWidth: 1,
-                    borderBottomColor: isDark ? "#374151" : "#F3F4F6",
-                    alignItems: "center"
-                  }}
-                  onPress={() => handleGroupTypeChange(type.id)}
-                >
-                  <View style={{ flex: 1 }}>
-                    <Text style={{ color: colors.text, fontFamily: "Poppins_600SemiBold", fontSize: 16 }}>
-                      {type.label}
-                    </Text>
-                    <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_400Regular", fontSize: 13, marginTop: 4 }}>
-                      {type.description}
-                    </Text>
-                    <Text style={{ color: colors.primary, fontFamily: "Poppins_500Medium", fontSize: 12, marginTop: 4 }}>
-                      Min: {type.minMembers} members
-                    </Text>
-                  </View>
-                  {groupType === type.id && (
-                    <Ionicons name="checkmark-circle" size={24} color={colors.primary} style={{ marginLeft: 16 }} />
-                  )}
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
+              {PH_MUSIC_GROUP_TYPES.map((type) => {
+                const selected = groupType === type.id;
+
+                return (
+                  <TouchableOpacity
+                    activeOpacity={1}
+                    key={type.id}
+                    style={[
+                      styles.groupTypeSheetOption,
+                      {
+                        backgroundColor: selected
+                          ? (isDark ? "rgba(99,102,241,0.18)" : "rgba(99,102,241,0.08)")
+                          : (isDark ? "#252D3A" : "#F7F8FA"),
+                        borderColor: selected ? colors.primary : "transparent",
+                      },
+                    ]}
+                    onPress={() => handleGroupTypeChange(type.id)}
+                  >
+                    <View style={styles.groupTypeSheetOptionCopy}>
+                      <Text style={[styles.groupTypeSheetOptionTitle, { color: colors.text }]}>
+                        {type.label}
+                      </Text>
+                      <Text style={[styles.groupTypeSheetOptionDescription, { color: colors.textSecondary }]}>
+                        {type.description}
+                      </Text>
+                      <Text style={[styles.groupTypeSheetOptionMeta, { color: colors.primary }]}>
+                        Min: {type.minMembers} members
+                      </Text>
+                    </View>
+                    <View style={styles.groupTypeSheetOptionCheck}>
+                      {selected ? <Ionicons name="checkmark-circle" size={24} color={colors.primary} /> : null}
+                    </View>
+                  </TouchableOpacity>
+                );
+              })}
+            </BottomSheetScrollView>
           </View>
-      </BottomModal>
+      </TrackedBottomSheetModal>
     </>
   );
 }
@@ -2817,7 +3039,7 @@ const styles = StyleSheet.create({
     padding: 12,
     marginTop: 16,
     minHeight: 80,
-    textAlignVertical: "top",
+    textAlignVertical: "center",
     fontFamily: "Poppins_400Regular",
   },
   transferConfirmButton: {
@@ -2837,6 +3059,76 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     borderRadius: 12,
     borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  groupTypeSheet: {
+    flex: 1,
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    paddingHorizontal: 20,
+    paddingTop: 12,
+  },
+  groupTypeSheetHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 16,
+  },
+  groupTypeSheetCloseButton: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  groupTypeSheetTitle: {
+    flex: 1,
+    fontSize: 18,
+    textAlign: "center",
+    fontFamily: "Poppins_700Bold",
+  },
+  groupTypeSheetHeaderSpacer: {
+    width: 38,
+    height: 38,
+  },
+  groupTypeSheetList: {
+    gap: 8,
+    paddingBottom: 4,
+  },
+  groupTypeSheetOption: {
+    flexDirection: "row",
+    alignItems: "center",
+    minHeight: 92,
+    borderRadius: 14,
+    borderWidth: 1.5,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    gap: 12,
+  },
+  groupTypeSheetOptionCopy: {
+    flex: 1,
+    gap: 3,
+  },
+  groupTypeSheetOptionTitle: {
+    fontSize: 15,
+    lineHeight: 20,
+    fontFamily: "Poppins_600SemiBold",
+  },
+  groupTypeSheetOptionDescription: {
+    fontSize: 12,
+    lineHeight: 17,
+    fontFamily: "Poppins_400Regular",
+  },
+  groupTypeSheetOptionMeta: {
+    fontSize: 11,
+    lineHeight: 15,
+    fontFamily: "Poppins_700Bold",
+    textTransform: "uppercase",
+  },
+  groupTypeSheetOptionCheck: {
+    width: 24,
+    height: 24,
     alignItems: "center",
     justifyContent: "center",
   },

@@ -15,6 +15,22 @@ import { emitToast } from '../src/events/toastBus';
 import { useTheme } from '../src/context/ThemeContext';
 import { ProductionInviteTarget, sendProductionTeamInvites } from '../src/utils/productionTeamInvites';
 
+const readFunctionErrorBody = async (error: any) => {
+  const response = error?.context;
+  if (!response) return null;
+
+  try {
+    const readableResponse = typeof response.clone === 'function' ? response.clone() : response;
+    if (typeof readableResponse.json === 'function') {
+      return await readableResponse.json();
+    }
+  } catch (parseError) {
+    console.warn('Failed to parse manage-production error response', parseError);
+  }
+
+  return null;
+};
+
 type TeamRecord = {
   id: string;
   name: string;
@@ -32,6 +48,17 @@ export default function EditProductionScreen() {
   const { session, userRole } = useAuth();
   const params = useLocalSearchParams<{ id?: string }>();
   const teamId = useMemo(() => (Array.isArray(params.id) ? params.id[0] : params.id) || '', [params.id]);
+  const handleReturnToTabs = useCallback(() => {
+    if (teamId) {
+      router.replace({
+        pathname: '/production_team',
+        params: { teamId, tab: 'About' },
+      });
+      return;
+    }
+
+    router.replace('/my_production');
+  }, [teamId]);
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -49,14 +76,21 @@ export default function EditProductionScreen() {
   const invokeProduction = useCallback(async (body: Record<string, unknown>) => {
     const { data, error } = await supabase.functions.invoke('manage-production', { body });
     if (error) {
+      const responseBody = await readFunctionErrorBody(error);
       const status = Number((error as any)?.status || (error as any)?.context?.status || 0);
+      const message =
+        responseBody?.error ||
+        responseBody?.message ||
+        error.message ||
+        'Production request failed.';
       console.warn('manage-production failed', {
-        message: error.message,
+        message,
         status,
         code: (error as any).code,
         details: (error as any).details,
         hint: (error as any).hint,
         context: (error as any).context,
+        response: responseBody,
         body,
       });
 
@@ -66,8 +100,13 @@ export default function EditProductionScreen() {
         throw transientError;
       }
 
-      throw error;
+      throw new Error(message);
     }
+
+    if (data && typeof data === 'object' && (data as any).error && !(data as any).success) {
+      throw new Error(String((data as any).error));
+    }
+
     return data;
   }, []);
 
@@ -174,7 +213,7 @@ export default function EditProductionScreen() {
           ? `Your production team details have been saved. ${inviteMessageSummary}`
           : 'Your production team details have been saved.',
       });
-      router.replace({ pathname: '/my_production', params: { refresh: String(Date.now()) } });
+      handleReturnToTabs();
     } catch (error: any) {
       setAlert({ type: 'error', title: 'Error', message: error?.message || 'Failed to update production team.' });
     } finally {
@@ -184,7 +223,7 @@ export default function EditProductionScreen() {
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
-      <Header title="Edit Production" onBackPress={() => router.back()} />
+      <Header title="Edit Production" onBackPress={handleReturnToTabs} />
 
       <ScrollView contentContainerStyle={[styles.content, { paddingBottom: contentBottomPadding }]} showsVerticalScrollIndicator={false}>
         {loading ? (
@@ -250,8 +289,8 @@ export default function EditProductionScreen() {
                 <Text style={[styles.helperText, { color: '#F59E0B' }]}>Complete all required fields before saving your production team.</Text>
               ) : null}
 
-              <TouchableOpacity activeOpacity={1}
-                style={[styles.submitBtn, { backgroundColor: hasIncompleteRequiredFields ? colors.textSecondary : colors.primary, opacity: saving ? 0.65 : 1 }]}
+              <TouchableOpacity activeOpacity={saving || hasIncompleteRequiredFields ? 1 : 0.78}
+                style={[styles.submitBtn, { backgroundColor: hasIncompleteRequiredFields ? colors.textSecondary : colors.primary, opacity: saving || hasIncompleteRequiredFields ? 0.6 : 1 }]}
                 onPress={handleSubmit}
                 disabled={saving || hasIncompleteRequiredFields}
               >
@@ -278,7 +317,7 @@ const styles = StyleSheet.create({
   heroText: { marginTop: 6, fontSize: 13, lineHeight: 20, fontFamily: 'Poppins_400Regular' },
   formCard: { borderWidth: 1, borderRadius: 22, padding: 18 },
   label: { marginTop: 16, marginBottom: 10, fontSize: 13, fontFamily: 'Poppins_600SemiBold' },
-  input: { borderWidth: 1, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, fontSize: 14, fontFamily: 'Poppins_400Regular' },
+  input: { borderWidth: 1, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, fontSize: 14, fontFamily: 'Poppins_400Regular', textAlignVertical: 'center' },
   textArea: { minHeight: 110, textAlignVertical: 'top' },
   descriptionHint: { marginTop: 8, fontSize: 12, fontFamily: 'Poppins_400Regular' },
   helperText: { marginTop: 12, fontSize: 12, fontFamily: 'Poppins_500Medium' },

@@ -107,12 +107,22 @@ const DASHBOARD_CACHE_TTL_MS = 30_000;
 type DashboardDateRange = '7d' | '30d' | 'all';
 type RevenueFilter = 'gross' | 'net';
 type IncidentTypeFilter = 'all' | 'booking' | 'profile';
+type WithdrawalStatusFilter = 'all' | 'pending' | 'processing' | 'completed' | 'failed' | 'cancelled';
 
 const DASHBOARD_DATE_RANGE_LABELS: Record<DashboardDateRange, string> = {
   '7d': 'Last 7 Days',
   '30d': 'Last 30 Days',
   all: 'All Time',
 };
+
+const WITHDRAWAL_STATUS_FILTERS: { key: WithdrawalStatusFilter; label: string }[] = [
+  { key: 'all', label: 'All' },
+  { key: 'completed', label: 'Completed' },
+  { key: 'pending', label: 'Pending' },
+  { key: 'processing', label: 'Processing' },
+  { key: 'failed', label: 'Failed' },
+  { key: 'cancelled', label: 'Cancelled' },
+];
 
 interface DashboardMetrics {
   generatedAt: string | null;
@@ -175,6 +185,36 @@ interface DashboardMetrics {
   };
 }
 
+interface AdminWithdrawalEntry {
+  id: string;
+  amount: number;
+  net_amount: number;
+  status: WithdrawalStatusFilter;
+  payout_type: string;
+  payout_account_name: string | null;
+  payout_account_number: string | null;
+  payout_bank_name: string | null;
+  reference_number: string | null;
+  notes: string | null;
+  created_at: string | null;
+  processed_at: string | null;
+  user?: {
+    id?: string;
+    full_name?: string | null;
+    email?: string | null;
+    role?: string | null;
+  } | null;
+}
+
+interface WithdrawalTotals {
+  count: number;
+  totalAmount: number;
+  totalNetAmount: number;
+  completedAmount: number;
+  pendingAmount: number;
+  mockCount: number;
+}
+
 const defaultMetrics: DashboardMetrics = {
   generatedAt: null,
   totalUsers: 0,
@@ -222,6 +262,15 @@ const defaultMetrics: DashboardMetrics = {
   },
 };
 
+const defaultWithdrawalTotals: WithdrawalTotals = {
+  count: 0,
+  totalAmount: 0,
+  totalNetAmount: 0,
+  completedAmount: 0,
+  pendingAmount: 0,
+  mockCount: 0,
+};
+
 const formatCurrency = (value?: number | null) => {
   const safeValue = Number(value || 0);
   return `₱${safeValue.toLocaleString('en-PH', {
@@ -257,6 +306,32 @@ const formatMetricTimestamp = (value?: string | null) => {
     minute: '2-digit',
     second: '2-digit',
   });
+};
+
+const formatDateTime = (value?: string | null) => {
+  if (!value) return 'n/a';
+
+  const timestamp = new Date(value);
+  if (Number.isNaN(timestamp.getTime())) return 'n/a';
+
+  return timestamp.toLocaleString('en-PH', {
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+};
+
+const formatWithdrawalStatus = (status?: string | null) => {
+  const normalized = String(status || '').trim().toLowerCase();
+  if (!normalized) return 'Unknown';
+  return normalized.replace(/_/g, ' ').replace(/\b\w/g, (letter) => letter.toUpperCase());
+};
+
+const maskAccountNumber = (value?: string | null) => {
+  const normalized = String(value || '').replace(/\s+/g, '');
+  if (!normalized) return 'No account';
+  return `****${normalized.slice(-4)}`;
 };
 
 const getErrorMessage = async (error: unknown, fallback: string) => {
@@ -556,6 +631,21 @@ const styles = StyleSheet.create({
     padding: 16,
     minHeight: 220,
   },
+  dashboardActionButton: {
+    minHeight: 36,
+    borderRadius: 8,
+    borderWidth: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+  },
+  dashboardActionText: {
+    fontSize: 12,
+    fontFamily: 'Poppins_600SemiBold',
+  },
   dataEnginePanelLeft: {
     flex: Platform.OS === 'web' ? 2 : 1,
   },
@@ -628,6 +718,21 @@ const styles = StyleSheet.create({
     marginTop: 12,
     fontSize: 14,
     fontFamily: 'Poppins_400Regular',
+  },
+  miniActionButton: {
+    minHeight: 30,
+    borderRadius: 8,
+    borderWidth: 1,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+  },
+  miniActionText: {
+    fontSize: 10,
+    fontFamily: 'Poppins_600SemiBold',
   },
   panelSubtitle: {
     fontSize: 12,
@@ -781,6 +886,67 @@ const styles = StyleSheet.create({
     fontSize: 11,
     textTransform: 'uppercase',
   },
+  withdrawalActionsCell: {
+    flex: 1.15,
+    alignItems: 'flex-end',
+    justifyContent: 'center',
+    gap: 6,
+  },
+  withdrawalButtonRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  withdrawalContextText: {
+    fontSize: 12,
+    lineHeight: 18,
+    fontFamily: 'Poppins_400Regular',
+    marginBottom: 12,
+  },
+  withdrawalExplainer: {
+    borderWidth: 1,
+    borderRadius: 10,
+    padding: 12,
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+    marginBottom: 12,
+  },
+  withdrawalExplainerText: {
+    fontSize: 12,
+    lineHeight: 18,
+    fontFamily: 'Poppins_400Regular',
+  },
+  withdrawalExplainerTitle: {
+    fontSize: 13,
+    fontFamily: 'Poppins_600SemiBold',
+    marginBottom: 2,
+  },
+  withdrawalSignalCard: {
+    flex: 1,
+    minWidth: 150,
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  withdrawalSignalGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+    marginBottom: 12,
+  },
+  withdrawalSignalLabel: {
+    fontSize: 11,
+    fontFamily: 'Poppins_500Medium',
+    marginBottom: 3,
+  },
+  withdrawalSignalValue: {
+    fontSize: 15,
+    fontFamily: 'Poppins_700Bold',
+  },
 });
 
 const tabItems: { key: Tab; label: string; icon: string }[] = [
@@ -808,6 +974,10 @@ export default function AdminDashboardPage() {
   const [dashboardSearchQuery, setDashboardSearchQuery] = useState('');
   const [revenueFilter, setRevenueFilter] = useState<RevenueFilter>('net');
   const [incidentTypeFilter, setIncidentTypeFilter] = useState<IncidentTypeFilter>('all');
+  const [withdrawals, setWithdrawals] = useState<AdminWithdrawalEntry[]>([]);
+  const [withdrawalTotals, setWithdrawalTotals] = useState<WithdrawalTotals>(defaultWithdrawalTotals);
+  const [withdrawalStatusFilter, setWithdrawalStatusFilter] = useState<WithdrawalStatusFilter>('all');
+  const [withdrawalsLoading, setWithdrawalsLoading] = useState(false);
   const [alertState, setAlertState] = useState<{
     visible: boolean;
     type: AlertType;
@@ -957,6 +1127,68 @@ export default function AdminDashboardPage() {
     return nextMetrics;
   }, []);
 
+  const fetchAdminWithdrawals = useCallback(async (filters?: {
+    status?: WithdrawalStatusFilter;
+    searchQuery?: string;
+  }) => {
+    const status = filters?.status || 'all';
+    const searchQuery = String(filters?.searchQuery || '').trim();
+
+    const { data, error } = await supabase.functions.invoke<any>('permit-management', {
+      body: {
+        action: 'admin_fetch_withdrawals',
+        status,
+        searchQuery: searchQuery || null,
+        limit: 8,
+      },
+    });
+
+    if (error) throw error;
+    if (data?.error) throw new Error(String(data.error));
+
+    const nextWithdrawals = Array.isArray(data?.withdrawals)
+      ? data.withdrawals.map((item: any) => {
+        const owner = Array.isArray(item?.user) ? item.user[0] : item?.user;
+        const normalizedStatus = String(item?.status || 'pending').trim().toLowerCase();
+
+        return {
+          id: String(item?.id || ''),
+          amount: Number(item?.amount || 0),
+          net_amount: Number(item?.net_amount || item?.amount || 0),
+          status: (WITHDRAWAL_STATUS_FILTERS.some((filter) => filter.key === normalizedStatus)
+            ? normalizedStatus
+            : 'pending') as WithdrawalStatusFilter,
+          payout_type: String(item?.payout_type || 'bank'),
+          payout_account_name: item?.payout_account_name || null,
+          payout_account_number: item?.payout_account_number || null,
+          payout_bank_name: item?.payout_bank_name || null,
+          reference_number: item?.reference_number || null,
+          notes: item?.notes || null,
+          created_at: item?.created_at || null,
+          processed_at: item?.processed_at || null,
+          user: owner ? {
+            id: owner.id,
+            full_name: owner.full_name || null,
+            email: owner.email || null,
+            role: owner.role || null,
+          } : null,
+        } satisfies AdminWithdrawalEntry;
+      })
+      : [];
+
+    const totalsPayload = data?.totals || {};
+    const nextTotals: WithdrawalTotals = {
+      count: Number(totalsPayload?.count || 0),
+      totalAmount: Number(totalsPayload?.totalAmount || 0),
+      totalNetAmount: Number(totalsPayload?.totalNetAmount || 0),
+      completedAmount: Number(totalsPayload?.completedAmount || 0),
+      pendingAmount: Number(totalsPayload?.pendingAmount || 0),
+      mockCount: Number(totalsPayload?.mockCount || 0),
+    };
+
+    return { withdrawals: nextWithdrawals, totals: nextTotals };
+  }, []);
+
   useEffect(() => {
     if (loading || !roleResolved || !session || isGuest || !isAdmin) {
       latestMetricsRequestRef.current += 1;
@@ -1026,6 +1258,93 @@ export default function AdminDashboardPage() {
     dashboardSearchQuery,
   ]);
 
+  useEffect(() => {
+    if (loading || !roleResolved || !session || isGuest || !isAdmin) {
+      setWithdrawals([]);
+      setWithdrawalTotals(defaultWithdrawalTotals);
+      setWithdrawalsLoading(false);
+      return;
+    }
+
+    let isMounted = true;
+    setWithdrawalsLoading(true);
+
+    void (async () => {
+      try {
+        const result = await fetchAdminWithdrawals({
+          status: withdrawalStatusFilter,
+          searchQuery: dashboardSearchQuery,
+        });
+
+        if (!isMounted) return;
+        setWithdrawals(result.withdrawals);
+        setWithdrawalTotals(result.totals);
+      } catch (error) {
+        if (!isMounted) return;
+        const message = await getErrorMessage(error, 'Unable to load withdrawals.');
+        showAlert('error', 'Withdrawal monitor unavailable', message);
+      } finally {
+        if (isMounted) {
+          setWithdrawalsLoading(false);
+        }
+      }
+    })();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [
+    loading,
+    roleResolved,
+    session,
+    isGuest,
+    isAdmin,
+    fetchAdminWithdrawals,
+    showAlert,
+    withdrawalStatusFilter,
+    dashboardSearchQuery,
+  ]);
+
+  const handleShowAllWithdrawals = useCallback(() => {
+    setWithdrawalStatusFilter('all');
+    setGlobalSearch('');
+  }, []);
+
+  const handleWithdrawalDetails = useCallback((withdrawal: AdminWithdrawalEntry) => {
+    const destination = withdrawal.payout_type === 'bank'
+      ? (withdrawal.payout_bank_name || 'Bank')
+      : withdrawal.payout_type.toUpperCase();
+    const owner = withdrawal.user?.full_name || withdrawal.user?.email || 'Unknown user';
+    const account = maskAccountNumber(withdrawal.payout_account_number);
+    const reference = withdrawal.reference_number || 'No reference';
+
+    showAlert(
+      'info',
+      'Withdrawal Details',
+      `${owner}\n${destination} ${account}\nStatus: ${formatWithdrawalStatus(withdrawal.status)}\nNet: ${formatCurrency(withdrawal.net_amount)}\nRef: ${reference}`,
+    );
+  }, [showAlert]);
+
+  const handleCopyWithdrawalReference = useCallback(async (reference?: string | null) => {
+    const value = String(reference || '').trim();
+    if (!value) {
+      showAlert('info', 'No Reference', 'This withdrawal has no reference number yet.');
+      return;
+    }
+
+    try {
+      if (Platform.OS === 'web' && typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(value);
+        showAlert('success', 'Reference Copied', value);
+        return;
+      }
+
+      showAlert('info', 'Reference', value);
+    } catch {
+      showAlert('info', 'Reference', value);
+    }
+  }, [showAlert]);
+
   const dashboardIncidentRows = useMemo(() => {
     if (incidentTypeFilter === 'all') return metrics.incidentTypeBreakdown;
     return metrics.incidentTypeBreakdown.filter((row) => row.category === incidentTypeFilter);
@@ -1039,6 +1358,13 @@ export default function AdminDashboardPage() {
   const selectedRevenueValue = useMemo(() => {
     return revenueFilter === 'gross' ? metrics.grossRevenue : metrics.netRevenue;
   }, [metrics.grossRevenue, metrics.netRevenue, revenueFilter]);
+
+  const selectedRevenueLabel = revenueFilter === 'gross'
+    ? 'Gross booking revenue'
+    : 'Platform net revenue';
+
+  const showWithdrawalRevenueContext =
+    withdrawalTotals.count === 0 && (metrics.grossRevenue > 0 || metrics.providerEarnings > 0);
 
   const revenueTrendRows = useMemo(() => {
     return metrics.revenueTrend.map((row) => ({
@@ -1232,6 +1558,7 @@ export default function AdminDashboardPage() {
                   style={[styles.pulseValueMain, { color: '#10b981' }]}
                 />
               </View>
+              <Text style={[styles.pulseSubtitle, { color: colors.textSecondary, marginTop: 2 }]}>{selectedRevenueLabel}</Text>
               <Text style={[styles.pulseSubtitle, { color: colors.textSecondary, marginTop: 12 }]}>Provider earnings: {formatCurrency(metrics.providerEarnings)}</Text>
               <Text style={[styles.pulseSubtitle, { color: colors.textSecondary, marginTop: 2 }]}>Pending payouts: {formatCurrency(metrics.pendingPayouts)}</Text>
               <Text style={[styles.pulseSubtitle, { color: colors.textSecondary, marginTop: 2 }]}>Gross: {formatCurrency(metrics.grossRevenue)} | Platform net: {formatCurrency(metrics.netRevenue)}</Text>
@@ -1272,6 +1599,191 @@ export default function AdminDashboardPage() {
               </View>
               <Text style={[styles.pulseSubtitle, { color: colors.textSecondary, marginTop: 8 }]}>Avg report resolve: {formatHours(metrics.avgReportResolutionHours)}</Text>
             </View>
+          </View>
+
+          <View style={[styles.dataEnginePanel, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            <View style={[styles.pulseHeader, { marginBottom: 16, flexWrap: 'wrap', gap: 10 }]}>
+              <View>
+                <Text style={[styles.panelTitle, { color: colors.text, marginBottom: 0 }]}>Withdrawal Monitor</Text>
+                <Text style={[styles.panelSubtitle, { color: colors.textSecondary, marginBottom: 0 }]}>
+                  Completed: {formatCurrency(withdrawalTotals.completedAmount)} | Pending: {formatCurrency(withdrawalTotals.pendingAmount)} | Mock cashouts: {formatMetricCount(withdrawalTotals.mockCount)}
+                </Text>
+              </View>
+              <View style={styles.withdrawalButtonRow}>
+                <TouchableOpacity
+                  activeOpacity={0.88}
+                  onPress={() => router.push({ pathname: '/wallet', params: { action: 'withdraw' } })}
+                  style={[
+                    styles.dashboardActionButton,
+                    {
+                      backgroundColor: colors.primary,
+                      borderColor: colors.primary,
+                    },
+                  ]}
+                >
+                  <Ionicons name="arrow-down-circle-outline" size={15} color="#FFFFFF" />
+                  <Text style={[styles.dashboardActionText, { color: '#FFFFFF' }]}>Withdraw</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  activeOpacity={0.88}
+                  onPress={handleShowAllWithdrawals}
+                  style={[
+                    styles.dashboardActionButton,
+                    {
+                      backgroundColor: isDark ? '#0F172A' : '#FFFFFF',
+                      borderColor: colors.border,
+                    },
+                  ]}
+                >
+                  <Ionicons name="albums-outline" size={15} color={colors.primary} />
+                  <Text style={[styles.dashboardActionText, { color: colors.primary }]}>View All</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+
+            <View
+              style={[
+                styles.withdrawalExplainer,
+                {
+                  backgroundColor: isDark ? '#0F172A' : '#F8FAFC',
+                  borderColor: colors.border,
+                },
+              ]}
+            >
+              <Ionicons name="information-circle-outline" size={18} color={colors.primary} />
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.withdrawalExplainerTitle, { color: colors.text }]}>
+                  Revenue and withdrawals are separate.
+                </Text>
+                <Text style={[styles.withdrawalExplainerText, { color: colors.textSecondary }]}>
+                  Revenue is counted from paid bookings. Withdrawal rows appear only after a provider requests a cashout, so zero withdrawals can still be correct while revenue exists.
+                </Text>
+              </View>
+            </View>
+
+            <View style={styles.withdrawalSignalGrid}>
+              <View style={[styles.withdrawalSignalCard, { backgroundColor: isDark ? '#102A22' : '#ECFDF5', borderColor: isDark ? '#14532D' : '#BBF7D0' }]}>
+                <Text style={[styles.withdrawalSignalLabel, { color: isDark ? '#86EFAC' : '#047857' }]}>Paid Booking Revenue</Text>
+                <Text style={[styles.withdrawalSignalValue, { color: isDark ? '#D1FAE5' : '#065F46' }]}>{formatCurrency(metrics.grossRevenue)}</Text>
+              </View>
+              <View style={[styles.withdrawalSignalCard, { backgroundColor: isDark ? '#172554' : '#EFF6FF', borderColor: isDark ? '#1D4ED8' : '#BFDBFE' }]}>
+                <Text style={[styles.withdrawalSignalLabel, { color: isDark ? '#93C5FD' : '#0369A1' }]}>Provider Earnings</Text>
+                <Text style={[styles.withdrawalSignalValue, { color: isDark ? '#DBEAFE' : '#0C4A6E' }]}>{formatCurrency(metrics.providerEarnings)}</Text>
+              </View>
+              <View style={[styles.withdrawalSignalCard, { backgroundColor: isDark ? '#312E81' : '#EEF2FF', borderColor: isDark ? '#4F46E5' : '#C7D2FE' }]}>
+                <Text style={[styles.withdrawalSignalLabel, { color: isDark ? '#C4B5FD' : '#4338CA' }]}>Cashout Requests</Text>
+                <Text style={[styles.withdrawalSignalValue, { color: isDark ? '#EDE9FE' : '#312E81' }]}>{formatMetricCount(withdrawalTotals.count)}</Text>
+              </View>
+            </View>
+
+            {showWithdrawalRevenueContext && (
+              <Text style={[styles.withdrawalContextText, { color: colors.textSecondary }]}>
+                No provider has submitted a withdrawal request for this view yet. The revenue total is from booking payments, not cashout records.
+              </Text>
+            )}
+
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingBottom: 4 }}>
+              {WITHDRAWAL_STATUS_FILTERS.map((filter) => (
+                <SmoothFilterChip
+                  key={filter.key}
+                  isActive={withdrawalStatusFilter === filter.key}
+                  label={filter.label}
+                  onPress={() => setWithdrawalStatusFilter(filter.key)}
+                  activeColor={colors.primary}
+                  inactiveBackground={colors.card}
+                  inactiveBorder={colors.border}
+                  inactiveText={colors.textSecondary}
+                />
+              ))}
+            </ScrollView>
+
+            <View style={{ flexDirection: 'row', gap: 12, flexWrap: 'wrap', marginBottom: 12 }}>
+              <View style={[styles.badgeGreen, styles.badgeInline, { backgroundColor: isDark ? '#064E3B' : '#ECFDF5' }]}>
+                <Text style={styles.badgeTextGreen}>{formatMetricCount(withdrawalTotals.count)} records</Text>
+              </View>
+              <View style={[styles.badgeGreen, styles.badgeInline, { backgroundColor: isDark ? '#172554' : '#EFF6FF' }]}>
+                <Text style={[styles.badgeTextGreen, { color: '#0ea5e9' }]}>Requested {formatCurrency(withdrawalTotals.totalAmount)}</Text>
+              </View>
+              <View style={[styles.badgeGreen, styles.badgeInline, { backgroundColor: isDark ? '#312E81' : '#EEF2FF' }]}>
+                <Text style={[styles.badgeTextGreen, { color: colors.primary }]}>Net {formatCurrency(withdrawalTotals.totalNetAmount)}</Text>
+              </View>
+            </View>
+
+            <View style={styles.tableHeader}>
+              <Text style={[styles.tableCell, styles.th, { color: colors.textSecondary, flex: 1.3 }]}>Owner</Text>
+              <Text style={[styles.tableCell, styles.th, { color: colors.textSecondary, flex: 1.5 }]}>Destination</Text>
+              <Text style={[styles.tableCell, styles.th, { color: colors.textSecondary }]}>Status</Text>
+              <Text style={[styles.tableCell, styles.th, { color: colors.textSecondary, textAlign: 'right' }]}>Net Amount</Text>
+              <Text style={[styles.tableCell, styles.th, { color: colors.textSecondary, textAlign: 'right', flex: 1.15 }]}>Actions</Text>
+            </View>
+
+            {withdrawalsLoading ? (
+              <ActivityIndicator size="small" color={colors.primary} style={{ paddingVertical: 18 }} />
+            ) : withdrawals.length === 0 ? (
+              <Text style={[styles.emptyText, { color: colors.textSecondary, textAlign: 'left', paddingVertical: 12 }]}>
+                No withdrawal requests match this filter. Cashouts will appear here after providers submit a withdrawal from their wallet.
+              </Text>
+            ) : (
+              withdrawals.map((withdrawal) => {
+                const destinationLabel = withdrawal.payout_type === 'bank'
+                  ? (withdrawal.payout_bank_name || 'Bank')
+                  : withdrawal.payout_type.toUpperCase();
+                const ownerLabel = withdrawal.user?.full_name || withdrawal.user?.email || 'Unknown user';
+                const statusColor = withdrawal.status === 'completed'
+                  ? '#10b981'
+                  : withdrawal.status === 'failed' || withdrawal.status === 'cancelled'
+                    ? '#ef4444'
+                    : '#f59e0b';
+
+                return (
+                  <View key={withdrawal.id} style={[styles.tableRow, { borderBottomColor: colors.border }]}>
+                    <View style={[styles.tableCell, { flex: 1.3 }]}>
+                      <Text numberOfLines={1} style={{ color: colors.text, fontSize: 12, fontFamily: 'Poppins_500Medium' }}>{ownerLabel}</Text>
+                      <Text numberOfLines={1} style={{ color: colors.textSecondary, fontSize: 11, fontFamily: 'Poppins_400Regular' }}>{formatDateTime(withdrawal.created_at)}</Text>
+                    </View>
+                    <View style={[styles.tableCell, { flex: 1.5 }]}>
+                      <Text numberOfLines={1} style={{ color: colors.text, fontSize: 12, fontFamily: 'Poppins_500Medium' }}>
+                        {destinationLabel} {maskAccountNumber(withdrawal.payout_account_number)}
+                      </Text>
+                      <Text numberOfLines={1} style={{ color: colors.textSecondary, fontSize: 11, fontFamily: 'Poppins_400Regular' }}>
+                        {withdrawal.reference_number || 'No reference'}
+                      </Text>
+                    </View>
+                    <View style={[styles.tableCell, { justifyContent: 'center' }]}>
+                      <View style={[styles.badgeGreen, { alignSelf: 'flex-start', backgroundColor: `${statusColor}26` }]}>
+                        <Text style={[styles.badgeTextGreen, { color: statusColor }]}>{formatWithdrawalStatus(withdrawal.status)}</Text>
+                      </View>
+                    </View>
+                    <View style={[styles.tableCell, { justifyContent: 'center' }]}>
+                      <Text style={{ color: colors.text, fontSize: 12, fontFamily: 'Poppins_600SemiBold', textAlign: 'right' }}>
+                        {formatCurrency(withdrawal.net_amount)}
+                      </Text>
+                      <Text style={{ color: colors.textSecondary, fontSize: 11, fontFamily: 'Poppins_400Regular', textAlign: 'right' }}>
+                        {formatDateTime(withdrawal.processed_at)}
+                      </Text>
+                    </View>
+                    <View style={[styles.tableCell, styles.withdrawalActionsCell]}>
+                      <TouchableOpacity
+                        activeOpacity={0.88}
+                        onPress={() => handleWithdrawalDetails(withdrawal)}
+                        style={[styles.miniActionButton, { borderColor: colors.border, backgroundColor: isDark ? '#0F172A' : '#FFFFFF' }]}
+                      >
+                        <Ionicons name="document-text-outline" size={13} color={colors.primary} />
+                        <Text style={[styles.miniActionText, { color: colors.primary }]}>Details</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        activeOpacity={0.88}
+                        onPress={() => handleCopyWithdrawalReference(withdrawal.reference_number)}
+                        style={[styles.miniActionButton, { borderColor: colors.border, backgroundColor: isDark ? '#0F172A' : '#FFFFFF' }]}
+                      >
+                        <Ionicons name="copy-outline" size={13} color={colors.primary} />
+                        <Text style={[styles.miniActionText, { color: colors.primary }]}>Copy</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                );
+              })
+            )}
           </View>
 
           <View style={styles.dataEngineRow}>

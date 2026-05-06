@@ -536,6 +536,9 @@ async function sendVerificationEmail(
                             full_name: fullName,
                             first_name: firstName,
                             verification_complete: true,
+                            FullName: fullName,
+                            FirstName: firstName,
+                            VerificationComplete: true,
                         }
                     }
                 }),
@@ -563,7 +566,11 @@ async function sendVerificationEmail(
                             redirectTo: 'musikalokal://?verified=true',
                             data: {
                                 full_name: fullName,
+                                first_name: firstName,
                                 verification_complete: true,
+                                FullName: fullName,
+                                FirstName: firstName,
+                                VerificationComplete: true,
                             }
                         }
                     }),

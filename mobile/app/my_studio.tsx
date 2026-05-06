@@ -6,12 +6,15 @@ import { supabase } from '../lib/supabase';
 import CachedImage from '../src/components/CachedImage';
 import CustomAlert, { AlertType } from '../src/components/CustomAlert';
 import Header from '../src/components/header';
-import Modal from '../src/components/modal';
+import InlineErrorBanner from '../src/components/InlineErrorBanner';
+import Modal, { normalizeConfirmationInput } from '../src/components/modal';
 import Navbar from '../src/components/navbar';
 import Skeleton from '../src/components/Skeleton';
 import { useBottomBarClearance } from '../src/hooks/useBottomBarClearance';
 import { useRequireAuth } from '../src/context/AuthContext';
 import { useTheme } from '../src/context/ThemeContext';
+import { getActionErrorMessage, getResultErrorMessage, logActionError } from '../src/utils/actionError';
+import { invalidateListingCaches } from '../src/utils/listingCacheInvalidation';
 
 const normalizePermitStatus = (permitStatus: string | null | undefined) => {
     const normalizedPermitStatus = String(permitStatus || '').trim().toLowerCase();
@@ -22,14 +25,6 @@ const normalizePermitStatus = (permitStatus: string | null | undefined) => {
     if (['rejected', 'declined'].includes(normalizedPermitStatus)) return 'rejected';
     return normalizedPermitStatus;
 };
-
-const normalizeDeleteConfirmation = (value: string) =>
-    String(value || '')
-        .normalize('NFKC')
-        .replace(/[\u200B-\u200D\uFEFF]/g, '')
-        .replace(/\s+/g, ' ')
-        .trim()
-        .toLowerCase();
 
 export default function MyStudioScreen() {
     const { colors, isDark } = useTheme();
@@ -45,6 +40,7 @@ export default function MyStudioScreen() {
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
     const [deleting, setDeleting] = useState(false);
+    const [loadError, setLoadError] = useState<string | null>(null);
     const [alertVisible, setAlertVisible] = useState(false);
     const [alertConfig, setAlertConfig] = useState<{
         type: AlertType;
@@ -57,13 +53,14 @@ export default function MyStudioScreen() {
         message: '',
     });
 
-    const showAlert = (type: AlertType, title: string, message: string, buttons?: any[]) => {
+    const showAlert = useCallback((type: AlertType, title: string, message: string, buttons?: any[]) => {
         setAlertConfig({ type, title, message, buttons });
         setAlertVisible(true);
-    };
+    }, []);
 
-    const fetchStudios = useCallback(async () => {
+    const fetchStudios = useCallback(async (options?: { showAlertOnError?: boolean }) => {
         if (!userId) return;
+        setLoadError(null);
         try {
             const { data: baseStudios, error: baseError } = await supabase
                 .from('studios')
@@ -133,11 +130,17 @@ export default function MyStudioScreen() {
                 };
             }));
         } catch (e) {
+            const message = getActionErrorMessage(e, 'Failed to load studios.');
+            logActionError('MyStudio', 'fetchStudios', e, { userId });
+            setLoadError(message);
+            if (options?.showAlertOnError) {
+                showAlert('error', 'Could Not Load Studios', message);
+            }
         } finally {
             setLoading(false);
             setRefreshing(false);
         }
-    }, [userId]);
+    }, [showAlert, userId]);
 
     useFocusEffect(
         useCallback(() => {
@@ -150,7 +153,7 @@ export default function MyStudioScreen() {
                 }
             });
             const refreshInterval = setInterval(() => {
-                fetchStudios();
+                void fetchStudios();
             }, 30000);
 
             return () => {
@@ -170,7 +173,7 @@ export default function MyStudioScreen() {
                 'postgres_changes',
                 { event: '*', schema: 'public', table: 'studios', filter: `owner_id=eq.${userId}` },
                 () => {
-                    fetchStudios();
+                    void fetchStudios();
                 }
             )
             .subscribe();
@@ -182,7 +185,7 @@ export default function MyStudioScreen() {
 
     const onRefresh = () => {
         setRefreshing(true);
-        fetchStudios();
+        void fetchStudios({ showAlertOnError: true });
     };
 
     const closeDeleteModal = () => {
@@ -200,8 +203,8 @@ export default function MyStudioScreen() {
     };
 
     const isDeleteConfirmed =
-        normalizeDeleteConfirmation(deleteConfirmationText) ===
-        normalizeDeleteConfirmation(selectedName);
+        normalizeConfirmationInput(deleteConfirmationText) ===
+        normalizeConfirmationInput(selectedName);
 
     const handleDelete = async () => {
         if (!selectedId || !userId || deleting) return;
@@ -240,6 +243,7 @@ export default function MyStudioScreen() {
             }
 
             if (invokeError) {
+                logActionError('MyStudio', 'delete-studio-with-storage invoke', invokeError, { studioId: selectedId });
                 const { data: rpcData, error: rpcError } = await supabase.rpc('delete_studio_safely', {
                     p_studio_id: selectedId,
                     p_reason: 'Deleted from My Studio screen by owner (RPC fallback)',
@@ -266,14 +270,17 @@ export default function MyStudioScreen() {
                     return;
                 }
 
-                throw new Error(result?.message || 'Delete failed');
+                throw new Error(getResultErrorMessage(result, 'Delete failed'));
             }
 
             setStudios(prev => prev.filter(s => s.id !== selectedId));
+            invalidateListingCaches(userId, ['bookings', 'details', 'home', 'search', 'wallet']);
             closeDeleteModal();
             showAlert('success', 'Studio Deleted', 'Studio deleted successfully.');
         } catch (e) {
-            showAlert('error', 'Error', 'Failed to delete studio');
+            const message = getActionErrorMessage(e, 'Failed to delete studio.');
+            logActionError('MyStudio', 'delete studio', e, { studioId: selectedId, userId });
+            showAlert('error', 'Delete Failed', message);
         } finally {
             setDeleting(false);
         }
@@ -290,6 +297,14 @@ export default function MyStudioScreen() {
                     style={styles.flex1}
                     refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
                 >
+                    <InlineErrorBanner
+                        message={loadError}
+                        onRetry={() => {
+                            if (studios.length === 0) setLoading(true);
+                            void fetchStudios({ showAlertOnError: true });
+                        }}
+                    />
+
                     {loading ? (
                         <View style={styles.skeletonList}>
                             {[0, 1, 2].map((index) => (
@@ -458,7 +473,10 @@ export default function MyStudioScreen() {
                 inputPlaceholder="Type studio name"
                 inputValue={deleteConfirmationText}
                 onInputChange={setDeleteConfirmationText}
+                requiredInputValue={selectedName}
                 confirmDisabled={!isDeleteConfirmed || deleting}
+                loading={deleting}
+                loadingMessage="Deleting studio..."
             />
             <CustomAlert
                 visible={alertVisible}

@@ -1271,6 +1271,104 @@ serve(async (req: Request) => {
       return jsonResponse(responsePayload);
     }
 
+    if (action === "admin_fetch_withdrawals") {
+      const allowedStatuses = new Set(["pending", "processing", "completed", "failed", "cancelled"]);
+      const statusFilter = String(params.status || "all").trim().toLowerCase();
+      const searchTerm = sanitizeSearchTerm(params.searchQuery);
+      const limit = Math.max(1, Math.min(50, Number(params.limit || 10)));
+      const offset = Math.max(0, Number(params.offset || 0));
+
+      const applyWithdrawalFilters = (query: any) => {
+        let nextQuery = query;
+
+        if (allowedStatuses.has(statusFilter)) {
+          nextQuery = nextQuery.eq("status", statusFilter);
+        }
+
+        if (searchTerm.length >= 2) {
+          const ilikePattern = `%${searchTerm}%`;
+          nextQuery = nextQuery.or(
+            `reference_number.ilike.${ilikePattern},notes.ilike.${ilikePattern},payout_account_name.ilike.${ilikePattern},payout_account_number.ilike.${ilikePattern},payout_bank_name.ilike.${ilikePattern}`,
+          );
+        }
+
+        return nextQuery;
+      };
+
+      const listQuery = applyWithdrawalFilters(
+        client
+          .from("withdrawal_requests")
+          .select(
+            "id,user_id,wallet_id,payout_method_id,amount,fee,net_amount,status,payout_type,payout_account_name,payout_account_number,payout_bank_name,reference_number,notes,processed_at,processed_by,failure_reason,created_at,updated_at,user:profiles!withdrawal_requests_user_id_fkey(id,full_name,email,role)",
+            { count: "exact" },
+          ),
+      )
+        .order("created_at", { ascending: false })
+        .range(offset, offset + limit - 1);
+
+      const totalsQuery = applyWithdrawalFilters(
+        client
+          .from("withdrawal_requests")
+          .select("id,amount,net_amount,status,reference_number,notes"),
+      );
+
+      const [listResult, totalsResult] = await Promise.all([listQuery, totalsQuery]);
+
+      if (listResult.error) throw listResult.error;
+      if (totalsResult.error) throw totalsResult.error;
+
+      const totals = (totalsResult.data || []).reduce(
+        (acc: any, withdrawal: any) => {
+          const status = String(withdrawal?.status || "").trim().toLowerCase();
+          const amount = toNumber(withdrawal?.amount);
+          const netAmount = toNumber(withdrawal?.net_amount) || amount;
+          const reference = String(withdrawal?.reference_number || "").trim().toLowerCase();
+          const notes = String(withdrawal?.notes || "").trim().toLowerCase();
+
+          acc.count += 1;
+          acc.totalAmount += amount;
+          acc.totalNetAmount += netAmount;
+
+          if (status === "completed") {
+            acc.completedAmount += netAmount;
+          }
+
+          if (status === "pending" || status === "processing") {
+            acc.pendingAmount += netAmount;
+          }
+
+          if (reference.startsWith("mock_wd_") || notes.includes("mock cashout")) {
+            acc.mockCount += 1;
+          }
+
+          return acc;
+        },
+        {
+          count: 0,
+          totalAmount: 0,
+          totalNetAmount: 0,
+          completedAmount: 0,
+          pendingAmount: 0,
+          mockCount: 0,
+        },
+      );
+
+      return jsonResponse({
+        success: true,
+        withdrawals: listResult.data || [],
+        totals: {
+          count: totals.count,
+          totalAmount: roundTo(totals.totalAmount, 2),
+          totalNetAmount: roundTo(totals.totalNetAmount, 2),
+          completedAmount: roundTo(totals.completedAmount, 2),
+          pendingAmount: roundTo(totals.pendingAmount, 2),
+          mockCount: totals.mockCount,
+        },
+        count: listResult.count || 0,
+        hasMore: offset + limit < (listResult.count || 0),
+      });
+    }
+
     if (action === "fetch_audit") {
       const limit = Math.max(1, Math.min(200, Number(params.limit || 100)));
 

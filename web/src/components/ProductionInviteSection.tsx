@@ -134,7 +134,7 @@ export default function ProductionInviteSection({
         {FILTER_OPTIONS.map((option) => {
           const isActive = activeFilter === option.value;
           return (
-            <TouchableOpacity activeOpacity={1}
+            <TouchableOpacity activeOpacity={disabled ? 1 : 0.78}
               key={option.value}
               onPress={() => setActiveFilter(option.value)}
               disabled={disabled}
@@ -176,7 +176,7 @@ export default function ProductionInviteSection({
                   </Text>
                 </View>
               </View>
-              <TouchableOpacity activeOpacity={1}
+              <TouchableOpacity activeOpacity={disabled ? 1 : 0.78}
                 onPress={() => removeTarget(target.key)}
                 disabled={disabled}
                 style={styles.removeBtn}
@@ -220,7 +220,7 @@ export default function ProductionInviteSection({
                   </Text>
                 </View>
               </View>
-              <TouchableOpacity activeOpacity={1}
+              <TouchableOpacity activeOpacity={disabled ? 1 : 0.78}
                 onPress={() => addTarget(target)}
                 disabled={disabled}
                 style={[styles.addBtn, { backgroundColor: colors.primary, opacity: disabled ? 0.6 : 1 }]}

@@ -135,7 +135,7 @@ BEGIN
   RETURNING * INTO v_updated;
 
   -- Notify participants
-  INSERT INTO notifications (user_id, type, title, message, is_read, meta)
+  INSERT INTO notifications (user_id, type, title, message, read, meta)
   SELECT
     uid,
     'info',

@@ -378,11 +378,12 @@ export default function ConflictResolutionModal({
               </Text>
             </TouchableOpacity>
 
-            <TouchableOpacity activeOpacity={1}
+            <TouchableOpacity activeOpacity={!allResolved || isResolving ? 1 : 0.78}
               style={[
                 styles.resolveBtn,
                 {
                   backgroundColor: allResolved ? colors.primary : colors.primary + '50',
+                  opacity: !allResolved || isResolving ? 0.6 : 1,
                 },
               ]}
               onPress={handleResolveAll}
