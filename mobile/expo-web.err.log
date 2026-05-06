@@ -1,0 +1,4 @@
+  --non-interactive is not supported, use $CI=1 instead
+Input is required, but 'npx expo' is in non-interactive mode.
+Required input:
+> Use port 8083 instead?

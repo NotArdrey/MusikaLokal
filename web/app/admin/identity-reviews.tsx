@@ -113,11 +113,39 @@ interface ManualIdentityReviewEntry {
   id: string;
   user_id: string;
   submitted_by_email: string;
+  submitted_role?: string | null;
   document_type: string;
   document_type_key?: string | null;
   document_country: string;
   source: string;
   status: string;
+  didit_session_id?: string | null;
+  document_fingerprint?: string | null;
+  metadata?: Record<string, unknown> | null;
+  didit_review?: {
+    status?: string | null;
+    session_id?: string | null;
+    action_available?: boolean;
+    last_synced_at?: string | null;
+    assets_available?: boolean;
+    assets_error?: string | null;
+  } | null;
+  duplicate_reason?: string | null;
+  duplicate_match_count?: number | null;
+  duplicate_verified_identity_warning?: {
+    same_verified_id_fingerprint?: boolean;
+    same_role?: boolean;
+    different_email_or_account?: boolean;
+    match_count?: number;
+    matched_accounts?: Array<{
+      user_id?: string | null;
+      email?: string | null;
+      full_name?: string | null;
+      role?: string | null;
+      source?: string | null;
+      verified_at?: string | null;
+    }>;
+  } | null;
   created_at: string;
   expected_decision_by?: string | null;
   review_notes?: string | null;
@@ -128,6 +156,7 @@ interface ManualIdentityReviewEntry {
     id?: string;
     full_name?: string | null;
     email?: string | null;
+    role?: string | null;
     verification_status?: string | null;
     id_document_expiry?: string | null;
   } | null;
@@ -163,6 +192,51 @@ const formatDateTime = (value?: string | null) => {
     hour: '2-digit',
     minute: '2-digit',
   });
+};
+
+const isDiditPendingReviewSource = (source?: string | null) => (
+  String(source || '').trim().toUpperCase() === 'DIDIT_PENDING'
+);
+
+const formatDiditStatusLabel = (rawStatus?: string | null) => {
+  const value = String(rawStatus || '').trim();
+  const normalized = value.replace(/[\s-]+/g, '_').toUpperCase();
+
+  if (normalized === 'PENDING_REVIEW' || normalized === 'IN_REVIEW') return 'In Review';
+  if (normalized === 'APPROVED') return 'Approved';
+  if (normalized === 'DECLINED') return 'Declined';
+  if (normalized === 'RESUBMITTED') return 'Resubmitted';
+  if (normalized === 'IN_PROGRESS') return 'In Progress';
+  if (normalized === 'NOT_STARTED') return 'Not Started';
+  if (normalized === 'ABANDONED') return 'Abandoned';
+  if (normalized === 'EXPIRED') return 'Expired';
+  if (normalized === 'KYC_EXPIRED') return 'Kyc Expired';
+
+  return value || 'In Review';
+};
+
+const getDiditReviewInfo = (review?: ManualIdentityReviewEntry | null) => {
+  if (!review || !isDiditPendingReviewSource(review.source)) return null;
+
+  const metadata = review.metadata || {};
+  const metadataStatus = metadata['didit_status'] || metadata['source_session_status'];
+  const sessionId = review.didit_review?.session_id || review.didit_session_id || null;
+
+  return {
+    status: formatDiditStatusLabel(review.didit_review?.status || String(metadataStatus || review.status || 'PENDING_REVIEW')),
+    session_id: sessionId,
+    action_available: Boolean(review.didit_review?.action_available ?? sessionId),
+    last_synced_at: review.didit_review?.last_synced_at || String(metadata['didit_status_synced_at'] || '') || null,
+    assets_available: Boolean(review.didit_review?.assets_available),
+    assets_error: review.didit_review?.assets_error || null,
+  };
+};
+
+const formatDiditSessionLabel = (sessionId?: string | null) => {
+  const value = String(sessionId || '').trim();
+  if (!value) return '-';
+  if (value.length <= 16) return value;
+  return `${value.slice(0, 8)}...${value.slice(-6)}`;
 };
 
 const getErrorMessage = async (error: unknown, fallback: string) => {
@@ -212,6 +286,34 @@ const styles = StyleSheet.create({
   cardTitle: {
     fontSize: 15,
     fontFamily: 'Poppins_600SemiBold',
+  },
+  duplicateWarningBox: {
+    marginTop: 8,
+    borderWidth: 1,
+    borderRadius: 10,
+    padding: 10,
+    gap: 4,
+  },
+  duplicateWarningTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  duplicateWarningTitle: {
+    fontSize: 13,
+    fontFamily: 'Poppins_700Bold',
+  },
+  duplicateWarningText: {
+    fontSize: 12,
+    lineHeight: 18,
+    fontFamily: 'Poppins_400Regular',
+  },
+  diditReviewBox: {
+    marginTop: 8,
+    borderWidth: 1,
+    borderRadius: 10,
+    padding: 10,
+    gap: 4,
   },
   centerContainer: {
     flex: 1,
@@ -300,6 +402,21 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 12,
     fontFamily: 'Poppins_600SemiBold',
+  },
+  overrideConfirmRow: {
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+  },
+  overrideConfirmText: {
+    flex: 1,
+    fontSize: 12,
+    lineHeight: 18,
+    fontFamily: 'Poppins_500Medium',
   },
   queueBadge: {
     borderRadius: 999,
@@ -470,6 +587,7 @@ export default function AdminIdentityReviewsPage() {
   const [manualReviewModalVisible, setManualReviewModalVisible] = useState(false);
   const [manualReviewDecision, setManualReviewDecision] = useState<'APPROVED' | 'DECLINED'>('APPROVED');
   const [manualReviewNotes, setManualReviewNotes] = useState('');
+  const [duplicateOverrideConfirmed, setDuplicateOverrideConfirmed] = useState(false);
   const [manualReviewSubmitting, setManualReviewSubmitting] = useState(false);
   const [manualReviewTarget, setManualReviewTarget] = useState<ManualIdentityReviewEntry | null>(null);
   const [manualReviewMediaPreview, setManualReviewMediaPreview] = useState<{ uri: string; title: string } | null>(null);
@@ -573,6 +691,7 @@ export default function AdminIdentityReviewsPage() {
     setManualReviewTarget(targetReview);
     setManualReviewDecision(decision);
     setManualReviewNotes('');
+    setDuplicateOverrideConfirmed(false);
     setManualReviewModalVisible(true);
   }, []);
 
@@ -581,12 +700,19 @@ export default function AdminIdentityReviewsPage() {
     setManualReviewModalVisible(false);
     setManualReviewTarget(null);
     setManualReviewNotes('');
+    setDuplicateOverrideConfirmed(false);
     setManualReviewDecision('APPROVED');
   }, [manualReviewSubmitting]);
 
   const submitManualReviewDecision = useCallback(async () => {
     if (!manualReviewTarget?.id) {
       showAlert('warning', 'Missing review', 'Select a review before submitting a decision.');
+      return;
+    }
+
+    const requiresDuplicateOverride = manualReviewDecision === 'APPROVED' && Boolean(manualReviewTarget.duplicate_verified_identity_warning);
+    if (requiresDuplicateOverride && (!duplicateOverrideConfirmed || !manualReviewNotes.trim())) {
+      showAlert('warning', 'Duplicate override required', 'Confirm the duplicate override and add admin notes before approving this review.');
       return;
     }
 
@@ -599,12 +725,14 @@ export default function AdminIdentityReviewsPage() {
         reviewId: manualReviewTarget.id,
         decision: manualReviewDecision,
         reviewNotes: manualReviewNotes.trim() || null,
+        duplicateOverrideConfirmed,
       });
 
       const reviewedItem = data?.item || {};
       const emailSent = Boolean(reviewedItem.decision_email_sent);
       const emailQueued = Boolean(reviewedItem.decision_email_queued);
       const emailError = String(reviewedItem.decision_email_error || '').trim();
+      const diditSync = reviewedItem.didit_status_sync as { synced?: boolean; status?: string | null } | null | undefined;
       console.log('manual identity review email result', {
         reviewId: manualReviewTarget.id,
         decision: manualReviewDecision,
@@ -612,13 +740,17 @@ export default function AdminIdentityReviewsPage() {
         queued: emailQueued,
         provider: reviewedItem.decision_email_provider || null,
         error: emailError || null,
+        diditStatus: diditSync?.status || null,
       });
       const cleanEmailError = cleanManualReviewEmailError(emailError);
+      const diditMessage = diditSync?.synced
+        ? ` Didit was updated to ${formatDiditStatusLabel(diditSync.status)}.`
+        : '';
       const emailMessage = emailSent
-        ? 'The decision was saved and the email notification was sent automatically.'
+        ? `The decision was saved and the email notification was sent automatically.${diditMessage}`
         : emailQueued
-          ? `The decision was saved. The email is queued for later delivery. ${cleanEmailError || 'Check the Gmail sender secrets or account limit.'}`
-          : `The decision was saved, but the email notification was not sent. ${cleanEmailError || 'Check the email provider configuration.'}`;
+          ? `The decision was saved.${diditMessage} The email is queued for later delivery. ${cleanEmailError || 'Check the Gmail sender secrets or account limit.'}`
+          : `The decision was saved.${diditMessage} The email notification was not sent. ${cleanEmailError || 'Check the email provider configuration.'}`;
 
       showAlert(
         emailSent ? 'success' : 'warning',
@@ -629,6 +761,7 @@ export default function AdminIdentityReviewsPage() {
       setManualReviewModalVisible(false);
       setManualReviewTarget(null);
       setManualReviewNotes('');
+      setDuplicateOverrideConfirmed(false);
       setManualReviewDecision('APPROVED');
 
       invalidateAdminPageCache();
@@ -644,6 +777,7 @@ export default function AdminIdentityReviewsPage() {
     manualReviewTarget,
     manualReviewDecision,
     manualReviewNotes,
+    duplicateOverrideConfirmed,
     invokeAdminUsersManagement,
     showAlert,
     fetchManualReviews,
@@ -661,6 +795,8 @@ export default function AdminIdentityReviewsPage() {
         review.document_type,
         review.document_country,
         review.source,
+        review.didit_session_id,
+        getDiditReviewInfo(review)?.status,
       ]
         .filter(Boolean)
         .join(' ')
@@ -682,6 +818,8 @@ export default function AdminIdentityReviewsPage() {
   if (!session || isGuest || !isAdmin) {
     return null;
   }
+
+  const manualReviewDiditInfo = getDiditReviewInfo(manualReviewTarget);
 
   return (
     <View style={[styles.flex1, { backgroundColor: colors.background }]}>
@@ -733,7 +871,7 @@ export default function AdminIdentityReviewsPage() {
                 <View style={styles.queueHeaderCopy}>
                   <Text style={[styles.queueHeaderTitle, { color: colors.text }]}>Identity Reviews</Text>
                   <Text style={[styles.queueHeaderSubtitle, { color: colors.textSecondary }]}>
-                    Review unsupported ID uploads from signup and save the final decision.
+                    Review manual uploads and Didit pending checks from signup.
                   </Text>
                 </View>
               </View>
@@ -794,14 +932,69 @@ export default function AdminIdentityReviewsPage() {
                 const profileName = review.profile?.full_name || review.submitted_by_email || 'Unknown user';
                 const profileEmail = review.profile?.email || review.submitted_by_email || '-';
                 const isReviewBusy = manualReviewActionLoadingId === review.id;
+                const duplicateWarning = review.duplicate_verified_identity_warning;
+                const matchedAccounts = duplicateWarning?.matched_accounts || [];
+                const diditReview = getDiditReviewInfo(review);
 
                 return (
                   <View key={review.id} style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
                     <Text style={[styles.cardTitle, { color: colors.text }]}>{profileName}</Text>
                     <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>{profileEmail}</Text>
+                    <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Role: {review.profile?.role || review.submitted_role || '-'}</Text>
                     <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Document: {review.document_type} ({review.document_country || 'PHL'})</Text>
                     <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>ID expires: {review.profile?.id_document_expiry || '-'}</Text>
                     <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Source: {String(review.source || 'MANUAL_UPLOAD').replace(/_/g, ' ')}</Text>
+                    {diditReview ? (
+                      <View style={[styles.diditReviewBox, { backgroundColor: isDark ? '#172554' : '#EFF6FF', borderColor: '#3B82F6' }]}>
+                        <View style={styles.duplicateWarningTitleRow}>
+                          <Ionicons name="shield-checkmark-outline" size={16} color="#2563EB" />
+                          <Text style={[styles.duplicateWarningTitle, { color: isDark ? '#BFDBFE' : '#1D4ED8' }]}>Didit In Review</Text>
+                        </View>
+                        <Text style={[styles.duplicateWarningText, { color: isDark ? '#DBEAFE' : '#1E40AF' }]}>
+                          Didit status: {diditReview.status} - MusikaLokal status: Pending Review
+                        </Text>
+                        <Text style={[styles.duplicateWarningText, { color: isDark ? '#DBEAFE' : '#1E40AF' }]}>
+                          Session: {formatDiditSessionLabel(diditReview.session_id)}
+                        </Text>
+                        <Text style={[styles.duplicateWarningText, { color: isDark ? '#DBEAFE' : '#1E40AF' }]}>
+                          Didit files: {diditReview.assets_available ? 'Ready' : 'Unavailable'}
+                        </Text>
+                        {diditReview.assets_error ? (
+                          <Text style={[styles.duplicateWarningText, { color: isDark ? '#FCA5A5' : '#B91C1C' }]}>
+                            {diditReview.assets_error}
+                          </Text>
+                        ) : null}
+                      </View>
+                    ) : null}
+                    {review.duplicate_reason ? (
+                      <Text style={[styles.cardMeta, { color: '#D97706' }]}>
+                        Review note: {review.duplicate_reason}
+                      </Text>
+                    ) : null}
+                    {review.duplicate_match_count ? (
+                      <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>
+                        Matching same-role account(s): {review.duplicate_match_count}
+                      </Text>
+                    ) : null}
+                    {duplicateWarning ? (
+                      <View style={[styles.duplicateWarningBox, { backgroundColor: isDark ? '#451A03' : '#FFFBEB', borderColor: '#F59E0B' }]}>
+                        <View style={styles.duplicateWarningTitleRow}>
+                          <Ionicons name="warning-outline" size={16} color="#D97706" />
+                          <Text style={[styles.duplicateWarningTitle, { color: '#B45309' }]}>Same-role verified ID match</Text>
+                        </View>
+                        <Text style={[styles.duplicateWarningText, { color: isDark ? '#FDE68A' : '#92400E' }]}>
+                          This review has the same verified ID fingerprint and role as another account with a different email/account.
+                        </Text>
+                        <Text style={[styles.duplicateWarningText, { color: isDark ? '#FDE68A' : '#92400E' }]}>
+                          Matched account{Number(duplicateWarning.match_count || 0) === 1 ? '' : 's'}: {Number(duplicateWarning.match_count || matchedAccounts.length)}
+                        </Text>
+                        {matchedAccounts.slice(0, 3).map((account) => (
+                          <Text key={String(account.user_id || account.email)} style={[styles.duplicateWarningText, { color: isDark ? '#FDE68A' : '#92400E' }]}>
+                            {account.email || account.user_id || 'Unknown account'} · {account.role || 'same role'}
+                          </Text>
+                        ))}
+                      </View>
+                    ) : null}
                     <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Submitted: {formatDateTime(review.created_at)}</Text>
                     {review.expected_decision_by ? (
                       <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Expected by: {formatDateTime(review.expected_decision_by)}</Text>
@@ -887,18 +1080,74 @@ export default function AdminIdentityReviewsPage() {
               User: {manualReviewTarget?.profile?.full_name || manualReviewTarget?.submitted_by_email || '-'}
             </Text>
             <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>
+              Role: {manualReviewTarget?.profile?.role || manualReviewTarget?.submitted_role || '-'}
+            </Text>
+            <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>
               ID expires: {manualReviewTarget?.profile?.id_document_expiry || '-'}
             </Text>
             <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>
               Document: {manualReviewTarget?.document_type || '-'}
             </Text>
+            {manualReviewDiditInfo ? (
+              <View style={[styles.diditReviewBox, { backgroundColor: isDark ? '#172554' : '#EFF6FF', borderColor: '#3B82F6' }]}>
+                <View style={styles.duplicateWarningTitleRow}>
+                  <Ionicons name="shield-checkmark-outline" size={16} color="#2563EB" />
+                  <Text style={[styles.duplicateWarningTitle, { color: isDark ? '#BFDBFE' : '#1D4ED8' }]}>Didit Review Sync</Text>
+                </View>
+                <Text style={[styles.duplicateWarningText, { color: isDark ? '#DBEAFE' : '#1E40AF' }]}>
+                  Didit status: {manualReviewDiditInfo.status}
+                </Text>
+                <Text style={[styles.duplicateWarningText, { color: isDark ? '#DBEAFE' : '#1E40AF' }]}>
+                  This decision will update Didit to {manualReviewDecision === 'APPROVED' ? 'Approved' : 'Declined'}.
+                </Text>
+                <Text style={[styles.duplicateWarningText, { color: isDark ? '#DBEAFE' : '#1E40AF' }]}>
+                  Session: {formatDiditSessionLabel(manualReviewDiditInfo.session_id)}
+                </Text>
+                <Text style={[styles.duplicateWarningText, { color: isDark ? '#DBEAFE' : '#1E40AF' }]}>
+                  Didit files: {manualReviewDiditInfo.assets_available ? 'Ready' : 'Unavailable'}
+                </Text>
+              </View>
+            ) : null}
+            {manualReviewTarget?.duplicate_reason ? (
+              <Text style={[styles.cardMeta, { color: '#D97706' }]}>
+                {manualReviewTarget.duplicate_reason}
+              </Text>
+            ) : null}
+            {manualReviewTarget?.duplicate_verified_identity_warning ? (
+              <View style={[styles.duplicateWarningBox, { backgroundColor: isDark ? '#451A03' : '#FFFBEB', borderColor: '#F59E0B' }]}>
+                <View style={styles.duplicateWarningTitleRow}>
+                  <Ionicons name="warning-outline" size={16} color="#D97706" />
+                  <Text style={[styles.duplicateWarningTitle, { color: '#B45309' }]}>Same-role verified ID match</Text>
+                </View>
+                <Text style={[styles.duplicateWarningText, { color: isDark ? '#FDE68A' : '#92400E' }]}>
+                  Same verified ID fingerprint, same role, different email/account.
+                </Text>
+              </View>
+            ) : null}
+
+            {manualReviewDecision === 'APPROVED' && manualReviewTarget?.duplicate_verified_identity_warning ? (
+              <TouchableOpacity
+                activeOpacity={1}
+                onPress={() => setDuplicateOverrideConfirmed((current) => !current)}
+                style={[styles.overrideConfirmRow, { borderColor: duplicateOverrideConfirmed ? '#D97706' : colors.border }]}
+              >
+                <Ionicons
+                  name={duplicateOverrideConfirmed ? 'checkbox-outline' : 'square-outline'}
+                  size={20}
+                  color={duplicateOverrideConfirmed ? '#D97706' : colors.textSecondary}
+                />
+                <Text style={[styles.overrideConfirmText, { color: colors.text }]}>
+                  I reviewed the matched account context and want to approve this duplicate, replacing the current approved claim.
+                </Text>
+              </TouchableOpacity>
+            ) : null}
 
             <TextInput
               value={manualReviewNotes}
               onChangeText={setManualReviewNotes}
               multiline
               numberOfLines={4}
-              placeholder="Optional admin notes"
+              placeholder={manualReviewDecision === 'APPROVED' && manualReviewTarget?.duplicate_verified_identity_warning ? 'Required notes for duplicate approval' : 'Optional admin notes'}
               placeholderTextColor={colors.textSecondary}
               style={[
                 styles.modalInputCompact,

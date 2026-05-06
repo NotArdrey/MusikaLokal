@@ -247,8 +247,14 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
     // Helper to filter/block unverified sessions (prevents auto-login during signup)
     const filterSession = (currentSession: Session | null) => {
-      // If user exists but has explicit is_verified: false, mimic logged out state
-      if (currentSession?.user?.user_metadata?.is_verified === false) {
+      const metadata = currentSession?.user?.user_metadata;
+      const metadataStatus =
+        typeof metadata?.verification_status === "string"
+          ? metadata.verification_status.toUpperCase()
+          : "";
+
+      // If user exists but identity is still pending, mimic logged out state.
+      if (metadata?.is_verified === false && metadataStatus !== "APPROVED") {
         return null;
       }
       return currentSession;

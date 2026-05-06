@@ -3,6 +3,12 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 // @ts-ignore
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { sendEmailWithGmail } from "../_shared/gmailEmail.ts";
+import {
+  claimApprovedIdentityDocument,
+  getDuplicateIdentityReviewReason,
+  recordIdentityDocumentClaim,
+  queueIdentityReview,
+} from "../_shared/identityDuplicate.ts";
 
 declare const Deno: {
   env: {
@@ -265,7 +271,7 @@ async function generateManualApprovalConfirmationLink(client: any, userEmail: st
     options: {
       redirectTo,
       data: {
-        is_verified: true,
+        is_verified: false,
         verification_status: "APPROVED",
       },
     },
@@ -407,6 +413,315 @@ async function sendDecisionEmail(
   };
 }
 
+function normalizeDiditReviewStatus(rawStatus: unknown) {
+  const value = String(rawStatus || "").trim();
+  const upperValue = value.replace(/[\s-]+/g, "_").toUpperCase();
+
+  if (upperValue === "PENDING_REVIEW" || upperValue === "IN_REVIEW") return "In Review";
+  if (upperValue === "APPROVED") return "Approved";
+  if (upperValue === "DECLINED") return "Declined";
+  if (upperValue === "RESUBMITTED") return "Resubmitted";
+  if (upperValue === "IN_PROGRESS") return "In Progress";
+  if (upperValue === "NOT_STARTED") return "Not Started";
+  if (upperValue === "ABANDONED") return "Abandoned";
+  if (upperValue === "EXPIRED") return "Expired";
+  if (upperValue === "KYC_EXPIRED") return "Kyc Expired";
+
+  return value || null;
+}
+
+function isDiditPendingReview(review: any) {
+  return String(review?.source || "").trim().toUpperCase() === "DIDIT_PENDING";
+}
+
+function getDiditReviewInfo(review: any) {
+  if (!isDiditPendingReview(review)) return null;
+
+  const metadata = review?.metadata && typeof review.metadata === "object" ? review.metadata : {};
+  const rawStatus = metadata.didit_status || metadata.source_session_status || review.status || "PENDING_REVIEW";
+
+  return {
+    status: normalizeDiditReviewStatus(rawStatus) || "In Review",
+    session_id: review.didit_session_id || null,
+    action_available: Boolean(review.didit_session_id),
+    last_synced_at: metadata.didit_status_synced_at || null,
+  };
+}
+
+function firstNonEmptyString(...values: unknown[]) {
+  for (const value of values) {
+    const normalized = String(value || "").trim();
+    if (normalized) return normalized;
+  }
+
+  return null;
+}
+
+function firstArrayItem(value: unknown) {
+  return Array.isArray(value) && value.length > 0 ? value[0] : null;
+}
+
+function extractDiditReviewAssetUrls(sessionDecision: any) {
+  const idVerification = firstArrayItem(sessionDecision?.id_verifications);
+  const livenessCheck = firstArrayItem(sessionDecision?.liveness_checks);
+  const faceMatch = firstArrayItem(sessionDecision?.face_matches);
+  const nfcVerification = firstArrayItem(sessionDecision?.nfc_verifications);
+
+  const frontImageUrl = firstNonEmptyString(
+    idVerification?.full_front_image,
+    idVerification?.front_image,
+    idVerification?.front_image_camera_front,
+  );
+  const backImageUrl = firstNonEmptyString(
+    idVerification?.full_back_image,
+    idVerification?.back_image,
+    idVerification?.back_image_camera_front,
+  );
+  const selfieImageUrl = firstNonEmptyString(
+    livenessCheck?.reference_image,
+    faceMatch?.source_image,
+    faceMatch?.target_image,
+    nfcVerification?.portrait_image,
+    idVerification?.portrait_image,
+  );
+
+  return {
+    front_image_url: frontImageUrl,
+    back_image_url: backImageUrl,
+    selfie_image_url: selfieImageUrl,
+    source_status: sessionDecision?.status || null,
+    available: Boolean(frontImageUrl || backImageUrl || selfieImageUrl),
+  };
+}
+
+async function fetchDiditReviewAssetUrls(sessionId: string) {
+  const diditApiKey = Deno.env.get("DIDIT_API_KEY") || "";
+  if (!diditApiKey) {
+    return {
+      front_image_url: null,
+      back_image_url: null,
+      selfie_image_url: null,
+      source_status: null,
+      available: false,
+      error: "DIDIT_API_KEY is not configured.",
+    };
+  }
+
+  const diditResponse = await fetch(
+    `https://verification.didit.me/v3/session/${encodeURIComponent(sessionId)}/decision/`,
+    {
+      method: "GET",
+      headers: {
+        "x-api-key": diditApiKey,
+      },
+    },
+  );
+
+  const responseText = await diditResponse.text();
+  let responsePayload: any = null;
+  if (responseText) {
+    try {
+      responsePayload = JSON.parse(responseText);
+    } catch {
+      responsePayload = { raw: responseText.slice(0, 500) };
+    }
+  }
+
+  if (!diditResponse.ok) {
+    const diditMessage = String(
+      responsePayload?.message ||
+        responsePayload?.detail ||
+        responsePayload?.error ||
+        responsePayload?.raw ||
+        "",
+    ).trim();
+
+    console.error("didit_manual_review_assets_fetch_failed", {
+      sessionId,
+      status: diditResponse.status,
+      message: diditMessage || null,
+    });
+
+    return {
+      front_image_url: null,
+      back_image_url: null,
+      selfie_image_url: null,
+      source_status: null,
+      available: false,
+      error: diditMessage || `Didit asset fetch failed with HTTP ${diditResponse.status}.`,
+    };
+  }
+
+  return {
+    ...extractDiditReviewAssetUrls(responsePayload),
+    error: null,
+  };
+}
+
+function isPendingDiditStatus(rawStatus: unknown) {
+  const value = String(rawStatus || "").trim().replace(/[\s-]+/g, "_").toUpperCase();
+  return value === "PENDING_REVIEW" || value === "IN_REVIEW";
+}
+
+async function queueMissingDiditPendingReviews(client: any) {
+  const { data: pendingProfiles, error: profilesError } = await client
+    .from("profiles")
+    .select("id, email, role, verification_status, didit_session_id, created_at")
+    .eq("verification_status", "PENDING_REVIEW")
+    .not("didit_session_id", "is", null)
+    .limit(300);
+
+  if (profilesError) {
+    throw new Error(`Unable to load pending Didit profiles: ${profilesError.message}`);
+  }
+
+  const profiles = (pendingProfiles || []).filter((profile: any) => {
+    return String(profile?.id || "").trim() && String(profile?.didit_session_id || "").trim();
+  });
+
+  if (profiles.length === 0) {
+    return { created: 0, checked: 0 };
+  }
+
+  const profileIds = profiles.map((profile: any) => String(profile.id));
+  const sessionIds = Array.from(new Set(profiles.map((profile: any) => String(profile.didit_session_id || "").trim()).filter(Boolean)));
+
+  const [{ data: existingReviews, error: reviewsError }, { data: sessions, error: sessionsError }] = await Promise.all([
+    client
+      .from("manual_identity_reviews")
+      .select("id, user_id, didit_session_id, source, status")
+      .in("user_id", profileIds)
+      .eq("status", "PENDING_REVIEW"),
+    client
+      .from("verification_sessions")
+      .select("session_ref, status, verification_data, created_at")
+      .in("session_ref", sessionIds),
+  ]);
+
+  if (reviewsError) {
+    throw new Error(`Unable to load pending Didit identity reviews: ${reviewsError.message}`);
+  }
+
+  if (sessionsError) {
+    throw new Error(`Unable to load pending Didit verification sessions: ${sessionsError.message}`);
+  }
+
+  const existingByUser = new Set((existingReviews || []).map((review: any) => String(review.user_id || "")));
+  const sessionByRef = new Map((sessions || []).map((session: any) => [String(session.session_ref || ""), session]));
+  let created = 0;
+
+  for (const profile of profiles) {
+    const userId = String(profile.id || "");
+    const diditSessionId = String(profile.didit_session_id || "").trim();
+    if (!userId || !diditSessionId || existingByUser.has(userId)) continue;
+
+    const session = sessionByRef.get(diditSessionId);
+    if (session && !isPendingDiditStatus(session.status)) continue;
+
+    const verificationData = session?.verification_data && typeof session.verification_data === "object"
+      ? session.verification_data
+      : {};
+
+    const queued = await queueIdentityReview(client, {
+      userId,
+      email: profile.email || verificationData.email || "",
+      role: profile.role || verificationData.role || "musician",
+      documentType: verificationData.document_type || verificationData.documentType || "Government ID",
+      documentTypeKey: verificationData.document_type_key || verificationData.documentTypeKey || null,
+      documentCountry: verificationData.document_country || verificationData.issuing_country || verificationData.country || "PHL",
+      source: "DIDIT_PENDING",
+      diditSessionId,
+      documentFingerprint: verificationData.document_fingerprint || null,
+      metadata: {
+        didit_status: normalizeDiditReviewStatus(session?.status || profile.verification_status || "PENDING_REVIEW"),
+        source_session_status: session?.status || profile.verification_status || "PENDING_REVIEW",
+        verification_session_user_ref: verificationData.user_ref || null,
+        review_started_at: verificationData.review_started_at || session?.created_at || profile.created_at || null,
+        hydrated_from_pending_profile: true,
+      },
+    });
+
+    if (queued?.id) {
+      created += 1;
+      existingByUser.add(userId);
+    }
+  }
+
+  return { created, checked: profiles.length };
+}
+
+function mapDiditManualDecision(decision: string) {
+  return decision === "APPROVED" ? "Approved" : "Declined";
+}
+
+async function updateDiditManualReviewStatus(
+  sessionId: string,
+  decision: "APPROVED" | "DECLINED",
+  reviewNotes: string | null,
+) {
+  const diditApiKey = Deno.env.get("DIDIT_API_KEY") || "";
+  if (!diditApiKey) {
+    throw new Error("DIDIT_API_KEY is not configured, so this Didit review cannot be updated from MusikaLokal.");
+  }
+
+  const nextStatus = mapDiditManualDecision(decision);
+  const diditResponse = await fetch(
+    `https://verification.didit.me/v3/session/${encodeURIComponent(sessionId)}/update-status/`,
+    {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": diditApiKey,
+      },
+      body: JSON.stringify({
+        new_status: nextStatus,
+        comment: reviewNotes || `MusikaLokal admin marked this identity review as ${nextStatus}.`,
+        send_email: false,
+      }),
+    },
+  );
+
+  const responseText = await diditResponse.text();
+  let responsePayload: any = null;
+  if (responseText) {
+    try {
+      responsePayload = JSON.parse(responseText);
+    } catch {
+      responsePayload = { raw: responseText.slice(0, 500) };
+    }
+  }
+
+  if (!diditResponse.ok) {
+    const diditMessage = String(
+      responsePayload?.message ||
+        responsePayload?.detail ||
+        responsePayload?.error ||
+        responsePayload?.raw ||
+        "",
+    ).trim();
+
+    console.error("didit_manual_review_status_update_failed", {
+      sessionId,
+      status: diditResponse.status,
+      message: diditMessage || null,
+    });
+
+    throw new Error(
+      diditMessage
+        ? `Didit status update failed: ${diditMessage}`
+        : `Didit status update failed with HTTP ${diditResponse.status}.`,
+    );
+  }
+
+  return {
+    synced: true,
+    session_id: responsePayload?.session_id || sessionId,
+    session_kind: responsePayload?.session_kind || null,
+    status: nextStatus,
+    synced_at: new Date().toISOString(),
+  };
+}
+
 serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -463,11 +778,16 @@ serve(async (req: Request) => {
     if (action === "fetch_manual_identity_reviews") {
       const limit = Math.max(1, Math.min(300, Number(body?.limit || 100)));
       const requestedStatus = String(body?.status || "PENDING_REVIEW").trim().toUpperCase();
+      let diditQueueHydration = { created: 0, checked: 0 };
+
+      if (!requestedStatus || requestedStatus === "ALL" || requestedStatus === "PENDING_REVIEW") {
+        diditQueueHydration = await queueMissingDiditPendingReviews(client);
+      }
 
       let reviewQuery = client
         .from("manual_identity_reviews")
         .select(
-          "id, user_id, submitted_by_email, document_type, document_type_key, document_country, source, status, front_image_path, back_image_path, selfie_image_path, review_notes, reviewed_by, reviewed_at, expected_decision_by, created_at, updated_at",
+          "id, user_id, submitted_by_email, submitted_role, document_type, document_type_key, document_country, source, status, didit_session_id, document_fingerprint, duplicate_reason, duplicate_match_count, metadata, front_image_path, back_image_path, selfie_image_path, review_notes, reviewed_by, reviewed_at, expected_decision_by, created_at, updated_at",
         )
         .order("created_at", { ascending: false })
         .limit(limit);
@@ -487,7 +807,7 @@ serve(async (req: Request) => {
       if (userIds.length > 0) {
         const { data: linkedProfiles, error: linkedProfilesError } = await client
           .from("profiles")
-          .select("id, full_name, email, verification_status, id_document_expiry")
+          .select("id, full_name, email, role, verification_status, id_document_expiry")
           .in("id", userIds);
 
         if (!linkedProfilesError && linkedProfiles) {
@@ -495,14 +815,107 @@ serve(async (req: Request) => {
         }
       }
 
+      const reviewFingerprints = Array.from(new Set(
+        (reviews || [])
+          .map((item: any) => String(item.document_fingerprint || "").trim())
+          .filter(Boolean),
+      ));
+      const reviewRoles = Array.from(new Set(
+        (reviews || [])
+          .map((item: any) => {
+            const profile = profilesById.get(String(item.user_id));
+            return String(item.submitted_role || profile?.role || "").trim().toLowerCase();
+          })
+          .filter(Boolean),
+      ));
+      let approvedClaimsByFingerprintRole = new Map<string, any[]>();
+
+      if (reviewFingerprints.length > 0 && reviewRoles.length > 0) {
+        const { data: approvedClaims, error: approvedClaimsError } = await client
+          .from("identity_document_claims")
+          .select("id, user_id, role, source, status, created_at, document_fingerprint, profiles:user_id(id, full_name, email, role)")
+          .in("document_fingerprint", reviewFingerprints)
+          .in("role", reviewRoles)
+          .eq("status", "APPROVED");
+
+        if (approvedClaimsError) {
+          return jsonResponse({ error: approvedClaimsError.message }, 400);
+        }
+
+        approvedClaimsByFingerprintRole = new Map();
+        for (const claim of approvedClaims || []) {
+          const key = `${String(claim.document_fingerprint || "")}:${String(claim.role || "").trim().toLowerCase()}`;
+          const existing = approvedClaimsByFingerprintRole.get(key) || [];
+          existing.push(claim);
+          approvedClaimsByFingerprintRole.set(key, existing);
+        }
+      }
+
+      const diditAssetUrlsBySession = new Map<string, any>();
+      const diditSessionIds = Array.from(new Set(
+        (reviews || [])
+          .filter((review: any) => isDiditPendingReview(review))
+          .map((review: any) => String(review.didit_session_id || "").trim())
+          .filter(Boolean),
+      ));
+
+      for (const sessionId of diditSessionIds.slice(0, 50)) {
+        diditAssetUrlsBySession.set(sessionId, await fetchDiditReviewAssetUrls(sessionId));
+      }
+
       const items = await Promise.all((reviews || []).map(async (review: any) => {
+        const profile = profilesById.get(String(review.user_id)) || null;
+        const reviewEmail = String(profile?.email || review.submitted_by_email || "").trim().toLowerCase();
+        const reviewRole = String(review.submitted_role || profile?.role || "").trim().toLowerCase();
+        const duplicateWarningKey = `${String(review.document_fingerprint || "").trim()}:${reviewRole}`;
+        const duplicateMatches = (approvedClaimsByFingerprintRole.get(duplicateWarningKey) || [])
+          .filter((claim: any) => {
+            const matchUserId = String(claim.user_id || "").trim();
+            const matchEmail = String(claim.profiles?.email || "").trim().toLowerCase();
+            return matchUserId &&
+              matchUserId !== String(review.user_id) &&
+              (!reviewEmail || !matchEmail || matchEmail !== reviewEmail);
+          })
+          .map((claim: any) => ({
+            user_id: claim.user_id,
+            email: claim.profiles?.email || null,
+            full_name: claim.profiles?.full_name || null,
+            role: claim.role,
+            source: claim.source,
+            verified_at: claim.created_at,
+          }));
+
         const item = {
           ...review,
-          profile: profilesById.get(String(review.user_id)) || null,
+          profile,
+          didit_review: getDiditReviewInfo(review),
+          duplicate_verified_identity_warning: duplicateMatches.length > 0
+            ? {
+                same_verified_id_fingerprint: true,
+                same_role: true,
+                different_email_or_account: true,
+                match_count: duplicateMatches.length,
+                matched_accounts: duplicateMatches.slice(0, 5),
+              }
+            : null,
           front_image_url: null,
           back_image_url: null,
           selfie_image_url: null,
         } as Record<string, any>;
+
+        const diditSessionId = String(review.didit_session_id || "").trim();
+        const diditAssetUrls = diditSessionId ? diditAssetUrlsBySession.get(diditSessionId) : null;
+        if (diditAssetUrls) {
+          item.didit_review = {
+            ...(item.didit_review || {}),
+            status: normalizeDiditReviewStatus(diditAssetUrls.source_status) || item.didit_review?.status || "In Review",
+            assets_available: Boolean(diditAssetUrls.available),
+            assets_error: diditAssetUrls.error || null,
+          };
+          item.front_image_url = diditAssetUrls.front_image_url || null;
+          item.back_image_url = diditAssetUrls.back_image_url || null;
+          item.selfie_image_url = diditAssetUrls.selfie_image_url || null;
+        }
 
         if (review.front_image_path) {
           const { data: signed } = await client.storage
@@ -528,7 +941,7 @@ serve(async (req: Request) => {
         return item;
       }));
 
-      return jsonResponse({ items });
+      return jsonResponse({ items, didit_queue_hydration: diditQueueHydration });
     }
 
     if (action === "review_manual_identity") {
@@ -536,6 +949,7 @@ serve(async (req: Request) => {
       const decision = String(body?.decision || "").trim().toUpperCase();
       const reviewNotesRaw = String(body?.reviewNotes || "").trim();
       const reviewNotes = reviewNotesRaw ? reviewNotesRaw : null;
+      const duplicateOverrideConfirmed = Boolean(body?.duplicateOverrideConfirmed);
 
       if (!reviewId) {
         return jsonResponse({ error: "Missing reviewId" }, 400);
@@ -563,8 +977,85 @@ serve(async (req: Request) => {
         return jsonResponse({ error: "This review is already finalized" }, 400);
       }
 
+      const { data: preDecisionProfile } = await client
+        .from("profiles")
+        .select("role, email")
+        .eq("id", review.user_id)
+        .maybeSingle();
+
+      const reviewRoleForClaim = String(review.submitted_role || preDecisionProfile?.role || "musician").trim().toLowerCase();
+      let duplicateMatchesForApproval: any[] = [];
+
+      if (decision === "APPROVED" && review.document_fingerprint) {
+        const reviewEmail = String(preDecisionProfile?.email || review.submitted_by_email || "").trim().toLowerCase();
+        const { data: duplicateClaims, error: duplicateClaimsError } = await client
+          .from("identity_document_claims")
+          .select("id, user_id, normalized_email, profiles:user_id(email)")
+          .eq("document_fingerprint", review.document_fingerprint)
+          .eq("role", reviewRoleForClaim)
+          .eq("status", "APPROVED");
+
+        if (duplicateClaimsError) {
+          return jsonResponse({ error: duplicateClaimsError.message }, 400);
+        }
+
+        duplicateMatchesForApproval = (duplicateClaims || []).filter((claim: any) => {
+          const matchUserId = String(claim.user_id || "").trim();
+          const matchEmail = String(claim.normalized_email || claim.profiles?.email || "").trim().toLowerCase();
+          return matchUserId !== String(review.user_id) && (!reviewEmail || !matchEmail || matchEmail !== reviewEmail);
+        });
+
+        if (duplicateMatchesForApproval.length > 0 && (!duplicateOverrideConfirmed || !reviewNotes)) {
+          return jsonResponse({
+            error: "This ID matches another approved same-role account. Confirm the duplicate override and add admin notes before approval.",
+          }, 400);
+        }
+      }
+
       const profileVerificationStatus = decision === "APPROVED" ? "APPROVED" : "DECLINED";
       const nowIso = new Date().toISOString();
+      let diditStatusSync: Record<string, any> | null = null;
+
+      if (isDiditPendingReview(review)) {
+        const diditSessionId = String(review.didit_session_id || "").trim();
+        if (!diditSessionId) {
+          return jsonResponse({
+            error: "This Didit review is missing a Didit session ID, so MusikaLokal cannot update Didit.",
+          }, 400);
+        }
+
+        try {
+          diditStatusSync = await updateDiditManualReviewStatus(
+            diditSessionId,
+            decision as "APPROVED" | "DECLINED",
+            reviewNotes,
+          );
+        } catch (diditError: any) {
+          return jsonResponse({
+            error: diditError?.message || "Unable to update the Didit review status.",
+          }, 502);
+        }
+      }
+
+      const existingReviewMetadata = review.metadata && typeof review.metadata === "object" ? review.metadata : {};
+      const nextReviewMetadata = {
+        ...existingReviewMetadata,
+        ...(diditStatusSync
+          ? {
+              didit_status: diditStatusSync.status,
+              didit_status_synced_at: diditStatusSync.synced_at,
+              didit_status_sync_session_kind: diditStatusSync.session_kind || null,
+            }
+          : {}),
+        ...(duplicateOverrideConfirmed && duplicateMatchesForApproval.length > 0
+          ? {
+              duplicate_override_confirmed: true,
+              duplicate_override_confirmed_by: actorId,
+              duplicate_override_confirmed_at: nowIso,
+              duplicate_override_match_count: duplicateMatchesForApproval.length,
+            }
+          : {}),
+      };
 
       const { data: updatedReview, error: updateReviewError } = await client
         .from("manual_identity_reviews")
@@ -573,6 +1064,7 @@ serve(async (req: Request) => {
           review_notes: reviewNotes,
           reviewed_by: actorId,
           reviewed_at: nowIso,
+          metadata: nextReviewMetadata,
           updated_at: nowIso,
         })
         .eq("id", reviewId)
@@ -587,6 +1079,12 @@ serve(async (req: Request) => {
       if (authUserError || !authUserData?.user) {
         return jsonResponse({ error: "User not found for review" }, 404);
       }
+
+      const { data: reviewProfile } = await client
+        .from("profiles")
+        .select("role, email")
+        .eq("id", review.user_id)
+        .maybeSingle();
 
       const emailAlreadyConfirmed = Boolean(authUserData.user.email_confirmed_at);
       const isVerified = decision === "APPROVED" && emailAlreadyConfirmed;
@@ -619,6 +1117,51 @@ serve(async (req: Request) => {
         return jsonResponse({ error: authUpdateError.message }, 400);
       }
 
+      if (review.document_fingerprint) {
+        if (decision === "APPROVED") {
+          const approvalClaim = await claimApprovedIdentityDocument(client, {
+            userId: review.user_id,
+            role: reviewRoleForClaim,
+            documentFingerprint: review.document_fingerprint,
+            documentType: review.document_type,
+            documentTypeKey: review.document_type_key,
+            documentCountry: review.document_country || "PHL",
+            source: review.source || "MANUAL_UPLOAD",
+            status: "APPROVED",
+            diditSessionId: review.didit_session_id || null,
+            manualReviewId: reviewId,
+            email: reviewProfile?.email || review.submitted_by_email || null,
+            duplicateOverride: duplicateOverrideConfirmed,
+            metadata: {
+              approved_by: actorId,
+              review_notes: reviewNotes,
+              duplicate_override_confirmed: duplicateOverrideConfirmed,
+            },
+          });
+
+          if (approvalClaim?.decision !== "APPROVED") {
+            return jsonResponse({
+              error: "This identity could not be approved because an approved same-role claim already exists.",
+              claim: approvalClaim,
+            }, 409);
+          }
+        } else {
+          await recordIdentityDocumentClaim(client, {
+            userId: review.user_id,
+            role: reviewRoleForClaim,
+            documentFingerprint: review.document_fingerprint,
+            documentType: review.document_type,
+            documentTypeKey: review.document_type_key,
+            documentCountry: review.document_country || "PHL",
+            source: review.source || "MANUAL_UPLOAD",
+            status: "DECLINED",
+            diditSessionId: review.didit_session_id || null,
+            manualReviewId: reviewId,
+            email: reviewProfile?.email || review.submitted_by_email || null,
+          });
+        }
+      }
+
       await client.from("notifications").insert({
         user_id: review.user_id,
         type: decision === "APPROVED" ? "success" : "warning",
@@ -630,6 +1173,7 @@ serve(async (req: Request) => {
           manual_identity_review_id: reviewId,
           decision: profileVerificationStatus,
           review_notes: reviewNotes,
+          didit_status_sync: diditStatusSync,
         },
       });
 
@@ -687,6 +1231,7 @@ serve(async (req: Request) => {
           decision_email_queued: decisionEmail.queued,
           decision_email_provider: decisionEmail.provider,
           decision_email_error: decisionEmail.error || null,
+          didit_status_sync: diditStatusSync,
         },
       });
     }
@@ -820,10 +1365,10 @@ serve(async (req: Request) => {
       }
 
       let existingProfileForUpdate: Record<string, unknown> | null = null;
-      if (maybeIsVerified !== undefined) {
+      if (maybeIsVerified !== undefined || maybeRole !== undefined) {
         const { data: existingProfile, error: existingProfileError } = await client
           .from("profiles")
-          .select("verification_status")
+          .select("role, email, is_verified, verification_status")
           .eq("id", userId)
           .maybeSingle();
 
@@ -889,6 +1434,80 @@ serve(async (req: Request) => {
             ? existingStatus
             : "PENDING";
           profileUpdates.id_verified_at = null;
+        }
+      }
+
+      let roleChangeReviewId: string | null = null;
+      if (
+        profileUpdates.role !== undefined &&
+        existingProfileForUpdate?.["role"] &&
+        String(existingProfileForUpdate["role"]).trim().toLowerCase() !== String(profileUpdates.role).trim().toLowerCase()
+      ) {
+        const previousRole = String(existingProfileForUpdate["role"] || "").trim().toLowerCase();
+        const nextRole = String(profileUpdates.role || "").trim().toLowerCase();
+        const existingStatus = String(existingProfileForUpdate["verification_status"] || "").trim().toUpperCase();
+        const wasVerified = existingProfileForUpdate["is_verified"] === true || existingStatus === "APPROVED";
+
+        if (wasVerified) {
+          const { data: latestApprovedClaim } = await client
+            .from("identity_document_claims")
+            .select("document_fingerprint, document_type, document_type_key, document_country, didit_session_id")
+            .eq("user_id", userId)
+            .eq("role", previousRole)
+            .eq("status", "APPROVED")
+            .order("last_seen_at", { ascending: false })
+            .limit(1)
+            .maybeSingle();
+
+          if (latestApprovedClaim?.document_fingerprint) {
+            const roleClaim = await claimApprovedIdentityDocument(client, {
+              userId,
+              role: nextRole,
+              documentFingerprint: latestApprovedClaim.document_fingerprint,
+              documentType: latestApprovedClaim.document_type,
+              documentTypeKey: latestApprovedClaim.document_type_key,
+              documentCountry: latestApprovedClaim.document_country || "PHL",
+              source: "DIDIT",
+              diditSessionId: latestApprovedClaim.didit_session_id || null,
+              email: existingProfileForUpdate["email"] || null,
+              metadata: {
+                claimed_due_to_admin_role_change: true,
+                previous_role: previousRole,
+                next_role: nextRole,
+                changed_by: actorId,
+              },
+            });
+
+            if (roleClaim?.decision !== "APPROVED") {
+              const reviewRecord = await queueIdentityReview(client, {
+                userId,
+                email: existingProfileForUpdate["email"] || "",
+                role: nextRole,
+                documentType: latestApprovedClaim.document_type || "Government ID",
+                documentTypeKey: latestApprovedClaim.document_type_key || null,
+                documentCountry: latestApprovedClaim.document_country || "PHL",
+                source: "DIDIT_DUPLICATE",
+                diditSessionId: latestApprovedClaim.didit_session_id || null,
+                documentFingerprint: latestApprovedClaim.document_fingerprint,
+                duplicateReason: getDuplicateIdentityReviewReason(nextRole),
+                duplicateMatchCount: roleClaim?.duplicate_count || roleClaim?.matches?.length || 1,
+                metadata: {
+                  created_due_to_admin_role_change: true,
+                  previous_role: previousRole,
+                  next_role: nextRole,
+                  claim_result: roleClaim,
+                },
+              });
+              roleChangeReviewId = reviewRecord?.id || null;
+              profileUpdates.is_verified = false;
+              profileUpdates.verification_status = "PENDING_REVIEW";
+              profileUpdates.id_verified_at = null;
+            }
+          } else {
+            profileUpdates.is_verified = false;
+            profileUpdates.verification_status = "PENDING_REVIEW";
+            profileUpdates.id_verified_at = null;
+          }
         }
       }
 
@@ -985,7 +1604,7 @@ serve(async (req: Request) => {
 
       const [item] = await attachProfileLists(client, [updatedProfile]);
 
-      return jsonResponse({ item: item || updatedProfile }, 200);
+      return jsonResponse({ item: item || updatedProfile, role_change_review_id: roleChangeReviewId }, 200);
     }
 
     if (action === "delete_user") {

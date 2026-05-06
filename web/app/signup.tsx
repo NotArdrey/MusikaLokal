@@ -161,6 +161,33 @@ const summarizeAuthUserForDiditEmailLog = (user: any) => {
     };
 };
 
+const diditEmailDeliveryWasAccepted = (emailDelivery: any) => {
+    return Boolean(emailDelivery?.sent || emailDelivery?.queued);
+};
+
+const diditEmailConfirmationWasDeferred = (payload: any, emailDelivery?: any) => {
+    return Boolean(payload?.emailConfirmationDeferred || emailDelivery?.skipped);
+};
+
+const getEmailDeliveryFromInvokeError = (error: any) => {
+    const responseBody = error?.responseBody;
+
+    if (responseBody && typeof responseBody === 'object' && !Array.isArray(responseBody)) {
+        return responseBody.emailDelivery ?? null;
+    }
+
+    if (typeof responseBody === 'string') {
+        try {
+            const parsed = JSON.parse(responseBody);
+            return parsed?.emailDelivery ?? null;
+        } catch {
+            return null;
+        }
+    }
+
+    return null;
+};
+
 const logDiditEmailFlow = (stage: string, payload: Record<string, unknown> = {}) => {
     console.log(`${DIDIT_EMAIL_FLOW_LOG_PREFIX} ${stage}`, {
         debugVersion: DIDIT_EMAIL_FLOW_DEBUG_VERSION,
@@ -189,6 +216,7 @@ export default function SignupScreen() {
     const [verificationUrl, setVerificationUrl] = useState('');
     const [tempSessionRef, setTempSessionRef] = useState('');
     const [sessionId, setSessionId] = useState<string>('');
+    const [sessionNonce, setSessionNonce] = useState<string>('');
     const [verificationMode, setVerificationMode] = useState<VerificationMode>('didit');
     const [selectedDocumentKey, setSelectedDocumentKey] = useState<string>(PH_DOCUMENT_OPTIONS[0].key);
     const [documentModalVisible, setDocumentModalVisible] = useState(false);
@@ -196,6 +224,7 @@ export default function SignupScreen() {
     const [manualBackImage, setManualBackImage] = useState<ManualUploadAsset | null>(null);
     const [manualSelfieImage, setManualSelfieImage] = useState<ManualUploadAsset | null>(null);
     const [manualFullName, setManualFullName] = useState('');
+    const [manualIdNumber, setManualIdNumber] = useState('');
     const [manualIdExpiration, setManualIdExpiration] = useState('');
     const [manualExpirationCalendarVisible, setManualExpirationCalendarVisible] = useState(false);
 
@@ -313,6 +342,7 @@ export default function SignupScreen() {
         Boolean(manualBackImage) &&
         Boolean(manualSelfieImage) &&
         Boolean(manualFullName.trim()) &&
+        Boolean(manualIdNumber.trim()) &&
         Boolean(manualIdExpiration.trim());
 
     // Reset session when email changes
@@ -340,6 +370,7 @@ export default function SignupScreen() {
                             selectedRole: sRole,
                             tempRef,
                             sSessionId,
+                            sSessionNonce,
                             verificationMode: sVerificationMode,
                             selectedDocumentKey: sSelectedDocumentKey,
                         } = JSON.parse(savedState);
@@ -356,6 +387,7 @@ export default function SignupScreen() {
                         }
                         if (tempRef) setTempSessionRef(tempRef);
                         if (sSessionId) setSessionId(sSessionId);
+                        if (sSessionNonce) setSessionNonce(sSessionNonce);
 
                         // If we have a session_id from params, override/set it
                         if (session_id) setSessionId(session_id);
@@ -386,7 +418,7 @@ export default function SignupScreen() {
                 if (!ref) return;
                 try {
                     const { data, error } = await supabase.functions.invoke('create-didit-session', {
-                        body: { action: 'get_session', session_id: ref }
+                        body: { action: 'get_session', session_id: ref, sessionNonce }
                     });
                     // Skip if there's an error (FunctionsHttpError) - just retry next poll
                     if (error) return;
@@ -404,7 +436,7 @@ export default function SignupScreen() {
             timer = setInterval(poll, 500);
         }
         return () => { if (timer) clearInterval(timer); };
-    }, [step, verificationUrl, verified, sessionId, tempSessionRef, check_verification, verificationMode]);
+    }, [step, verificationUrl, verified, sessionId, tempSessionRef, sessionNonce, check_verification, verificationMode]);
 
     // Auto-submit verification when data is ready and we are in the verification step
     useEffect(() => {
@@ -430,7 +462,7 @@ export default function SignupScreen() {
                 try {
                     // Verify the ACTUAL status from Didit/Database
                     const { data: sessionData, error: invokeError } = await supabase.functions.invoke('create-didit-session', {
-                        body: { action: 'get_session', session_id: refToCheck }
+                        body: { action: 'get_session', session_id: refToCheck, sessionNonce }
                     });
 
                     if (invokeError) throw invokeError;
@@ -710,6 +742,7 @@ export default function SignupScreen() {
                 body: {
                     userId: tempRef,
                     email: email || undefined, // Optional
+                    role: selectedRole,
                     document_type: selectedDocumentOption?.diditDocumentType || 'id_card',
                     redirect_url: redirectUrl // Tells the edge function where to eventually send the user
                 }
@@ -720,8 +753,10 @@ export default function SignupScreen() {
 
             // Save the ACTUAL Didit Session ID
             const createdSessionId = data.sessionId || data.id;
+            const createdSessionNonce = data.sessionNonce || '';
             if (createdSessionId) {
                 setSessionId(createdSessionId);
+                setSessionNonce(createdSessionNonce);
                 // Update storage with the real ID
                 try {
                     await AsyncStorage.setItem('signup_current_session', JSON.stringify({
@@ -732,6 +767,7 @@ export default function SignupScreen() {
                         verificationMode,
                         selectedDocumentKey,
                         sSessionId: createdSessionId,
+                        sSessionNonce: createdSessionNonce,
                     }));
                 } catch (e) {
                     console.error('Failed to update session state with ID', e);
@@ -854,10 +890,10 @@ export default function SignupScreen() {
                     password,
                     role: selectedRole,
                     fullName: fallbackName,
-                    isVerified: false,
-                    verificationStatus: 'PENDING_REVIEW',
                     diditSessionId: refToLink || null,
+                    sessionNonce,
                     selectedDocumentType: selectedDocumentOption.label,
+                    selectedDocumentTypeKey: selectedDocumentOption.key,
                     verificationMode: 'didit',
                     redirectTo: emailRedirectTo,
                 },
@@ -883,6 +919,7 @@ export default function SignupScreen() {
 
             setVerificationUrl('');
             setSessionId('');
+            setSessionNonce('');
             setTempSessionRef('');
             router.setParams({ verified: '', check_verification: '' });
 
@@ -923,11 +960,17 @@ export default function SignupScreen() {
         }
 
         const enteredFullName = manualFullName.trim();
+        const enteredIdNumber = manualIdNumber.trim();
         const enteredIdExpiration = manualIdExpiration.trim();
         const expirationDate = new Date(`${enteredIdExpiration}T00:00:00Z`);
 
         if (!enteredFullName) {
             Alert.alert('Name Required', 'Please enter the full name shown on your ID.');
+            return;
+        }
+
+        if (!enteredIdNumber) {
+            Alert.alert('ID Number Required', 'Please enter the ID number shown on your document.');
             return;
         }
 
@@ -957,6 +1000,7 @@ export default function SignupScreen() {
                     password,
                     role: selectedRole,
                     fullName: enteredFullName,
+                    identityDocumentNumber: enteredIdNumber,
                     idDocumentExpiry: enteredIdExpiration,
                     documentType: selectedDocumentOption.label,
                     documentTypeKey: selectedDocumentOption.key,
@@ -1176,7 +1220,7 @@ export default function SignupScreen() {
             });
 
             const { data: sessionData, error: invokeError } = await supabase.functions.invoke('create-didit-session', {
-                body: { action: 'get_session', session_id: refToLink }
+                body: { action: 'get_session', session_id: refToLink, sessionNonce }
             });
 
             if (invokeError) {
@@ -1226,6 +1270,73 @@ export default function SignupScreen() {
         });
 
         try {
+            const edgeEmailRedirectTo = createEmailConfirmationRedirectUrl();
+            logDiditEmailFlow('auth.edgeSignup.start', {
+                email: maskEmailForLog(email),
+                selectedRole,
+                verificationMode,
+                diditSessionId: refToLink,
+                documentType: selectedDocumentOption.label,
+                documentTypeKey: selectedDocumentOption.key,
+                redirectTo: edgeEmailRedirectTo,
+                platform: Platform.OS,
+            });
+
+            const { data: edgeSignupData, error: edgeSignupError } = await supabase.functions.invoke('create-unverified-user', {
+                body: {
+                    email: email.trim(),
+                    password,
+                    role: selectedRole,
+                    fullName: verifiedName,
+                    diditSessionId: refToLink,
+                    sessionNonce,
+                    selectedDocumentType: selectedDocumentOption.label,
+                    selectedDocumentTypeKey: selectedDocumentOption.key,
+                    verificationMode,
+                    redirectTo: edgeEmailRedirectTo,
+                },
+            });
+
+            const edgeSignupUser = (edgeSignupData as any)?.user;
+            const duplicateIdentityReview = Boolean((edgeSignupData as any)?.duplicateIdentityReview);
+
+            logDiditEmailFlow('auth.edgeSignup.result', {
+                email: maskEmailForLog(email),
+                diditSessionId: refToLink,
+                hasError: Boolean(edgeSignupError),
+                error: summarizeErrorForDiditEmailLog(edgeSignupError),
+                user: summarizeAuthUserForDiditEmailLog(edgeSignupUser),
+                duplicateIdentityReview,
+                platform: Platform.OS,
+            });
+
+            if (edgeSignupError) {
+                throw edgeSignupError;
+            }
+
+            if (edgeSignupUser) {
+                try {
+                    await AsyncStorage.removeItem('signup_current_session');
+                } catch (e) {
+                    logDiditEmailFlowError('signupSession.cleanup.error', e, {
+                        storageKey: 'signup_current_session',
+                        email: maskEmailForLog(email),
+                        platform: Platform.OS,
+                    });
+                }
+
+                router.replace({
+                    pathname: '/',
+                    params: {
+                        accountCreated: 'true',
+                        email,
+                        ...(duplicateIdentityReview ? { diditPendingReview: 'true' } : { diditVerified: 'true' }),
+                    }
+                } as any);
+                setSessionNonce('');
+                return;
+            }
+
             // 3. Create the auth user with Supabase Auth so the native
             // confirmation email path is used for this specific signup flow.
             const emailRedirectTo = createEmailConfirmationRedirectUrl();
@@ -1243,6 +1354,7 @@ export default function SignupScreen() {
                     is_verified: true,
                     didit_session_id: refToLink,
                     selected_document_type: selectedDocumentOption.label,
+                    selected_document_type_key: selectedDocumentOption.key,
                     verification_mode: verificationMode,
                     hasFullName: Boolean(verifiedName),
                 },
@@ -1260,6 +1372,7 @@ export default function SignupScreen() {
                         is_verified: true,
                         didit_session_id: refToLink,
                         selected_document_type: selectedDocumentOption.label,
+                        selected_document_type_key: selectedDocumentOption.key,
                         verification_mode: verificationMode,
                         full_name: verifiedName,
                         display_name: verifiedName,
@@ -1399,6 +1512,7 @@ export default function SignupScreen() {
                         email: email,
                     }
                 } as any);
+                setSessionNonce('');
             } else {
                 logDiditEmailFlow('auth.signUp.noUser', {
                     email: maskEmailForLog(email),
@@ -1428,19 +1542,23 @@ export default function SignupScreen() {
                     email: maskEmailForLog(email),
                     diditSessionId: refToLink,
                     redirectTo: resendRedirectTo,
-                    type: 'signup',
+                    provider: 'create-unverified-user',
                     platform: Platform.OS,
                 });
 
-                const { error: resendError } = await supabase.auth.resend({
-                    type: 'signup',
-                    email: email.trim(),
-                    options: {
-                        emailRedirectTo: resendRedirectTo,
+                const { data: resendData, error: resendError } = await supabase.functions.invoke('create-unverified-user', {
+                    body: {
+                        action: 'resend_confirmation_email',
+                        email: email.trim(),
+                        redirectTo: resendRedirectTo,
                     },
                 });
 
-                if (resendError) {
+                const emailDelivery = (resendData as any)?.emailDelivery;
+                const errorEmailDelivery = getEmailDeliveryFromInvokeError(resendError);
+                const confirmationDeferred = diditEmailConfirmationWasDeferred(resendData, emailDelivery ?? errorEmailDelivery);
+
+                if (resendError && !diditEmailDeliveryWasAccepted(errorEmailDelivery)) {
                     logDiditEmailFlowError('auth.resendExisting.error', resendError, {
                         email: maskEmailForLog(email),
                         diditSessionId: refToLink,
@@ -1448,11 +1566,23 @@ export default function SignupScreen() {
                         platform: Platform.OS,
                     });
                     Alert.alert('Account Exists', 'This email is already registered. We tried to resend the verification link but failed. Please log in.');
+                } else if (confirmationDeferred) {
+                    Alert.alert(
+                        'Verification In Review',
+                        (resendData as any)?.message || 'Email confirmation will be sent after identity review is approved.'
+                    );
                 } else {
                     logDiditEmailFlow('auth.resendExisting.success', {
                         email: maskEmailForLog(email),
                         diditSessionId: refToLink,
                         redirectTo: resendRedirectTo,
+                        emailDelivery: (emailDelivery ?? errorEmailDelivery)
+                            ? {
+                                sent: Boolean((emailDelivery ?? errorEmailDelivery).sent),
+                                queued: Boolean((emailDelivery ?? errorEmailDelivery).queued),
+                                provider: (emailDelivery ?? errorEmailDelivery).provider ?? null,
+                            }
+                            : null,
                         platform: Platform.OS,
                     });
                     Alert.alert('Account Exists', 'This email is already registered. We have sent a new verification link to your inbox.');
@@ -1487,28 +1617,45 @@ export default function SignupScreen() {
         });
 
         try {
-            const { error } = await supabase.auth.resend({
-                type: 'signup',
-                email: email.trim(),
-                options: {
-                    emailRedirectTo,
+            const { data, error } = await supabase.functions.invoke('create-unverified-user', {
+                body: {
+                    action: 'resend_confirmation_email',
+                    email: email.trim(),
+                    redirectTo: emailRedirectTo,
                 },
             });
+            const emailDelivery = (data as any)?.emailDelivery;
+            const errorEmailDelivery = getEmailDeliveryFromInvokeError(error);
+            const confirmationDeferred = diditEmailConfirmationWasDeferred(data, emailDelivery ?? errorEmailDelivery);
             logDiditEmailFlow('auth.resendManual.result', {
                 email: maskEmailForLog(email),
                 hasError: Boolean(error),
                 error: summarizeErrorForDiditEmailLog(error),
+                emailDelivery: (emailDelivery ?? errorEmailDelivery)
+                    ? {
+                        sent: Boolean((emailDelivery ?? errorEmailDelivery).sent),
+                        queued: Boolean((emailDelivery ?? errorEmailDelivery).queued),
+                        provider: (emailDelivery ?? errorEmailDelivery).provider ?? null,
+                    }
+                    : null,
                 redirectTo: emailRedirectTo,
                 platform: Platform.OS,
             });
 
-            if (error) {
+            if (error && !diditEmailDeliveryWasAccepted(errorEmailDelivery)) {
                 logDiditEmailFlowError('auth.resendManual.error', error, {
                     email: maskEmailForLog(email),
                     redirectTo: emailRedirectTo,
                     platform: Platform.OS,
                 });
                 throw error;
+            }
+            if (confirmationDeferred) {
+                Alert.alert(
+                    'Verification In Review',
+                    (data as any)?.message || 'Email confirmation will be sent after identity review is approved.'
+                );
+                return;
             }
             Alert.alert('Email Sent', 'A new verification link has been sent to your email.');
         } catch (e: any) {
@@ -1811,7 +1958,7 @@ export default function SignupScreen() {
 
             try {
                 const { data: sessionData } = await supabase.functions.invoke('create-didit-session', {
-                    body: { action: 'get_session', session_id: refToCheck }
+                    body: { action: 'get_session', session_id: refToCheck, sessionNonce }
                 });
 
                 const status = sessionData?.status || sessionData?.verification_data?.status;
@@ -1931,6 +2078,22 @@ export default function SignupScreen() {
                                         placeholder="Juan Dela Cruz"
                                         placeholderTextColor={colors.textSecondary}
                                         autoCapitalize="words"
+                                        style={[styles.manualInfoInput, themeStyles.text]}
+                                    />
+                                </View>
+                            </View>
+
+                            <View style={styles.manualInfoField}>
+                                <Text style={[styles.manualInfoFieldLabel, themeStyles.textSecondary]}>ID number</Text>
+                                <View style={[styles.manualInfoControl, { backgroundColor: isDark ? '#1F2937' : '#F9FAFB', borderColor: isDark ? '#374151' : '#E5E7EB' }]}>
+                                    <Ionicons name="keypad-outline" size={18} color={colors.textSecondary} style={styles.manualInfoIcon} />
+                                    <TextInput
+                                        value={manualIdNumber}
+                                        onChangeText={setManualIdNumber}
+                                        placeholder="ID number on document"
+                                        placeholderTextColor={colors.textSecondary}
+                                        autoCapitalize="characters"
+                                        autoCorrect={false}
                                         style={[styles.manualInfoInput, themeStyles.text]}
                                     />
                                 </View>

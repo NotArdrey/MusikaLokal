@@ -180,6 +180,10 @@ const diditEmailDeliveryWasAccepted = (emailDelivery: any) => {
     return Boolean(emailDelivery?.sent || emailDelivery?.queued);
 };
 
+const diditEmailConfirmationWasDeferred = (payload: any, emailDelivery?: any) => {
+    return Boolean(payload?.emailConfirmationDeferred || emailDelivery?.skipped);
+};
+
 const getEmailDeliveryFromInvokeError = (error: any) => {
     const responseBody = error?.responseBody;
 
@@ -238,6 +242,7 @@ export default function SignupScreen() {
     const [manualBackImage, setManualBackImage] = useState<ManualUploadAsset | null>(null);
     const [manualSelfieImage, setManualSelfieImage] = useState<ManualUploadAsset | null>(null);
     const [manualFullName, setManualFullName] = useState('');
+    const [manualIdNumber, setManualIdNumber] = useState('');
     const [manualIdExpiration, setManualIdExpiration] = useState('');
     const [manualExpirationCalendarVisible, setManualExpirationCalendarVisible] = useState(false);
 
@@ -725,6 +730,7 @@ export default function SignupScreen() {
         Boolean(manualBackImage) &&
         Boolean(manualSelfieImage) &&
         Boolean(manualFullName.trim()) &&
+        Boolean(manualIdNumber.trim()) &&
         Boolean(manualIdExpiration.trim());
 
     const handleDocumentSelect = (documentKey: string) => {
@@ -794,6 +800,7 @@ export default function SignupScreen() {
                 body: {
                     userId: tempRef,
                     email: email || undefined, // Optional
+                    role: selectedRole,
                     document_type: selectedDocumentOption?.diditDocumentType || 'id_card',
                     redirect_url: redirectUrl // Tells the edge function where to eventually send the user
                 }
@@ -990,6 +997,7 @@ export default function SignupScreen() {
                     verificationStatus: 'PENDING_REVIEW',
                     diditSessionId: refToLink || null,
                     selectedDocumentType: selectedDocumentOption.label,
+                    selectedDocumentTypeKey: selectedDocumentOption.key,
                     verificationMode: 'didit',
                     redirectTo: emailRedirectTo,
                 },
@@ -1054,11 +1062,17 @@ export default function SignupScreen() {
         }
 
         const enteredFullName = manualFullName.trim();
+        const enteredIdNumber = manualIdNumber.trim();
         const enteredIdExpiration = manualIdExpiration.trim();
         const expirationDate = new Date(`${enteredIdExpiration}T00:00:00Z`);
 
         if (!enteredFullName) {
             Alert.alert('Name Required', 'Please enter the full name shown on your ID.');
+            return;
+        }
+
+        if (!enteredIdNumber) {
+            Alert.alert('ID Number Required', 'Please enter the ID number shown on your document.');
             return;
         }
 
@@ -1088,6 +1102,7 @@ export default function SignupScreen() {
                     password,
                     role: selectedRole,
                     fullName: enteredFullName,
+                    identityDocumentNumber: enteredIdNumber,
                     idDocumentExpiry: enteredIdExpiration,
                     documentType: selectedDocumentOption.label,
                     documentTypeKey: selectedDocumentOption.key,
@@ -1390,6 +1405,7 @@ export default function SignupScreen() {
                     verificationStatus: 'APPROVED',
                     diditSessionId: refToLink,
                     selectedDocumentType: selectedDocumentOption.label,
+                    selectedDocumentTypeKey: selectedDocumentOption.key,
                     verificationMode,
                     redirectTo: emailRedirectTo,
                 },
@@ -1397,6 +1413,7 @@ export default function SignupScreen() {
 
             const signupUser = (signupData as any)?.user;
             const emailDelivery = (signupData as any)?.emailDelivery;
+            const duplicateIdentityReview = Boolean((signupData as any)?.duplicateIdentityReview);
 
             logDiditEmailFlow('auth.edgeSignup.result', {
                 email: maskEmailForLog(email),
@@ -1404,6 +1421,7 @@ export default function SignupScreen() {
                 hasError: Boolean(signupError),
                 error: summarizeErrorForDiditEmailLog(signupError),
                 user: summarizeAuthUserForDiditEmailLog(signupUser),
+                duplicateIdentityReview,
                 emailDelivery: emailDelivery
                     ? {
                         sent: Boolean(emailDelivery.sent),
@@ -1467,7 +1485,7 @@ export default function SignupScreen() {
                     params: {
                         accountCreated: 'true',
                         email: email,
-                        diditVerified: 'true',
+                        ...(duplicateIdentityReview ? { diditPendingReview: 'true' } : { diditVerified: 'true' }),
                     }
                 } as any);
             } else {
@@ -1513,6 +1531,7 @@ export default function SignupScreen() {
 
                 const emailDelivery = (resendData as any)?.emailDelivery;
                 const errorEmailDelivery = getEmailDeliveryFromInvokeError(resendError);
+                const confirmationDeferred = diditEmailConfirmationWasDeferred(resendData, emailDelivery ?? errorEmailDelivery);
                 if (resendError && !diditEmailDeliveryWasAccepted(errorEmailDelivery)) {
                     logDiditEmailFlowError('auth.resendExisting.error', resendError, {
                         email: maskEmailForLog(email),
@@ -1521,6 +1540,11 @@ export default function SignupScreen() {
                         platform: Platform.OS,
                     });
                     Alert.alert('Account Exists', 'This email is already registered. We tried to resend the verification link but failed. Please log in.');
+                } else if (confirmationDeferred) {
+                    Alert.alert(
+                        'Verification In Review',
+                        (resendData as any)?.message || 'Email confirmation will be sent after identity review is approved.'
+                    );
                 } else {
                     logDiditEmailFlow('auth.resendExisting.success', {
                         email: maskEmailForLog(email),
@@ -1576,6 +1600,7 @@ export default function SignupScreen() {
             });
             const emailDelivery = (data as any)?.emailDelivery;
             const errorEmailDelivery = getEmailDeliveryFromInvokeError(error);
+            const confirmationDeferred = diditEmailConfirmationWasDeferred(data, emailDelivery ?? errorEmailDelivery);
             logDiditEmailFlow('auth.resendManual.result', {
                 email: maskEmailForLog(email),
                 hasError: Boolean(error),
@@ -1598,6 +1623,13 @@ export default function SignupScreen() {
                     platform: Platform.OS,
                 });
                 throw error;
+            }
+            if (confirmationDeferred) {
+                Alert.alert(
+                    'Verification In Review',
+                    (data as any)?.message || 'Email confirmation will be sent after identity review is approved.'
+                );
+                return;
             }
             Alert.alert('Email Sent', 'A new verification link has been sent to your email.');
         } catch (e: any) {
@@ -2011,6 +2043,22 @@ export default function SignupScreen() {
                                         placeholder="Juan Dela Cruz"
                                         placeholderTextColor={colors.textSecondary}
                                         autoCapitalize="words"
+                                        style={[styles.manualInfoInput, themeStyles.text]}
+                                    />
+                                </View>
+                            </View>
+
+                            <View style={styles.manualInfoField}>
+                                <Text style={[styles.manualInfoFieldLabel, themeStyles.textSecondary]}>ID number</Text>
+                                <View style={[styles.manualInfoControl, { backgroundColor: isDark ? '#1F2937' : '#F9FAFB', borderColor: isDark ? '#374151' : '#E5E7EB' }]}>
+                                    <Ionicons name="keypad-outline" size={18} color={colors.textSecondary} style={styles.manualInfoIcon} />
+                                    <TextInput
+                                        value={manualIdNumber}
+                                        onChangeText={setManualIdNumber}
+                                        placeholder="ID number on document"
+                                        placeholderTextColor={colors.textSecondary}
+                                        autoCapitalize="characters"
+                                        autoCorrect={false}
                                         style={[styles.manualInfoInput, themeStyles.text]}
                                     />
                                 </View>

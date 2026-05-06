@@ -53,10 +53,8 @@ export default function WalletScreen() {
   const { colors, isDark } = useTheme();
   const { userId, isGuest } = useAuth();
   const { contentBottomPadding } = useBottomBarClearance(24);
-  const params = useLocalSearchParams<{ refresh?: string; action?: string; withdraw?: string }>();
+  const params = useLocalSearchParams<{ refresh?: string }>();
   const walletRefreshKey = Array.isArray(params.refresh) ? params.refresh[0] : params.refresh;
-  const walletAction = Array.isArray(params.action) ? params.action[0] : params.action;
-  const walletWithdrawParam = Array.isArray(params.withdraw) ? params.withdraw[0] : params.withdraw;
 
   // Withdrawal modal states
   const [withdrawModalVisible, setWithdrawModalVisible] = useState(false);
@@ -463,13 +461,6 @@ export default function WalletScreen() {
     setWithdrawAmount('');
     setWithdrawModalVisible(true);
   }, []);
-
-  useEffect(() => {
-    if (isGuest) return;
-    if (walletAction === 'withdraw' || walletWithdrawParam === '1' || walletWithdrawParam === 'true') {
-      openWithdrawModal();
-    }
-  }, [isGuest, openWithdrawModal, walletAction, walletWithdrawParam]);
 
   // Handle actual withdrawal request
   const handleWithdraw = async () => {

@@ -105,7 +105,7 @@ export default function LoginScreen() {
   // Verification Modal State
   const [showVerification, setShowVerification] = useState(false);
   const [verificationUrl, setVerificationUrl] = useState('');
-  const [loginMessage, setLoginMessage] = useState<{ type: 'error' | 'success', text: string } | null>(null);
+  const [loginMessage, setLoginMessage] = useState<{ type: 'error' | 'success' | 'info', text: string } | null>(null);
 
   // Custom Alert State
   const [alertState, setAlertState] = useState<AlertState>({
@@ -213,7 +213,7 @@ export default function LoginScreen() {
         showAlert(
           'success',
           'Verification In Review',
-          `Your identity verification is still being reviewed by Didit.\n\nPlease confirm the email link we sent to ${createdEmail || 'your email'}. We will update your account when Didit finishes the review.`
+          `Your identity is now under manual review.\n\nWe will send the email confirmation link to ${createdEmail || 'your email'} after the review is approved.`
         );
         return;
       }
@@ -222,7 +222,7 @@ export default function LoginScreen() {
         showAlert(
           'success',
           'Manual Review Submitted',
-          `Your requirements were submitted and your account is under manual review.\n\nWe will email ${createdEmail || 'you'} when the review is complete. If you receive an email confirmation link, confirm your email so you can sign in after approval.`
+          `Your requirements were submitted and your account is under manual review.\n\nWe will send the email confirmation link to ${createdEmail || 'you'} after the review is approved.`
         );
         return;
       }
@@ -455,6 +455,14 @@ export default function LoginScreen() {
         return;
       }
 
+      if ((data as any)?.emailConfirmationDeferred || (data as any)?.emailDelivery?.skipped) {
+        const message = (data as any)?.message || 'Email confirmation will be sent after identity review is approved.';
+        setCanResendConfirmation(false);
+        setLoginMessage({ type: 'info', text: message });
+        showAlert('info', 'Verification In Review', message, [{ text: 'OK' }], true);
+        return;
+      }
+
       setResendCooldownSeconds(60);
       setCanResendConfirmation(true);
       setLoginMessage({ type: 'success', text: 'A new confirmation email has been sent.' });
@@ -641,8 +649,8 @@ export default function LoginScreen() {
             </TouchableOpacity>
 
             {loginMessage && (
-              <View style={{ marginTop: 16, backgroundColor: loginMessage.type === 'error' ? 'rgba(239, 68, 68, 0.1)' : 'rgba(16, 185, 129, 0.1)', padding: 12, borderRadius: 8 }}>
-                <Text style={{ color: loginMessage.type === 'error' ? '#EF4444' : '#10B981', textAlign: 'center', fontFamily: 'Poppins_500Medium' }}>
+              <View style={{ marginTop: 16, backgroundColor: loginMessage.type === 'error' ? 'rgba(239, 68, 68, 0.1)' : loginMessage.type === 'info' ? 'rgba(59, 130, 246, 0.1)' : 'rgba(16, 185, 129, 0.1)', padding: 12, borderRadius: 8 }}>
+                <Text style={{ color: loginMessage.type === 'error' ? '#EF4444' : loginMessage.type === 'info' ? '#3B82F6' : '#10B981', textAlign: 'center', fontFamily: 'Poppins_500Medium' }}>
                   {loginMessage.text}
                 </Text>
               </View>
