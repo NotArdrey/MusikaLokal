@@ -12,6 +12,7 @@ import {
     Text,
     TextInput,
     TouchableOpacity,
+    useWindowDimensions,
     View
 } from "react-native";
 import { supabase } from "../lib/supabase";
@@ -70,6 +71,13 @@ const IS_WEB = Platform.OS === "web";
 
 export default function AddGroupScreen() {
   const { colors, isDark } = useTheme();
+  const { width: viewportWidth } = useWindowDimensions();
+  const isWebDesktop = Platform.OS === "web" && viewportWidth >= 768;
+  const pageBackground = isWebDesktop
+    ? isDark
+      ? "#0A1224"
+      : "#E9EEF8"
+    : colors.background;
   const params = useLocalSearchParams<{ mode?: string }>();
   const isDuoMode = params.mode === "duo";
   const { isSystemLocked, showLockAlert } = useAuth();
@@ -295,7 +303,7 @@ export default function AddGroupScreen() {
 
       if (profile?.role !== "musician") {
         showAlert("error", "Unauthorized", "Only musicians can create groups.");
-        router.replace("/home");
+        router.replace("/feed");
         return;
       }
 
@@ -319,7 +327,7 @@ export default function AddGroupScreen() {
       setAuthorized(true);
     } catch (e) {
       console.error("Authorization check failed:", e);
-      router.replace("/home");
+      router.replace("/feed");
     } finally {
       setCheckingAuth(false);
     }
@@ -864,7 +872,7 @@ export default function AddGroupScreen() {
 
   return (
     <>
-      <View style={[styles.flex1, { backgroundColor: colors.background }]}>
+      <View style={[styles.flex1, { backgroundColor: pageBackground }]}>
         <Header title="Create Group" onBackPress={handleBack} />
 
         <View style={styles.contentFrame}>

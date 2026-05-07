@@ -1,4 +1,4 @@
-﻿import { Ionicons } from "@expo/vector-icons";
+import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import React, { useEffect, useState } from "react";
 import {
@@ -6,10 +6,12 @@ import {
     Dimensions,
     Image,
     Linking,
+    Platform,
     ScrollView,
     StyleSheet,
     Text,
     TouchableOpacity,
+    useWindowDimensions,
     View,
 } from "react-native";
 import { supabase } from "../lib/supabase";
@@ -33,6 +35,23 @@ import { useLocalSearchParams } from "expo-router";
 
 export default function GigDetailsScreen() {
   const { colors, isDark } = useTheme();
+  const { width: viewportWidth } = useWindowDimensions();
+  const isWebDesktop = Platform.OS === "web" && viewportWidth >= 768;
+  const pageBackground = isWebDesktop
+    ? isDark
+      ? "#0A1224"
+      : "#E9EEF8"
+    : colors.background;
+  const pageCardBackground = isWebDesktop
+    ? isDark
+      ? "#0F172A"
+      : "#FFFFFF"
+    : colors.card;
+  const borderSoft = isWebDesktop
+    ? isDark
+      ? "#1E2C48"
+      : "#D8E3F2"
+    : colors.border;
   const { id, tab } = useLocalSearchParams<{ id?: string | string[]; tab?: string | string[] }>();
   const requestedTab = Array.isArray(tab) ? tab[0] : tab;
   const [activeTab, setActiveTab] = useState(
@@ -159,7 +178,7 @@ export default function GigDetailsScreen() {
 
       if (profile?.role !== "venue-owner") {
         Alert.alert("Unauthorized", "Only venue owners can access this page.");
-        router.replace("/home");
+        router.replace("/feed");
         return;
       }
 
@@ -167,7 +186,7 @@ export default function GigDetailsScreen() {
       if (id) fetchData(user.id);
     } catch (e) {
       console.error("Authorization check failed:", e);
-      router.replace("/home");
+      router.replace("/feed");
     } finally {
       setCheckingAuth(false);
     }
@@ -180,7 +199,7 @@ export default function GigDetailsScreen() {
       const gigId = Array.isArray(id) ? id[0] : id;
       if (!gigId) {
         Alert.alert("Error", "Invalid gig ID");
-        router.replace("/home");
+        router.replace("/feed");
         return;
       }
 
@@ -373,7 +392,7 @@ export default function GigDetailsScreen() {
         style={[
           styles.flex1,
           styles.centerContainer,
-          { backgroundColor: colors.background },
+          { backgroundColor: pageBackground },
         ]}
       >
         <ActivityIndicator size="large" color={colors.primary} />
@@ -397,12 +416,16 @@ export default function GigDetailsScreen() {
 
   return (
     <>
-      <View style={[styles.flex1, { backgroundColor: colors.background }]}>
+      <View style={[styles.flex1, { backgroundColor: pageBackground }]}>
+        <View style={[styles.pageFrame, isWebDesktop && styles.pageFrameWeb]}>
         <Header title="Manage Gig" />
 
         <ScrollView
           showsVerticalScrollIndicator={false}
-          contentContainerStyle={styles.scrollContent}
+          contentContainerStyle={[
+            styles.scrollContent,
+            isWebDesktop && styles.scrollContentWeb,
+          ]}
         >
           {/* Header Image & Info */}
           <View style={styles.headerContainer}>
@@ -435,9 +458,9 @@ export default function GigDetailsScreen() {
                 : "Date TBA"}
               {gig?.requirements?.event_start_time &&
                 gig?.requirements?.event_end_time
-                ? ` • ${gig.requirements.event_start_time} - ${gig.requirements.event_end_time}`
+                ? ` � ${gig.requirements.event_start_time} - ${gig.requirements.event_end_time}`
                 : ""}
-              {" • "}
+              {" � "}
               {gig?.location || "Location N/A"}
             </Text>
             {hasValidCoordinates(gig?.latitude, gig?.longitude) && (
@@ -704,7 +727,7 @@ export default function GigDetailsScreen() {
                       <Text
                         style={[styles.payoutAmount, { color: colors.primary }]}
                       >
-                        ₱{(gig?.budget || 0).toLocaleString()}
+                        ?{(gig?.budget || 0).toLocaleString()}
                       </Text>
                     </View>
                   </View>
@@ -991,7 +1014,7 @@ export default function GigDetailsScreen() {
                               app.applicant?.genres?.join(", ") ||
                               "Musician"}
                             {(app.group?.location || app.applicant?.location) &&
-                              ` • ${app.group?.location || app.applicant?.location}`}
+                              ` � ${app.group?.location || app.applicant?.location}`}
                           </Text>
                         </View>
                       </View>
@@ -1453,14 +1476,14 @@ export default function GigDetailsScreen() {
                       {/* View Full Profile Button */}
                       <TouchableOpacity activeOpacity={1}
                         onPress={() => {
-                          console.log("👤 View Profile pressed");
-                          console.log("👤 app.group:", app.group);
-                          console.log("👤 app.applicant:", app.applicant);
-                          console.log("👤 app.applicant_id:", app.applicant_id);
+                          console.log("?? View Profile pressed");
+                          console.log("?? app.group:", app.group);
+                          console.log("?? app.applicant:", app.applicant);
+                          console.log("?? app.applicant_id:", app.applicant_id);
 
                           if (app.group?.id) {
                             console.log(
-                              "👤 Navigating to group:",
+                              "?? Navigating to group:",
                               app.group.id,
                             );
                             router.push({
@@ -1469,7 +1492,7 @@ export default function GigDetailsScreen() {
                             });
                           } else if (app.applicant?.id) {
                             console.log(
-                              "👤 Navigating to profile with applicant.id:",
+                              "?? Navigating to profile with applicant.id:",
                               app.applicant.id,
                             );
                             router.push({
@@ -1478,7 +1501,7 @@ export default function GigDetailsScreen() {
                             });
                           } else if (app.applicant_id) {
                             console.log(
-                              "👤 Navigating to profile with applicant_id:",
+                              "?? Navigating to profile with applicant_id:",
                               app.applicant_id,
                             );
                             router.push({
@@ -1486,7 +1509,7 @@ export default function GigDetailsScreen() {
                               params: { userId: app.applicant_id },
                             });
                           } else {
-                            console.log("❌ No ID available for navigation");
+                            console.log("? No ID available for navigation");
                             Alert.alert("Error", "Unable to view profile");
                           }
                         }}
@@ -1654,6 +1677,7 @@ export default function GigDetailsScreen() {
           </SmoothTabTransition>
         </ScrollView>
 
+        </View>
         <Navbar />
       </View>
       <Modal
@@ -1681,12 +1705,29 @@ const styles = StyleSheet.create({
   flex1: {
     flex: 1,
   },
+  pageFrame: {
+    flex: 1,
+    width: "100%",
+  },
+  pageFrameWeb: {
+    maxWidth: 1240,
+    width: "100%",
+    alignSelf: "center",
+    paddingHorizontal: 20,
+    paddingTop: 12,
+  },
   centerContainer: {
     alignItems: "center",
     justifyContent: "center",
   },
   scrollContent: {
     paddingBottom: 180,
+  },
+  scrollContentWeb: {
+    maxWidth: 1120,
+    width: "100%",
+    alignSelf: "center",
+    paddingTop: 10,
   },
   headerContainer: {
     paddingHorizontal: 24,

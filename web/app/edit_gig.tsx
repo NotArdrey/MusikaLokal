@@ -427,14 +427,14 @@ export default function EditGigScreen() {
 
       if (profile?.role !== "venue-owner") {
         showAlert("error", "Unauthorized", "Only venue owners can edit gigs.");
-        router.replace("/home");
+        router.replace("/feed");
         return;
       }
 
       setAuthorized(true);
     } catch (e) {
       console.error("Authorization check failed:", e);
-      router.replace("/home");
+      router.replace("/feed");
     } finally {
       setCheckingAuth(false);
     }
@@ -500,7 +500,7 @@ export default function EditGigScreen() {
       const gigId = Array.isArray(id) ? id[0] : id;
       if (!gigId) {
         showAlert("error", "Error", "Invalid gig ID");
-        router.replace("/home");
+        router.replace("/feed");
         return;
       }
 
@@ -544,7 +544,7 @@ export default function EditGigScreen() {
           "Not Found",
           "Gig not found or you do not have permission to edit it.",
         );
-        router.replace("/home");
+        router.replace("/feed");
         return;
       }
 
@@ -581,7 +581,7 @@ export default function EditGigScreen() {
           "Not Found",
           "Gig not found or you do not have permission to edit it.",
         );
-        router.replace("/home");
+        router.replace("/feed");
         return;
       }
 
@@ -714,7 +714,7 @@ export default function EditGigScreen() {
     } catch (e) {
       console.log("Error fetching gig details:", e);
       showAlert("error", "Error", "Failed to load gig details.");
-      router.replace("/home");
+      router.replace("/feed");
     } finally {
       setLoading(false);
     }

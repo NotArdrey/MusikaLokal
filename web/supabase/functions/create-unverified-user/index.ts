@@ -329,7 +329,6 @@ serve(async (req) => {
         let existingUser = listData?.users.find(u => u.email?.toLowerCase() === normalizedEmail)
 
         if (existingUser) {
-            console.log('Found existing user:', existingUser.id)
 
             // If they are already confirmed, STOP.
             if (existingUser.email_confirmed_at) {
@@ -341,7 +340,6 @@ serve(async (req) => {
 
             // If they are NOT confirmed, this is a stalled/failed signup.
             // DELETE them to allow a fresh start.
-            console.log('User is unverified. Deleting to allow fresh signup...')
             const { error: deleteError } = await supabaseAdmin.auth.admin.deleteUser(existingUser.id)
 
             if (deleteError) {
@@ -355,7 +353,6 @@ serve(async (req) => {
             // Also clean up profile if it exists
             await supabaseAdmin.from('profiles').delete().eq('id', existingUser.id)
 
-            console.log('Existing unverified user deleted.')
         }
 
         // 2. Create Fresh User

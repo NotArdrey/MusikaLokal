@@ -111,7 +111,7 @@ export default function SettingsScreen() {
       // Continue even if cache write fails.
     }
 
-    router.push('/home');
+    router.push('/feed');
   };
 
   const clearRecentPreviewHistory = async () => {

@@ -1,10 +1,12 @@
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { router } from "expo-router";
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
 	ActivityIndicator,
+	Modal,
 	Platform,
+	Pressable,
 	ScrollView,
 	StatusBar,
 	StyleSheet,
@@ -16,6 +18,7 @@ import {
 } from "react-native";
 import { supabase } from "../lib/supabase";
 import CachedImage from "../src/components/CachedImage";
+import ListingDetailsSheet from "../src/components/ListingDetailsSheet";
 import { useAuth } from "../src/context/AuthContext";
 import { useTheme } from "../src/context/ThemeContext";
 
@@ -62,6 +65,12 @@ export default function DiscoverScreen() {
 	const [listings, setListings] = useState<DiscoverListing[]>([]);
 	const [loading, setLoading] = useState(true);
 	const [refreshing, setRefreshing] = useState(false);
+	const [showFilters, setShowFilters] = useState(false);
+	const [priceRange, setPriceRange] = useState<"all" | "low" | "mid" | "high">("all");
+	const [sortBy, setSortBy] = useState<"newest" | "rating" | "price_low" | "price_high">("newest");
+	const [selectedListing, setSelectedListing] = useState<DiscoverListing | null>(null);
+	const [sheetListingId, setSheetListingId] = useState<string | null>(null);
+	const listingSheetRef = useRef<any>(null);
 
 	const isOwner = userRole === "venue-owner" || userRole === "studio-owner";
 	const showMusiciansOnly = isGuest || isOwner;
@@ -266,18 +275,47 @@ export default function DiscoverScreen() {
 			items = items.filter((item) => item.type === matchType);
 		}
 
-		const q = searchQuery.trim().toLowerCase();
-		if (!q) return items;
+		const priceOf = (item: DiscoverListing) =>
+			Number(item.hourly_rate || item.budget || item.rate || 0);
 
-		return items.filter((item) => {
-			return (
-				toSearchable(item.name).includes(q) ||
-				toSearchable(item.location).includes(q) ||
-				toSearchable(item.genre).includes(q) ||
-				toSearchable(item.description).includes(q)
+		if (priceRange !== "all") {
+			items = items.filter((item) => {
+				if (item.type === "Group" || item.type === "Artist") return true;
+				const p = priceOf(item);
+				if (priceRange === "low") return p > 0 && p < 1000;
+				if (priceRange === "mid") return p >= 1000 && p <= 3000;
+				if (priceRange === "high") return p > 3000;
+				return true;
+			});
+		}
+
+		const q = searchQuery.trim().toLowerCase();
+		if (q) {
+			items = items.filter((item) => {
+				return (
+					toSearchable(item.name).includes(q) ||
+					toSearchable(item.location).includes(q) ||
+					toSearchable(item.genre).includes(q) ||
+					toSearchable(item.description).includes(q)
+				);
+			});
+		}
+
+		const sorted = [...items];
+		if (sortBy === "rating") {
+			sorted.sort((a, b) => Number(b.rating || 0) - Number(a.rating || 0));
+		} else if (sortBy === "price_low") {
+			sorted.sort((a, b) => priceOf(a) - priceOf(b));
+		} else if (sortBy === "price_high") {
+			sorted.sort((a, b) => priceOf(b) - priceOf(a));
+		} else {
+			sorted.sort(
+				(a, b) =>
+					new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime(),
 			);
-		});
-	}, [activeFilter, listings, searchQuery]);
+		}
+		return sorted;
+	}, [activeFilter, listings, searchQuery, priceRange, sortBy]);
 
 	const getCardIcon = (type: ListingType) => {
 		switch (type) {
@@ -315,6 +353,21 @@ export default function DiscoverScreen() {
 
 		return "";
 	};
+
+	const openListing = useCallback((item: DiscoverListing) => {
+		if (item.type === "Artist") {
+			setSelectedListing(item);
+			return;
+		}
+		setSheetListingId(String(item.id));
+		setTimeout(() => {
+			listingSheetRef.current?.present?.();
+		}, 0);
+	}, []);
+
+	const dismissSheet = useCallback(() => {
+		setSheetListingId(null);
+	}, []);
 
 	return (
 		<View style={[styles.container, { backgroundColor: colors.background }]}>
@@ -382,6 +435,8 @@ export default function DiscoverScreen() {
 							placeholder={searchPlaceholder}
 							placeholderTextColor={colors.textSecondary}
 							style={[styles.searchInput, { color: colors.text }]}
+							returnKeyType="search"
+							autoCorrect={false}
 						/>
 
 						{searchQuery.length > 0 && (
@@ -411,8 +466,163 @@ export default function DiscoverScreen() {
 								<Ionicons name="refresh" size={16} color={colors.primary} />
 							)}
 						</TouchableOpacity>
+
+						<TouchableOpacity
+							activeOpacity={1}
+							onPress={() => setShowFilters((v) => !v)}
+							style={[
+								styles.refreshButton,
+								{
+									backgroundColor: showFilters
+										? colors.primary
+										: isDark
+											? "#374151"
+											: "#F3F4F6",
+									borderColor: showFilters
+										? colors.primary
+										: isDark
+											? "#4B5563"
+											: "#E5E7EB",
+								},
+							]}
+							accessibilityRole="button"
+							accessibilityLabel="Filters"
+						>
+							<Ionicons
+								name="options-outline"
+								size={18}
+								color={showFilters ? "#FFFFFF" : colors.textSecondary}
+							/>
+						</TouchableOpacity>
 					</View>
 				</View>
+
+				{showFilters && (
+					<View
+						style={{
+							marginTop: 12,
+							marginHorizontal: frameHorizontalPadding,
+							padding: 14,
+							borderRadius: 14,
+							borderWidth: 1,
+							backgroundColor: isDark ? "#111827" : "#FFFFFF",
+							borderColor: colors.border,
+							gap: 12,
+						}}
+					>
+						<View>
+							<Text style={[styles.filterPanelLabel, { color: colors.textSecondary }]}>
+								Sort by
+							</Text>
+							<View style={styles.filterPanelRow}>
+								{(
+									[
+										["newest", "Newest"],
+										["rating", "Top rated"],
+										["price_low", "Price: Low"],
+										["price_high", "Price: High"],
+									] as const
+								).map(([val, label]) => {
+									const active = sortBy === val;
+									return (
+										<TouchableOpacity
+											key={val}
+											activeOpacity={1}
+											onPress={() => setSortBy(val)}
+											style={[
+												styles.chip,
+												{
+													backgroundColor: active
+														? colors.primary
+														: isDark
+															? "#1F2937"
+															: "#EEF2FF",
+													borderColor: active
+														? colors.primary
+														: isDark
+															? "#374151"
+															: "#DBEAFE",
+												},
+											]}
+										>
+											<Text
+												style={[
+													styles.chipText,
+													{ color: active ? "#FFFFFF" : colors.text },
+												]}
+											>
+												{label}
+											</Text>
+										</TouchableOpacity>
+									);
+								})}
+							</View>
+						</View>
+
+						<View>
+							<Text style={[styles.filterPanelLabel, { color: colors.textSecondary }]}>
+								Price range
+							</Text>
+							<View style={styles.filterPanelRow}>
+								{(
+									[
+										["all", "Any"],
+										["low", "Under ₱1k"],
+										["mid", "₱1k–3k"],
+										["high", "Over ₱3k"],
+									] as const
+								).map(([val, label]) => {
+									const active = priceRange === val;
+									return (
+										<TouchableOpacity
+											key={val}
+											activeOpacity={1}
+											onPress={() => setPriceRange(val)}
+											style={[
+												styles.chip,
+												{
+													backgroundColor: active
+														? colors.primary
+														: isDark
+															? "#1F2937"
+															: "#EEF2FF",
+													borderColor: active
+														? colors.primary
+														: isDark
+															? "#374151"
+															: "#DBEAFE",
+												},
+											]}
+										>
+											<Text
+												style={[
+													styles.chipText,
+													{ color: active ? "#FFFFFF" : colors.text },
+												]}
+											>
+												{label}
+											</Text>
+										</TouchableOpacity>
+									);
+								})}
+							</View>
+						</View>
+
+						<TouchableOpacity
+							activeOpacity={1}
+							onPress={() => {
+								setPriceRange("all");
+								setSortBy("newest");
+								setActiveFilter("All");
+							}}
+							style={{ alignSelf: "flex-end" }}
+						>
+							<Text style={{ color: colors.primary, fontFamily: "Poppins_600SemiBold", fontSize: 13 }}>
+								Reset filters
+							</Text>
+						</TouchableOpacity>
+					</View>
+				)}
 
 				<View style={{ paddingHorizontal: frameHorizontalPadding, marginTop: 14 }}>
 					<ScrollView
@@ -520,7 +730,8 @@ export default function DiscoverScreen() {
 									}}
 								>
 									<TouchableOpacity
-										activeOpacity={1}
+										activeOpacity={0.85}
+										onPress={() => openListing(item)}
 										style={[
 											styles.listCard,
 											{ backgroundColor: isDark ? "#1F2937" : "#FFFFFF" },
@@ -604,6 +815,188 @@ export default function DiscoverScreen() {
 					</View>
 				)}
 			</ScrollView>
+
+			<Modal
+				visible={!!selectedListing}
+				transparent
+				animationType="fade"
+				onRequestClose={() => setSelectedListing(null)}
+			>
+				<Pressable
+					style={styles.modalOverlay}
+					onPress={() => setSelectedListing(null)}
+				>
+					<Pressable
+						onPress={(e) => e.stopPropagation?.()}
+						style={[
+							styles.modalCard,
+							{ backgroundColor: isDark ? "#111827" : "#FFFFFF", borderColor: colors.border },
+						]}
+					>
+						{selectedListing && (
+							<>
+								<View style={styles.modalMedia}>
+									{selectedListing.image ? (
+										<CachedImage
+											uri={selectedListing.image}
+											style={styles.modalImage}
+											width={1200}
+											height={600}
+											quality={78}
+											cacheVersion={selectedListing.created_at || selectedListing.id}
+										/>
+									) : (
+										<View
+											style={[
+												styles.modalImage,
+												{
+													backgroundColor: isDark ? "#374151" : "#E5E7EB",
+													alignItems: "center",
+													justifyContent: "center",
+												},
+											]}
+										>
+											<Ionicons
+												name={getCardIcon(selectedListing.type) as any}
+												size={48}
+												color={colors.textSecondary}
+											/>
+										</View>
+									)}
+
+									<View
+										style={[
+											styles.typePill,
+											{
+												backgroundColor:
+													selectedListing.type === "Studio"
+														? "#7C3AED"
+														: selectedListing.type === "Gig"
+															? "#10B981"
+															: selectedListing.type === "Group"
+																? "#3B82F6"
+																: "#EC4899",
+											},
+										]}
+									>
+										<Text style={styles.typePillText}>{selectedListing.type}</Text>
+									</View>
+
+									<TouchableOpacity
+										activeOpacity={1}
+										onPress={() => setSelectedListing(null)}
+										style={styles.modalClose}
+									>
+										<Ionicons name="close" size={20} color="#FFFFFF" />
+									</TouchableOpacity>
+								</View>
+
+								<ScrollView
+									style={{ maxHeight: 360 }}
+									contentContainerStyle={{ padding: 18 }}
+									showsVerticalScrollIndicator={false}
+								>
+									<Text style={[styles.modalTitle, { color: colors.text }]}>
+										{selectedListing.name}
+									</Text>
+
+									<View style={[styles.cardMetaRow, { marginTop: 6 }]}>
+										<Ionicons
+											name="location-outline"
+											size={14}
+											color={colors.textSecondary}
+										/>
+										<Text style={[styles.cardMetaText, { color: colors.textSecondary }]}>
+											{selectedListing.location ||
+												selectedListing.genre ||
+												"Location not set"}
+										</Text>
+									</View>
+
+									<View style={styles.cardMetaRow}>
+										<Ionicons name="star" size={14} color="#FBBF24" />
+										<Text style={[styles.cardMetaText, { color: colors.textSecondary }]}>
+											{selectedListing.rating && selectedListing.rating > 0
+												? `${selectedListing.rating.toFixed(1)} (${
+														selectedListing.review_count || 0
+													} reviews)`
+												: "No ratings yet"}
+										</Text>
+									</View>
+
+									{getPriceLabel(selectedListing) ? (
+										<Text
+											style={[
+												styles.cardPrice,
+												{ color: colors.primary, fontSize: 16, marginTop: 10 },
+											]}
+										>
+											{getPriceLabel(selectedListing)}
+										</Text>
+									) : null}
+
+									{selectedListing.description ? (
+										<Text
+											style={[
+												styles.modalDescription,
+												{ color: colors.textSecondary },
+											]}
+										>
+											{selectedListing.description}
+										</Text>
+									) : null}
+								</ScrollView>
+
+								<View
+									style={[
+										styles.modalActions,
+										{ borderTopColor: colors.border },
+									]}
+								>
+									<TouchableOpacity
+										activeOpacity={1}
+										onPress={() => setSelectedListing(null)}
+										style={[
+											styles.modalSecondaryBtn,
+											{
+												borderColor: colors.border,
+												backgroundColor: isDark ? "#1F2937" : "#F3F4F6",
+											},
+										]}
+									>
+										<Text style={[styles.modalBtnText, { color: colors.text }]}>
+											Close
+										</Text>
+									</TouchableOpacity>
+
+									<TouchableOpacity
+										activeOpacity={1}
+										onPress={() => {
+											const id = String(selectedListing.id);
+											setSelectedListing(null);
+											router.push({ pathname: "/profile", params: { userId: id } });
+										}}
+										style={[
+											styles.modalPrimaryBtn,
+											{ backgroundColor: colors.primary },
+										]}
+									>
+										<Text style={[styles.modalBtnText, { color: "#FFFFFF" }]}>
+											View profile
+										</Text>
+									</TouchableOpacity>
+								</View>
+							</>
+						)}
+					</Pressable>
+				</Pressable>
+			</Modal>
+
+			<ListingDetailsSheet
+				ref={listingSheetRef}
+				listingId={sheetListingId}
+				onDismiss={dismissSheet}
+			/>
 		</View>
 	);
 }
@@ -674,6 +1067,7 @@ const styles = StyleSheet.create({
 		flex: 1,
 		fontFamily: "Poppins_500Medium",
 		fontSize: 14,
+		...(Platform.OS === "web" ? ({ outlineStyle: "none" } as any) : null),
 	},
 	refreshButton: {
 		width: 34,
@@ -686,6 +1080,18 @@ const styles = StyleSheet.create({
 	},
 	chipsRow: {
 		paddingRight: 8,
+	},
+	filterPanelLabel: {
+		fontFamily: "Poppins_500Medium",
+		fontSize: 12,
+		marginBottom: 6,
+		textTransform: "uppercase",
+		letterSpacing: 0.5,
+	},
+	filterPanelRow: {
+		flexDirection: "row",
+		flexWrap: "wrap",
+		gap: 8,
 	},
 	chip: {
 		paddingHorizontal: 14,
@@ -771,5 +1177,73 @@ const styles = StyleSheet.create({
 		fontFamily: "Poppins_600SemiBold",
 		fontSize: 12,
 		marginTop: 2,
+	},
+	modalOverlay: {
+		flex: 1,
+		backgroundColor: "rgba(0,0,0,0.55)",
+		alignItems: "center",
+		justifyContent: "center",
+		padding: 20,
+	},
+	modalCard: {
+		width: "100%",
+		maxWidth: 560,
+		borderRadius: 18,
+		borderWidth: 1,
+		overflow: "hidden",
+	},
+	modalMedia: {
+		height: 220,
+		position: "relative",
+	},
+	modalImage: {
+		width: "100%",
+		height: "100%",
+	},
+	modalClose: {
+		position: "absolute",
+		top: 12,
+		right: 12,
+		width: 32,
+		height: 32,
+		borderRadius: 16,
+		alignItems: "center",
+		justifyContent: "center",
+		backgroundColor: "rgba(0,0,0,0.55)",
+	},
+	modalTitle: {
+		fontFamily: "Poppins_700Bold",
+		fontSize: 20,
+	},
+	modalDescription: {
+		marginTop: 12,
+		fontFamily: "Poppins_400Regular",
+		fontSize: 13,
+		lineHeight: 19,
+	},
+	modalActions: {
+		flexDirection: "row",
+		gap: 10,
+		padding: 14,
+		borderTopWidth: 1,
+	},
+	modalSecondaryBtn: {
+		flex: 1,
+		paddingVertical: 12,
+		borderRadius: 12,
+		borderWidth: 1,
+		alignItems: "center",
+		justifyContent: "center",
+	},
+	modalPrimaryBtn: {
+		flex: 1,
+		paddingVertical: 12,
+		borderRadius: 12,
+		alignItems: "center",
+		justifyContent: "center",
+	},
+	modalBtnText: {
+		fontFamily: "Poppins_600SemiBold",
+		fontSize: 14,
 	},
 });

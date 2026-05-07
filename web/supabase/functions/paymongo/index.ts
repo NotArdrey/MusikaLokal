@@ -4,6 +4,7 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 // @ts-ignore
 import { crypto } from "https://deno.land/std@0.168.0/crypto/mod.ts";
+import { withNotificationRouteMeta } from "../_shared/notificationRoutes.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -72,10 +73,7 @@ async function verifyWebhookSignature(
 
     if (!isValid) {
       console.error("❌ Webhook signature mismatch");
-      console.log("Expected:", signature);
-      console.log("Computed:", computedSignature);
     } else {
-      console.log("✅ Webhook signature verified");
     }
 
     return isValid;
@@ -342,6 +340,25 @@ function allocateInitialPaymentRows(
   return allocation;
 }
 
+async function insertNotification(
+  supabaseAdmin: any,
+  payload: {
+    user_id: string;
+    type: string;
+    title: string;
+    message: string;
+    image?: string | null;
+    meta?: Record<string, unknown> | null;
+    read?: boolean;
+  },
+) {
+  await supabaseAdmin.from("notifications").insert({
+    ...payload,
+    meta: withNotificationRouteMeta(payload.meta),
+    read: payload.read ?? false,
+  });
+}
+
 // Helper to credit owner's wallet when a booking payment is received
 // Idempotent: safe to call multiple times for the same booking (e.g. both
 // the client-side forfeit path and the webhook path may trigger this).
@@ -355,12 +372,6 @@ async function creditOwnerWallet(
   } = {},
 ) {
   try {
-    console.log(
-      "💰 Crediting owner wallet for booking:",
-      bookingId,
-      "Amount:",
-      paymentAmount,
-    );
 
     const paymentStage = options.paymentStage || "full";
     const referenceType =
@@ -384,7 +395,6 @@ async function creditOwnerWallet(
     );
 
     if (alreadyCredited) {
-      console.log("⏭️ Owner wallet already credited for booking:", bookingId);
       return;
     }
 
@@ -411,8 +421,9 @@ async function creditOwnerWallet(
       return;
     }
 
-    // Prefer the booking's stored amount so batch checkouts credit each row correctly.
-    // In test mode PayMongo may charge a placeholder amount that should not drive earnings.
+    // Prefer the booking's actual payment_amount from DB over the PayMongo-charged amount.
+    // In TEST MODE PayMongo always charges ₱1 (100 centavos), but the booking records the
+    // real agreed price — that is what the studio owner should receive in their wallet.
     const finalPrice = getNumericAmount(booking.final_price);
     const storedPaymentAmount = getNumericAmount(booking.payment_amount);
     const storedRemainingBalance = getNumericAmount(booking.remaining_balance);
@@ -485,19 +496,122 @@ async function creditOwnerWallet(
       return;
     }
 
-    console.log(
-      "✅ Successfully credited ₱" +
-      creditAmount +
-      " to owner wallet. New balance: ₱" +
-      newBalance,
-    );
   } catch (e) {
     console.error("❌ Error in creditOwnerWallet:", e);
   }
 }
 
+async function creditWalletDeposit(
+  supabaseAdmin: any,
+  {
+    checkoutSessionId,
+    paymentId,
+    userId,
+    amount,
+  }: {
+    checkoutSessionId?: string | null;
+    paymentId?: string | null;
+    userId?: string | null;
+    amount?: string | number | null;
+  },
+) {
+  const referenceId = checkoutSessionId || paymentId || null;
+  const depositAmount = getNumericAmount(amount);
+
+  if (!referenceId || !userId || depositAmount <= 0) {
+    return {
+      success: false,
+      error: "Missing wallet deposit reference, user, or amount",
+    };
+  }
+
+  const { data: existingTx } = await supabaseAdmin
+    .from("wallet_transactions")
+    .select("id")
+    .eq("reference_id", referenceId)
+    .eq("type", "deposit")
+    .maybeSingle();
+
+  if (existingTx) {
+    if (checkoutSessionId) {
+      await supabaseAdmin
+        .from("wallet_deposits")
+        .update({ status: "completed" })
+        .eq("checkout_session_id", checkoutSessionId);
+    }
+
+    return { success: true, alreadyCredited: true };
+  }
+
+  let { data: wallet } = await supabaseAdmin
+    .from("wallets")
+    .select("id, balance")
+    .eq("user_id", userId)
+    .maybeSingle();
+
+  if (!wallet) {
+    const { data: newWallet, error: walletCreateError } = await supabaseAdmin
+      .from("wallets")
+      .insert([{ user_id: userId, balance: 0 }])
+      .select("id, balance")
+      .single();
+
+    if (walletCreateError || !newWallet) {
+      console.error("Wallet deposit wallet create error:", walletCreateError);
+      return { success: false, error: "Unable to create wallet" };
+    }
+
+    wallet = newWallet;
+  }
+
+  const newBalance = getNumericAmount(wallet.balance) + depositAmount;
+  const { error: walletUpdateError } = await supabaseAdmin
+    .from("wallets")
+    .update({ balance: newBalance, updated_at: new Date().toISOString() })
+    .eq("id", wallet.id);
+
+  if (walletUpdateError) {
+    console.error("Wallet deposit balance update error:", walletUpdateError);
+    return { success: false, error: "Unable to update wallet balance" };
+  }
+
+  const { error: txError } = await supabaseAdmin
+    .from("wallet_transactions")
+    .insert({
+      wallet_id: wallet.id,
+      amount: depositAmount,
+      type: "deposit",
+      description: "Wallet top-up via PayMongo",
+      reference_id: referenceId,
+      reference_type: "wallet_deposit",
+      is_credit: true,
+      status: "completed",
+    });
+
+  if (txError) {
+    console.error("Wallet deposit transaction insert error:", txError);
+    return { success: false, error: "Unable to record wallet transaction" };
+  }
+
+  if (checkoutSessionId) {
+    await supabaseAdmin
+      .from("wallet_deposits")
+      .update({ status: "completed" })
+      .eq("checkout_session_id", checkoutSessionId);
+  }
+
+  await insertNotification(supabaseAdmin, {
+    user_id: userId,
+    type: "success",
+    title: "Wallet Topped Up!",
+    message: `PHP ${depositAmount.toLocaleString()} has been added to your wallet.`,
+    meta: { type: "wallet_deposit", amount: depositAmount },
+  }).catch(() => {});
+
+  return { success: true, creditedAmount: depositAmount, newBalance };
+}
+
 serve(async (req: Request) => {
-  console.log("🔵 PayMongo function called:", req.method, req.url);
 
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -536,7 +650,6 @@ serve(async (req: Request) => {
     }
 
     const authHeader = req.headers.get("Authorization");
-    console.log("🔵 Auth header present:", !!authHeader);
 
     const supabaseClient = createClient(supabaseUrl, supabaseAnonKey, {
       global: { headers: { Authorization: authHeader || "" } },
@@ -637,13 +750,6 @@ serve(async (req: Request) => {
         });
       }
 
-      console.log("📤 Creating PayMongo checkout session:", {
-        booking_id,
-        amount,
-        description,
-        payment_type,
-        redirect_url,
-      });
 
       const targetBookingIds = normalizeBookingIds(booking_id, booking_ids);
       const primaryBookingId = targetBookingIds[0] || booking_id;
@@ -780,7 +886,6 @@ serve(async (req: Request) => {
         },
       });
 
-      console.log("✅ Checkout session created:", checkoutData.data.id);
 
       // Update booking with checkout session ID
       // For balance payments, don't change the payment_type, just update the remaining_balance
@@ -926,11 +1031,6 @@ serve(async (req: Request) => {
         sessionData.data.attributes.payment_intent?.attributes?.status;
       const payments = sessionData.data.attributes.payments || [];
 
-      console.log("📊 Payment status check:", {
-        sessionId,
-        paymentStatus,
-        paymentsCount: payments.length,
-      });
 
       // If payment is successful, update booking
       if (paymentStatus === "succeeded" || payments.length > 0) {
@@ -1007,7 +1107,6 @@ serve(async (req: Request) => {
           });
 
         if (alreadySettled) {
-          console.log("⏭️ check_status: Booking already paid by webhook, skipping duplicate notification");
           return new Response(
             JSON.stringify({
               success: true,
@@ -1086,19 +1185,21 @@ serve(async (req: Request) => {
           const studioImage = fullBooking.studio?.images?.[0];
           const userAvatar = fullBooking.profile?.avatar_url;
 
-          // Notify musician
-          await supabaseAdmin.from("notifications").insert({
+          // Notify musician — downpayment lands in Pending (balance due), full payment lands in Upcoming
+          await insertNotification(supabaseAdmin, {
             user_id: fullBooking.user_id,
             type: "success",
             title: "Payment Successful!",
-            message: `Your booking at ${fullBooking.studio?.name} has been confirmed and moved to Upcoming.`,
+            message: isDownpayment
+              ? `Downpayment received for ${fullBooking.studio?.name}. Pay the remaining balance in your Pending bookings.`
+              : `Your booking at ${fullBooking.studio?.name} has been confirmed and moved to Upcoming.`,
             image: studioImage,
             meta: { booking_id: fullBooking.id },
           });
 
           // Notify studio owner
           if (fullBooking.studio?.owner_id) {
-            await supabaseAdmin.from("notifications").insert({
+            await insertNotification(supabaseAdmin, {
               user_id: fullBooking.studio.owner_id,
               type: "info",
               title: "Booking Payment Received",
@@ -1148,12 +1249,6 @@ serve(async (req: Request) => {
       // Get client-provided redirect URL (supports Expo Go exp:// and production musikalokal://)
       const clientRedirectUrl = url.searchParams.get("redirect_url");
 
-      console.log(
-        "✅ Payment success callback for booking:",
-        bookingId,
-        "redirect_url:",
-        clientRedirectUrl,
-      );
 
       if (bookingId) {
         // Get booking details
@@ -1167,7 +1262,6 @@ serve(async (req: Request) => {
         // DEDUPLICATION: Skip if already paid (webhook may have processed it)
         // ========================================
         if (booking?.payment_status === "paid" && !booking?.checkout_session_id) {
-          console.log("⏭️ payment_success: Booking already paid, redirecting without duplicate notification");
         } else if (booking?.checkout_session_id) {
           // Verify payment with PayMongo
           try {
@@ -1185,6 +1279,8 @@ serve(async (req: Request) => {
               const paymentAmount = payment?.attributes?.amount
                 ? payment.attributes.amount / 100
                 : 0; // Convert from centavos
+
+              // Get payment type from checkout session metadata
               const metadata = sessionData.data.attributes.metadata || {};
               const paymentType = inferBookingPaymentType(metadata, booking);
               const remainingBalance = parseFloat(
@@ -1231,7 +1327,6 @@ serve(async (req: Request) => {
               });
 
               if (alreadySettled) {
-                console.log("⏭️ payment_success: Booking already processed by webhook, skipping");
               } else {
                 const bookingIdsToSettle =
                   unsettledBookingIds.length > 0 ? unsettledBookingIds : targetBookingIds;
@@ -1242,8 +1337,6 @@ serve(async (req: Request) => {
                   ]),
                 );
 
-                // Get payment type from checkout session metadata
-                console.log("💰 payment_success: Processing payment", { paymentType, remainingBalance, isDownpayment });
 
                 // Update booking - handle downpayment vs full payment
                 const updateData: any = {
@@ -1302,7 +1395,7 @@ serve(async (req: Request) => {
                     ? `Your downpayment for ${fullBooking.studio?.name} has been received. Remaining balance: ₱${bookingRemainingBalance.toLocaleString()}`
                     : `Your booking at ${fullBooking.studio?.name} has been confirmed and moved to Upcoming.`;
 
-                  await supabaseAdmin.from("notifications").insert({
+                  await insertNotification(supabaseAdmin, {
                     user_id: fullBooking.user_id,
                     type: "success",
                     title: musicianTitle,
@@ -1318,7 +1411,7 @@ serve(async (req: Request) => {
                       ? `Downpayment received for booking at ${fullBooking.studio?.name} on ${fullBooking.booking_date}. Remaining balance: ₱${bookingRemainingBalance.toLocaleString()}`
                       : `Payment received for booking at ${fullBooking.studio?.name} on ${fullBooking.booking_date}.`;
 
-                    await supabaseAdmin.from("notifications").insert({
+                    await insertNotification(supabaseAdmin, {
                       user_id: fullBooking.studio.owner_id,
                       type: "info",
                       title: ownerTitle,
@@ -1342,7 +1435,6 @@ serve(async (req: Request) => {
         clientRedirectUrl ||
         `musikalokal://payment-result?status=success&booking_id=${bookingId}`;
 
-      console.log("🔀 Redirecting directly to:", appDeepLink);
 
       // Use HTTP 302 redirect directly to the app deep link
       return new Response(null, {
@@ -1363,12 +1455,6 @@ serve(async (req: Request) => {
       // Get client-provided redirect URL (supports Expo Go exp:// and production musikalokal://)
       const clientRedirectUrl = url.searchParams.get("redirect_url");
 
-      console.log(
-        "❌ Payment cancelled for booking:",
-        bookingId,
-        "redirect_url:",
-        clientRedirectUrl,
-      );
 
       // Reset payment status back to unpaid so user can try again
       // (Do NOT set to 'failed' as that hides the Pay Now button)
@@ -1392,7 +1478,6 @@ serve(async (req: Request) => {
         clientRedirectUrl ||
         `musikalokal://payment-result?status=cancelled&booking_id=${bookingId}`;
 
-      console.log("🔀 Redirecting directly to:", appDeepLink);
 
       // Use HTTP 302 redirect directly to the app deep link
       return new Response(null, {
@@ -1410,8 +1495,6 @@ serve(async (req: Request) => {
       // PayMongo sends webhook data in params or as root object with 'data' key
       const event = params.data ? params.data.attributes : params;
 
-      console.log("🔔 PayMongo webhook received:", event.type);
-      console.log("📦 Webhook payload:", JSON.stringify(event, null, 2));
 
       // Helper function to process successful payment
       async function processSuccessfulPayment(
@@ -1445,9 +1528,9 @@ serve(async (req: Request) => {
         const existingById = new Map<string, any>(
           (existingBookings || []).map((booking: any) => [booking.id, booking]),
         );
-        const firstExistingBooking = (existingBookings || [])[0];
 
         // Determine the payment type from metadata or existing booking
+        const firstExistingBooking = (existingBookings || [])[0];
         const paymentType = inferBookingPaymentType(metadata, firstExistingBooking);
         const remainingBalance = parseFloat(String(metadata?.remaining_balance || 0));
         const isDownpayment = paymentType === "downpayment";
@@ -1535,7 +1618,7 @@ serve(async (req: Request) => {
               ? `Your downpayment for ${booking.studio?.name} has been received. Remaining balance: PHP ${bookingRemainingBalance.toLocaleString()}`
               : `Your booking at ${booking.studio?.name} is now confirmed.`;
 
-            await supabaseAdmin.from("notifications").insert({
+            await insertNotification(supabaseAdmin, {
               user_id: booking.user_id,
               type: "success",
               title: notificationTitle,
@@ -1548,7 +1631,7 @@ serve(async (req: Request) => {
               const ownerMessage = isDownpayment
                 ? `Downpayment received for ${booking.studio?.name} on ${booking.booking_date}. Remaining balance: PHP ${bookingRemainingBalance.toLocaleString()}`
                 : `Payment received for ${booking.studio?.name} on ${booking.booking_date}.`;
-              await supabaseAdmin.from("notifications").insert({
+              await insertNotification(supabaseAdmin, {
                 user_id: booking.studio.owner_id,
                 type: "info",
                 title: isDownpayment ? "Downpayment Received" : "New Paid Booking",
@@ -1569,16 +1652,13 @@ serve(async (req: Request) => {
         const bookingId = metadata?.booking_id;
         const paymentMethod =
           event.data?.attributes?.payments?.[0]?.attributes?.source?.type;
+        const paymentAmountCentavos =
+          event.data?.attributes?.payments?.[0]?.attributes?.amount;
+        const paymentAmount = paymentAmountCentavos
+          ? paymentAmountCentavos / 100
+          : 0;
         const paymentIntentId =
           event.data?.attributes?.payment_intent?.id || null;
-        console.log("💰 Checkout session payment paid:", {
-          sessionId,
-          bookingId,
-          paymentMethod,
-          metadata,
-        });
-        const paymentAmountCentavos = event.data?.attributes?.payments?.[0]?.attributes?.amount;
-        const paymentAmount = paymentAmountCentavos ? paymentAmountCentavos / 100 : 0;
         await processSuccessfulPayment(
           bookingId,
           paymentMethod,
@@ -1601,12 +1681,6 @@ serve(async (req: Request) => {
         const paymentAmountCentavos = event.data?.attributes?.payments?.[0]?.attributes?.amount;
         const paymentAmount = paymentAmountCentavos ? paymentAmountCentavos / 100 : 0;
 
-        console.log("💰 Link payment paid:", {
-          linkId,
-          bookingId,
-          paymentMethod,
-          metadata,
-        });
         await processSuccessfulPayment(bookingId, paymentMethod, paymentAmount, metadata);
       }
 
@@ -1625,11 +1699,6 @@ serve(async (req: Request) => {
           event.data?.attributes?.checkout_session?.id ||
           null;
 
-        console.log("💰 Payment paid:", {
-          paymentId,
-          bookingId,
-          paymentMethod,
-        });
 
         // For payment.paid, we might need to look up by payment_intent_id
         if (bookingId || checkoutSessionId || paymentIntentId) {
@@ -1673,11 +1742,6 @@ serve(async (req: Request) => {
         const failureMessage =
           event.data?.attributes?.failed_message || "Payment failed";
 
-        console.log("❌ Payment failed:", {
-          paymentId,
-          bookingId,
-          failureMessage,
-        });
 
         const targetBookingIds = await resolvePaymentTargetBookingIds(
           supabaseAdmin,
@@ -1704,7 +1768,7 @@ serve(async (req: Request) => {
           const hydratedBookings = await hydrateStudioBookingLegacy(supabaseAdmin, bookings || []);
 
           for (const booking of hydratedBookings) {
-            await supabaseAdmin.from("notifications").insert({
+            await insertNotification(supabaseAdmin, {
               user_id: booking.user_id,
               type: "warning",
               title: "Payment Failed",
@@ -1722,10 +1786,6 @@ serve(async (req: Request) => {
         const bookingId = refundData?.metadata?.booking_id;
         const refundAmount = refundData?.amount ? refundData.amount / 100 : 0; // Convert from centavos
 
-        console.log("💸 Payment refunded webhook:", {
-          bookingId,
-          refundAmount,
-        });
 
         if (bookingId) {
           // Update booking status to refunded
@@ -1751,7 +1811,7 @@ serve(async (req: Request) => {
             : [];
 
           if (bookingWithLegacy) {
-            await supabaseAdmin.from("notifications").insert({
+            await insertNotification(supabaseAdmin, {
               user_id: bookingWithLegacy.user_id,
               type: "success",
               title: "Refund Completed",
@@ -1769,7 +1829,6 @@ serve(async (req: Request) => {
         const refundStatus = refundData?.status;
         const bookingId = refundData?.metadata?.booking_id;
 
-        console.log("🔄 Refund status updated:", { bookingId, refundStatus });
 
         if (bookingId && refundStatus === "failed") {
           // Notify user that refund failed
@@ -1784,7 +1843,7 @@ serve(async (req: Request) => {
             : [];
 
           if (bookingWithLegacy) {
-            await supabaseAdmin.from("notifications").insert({
+            await insertNotification(supabaseAdmin, {
               user_id: bookingWithLegacy.user_id,
               type: "warning",
               title: "Refund Failed",
@@ -1827,7 +1886,6 @@ serve(async (req: Request) => {
         console.error("Error expiring bookings:", error);
       }
 
-      console.log(`⏰ Expired ${expiredBookings?.length || 0} unpaid bookings`);
 
       return new Response(
         JSON.stringify({
@@ -1854,7 +1912,6 @@ serve(async (req: Request) => {
         });
       }
 
-      console.log("💸 Refund requested for booking:", booking_id);
 
       if (!booking_id || !user_id) {
         return new Response(
@@ -1961,12 +2018,6 @@ serve(async (req: Request) => {
       );
       const refundAmountCentavos = refundAmount * 100;
 
-      console.log("💰 Refund calculation:", {
-        diffDays,
-        refundPercentage,
-        originalAmount: booking.payment_amount,
-        refundAmount,
-      });
 
       // If no refund due
       if (refundPercentage === 0) {
@@ -2024,7 +2075,7 @@ serve(async (req: Request) => {
 
         // Notify studio owner about manual refund needed
         if (booking.studio?.owner_id) {
-          await supabaseAdmin.from("notifications").insert({
+          await insertNotification(supabaseAdmin, {
             user_id: booking.studio.owner_id,
             type: "warning",
             title: "Manual Refund Required",
@@ -2065,7 +2116,6 @@ serve(async (req: Request) => {
           },
         });
 
-        console.log("✅ Refund created:", refundData.data.id);
 
         // Update booking
         await supabaseAdmin
@@ -2081,7 +2131,7 @@ serve(async (req: Request) => {
           .eq("id", booking_id);
 
         // Notify user
-        await supabaseAdmin.from("notifications").insert({
+        await insertNotification(supabaseAdmin, {
           user_id: booking.user_id,
           type: "success",
           title: "Refund Processed",
@@ -2091,7 +2141,7 @@ serve(async (req: Request) => {
 
         // Notify studio owner
         if (booking.studio?.owner_id) {
-          await supabaseAdmin.from("notifications").insert({
+          await insertNotification(supabaseAdmin, {
             user_id: booking.studio.owner_id,
             type: "info",
             title: "Booking Cancelled & Refunded",
@@ -2189,6 +2239,188 @@ serve(async (req: Request) => {
           status: 200,
         },
       );
+    }
+
+    // ====================================================================
+    // WALLET TOP-UP: create_deposit — creates a PayMongo checkout to add funds to wallet
+    // ====================================================================
+    if (action === "create_deposit") {
+      const { user_id, amount, redirect_url, cancel_redirect_url } = params;
+
+      if (!user_id || !amount || amount <= 0) {
+        return new Response(JSON.stringify({ error: "user_id and amount are required" }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+          status: 400,
+        });
+      }
+
+      const depositAmount = getNumericAmount(amount);
+      if (depositAmount <= 0) {
+        return new Response(JSON.stringify({ error: "Invalid deposit amount" }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+          status: 400,
+        });
+      }
+
+      const amountCentavos = Math.round(depositAmount * 100);
+
+      const checkoutPayload = {
+        data: {
+          attributes: {
+            amount: amountCentavos,
+            currency: "PHP",
+            description: `Wallet top-up: PHP ${depositAmount.toLocaleString()}`,
+            payment_method_types: ["gcash", "card", "paymaya"],
+            success_url: redirect_url || "https://musikalokal.com/payment-result?status=success&type=deposit",
+            cancel_url: cancel_redirect_url || "https://musikalokal.com/payment-result?status=cancelled&type=deposit",
+            metadata: {
+              type: "wallet_deposit",
+              user_id: String(user_id),
+              amount: String(depositAmount), // actual peso amount
+            },
+          },
+        },
+      };
+
+      const PAYMONGO_SECRET = Deno.env.get("PAYMONGO_SECRET_KEY") || "";
+      const encoded = btoa(`${PAYMONGO_SECRET}:`);
+
+      const pmRes = await fetch("https://api.paymongo.com/v1/checkout_sessions", {
+        method: "POST",
+        headers: {
+          "Authorization": `Basic ${encoded}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(checkoutPayload),
+      });
+
+      const pmData = await pmRes.json();
+      if (!pmRes.ok) {
+        console.error("PayMongo create_deposit error:", pmData);
+        return new Response(JSON.stringify({ error: "Failed to create deposit checkout", details: pmData }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+          status: 500,
+        });
+      }
+
+      const checkoutId = pmData.data?.id;
+      const checkoutUrl = pmData.data?.attributes?.checkout_url;
+
+      // Store the pending deposit record
+      const { error: depositError } = await supabaseAdmin.from("wallet_deposits").insert({
+        user_id,
+        checkout_session_id: checkoutId,
+        amount: depositAmount,
+        status: "pending",
+      });
+
+      if (depositError) {
+        // wallet_deposits table may not exist yet — still return checkout URL so user can pay
+        console.warn("wallet_deposits insert error (table may not exist):", depositError.message);
+      }
+
+      return new Response(JSON.stringify({ checkout_url: checkoutUrl, checkout_id: checkoutId }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        status: 200,
+      });
+    }
+
+    // ====================================================================
+    // WALLET TOP-UP: check_deposit — verifies payment and credits the user's wallet
+    // ====================================================================
+    if (action === "check_deposit") {
+      const { checkout_id, user_id } = params;
+
+      if (!checkout_id || !user_id) {
+        return new Response(JSON.stringify({ error: "checkout_id and user_id are required" }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+          status: 400,
+        });
+      }
+
+      const PAYMONGO_SECRET = Deno.env.get("PAYMONGO_SECRET_KEY") || "";
+      const encoded = btoa(`${PAYMONGO_SECRET}:`);
+
+      const pmRes = await fetch(`https://api.paymongo.com/v1/checkout_sessions/${checkout_id}`, {
+        headers: { "Authorization": `Basic ${encoded}` },
+      });
+
+      const pmData = await pmRes.json();
+      const sessionAttr = pmData.data?.attributes;
+      const paymentStatus = sessionAttr?.payment_intent?.attributes?.status;
+      const payments = sessionAttr?.payments || [];
+      const succeeded = paymentStatus === "succeeded" || payments.some((p: any) => p.attributes?.status === "paid");
+
+      if (!succeeded) {
+        return new Response(JSON.stringify({ success: false, status: paymentStatus || "pending" }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+
+      // Idempotency: check if already credited
+      const { data: existingDeposit } = await supabaseAdmin
+        .from("wallet_deposits")
+        .select("id, status")
+        .eq("checkout_session_id", checkout_id)
+        .maybeSingle();
+
+      if (existingDeposit?.status === "completed") {
+        return new Response(JSON.stringify({ success: true, status: "already_credited" }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+
+      // Get actual amount from metadata
+      const metadata = sessionAttr?.metadata || {};
+      const depositAmount = Number(metadata.amount || payments[0]?.attributes?.amount / 100 || 0);
+
+      if (depositAmount <= 0) {
+        return new Response(JSON.stringify({ error: "Invalid deposit amount" }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+          status: 400,
+        });
+      }
+
+      // Credit the user's wallet
+      let { data: wallet } = await supabaseAdmin.from("wallets").select("id, balance").eq("user_id", user_id).single();
+      if (!wallet) {
+        const { data: newWallet } = await supabaseAdmin.from("wallets").insert([{ user_id, balance: 0 }]).select().single();
+        wallet = newWallet;
+      }
+
+      const newBalance = (wallet?.balance || 0) + depositAmount;
+      await supabaseAdmin.from("wallets").update({ balance: newBalance, updated_at: new Date().toISOString() }).eq("id", wallet.id);
+
+      await supabaseAdmin.from("wallet_transactions").insert({
+        wallet_id: wallet.id,
+        amount: depositAmount,
+        type: "deposit",
+        description: `Wallet top-up via PayMongo`,
+        reference_id: checkout_id,
+        is_credit: true,
+        status: "completed",
+      });
+
+      // Mark deposit record as completed
+      if (existingDeposit) {
+        await supabaseAdmin.from("wallet_deposits").update({ status: "completed" }).eq("checkout_session_id", checkout_id);
+      }
+
+      // Notify user
+      await insertNotification(supabaseAdmin, {
+        user_id,
+        type: "success",
+        title: "Wallet Topped Up!",
+        message: `₱${depositAmount.toLocaleString()} has been added to your wallet.`,
+        meta: { type: "wallet_deposit", amount: depositAmount },
+      }).catch(() => {});
+
+      return new Response(JSON.stringify({ success: true, credited_amount: depositAmount, new_balance: newBalance }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        status: 200,
+      });
     }
 
     return new Response(JSON.stringify({ error: "Invalid action" }), {

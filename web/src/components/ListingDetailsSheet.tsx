@@ -731,7 +731,7 @@ const ListingDetailsSheet = forwardRef<
   };
 
   const buildListingShareUrl = () => {
-    if (!group?.id) return ExpoLinking.createURL("/home");
+    if (!group?.id) return ExpoLinking.createURL("/feed");
 
     const normalizedType = String(group?.type || "").toLowerCase();
 
@@ -747,7 +747,7 @@ const ListingDetailsSheet = forwardRef<
       });
     }
 
-    return ExpoLinking.createURL("/home", {
+    return ExpoLinking.createURL("/feed", {
       queryParams: {
         listingId: group.id,
         listingType: normalizedType || "listing",

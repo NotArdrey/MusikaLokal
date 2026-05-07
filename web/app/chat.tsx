@@ -273,7 +273,7 @@ export default function ChatPage() {
                 <ConversationsList
                     currentUserId={userId}
                     onSelectConversation={handleSelectConversation}
-                    onNewConversation={() => router.push('/home')}
+                    onNewConversation={() => router.push('/feed')}
                 />
             </View>
         );

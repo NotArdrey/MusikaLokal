@@ -67,8 +67,6 @@ serve(async (req: Request) => {
 
         // Log authorization header for debugging (remove in production)
         const authHeader = req.headers.get('Authorization')
-        console.log('Authorization header present:', !!authHeader)
-        console.log('Action requested:', action)
 
         // Allow 'create' action without auth header (for signup flow)
         // The create action uses service role key anyway
@@ -226,7 +224,6 @@ serve(async (req: Request) => {
                 })
             }
 
-            console.log('Creating profile for user:', userId, email)
 
             const { data, error } = await supabaseAdmin
                 .from('profiles')
@@ -247,7 +244,6 @@ serve(async (req: Request) => {
                 throw error
             }
 
-            console.log('Profile created successfully:', data?.id)
 
             return new Response(JSON.stringify(data), {
                 headers: { ...corsHeaders, 'Content-Type': 'application/json' },

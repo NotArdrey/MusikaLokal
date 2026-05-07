@@ -29,8 +29,7 @@ export default function LoginScreen() {
   const resolvePostLoginRoute = (role: unknown) => {
     const normalizedRole = typeof role === 'string' ? role.trim().toLowerCase() : '';
     if (normalizedRole === 'admin') return '/admin';
-    if (normalizedRole === 'fan') return '/feed';
-    return '/home';
+    return '/feed';
   };
 
   useEffect(() => {

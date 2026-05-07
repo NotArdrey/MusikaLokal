@@ -1,7 +1,9 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import React, { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, useWindowDimensions, View } from 'react-native';
+
+const IS_WEB = Platform.OS === 'web';
 import { supabase } from '../lib/supabase';
 import CustomAlert, { AlertType } from '../src/components/CustomAlert';
 import Header from '../src/components/header';
@@ -32,6 +34,13 @@ const readFunctionErrorBody = async (error: any) => {
 
 export default function AddProductionScreen() {
   const { colors, isDark } = useTheme();
+  const { width: viewportWidth } = useWindowDimensions();
+  const isWebDesktop = Platform.OS === 'web' && viewportWidth >= 768;
+  const pageBackground = isWebDesktop
+    ? isDark
+      ? '#0A1224'
+      : '#E9EEF8'
+    : colors.background;
   const { contentBottomPadding } = useBottomBarClearance(24);
   const { isAuthenticated, loading: authLoading, userId } = useRequireAuth();
   const { session, userRole } = useAuth();
@@ -156,10 +165,11 @@ export default function AddProductionScreen() {
   };
 
   return (
-    <View style={[styles.container, { backgroundColor: colors.background }]}>
+    <View style={[styles.container, { backgroundColor: pageBackground }]}>
       <Header title="Add Production" onBackPress={() => router.replace('/my_production')} />
 
       <ScrollView contentContainerStyle={[styles.content, { paddingBottom: contentBottomPadding }]} showsVerticalScrollIndicator={false}>
+        <View style={styles.contentFrame}>
         <View style={[styles.heroCard, { backgroundColor: colors.surface, borderColor: isDark ? '#334155' : '#E2E8F0' }]}>
           <View style={[styles.heroIcon, { backgroundColor: colors.primary + '14' }]}>
             <Ionicons name="people-outline" size={24} color={colors.primary} />
@@ -224,6 +234,7 @@ export default function AddProductionScreen() {
             {saving ? <ActivityIndicator color="#fff" /> : <Text style={[styles.submitBtnText, { color: hasIncompleteRequiredFields ? colors.textSecondary : "#fff" }]}>Create Production Team</Text>}
           </TouchableOpacity>
         </View>
+        </View>
       </ScrollView>
 
       {alert ? <CustomAlert visible type={alert.type} title={alert.title} message={alert.message} onClose={() => setAlert(null)} /> : null}
@@ -235,6 +246,12 @@ export default function AddProductionScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1 },
   content: { padding: 16, gap: 14 },
+  contentFrame: {
+    width: '100%',
+    maxWidth: IS_WEB ? 1080 : undefined,
+    alignSelf: 'center',
+    gap: 14,
+  },
   heroCard: { borderWidth: 1, borderRadius: 22, padding: 18 },
   heroIcon: { width: 48, height: 48, borderRadius: 24, alignItems: 'center', justifyContent: 'center', marginBottom: 12 },
   heroTitle: { fontSize: 20, fontFamily: 'Poppins_700Bold' },

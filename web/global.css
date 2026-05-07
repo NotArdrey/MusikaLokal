@@ -15,3 +15,13 @@ body,
   height: 0;
   display: none;
 }
+
+/* Remove default browser focus outline on form fields rendered by React Native Web.
+   Inputs already render their own focus styling via container borders. */
+input:focus,
+textarea:focus,
+select:focus,
+[contenteditable]:focus {
+  outline: none !important;
+  box-shadow: none !important;
+}

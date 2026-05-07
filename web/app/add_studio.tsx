@@ -13,6 +13,7 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
+  useWindowDimensions,
   View,
 } from "react-native";
 import { Calendar } from "react-native-calendars";
@@ -274,6 +275,13 @@ const normalizeWeeklySessionType = (
 
 export default function AddStudioScreen() {
   const { colors, isDark } = useTheme();
+  const { width: viewportWidth } = useWindowDimensions();
+  const isWebDesktop = Platform.OS === "web" && viewportWidth >= 768;
+  const pageBackground = isWebDesktop
+    ? isDark
+      ? "#0A1224"
+      : "#E9EEF8"
+    : colors.background;
   const { isSystemLocked, showLockAlert } = useAuth();
   const params = useLocalSearchParams<{ refresh?: string }>();
   const refreshKey = Array.isArray(params.refresh) ? params.refresh[0] : params.refresh;
@@ -660,7 +668,7 @@ export default function AddStudioScreen() {
 
       if (profile?.role !== "studio-owner") {
         showAlert("warning", "Unauthorized", "Only studio owners can create studios.");
-        router.replace("/home");
+        router.replace("/feed");
         return;
       }
 
@@ -670,7 +678,7 @@ export default function AddStudioScreen() {
       setAuthorized(true);
     } catch (e) {
       console.error("Authorization check failed:", e);
-      router.replace("/home");
+      router.replace("/feed");
     } finally {
       setCheckingAuth(false);
     }
@@ -2103,8 +2111,9 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
           style={{ display: "none" }}
         />
       )}
-      <View style={[styles.flex1, { backgroundColor: colors.background }]}>
-        <Header title="List Studio" onBackPress={handleBack} />
+      <View style={[styles.flex1, { backgroundColor: pageBackground }]}>
+        <View style={[styles.pageFrame, isWebDesktop && styles.pageFrameWeb]}>
+        <Header title="Add Studio" onBackPress={handleBack} />
 
         {/* Enhanced Step Indicator (Fixed at top) */}
         <View style={styles.stepIndicatorContainer}>
@@ -2508,7 +2517,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                           marginRight: 4,
                         }}
                       >
-                        ?
+                        ₱
                       </Text>
                       <TextInput
                         value={rehearsalRate}
@@ -2580,7 +2589,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                           marginRight: 4,
                         }}
                       >
-                        ?
+                        ₱
                       </Text>
                       <TextInput
                         value={recordingRate}
@@ -5092,7 +5101,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
               </View>
 
               <Text style={styles.termsText}>
-                By tapping List Studio, you agree to our Terms and Conditions.
+                By tapping Add Studio, you agree to our Terms and Conditions.
               </Text>
             </View>
           )}
@@ -5134,13 +5143,14 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                 <ActivityIndicator color="#fff" size="small" />
               ) : (
                 <Text style={[styles.nextBtnText, { color: isCurrentStepComplete ? "#FFFFFF" : colors.textSecondary }]}>
-                  {step === 4 ? "List Studio" : "Next"}
+                  {step === 4 ? "Add Studio" : "Next"}
                 </Text>
               )}
             </TouchableOpacity>
           </View>
         </ScrollView>
 
+        </View>
         <Navbar />
       </View>
 
@@ -5559,6 +5569,17 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
 const styles = StyleSheet.create({
   flex1: {
     flex: 1,
+  },
+  pageFrame: {
+    flex: 1,
+    width: "100%",
+  },
+  pageFrameWeb: {
+    maxWidth: 1240,
+    width: "100%",
+    alignSelf: "center",
+    paddingHorizontal: 20,
+    paddingTop: 12,
   },
   centerContainer: {
     alignItems: "center",

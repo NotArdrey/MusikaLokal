@@ -1166,7 +1166,7 @@ export default function ProfileScreen() {
       // Continue navigation even if cache write fails.
     }
 
-    router.push("/home");
+    router.push("/feed");
   };
 
   const submitProfileReport = async (reason: string, details?: string) => {

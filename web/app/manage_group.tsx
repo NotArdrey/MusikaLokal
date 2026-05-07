@@ -4,11 +4,13 @@ import React, { useEffect, useState } from "react";
 import {
     ActivityIndicator,
     Image,
+    Platform,
     ScrollView,
     StyleSheet,
     Switch,
     Text,
     TouchableOpacity,
+    useWindowDimensions,
     View,
 } from "react-native";
 import { supabase } from "../lib/supabase";
@@ -32,6 +34,23 @@ const GROUP_TABS = ["About", "Applications", "Review"];
 
 export default function GroupDetailsScreen() {
   const { colors, isDark } = useTheme();
+  const { width: viewportWidth } = useWindowDimensions();
+  const isWebDesktop = Platform.OS === "web" && viewportWidth >= 768;
+  const pageBackground = isWebDesktop
+    ? isDark
+      ? "#0A1224"
+      : "#E9EEF8"
+    : colors.background;
+  const pageCardBackground = isWebDesktop
+    ? isDark
+      ? "#0F172A"
+      : "#FFFFFF"
+    : colors.card;
+  const borderSoft = isWebDesktop
+    ? isDark
+      ? "#1E2C48"
+      : "#D8E3F2"
+    : colors.border;
   const { isSystemLocked, showLockAlert } = useAuth();
   const { id, tab } = useLocalSearchParams<{ id?: string | string[]; tab?: string | string[] }>();
   const requestedTab = Array.isArray(tab) ? tab[0] : tab;
@@ -151,7 +170,7 @@ export default function GroupDetailsScreen() {
 
       if (profile?.role !== "musician") {
         showAlert("error", "Unauthorized", "Only musicians can access this page.");
-        router.replace("/home");
+        router.replace("/feed");
         return;
       }
 
@@ -159,7 +178,7 @@ export default function GroupDetailsScreen() {
       setAuthorized(true);
     } catch (e) {
       console.error("Authorization check failed:", e);
-      router.replace("/home");
+      router.replace("/feed");
     } finally {
       setCheckingAuth(false);
     }
@@ -176,7 +195,7 @@ export default function GroupDetailsScreen() {
       const groupId = Array.isArray(id) ? id[0] : id;
       if (!groupId) {
         showAlert("error", "Error", "Invalid group ID");
-        router.replace("/home");
+        router.replace("/feed");
         return;
       }
 
@@ -461,7 +480,7 @@ export default function GroupDetailsScreen() {
         style={[
           styles.flex1,
           styles.centerContainer,
-          { backgroundColor: colors.background },
+          { backgroundColor: pageBackground },
         ]}
       >
         <ActivityIndicator size="large" color={colors.primary} />
@@ -489,7 +508,7 @@ export default function GroupDetailsScreen() {
         style={[
           styles.flex1,
           styles.centerContainer,
-          { backgroundColor: colors.background },
+          { backgroundColor: pageBackground },
         ]}
       >
         <ActivityIndicator size="large" color={colors.primary} />
@@ -508,12 +527,16 @@ export default function GroupDetailsScreen() {
 
   return (
     <>
-      <View style={[styles.flex1, { backgroundColor: colors.background }]}>
+      <View style={[styles.flex1, { backgroundColor: pageBackground }]}>
+        <View style={[styles.pageFrame, isWebDesktop && styles.pageFrameWeb]}>
         <Header title="Manage Group" />
 
         <ScrollView
           showsVerticalScrollIndicator={false}
-          contentContainerStyle={styles.scrollContent}
+          contentContainerStyle={[
+            styles.scrollContent,
+            isWebDesktop && styles.scrollContentWeb,
+          ]}
         >
           {/* Header Image & Info */}
           <View style={styles.headerContainer}>
@@ -1056,6 +1079,7 @@ export default function GroupDetailsScreen() {
           </SmoothTabTransition>
         </ScrollView>
 
+        </View>
         <Navbar />
       </View>
       <Modal
@@ -1087,12 +1111,29 @@ const styles = StyleSheet.create({
   flex1: {
     flex: 1,
   },
+  pageFrame: {
+    flex: 1,
+    width: "100%",
+  },
+  pageFrameWeb: {
+    maxWidth: 1240,
+    width: "100%",
+    alignSelf: "center",
+    paddingHorizontal: 20,
+    paddingTop: 12,
+  },
   centerContainer: {
     alignItems: "center",
     justifyContent: "center",
   },
   scrollContent: {
     paddingBottom: 180,
+  },
+  scrollContentWeb: {
+    maxWidth: 1120,
+    width: "100%",
+    alignSelf: "center",
+    paddingTop: 10,
   },
   headerContainer: {
     paddingHorizontal: 24,

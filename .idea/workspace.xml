@@ -6,25 +6,7 @@
   <component name="ChangeListManager">
     <list default="true" id="1228764b-191d-4dd6-88c7-52fb0268941f" name="Changes" comment="">
       <change beforePath="$PROJECT_DIR$/web/app/_layout.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/web/app/_layout.tsx" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/web/app/add_gig.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/web/app/add_gig.tsx" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/web/app/ai_suggestions.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/web/app/ai_suggestions.tsx" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/web/app/bookings.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/web/app/bookings.tsx" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/web/app/edit_gig.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/web/app/edit_gig.tsx" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/web/app/edit_profile.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/web/app/edit_profile.tsx" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/web/app/home.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/web/app/home.tsx" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/web/app/identity_verification.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/web/app/identity_verification.tsx" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/web/app/manage.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/web/app/manage.tsx" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/web/app/manage_gig.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/web/app/manage_gig.tsx" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/web/app/my_venue.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/web/app/my_venue.tsx" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/web/app/notifications.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/web/app/notifications.tsx" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/web/app/profile.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/web/app/profile.tsx" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/web/app/settings.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/web/app/settings.tsx" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/web/app/wallet.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/web/app/wallet.tsx" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/web/src/components/CustomAlert.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/web/src/components/CustomAlert.tsx" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/web/src/components/ImageUploader.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/web/src/components/ImageUploader.tsx" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/web/src/components/LocationPicker.web.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/web/src/components/LocationPicker.web.tsx" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/web/src/components/SidebarNav.web.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/web/src/components/SidebarNav.web.tsx" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/web/src/components/modal.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/web/src/components/modal.tsx" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -37,10 +19,10 @@
   <component name="Git.Settings">
     <option name="RECENT_GIT_ROOT_PATH" value="$PROJECT_DIR$" />
   </component>
-  <component name="ProjectColorInfo"><![CDATA[{
-  "customColor": "",
-  "associatedIndex": 0
-}]]></component>
+  <component name="ProjectColorInfo">{
+  &quot;customColor&quot;: &quot;&quot;,
+  &quot;associatedIndex&quot;: 0
+}</component>
   <component name="ProjectId" id="3C6F1IDbtjXldy81zB5W2BmkyXK" />
   <component name="ProjectViewState">
     <option name="hideEmptyMiddlePackages" value="true" />
@@ -56,7 +38,7 @@
     "cf.first.check.clang-format": "false",
     "cidr.known.project.marker": "true",
     "dart.analysis.tool.window.visible": "false",
-    "git-widget-placeholder": "improvements/mobile-web-structure",
+    "git-widget-placeholder": "improvements/app-flow-refinements",
     "kotlin-language-version-configured": "true",
     "show.migrate.to.gradle.popup": "false"
   }

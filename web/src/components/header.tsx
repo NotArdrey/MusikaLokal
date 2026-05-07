@@ -33,7 +33,7 @@ function Header({ title, transparent, onBackPress, hideBackButton = false, leftC
         [pathname],
     );
     const isMainNavPath = useMemo(
-        () => pathname === "/explore" || pathname === "/home" || pathname === "/manage" || pathname === "/bookings" || pathname === "/ai_suggestions",
+        () => pathname === "/explore" || pathname === "/feed" || pathname === "/manage" || pathname === "/bookings" || pathname === "/ai_suggestions",
         [pathname],
     );
 

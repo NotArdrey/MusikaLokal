@@ -40,23 +40,21 @@ serve(async (req) => {
 
     // Parse request body
     const { userId, email, callback, redirect_url, action, session_id } = await req.json();
+    const normalizedEmail = typeof email === 'string' ? email.trim().toLowerCase() : '';
 
     // HANDLE GET SESSION ACTION
     if (action === 'get_session' && session_id) {
-      console.log(`Fetching Didit session: ${session_id}`);
 
       let sessionData = {};
 
       // Try /decision/ first (contains verification results)
       try {
-        console.log(`Attempting /decision/ endpoint...`);
         const decisionResponse = await fetch(`https://verification.didit.me/v3/session/${session_id}/decision/`, {
           method: "GET",
           headers: { "Content-Type": "application/json", "X-Api-Key": DIDIT_API_KEY }
         });
         if (decisionResponse.ok) {
           const decision = await decisionResponse.json();
-          console.log('Decision fetched successfully');
           sessionData = { ...sessionData, ...decision };
         } else {
           console.warn(`Decision endpoint failed: ${decisionResponse.status}`);
@@ -67,14 +65,12 @@ serve(async (req) => {
 
       // Try base /session/ endpoint (contains metadata)
       try {
-        console.log(`Attempting /session/ endpoint...`);
         const baseResponse = await fetch(`https://verification.didit.me/v3/session/${session_id}`, {
           method: "GET",
           headers: { "Content-Type": "application/json", "X-Api-Key": DIDIT_API_KEY }
         });
         if (baseResponse.ok) {
           const base = await baseResponse.json();
-          console.log('Base session fetched successfully');
           // Merge, but don't overwrite decision data if it exists
           sessionData = { ...base, ...sessionData };
         } else {
@@ -99,7 +95,6 @@ serve(async (req) => {
 
           // 2. If not found, and session_id looks like a TEMP ref, try lookup by user_ref inside JSON
           if (!localData && session_id && session_id.startsWith('TEMP_')) {
-            console.log('Session lookup failed, trying lookup by user_ref in JSON data...');
             const { data: userRefData } = await supabaseAdmin
               .from('verification_sessions')
               .select('status, verification_data')
@@ -110,16 +105,13 @@ serve(async (req) => {
 
             if (userRefData) {
               localData = userRefData;
-              console.log('Found session via user_ref lookup!');
             }
           }
 
           if (localData) {
-            console.log('Found data in verification_sessions table!', localData);
             // Read the ACTUAL status from the database - DO NOT hardcode 'Approved'
             // The webhook now stores all statuses: APPROVED, DECLINED, ABANDONED, PENDING_REVIEW
             const storedStatus = localData.status || 'Approved';
-            console.log('Stored status from verification_sessions:', storedStatus);
 
             // Merge local data (extracted by webhook) into sessionData
             sessionData = {
@@ -181,7 +173,6 @@ serve(async (req) => {
         derivedName = [foundFirst, foundMiddle, foundLast].filter(Boolean).join(' ');
       }
 
-      console.log(`Derived Name: ${derivedName}`);
 
       // Return normalized data along with raw
       return new Response(JSON.stringify({
@@ -203,7 +194,6 @@ serve(async (req) => {
       });
     }
 
-    console.log(`Creating Didit session for user: ${userId}`);
 
     // Fallback anon key if not in env
     const anonKey = SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFlZmxkeGVnc3Z6ZWNzaGxheXphIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njg2NTgyOTUsImV4cCI6MjA4NDIzNDI5NX0._BKyxjyqHKHaheMWkBk8mMalzSPy_gm1ImsT_RQaOB0';
@@ -222,7 +212,6 @@ serve(async (req) => {
     }
     // Else, verification-redirect will fallback to static default
 
-    console.log('Callback/Redirect URL:', finalRedirectUrl);
 
     // Create session with Didit API v3
     const diditResponse = await fetch("https://verification.didit.me/v3/session/", {
@@ -235,7 +224,7 @@ serve(async (req) => {
         workflow_id: DIDIT_WORKFLOW_ID,
         vendor_data: userId, // This is passed to webhook and included in session
         callback: finalRedirectUrl, // Browser redirect URL after verification completes
-        features: email ? { email } : undefined, // v3 uses 'features' instead of 'contact_details'
+        features: normalizedEmail ? { email: normalizedEmail } : undefined, // v3 uses 'features' instead of 'contact_details'
       }),
     });
 
@@ -253,7 +242,6 @@ serve(async (req) => {
     }
 
     const diditData = await diditResponse.json();
-    console.log("Didit session created:", JSON.stringify(diditData));
 
     /*
     Expected response:
@@ -269,24 +257,55 @@ serve(async (req) => {
     }
     */
 
-    // Update user profile with the session ID
-    // SKIP if it's a temp ID (user not created yet)
-    if (userId && !userId.startsWith('TEMP_') && SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY) {
+    if (SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY) {
       const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
-      const { error: updateError } = await supabase
-        .from("profiles")
-        .update({
-          didit_session_id: diditData.session_id,
-          verification_status: "PENDING",
-        })
-        .eq("id", userId);
+      if (normalizedEmail) {
+        const { error: supersedeError } = await supabase
+          .from('verification_sessions')
+          .update({ status: 'SUPERSEDED' })
+          .eq('verification_data->>email', normalizedEmail)
+          .in('status', ['PENDING', 'Not Started', 'In Progress'])
+          .neq('session_ref', diditData.session_id);
 
-      if (updateError) {
-        console.error("Failed to update profile:", updateError);
-        // Don't fail the request, just log the error
-      } else {
-        console.log("Profile updated with session ID");
+        if (supersedeError) {
+          console.error('Failed to supersede older Didit sessions:', supersedeError);
+        }
+      }
+
+      const { error: sessionStoreError } = await supabase
+        .from('verification_sessions')
+        .upsert({
+          session_ref: diditData.session_id,
+          status: 'PENDING',
+          verification_data: {
+            user_ref: userId,
+            email: normalizedEmail || null,
+            session_url: diditData.url || null,
+            started_at: new Date().toISOString(),
+          },
+        });
+
+      if (sessionStoreError) {
+        console.error('Failed to store pending Didit session:', sessionStoreError);
+      }
+
+      // Update user profile with the session ID.
+      // SKIP if it's a temp ID (user not created yet).
+      if (userId && !userId.startsWith('TEMP_')) {
+        const { error: updateError } = await supabase
+          .from("profiles")
+          .update({
+            didit_session_id: diditData.session_id,
+            verification_status: "PENDING",
+          })
+          .eq("id", userId);
+
+        if (updateError) {
+          console.error("Failed to update profile:", updateError);
+          // Don't fail the request, just log the error
+        } else {
+        }
       }
     }
 

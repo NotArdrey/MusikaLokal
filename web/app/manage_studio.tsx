@@ -1,4 +1,4 @@
-﻿import { Ionicons } from "@expo/vector-icons";
+import { Ionicons } from "@expo/vector-icons";
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import React, { useRef, useState } from "react";
 import {
@@ -6,10 +6,12 @@ import {
     Image,
     Linking,
     Modal as RNModal,
+    Platform,
     ScrollView,
     StyleSheet,
     Text,
     TouchableOpacity,
+    useWindowDimensions,
     View,
 } from "react-native";
 import { Calendar } from "react-native-calendars";
@@ -56,6 +58,23 @@ const inferStudioTypeFromRows = (rows: unknown[]): "Rehearsal" | "Recording" | "
 
 export default function StudioDetailsScreen() {
   const { colors, isDark } = useTheme();
+  const { width: viewportWidth } = useWindowDimensions();
+  const isWebDesktop = Platform.OS === "web" && viewportWidth >= 768;
+  const pageBackground = isWebDesktop
+    ? isDark
+      ? "#0A1224"
+      : "#E9EEF8"
+    : colors.background;
+  const pageCardBackground = isWebDesktop
+    ? isDark
+      ? "#0F172A"
+      : "#FFFFFF"
+    : colors.card;
+  const borderSoft = isWebDesktop
+    ? isDark
+      ? "#1E2C48"
+      : "#D8E3F2"
+    : colors.border;
   const { id, tab } = useLocalSearchParams<{ id?: string | string[]; tab?: string | string[] }>(); // Get Studio ID
   const requestedTab = Array.isArray(tab) ? tab[0] : tab;
   const [activeTab, setActiveTab] = useState(
@@ -243,7 +262,7 @@ export default function StudioDetailsScreen() {
 
       if (profile?.role !== "studio-owner") {
         Alert.alert("Unauthorized", "Only studio owners can access this page.");
-        router.replace("/home");
+        router.replace("/feed");
         return;
       }
 
@@ -251,7 +270,7 @@ export default function StudioDetailsScreen() {
       if (id) fetchData(user.id);
     } catch (e) {
       console.error("Authorization check failed:", e);
-      router.replace("/home");
+      router.replace("/feed");
     } finally {
       setCheckingAuth(false);
     }
@@ -264,7 +283,7 @@ export default function StudioDetailsScreen() {
       const studioId = Array.isArray(id) ? id[0] : id;
       if (!studioId) {
         Alert.alert("Error", "Invalid studio ID");
-        router.replace("/home");
+        router.replace("/feed");
         return;
       }
 
@@ -619,13 +638,13 @@ export default function StudioDetailsScreen() {
             : "Rate";
   const studioRateDisplay =
     hasRehearsalRate && hasRecordingRate
-      ? `₱${rehearsalRateValue.toLocaleString()}/hr | ₱${recordingRateValue.toLocaleString()}/song`
+      ? `?${rehearsalRateValue.toLocaleString()}/hr | ?${recordingRateValue.toLocaleString()}/song`
       : hasRecordingRate
-        ? `₱${recordingRateValue.toLocaleString()}/song`
+        ? `?${recordingRateValue.toLocaleString()}/song`
         : hasRehearsalRate
-          ? `₱${rehearsalRateValue.toLocaleString()}/hr`
+          ? `?${rehearsalRateValue.toLocaleString()}/hr`
           : hourlyRateValue > 0
-            ? `₱${hourlyRateValue.toLocaleString()}/hr`
+            ? `?${hourlyRateValue.toLocaleString()}/hr`
             : "N/A";
   const studioEquipment = Array.isArray(studio?.instruments)
     ? studio.instruments.filter((item: any) => {
@@ -646,7 +665,7 @@ export default function StudioDetailsScreen() {
         style={[
           styles.flex1,
           styles.centerContainer,
-          { backgroundColor: colors.background },
+          { backgroundColor: pageBackground },
         ]}
       >
         <ActivityIndicator size="large" color={colors.primary} />
@@ -670,12 +689,16 @@ export default function StudioDetailsScreen() {
 
   return (
     <>
-      <View style={[styles.flex1, { backgroundColor: colors.background }]}>
+      <View style={[styles.flex1, { backgroundColor: pageBackground }]}>
+        <View style={[styles.pageFrame, isWebDesktop && styles.pageFrameWeb]}>
         <Header title="Manage Studio" />
 
         <ScrollView
           showsVerticalScrollIndicator={false}
-          contentContainerStyle={styles.scrollContent}
+          contentContainerStyle={[
+            styles.scrollContent,
+            isWebDesktop && styles.scrollContentWeb,
+          ]}
         >
           {/* Header Image & Info */}
           <View style={styles.headerContainer}>
@@ -1948,6 +1971,7 @@ export default function StudioDetailsScreen() {
           </SmoothTabTransition>
         </ScrollView>
 
+        </View>
         <Navbar />
       </View>
       <Modal
@@ -2177,12 +2201,29 @@ const styles = StyleSheet.create({
   flex1: {
     flex: 1,
   },
+  pageFrame: {
+    flex: 1,
+    width: "100%",
+  },
+  pageFrameWeb: {
+    maxWidth: 1240,
+    width: "100%",
+    alignSelf: "center",
+    paddingHorizontal: 20,
+    paddingTop: 12,
+  },
   centerContainer: {
     alignItems: "center",
     justifyContent: "center",
   },
   scrollContent: {
     paddingBottom: 180,
+  },
+  scrollContentWeb: {
+    maxWidth: 1120,
+    width: "100%",
+    alignSelf: "center",
+    paddingTop: 10,
   },
   headerContainer: {
     paddingHorizontal: 24,

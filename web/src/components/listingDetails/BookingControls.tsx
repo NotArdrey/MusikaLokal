@@ -328,17 +328,21 @@ const BookingControls = ({
             return;
           }
 
-          const slots = await fetchAvailableSlots(day.dateString);
-          if (!slots || slots.length === 0) {
-            return;
-          }
-
+          // Always commit the selection so the user gets feedback;
+          // the slot picker below will show an empty state when no
+          // times are available instead of silently swallowing the tap.
           setSelectedDate(day.dateString);
           setSelectedSlot(null);
           setValidEndTimes([]);
           setEndTime(null);
           const selectedDateObj = new Date(day.dateString);
           setDate(selectedDateObj);
+
+          try {
+            await fetchAvailableSlots(day.dateString);
+          } catch (err) {
+            console.warn("[BookingControls] fetchAvailableSlots failed:", err);
+          }
         }}
         theme={{
           backgroundColor: "transparent",

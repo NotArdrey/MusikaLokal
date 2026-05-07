@@ -161,7 +161,7 @@ export default function IdentityVerificationScreen() {
 
     const isVerifiedAndValid = latestProfile?.is_verified === true && !isDateExpired(latestProfile?.id_document_expiry || null);
     if (isVerifiedAndValid) {
-      router.replace('/home');
+      router.replace('/feed');
       return true;
     }
 

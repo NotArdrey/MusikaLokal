@@ -730,7 +730,7 @@ export default function EditStudioScreen() {
           "Unauthorized",
           "Only studio owners can edit studios.",
         );
-        router.replace("/home");
+        router.replace("/feed");
         return;
       }
 
@@ -739,7 +739,7 @@ export default function EditStudioScreen() {
       // fetchStudioDetails(); // This will be called by the other useEffect now
     } catch (e) {
       console.error("Authorization check failed:", e);
-      router.replace("/home");
+      router.replace("/feed");
     } finally {
       setCheckingAuth(false);
     }
@@ -992,7 +992,7 @@ export default function EditStudioScreen() {
       if (!studioId) {
         console.error("? Invalid studio ID after processing");
         showAlert("warning", "Invalid Studio", "Invalid studio ID. Please try again.");
-        router.replace("/home");
+        router.replace("/feed");
         return;
       }
 
@@ -1175,7 +1175,7 @@ export default function EditStudioScreen() {
           "Not Found",
           "Studio not found or you do not have permission to edit it.",
         );
-        router.replace("/home");
+        router.replace("/feed");
         return;
       }
 
@@ -1783,7 +1783,7 @@ export default function EditStudioScreen() {
       console.error("? Error message:", (e as any)?.message);
       console.error("? Error stack:", (e as any)?.stack);
       showAlert("warning", "Couldn't Load Details", "Failed to load studio details.");
-      router.replace("/home");
+      router.replace("/feed");
     } finally {
       setLoading(false);
     }
@@ -3820,7 +3820,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                       marginRight: 4,
                     }}
                   >
-                    ?
+                    ₱
                   </Text>
                   <TextInput
                     value={rehearsalRate}
@@ -3892,7 +3892,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                       marginRight: 4,
                     }}
                   >
-                    ?
+                    ₱
                   </Text>
                   <TextInput
                     value={recordingRate}
