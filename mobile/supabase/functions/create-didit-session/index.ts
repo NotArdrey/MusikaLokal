@@ -39,8 +39,9 @@ serve(async (req) => {
     }
 
     // Parse request body
-    const { userId, email, callback, redirect_url, action, session_id } = await req.json();
+    const { userId, email, role, callback, redirect_url, action, session_id } = await req.json();
     const normalizedEmail = typeof email === 'string' ? email.trim().toLowerCase() : '';
+    const normalizedRole = typeof role === 'string' ? role.trim().toLowerCase() : '';
 
     // HANDLE GET SESSION ACTION
     if (action === 'get_session' && session_id) {
@@ -51,7 +52,7 @@ serve(async (req) => {
       try {
         const decisionResponse = await fetch(`https://verification.didit.me/v3/session/${session_id}/decision/`, {
           method: "GET",
-          headers: { "Content-Type": "application/json", "X-Api-Key": DIDIT_API_KEY }
+          headers: { "Content-Type": "application/json", "x-api-key": DIDIT_API_KEY }
         });
         if (decisionResponse.ok) {
           const decision = await decisionResponse.json();
@@ -67,7 +68,7 @@ serve(async (req) => {
       try {
         const baseResponse = await fetch(`https://verification.didit.me/v3/session/${session_id}`, {
           method: "GET",
-          headers: { "Content-Type": "application/json", "X-Api-Key": DIDIT_API_KEY }
+          headers: { "Content-Type": "application/json", "x-api-key": DIDIT_API_KEY }
         });
         if (baseResponse.ok) {
           const base = await baseResponse.json();
@@ -218,13 +219,21 @@ serve(async (req) => {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "X-Api-Key": DIDIT_API_KEY,
+        "x-api-key": DIDIT_API_KEY,
       },
       body: JSON.stringify({
         workflow_id: DIDIT_WORKFLOW_ID,
         vendor_data: userId, // This is passed to webhook and included in session
         callback: finalRedirectUrl, // Browser redirect URL after verification completes
-        features: normalizedEmail ? { email: normalizedEmail } : undefined, // v3 uses 'features' instead of 'contact_details'
+        metadata: {
+          signup_role: normalizedRole || undefined,
+        },
+        contact_details: normalizedEmail
+          ? {
+            email: normalizedEmail,
+            send_notification_emails: false,
+          }
+          : undefined,
       }),
     });
 
@@ -242,6 +251,7 @@ serve(async (req) => {
     }
 
     const diditData = await diditResponse.json();
+    const verificationUrl = diditData.url || diditData.verification_url || diditData.verificationUrl;
 
     /*
     Expected response:
@@ -281,7 +291,8 @@ serve(async (req) => {
           verification_data: {
             user_ref: userId,
             email: normalizedEmail || null,
-            session_url: diditData.url || null,
+            signup_role: normalizedRole || null,
+            session_url: verificationUrl || null,
             started_at: new Date().toISOString(),
           },
         });
@@ -314,7 +325,7 @@ serve(async (req) => {
       JSON.stringify({
         success: true,
         sessionId: diditData.session_id,
-        verificationUrl: diditData.url, // This is the URL to redirect the user to
+        verificationUrl, // This is the URL to redirect the user to
       }),
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );

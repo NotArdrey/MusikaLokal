@@ -1,4 +1,10 @@
 import { Ionicons } from '@expo/vector-icons';
+import {
+  BottomSheetBackdrop,
+  BottomSheetModal,
+  BottomSheetScrollView,
+  useBottomSheetTimingConfigs,
+} from '@gorhom/bottom-sheet';
 import { router } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -270,6 +276,8 @@ const defaultWithdrawalTotals: WithdrawalTotals = {
   pendingAmount: 0,
   mockCount: 0,
 };
+
+const ADMIN_WITHDRAW_QUICK_AMOUNTS = [100, 500, 1000];
 
 const formatCurrency = (value?: number | null) => {
   const safeValue = Number(value || 0);
@@ -646,6 +654,109 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontFamily: 'Poppins_600SemiBold',
   },
+  adminWithdrawSheetContent: {
+    paddingHorizontal: 18,
+    paddingBottom: 32,
+    paddingTop: 4,
+  },
+  adminWithdrawHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+    marginBottom: 22,
+  },
+  adminWithdrawTitle: {
+    fontSize: 24,
+    fontFamily: 'Poppins_700Bold',
+  },
+  adminWithdrawSubtitle: {
+    fontSize: 13,
+    fontFamily: 'Poppins_400Regular',
+    marginTop: 2,
+  },
+  adminWithdrawCloseButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  adminWithdrawSection: {
+    gap: 8,
+    marginBottom: 18,
+  },
+  adminWithdrawLabel: {
+    fontSize: 13,
+    fontFamily: 'Poppins_600SemiBold',
+  },
+  adminWithdrawInputWrap: {
+    minHeight: 50,
+    borderWidth: 1,
+    borderRadius: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 14,
+  },
+  adminWithdrawCurrency: {
+    fontSize: 22,
+    fontFamily: 'Poppins_700Bold',
+    marginRight: 8,
+  },
+  adminWithdrawInput: {
+    flex: 1,
+    fontSize: 22,
+    fontFamily: 'Poppins_700Bold',
+    outlineStyle: 'none' as any,
+  },
+  adminWithdrawHint: {
+    fontSize: 12,
+    fontFamily: 'Poppins_400Regular',
+  },
+  adminWithdrawQuickGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+    marginBottom: 20,
+  },
+  adminWithdrawQuickButton: {
+    flexGrow: 1,
+    minWidth: 150,
+    minHeight: 42,
+    borderWidth: 1,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 12,
+  },
+  adminWithdrawQuickText: {
+    fontSize: 12,
+    fontFamily: 'Poppins_700Bold',
+  },
+  adminWithdrawNote: {
+    borderRadius: 10,
+    flexDirection: 'row',
+    gap: 10,
+    padding: 14,
+    marginBottom: 40,
+  },
+  adminWithdrawNoteText: {
+    flex: 1,
+    fontSize: 12,
+    lineHeight: 18,
+    fontFamily: 'Poppins_400Regular',
+  },
+  adminWithdrawSubmitButton: {
+    minHeight: 50,
+    borderRadius: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  adminWithdrawSubmitText: {
+    fontSize: 14,
+    fontFamily: 'Poppins_700Bold',
+  },
   dataEnginePanelLeft: {
     flex: Platform.OS === 'web' ? 2 : 1,
   },
@@ -964,6 +1075,7 @@ export default function AdminDashboardPage() {
   const { width } = useWindowDimensions();
   const hasHydratedDashboardRef = useRef(false);
   const latestMetricsRequestRef = useRef(0);
+  const adminWithdrawSheetRef = useRef<BottomSheetModal>(null);
   const dashboardContentOpacity = useRef(new Animated.Value(1)).current;
 
   const [initializingDashboard, setInitializingDashboard] = useState(false);
@@ -978,6 +1090,7 @@ export default function AdminDashboardPage() {
   const [withdrawalTotals, setWithdrawalTotals] = useState<WithdrawalTotals>(defaultWithdrawalTotals);
   const [withdrawalStatusFilter, setWithdrawalStatusFilter] = useState<WithdrawalStatusFilter>('all');
   const [withdrawalsLoading, setWithdrawalsLoading] = useState(false);
+  const [adminWithdrawAmount, setAdminWithdrawAmount] = useState('');
   const [alertState, setAlertState] = useState<{
     visible: boolean;
     type: AlertType;
@@ -995,6 +1108,25 @@ export default function AdminDashboardPage() {
   const showAlert = useCallback((type: AlertType, title: string, message: string) => {
     setAlertState({ visible: true, type, title, message });
   }, []);
+
+  const adminWithdrawAnimationConfigs = useBottomSheetTimingConfigs({
+    duration: 240,
+    easing: Easing.out(Easing.cubic),
+  });
+
+  const adminWithdrawSnapPoints = useMemo(() => ['72%'], []);
+
+  const renderAdminWithdrawBackdrop = useCallback(
+    (props: any) => (
+      <BottomSheetBackdrop
+        {...props}
+        appearsOnIndex={0}
+        disappearsOnIndex={-1}
+        opacity={0.5}
+      />
+    ),
+    [],
+  );
 
   const dashboardCacheKey = useMemo(
     () => getAdminPageCacheKey('dashboard', {
@@ -1310,6 +1442,23 @@ export default function AdminDashboardPage() {
     setGlobalSearch('');
   }, []);
 
+  const handleAdminWithdrawShortcut = useCallback(() => {
+    setAdminWithdrawAmount('');
+    adminWithdrawSheetRef.current?.present();
+  }, []);
+
+  const dismissAdminWithdrawSheet = useCallback(() => {
+    adminWithdrawSheetRef.current?.dismiss();
+  }, []);
+
+  const handleAdminWithdrawSubmit = useCallback(() => {
+    showAlert(
+      'info',
+      'Platform Cashout Not Connected',
+      'This admin sheet matches the app bottom-sheet flow, but platform cashout is not wired to a platform wallet ledger yet. User/provider cashouts still work from the Wallet page.',
+    );
+  }, [showAlert]);
+
   const handleWithdrawalDetails = useCallback((withdrawal: AdminWithdrawalEntry) => {
     const destination = withdrawal.payout_type === 'bank'
       ? (withdrawal.payout_bank_name || 'Bank')
@@ -1365,6 +1514,13 @@ export default function AdminDashboardPage() {
 
   const showWithdrawalRevenueContext =
     withdrawalTotals.count === 0 && (metrics.grossRevenue > 0 || metrics.providerEarnings > 0);
+
+  const adminWithdrawAvailable = Math.max(Number(metrics.netRevenue || 0), 0);
+  const parsedAdminWithdrawAmount = Number(adminWithdrawAmount);
+  const isAdminWithdrawReady =
+    Number.isFinite(parsedAdminWithdrawAmount) &&
+    parsedAdminWithdrawAmount >= 100 &&
+    parsedAdminWithdrawAmount <= adminWithdrawAvailable;
 
   const revenueTrendRows = useMemo(() => {
     return metrics.revenueTrend.map((row) => ({
@@ -1612,7 +1768,7 @@ export default function AdminDashboardPage() {
               <View style={styles.withdrawalButtonRow}>
                 <TouchableOpacity
                   activeOpacity={0.88}
-                  onPress={() => router.push({ pathname: '/wallet', params: { action: 'withdraw' } })}
+                  onPress={handleAdminWithdrawShortcut}
                   style={[
                     styles.dashboardActionButton,
                     {
@@ -1937,6 +2093,112 @@ export default function AdminDashboardPage() {
           </Animated.View>
         </View>
       </ScrollView>
+
+      <BottomSheetModal
+        ref={adminWithdrawSheetRef}
+        index={0}
+        snapPoints={adminWithdrawSnapPoints}
+        animationConfigs={adminWithdrawAnimationConfigs}
+        animateOnMount
+        enableDynamicSizing={false}
+        enableContentPanningGesture={false}
+        enableOverDrag={false}
+        enablePanDownToClose
+        backdropComponent={renderAdminWithdrawBackdrop}
+        backgroundStyle={{ backgroundColor: colors.background }}
+        handleIndicatorStyle={{
+          backgroundColor: isDark ? '#4B5563' : '#CBD5E1',
+          width: 42,
+        }}
+      >
+        <BottomSheetScrollView
+          contentContainerStyle={styles.adminWithdrawSheetContent}
+          showsVerticalScrollIndicator={false}
+        >
+          <View style={styles.adminWithdrawHeader}>
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.adminWithdrawTitle, { color: colors.text }]}>Withdraw Funds</Text>
+              <Text style={[styles.adminWithdrawSubtitle, { color: colors.textSecondary }]}>
+                Available platform net: {formatCurrency(adminWithdrawAvailable)}
+              </Text>
+            </View>
+            <TouchableOpacity
+              activeOpacity={0.8}
+              onPress={dismissAdminWithdrawSheet}
+              style={[styles.adminWithdrawCloseButton, { backgroundColor: colors.card }]}
+            >
+              <Ionicons name="close" size={20} color={colors.text} />
+            </TouchableOpacity>
+          </View>
+
+          <View style={styles.adminWithdrawSection}>
+            <Text style={[styles.adminWithdrawLabel, { color: colors.text }]}>Amount to Withdraw</Text>
+            <View style={[styles.adminWithdrawInputWrap, { backgroundColor: colors.card, borderColor: colors.border }]}>
+              <Text style={[styles.adminWithdrawCurrency, { color: colors.textSecondary }]}>₱</Text>
+              <TextInput
+                value={adminWithdrawAmount}
+                onChangeText={setAdminWithdrawAmount}
+                keyboardType="decimal-pad"
+                placeholder="0.00"
+                placeholderTextColor={colors.textSecondary}
+                style={[styles.adminWithdrawInput, { color: colors.text }]}
+              />
+            </View>
+            <Text style={[styles.adminWithdrawHint, { color: colors.textSecondary }]}>Minimum withdrawal: PHP 100</Text>
+          </View>
+
+          <View style={styles.adminWithdrawQuickGrid}>
+            {[...ADMIN_WITHDRAW_QUICK_AMOUNTS, adminWithdrawAvailable].map((amount, index) => {
+              const isMax = index === ADMIN_WITHDRAW_QUICK_AMOUNTS.length;
+              const normalizedAmount = Math.max(Number(amount || 0), 0);
+              const isActive = Number(adminWithdrawAmount) === normalizedAmount && normalizedAmount > 0;
+              return (
+                <TouchableOpacity
+                  key={isMax ? 'max' : String(amount)}
+                  activeOpacity={0.8}
+                  onPress={() => setAdminWithdrawAmount(String(normalizedAmount))}
+                  style={[
+                    styles.adminWithdrawQuickButton,
+                    {
+                      backgroundColor: isActive ? colors.primary : colors.card,
+                      borderColor: isActive ? colors.primary : colors.border,
+                    },
+                  ]}
+                >
+                  <Text style={[styles.adminWithdrawQuickText, { color: isActive ? '#FFFFFF' : colors.text }]}>
+                    {isMax ? 'Max' : `PHP ${normalizedAmount.toLocaleString()}`}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+
+          <View style={[styles.adminWithdrawNote, { backgroundColor: isDark ? '#172033' : '#EFF6FF' }]}>
+            <Ionicons name="information-circle-outline" size={18} color={colors.primary} />
+            <Text style={[styles.adminWithdrawNoteText, { color: isDark ? colors.textSecondary : '#1E40AF' }]}>
+              This dashboard sheet uses the same bottom-sheet presentation as feed cards. Platform cashout still needs a dedicated ledger before it can deduct funds here.
+            </Text>
+          </View>
+
+          <TouchableOpacity
+            activeOpacity={isAdminWithdrawReady ? 0.82 : 1}
+            disabled={!isAdminWithdrawReady}
+            onPress={handleAdminWithdrawSubmit}
+            style={[
+              styles.adminWithdrawSubmitButton,
+              {
+                backgroundColor: isAdminWithdrawReady ? colors.primary : colors.border,
+                opacity: isAdminWithdrawReady ? 1 : 0.6,
+              },
+            ]}
+          >
+            <Ionicons name="arrow-down-circle" size={20} color={isAdminWithdrawReady ? '#FFFFFF' : colors.textSecondary} />
+            <Text style={[styles.adminWithdrawSubmitText, { color: isAdminWithdrawReady ? '#FFFFFF' : colors.textSecondary }]}>
+              Confirm Withdrawal
+            </Text>
+          </TouchableOpacity>
+        </BottomSheetScrollView>
+      </BottomSheetModal>
 
       <CustomAlert
         visible={alertState.visible}

@@ -183,7 +183,7 @@ export default function LoginScreen() {
         showAlert(
           'success',
           'Verification In Review',
-          `Your identity verification is still being reviewed by Didit.\n\nPlease confirm the email link we sent to ${createdEmail || 'your email'}. We will update your account when Didit finishes the review.`
+          `Your identity is now under manual review.\n\nWe will send the email confirmation link to ${createdEmail || 'your email'} after the review is approved.`
         );
         return;
       }
@@ -192,7 +192,7 @@ export default function LoginScreen() {
         showAlert(
           'success',
           'Manual Review Submitted',
-          `Your requirements were submitted and your account is under manual review.\n\nWe will email ${createdEmail || 'you'} when the review is complete. If you receive an email confirmation link, confirm your email so you can sign in after approval.`
+          `Your requirements were submitted and your account is under manual review.\n\nWe will send the email confirmation link to ${createdEmail || 'you'} after the review is approved.`
         );
         return;
       }

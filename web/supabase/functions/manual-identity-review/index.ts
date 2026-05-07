@@ -2,6 +2,12 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { sendEmailWithGmail } from "../_shared/gmailEmail.ts";
+import {
+  buildIdentityDocumentFingerprint,
+  findSameRoleIdentityDuplicate,
+  getDuplicateIdentityReviewReason,
+  recordIdentityDocumentClaim,
+} from "../_shared/identityDuplicate.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -204,6 +210,43 @@ async function findAuthUserByEmail(supabaseAdmin: any, email: string) {
   }
 
   return null;
+}
+
+async function enforceManualReviewRateLimit(supabaseAdmin: any, email: string, userId?: string | null) {
+  const normalizedEmail = String(email || "").trim().toLowerCase();
+  const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+  const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+
+  let hourlyQuery = supabaseAdmin
+    .from("manual_identity_reviews")
+    .select("id", { count: "exact", head: true })
+    .eq("submitted_by_email", normalizedEmail)
+    .gte("created_at", oneHourAgo);
+
+  let dailyQuery = supabaseAdmin
+    .from("manual_identity_reviews")
+    .select("id", { count: "exact", head: true })
+    .eq("submitted_by_email", normalizedEmail)
+    .gte("created_at", oneDayAgo);
+
+  if (userId) {
+    hourlyQuery = hourlyQuery.or(`user_id.eq.${userId},submitted_by_email.eq.${normalizedEmail}`);
+    dailyQuery = dailyQuery.or(`user_id.eq.${userId},submitted_by_email.eq.${normalizedEmail}`);
+  }
+
+  const [{ count: hourlyCount, error: hourlyError }, { count: dailyCount, error: dailyError }] = await Promise.all([
+    hourlyQuery,
+    dailyQuery,
+  ]);
+
+  if (hourlyError || dailyError) {
+    console.error("manual_identity_review_rate_limit_lookup_failed", hourlyError || dailyError);
+    return;
+  }
+
+  if ((hourlyCount || 0) >= 3 || (dailyCount || 0) >= 5) {
+    throw new Error("Too many manual review attempts. Please wait before trying again.");
+  }
 }
 
 async function ensurePendingReviewProfile(
@@ -476,6 +519,9 @@ serve(async (req: Request) => {
       "ID expiration date",
       source === "MANUAL_UPLOAD",
     );
+    const identityDocumentNumber = String(
+      body?.identityDocumentNumber || body?.idDocumentNumber || body?.documentNumber || "",
+    ).trim();
     const documentType = String(body?.documentType || "").trim();
     const documentTypeKey = String(body?.documentTypeKey || "").trim() || null;
     const documentCountry = String(body?.documentCountry || "PHL").trim().toUpperCase();
@@ -493,6 +539,29 @@ serve(async (req: Request) => {
     if (source === "MANUAL_UPLOAD" && !fullName) {
       return jsonResponse({ error: "Full name on ID is required" }, 400);
     }
+
+    if (source === "MANUAL_UPLOAD" && !identityDocumentNumber) {
+      return jsonResponse({ error: "ID number is required" }, 400);
+    }
+
+    await enforceManualReviewRateLimit(supabaseAdmin, email, userId || null);
+
+    const documentFingerprint = await buildIdentityDocumentFingerprint(null, {
+      documentNumber: identityDocumentNumber,
+      documentType,
+      documentTypeKey,
+      documentCountry,
+    });
+
+    const duplicateIdentity = documentFingerprint
+      ? await findSameRoleIdentityDuplicate(supabaseAdmin, {
+        documentFingerprint,
+        role,
+        email,
+      })
+      : { hasDuplicate: false, matches: [] };
+
+    const duplicateReason = duplicateIdentity.hasDuplicate ? getDuplicateIdentityReviewReason(role) : null;
 
     const authUser = await ensurePendingReviewAuthUser(supabaseAdmin, {
       userId,
@@ -565,7 +634,11 @@ serve(async (req: Request) => {
           front_image_path: frontPath,
           back_image_path: backPath,
           selfie_image_path: selfiePath,
-          review_notes: null,
+          submitted_role: role,
+          document_fingerprint: documentFingerprint,
+          duplicate_reason: duplicateReason,
+          duplicate_match_count: duplicateIdentity.matches?.length || 0,
+          review_notes: duplicateReason,
           reviewed_by: null,
           reviewed_at: null,
           decision_email_sent_at: null,
@@ -588,6 +661,11 @@ serve(async (req: Request) => {
           document_country: documentCountry,
           source,
           status: "PENDING_REVIEW",
+          submitted_role: role,
+          document_fingerprint: documentFingerprint,
+          duplicate_reason: duplicateReason,
+          duplicate_match_count: duplicateIdentity.matches?.length || 0,
+          review_notes: duplicateReason,
           front_image_path: frontPath,
           back_image_path: backPath,
           selfie_image_path: selfiePath,
@@ -614,6 +692,19 @@ serve(async (req: Request) => {
       })
       .eq("id", userId);
 
+    await recordIdentityDocumentClaim(supabaseAdmin, {
+      userId,
+      role,
+      documentFingerprint,
+      documentType,
+      documentTypeKey,
+      documentCountry,
+      source,
+      status: "PENDING_REVIEW",
+      manualReviewId: reviewId,
+      email,
+    });
+
     await supabaseAdmin.from("notifications").insert({
       user_id: userId,
       type: "info",
@@ -623,6 +714,7 @@ serve(async (req: Request) => {
         manual_identity_review_id: reviewId,
         document_type: documentType,
         verification_status: "PENDING_REVIEW",
+        duplicate_identity_review: duplicateIdentity.hasDuplicate,
       },
     });
 
@@ -632,6 +724,7 @@ serve(async (req: Request) => {
       success: true,
       reviewId,
       status: "PENDING_REVIEW",
+      duplicateIdentityReview: duplicateIdentity.hasDuplicate,
       submissionEmail,
     });
   } catch (error) {

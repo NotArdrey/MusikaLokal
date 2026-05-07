@@ -2,6 +2,15 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { sendEmailWithGmail } from '../_shared/gmailEmail.ts'
+import {
+    buildIdentityDocumentFingerprint,
+    DIDIT_PENDING_SOURCE,
+    DUPLICATE_REVIEW_SOURCE,
+    findSameRoleIdentityDuplicate,
+    getDuplicateIdentityReviewReason,
+    queueIdentityReview,
+    recordIdentityDocumentClaim,
+} from '../_shared/identityDuplicate.ts'
 
 const corsHeaders = {
     'Access-Control-Allow-Origin': '*',
@@ -28,6 +37,44 @@ function getConfirmationRedirect(rawRedirectTo: unknown) {
     return redirectTo || Deno.env.get('EMAIL_CONFIRM_REDIRECT_TO') || 'musikalokal://?verified=true'
 }
 
+function normalizeVerificationStatus(value: unknown) {
+    return String(value || '').trim().replace(/[\s-]+/g, '_').toUpperCase()
+}
+
+function buildDeferredEmailDelivery(identityStatus: string) {
+    return {
+        sent: false,
+        queued: false,
+        provider: 'identity_review',
+        skipped: true,
+        reason: identityStatus === 'PENDING_REVIEW'
+            ? 'identity_pending_review'
+            : 'identity_not_approved',
+    }
+}
+
+async function getEmailConfirmationGate(supabaseAdmin: any, user: any) {
+    const metadataStatus = normalizeVerificationStatus(user?.user_metadata?.verification_status)
+    const { data: profile, error } = await supabaseAdmin
+        .from('profiles')
+        .select('is_verified, verification_status')
+        .eq('id', user.id)
+        .maybeSingle()
+
+    if (error) {
+        console.error('email_confirmation_gate_profile_lookup_failed', {
+            userId: user?.id || null,
+            message: error.message,
+        })
+    }
+
+    const profileStatus = normalizeVerificationStatus(profile?.verification_status)
+    const status = profileStatus || metadataStatus || 'PENDING'
+    const canSend = profile?.is_verified === true || status === 'APPROVED'
+
+    return { canSend, status }
+}
+
 async function sendEmailConfirmationLink(
     supabaseAdmin: any,
     email: string,
@@ -35,6 +82,11 @@ async function sendEmailConfirmationLink(
     redirectTo: string,
     identityStatus: string = 'APPROVED',
 ) {
+    const normalizedIdentityStatus = normalizeVerificationStatus(identityStatus) || 'APPROVED'
+    if (normalizedIdentityStatus !== 'APPROVED') {
+        return buildDeferredEmailDelivery(normalizedIdentityStatus)
+    }
+
     const supabaseUrl = Deno.env.get('SUPABASE_URL') || ''
     const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY') || ''
     let supabaseAuthError: string | null = null
@@ -78,8 +130,8 @@ async function sendEmailConfirmationLink(
         options: {
             redirectTo,
             data: {
-                is_verified: identityStatus === 'APPROVED',
-                verification_status: identityStatus,
+                is_verified: normalizedIdentityStatus === 'APPROVED',
+                verification_status: normalizedIdentityStatus,
             },
         },
     })
@@ -97,7 +149,7 @@ async function sendEmailConfirmationLink(
     const safeName = escapeHtml(displayName || 'there')
     const safeLink = escapeHtml(actionLink)
     const subject = 'Confirm your email - MusikaLokal'
-    const statusCopy = identityStatus === 'PENDING_REVIEW'
+    const statusCopy = normalizedIdentityStatus === 'PENDING_REVIEW'
         ? 'Your ID scan is still being reviewed by Didit. Please confirm your email address now so your account is ready after approval.'
         : 'Your ID scan was approved. Please confirm your email address before logging in.'
     const html = `
@@ -160,6 +212,7 @@ serve(async (req) => {
             verificationStatus,
             diditSessionId,
             selectedDocumentType,
+            selectedDocumentTypeKey,
             verificationMode,
             redirectTo,
             action,
@@ -197,12 +250,25 @@ serve(async (req) => {
                 })
             }
 
+            const confirmationGate = await getEmailConfirmationGate(supabaseAdmin, existingUser)
+            if (!confirmationGate.canSend) {
+                return new Response(JSON.stringify({
+                    message: 'Email confirmation will be sent after identity review is approved.',
+                    emailConfirmationDeferred: true,
+                    identityStatus: confirmationGate.status,
+                    emailDelivery: buildDeferredEmailDelivery(confirmationGate.status),
+                }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 200,
+                })
+            }
+
             const emailDelivery = await sendEmailConfirmationLink(
                 supabaseAdmin,
                 normalizedEmail,
                 existingUser.user_metadata?.full_name || existingUser.user_metadata?.name || normalizedEmail.split('@')[0] || getDefaultDisplayNameForRole(existingUser.user_metadata?.role),
                 getConfirmationRedirect(redirectTo),
-                String(existingUser.user_metadata?.verification_status || 'APPROVED').toUpperCase(),
+                confirmationGate.status,
             )
 
             return new Response(JSON.stringify({ emailDelivery }), {
@@ -233,6 +299,8 @@ serve(async (req) => {
         const fallbackName = String(fullName || normalizedEmail.split('@')[0] || getDefaultDisplayNameForRole(normalizedRole)).trim()
 
         let diditVerificationData: any = null
+        let documentFingerprint: string | null = null
+        let duplicateIdentityReview: any = null
 
         if (approvedByDidit || pendingByDidit) {
             if (!diditSessionId) {
@@ -264,7 +332,7 @@ serve(async (req) => {
                     try {
                         const decisionResponse = await fetch(`https://verification.didit.me/v3/session/${diditSessionId}/decision/`, {
                             method: 'GET',
-                            headers: { 'Content-Type': 'application/json', 'X-Api-Key': diditApiKey },
+                            headers: { 'Content-Type': 'application/json', 'x-api-key': diditApiKey },
                         })
 
                         if (decisionResponse.ok) {
@@ -281,6 +349,8 @@ serve(async (req) => {
                                     verification_data: {
                                         full_name: fallbackName,
                                         email: normalizedEmail,
+                                        raw_data: idVerification,
+                                        document_country: idVerification?.issuing_country || idVerification?.issuingCountry || idVerification?.country || 'PHL',
                                     },
                                 }
                             } else if (idStatus === 'In Review' || faceStatus === 'In Review' || idStatus === 'Pending Review' || faceStatus === 'Pending Review') {
@@ -316,7 +386,33 @@ serve(async (req) => {
                     status: 400,
                 })
             }
+
+            documentFingerprint = diditVerificationData?.document_fingerprint || await buildIdentityDocumentFingerprint(
+                diditVerificationData?.raw_data || diditVerificationData,
+                {
+                    documentType: selectedDocumentType,
+                    documentTypeKey: selectedDocumentTypeKey,
+                    documentCountry: diditVerificationData?.document_country || 'PHL',
+                },
+            )
+
+            if (documentFingerprint) {
+                duplicateIdentityReview = await findSameRoleIdentityDuplicate(supabaseAdmin, {
+                    documentFingerprint,
+                    role: normalizedRole,
+                    email: normalizedEmail,
+                })
+            }
         }
+
+        const diditDuplicateFlag = Boolean(diditVerificationData?.duplicate_identity_review_required)
+        const sameRoleDuplicateDetected = Boolean(duplicateIdentityReview?.hasDuplicate)
+        const diditDuplicateFlagRequiresReview = diditDuplicateFlag && (!documentFingerprint || sameRoleDuplicateDetected)
+        const requiresDuplicateIdentityReview = Boolean(sameRoleDuplicateDetected || diditDuplicateFlagRequiresReview)
+        const effectiveVerificationStatus = approvedByDidit && !requiresDuplicateIdentityReview
+            ? 'APPROVED'
+            : (pendingByDidit || requiresDuplicateIdentityReview) ? 'PENDING_REVIEW' : 'PENDING'
+        const effectiveIsVerified = effectiveVerificationStatus === 'APPROVED'
 
         // 1. Check if user already exists in Auth
         const { data: listData, error: listError } = await supabaseAdmin.auth.admin.listUsers()
@@ -363,11 +459,12 @@ serve(async (req) => {
             password,
             email_confirm: false,
             user_metadata: {
-                is_verified: approvedByDidit,
+                is_verified: effectiveIsVerified,
                 role: normalizedRole,
-                verification_status: approvedByDidit ? 'APPROVED' : pendingByDidit ? 'PENDING_REVIEW' : 'PENDING',
+                verification_status: effectiveVerificationStatus,
                 didit_session_id: diditSessionId || null,
                 selected_document_type: selectedDocumentType || null,
+                selected_document_type_key: selectedDocumentTypeKey || null,
                 verification_mode: verificationMode || null,
                 full_name: fallbackName,
                 display_name: fallbackName,
@@ -396,7 +493,7 @@ serve(async (req) => {
                 full_name: fallbackName,
                 role: normalizedRole,
                 is_verified: false,
-                verification_status: approvedByDidit ? 'APPROVED' : pendingByDidit ? 'PENDING_REVIEW' : 'PENDING',
+                verification_status: effectiveVerificationStatus,
                 didit_session_id: diditSessionId || null,
                 id_document_expiry: diditVerificationData?.id_document_expiry || null,
                 id_verified_at: null,
@@ -408,22 +505,101 @@ serve(async (req) => {
             throw new Error('Failed to create profile: ' + profileError.message)
         }
 
-        const emailDelivery = await sendEmailConfirmationLink(
-            supabaseAdmin,
-            normalizedEmail,
-            fallbackName,
-            getConfirmationRedirect(redirectTo),
-            approvedByDidit ? 'APPROVED' : pendingByDidit ? 'PENDING_REVIEW' : 'PENDING',
-        )
+        let identityReviewRecord = null
+        if (requiresDuplicateIdentityReview) {
+            const duplicateReason = getDuplicateIdentityReviewReason(normalizedRole)
+            identityReviewRecord = await queueIdentityReview(supabaseAdmin, {
+                userId,
+                email: normalizedEmail,
+                role: normalizedRole,
+                documentType: selectedDocumentType,
+                documentTypeKey: selectedDocumentTypeKey,
+                documentCountry: diditVerificationData?.document_country || 'PHL',
+                source: DUPLICATE_REVIEW_SOURCE,
+                diditSessionId,
+                documentFingerprint,
+                duplicateReason,
+                duplicateMatchCount: duplicateIdentityReview?.matches?.length || diditVerificationData?.duplicate_match_count || 1,
+                metadata: {
+                    didit_duplicate_flag: diditDuplicateFlag,
+                    source_session_status: normalizedVerificationStatus,
+                },
+            })
+            await recordIdentityDocumentClaim(supabaseAdmin, {
+                userId,
+                role: normalizedRole,
+                documentFingerprint,
+                documentType: selectedDocumentType,
+                documentTypeKey: selectedDocumentTypeKey,
+                documentCountry: diditVerificationData?.document_country || 'PHL',
+                source: DUPLICATE_REVIEW_SOURCE,
+                status: 'PENDING_REVIEW',
+                diditSessionId,
+                manualReviewId: identityReviewRecord?.id || null,
+            })
+        } else if (pendingByDidit) {
+            identityReviewRecord = await queueIdentityReview(supabaseAdmin, {
+                userId,
+                email: normalizedEmail,
+                role: normalizedRole,
+                documentType: selectedDocumentType,
+                documentTypeKey: selectedDocumentTypeKey,
+                documentCountry: diditVerificationData?.document_country || 'PHL',
+                source: DIDIT_PENDING_SOURCE,
+                diditSessionId,
+                documentFingerprint,
+                metadata: {
+                    source_session_status: normalizedVerificationStatus,
+                },
+            })
+            await recordIdentityDocumentClaim(supabaseAdmin, {
+                userId,
+                role: normalizedRole,
+                documentFingerprint,
+                documentType: selectedDocumentType,
+                documentTypeKey: selectedDocumentTypeKey,
+                documentCountry: diditVerificationData?.document_country || 'PHL',
+                source: DIDIT_PENDING_SOURCE,
+                status: 'PENDING_REVIEW',
+                diditSessionId,
+                manualReviewId: identityReviewRecord?.id || null,
+            })
+        } else if (approvedByDidit && documentFingerprint) {
+            await recordIdentityDocumentClaim(supabaseAdmin, {
+                userId,
+                role: normalizedRole,
+                documentFingerprint,
+                documentType: selectedDocumentType,
+                documentTypeKey: selectedDocumentTypeKey,
+                documentCountry: diditVerificationData?.document_country || 'PHL',
+                source: 'DIDIT',
+                status: 'APPROVED',
+                diditSessionId,
+            })
+        }
+
+        const emailConfirmationRequired = effectiveVerificationStatus === 'APPROVED'
+        const emailDelivery = emailConfirmationRequired
+            ? await sendEmailConfirmationLink(
+                supabaseAdmin,
+                normalizedEmail,
+                fallbackName,
+                getConfirmationRedirect(redirectTo),
+                effectiveVerificationStatus,
+            )
+            : buildDeferredEmailDelivery(effectiveVerificationStatus)
 
         return new Response(JSON.stringify({
             user: user.user,
-            emailConfirmationRequired: true,
+            emailConfirmationRequired,
+            emailConfirmationDeferred: !emailConfirmationRequired,
+            duplicateIdentityReview: requiresDuplicateIdentityReview,
+            identityReviewId: identityReviewRecord?.id || null,
             emailDelivery,
-            message: approvedByDidit
+            message: effectiveVerificationStatus === 'APPROVED'
                 ? 'User created with verified identity; email confirmation required'
-                : pendingByDidit
-                    ? 'User created with Didit identity pending review; email confirmation required'
+                : effectiveVerificationStatus === 'PENDING_REVIEW'
+                    ? 'User created with identity pending review; email confirmation will be sent after approval'
                 : 'User created (unverified); email confirmation required'
         }), {
             headers: { ...corsHeaders, 'Content-Type': 'application/json' },

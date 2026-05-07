@@ -1,19 +1,28 @@
 // @ts-nocheck
-import { decode as base64Decode } from 'https://deno.land/std@0.168.0/encoding/base64.ts';
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { sendEmailWithGmail } from '../_shared/gmailEmail.ts';
+import {
+    buildIdentityDocumentFingerprint,
+    DUPLICATE_REVIEW_SOURCE,
+    findSameRoleIdentityDuplicate,
+    getDuplicateIdentityReviewReason,
+    isUuid,
+    normalizeIdentityRole,
+    queueIdentityReview,
+    recordIdentityDocumentClaim,
+    sanitizeIdentityVerificationData,
+} from '../_shared/identityDuplicate.ts';
 
 // Note: Removed SMTP library import as it's incompatible with current Deno runtime
 // Using Gmail HTTP/SMTP or Supabase built-in email instead
 
 const corsHeaders = {
     'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-signature, x-supabase-client-platform',
+    'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-signature, x-signature-v2, x-signature-simple, x-timestamp, x-supabase-client-platform',
 }
 
-// Webhook secret key for signature validation - get from env or use default
-const WEBHOOK_SECRET_KEY = Deno.env.get('DIDIT_WEBHOOK_SECRET') || 'NI3SI6-68go4my2TjpQOCyvNs90aZ9PLjZV-zB0Ed7w';
+const WEBHOOK_SECRET_KEY = Deno.env.get('DIDIT_WEBHOOK_SECRET') || Deno.env.get('WEBHOOK_SECRET_KEY') || '';
 
 /**
  * Didit Webhook Handler with Signature Validation
@@ -24,7 +33,7 @@ const WEBHOOK_SECRET_KEY = Deno.env.get('DIDIT_WEBHOOK_SECRET') || 'NI3SI6-68go4
  * - Abandoned: is_verified = false, verification_status = ABANDONED, clear session
  * - In Review: verification_status = PENDING_REVIEW (blocks new attempts)
  * 
- * Security: Validates x-signature header using HMAC-SHA256
+ * Security: Validates Didit v3 x-signature-v2 or x-signature-simple headers.
  */
 
 /**
@@ -68,6 +77,145 @@ async function verifySignature(payload: string, signature: string): Promise<bool
         console.error('Signature verification error:', error);
         return false;
     }
+    return result === 0;
+}
+
+function hasFreshTimestamp(timestampHeader: string) {
+    const incomingTime = Number.parseInt(timestampHeader, 10);
+    if (!Number.isFinite(incomingTime)) return false;
+    const currentTime = Math.floor(Date.now() / 1000);
+    return Math.abs(currentTime - incomingTime) <= 300;
+}
+
+function sortJsonKeys(value: any): any {
+    if (Array.isArray(value)) return value.map(sortJsonKeys);
+    if (value && typeof value === 'object') {
+        return Object.keys(value).sort().reduce((result: Record<string, unknown>, key) => {
+            result[key] = sortJsonKeys(value[key]);
+            return result;
+        }, {});
+    }
+    return value;
+}
+
+function shortenFloats(value: any): any {
+    if (Array.isArray(value)) return value.map(shortenFloats);
+    if (value && typeof value === 'object') {
+        return Object.keys(value).reduce((result: Record<string, unknown>, key) => {
+            result[key] = shortenFloats(value[key]);
+            return result;
+        }, {});
+    }
+    if (typeof value === 'number' && Number.isFinite(value) && !Number.isInteger(value) && value % 1 === 0) {
+        return Math.trunc(value);
+    }
+    return value;
+}
+
+async function hmacSha256Hex(message: string, secret: string) {
+    const encoder = new TextEncoder();
+    const key = await crypto.subtle.importKey(
+        'raw',
+        encoder.encode(secret),
+        { name: 'HMAC', hash: 'SHA-256' },
+        false,
+        ['sign'],
+    );
+    const signature = await crypto.subtle.sign('HMAC', key, encoder.encode(message));
+    return Array.from(new Uint8Array(signature))
+        .map((byte) => byte.toString(16).padStart(2, '0'))
+        .join('');
+}
+
+async function verifyDiditWebhookSignature(rawBody: string, jsonBody: any, headers: Headers) {
+    const timestamp = headers.get('x-timestamp') || '';
+    const signatureV2 = headers.get('x-signature-v2') || '';
+    const signatureSimple = headers.get('x-signature-simple') || '';
+
+    if (!WEBHOOK_SECRET_KEY || !timestamp || !hasFreshTimestamp(timestamp)) return false;
+
+    if (signatureV2) {
+        const canonicalJson = JSON.stringify(sortJsonKeys(shortenFloats(jsonBody)));
+        const expected = await hmacSha256Hex(canonicalJson, WEBHOOK_SECRET_KEY);
+        if (constantTimeEqual(expected, signatureV2.trim().toLowerCase())) return true;
+    }
+
+    if (signatureSimple) {
+        const canonicalString = [
+            jsonBody?.timestamp || '',
+            jsonBody?.session_id || '',
+            jsonBody?.status || '',
+            jsonBody?.webhook_type || '',
+        ].join(':');
+        const expected = await hmacSha256Hex(canonicalString, WEBHOOK_SECRET_KEY);
+        if (constantTimeEqual(expected, signatureSimple.trim().toLowerCase())) return true;
+    }
+
+    return false;
+}
+
+async function sha256Hex(message: string) {
+    const encoder = new TextEncoder();
+    const digest = await crypto.subtle.digest('SHA-256', encoder.encode(message));
+    return Array.from(new Uint8Array(digest))
+        .map((byte) => byte.toString(16).padStart(2, '0'))
+        .join('');
+}
+
+async function recordWebhookEvent(supabaseAdmin: any, payload: any, rawBody: string) {
+    const payloadHash = await sha256Hex(rawBody);
+    const sessionId = payload.session_id || payload.sessionId || payload.id || null;
+    const explicitEventKey = payload.event_id || payload.webhook_id || payload.webhook_event_id || payload.event?.id || null;
+    const eventKey = explicitEventKey
+        ? `didit:${explicitEventKey}`
+        : `didit:${sessionId || 'unknown'}:${payload.status || ''}:${payload.webhook_type || payload.event || payload.type || ''}:${payloadHash}`;
+
+    const { error } = await supabaseAdmin
+        .from('didit_webhook_events')
+        .insert({
+            event_key: eventKey,
+            session_id: sessionId,
+            status: payload.status || null,
+            payload_hash: payloadHash,
+            processed_at: new Date().toISOString(),
+        });
+
+    if (!error) {
+        return { duplicate: false, eventKey };
+    }
+
+    if (error.code === '23505' || /duplicate key/i.test(error.message || '')) {
+        return { duplicate: true, eventKey };
+    }
+
+    throw new Error(`Failed to record Didit webhook idempotency key: ${error.message}`);
+}
+
+async function upsertVerificationSession(
+    supabaseAdmin: any,
+    sessionRef: string,
+    status: string,
+    verificationData: Record<string, unknown>,
+) {
+    const { data: existing } = await supabaseAdmin
+        .from('verification_sessions')
+        .select('verification_data')
+        .eq('session_ref', sessionRef)
+        .maybeSingle();
+
+    const existingNonceHash = existing?.verification_data?.session_nonce_hash;
+    const nextVerificationData = {
+        ...(verificationData || {}),
+        ...(existingNonceHash ? { session_nonce_hash: existingNonceHash } : {}),
+    };
+
+    return supabaseAdmin
+        .from('verification_sessions')
+        .upsert({
+            session_ref: sessionRef,
+            status,
+            verification_data: nextVerificationData,
+        });
 }
 
 function firstNonEmptyString(values: any[]): string | null {
@@ -143,11 +291,29 @@ serve(async (req) => {
 
         const payload = JSON.parse(rawBody);
 
+        const isValidSignature = await verifyDiditWebhookSignature(rawBody, payload, req.headers);
+        if (!isValidSignature) {
+            console.error('Invalid Didit webhook signature');
+            return new Response(JSON.stringify({ error: 'Invalid signature' }), {
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                status: 401,
+            });
+        }
+
         // Log ALL top-level keys in the payload to understand the structure
 
         const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
         const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
         const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey);
+
+        const webhookEvent = await recordWebhookEvent(supabaseAdmin, payload, rawBody);
+        if (webhookEvent.duplicate) {
+            console.log('Duplicate Didit webhook skipped:', webhookEvent.eventKey);
+            return new Response(JSON.stringify({ received: true, duplicate: true }), {
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                status: 200,
+            });
+        }
 
         // Extract session info from Didit payload
         // Based on Didit docs, the session_id might be under different field names
@@ -208,6 +374,47 @@ serve(async (req) => {
 
             }
 
+            return new Response(JSON.stringify({ received: true }), {
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                status: 200,
+            });
+        }
+
+        if (!decision && ['In Review', 'Pending Review', 'PENDING_REVIEW'].includes(status)) {
+            let reviewUserReference = userReference;
+            const isReviewUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(reviewUserReference || '');
+            const isReviewTempRef = reviewUserReference && String(reviewUserReference).startsWith('TEMP_');
+            if (!isReviewUuid && !isReviewTempRef && sessionId) {
+                const { data: profileData } = await supabaseAdmin
+                    .from('profiles')
+                    .select('id')
+                    .eq('didit_session_id', sessionId)
+                    .maybeSingle();
+                reviewUserReference = profileData?.id || reviewUserReference;
+            }
+            if (reviewUserReference) {
+                await handleInReview(supabaseAdmin, reviewUserReference, sessionId);
+            }
+            return new Response(JSON.stringify({ received: true }), {
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                status: 200,
+            });
+        }
+
+        if (!decision && ['Abandoned', 'ABANDONED'].includes(status)) {
+            if (userReference) {
+                await handleAbandoned(supabaseAdmin, userReference, sessionId);
+            }
+            return new Response(JSON.stringify({ received: true }), {
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                status: 200,
+            });
+        }
+
+        if (!decision && ['Declined', 'DECLINED'].includes(status)) {
+            if (userReference) {
+                await handleDeclined(supabaseAdmin, userReference, sessionId);
+            }
             return new Response(JSON.stringify({ received: true }), {
                 headers: { ...corsHeaders, 'Content-Type': 'application/json' },
                 status: 200,
@@ -310,6 +517,7 @@ serve(async (req) => {
             // the face/document was used in a PREVIOUSLY APPROVED session
             // Confirmed from Didit docs: ID_DOCUMENT_IN_BLOCKLIST, FACE_IN_BLOCKLIST
             const duplicateWarningCodes = [
+                'POSSIBLE_DUPLICATED_USER',
                 'FACE_IN_BLOCKLIST',
                 'ID_DOCUMENT_IN_BLOCKLIST',
                 'PHONE_NUMBER_IN_BLOCKLIST',
@@ -329,7 +537,7 @@ serve(async (req) => {
             // 1. DECLINED: If EITHER is declined, the whole verification is declined.
             if (faceStatus === 'Declined' || idStatus === 'Declined') {
                 if (isDuplicateOfApprovedAccount) {
-                    await handleDuplicateDetected(supabaseAdmin, finalUserReference, userEmail, allWarnings);
+                    await handleDuplicateDetected(supabaseAdmin, finalUserReference, userEmail, allWarnings, sessionId, idVerification, authUser, payload.metadata);
                 } else {
                     // This guarantees NO EMAIL is sent
                     await handleDeclined(supabaseAdmin, finalUserReference, sessionId);
@@ -596,6 +804,10 @@ async function handleApproved(
     const fullName = nameParts.length > 0 ? nameParts.join(' ') : '';
 
     const documentExpiry = extractDocumentExpiry(idVerification);
+    const documentFingerprint = await buildIdentityDocumentFingerprint(idVerification, {
+        documentType: idVerification?.document_type || idVerification?.documentType || idVerification?.type,
+        documentCountry: idVerification?.issuing_country || idVerification?.issuingCountry || idVerification?.country || 'PHL',
+    });
 
 
     // ALWAYS Store verification result in verification_sessions table
@@ -623,7 +835,9 @@ async function handleApproved(
                     first_name: firstName,
                     middle_name: middleName,
                     last_name: lastName,
-                    raw_data: idVerification, // Store the FULL raw object for safety
+                    raw_data: sanitizeIdentityVerificationData(idVerification),
+                    document_fingerprint: documentFingerprint,
+                    document_country: idVerification?.issuing_country || idVerification?.issuingCountry || idVerification?.country || 'PHL',
                     id_document_expiry: documentExpiry,
                     id_verified_at: new Date().toISOString(),
                     user_ref: userReference, // Store the user ID reference inside data
@@ -646,6 +860,163 @@ async function handleApproved(
     }
 
     // --- LEGACY/EXISTING USER FLOW (User already exists) ---
+    const { data: currentProfile } = await supabaseAdmin
+        .from('profiles')
+        .select('id, email, role')
+        .eq('id', userReference)
+        .maybeSingle();
+
+    const resolvedRole = currentProfile?.role || authUser?.user?.user_metadata?.role || 'musician';
+    const resolvedEmail = userEmail || currentProfile?.email || authUser?.user?.email || '';
+
+    if (documentFingerprint) {
+        const duplicate = await findSameRoleIdentityDuplicate(supabaseAdmin, {
+            documentFingerprint,
+            role: resolvedRole,
+            userId: userReference,
+        });
+
+        if (duplicate.hasDuplicate) {
+            const duplicateReason = getDuplicateIdentityReviewReason(resolvedRole);
+            const reviewRecord = await queueIdentityReview(supabaseAdmin, {
+                userId: userReference,
+                email: resolvedEmail,
+                role: resolvedRole,
+                documentType: idVerification?.document_type || idVerification?.documentType || idVerification?.type || 'Government ID',
+                documentCountry: idVerification?.issuing_country || idVerification?.issuingCountry || idVerification?.country || 'PHL',
+                source: DUPLICATE_REVIEW_SOURCE,
+                diditSessionId: sessionId,
+                documentFingerprint,
+                duplicateReason,
+                duplicateMatchCount: duplicate.matches.length,
+                metadata: {
+                    duplicate_detected_by: 'local_document_fingerprint',
+                },
+            });
+
+            await recordIdentityDocumentClaim(supabaseAdmin, {
+                userId: userReference,
+                role: resolvedRole,
+                documentFingerprint,
+                documentType: idVerification?.document_type || idVerification?.documentType || idVerification?.type || 'Government ID',
+                documentCountry: idVerification?.issuing_country || idVerification?.issuingCountry || idVerification?.country || 'PHL',
+                source: DUPLICATE_REVIEW_SOURCE,
+                status: 'PENDING_REVIEW',
+                diditSessionId: sessionId,
+                manualReviewId: reviewRecord?.id || null,
+                email: resolvedEmail,
+            });
+
+            if (sessionId) {
+                await upsertVerificationSession(
+                    supabaseAdmin,
+                    sessionId,
+                    'PENDING_REVIEW',
+                    {
+                            full_name: fullName,
+                            first_name: firstName,
+                            middle_name: middleName,
+                            last_name: lastName,
+                            raw_data: sanitizeIdentityVerificationData(idVerification),
+                            document_fingerprint: documentFingerprint,
+                            id_document_expiry: documentExpiry,
+                            id_verified_at: new Date().toISOString(),
+                            user_ref: userReference,
+                            email: resolvedEmail,
+                            duplicate_identity_review_required: true,
+                            duplicate_reason: duplicateReason,
+                            duplicate_match_count: duplicate.matches.length,
+                    },
+                );
+            }
+
+            await supabaseAdmin
+                .from('profiles')
+                .update({
+                    full_name: fullName || null,
+                    is_verified: false,
+                    verification_status: 'PENDING_REVIEW',
+                    id_document_expiry: documentExpiry,
+                    id_verified_at: null,
+                    didit_session_id: sessionId,
+                })
+                .eq('id', userReference);
+
+            await supabaseAdmin
+                .from('notifications')
+                .insert({
+                    user_id: userReference,
+                    type: 'info',
+                    title: 'Identity Review Started',
+                    message: 'Your ID is verified, but it needs a quick manual review before we finish activating this account.',
+                    meta: {
+                        manual_identity_review_id: reviewRecord?.id || null,
+                        verification_status: 'PENDING_REVIEW',
+                    },
+                });
+
+            return;
+        }
+    }
+
+    const approvalClaim = await recordIdentityDocumentClaim(supabaseAdmin, {
+        userId: userReference,
+        role: resolvedRole,
+        documentFingerprint,
+        documentType: idVerification?.document_type || idVerification?.documentType || idVerification?.type || 'Government ID',
+        documentCountry: idVerification?.issuing_country || idVerification?.issuingCountry || idVerification?.country || 'PHL',
+        source: 'DIDIT',
+        status: 'APPROVED',
+        diditSessionId: sessionId,
+        email: resolvedEmail,
+    });
+
+    if (approvalClaim?.decision === 'PENDING_REVIEW' || approvalClaim?.decision === 'EXISTING_ACCOUNT') {
+        const duplicateReason = getDuplicateIdentityReviewReason(resolvedRole);
+        const reviewRecord = await queueIdentityReview(supabaseAdmin, {
+            userId: userReference,
+            email: resolvedEmail,
+            role: resolvedRole,
+            documentType: idVerification?.document_type || idVerification?.documentType || idVerification?.type || 'Government ID',
+            documentCountry: idVerification?.issuing_country || idVerification?.issuingCountry || idVerification?.country || 'PHL',
+            source: DUPLICATE_REVIEW_SOURCE,
+            diditSessionId: sessionId,
+            documentFingerprint,
+            duplicateReason,
+            duplicateMatchCount: approvalClaim?.duplicate_count || approvalClaim?.matches?.length || 1,
+            metadata: {
+                duplicate_detected_by: 'approval_rpc',
+                approval_claim_result: approvalClaim,
+            },
+        });
+
+        await supabaseAdmin
+            .from('profiles')
+            .update({
+                full_name: fullName || null,
+                is_verified: false,
+                verification_status: 'PENDING_REVIEW',
+                id_document_expiry: documentExpiry,
+                id_verified_at: null,
+                didit_session_id: sessionId,
+            })
+            .eq('id', userReference);
+
+        await supabaseAdmin
+            .from('notifications')
+            .insert({
+                user_id: userReference,
+                type: 'info',
+                title: 'Identity Review Started',
+                message: 'Your ID is verified, but it needs a quick manual review before we finish activating this account.',
+                meta: {
+                    manual_identity_review_id: reviewRecord?.id || null,
+                    verification_status: 'PENDING_REVIEW',
+                },
+            });
+
+        return;
+    }
 
     // Confirm the email in auth system and update user metadata with display name
     if (userEmail) {
@@ -739,12 +1110,11 @@ async function handleDeclined(supabaseAdmin: any, userReference: string, session
 
     // ALWAYS store status in verification_sessions for frontend polling
     if (sessionId) {
-        await supabaseAdmin
-            .from('verification_sessions')
-            .upsert({
-                session_ref: sessionId,
-                status: 'DECLINED',
-                verification_data: {
+        await upsertVerificationSession(
+            supabaseAdmin,
+            sessionId,
+            'DECLINED',
+            {
                     user_ref: userReference,
                     declined_at: new Date().toISOString()
                 }
@@ -774,12 +1144,11 @@ async function handleAbandoned(supabaseAdmin: any, userReference: string, sessio
 
     // ALWAYS store status in verification_sessions for frontend polling
     if (sessionId) {
-        await supabaseAdmin
-            .from('verification_sessions')
-            .upsert({
-                session_ref: sessionId,
-                status: 'ABANDONED',
-                verification_data: {
+        await upsertVerificationSession(
+            supabaseAdmin,
+            sessionId,
+            'ABANDONED',
+            {
                     user_ref: userReference,
                     abandoned_at: new Date().toISOString()
                 }
@@ -809,12 +1178,11 @@ async function handleInReview(supabaseAdmin: any, userReference: string, session
 
     // ALWAYS store status in verification_sessions for frontend polling
     if (sessionId) {
-        await supabaseAdmin
-            .from('verification_sessions')
-            .upsert({
-                session_ref: sessionId,
-                status: 'PENDING_REVIEW',
-                verification_data: {
+        await upsertVerificationSession(
+            supabaseAdmin,
+            sessionId,
+            'PENDING_REVIEW',
+            {
                     user_ref: userReference,
                     review_started_at: new Date().toISOString()
                 }
@@ -823,6 +1191,24 @@ async function handleInReview(supabaseAdmin: any, userReference: string, session
 
     // Only update profiles if it's a real user (not TEMP_)
     if (!userReference.startsWith('TEMP_')) {
+        const { data: profile } = await supabaseAdmin
+            .from('profiles')
+            .select('email, role')
+            .eq('id', userReference)
+            .maybeSingle();
+
+        const reviewRecord = await queueIdentityReview(supabaseAdmin, {
+            userId: userReference,
+            email: profile?.email || '',
+            role: profile?.role || 'musician',
+            documentType: 'Government ID',
+            source: 'DIDIT_PENDING',
+            diditSessionId: sessionId,
+            metadata: {
+                didit_status: 'PENDING_REVIEW',
+            },
+        });
+
         await supabaseAdmin
             .from('profiles')
             .update({
@@ -839,29 +1225,52 @@ async function handleInReview(supabaseAdmin: any, userReference: string, session
                 type: 'info',
                 title: 'Manual Review in Progress',
                 message: 'Your verification requires manual review. Please wait - this usually takes 5-7 business days.',
+                meta: {
+                    manual_identity_review_id: reviewRecord?.id || null,
+                    verification_status: 'PENDING_REVIEW',
+                },
             });
     }
 
 }
 
 /**
- * Handle DUPLICATE DETECTED - delete the orphan account completely
- * This happens when someone tries to register with a different email but same ID/face
- * that was already used by another verified account
+ * Handle DUPLICATE DETECTED as manual review, not account deletion.
+ * This keeps signup feedback calm and lets admins decide legitimate edge cases.
  */
 async function handleDuplicateDetected(
     supabaseAdmin: any,
     userReference: string,
     userEmail: string | undefined,
-    warnings: any[]
+    warnings: any[],
+    sessionId: string | null = null,
+    idVerification: any = null,
+    authUser: any = null,
+    sessionMetadata: any = null
 ) {
 
-    try {
-        // First, delete the profile record to avoid foreign key issues
-        const { error: profileDeleteError } = await supabaseAdmin
+    const documentType = idVerification?.document_type || idVerification?.documentType || idVerification?.type || 'Government ID';
+    const documentCountry = idVerification?.issuing_country || idVerification?.issuingCountry || idVerification?.country || 'PHL';
+    const documentFingerprint = await buildIdentityDocumentFingerprint(idVerification, {
+        documentType,
+        documentCountry,
+    });
+    const canResolveDuplicateByRole = warnings.some((warning: any) => {
+        const warningCode = typeof warning === 'string' ? warning : warning?.code || warning?.type || warning?.warning;
+        const normalizedCode = String(warningCode || '').toUpperCase();
+        return normalizedCode.includes('POSSIBLE_DUPLICATED_USER') ||
+            normalizedCode.includes('FACE_IN_BLOCKLIST') ||
+            normalizedCode.includes('ID_DOCUMENT_IN_BLOCKLIST');
+    });
+    let resolvedRole = '';
+    let resolvedEmail = userEmail || '';
+
+    if (isUuid(userReference)) {
+        const { data: profile } = await supabaseAdmin
             .from('profiles')
-            .delete()
-            .eq('id', userReference);
+            .select('email, role')
+            .eq('id', userReference)
+            .maybeSingle();
 
         if (profileDeleteError) {
         } else {
@@ -900,6 +1309,99 @@ async function handleDuplicateDetected(
             })
             .eq('id', userReference);
     }
+
+    let duplicateMatchCount = 1;
+    const hasRoleForDuplicateCheck = Boolean(resolvedRole);
+    if (documentFingerprint && hasRoleForDuplicateCheck && canResolveDuplicateByRole) {
+        const duplicate = await findSameRoleIdentityDuplicate(supabaseAdmin, {
+            documentFingerprint,
+            role: resolvedRole,
+            userId: isUuid(userReference) ? userReference : null,
+            email: resolvedEmail,
+        });
+
+        duplicateMatchCount = duplicate.matches?.length || 0;
+        if (!duplicate.hasDuplicate) {
+            await handleApproved(supabaseAdmin, userReference, resolvedEmail || userEmail, idVerification, authUser, sessionId, 'APPROVED');
+            return;
+        }
+    }
+
+    const reviewRole = hasRoleForDuplicateCheck ? resolvedRole : 'musician';
+    const duplicateReason = getDuplicateIdentityReviewReason(reviewRole);
+
+    if (!isUuid(userReference)) {
+        await upsertVerificationSession(
+            supabaseAdmin,
+            sessionId || userReference,
+            'PENDING_REVIEW',
+            {
+                    user_ref: userReference,
+                    email: resolvedEmail || null,
+                    signup_role: hasRoleForDuplicateCheck ? resolvedRole : null,
+                    document_fingerprint: documentFingerprint,
+                    document_country: documentCountry,
+                    duplicate_identity_review_required: true,
+                    duplicate_reason: duplicateReason,
+                    duplicate_match_count: duplicateMatchCount || 1,
+                    warnings,
+                    review_started_at: new Date().toISOString(),
+            },
+        );
+        return;
+    }
+
+    const reviewRecord = await queueIdentityReview(supabaseAdmin, {
+        userId: userReference,
+        email: resolvedEmail || '',
+        role: reviewRole,
+        documentType,
+        documentCountry,
+        source: DUPLICATE_REVIEW_SOURCE,
+        diditSessionId: sessionId,
+        documentFingerprint,
+        duplicateReason,
+        duplicateMatchCount: duplicateMatchCount || 1,
+        metadata: {
+            didit_warnings: warnings,
+            duplicate_detected_by: 'didit_warning',
+            role_scoped_duplicate_check: canResolveDuplicateByRole,
+        },
+    });
+
+    await recordIdentityDocumentClaim(supabaseAdmin, {
+        userId: userReference,
+        role: reviewRole,
+        documentFingerprint,
+        documentType,
+        documentCountry,
+        source: DUPLICATE_REVIEW_SOURCE,
+        status: 'PENDING_REVIEW',
+        diditSessionId: sessionId,
+        manualReviewId: reviewRecord?.id || null,
+        email: resolvedEmail,
+    });
+
+    await supabaseAdmin
+        .from('profiles')
+        .update({
+            is_verified: false,
+            verification_status: 'PENDING_REVIEW',
+        })
+        .eq('id', userReference);
+
+    await supabaseAdmin
+        .from('notifications')
+        .insert({
+            user_id: userReference,
+            type: 'info',
+            title: 'Identity Review Started',
+            message: 'Your ID needs a quick manual review before we finish activating this account.',
+            meta: {
+                manual_identity_review_id: reviewRecord?.id || null,
+                verification_status: 'PENDING_REVIEW',
+            },
+        });
 }
 
 /**

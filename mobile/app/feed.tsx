@@ -543,6 +543,92 @@ const getPositiveInteger = (value: unknown) => {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
 };
 
+type FeedCoordinate = {
+  latitude: number;
+  longitude: number;
+};
+
+const PH_LOCATION_COORDINATES: Array<{ keywords: string[]; coordinate: FeedCoordinate }> = [
+  { keywords: ["albay", "legazpi"], coordinate: { latitude: 13.1391, longitude: 123.7438 } },
+  { keywords: ["daraga"], coordinate: { latitude: 13.1483, longitude: 123.7124 } },
+  { keywords: ["naga"], coordinate: { latitude: 13.6218, longitude: 123.1948 } },
+  { keywords: ["manila"], coordinate: { latitude: 14.5995, longitude: 120.9842 } },
+  { keywords: ["makati"], coordinate: { latitude: 14.5547, longitude: 121.0244 } },
+  { keywords: ["quezon city", "qc"], coordinate: { latitude: 14.676, longitude: 121.0437 } },
+  { keywords: ["taguig", "bgc", "bonifacio global city"], coordinate: { latitude: 14.5176, longitude: 121.0509 } },
+  { keywords: ["pasig"], coordinate: { latitude: 14.5764, longitude: 121.0851 } },
+  { keywords: ["marikina"], coordinate: { latitude: 14.6507, longitude: 121.1029 } },
+  { keywords: ["mandaluyong"], coordinate: { latitude: 14.5794, longitude: 121.0359 } },
+  { keywords: ["paranaque", "parañaque"], coordinate: { latitude: 14.4793, longitude: 121.0198 } },
+  { keywords: ["pasay"], coordinate: { latitude: 14.5378, longitude: 121.0014 } },
+  { keywords: ["caloocan"], coordinate: { latitude: 14.7566, longitude: 121.045 } },
+  { keywords: ["las pinas", "las piñas"], coordinate: { latitude: 14.4445, longitude: 120.9939 } },
+  { keywords: ["muntinlupa", "alabang"], coordinate: { latitude: 14.4081, longitude: 121.0415 } },
+  { keywords: ["cebu"], coordinate: { latitude: 10.3157, longitude: 123.8854 } },
+  { keywords: ["davao"], coordinate: { latitude: 7.1907, longitude: 125.4553 } },
+  { keywords: ["iloilo"], coordinate: { latitude: 10.7202, longitude: 122.5621 } },
+  { keywords: ["bacolod"], coordinate: { latitude: 10.6765, longitude: 122.9509 } },
+  { keywords: ["baguio"], coordinate: { latitude: 16.4023, longitude: 120.596 } },
+  { keywords: ["cavite"], coordinate: { latitude: 14.4791, longitude: 120.896 } },
+  { keywords: ["laguna"], coordinate: { latitude: 14.1709, longitude: 121.2437 } },
+  { keywords: ["batangas"], coordinate: { latitude: 13.7565, longitude: 121.0583 } },
+  { keywords: ["rizal", "antipolo"], coordinate: { latitude: 14.6255, longitude: 121.1245 } },
+  { keywords: ["pampanga", "angeles"], coordinate: { latitude: 15.1456, longitude: 120.5887 } },
+];
+
+const toFeedCoordinateValue = (value: unknown) => {
+  const parsed = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+};
+
+const getItemCoordinates = (item: any): FeedCoordinate | null => {
+  const latitude = toFeedCoordinateValue(item?.latitude ?? item?.lat);
+  const longitude = toFeedCoordinateValue(item?.longitude ?? item?.lng);
+
+  if (latitude === null || longitude === null) return null;
+  return { latitude, longitude };
+};
+
+const getCoordinateFromLocationText = (value: unknown): FeedCoordinate | null => {
+  const normalized = typeof value === "string" ? value.toLowerCase() : "";
+  if (!normalized.trim()) return null;
+  const coordinateMatch = normalized.match(/(-?\d{1,2}(?:\.\d+)?)[,\s]+(-?\d{1,3}(?:\.\d+)?)/);
+  if (coordinateMatch) {
+    const latitude = Number(coordinateMatch[1]);
+    const longitude = Number(coordinateMatch[2]);
+    if (
+      Number.isFinite(latitude) &&
+      Number.isFinite(longitude) &&
+      latitude >= -90 &&
+      latitude <= 90 &&
+      longitude >= -180 &&
+      longitude <= 180
+    ) {
+      return { latitude, longitude };
+    }
+  }
+
+  return PH_LOCATION_COORDINATES.find(({ keywords }) =>
+    keywords.some((keyword) => normalized.includes(keyword)),
+  )?.coordinate || null;
+};
+
+const getDistanceKm = (from: FeedCoordinate | null, to: FeedCoordinate | null) => {
+  if (!from || !to) return null;
+
+  const toRadians = (value: number) => (value * Math.PI) / 180;
+  const radiusKm = 6371;
+  const dLat = toRadians(to.latitude - from.latitude);
+  const dLon = toRadians(to.longitude - from.longitude);
+  const lat1 = toRadians(from.latitude);
+  const lat2 = toRadians(to.latitude);
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+
+  return radiusKm * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+};
+
 const formatCompactPostType = (value: unknown) => {
   const raw = typeof value === "string" ? value.trim() : "";
   if (!raw) return "Update";
@@ -557,6 +643,42 @@ const formatCompactPostType = (value: unknown) => {
 const formatFeedPrice = (amount: number, unit = "", label = "") => {
   const formatted = `${PESO_SIGN}${amount.toLocaleString()}`;
   return `${formatted}${unit}${label ? ` ${label}` : ""}`;
+};
+
+type FeedQuickInfoItem = {
+  icon: React.ComponentProps<typeof Ionicons>["name"];
+  label: string;
+};
+
+const getFeedQuickInfoItems = (item: any): FeedQuickInfoItem[] => {
+  const rating = Number(item?.rating || 0);
+  const reviewCount = Number(item?.review_count || 0);
+  const rawLocation = typeof item?.location === "string" ? item.location.trim() : "";
+  const distanceKm = Number(item?.distance_km || item?.distanceKm || 0);
+  const reviewLabel =
+    reviewCount > 0
+      ? `${reviewCount} ${reviewCount === 1 ? "Review" : "Reviews"}`
+      : "No reviews yet";
+  const locationLabel =
+    distanceKm > 0
+      ? `${distanceKm.toFixed(distanceKm >= 10 ? 0 : 1)} km away`
+      : item?.type === "Studio"
+        ? "Distance N/A"
+        : rawLocation.split(",")[0]?.trim() || "Local";
+  const ratingLabel =
+    rating > 0
+      ? `${rating.toFixed(1)} Rating`
+      : item?.type === "Studio"
+        ? "New Studio"
+        : "Featured";
+
+  const quickInfoItems: FeedQuickInfoItem[] = [
+    { icon: "star", label: ratingLabel },
+    { icon: "location", label: locationLabel },
+    { icon: "chatbubble-ellipses", label: reviewLabel },
+  ];
+
+  return quickInfoItems.filter((info) => info.label.length > 0);
 };
 
 const getFeedPriceChips = (item: any) => {
@@ -692,10 +814,10 @@ const getFeedEngagementCounts = (item: any) => ({
 });
 
 const DEMO_RADIO_STATION = {
-  id: "musikalokal-demo-radio",
-  name: "MusikaLokal Demo Radio",
-  description: "Preview track while local stations are warming up",
-  genre: "OPM / Indie",
+  id: "musikalokal-ncs-radio",
+  name: "MusikaLokal NCS Radio",
+  description: "NCS releases for the demo radio rotation",
+  genre: "NCS / EDM",
   is_active: true,
   __queueReady: true,
   __isDemoStation: true,
@@ -705,27 +827,38 @@ const DEMO_RADIO_STATION = {
   rotation_interval_minutes: 15,
   slot_count: 1,
   creator: {
-    full_name: "MusikaLokal",
+    full_name: "NoCopyrightSounds",
   },
   live_slots: [
     {
-      id: "musikalokal-demo-slot",
-      station_id: "musikalokal-demo-radio",
+      id: "musikalokal-ncs-slot",
+      station_id: "musikalokal-ncs-radio",
       position: 0,
-      label: "Local artist spotlight",
+      label: "NCS spotlight",
       created_at: "2026-01-01T00:00:00.000Z",
       updated_at: "2026-01-01T00:00:00.000Z",
       playlist: {
-        id: "musikalokal-demo-playlist",
-        title: "Local artist spotlight",
-        track_count: 1,
+        id: "musikalokal-ncs-playlist",
+        title: "NCS spotlight",
+        track_count: 3,
         items: [
           {
-            id: "musikalokal-demo-track",
-            title: "Local Groove Preview",
-            artist_name: "MusikaLokal",
-            duration_seconds: 372,
-            audio_url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3",
+            id: "musikalokal-ncs-sky-high",
+            title: "Sky High",
+            artist_name: "Elektronomia",
+            audio_url: "https://ncsmusic.s3.eu-west-1.amazonaws.com/tracks/000/000/290/sky-high-1586948785-jGkCsW2xA9.mp3",
+          },
+          {
+            id: "musikalokal-ncs-nekozilla",
+            title: "Nekozilla",
+            artist_name: "Different Heaven",
+            audio_url: "https://ncsmusic.s3.eu-west-1.amazonaws.com/tracks/000/000/275/nekozilla-1586948469-wOdU2Fj3uG.mp3",
+          },
+          {
+            id: "musikalokal-ncs-on-and-on",
+            title: "On & On (feat. Daniel Levi)",
+            artist_name: "Cartoon, Jeja",
+            audio_url: "https://ncsmusic.s3.eu-west-1.amazonaws.com/tracks/000/000/152/1654766391_N6n9kRBaAr_Cartoon---On--On-feat.-Daniel-Levi-_NCS-Release_.mp3",
           },
         ],
       },
@@ -871,11 +1004,6 @@ const LiveRadioCard = React.memo(function LiveRadioCard({
     typeof displayStation?.name === "string" && displayStation.name.trim().length > 0
       ? displayStation.name.trim()
       : "MusikaLokal Radio";
-  const stationSubtitle =
-    typeof displayStation?.description === "string" && displayStation.description.trim().length > 0
-      ? displayStation.description.trim()
-      : "Stream local music and artist features";
-  const isDemoStation = displayStation?.__isDemoStation === true;
   const nowPlayingTitle = isCurrentStation
     ? currentTrack?.title || getStationNowPlayingTitle(displayStation, currentSlotIndex)
     : getStationNowPlayingTitle(displayStation, 0);
@@ -898,7 +1026,7 @@ const LiveRadioCard = React.memo(function LiveRadioCard({
     : isCurrentStation && isPlaying
       ? "pause"
       : "play";
-  const statusBadgeLabel = loadingStation ? "LOADING" : canTuneIn ? "LIVE" : "OFF AIR";
+  const statusBadgeLabel = loadingStation ? "..." : canTuneIn ? "LIVE" : "OFF";
 
   const openStationDetails = useCallback(() => {
     if (!displayStation?.id || displayStation?.__isDemoStation) return;
@@ -962,75 +1090,64 @@ const LiveRadioCard = React.memo(function LiveRadioCard({
           },
         ]}
       >
-        <View style={[styles.liveRadioArtwork, { backgroundColor: primaryColor + (isDark ? "26" : "18") }]}>
+        <View style={[styles.liveRadioThumbnail, { backgroundColor: primaryColor + (isDark ? "24" : "14") }]}>
           <View style={[styles.liveRadioArtworkInner, { borderColor: primaryColor + "55" }]}>
-            <Ionicons name={isCurrentStation && isPlaying ? "volume-high" : "musical-notes"} size={22} color={primaryColor} />
+            <Ionicons name={isCurrentStation && isPlaying ? "volume-high" : "radio"} size={20} color={primaryColor} />
           </View>
         </View>
 
-        <View style={styles.liveRadioContent}>
-          <View style={styles.liveRadioTitleRow}>
-            <Text style={[styles.liveRadioTitle, { color: textColor }]} numberOfLines={1}>
+        <TouchableOpacity
+          activeOpacity={displayStation?.id ? 0.78 : 1}
+          disabled={!displayStation?.id}
+          onPress={openStationDetails}
+          style={styles.liveRadioContent}
+        >
+          <Text style={[styles.liveRadioStation, { color: textColor }]} numberOfLines={1}>
+            {loadingStation ? "Finding live stations..." : stationName}
+          </Text>
+          <Text style={[styles.liveRadioNowPlayingLine, { color: mutedTextColor }]} numberOfLines={1}>
+            {loadingStation ? "Now playing: Loading rotation" : `Now playing: ${nowPlayingTitle}`}
+          </Text>
+          <View style={styles.liveRadioMetaRow}>
+            <Text style={[styles.liveRadioMetaLabel, { color: mutedTextColor }]} numberOfLines={1}>
               Live Radio
             </Text>
-            <View style={[styles.liveRadioBadge, !canTuneIn && styles.liveRadioBadgeMuted]}>
-              <View style={styles.liveRadioBadgeDot} />
-              <Text style={styles.liveRadioBadgeText}>{statusBadgeLabel}</Text>
-            </View>
-          </View>
-
-          <TouchableOpacity
-            activeOpacity={displayStation?.id ? 0.78 : 1}
-            disabled={!displayStation?.id}
-            onPress={openStationDetails}
-          >
-            <Text style={[styles.liveRadioStation, { color: textColor }]} numberOfLines={1}>
-              {loadingStation ? "Finding live stations..." : stationName}
-            </Text>
-            <Text style={[styles.liveRadioSubtitle, { color: mutedTextColor }]} numberOfLines={2}>
-              {loadingStation ? "Checking the local radio rotation" : isDemoStation ? "A playable preview while your local station queue is empty" : stationSubtitle}
-            </Text>
-          </TouchableOpacity>
-
-          <View style={styles.liveRadioMetaRow}>
-            <View style={styles.liveRadioNowPlaying}>
-              <Text style={[styles.liveRadioMetaLabel, { color: mutedTextColor }]} numberOfLines={1}>
-                Now playing
-              </Text>
-              <Text style={[styles.liveRadioMetaValue, { color: textColor }]} numberOfLines={1}>
-                {loadingStation ? "Loading rotation" : nowPlayingTitle}
-              </Text>
-            </View>
-            <View style={styles.liveRadioListeners}>
-              <Ionicons name={stationSlots.length > 0 ? "musical-notes-outline" : "cloud-offline-outline"} size={14} color={mutedTextColor} />
+            <Text style={[styles.liveRadioMetaDot, { color: mutedTextColor }]}>|</Text>
+            <View style={styles.liveRadioTrackCount}>
+              <Ionicons name={stationSlots.length > 0 ? "musical-notes-outline" : "cloud-offline-outline"} size={12} color={mutedTextColor} />
               <Text style={[styles.liveRadioListenerText, { color: mutedTextColor }]} numberOfLines={1}>
                 {rotationSummary}
               </Text>
             </View>
           </View>
-        </View>
-
-        <TouchableOpacity
-          activeOpacity={0.78}
-          accessibilityRole="button"
-          accessibilityLabel={`${playButtonLabel} Live Radio`}
-          disabled={loadingStation || isTuneInLoading}
-          onPress={handlePlayPress}
-          style={[
-            styles.liveRadioPlayButton,
-            {
-              backgroundColor: canTuneIn ? primaryColor : (isDark ? "#334155" : "#CBD5E1"),
-              opacity: loadingStation || isTuneInLoading ? 0.8 : 1,
-            },
-          ]}
-        >
-          {loadingStation || isTuneInLoading ? (
-            <ActivityIndicator size="small" color="#FFFFFF" />
-          ) : (
-            <Ionicons name={playIcon as any} size={16} color="#FFFFFF" />
-          )}
-          <Text style={styles.liveRadioPlayText}>{playButtonLabel}</Text>
         </TouchableOpacity>
+
+        <View style={styles.liveRadioActions}>
+          <View style={[styles.liveRadioBadge, !canTuneIn && styles.liveRadioBadgeMuted]}>
+            <View style={styles.liveRadioBadgeDot} />
+            <Text style={styles.liveRadioBadgeText}>{statusBadgeLabel}</Text>
+          </View>
+          <TouchableOpacity
+            activeOpacity={0.78}
+            accessibilityRole="button"
+            accessibilityLabel={`${playButtonLabel} Live Radio`}
+            disabled={loadingStation || isTuneInLoading}
+            onPress={handlePlayPress}
+            style={[
+              styles.liveRadioPlayButton,
+              {
+                backgroundColor: canTuneIn ? primaryColor : (isDark ? "#334155" : "#CBD5E1"),
+                opacity: loadingStation || isTuneInLoading ? 0.8 : 1,
+              },
+            ]}
+          >
+            {loadingStation || isTuneInLoading ? (
+              <ActivityIndicator size="small" color="#FFFFFF" />
+            ) : (
+              <Ionicons name={playIcon as any} size={17} color="#FFFFFF" />
+            )}
+          </TouchableOpacity>
+        </View>
       </View>
     </View>
   );
@@ -1083,6 +1200,7 @@ const SocialFeedCard = React.memo(function SocialFeedCard({
   const mediaUrls = useMemo(() => getFeedMediaUrls(item), [item]);
   const badges = useMemo(() => getFeedServiceBadges(item), [item]);
   const priceChips = useMemo(() => getFeedPriceChips(item), [item]);
+  const quickInfoItems = useMemo(() => getFeedQuickInfoItems(item), [item]);
   const engagement = useMemo(() => getFeedEngagementCounts(item), [item]);
   const avatarUri = useMemo(() => getFeedAvatarUri(item), [item]);
   const displayName = getFeedDisplayName(item);
@@ -1281,50 +1399,77 @@ const SocialFeedCard = React.memo(function SocialFeedCard({
         </TouchableOpacity>
       ) : null}
 
-      <View style={[styles.socialEngagementRow, { borderBottomColor: borderColor }]}>
-        <View style={styles.socialEngagementLeft}>
-          <View style={styles.socialLikeBubble}>
-            <Ionicons name="heart" size={10} color="#FFFFFF" />
-          </View>
-          <Text style={[styles.socialEngagementText, { color: colors.textSecondary }]}>
-            {engagement.likes} likes
-          </Text>
+      {isSuggestion ? (
+        <View style={[styles.socialQuickInfoRow, { borderTopColor: borderColor }]}>
+          {quickInfoItems.map((info) => (
+            <View key={`${info.icon}-${info.label}`} style={styles.socialQuickInfoItem}>
+              <View
+                style={[
+                  styles.socialQuickInfoIconBox,
+                  info.icon === "star" && styles.socialQuickInfoStarIconBox,
+                  info.icon === "location" && styles.socialQuickInfoLocationIconBox,
+                  info.icon === "chatbubble-ellipses" && styles.socialQuickInfoChatIconBox,
+                ]}
+              >
+                <Ionicons
+                  name={info.icon}
+                  size={15}
+                  color={info.icon === "star" ? "#F59E0B" : colors.primary}
+                  style={styles.socialQuickInfoIcon}
+                />
+              </View>
+              <Text style={[styles.socialQuickInfoText, { color: colors.textSecondary }]} numberOfLines={1}>
+                {info.label}
+              </Text>
+            </View>
+          ))}
         </View>
-        <Text style={[styles.socialEngagementText, { color: colors.textSecondary }]} numberOfLines={1}>
+      ) : (
+        <>
+          <View style={[styles.socialEngagementRow, { borderBottomColor: borderColor }]}>
+            <View style={styles.socialEngagementLeft}>
+              <View style={styles.socialLikeBubble}>
+                <Ionicons name="heart" size={10} color="#FFFFFF" />
+              </View>
+              <Text style={[styles.socialEngagementText, { color: colors.textSecondary }]}>
+                {engagement.likes} likes
+              </Text>
+            </View>
+            <Text style={[styles.socialEngagementText, { color: colors.textSecondary }]} numberOfLines={1}>
           {engagement.comments} comments • {engagement.shares} shares
-        </Text>
-      </View>
+            </Text>
+          </View>
 
-      <View style={styles.socialActionRow}>
-        <TouchableOpacity
-          activeOpacity={isSuggestion ? 1 : 0.78}
-          disabled={isSuggestion}
-          onPress={handleReaction}
-          style={styles.socialActionButton}
-        >
-          <Ionicons
-            name={item?.my_reaction ? "heart" : "heart-outline"}
-            size={18}
-            color={item?.my_reaction ? "#EF4444" : colors.textSecondary}
-          />
-          <Text style={[styles.socialActionText, { color: item?.my_reaction ? "#EF4444" : colors.textSecondary }]}>
-            Like
-          </Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          activeOpacity={isSuggestion ? 1 : 0.78}
-          disabled={isSuggestion}
-          onPress={handleComment}
-          style={styles.socialActionButton}
-        >
-          <Ionicons name="chatbubble-outline" size={17} color={colors.textSecondary} />
-          <Text style={[styles.socialActionText, { color: colors.textSecondary }]}>Comment</Text>
-        </TouchableOpacity>
-        <TouchableOpacity activeOpacity={0.78} style={styles.socialActionButton}>
-          <Ionicons name="share-outline" size={18} color={colors.textSecondary} />
-          <Text style={[styles.socialActionText, { color: colors.textSecondary }]}>Share</Text>
-        </TouchableOpacity>
-      </View>
+          <View style={styles.socialActionRow}>
+            <TouchableOpacity
+              activeOpacity={0.78}
+              onPress={handleReaction}
+              style={styles.socialActionButton}
+            >
+              <Ionicons
+                name={item?.my_reaction ? "heart" : "heart-outline"}
+                size={18}
+                color={item?.my_reaction ? "#EF4444" : colors.textSecondary}
+              />
+              <Text style={[styles.socialActionText, { color: item?.my_reaction ? "#EF4444" : colors.textSecondary }]}>
+                Like
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              activeOpacity={0.78}
+              onPress={handleComment}
+              style={styles.socialActionButton}
+            >
+              <Ionicons name="chatbubble-outline" size={17} color={colors.textSecondary} />
+              <Text style={[styles.socialActionText, { color: colors.textSecondary }]}>Comment</Text>
+            </TouchableOpacity>
+            <TouchableOpacity activeOpacity={0.78} style={styles.socialActionButton}>
+              <Ionicons name="share-outline" size={18} color={colors.textSecondary} />
+              <Text style={[styles.socialActionText, { color: colors.textSecondary }]}>Share</Text>
+            </TouchableOpacity>
+          </View>
+        </>
+      )}
 
       <View style={styles.socialCtaRow}>
         <TouchableOpacity
@@ -1670,7 +1815,7 @@ export default function FeedScreen() {
 
     try {
       // Primary queries with strict filters (matching Home)
-      const [groupsResult, studiosResult, gigsResult, artistsResult, teamsResult] = await Promise.all([
+      const [groupsResult, studiosResult, gigsResult, artistsResult, teamsResult, viewerProfileResult] = await Promise.all([
         supabase
           .from("groups_with_stats")
           .select("*")
@@ -1701,6 +1846,11 @@ export default function FeedScreen() {
           .select("id, owner_id, name, description, logo_url, created_at, updated_at")
           .order("created_at", { ascending: false })
           .limit(24),
+        supabase
+          .from("profiles")
+          .select("address, location")
+          .eq("id", userId)
+          .maybeSingle(),
       ]);
 
 
@@ -1744,6 +1894,19 @@ export default function FeedScreen() {
       const finalGigs = (gigsResult.data || []).length > 0 ? gigsResult.data! : relaxedGigs;
       const finalArtists = (artistsResult.data || []).length > 0 ? artistsResult.data! : relaxedProfiles;
       const finalTeams = teamsResult.data || [];
+      const viewerProfile = (viewerProfileResult.data || {}) as {
+        address?: string | null;
+        location?: string | null;
+      };
+      const viewerCoordinates = getCoordinateFromLocationText(viewerProfile.address || viewerProfile.location || "");
+      const withFeedDistance = (item: any) => {
+        const itemCoordinates = getItemCoordinates(item) || getCoordinateFromLocationText(item?.location);
+        const distanceKm = getDistanceKm(viewerCoordinates, itemCoordinates);
+        return {
+          ...item,
+          distance_km: distanceKm === null ? null : Number(distanceKm.toFixed(1)),
+        };
+      };
 
       const artistIds = finalArtists
         .map((row: any) => row?.id)
@@ -1818,6 +1981,8 @@ export default function FeedScreen() {
         rating: Number(item.rating || 0),
         review_count: Number(item.review_count || 0),
         location: item.location || "",
+        latitude: item.latitude ?? null,
+        longitude: item.longitude ?? null,
         genre: item.genre || "",
         group_type: item.group_type || null,
         created_at: item.created_at || null,
@@ -1836,6 +2001,8 @@ export default function FeedScreen() {
         rating: Number(item.rating || 0),
         review_count: Number(item.review_count || 0),
         location: item.address || "",
+        latitude: item.latitude ?? null,
+        longitude: item.longitude ?? null,
         genre: item.type || "Studio",
         created_at: item.created_at || null,
         updated_at: item.updated_at || null,
@@ -1857,6 +2024,8 @@ export default function FeedScreen() {
         rating: Number(item.rating || 0),
         review_count: Number(item.review_count || 0),
         location: item.location || "",
+        latitude: item.latitude ?? null,
+        longitude: item.longitude ?? null,
         genre: Array.isArray(item?.requirements?.genres)
           ? item.requirements.genres.join(", ")
           : item?.requirements?.genre || "",
@@ -1920,7 +2089,7 @@ export default function FeedScreen() {
         ...normalizedGigs,
         ...normalizedArtists,
         ...normalizedTeams,
-      ].map(ensureFeedCardImage);
+      ].map(withFeedDistance).map(ensureFeedCardImage);
 
       if (allCandidates.length === 0) {
         return { cards: [], provider: "", message: "" };
@@ -3195,27 +3364,29 @@ const styles = StyleSheet.create({
     paddingBottom: 10,
   },
   liveRadioCard: {
-    borderRadius: 16,
+    minHeight: 88,
+    borderRadius: 14,
     borderWidth: 1,
-    padding: 12,
+    padding: 10,
     flexDirection: "row",
-    alignItems: "stretch",
+    alignItems: "center",
     gap: 10,
     shadowColor: "#000",
-    shadowOffset: { width: 0, height: 8 },
-    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 5 },
+    shadowRadius: 12,
     elevation: 2,
   },
-  liveRadioArtwork: {
-    width: 58,
-    borderRadius: 14,
+  liveRadioThumbnail: {
+    width: 48,
+    height: 48,
+    borderRadius: 12,
     alignItems: "center",
     justifyContent: "center",
   },
   liveRadioArtworkInner: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
     borderWidth: 1,
     alignItems: "center",
     justifyContent: "center",
@@ -3223,30 +3394,11 @@ const styles = StyleSheet.create({
   liveRadioContent: {
     flex: 1,
     minWidth: 0,
-  },
-  liveRadioTitleRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    marginBottom: 6,
-  },
-  liveRadioIcon: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    alignItems: "center",
     justifyContent: "center",
-  },
-  liveRadioTitle: {
-    flex: 1,
-    fontSize: moderateScale(12),
-    fontFamily: "Poppins_700Bold",
-    textTransform: "uppercase",
-    letterSpacing: 0,
   },
   liveRadioBadge: {
     borderRadius: 999,
-    paddingHorizontal: 7,
+    paddingHorizontal: 6,
     paddingVertical: 3,
     backgroundColor: "#EF4444",
     flexDirection: "row",
@@ -3257,9 +3409,9 @@ const styles = StyleSheet.create({
     backgroundColor: "#64748B",
   },
   liveRadioBadgeDot: {
-    width: 5,
-    height: 5,
-    borderRadius: 2.5,
+    width: 4,
+    height: 4,
+    borderRadius: 2,
     backgroundColor: "#FFFFFF",
   },
   liveRadioBadgeText: {
@@ -3268,63 +3420,58 @@ const styles = StyleSheet.create({
     fontFamily: "Poppins_700Bold",
   },
   liveRadioStation: {
-    fontSize: moderateScale(16),
+    fontSize: moderateScale(15),
     fontFamily: "Poppins_700Bold",
-    lineHeight: 21,
+    lineHeight: 20,
   },
-  liveRadioSubtitle: {
+  liveRadioNowPlayingLine: {
     fontSize: moderateScale(11),
     fontFamily: "Poppins_400Regular",
     lineHeight: 16,
     marginTop: 2,
   },
   liveRadioMetaRow: {
-    marginTop: 9,
+    marginTop: 5,
     flexDirection: "row",
     alignItems: "center",
-    gap: 8,
-  },
-  liveRadioNowPlaying: {
-    flex: 1,
-    minWidth: 0,
+    gap: 5,
   },
   liveRadioMetaLabel: {
     fontSize: moderateScale(9),
     fontFamily: "Poppins_500Medium",
   },
-  liveRadioMetaValue: {
-    fontSize: moderateScale(11),
+  liveRadioMetaDot: {
+    fontSize: moderateScale(10),
     fontFamily: "Poppins_600SemiBold",
-    marginTop: 1,
+    lineHeight: 12,
   },
-  liveRadioListeners: {
-    maxWidth: 94,
+  liveRadioTrackCount: {
+    maxWidth: 74,
     borderRadius: 999,
-    paddingHorizontal: 8,
-    paddingVertical: 5,
+    paddingHorizontal: 6,
+    paddingVertical: 3,
     backgroundColor: "rgba(124,58,237,0.10)",
     flexDirection: "row",
     alignItems: "center",
-    gap: 5,
+    gap: 4,
   },
   liveRadioListenerText: {
     flexShrink: 1,
     fontSize: moderateScale(9),
     fontFamily: "Poppins_600SemiBold",
   },
-  liveRadioPlayButton: {
-    width: 76,
-    minHeight: 44,
-    borderRadius: 14,
+  liveRadioActions: {
+    width: 42,
     alignItems: "center",
     justifyContent: "center",
-    gap: 4,
-    alignSelf: "center",
+    gap: 8,
   },
-  liveRadioPlayText: {
-    color: "#FFFFFF",
-    fontSize: moderateScale(11),
-    fontFamily: "Poppins_700Bold",
+  liveRadioPlayButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: "center",
+    justifyContent: "center",
   },
 
   /* Tabs */
@@ -3456,23 +3603,35 @@ const styles = StyleSheet.create({
   },
   socialBadgeChip: {
     borderRadius: 999,
+    minHeight: 28,
     paddingHorizontal: 9,
-    paddingVertical: 5,
+    paddingVertical: 0,
+    alignItems: "center",
+    justifyContent: "center",
   },
   socialBadgeText: {
     fontSize: moderateScale(10),
+    lineHeight: 14,
     fontFamily: "Poppins_700Bold",
+    includeFontPadding: false,
+    textAlignVertical: "center",
   },
   socialPriceChip: {
     borderRadius: 999,
     borderWidth: 1,
+    minHeight: 32,
     paddingHorizontal: 9,
-    paddingVertical: 5,
+    paddingVertical: 0,
+    alignItems: "center",
+    justifyContent: "center",
     backgroundColor: "rgba(124,58,237,0.06)",
   },
   socialPriceText: {
     fontSize: moderateScale(10),
+    lineHeight: 14,
     fontFamily: "Poppins_700Bold",
+    includeFontPadding: false,
+    textAlignVertical: "center",
   },
   socialLinkedCard: {
     marginHorizontal: 12,
@@ -3516,6 +3675,59 @@ const styles = StyleSheet.create({
   socialEngagementText: {
     fontSize: moderateScale(11),
     fontFamily: "Poppins_400Regular",
+  },
+  socialQuickInfoRow: {
+    marginHorizontal: 12,
+    marginTop: 10,
+    paddingTop: 11,
+    paddingBottom: 7,
+    minHeight: 40,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    borderTopWidth: 1,
+    gap: 10,
+  },
+  socialQuickInfoItem: {
+    flex: 1,
+    minWidth: 0,
+    height: 24,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 5,
+  },
+  socialQuickInfoIconBox: {
+    width: 20,
+    height: 24,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  socialQuickInfoStarIconBox: {
+    transform: [{ translateY: -0.5 }],
+  },
+  socialQuickInfoLocationIconBox: {
+    transform: [{ translateY: -2 }],
+  },
+  socialQuickInfoChatIconBox: {
+    transform: [{ translateY: -1.5 }],
+  },
+  socialQuickInfoIcon: {
+    width: 20,
+    height: 24,
+    lineHeight: 24,
+    includeFontPadding: false,
+    textAlign: "center",
+    textAlignVertical: "center",
+  },
+  socialQuickInfoText: {
+    flexShrink: 1,
+    fontSize: moderateScale(10.5),
+    lineHeight: 24,
+    fontFamily: "Poppins_700Bold",
+    includeFontPadding: false,
+    textAlignVertical: "center",
+    transform: [{ translateY: 0.5 }],
   },
   socialActionRow: {
     flexDirection: "row",

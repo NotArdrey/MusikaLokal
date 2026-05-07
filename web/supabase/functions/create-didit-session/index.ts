@@ -1,12 +1,80 @@
 // @ts-nocheck
 import { serve } from "https://deno.land/std@0.177.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import {
+  createSessionNonce,
+  hashSessionNonce,
+  normalizeIdentityEmail,
+  sanitizeIdentityVerificationData,
+  stripPrivateSessionFields,
+  verifySessionNonce,
+} from "../_shared/identityDuplicate.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
+
+function jsonResponse(payload: unknown, status = 200) {
+  return new Response(JSON.stringify(payload), {
+    status,
+    headers: { ...corsHeaders, "Content-Type": "application/json" },
+  });
+}
+
+async function assertSessionNonce(
+  supabaseAdmin: any,
+  sessionRef: string,
+  sessionNonce: unknown,
+) {
+  const { data: localData, error } = await supabaseAdmin
+    .from("verification_sessions")
+    .select("status, verification_data")
+    .eq("session_ref", sessionRef)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(`Failed to validate verification session: ${error.message}`);
+  }
+
+  const expectedHash = localData?.verification_data?.session_nonce_hash;
+  const valid = await verifySessionNonce(sessionRef, sessionNonce, expectedHash);
+  if (!localData || !valid) {
+    throw new Error("Verification session could not be validated. Please start verification again.");
+  }
+
+  return localData;
+}
+
+async function enforceDiditSessionRateLimit(supabaseAdmin: any, normalizedEmail: string) {
+  if (!normalizedEmail) return;
+
+  const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+  const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+
+  const [{ count: hourlyCount, error: hourlyError }, { count: dailyCount, error: dailyError }] = await Promise.all([
+    supabaseAdmin
+      .from("verification_sessions")
+      .select("session_ref", { count: "exact", head: true })
+      .eq("verification_data->>email", normalizedEmail)
+      .gte("created_at", oneHourAgo),
+    supabaseAdmin
+      .from("verification_sessions")
+      .select("session_ref", { count: "exact", head: true })
+      .eq("verification_data->>email", normalizedEmail)
+      .gte("created_at", oneDayAgo),
+  ]);
+
+  if (hourlyError || dailyError) {
+    console.error("didit_rate_limit_lookup_failed", hourlyError || dailyError);
+    return;
+  }
+
+  if ((hourlyCount || 0) >= 3 || (dailyCount || 0) >= 8) {
+    throw new Error("Too many verification attempts. Please wait before trying again.");
+  }
+}
 
 serve(async (req) => {
   // Handle CORS preflight
@@ -38,6 +106,13 @@ serve(async (req) => {
       );
     }
 
+    if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY || !SUPABASE_ANON_KEY) {
+      console.error("Missing Supabase configuration for Didit session flow");
+      return jsonResponse({ error: "Server configuration error", success: false }, 500);
+    }
+
+    const supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+
     // Parse request body
     const { userId, email, callback, redirect_url, action, session_id } = await req.json();
     const normalizedEmail = typeof email === 'string' ? email.trim().toLowerCase() : '';
@@ -45,13 +120,14 @@ serve(async (req) => {
     // HANDLE GET SESSION ACTION
     if (action === 'get_session' && session_id) {
 
+      const localSessionData = await assertSessionNonce(supabaseAdmin, String(session_id), providedSessionNonce);
       let sessionData = {};
 
       // Try /decision/ first (contains verification results)
       try {
         const decisionResponse = await fetch(`https://verification.didit.me/v3/session/${session_id}/decision/`, {
           method: "GET",
-          headers: { "Content-Type": "application/json", "X-Api-Key": DIDIT_API_KEY }
+          headers: { "Content-Type": "application/json", "x-api-key": DIDIT_API_KEY }
         });
         if (decisionResponse.ok) {
           const decision = await decisionResponse.json();
@@ -67,12 +143,12 @@ serve(async (req) => {
       try {
         const baseResponse = await fetch(`https://verification.didit.me/v3/session/${session_id}`, {
           method: "GET",
-          headers: { "Content-Type": "application/json", "X-Api-Key": DIDIT_API_KEY }
+          headers: { "Content-Type": "application/json", "x-api-key": DIDIT_API_KEY }
         });
         if (baseResponse.ok) {
           const base = await baseResponse.json();
           // Merge, but don't overwrite decision data if it exists
-          sessionData = { ...base, ...sessionData };
+          sessionData = { ...sanitizeIdentityVerificationData(base), ...sessionData };
         } else {
           console.warn(`Base session endpoint failed: ${baseResponse.status}`);
         }
@@ -82,9 +158,12 @@ serve(async (req) => {
 
       // FALLBACK: Check local 'verification_sessions' table
       // This is crucial if we are using a TEMP_ ref that the Webhook has processed
-      if (SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY) {
-        try {
-          const supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+      if (localSessionData) {
+        console.log('Found data in verification_sessions table');
+        const storedStatus = localSessionData.status || 'PENDING';
+        const publicVerificationData = stripPrivateSessionFields(
+          sanitizeIdentityVerificationData(localSessionData.verification_data || {}),
+        );
 
           // 1. Try lookup by Session Reference (UUID)
           let { data: localData, error } = await supabaseAdmin
@@ -202,7 +281,7 @@ serve(async (req) => {
     // This is where the user's browser goes after completing verification
     // Include the client's redirect_url (e.g., exp://... or musikalokal://...)
     // so verification-redirect can send them back to the right place
-    let finalRedirectUrl = `${SUPABASE_URL}/functions/v1/verification-redirect?vendor_data=${userId}&apikey=${anonKey}`;
+    let finalRedirectUrl = `${SUPABASE_URL}/functions/v1/verification-redirect?vendor_data=${userId}&apikey=${SUPABASE_ANON_KEY}`;
 
     if (redirect_url) {
       finalRedirectUrl += `&redirect_to=${encodeURIComponent(redirect_url)}`;
@@ -218,7 +297,7 @@ serve(async (req) => {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "X-Api-Key": DIDIT_API_KEY,
+        "x-api-key": DIDIT_API_KEY,
       },
       body: JSON.stringify({
         workflow_id: DIDIT_WORKFLOW_ID,
@@ -307,14 +386,14 @@ serve(async (req) => {
         } else {
         }
       }
-    }
 
     // Return the verification URL to the client
     return new Response(
       JSON.stringify({
         success: true,
-        sessionId: diditData.session_id,
-        verificationUrl: diditData.url, // This is the URL to redirect the user to
+        sessionId: createdSessionId,
+        sessionNonce,
+        verificationUrl, // This is the URL to redirect the user to
       }),
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );

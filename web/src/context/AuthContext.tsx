@@ -149,10 +149,8 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         console.log("Error checking identity status:", error);
 
         if (error.code === "PGRST116") {
-          const metadataVerified = session.user?.user_metadata?.is_verified;
-          const needsVerification = metadataVerified !== true;
-          setIdentityStatus(needsVerification ? "UNVERIFIED" : null);
-          setIdentityRequired(needsVerification);
+          setIdentityStatus("UNVERIFIED");
+          setIdentityRequired(true);
           setIdentityExpiresAt(null);
         } else {
           setIdentityStatus(null);
@@ -162,29 +160,6 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
         setIdentityChecked(true);
         return;
-      }
-
-      if ((!profile || profile.is_verified !== true) && session.user?.user_metadata?.is_verified === true) {
-        const { error: promoteError } = await supabase
-          .from("profiles")
-          .upsert({
-            id: session.user.id,
-            email: session.user.email,
-            full_name: session.user.user_metadata?.full_name || session.user.user_metadata?.name || "",
-            role: session.user.user_metadata?.role || "musician",
-            is_verified: true,
-            verification_status: "APPROVED",
-            didit_session_id: session.user.user_metadata?.didit_session_id || null,
-          });
-
-        if (!promoteError) {
-          const { data: promotedProfile } = await supabase
-            .from("profiles")
-            .select("is_verified, verification_status, id_document_expiry")
-            .eq("id", session.user.id)
-            .maybeSingle();
-          profile = promotedProfile;
-        }
       }
 
       const normalizedStatus =
@@ -248,12 +223,17 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         console.log("Failed to clear guest mode:", e);
       });
 
-    // Helper to filter/block unverified sessions (prevents auto-login during signup)
     const filterSession = (currentSession: Session | null) => {
-      // If user exists but has explicit is_verified: false, mimic logged out state
-      if (currentSession?.user?.user_metadata?.is_verified === false) {
+      const metadata = currentSession?.user?.user_metadata;
+      const metadataStatus =
+        typeof metadata?.verification_status === "string"
+          ? metadata.verification_status.toUpperCase()
+          : "";
+
+      if (metadata?.is_verified === false && metadataStatus !== "APPROVED") {
         return null;
       }
+
       return currentSession;
     };
 
@@ -579,14 +559,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     setRoleResolved(true);
   };
 
-  const fetchUserRole = async (userId: string, activeSession?: Session | null) => {
-    const metadataRole = normalizeRole(
-      activeSession?.user?.user_metadata?.role ??
-      activeSession?.user?.app_metadata?.role ??
-      session?.user?.user_metadata?.role ??
-      session?.user?.app_metadata?.role,
-    );
-
+  const fetchUserRole = async (userId: string, _activeSession?: Session | null) => {
     try {
       console.log("🔍 Fetching role for user ID:", userId);
       const { data, error } = await supabase
@@ -603,12 +576,6 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       if (profileRole) {
         console.log("✅ User role fetched from profiles:", profileRole);
         applyResolvedRole(profileRole);
-        return;
-      }
-
-      if (metadataRole) {
-        console.log("ℹ️ Using role from session metadata:", metadataRole);
-        applyResolvedRole(metadataRole);
         return;
       }
 
@@ -634,12 +601,6 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       applyResolvedRole(null);
     } catch (error) {
       console.log("❌ Exception fetching user role:", error);
-      if (metadataRole) {
-        console.log("ℹ️ Falling back to metadata role after exception:", metadataRole);
-        applyResolvedRole(metadataRole);
-        return;
-      }
-
       applyResolvedRole(null);
     }
   };
