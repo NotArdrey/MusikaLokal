@@ -76,6 +76,7 @@
   },
   "devDependencies": {
     "@expo/cli": "^54.0.21",
+    "@playwright/test": "^1.59.1",
     "@types/react": "~19.1.0",
     "eslint": "^9.25.0",
     "eslint-config-expo": "~10.0.0",

@@ -301,9 +301,9 @@ export default function ShopScreen() {
       const orderedImages =
         listingImages.length > 0
           ? [
-              listingImages[listingThumbnailIndex] || listingImages[0],
-              ...listingImages.filter((_, i) => i !== listingThumbnailIndex),
-            ].filter((url, i, arr) => Boolean(url) && arr.indexOf(url) === i)
+            listingImages[listingThumbnailIndex] || listingImages[0],
+            ...listingImages.filter((_, i) => i !== listingThumbnailIndex),
+          ].filter((url, i, arr) => Boolean(url) && arr.indexOf(url) === i)
           : [];
 
       const listingBody: Record<string, unknown> = {
