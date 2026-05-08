@@ -72,6 +72,10 @@ const moderateScale = (size: number, factor = 0.3) => {
   return size + (scaled - size) * factor;
 };
 
+const BOOKING_CARD_IMAGE_WIDTH = 640;
+const BOOKING_CARD_IMAGE_HEIGHT = 240;
+const BOOKING_AVATAR_IMAGE_SIZE = 64;
+
 const REQUEST_PLACEHOLDER_IMAGE =
   "https://images.unsplash.com/photo-1633332755192-727a05c4013d?w=400&h=400&fit=crop";
 
@@ -767,16 +771,6 @@ export default function BookingsScreen() {
       router.replace("/");
     }
   }, [authLoading, isAuthenticated, isGuest]);
-
-  useEffect(() => {
-    const intervalId = setInterval(() => {
-      setCurrentTime(new Date());
-    }, 30 * 1000);
-
-    return () => {
-      clearInterval(intervalId);
-    };
-  }, []);
 
   useEffect(() => {
     setLocallyReportedLateBookings({});
@@ -3811,6 +3805,35 @@ export default function BookingsScreen() {
     [applicationData, data, deferredActiveAppTab, deferredActiveTab, userRole, viewMode],
   );
 
+  const shouldTrackLateReportWindow = React.useMemo(
+    () =>
+      userRole === "musician" &&
+      renderActiveTab === "Upcoming" &&
+      currentItems.some(
+        (item: any) =>
+          item?.type_id === "studio_booking" &&
+          !item?.isCancelled &&
+          !item?.has_late_report &&
+          !locallyReportedLateBookings[item?.id] &&
+          item?.raw_date &&
+          item?.start_time,
+      ),
+    [currentItems, locallyReportedLateBookings, renderActiveTab, userRole],
+  );
+
+  useEffect(() => {
+    if (!shouldTrackLateReportWindow) return;
+
+    setCurrentTime(new Date());
+    const intervalId = setInterval(() => {
+      setCurrentTime(new Date());
+    }, 30 * 1000);
+
+    return () => {
+      clearInterval(intervalId);
+    };
+  }, [shouldTrackLateReportWindow]);
+
   const activeListLabel =
     userRole === "musician" && viewMode === "applications"
       ? deferredActiveAppTab
@@ -4457,8 +4480,8 @@ export default function BookingsScreen() {
                         uri={item.image}
                         fallbackUri={REQUEST_PLACEHOLDER_IMAGE}
                         style={styles.cardImage}
-                        width={800}
-                        height={400}
+                        width={BOOKING_CARD_IMAGE_WIDTH}
+                        height={BOOKING_CARD_IMAGE_HEIGHT}
                         quality={72}
                         cacheVersion={item.updated_at || item.created_at || item.id}
                       />
@@ -4838,8 +4861,8 @@ export default function BookingsScreen() {
                           styles.cardImage,
                           { opacity: item.isCancelled ? 0.6 : 1 },
                         ]}
-                        width={800}
-                        height={400}
+                        width={BOOKING_CARD_IMAGE_WIDTH}
+                        height={BOOKING_CARD_IMAGE_HEIGHT}
                         quality={72}
                         cacheVersion={item.updated_at || item.created_at || item.id}
                       />
@@ -5486,8 +5509,8 @@ export default function BookingsScreen() {
                         styles.cardImage,
                         { opacity: item.isCancelled ? 0.6 : 1 },
                       ]}
-                      width={800}
-                      height={400}
+                      width={BOOKING_CARD_IMAGE_WIDTH}
+                      height={BOOKING_CARD_IMAGE_HEIGHT}
                       quality={72}
                       cacheVersion={item.updated_at || item.created_at || item.id}
                     />
@@ -5575,8 +5598,8 @@ export default function BookingsScreen() {
                                   "https://images.unsplash.com/photo-1633332755192-727a05c4013d?w=100&h=100&fit=crop"
                                 }
                                 style={styles.customerAvatar}
-                                width={100}
-                                height={100}
+                                width={BOOKING_AVATAR_IMAGE_SIZE}
+                                height={BOOKING_AVATAR_IMAGE_SIZE}
                                 quality={68}
                                 cacheVersion={item.customer_updated_at || item.updated_at || item.id}
                               />
@@ -7499,7 +7522,6 @@ const styles = StyleSheet.create({
     paddingVertical: moderateScale(5),
     borderRadius: moderateScale(9999),
     backgroundColor: "rgba(0,0,0,0.65)",
-    backdropFilter: "blur(4px)",
   },
   topLeftImageBadge: {
     maxWidth: "56%",

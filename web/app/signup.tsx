@@ -6,7 +6,7 @@ import * as ImagePicker from 'expo-image-picker';
 import * as Linking from 'expo-linking';
 import { router, useLocalSearchParams } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Dimensions, Image, KeyboardAvoidingView, Modal as RNModal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { Calendar } from 'react-native-calendars';
 import type { DateData } from 'react-native-calendars';
@@ -207,6 +207,8 @@ export default function SignupScreen() {
     const { colors, isDark } = useTheme();
     const { width } = Dimensions.get('window');
     const isWebDesktop = Platform.OS === 'web' && width >= 768;
+    const creatingDiditSessionRef = useRef(false);
+    const lastVerificationEmailRef = useRef('');
 
     // State
     // State
@@ -345,9 +347,27 @@ export default function SignupScreen() {
         Boolean(manualIdNumber.trim()) &&
         Boolean(manualIdExpiration.trim());
 
-    // Reset session when email changes
+    // Reset verification state only after the user edits away from a known email.
     React.useEffect(() => {
-        setVerificationUrl('');
+        const normalizedEmail = email.trim().toLowerCase();
+        const previousEmail = lastVerificationEmailRef.current;
+
+        if (!previousEmail) {
+            lastVerificationEmailRef.current = normalizedEmail;
+            return;
+        }
+
+        if (previousEmail !== normalizedEmail) {
+            setVerificationUrl('');
+            setSessionId('');
+            setSessionNonce('');
+            setTempSessionRef('');
+            AsyncStorage.removeItem('signup_current_session').catch((storageError) => {
+                console.error('Failed to clear signup session after email change', storageError);
+            });
+        }
+
+        lastVerificationEmailRef.current = normalizedEmail;
     }, [email]);
 
     const handleRoleSelect = (nextRole: SignupRole) => {
@@ -371,6 +391,7 @@ export default function SignupScreen() {
                             tempRef,
                             sSessionId,
                             sSessionNonce,
+                            sVerificationUrl,
                             verificationMode: sVerificationMode,
                             selectedDocumentKey: sSelectedDocumentKey,
                         } = JSON.parse(savedState);
@@ -388,6 +409,7 @@ export default function SignupScreen() {
                         if (tempRef) setTempSessionRef(tempRef);
                         if (sSessionId) setSessionId(sSessionId);
                         if (sSessionNonce) setSessionNonce(sSessionNonce);
+                        if (sVerificationUrl) setVerificationUrl(sVerificationUrl);
 
                         // If we have a session_id from params, override/set it
                         if (session_id) setSessionId(session_id);
@@ -433,7 +455,7 @@ export default function SignupScreen() {
                     console.log('Poll error (expected during verification):', e?.message || 'unknown');
                 }
             };
-            timer = setInterval(poll, 500);
+            timer = setInterval(poll, 2500);
         }
         return () => { if (timer) clearInterval(timer); };
     }, [step, verificationUrl, verified, sessionId, tempSessionRef, sessionNonce, check_verification, verificationMode]);
@@ -617,7 +639,7 @@ export default function SignupScreen() {
 
             return () => { mounted = false; };
         }
-    }, [step, email, password, selectedRole, verified, check_verification, verificationMode]);
+    }, [step, email, password, selectedRole, verified, check_verification, verificationMode, sessionId, tempSessionRef, sessionNonce]);
 
     const [permission, requestPermission] = useCameraPermissions();
 
@@ -629,7 +651,8 @@ export default function SignupScreen() {
             Platform.OS !== 'web' &&
             step === 'verification' &&
             !verificationUrl &&
-            verified !== 'true'
+            verified !== 'true' &&
+            check_verification !== 'true'
         ) {
             // Check permissions first
             if (!permission?.granted) {
@@ -656,7 +679,7 @@ export default function SignupScreen() {
             }
         }
         return () => { mounted = false; };
-    }, [step, verificationUrl, verified, permission, verificationMode]);
+    }, [step, verificationUrl, verified, check_verification, permission, verificationMode]);
 
 
     // Theme Styles
@@ -705,8 +728,17 @@ export default function SignupScreen() {
      */
 
     // Helper to generate a fresh session URL
-    const startNewVerificationSession = async () => {
-        const tempRef = `TEMP_${Math.random().toString(36).substring(2, 15)}_${Date.now()}`;
+    const startNewVerificationSession = async ({ forceNew = false }: { forceNew?: boolean } = {}) => {
+        if (creatingDiditSessionRef.current) {
+            return verificationUrl;
+        }
+
+        creatingDiditSessionRef.current = true;
+        const existingSessionId = forceNew ? '' : sessionId;
+        const existingSessionNonce = forceNew ? '' : sessionNonce;
+        const tempRef = forceNew || !tempSessionRef
+            ? `TEMP_${Math.random().toString(36).substring(2, 15)}_${Date.now()}`
+            : tempSessionRef;
         setTempSessionRef(tempRef);
 
         // Persist state before redirecting
@@ -718,6 +750,8 @@ export default function SignupScreen() {
                 tempRef,
                 verificationMode,
                 selectedDocumentKey,
+                sSessionId: existingSessionId || undefined,
+                sSessionNonce: existingSessionNonce || undefined,
             }));
         } catch (e) {
             console.error('Failed to save session state', e);
@@ -744,7 +778,10 @@ export default function SignupScreen() {
                     email: email || undefined, // Optional
                     role: selectedRole,
                     document_type: selectedDocumentOption?.diditDocumentType || 'id_card',
-                    redirect_url: redirectUrl // Tells the edge function where to eventually send the user
+                    redirect_url: redirectUrl, // Tells the edge function where to eventually send the user
+                    existing_session_id: existingSessionId || undefined,
+                    sessionNonce: existingSessionNonce || undefined,
+                    force_new: forceNew || undefined,
                 }
             });
 
@@ -753,7 +790,8 @@ export default function SignupScreen() {
 
             // Save the ACTUAL Didit Session ID
             const createdSessionId = data.sessionId || data.id;
-            const createdSessionNonce = data.sessionNonce || '';
+            const responseSessionNonce = typeof data.sessionNonce === 'string' ? data.sessionNonce : '';
+            const createdSessionNonce = responseSessionNonce || (createdSessionId === existingSessionId ? existingSessionNonce : '');
             if (createdSessionId) {
                 setSessionId(createdSessionId);
                 setSessionNonce(createdSessionNonce);
@@ -768,6 +806,7 @@ export default function SignupScreen() {
                         selectedDocumentKey,
                         sSessionId: createdSessionId,
                         sSessionNonce: createdSessionNonce,
+                        sVerificationUrl: data.verificationUrl,
                     }));
                 } catch (e) {
                     console.error('Failed to update session state with ID', e);
@@ -780,6 +819,8 @@ export default function SignupScreen() {
             console.error('Failed to create Didit session:', e);
             Alert.alert('Error', 'Could not start verification session. Please try again.');
             return '';
+        } finally {
+            creatingDiditSessionRef.current = false;
         }
     };
 
@@ -2263,8 +2304,8 @@ export default function SignupScreen() {
                                 // INTERCEPTOR: Prevent the broken HTML page from loading
                                 // Check for the function URL OR the static storage file
                                 if (request.url.includes('verification-redirect') || request.url.includes('verification-v2.html')) {
-                                    // We caught the redirect! Stop loading and force success.
-                                    router.setParams({ verified: 'true' });
+                                    // We caught the redirect; now confirm the real status with our Edge Function.
+                                    router.setParams({ verified: '', check_verification: 'true' });
                                     return false;
                                 }
                                 return true;
@@ -2300,7 +2341,7 @@ export default function SignupScreen() {
 
                     <TouchableOpacity activeOpacity={1}
                         onPress={() => {
-                            startNewVerificationSession().then(newUrl => {
+                            startNewVerificationSession({ forceNew: true }).then(newUrl => {
                                 if (newUrl && Platform.OS === 'web') window.open(newUrl, '_self');
                             });
                         }}

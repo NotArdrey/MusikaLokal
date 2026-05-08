@@ -484,6 +484,7 @@ const userFilters: { value: UserFilter; label: string }[] = [
   { value: 'venue-owner', label: 'venue owner' },
   { value: 'producer', label: 'producer' },
 ];
+const USER_MANAGEMENT_HIDDEN_VERIFICATION_STATUSES = new Set(['DECLINED', 'PENDING_REVIEW']);
 const auditEntityTypes: AuditEntityFilter[] = ['all', 'studio', 'gig'];
 const auditActions: AuditActionFilter[] = ['all', 'approved', 'rejected', 'submitted', 'resubmitted'];
 const REPORTS_PAGE_SIZE = 50;
@@ -544,6 +545,11 @@ const normalizeUserRole = (rawRole: unknown): UserRole => {
   }
 
   return userRoleOptions.includes(normalized as UserRole) ? (normalized as UserRole) : 'musician';
+};
+
+const isVisibleInUserManagement = (user: UserEntry) => {
+  const verificationStatus = String(user.verification_status || '').trim().toUpperCase();
+  return !USER_MANAGEMENT_HIDDEN_VERIFICATION_STATUSES.has(verificationStatus);
 };
 
 export default function AdminPanel({ initialTab, children }: AdminPanelProps) {
@@ -883,7 +889,9 @@ export default function AdminPanel({ initialTab, children }: AdminPanelProps) {
         limit: 300,
       });
 
-      const items = Array.isArray(data?.items) ? data.items : [];
+      const items = Array.isArray(data?.items)
+        ? data.items.filter(isVisibleInUserManagement)
+        : [];
       setUsers(items);
       console.log('[AdminPanel][Users] Fetch success', {
         total: items.length,
@@ -1773,6 +1781,8 @@ export default function AdminPanel({ initialTab, children }: AdminPanelProps) {
 
   const filteredUsers = useMemo(() => {
     const roleFiltered = users.filter((item) => {
+      if (!isVisibleInUserManagement(item)) return false;
+
       const role = String(item.role || '').trim().toLowerCase();
 
       if (userFilter === 'all') return true;

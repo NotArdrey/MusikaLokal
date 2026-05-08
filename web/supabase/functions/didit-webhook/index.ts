@@ -9,6 +9,7 @@ import {
     getDuplicateIdentityReviewReason,
     isUuid,
     normalizeIdentityRole,
+    prepareIdentityNameBirthDateDuplicateInput,
     queueIdentityReview,
     recordIdentityDocumentClaim,
     sanitizeIdentityVerificationData,
@@ -168,11 +169,18 @@ async function upsertVerificationSession(
         .eq('session_ref', sessionRef)
         .maybeSingle();
 
-    const existingNonceHash = existing?.verification_data?.session_nonce_hash;
-    const nextVerificationData = {
-        ...(verificationData || {}),
-        ...(existingNonceHash ? { session_nonce_hash: existingNonceHash } : {}),
-    };
+    const existingVerificationData =
+        existing?.verification_data && typeof existing.verification_data === 'object'
+            ? existing.verification_data
+            : {};
+    const nextVerificationData = { ...existingVerificationData };
+
+    for (const [key, value] of Object.entries(verificationData || {})) {
+        if (value === undefined || value === null || value === '') {
+            continue;
+        }
+        nextVerificationData[key] = value;
+    }
 
     return supabaseAdmin
         .from('verification_sessions')
@@ -200,6 +208,39 @@ function normalizeDateOnly(value: any): string | null {
     if (isoMatch) return isoMatch[1];
 
     return null;
+}
+
+function normalizeDiditDecisionStatus(value: any) {
+    return String(value || '').trim().replace(/[\s-]+/g, '_').toUpperCase();
+}
+
+function isDiditApprovedStatus(value: any) {
+    return normalizeDiditDecisionStatus(value) === 'APPROVED';
+}
+
+function isDiditDeclinedStatus(value: any) {
+    return ['DECLINED', 'REJECTED'].includes(normalizeDiditDecisionStatus(value));
+}
+
+function isDiditAbandonedStatus(value: any) {
+    return normalizeDiditDecisionStatus(value) === 'ABANDONED';
+}
+
+function isDiditReviewStatus(value: any) {
+    return ['IN_REVIEW', 'PENDING_REVIEW', 'REVIEW'].includes(normalizeDiditDecisionStatus(value));
+}
+
+function getApprovalClaimReviewReason(approvalClaim: any, role: string) {
+    return String(approvalClaim?.review_reason || approvalClaim?.reason || '').trim() || getDuplicateIdentityReviewReason(role);
+}
+
+function getApprovalClaimMatchedOn(approvalClaim: any, fallback = 'DOCUMENT_FINGERPRINT') {
+    return String(approvalClaim?.matched_on || approvalClaim?.match_type || fallback).trim().toUpperCase();
+}
+
+function getApprovalClaimMatchCount(approvalClaim: any, fallback = 1) {
+    const count = Number(approvalClaim?.duplicate_count || approvalClaim?.match_count || approvalClaim?.matches?.length || fallback);
+    return Number.isFinite(count) ? count : fallback;
 }
 
 function extractDocumentExpiry(idVerification: any): string | null {
@@ -270,7 +311,7 @@ serve(async (req) => {
         const sessionId = payload.session_id || payload.sessionId || payload.id;
         const status = payload.status;
         const webhookType = payload.webhook_type || payload.event || payload.type;
-        const decision = payload.decision;
+        let decision = payload.decision;
 
         // The reference should be the user's UUID (passed during verification initiation)
         // Didit returns vendor_data that we passed when creating the session
@@ -329,8 +370,42 @@ serve(async (req) => {
 
         // Handle different webhook types and statuses
 
-        // 1. Session Started - Update status to PENDING
-        if (status === 'Not Started' || status === 'In Progress') {
+        if (!decision && ['Approved', 'APPROVED'].includes(status) && sessionId) {
+            const diditApiKey = Deno.env.get('DIDIT_API_KEY') || '';
+            if (diditApiKey) {
+                try {
+                    const decisionResponse = await fetch(`https://verification.didit.me/v3/session/${sessionId}/decision/`, {
+                        method: 'GET',
+                        headers: { 'Content-Type': 'application/json', 'x-api-key': diditApiKey },
+                    });
+                    if (decisionResponse.ok) {
+                        const fetchedDecision = await decisionResponse.json();
+                        decision = fetchedDecision?.decision || fetchedDecision;
+                        console.log('Recovered Didit decision for Approved webhook without embedded decision.');
+                    } else {
+                        console.warn('Could not recover Didit decision for Approved webhook:', decisionResponse.status);
+                    }
+                } catch (decisionFetchError) {
+                    console.error('Error recovering Didit decision for Approved webhook:', decisionFetchError);
+                }
+            } else {
+                console.warn('DIDIT_API_KEY is missing; cannot recover Approved webhook decision.');
+            }
+        }
+
+        const normalizedWebhookStatus = String(status || '').trim().replace(/[\s-]+/g, '_').toUpperCase();
+        const webhookStatusIsRunning = [
+            'NOT_STARTED',
+            'IN_PROGRESS',
+            'PENDING',
+            'PROCESSING',
+            'SUBMITTED',
+            'CREATED',
+            'STARTED',
+        ].includes(normalizedWebhookStatus);
+
+        // 1. Session Started / still running - Update status to PENDING
+        if (webhookStatusIsRunning) {
             if (userReference) {
                 await supabaseAdmin
                     .from('profiles')
@@ -340,7 +415,9 @@ serve(async (req) => {
                     })
                     .eq('id', userReference);
 
-                console.log(`Verification started for user ${userReference}, session ${sessionId}`);
+                console.log(`Verification running for user ${userReference}, session ${sessionId}`, {
+                    sourceStatus: status || null,
+                });
             }
 
             return new Response(JSON.stringify({ received: true }), {
@@ -390,15 +467,17 @@ serve(async (req) => {
             });
         }
 
-        // 2. Decision Made - Process the result
+            // 2. Decision Made - Process the result
         if (decision) {
             const idVerification = decision.id_verifications?.[0];
             const faceMatch = decision.face_matches?.[0];
+            const livenessCheck = decision.liveness_checks?.[0] || decision.liveness?.[0] || null;
             const faceMatchStatus = faceMatch?.status; // 'Approved', 'Declined', 'Abandoned', 'In Review'
 
             console.log('Decision details:', {
                 faceMatchStatus,
                 idVerificationStatus: idVerification?.status,
+                livenessStatus: livenessCheck?.status,
                 hasOcrData: !!idVerification?.ocr_data,
                 idVerificationKeys: idVerification ? Object.keys(idVerification) : [],
             });
@@ -519,12 +598,14 @@ serve(async (req) => {
             });
 
             const idStatus = idVerification?.status;
-            const faceStatus = faceMatch?.status || (idStatus === 'Approved' ? 'Approved' : undefined); // Fallback for face if ID is good (for doc-only flows)
+            const faceStatus = faceMatch?.status;
+            const livenessStatus = livenessCheck?.status;
+            const livenessPassed = !livenessCheck || isDiditApprovedStatus(livenessStatus);
 
-            console.log('Consolidated Verification Status:', { idStatus, faceStatus, faceMatchRaw: faceMatch?.status });
+            console.log('Consolidated Verification Status:', { idStatus, faceStatus, livenessStatus, faceMatchRaw: faceMatch?.status });
 
             // 1. DECLINED: If EITHER is declined, the whole verification is declined.
-            if (faceStatus === 'Declined' || idStatus === 'Declined') {
+            if (isDiditDeclinedStatus(faceStatus) || isDiditDeclinedStatus(idStatus) || isDiditDeclinedStatus(livenessStatus)) {
                 console.log('Status is DECLINED (ID or Face)');
                 if (isDuplicateOfApprovedAccount) {
                     await handleDuplicateDetected(supabaseAdmin, finalUserReference, userEmail, allWarnings, sessionId, idVerification, authUser, payload.metadata);
@@ -534,33 +615,40 @@ serve(async (req) => {
                 }
             }
             // 2. ABANDONED: If either is abandoned (and not declined)
-            else if (faceStatus === 'Abandoned' || idStatus === 'Abandoned') {
+            else if (isDiditAbandonedStatus(faceStatus) || isDiditAbandonedStatus(idStatus) || isDiditAbandonedStatus(livenessStatus)) {
                 console.log('Status is ABANDONED');
                 await handleAbandoned(supabaseAdmin, finalUserReference, sessionId);
             }
             // 3. IN REVIEW: If manual review is required
-            else if (faceStatus === 'In Review' || idStatus === 'In Review' || faceStatus === 'Pending Review' || idStatus === 'Pending Review') {
+            else if (isDiditReviewStatus(faceStatus) || isDiditReviewStatus(idStatus) || isDiditReviewStatus(livenessStatus)) {
                 console.log('Status is IN REVIEW');
                 await handleInReview(supabaseAdmin, finalUserReference, sessionId);
             }
+            // 3b. Missing Face Match: ID-only approval is not enough for MusikaLokal identity verification.
+            else if (idStatus === 'Approved' && !faceMatch) {
+                console.warn('ID was approved but Didit did not return a face match result. Sending to review instead of approving.', {
+                    sessionId,
+                    finalUserReference,
+                    idStatus,
+                    decisionKeys: Object.keys(decision || {}),
+                });
+                await handleInReview(supabaseAdmin, finalUserReference, sessionId);
+            }
             // 4. APPROVED: Both must be effectively approved
-            else if (idStatus === 'Approved' && (faceStatus === 'Approved' || !faceMatch)) {
+            else if (isDiditApprovedStatus(idStatus) && isDiditApprovedStatus(faceStatus) && livenessPassed) {
                 console.log('Status is APPROVED');
-                await handleApproved(supabaseAdmin, finalUserReference, userEmail, idVerification, authUser, sessionId, 'APPROVED');
+                if (isDuplicateOfApprovedAccount) {
+                    await handleDuplicateDetected(supabaseAdmin, finalUserReference, userEmail, allWarnings, sessionId, idVerification, authUser, payload.metadata);
+                } else {
+                    await handleApproved(supabaseAdmin, finalUserReference, userEmail, idVerification, authUser, sessionId, 'APPROVED');
+                }
             }
             // 5. UNKNOWN / FALLBACK
             else {
                 console.warn('Unhandled Status Combination:', { idStatus, faceStatus });
                 // Default to abandoned/incomplete rather than accidental approval
-                // But if ID is approved and Face is missing (and not required/declined?), maybe approve?
-                // The priority logic above handles the specific 'Declined' cases, so this is just safety.
-                if (idStatus === 'Approved') {
-                    console.log('ID Approved but Face execution unclear - Approving with caution.');
-                    await handleApproved(supabaseAdmin, finalUserReference, userEmail, idVerification, authUser, sessionId, 'APPROVED');
-                } else {
-                    console.log('Unknown status - Treating as abandoned/retryable');
-                    await handleAbandoned(supabaseAdmin, finalUserReference);
-                }
+                console.log('Unknown status - Treating as abandoned/retryable');
+                await handleAbandoned(supabaseAdmin, finalUserReference);
             }
         }
 
@@ -813,12 +901,20 @@ async function handleApproved(
 
     // Construct Full Name intelligently
     const nameParts = [firstName, middleName, lastName, secondSurname].filter(Boolean);
-    const fullName = nameParts.length > 0 ? nameParts.join(' ') : '';
+    let fullName = nameParts.length > 0 ? nameParts.join(' ') : '';
+    const identityNameBirthDate = prepareIdentityNameBirthDateDuplicateInput(idVerification, {
+        fullLegalName: fullName,
+    });
+    if (!fullName && identityNameBirthDate.fullLegalName) {
+        fullName = identityNameBirthDate.fullLegalName;
+    }
 
     const documentExpiry = extractDocumentExpiry(idVerification);
+    const documentType = idVerification?.document_type || idVerification?.documentType || idVerification?.type || 'Government ID';
+    const documentCountry = idVerification?.issuing_country || idVerification?.issuingCountry || idVerification?.country || '';
     const documentFingerprint = await buildIdentityDocumentFingerprint(idVerification, {
-        documentType: idVerification?.document_type || idVerification?.documentType || idVerification?.type,
-        documentCountry: idVerification?.issuing_country || idVerification?.issuingCountry || idVerification?.country || 'PHL',
+        documentType,
+        documentCountry,
     });
 
     console.log('Approving user - extracted data:', {
@@ -828,6 +924,7 @@ async function handleApproved(
         lastName,
         documentExpiry,
         hasDocumentFingerprint: Boolean(documentFingerprint),
+        hasNameBirthDateDuplicateInput: identityNameBirthDate.hasNameBirthDate,
     });
 
     // ALWAYS Store verification result in verification_sessions table
@@ -847,7 +944,10 @@ async function handleApproved(
                     last_name: lastName,
                     raw_data: sanitizeIdentityVerificationData(idVerification),
                     document_fingerprint: documentFingerprint,
-                    document_country: idVerification?.issuing_country || idVerification?.issuingCountry || idVerification?.country || 'PHL',
+                    document_country: documentCountry || 'PHL',
+                    verified_full_legal_name: identityNameBirthDate.fullLegalName,
+                    normalized_full_legal_name: identityNameBirthDate.normalizedFullLegalName,
+                    birth_date: identityNameBirthDate.birthDate,
                     id_document_expiry: documentExpiry,
                     id_verified_at: new Date().toISOString(),
                     user_ref: userReference, // Store the user ID reference inside data
@@ -893,15 +993,22 @@ async function handleApproved(
                 userId: userReference,
                 email: resolvedEmail,
                 role: resolvedRole,
-                documentType: idVerification?.document_type || idVerification?.documentType || idVerification?.type || 'Government ID',
-                documentCountry: idVerification?.issuing_country || idVerification?.issuingCountry || idVerification?.country || 'PHL',
+                documentType,
+                documentCountry: documentCountry || 'PHL',
                 source: DUPLICATE_REVIEW_SOURCE,
                 diditSessionId: sessionId,
                 documentFingerprint,
                 duplicateReason,
                 duplicateMatchCount: duplicate.matches.length,
+                verifiedFullLegalName: identityNameBirthDate.fullLegalName,
+                normalizedFullLegalName: identityNameBirthDate.normalizedFullLegalName,
+                birthDate: identityNameBirthDate.birthDate,
+                reviewReason: duplicateReason,
+                matchedOn: 'DOCUMENT_FINGERPRINT',
                 metadata: {
                     duplicate_detected_by: 'local_document_fingerprint',
+                    matched_on: 'DOCUMENT_FINGERPRINT',
+                    duplicate_matches: duplicate.matches,
                 },
             });
 
@@ -909,13 +1016,18 @@ async function handleApproved(
                 userId: userReference,
                 role: resolvedRole,
                 documentFingerprint,
-                documentType: idVerification?.document_type || idVerification?.documentType || idVerification?.type || 'Government ID',
-                documentCountry: idVerification?.issuing_country || idVerification?.issuingCountry || idVerification?.country || 'PHL',
+                documentType,
+                documentCountry: documentCountry || 'PHL',
                 source: DUPLICATE_REVIEW_SOURCE,
                 status: 'PENDING_REVIEW',
                 diditSessionId: sessionId,
                 manualReviewId: reviewRecord?.id || null,
                 email: resolvedEmail,
+                verifiedFullLegalName: identityNameBirthDate.fullLegalName,
+                normalizedFullLegalName: identityNameBirthDate.normalizedFullLegalName,
+                birthDate: identityNameBirthDate.birthDate,
+                reviewReason: duplicateReason,
+                matchedOn: 'DOCUMENT_FINGERPRINT',
             });
 
             if (sessionId) {
@@ -930,12 +1042,18 @@ async function handleApproved(
                             last_name: lastName,
                             raw_data: sanitizeIdentityVerificationData(idVerification),
                             document_fingerprint: documentFingerprint,
+                            document_country: documentCountry || 'PHL',
+                            verified_full_legal_name: identityNameBirthDate.fullLegalName,
+                            normalized_full_legal_name: identityNameBirthDate.normalizedFullLegalName,
+                            birth_date: identityNameBirthDate.birthDate,
                             id_document_expiry: documentExpiry,
                             id_verified_at: new Date().toISOString(),
                             user_ref: userReference,
                             email: resolvedEmail,
                             duplicate_identity_review_required: true,
                             duplicate_reason: duplicateReason,
+                            review_reason: duplicateReason,
+                            matched_on: 'DOCUMENT_FINGERPRINT',
                             duplicate_match_count: duplicate.matches.length,
                     },
                 );
@@ -974,32 +1092,98 @@ async function handleApproved(
         userId: userReference,
         role: resolvedRole,
         documentFingerprint,
-        documentType: idVerification?.document_type || idVerification?.documentType || idVerification?.type || 'Government ID',
-        documentCountry: idVerification?.issuing_country || idVerification?.issuingCountry || idVerification?.country || 'PHL',
+        documentType,
+        documentCountry: documentCountry || 'PHL',
         source: 'DIDIT',
         status: 'APPROVED',
         diditSessionId: sessionId,
         email: resolvedEmail,
+        verifiedFullLegalName: identityNameBirthDate.fullLegalName,
+        normalizedFullLegalName: identityNameBirthDate.normalizedFullLegalName,
+        birthDate: identityNameBirthDate.birthDate,
     });
 
     if (approvalClaim?.decision === 'PENDING_REVIEW' || approvalClaim?.decision === 'EXISTING_ACCOUNT') {
-        const duplicateReason = getDuplicateIdentityReviewReason(resolvedRole);
+        const duplicateReason = getApprovalClaimReviewReason(approvalClaim, resolvedRole);
+        const matchedOn = getApprovalClaimMatchedOn(
+            approvalClaim,
+            duplicateReason === 'MISSING_DOCUMENT_FINGERPRINT' ? '' : 'DOCUMENT_FINGERPRINT',
+        );
+        const duplicateMatchCount = getApprovalClaimMatchCount(approvalClaim, duplicateReason === 'MISSING_DOCUMENT_FINGERPRINT' ? 0 : 1);
         const reviewRecord = await queueIdentityReview(supabaseAdmin, {
             userId: userReference,
             email: resolvedEmail,
             role: resolvedRole,
-            documentType: idVerification?.document_type || idVerification?.documentType || idVerification?.type || 'Government ID',
-            documentCountry: idVerification?.issuing_country || idVerification?.issuingCountry || idVerification?.country || 'PHL',
+            documentType,
+            documentCountry: documentCountry || 'PHL',
             source: DUPLICATE_REVIEW_SOURCE,
             diditSessionId: sessionId,
             documentFingerprint,
             duplicateReason,
-            duplicateMatchCount: approvalClaim?.duplicate_count || approvalClaim?.matches?.length || 1,
+            duplicateMatchCount,
+            verifiedFullLegalName: identityNameBirthDate.fullLegalName,
+            normalizedFullLegalName: identityNameBirthDate.normalizedFullLegalName,
+            birthDate: identityNameBirthDate.birthDate,
+            reviewReason: duplicateReason,
+            matchedOn,
             metadata: {
                 duplicate_detected_by: 'approval_rpc',
+                matched_on: matchedOn,
                 approval_claim_result: approvalClaim,
             },
         });
+
+        await recordIdentityDocumentClaim(supabaseAdmin, {
+            userId: userReference,
+            role: resolvedRole,
+            documentFingerprint,
+            documentType,
+            documentCountry: documentCountry || 'PHL',
+            source: DUPLICATE_REVIEW_SOURCE,
+            status: 'PENDING_REVIEW',
+            diditSessionId: sessionId,
+            manualReviewId: reviewRecord?.id || null,
+            email: resolvedEmail,
+            verifiedFullLegalName: identityNameBirthDate.fullLegalName,
+            normalizedFullLegalName: identityNameBirthDate.normalizedFullLegalName,
+            birthDate: identityNameBirthDate.birthDate,
+            reviewReason: duplicateReason,
+            matchedOn,
+            metadata: {
+                duplicate_detected_by: 'approval_rpc',
+                matched_on: matchedOn,
+                approval_claim_result: approvalClaim,
+            },
+        });
+
+        if (sessionId) {
+            await upsertVerificationSession(
+                supabaseAdmin,
+                sessionId,
+                'PENDING_REVIEW',
+                {
+                        full_name: fullName,
+                        first_name: firstName,
+                        middle_name: middleName,
+                        last_name: lastName,
+                        raw_data: sanitizeIdentityVerificationData(idVerification),
+                        document_fingerprint: documentFingerprint,
+                        document_country: documentCountry || 'PHL',
+                        verified_full_legal_name: identityNameBirthDate.fullLegalName,
+                        normalized_full_legal_name: identityNameBirthDate.normalizedFullLegalName,
+                        birth_date: identityNameBirthDate.birthDate,
+                        id_document_expiry: documentExpiry,
+                        id_verified_at: new Date().toISOString(),
+                        user_ref: userReference,
+                        email: resolvedEmail,
+                        duplicate_identity_review_required: true,
+                        duplicate_reason: duplicateReason,
+                        review_reason: duplicateReason,
+                        matched_on: matchedOn,
+                        duplicate_match_count: duplicateMatchCount,
+                },
+            );
+        }
 
         await supabaseAdmin
             .from('profiles')
@@ -1285,7 +1469,8 @@ async function handleDuplicateDetected(
     console.log('Warnings received:', warnings);
 
     const documentType = idVerification?.document_type || idVerification?.documentType || idVerification?.type || 'Government ID';
-    const documentCountry = idVerification?.issuing_country || idVerification?.issuingCountry || idVerification?.country || 'PHL';
+    const documentCountry = idVerification?.issuing_country || idVerification?.issuingCountry || idVerification?.country || '';
+    const identityNameBirthDate = prepareIdentityNameBirthDateDuplicateInput(idVerification);
     const documentFingerprint = await buildIdentityDocumentFingerprint(idVerification, {
         documentType,
         documentCountry,
@@ -1323,6 +1508,7 @@ async function handleDuplicateDetected(
     }
 
     let duplicateMatchCount = 1;
+    let duplicateMatchesForReview: any[] = [];
     const hasRoleForDuplicateCheck = Boolean(resolvedRole);
     if (documentFingerprint && hasRoleForDuplicateCheck && canResolveDuplicateByRole) {
         const duplicate = await findSameRoleIdentityDuplicate(supabaseAdmin, {
@@ -1333,6 +1519,7 @@ async function handleDuplicateDetected(
         });
 
         duplicateMatchCount = duplicate.matches?.length || 0;
+        duplicateMatchesForReview = duplicate.matches || [];
         if (!duplicate.hasDuplicate) {
             await handleApproved(supabaseAdmin, userReference, resolvedEmail || userEmail, idVerification, authUser, sessionId, 'APPROVED');
             return;
@@ -1353,8 +1540,13 @@ async function handleDuplicateDetected(
                     signup_role: hasRoleForDuplicateCheck ? resolvedRole : null,
                     document_fingerprint: documentFingerprint,
                     document_country: documentCountry,
+                    verified_full_legal_name: identityNameBirthDate.fullLegalName,
+                    normalized_full_legal_name: identityNameBirthDate.normalizedFullLegalName,
+                    birth_date: identityNameBirthDate.birthDate,
                     duplicate_identity_review_required: true,
                     duplicate_reason: duplicateReason,
+                    review_reason: duplicateReason,
+                    matched_on: 'DOCUMENT_FINGERPRINT',
                     duplicate_match_count: duplicateMatchCount || 1,
                     warnings,
                     review_started_at: new Date().toISOString(),
@@ -1374,10 +1566,17 @@ async function handleDuplicateDetected(
         documentFingerprint,
         duplicateReason,
         duplicateMatchCount: duplicateMatchCount || 1,
+        verifiedFullLegalName: identityNameBirthDate.fullLegalName,
+        normalizedFullLegalName: identityNameBirthDate.normalizedFullLegalName,
+        birthDate: identityNameBirthDate.birthDate,
+        reviewReason: duplicateReason,
+        matchedOn: 'DOCUMENT_FINGERPRINT',
         metadata: {
             didit_warnings: warnings,
             duplicate_detected_by: 'didit_warning',
             role_scoped_duplicate_check: canResolveDuplicateByRole,
+            matched_on: 'DOCUMENT_FINGERPRINT',
+            duplicate_matches: duplicateMatchesForReview,
         },
     });
 
@@ -1392,6 +1591,11 @@ async function handleDuplicateDetected(
         diditSessionId: sessionId,
         manualReviewId: reviewRecord?.id || null,
         email: resolvedEmail,
+        verifiedFullLegalName: identityNameBirthDate.fullLegalName,
+        normalizedFullLegalName: identityNameBirthDate.normalizedFullLegalName,
+        birthDate: identityNameBirthDate.birthDate,
+        reviewReason: duplicateReason,
+        matchedOn: 'DOCUMENT_FINGERPRINT',
     });
 
     await supabaseAdmin

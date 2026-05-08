@@ -126,6 +126,8 @@ const createEmailConfirmationRedirectUrl = () => {
 
 const DIDIT_EMAIL_FLOW_LOG_PREFIX = '[DiditEmailFlow]';
 const DIDIT_EMAIL_FLOW_DEBUG_VERSION = 'supabase-auth-signup-2026-05-03';
+const SIGNUP_FLOW_LOG_PREFIX = '[SignupFlow]';
+const SIGNUP_FLOW_DEBUG_VERSION = 'signup-diagnostics-2026-05-08';
 
 const maskEmailForLog = (value?: string | null) => {
     const normalized = (value ?? '').trim();
@@ -218,11 +220,149 @@ const logDiditEmailFlowError = (stage: string, error: unknown, payload: Record<s
     });
 };
 
+const summarizeSessionRefForLog = (value?: string | null) => {
+    const raw = String(value || '').trim();
+    if (!raw) return null;
+    if (raw.startsWith('TEMP_')) {
+        return `${raw.slice(0, 12)}...${raw.slice(-6)}`;
+    }
+    return raw.length > 14 ? `${raw.slice(0, 8)}...${raw.slice(-6)}` : raw;
+};
+
+const summarizeSignupInvokeData = (data: any) => {
+    if (!data) return null;
+
+    return {
+        success: data.success ?? null,
+        status: data.status ?? null,
+        verificationStatus: data.verification_status ?? data.verification_data?.status ?? null,
+        decision: data.decision ?? null,
+        hasVerificationUrl: Boolean(data.verificationUrl || data.verification_url || data.url),
+        sessionId: summarizeSessionRefForLog(data.sessionId || data.session_id || data.id),
+        workflowId: data.workflowId || data.workflow_id || data.session?.workflow_id || null,
+        hasSessionNonce: Boolean(data.sessionNonce),
+        hasDerivedFullName: Boolean(data.derived?.fullName),
+        diditProgress: {
+            features: Array.isArray(data.features)
+                ? data.features
+                    .map((feature: any) => typeof feature === 'string' ? feature : feature?.feature || feature?.name || feature?.type)
+                    .filter(Boolean)
+                    .slice(0, 12)
+                : [],
+            idStatus: data.id_verifications?.[0]?.status || data.decision?.id_verifications?.[0]?.status || null,
+            livenessCount: data.liveness_checks?.length ?? data.decision?.liveness_checks?.length ?? 0,
+            livenessStatus: data.liveness_checks?.[0]?.status || data.decision?.liveness_checks?.[0]?.status || null,
+            faceMatchCount: data.face_matches?.length ?? data.decision?.face_matches?.length ?? 0,
+            faceMatchStatus: data.face_matches?.[0]?.status || data.decision?.face_matches?.[0]?.status || null,
+            faceMatchScore:
+                data.face_matches?.[0]?.score ??
+                data.face_matches?.[0]?.similarity_percentage ??
+                data.decision?.face_matches?.[0]?.score ??
+                data.decision?.face_matches?.[0]?.similarity_percentage ??
+                null,
+        },
+        error: data.error ?? null,
+        details: data.details ?? null,
+        keys: typeof data === 'object' ? Object.keys(data).slice(0, 20) : [],
+    };
+};
+
+const getDiditVerificationUrlFromInvokeData = (data: any) => {
+    const candidates = [
+        data?.verificationUrl,
+        data?.verification_url,
+        data?.url,
+        data?.sessionUrl,
+        data?.session_url,
+        data?.session?.verificationUrl,
+        data?.session?.verification_url,
+        data?.session?.url,
+    ];
+
+    return candidates.find((value) => typeof value === 'string' && /^https?:\/\//i.test(value.trim()))?.trim() || '';
+};
+
+const getSignupInvokeErrorMessage = (data: any) => {
+    const error = String(data?.error || '').trim();
+    const details = String(data?.details || '').trim();
+
+    if (error && details && error.toLowerCase() !== 'internal server error') {
+        return `${error}: ${details}`;
+    }
+
+    return details || error || 'Could not create verification session';
+};
+
+const normalizeDiditFlowStatus = (value: unknown) => String(value || '').trim().replace(/[\s-]+/g, '_').toUpperCase();
+
+const isApprovedDiditFlowStatus = (status: unknown) => normalizeDiditFlowStatus(status) === 'APPROVED';
+
+const isPendingReviewDiditFlowStatus = (status: unknown) => [
+    'IN_REVIEW',
+    'PENDING_REVIEW',
+    'PENDING_REVIEW_REQUIRED',
+    'REVIEW',
+    'MANUAL_REVIEW',
+    'PENDING_MANUAL_REVIEW',
+].includes(normalizeDiditFlowStatus(status));
+
+const isFailedDiditFlowStatus = (status: unknown) => [
+    'DECLINED',
+    'REJECTED',
+    'DENIED',
+    'ABANDONED',
+    'EXPIRED',
+    'CANCELLED',
+    'CANCELED',
+].includes(normalizeDiditFlowStatus(status));
+
+const isTerminalDiditFlowStatus = (status: unknown) => (
+    isApprovedDiditFlowStatus(status) ||
+    isPendingReviewDiditFlowStatus(status) ||
+    isFailedDiditFlowStatus(status) ||
+    isSupersededVerificationStatus(status)
+);
+
+const diditSessionHasApprovedFaceMatch = (sessionData: any) => {
+    const faceMatch = sessionData?.face_matches?.[0] || sessionData?.decision?.face_matches?.[0];
+    const idVerification = sessionData?.id_verifications?.[0] || sessionData?.decision?.id_verifications?.[0];
+
+    return {
+        hasFaceMatch: Boolean(faceMatch),
+        faceStatus: normalizeDiditFlowStatus(faceMatch?.status),
+        idStatus: normalizeDiditFlowStatus(idVerification?.status),
+        approved: normalizeDiditFlowStatus(idVerification?.status) === 'APPROVED' &&
+            normalizeDiditFlowStatus(faceMatch?.status) === 'APPROVED',
+    };
+};
+
+const logSignupFlow = (stage: string, payload: Record<string, unknown> = {}) => {
+    console.log(`${SIGNUP_FLOW_LOG_PREFIX} ${stage}`, {
+        debugVersion: SIGNUP_FLOW_DEBUG_VERSION,
+        timestamp: new Date().toISOString(),
+        ...payload,
+    });
+};
+
+const logSignupFlowError = (stage: string, error: unknown, payload: Record<string, unknown> = {}) => {
+    console.error(`${SIGNUP_FLOW_LOG_PREFIX} ${stage}`, {
+        debugVersion: SIGNUP_FLOW_DEBUG_VERSION,
+        timestamp: new Date().toISOString(),
+        ...payload,
+        error: summarizeErrorForDiditEmailLog(error),
+    });
+};
+
 export default function SignupScreen() {
     const { colors, isDark } = useTheme();
     const insets = useSafeAreaInsets();
     const documentSheetRef = useRef<BottomSheetModal>(null);
     const manualExpirationSheetRef = useRef<BottomSheetModal>(null);
+    const creatingDiditSessionRef = useRef(false);
+    const lastVerificationEmailRef = useRef('');
+    const diditStatusPollInFlightRef = useRef(false);
+    const diditStatusPollFinalizedRef = useRef(false);
+    const pendingReviewSignupRef = useRef(false);
     const documentSheetSnapPoints = useMemo(() => ['88%'], []);
     const manualCalendarSnapPoints = useMemo(() => ['70%'], []);
     const bottomSheetAnimationConfigs = useBottomSheetSpringConfigs(bottomSheetSpringConfig);
@@ -235,6 +375,7 @@ export default function SignupScreen() {
     const [verificationUrl, setVerificationUrl] = useState('');
     const [tempSessionRef, setTempSessionRef] = useState('');
     const [sessionId, setSessionId] = useState<string>('');
+    const [sessionNonce, setSessionNonce] = useState<string>('');
     const [verificationMode, setVerificationMode] = useState<VerificationMode>('didit');
     const [selectedDocumentKey, setSelectedDocumentKey] = useState<string>(PH_DOCUMENT_OPTIONS[0].key);
     const [documentModalVisible, setDocumentModalVisible] = useState(false);
@@ -381,14 +522,43 @@ export default function SignupScreen() {
         manualExpirationSheetRef.current?.dismiss();
     }, [manualExpirationCalendarVisible]);
 
-    // Reset session when email changes
+    // Reset verification state only after the user edits away from a known email.
     React.useEffect(() => {
-        setVerificationUrl('');
+        const normalizedEmail = email.trim().toLowerCase();
+        const previousEmail = lastVerificationEmailRef.current;
+
+        if (!previousEmail) {
+            lastVerificationEmailRef.current = normalizedEmail;
+            return;
+        }
+
+        if (previousEmail !== normalizedEmail) {
+            logSignupFlow('email.changed.resetVerificationState', {
+                previousEmail: maskEmailForLog(previousEmail),
+                email: maskEmailForLog(normalizedEmail),
+            });
+            setVerificationUrl('');
+            setSessionId('');
+            setSessionNonce('');
+            setTempSessionRef('');
+            AsyncStorage.removeItem('signup_current_session').catch((storageError) => {
+                logSignupFlowError('email.changed.sessionClearError', storageError, {
+                    storageKey: 'signup_current_session',
+                });
+            });
+        }
+
+        lastVerificationEmailRef.current = normalizedEmail;
     }, [email]);
 
     // Restore state on mount if returning from verification
     useEffect(() => {
         if (verified === 'true' || check_verification === 'true') {
+            logSignupFlow('restoreState.requested', {
+                verified,
+                checkVerification: check_verification,
+                sessionIdParam: summarizeSessionRefForLog(session_id),
+            });
             const restoreState = async () => {
                 try {
                     const savedState = await AsyncStorage.getItem('signup_current_session');
@@ -399,9 +569,22 @@ export default function SignupScreen() {
                             selectedRole: sRole,
                             tempRef,
                             sSessionId,
+                            sSessionNonce,
+                            sVerificationUrl,
                             verificationMode: sVerificationMode,
                             selectedDocumentKey: sSelectedDocumentKey,
                         } = JSON.parse(savedState);
+                        logSignupFlow('restoreState.loaded', {
+                            email: maskEmailForLog(sEmail),
+                            hasPassword: Boolean(sPassword),
+                            selectedRole: sRole ?? null,
+                            verificationMode: sVerificationMode ?? null,
+                            selectedDocumentKey: sSelectedDocumentKey ?? null,
+                            tempRef: summarizeSessionRefForLog(tempRef),
+                            sessionId: summarizeSessionRefForLog(sSessionId),
+                            hasSessionNonce: Boolean(sSessionNonce),
+                            sessionIdParam: summarizeSessionRefForLog(session_id),
+                        });
                         if (sEmail) setEmail(sEmail);
                         if (sPassword) setPassword(sPassword);
                         if (isAllowedSignupRole(sRole)) {
@@ -415,14 +598,26 @@ export default function SignupScreen() {
                         }
                         if (tempRef) setTempSessionRef(tempRef);
                         if (sSessionId) setSessionId(sSessionId);
+                        if (sSessionNonce) setSessionNonce(sSessionNonce);
+                        if (sVerificationUrl) setVerificationUrl(sVerificationUrl);
 
                         // If we have a session_id from params, override/set it
                         if (session_id) setSessionId(session_id);
 
                         setStep('verification');
+                    } else {
+                        logSignupFlow('restoreState.missingSavedState', {
+                            verified,
+                            checkVerification: check_verification,
+                            sessionIdParam: summarizeSessionRefForLog(session_id),
+                        });
                     }
                 } catch (e) {
-                    console.error('Failed to restore state', e);
+                    logSignupFlowError('restoreState.error', e, {
+                        verified,
+                        checkVerification: check_verification,
+                        sessionIdParam: summarizeSessionRefForLog(session_id),
+                    });
                 }
             };
             restoreState();
@@ -433,6 +628,7 @@ export default function SignupScreen() {
     // This bypasses any redirect issues by detecting status changes in the background
     useEffect(() => {
         let timer: any;
+        let stopped = false;
         if (
             verificationMode === 'didit' &&
             step === 'verification' &&
@@ -440,29 +636,83 @@ export default function SignupScreen() {
             verified !== 'true' &&
             check_verification !== 'true'
         ) {
+            let pollAttempt = 0;
+            diditStatusPollFinalizedRef.current = false;
+            logSignupFlow('backgroundPoll.started', {
+                sessionId: summarizeSessionRefForLog(sessionId),
+                tempSessionRef: summarizeSessionRefForLog(tempSessionRef),
+                hasSessionNonce: Boolean(sessionNonce),
+                hasVerificationUrl: Boolean(verificationUrl),
+            });
             const poll = async () => {
+                if (stopped || diditStatusPollInFlightRef.current || diditStatusPollFinalizedRef.current) return;
                 const ref = sessionId || tempSessionRef;
                 if (!ref) return;
+                pollAttempt += 1;
+                diditStatusPollInFlightRef.current = true;
                 try {
                     const { data, error } = await supabase.functions.invoke('create-didit-session', {
-                        body: { action: 'get_session', session_id: ref }
+                        body: { action: 'get_session', session_id: ref, sessionNonce }
                     });
+                    if (stopped) return;
                     // Skip if there's an error (FunctionsHttpError) - just retry next poll
-                    if (error) return;
+                    if (error) {
+                        if (pollAttempt <= 3 || pollAttempt % 20 === 0) {
+                            logSignupFlowError('backgroundPoll.invokeError', error, {
+                                attempt: pollAttempt,
+                                sessionId: summarizeSessionRefForLog(ref),
+                                hasSessionNonce: Boolean(sessionNonce),
+                            });
+                        }
+                        return;
+                    }
                     const s = data?.status || data?.verification_data?.status;
+                    if (pollAttempt <= 3 || pollAttempt % 20 === 0 || isTerminalDiditFlowStatus(s)) {
+                        logSignupFlow('backgroundPoll.result', {
+                            attempt: pollAttempt,
+                            sessionId: summarizeSessionRefForLog(ref),
+                            status: s ?? null,
+                            invokeData: summarizeSignupInvokeData(data),
+                        });
+                    }
                     // If we detect a final status, manually trigger the completion flow
-                    if (['Approved', 'APPROVED', 'Declined', 'DECLINED', 'Abandoned', 'ABANDONED', 'PENDING_REVIEW', 'In Review', 'SUPERSEDED', 'SUPERSEDED_APPROVED'].includes(s)) {
+                    if (isTerminalDiditFlowStatus(s)) {
+                        diditStatusPollFinalizedRef.current = true;
+                        logSignupFlow('backgroundPoll.finalStatusDetected', {
+                            attempt: pollAttempt,
+                            sessionId: summarizeSessionRefForLog(ref),
+                            status: s,
+                        });
                         router.setParams({ check_verification: 'true' });
                     }
                 } catch (e: any) {
                     // Silent catch - FunctionsHttpError or network errors are expected during polling
                     // The Didit session may not have a decision yet, which causes 404/500 errors
+                    if (pollAttempt <= 3 || pollAttempt % 20 === 0) {
+                        logSignupFlowError('backgroundPoll.exception', e, {
+                            attempt: pollAttempt,
+                            sessionId: summarizeSessionRefForLog(ref),
+                            hasSessionNonce: Boolean(sessionNonce),
+                        });
+                    }
+                } finally {
+                    diditStatusPollInFlightRef.current = false;
                 }
             };
-            timer = setInterval(poll, 500);
+            poll();
+            timer = setInterval(poll, 2500);
         }
-        return () => { if (timer) clearInterval(timer); };
-    }, [step, verificationUrl, verified, sessionId, tempSessionRef, check_verification, verificationMode]);
+        return () => {
+            stopped = true;
+            if (timer) {
+                logSignupFlow('backgroundPoll.stopped', {
+                    sessionId: summarizeSessionRefForLog(sessionId),
+                    tempSessionRef: summarizeSessionRefForLog(tempSessionRef),
+                });
+                clearInterval(timer);
+            }
+        };
+    }, [step, verificationUrl, verified, sessionId, tempSessionRef, sessionNonce, check_verification, verificationMode]);
 
     // Auto-submit verification when data is ready and we are in the verification step
     useEffect(() => {
@@ -476,32 +726,74 @@ export default function SignupScreen() {
             selectedRole &&
             (verified === 'true' || check_verification === 'true')
         ) {
+            logSignupFlow('returnCheck.started', {
+                email: maskEmailForLog(email),
+                selectedRole,
+                selectedDocumentKey,
+                selectedDocumentLabel: selectedDocumentOption.label,
+                verified,
+                checkVerification: check_verification,
+                sessionId: summarizeSessionRefForLog(sessionId),
+                tempSessionRef: summarizeSessionRefForLog(tempSessionRef),
+                hasSessionNonce: Boolean(sessionNonce),
+            });
 
             const checkAndFinish = async (retries = 0) => {
                 const refToCheck = sessionId || tempSessionRef;
                 if (!refToCheck) {
+                    logSignupFlow('returnCheck.missingSessionRef', {
+                        retries,
+                        hasEmail: Boolean(email),
+                        selectedRole,
+                    });
                     if (mounted) finishAccountCreation(); // Fallback
                     return;
                 }
 
                 try {
+                    logSignupFlow('returnCheck.invoke.start', {
+                        attempt: retries + 1,
+                        sessionId: summarizeSessionRefForLog(refToCheck),
+                        hasSessionNonce: Boolean(sessionNonce),
+                    });
                     // Verify the ACTUAL status from Didit/Database
                     const { data: sessionData, error: invokeError } = await supabase.functions.invoke('create-didit-session', {
-                        body: { action: 'get_session', session_id: refToCheck }
+                        body: { action: 'get_session', session_id: refToCheck, sessionNonce }
                     });
 
                     if (invokeError) throw invokeError;
+                    if (sessionData?.success === false && sessionData?.error) {
+                        throw new Error(String(sessionData.error));
+                    }
 
                     // Check status - supports robust checking of nested data
                     const status = sessionData?.status || sessionData?.verification_data?.status;
+                    logSignupFlow('returnCheck.invoke.result', {
+                        attempt: retries + 1,
+                        sessionId: summarizeSessionRefForLog(refToCheck),
+                        status: status ?? null,
+                        invokeData: summarizeSignupInvokeData(sessionData),
+                    });
 
                     // 1. SUCCESS
-                    if (status === 'Approved' || status === 'APPROVED') {
+                    if (isApprovedDiditFlowStatus(status)) {
+                        logSignupFlow('returnCheck.approved', {
+                            attempt: retries + 1,
+                            sessionId: summarizeSessionRefForLog(refToCheck),
+                        });
                         if (mounted) finishAccountCreation();
                         return;
                     }
 
-                    if (status === 'In Review' || status === 'PENDING_REVIEW') {
+                    if (isPendingReviewDiditFlowStatus(status)) {
+                        const faceMatchCheck = diditSessionHasApprovedFaceMatch(sessionData);
+                        logSignupFlow('returnCheck.pendingReview', {
+                            attempt: retries + 1,
+                            sessionId: summarizeSessionRefForLog(refToCheck),
+                            idStatus: faceMatchCheck.idStatus || null,
+                            faceStatus: faceMatchCheck.faceStatus || null,
+                            hasFaceMatch: faceMatchCheck.hasFaceMatch,
+                        });
                         if (mounted) {
                             await finishAccountCreationPendingReview(refToCheck);
                         }
@@ -509,12 +801,18 @@ export default function SignupScreen() {
                     }
 
                     // 2. FAILURE (Final) - Show alert and go back to signup form
-                    if (['DECLINED', 'Declined', 'ABANDONED', 'Abandoned'].includes(status) || isSupersededVerificationStatus(status)) {
+                    if (isFailedDiditFlowStatus(status) || isSupersededVerificationStatus(status)) {
+                        logSignupFlow('returnCheck.finalFailure', {
+                            attempt: retries + 1,
+                            sessionId: summarizeSessionRefForLog(refToCheck),
+                            status,
+                        });
                         setLoading(false);
 
                         // Clear all verification state
                         setVerificationUrl('');
                         setSessionId('');
+                        setSessionNonce('');
                         setTempSessionRef('');
                         await AsyncStorage.removeItem('signup_current_session');
                         router.setParams({ verified: '', check_verification: '' });
@@ -543,24 +841,33 @@ export default function SignupScreen() {
                     }
 
                     // 3. PENDING / RETRY (Created, Submitted, Processing)
-                    const maxRetries = 10;
+                    const maxRetries = 60;
+                    const retryDelayMs = 2000;
                     if (retries < maxRetries) {
+                        if (retries < 5 || retries % 10 === 0) {
+                            logSignupFlow('returnCheck.retryScheduled', {
+                                nextAttempt: retries + 2,
+                                maxRetries: maxRetries + 1,
+                                retryDelayMs,
+                                sessionId: summarizeSessionRefForLog(refToCheck),
+                                status: status ?? null,
+                            });
+                        }
                         setTimeout(() => {
                             if (mounted) checkAndFinish(retries + 1);
-                        }, 1000); // Wait 1 second between checks
+                        }, retryDelayMs);
                     } else {
-                        // TIMEOUT - Go back to signup form with alert
+                        // Didit can return before its final decision is available. Keep
+                        // the session so the user can retry without starting over.
+                        logSignupFlow('returnCheck.stillProcessingAfterRetries', {
+                            attempts: retries + 1,
+                            sessionId: summarizeSessionRefForLog(refToCheck),
+                            lastStatus: status ?? null,
+                        });
                         setLoading(false);
-                        setVerificationUrl('');
-                        setSessionId('');
-                        setTempSessionRef('');
-                        await AsyncStorage.removeItem('signup_current_session');
-                        router.setParams({ verified: '', check_verification: '' });
-
-                        setStep('details');
                         Alert.alert(
-                            'Verification Timeout',
-                            'We could not confirm your verification status in time. Please try again.',
+                            'Still Processing',
+                            'Didit is taking longer than usual to confirm your verification. Please wait a moment, then tap "I Have Verified" to check again.',
                             [{ text: 'OK' }]
                         );
                     }
@@ -597,15 +904,28 @@ export default function SignupScreen() {
 
 
                     // If we got a status from error, handle it
-                    if (errorStatus && ['In Review', 'PENDING_REVIEW'].includes(errorStatus)) {
+                    if (errorStatus && isPendingReviewDiditFlowStatus(errorStatus)) {
+                        logSignupFlow('returnCheck.errorStatusPendingReview', {
+                            attempt: retries + 1,
+                            sessionId: summarizeSessionRefForLog(refToCheck),
+                            errorStatus,
+                            errorMessage,
+                        });
                         await finishAccountCreationPendingReview(refToCheck);
                         return;
                     }
 
-                    if (errorStatus && (['DECLINED', 'Declined', 'ABANDONED', 'Abandoned'].includes(errorStatus) || isSupersededVerificationStatus(errorStatus))) {
+                    if (errorStatus && (isFailedDiditFlowStatus(errorStatus) || isSupersededVerificationStatus(errorStatus))) {
+                        logSignupFlow('returnCheck.errorStatusFinalFailure', {
+                            attempt: retries + 1,
+                            sessionId: summarizeSessionRefForLog(refToCheck),
+                            errorStatus,
+                            errorMessage,
+                        });
                         setLoading(false);
                         setVerificationUrl('');
                         setSessionId('');
+                        setSessionNonce('');
                         setTempSessionRef('');
                         await AsyncStorage.removeItem('signup_current_session');
                         router.setParams({ verified: '', check_verification: '' });
@@ -627,8 +947,21 @@ export default function SignupScreen() {
 
                     // Retry on network/function error (FunctionsHttpError is common during initial polling)
                     if (retries < 8) {
+                        logSignupFlowError('returnCheck.exceptionRetryScheduled', e, {
+                            attempt: retries + 1,
+                            nextAttempt: retries + 2,
+                            sessionId: summarizeSessionRefForLog(refToCheck),
+                            errorStatus,
+                            errorMessage,
+                        });
                         setTimeout(() => { if (mounted) checkAndFinish(retries + 1); }, 2000);
                     } else {
+                        logSignupFlowError('returnCheck.exceptionExhausted', e, {
+                            attempts: retries + 1,
+                            sessionId: summarizeSessionRefForLog(refToCheck),
+                            errorStatus,
+                            errorMessage,
+                        });
                         setLoading(false);
                         Alert.alert(
                             'Connection Error',
@@ -644,7 +977,7 @@ export default function SignupScreen() {
 
             return () => { mounted = false; };
         }
-    }, [step, email, password, selectedRole, verified, check_verification, verificationMode]);
+    }, [step, email, password, selectedRole, verified, check_verification, verificationMode, sessionId, tempSessionRef, sessionNonce]);
 
     const [permission, requestPermission] = useCameraPermissions();
 
@@ -656,12 +989,29 @@ export default function SignupScreen() {
             Platform.OS !== 'web' &&
             step === 'verification' &&
             !verificationUrl &&
-            verified !== 'true'
+            verified !== 'true' &&
+            check_verification !== 'true'
         ) {
+            logSignupFlow('mobileAutoStart.evaluate', {
+                step,
+                verificationMode,
+                hasVerificationUrl: Boolean(verificationUrl),
+                verified,
+                permissionGranted: Boolean(permission?.granted),
+                hasEmail: Boolean(email),
+                selectedRole,
+                selectedDocumentKey,
+            });
             // Check permissions first
             if (!permission?.granted) {
+                logSignupFlow('mobileAutoStart.requestCameraPermission', {
+                    permissionStatus: permission?.status ?? null,
+                });
                 requestPermission().then(response => {
                     if (response.granted && mounted) {
+                        logSignupFlow('mobileAutoStart.permissionGranted', {
+                            permissionStatus: response.status ?? null,
+                        });
                         // Permissions granted, start session
                         const timer = setTimeout(() => {
                             if (mounted) {
@@ -669,10 +1019,16 @@ export default function SignupScreen() {
                             }
                         }, 100);
                     } else if (mounted) {
+                        logSignupFlow('mobileAutoStart.permissionDenied', {
+                            permissionStatus: response.status ?? null,
+                        });
                         Alert.alert('Permission Required', 'Camera access is needed for identity verification.');
                     }
                 });
             } else {
+                logSignupFlow('mobileAutoStart.permissionAlreadyGranted', {
+                    permissionStatus: permission?.status ?? null,
+                });
                 // Already granted
                 const timer = setTimeout(() => {
                     if (mounted) {
@@ -683,7 +1039,7 @@ export default function SignupScreen() {
             }
         }
         return () => { mounted = false; };
-    }, [step, verificationUrl, verified, permission, verificationMode]);
+    }, [step, verificationUrl, verified, check_verification, permission, verificationMode]);
 
 
     // Theme Styles
@@ -763,8 +1119,37 @@ export default function SignupScreen() {
      */
 
     // Helper to generate a fresh session URL
-    const startNewVerificationSession = async () => {
-        const tempRef = `TEMP_${Math.random().toString(36).substring(2, 15)}_${Date.now()}`;
+    const startNewVerificationSession = async ({ forceNew = false }: { forceNew?: boolean } = {}) => {
+        if (creatingDiditSessionRef.current) {
+            logSignupFlow('diditSession.startBlocked.inFlight', {
+                email: maskEmailForLog(email),
+                selectedRole,
+                selectedDocumentKey,
+                hasVerificationUrl: Boolean(verificationUrl),
+                sessionId: summarizeSessionRefForLog(sessionId),
+                tempSessionRef: summarizeSessionRefForLog(tempSessionRef),
+            });
+            return verificationUrl;
+        }
+
+        creatingDiditSessionRef.current = true;
+        const existingSessionId = forceNew ? '' : sessionId;
+        const existingSessionNonce = forceNew ? '' : sessionNonce;
+        const tempRef = forceNew || !tempSessionRef
+            ? `TEMP_${Math.random().toString(36).substring(2, 15)}_${Date.now()}`
+            : tempSessionRef;
+        logSignupFlow('diditSession.start', {
+            email: maskEmailForLog(email),
+            selectedRole,
+            selectedDocumentKey,
+            selectedDocumentLabel: selectedDocumentOption.label,
+            diditDocumentType: selectedDocumentOption?.diditDocumentType || 'id_card',
+            tempRef: summarizeSessionRefForLog(tempRef),
+            existingSessionId: summarizeSessionRefForLog(existingSessionId),
+            hasExistingSessionNonce: Boolean(existingSessionNonce),
+            forceNew,
+            platform: Platform.OS,
+        });
         setTempSessionRef(tempRef);
 
         // Persist state before redirecting
@@ -776,9 +1161,22 @@ export default function SignupScreen() {
                 tempRef,
                 verificationMode,
                 selectedDocumentKey,
+                sSessionId: existingSessionId || undefined,
+                sSessionNonce: existingSessionNonce || undefined,
             }));
+            logSignupFlow('diditSession.statePersisted.preCreate', {
+                email: maskEmailForLog(email),
+                selectedRole,
+                verificationMode,
+                selectedDocumentKey,
+                tempRef: summarizeSessionRefForLog(tempRef),
+                existingSessionId: summarizeSessionRefForLog(existingSessionId),
+                hasExistingSessionNonce: Boolean(existingSessionNonce),
+            });
         } catch (e) {
-            console.error('Failed to save session state', e);
+            logSignupFlowError('diditSession.statePersistFailed.preCreate', e, {
+                tempRef: summarizeSessionRefForLog(tempRef),
+            });
         }
 
         // NEUTRAL SIGNAL: Don't assume 'verified=true'. Just signal that flow returned.
@@ -792,8 +1190,24 @@ export default function SignupScreen() {
             currentUrl.searchParams.delete('verified');
             redirectUrl = currentUrl.toString();
         }
+        logSignupFlow('diditSession.redirectPrepared', {
+            tempRef: summarizeSessionRefForLog(tempRef),
+            redirectUrl,
+            platform: Platform.OS,
+        });
 
         try {
+            logSignupFlow('diditSession.invokeCreate.start', {
+                functionName: 'create-didit-session',
+                email: maskEmailForLog(email),
+                selectedRole,
+                tempRef: summarizeSessionRefForLog(tempRef),
+                documentType: selectedDocumentOption?.diditDocumentType || 'id_card',
+                hasRedirectUrl: Boolean(redirectUrl),
+                existingSessionId: summarizeSessionRefForLog(existingSessionId),
+                hasExistingSessionNonce: Boolean(existingSessionNonce),
+                forceNew,
+            });
             // Call our Edge Function to create the session
             // This ensures the callback URL is properly set to our verification-redirect function
             const { data, error } = await supabase.functions.invoke('create-didit-session', {
@@ -802,17 +1216,33 @@ export default function SignupScreen() {
                     email: email || undefined, // Optional
                     role: selectedRole,
                     document_type: selectedDocumentOption?.diditDocumentType || 'id_card',
-                    redirect_url: redirectUrl // Tells the edge function where to eventually send the user
+                    redirect_url: redirectUrl, // Tells the edge function where to eventually send the user
+                    existing_session_id: existingSessionId || undefined,
+                    sessionNonce: existingSessionNonce || undefined,
+                    force_new: forceNew || undefined,
                 }
             });
 
             if (error) throw error;
-            if (!data?.verificationUrl) throw new Error('No verification URL returned');
+            logSignupFlow('diditSession.invokeCreate.result', {
+                tempRef: summarizeSessionRefForLog(tempRef),
+                invokeData: summarizeSignupInvokeData(data),
+                workflowId: data?.workflowId || data?.workflow_id || null,
+            });
+            if (data?.success === false) {
+                throw new Error(getSignupInvokeErrorMessage(data));
+            }
+
+            const createdVerificationUrl = getDiditVerificationUrlFromInvokeData(data);
+            if (!createdVerificationUrl) throw new Error('No verification URL returned');
 
             // Save the ACTUAL Didit Session ID
-            const createdSessionId = data.sessionId || data.id;
+            const createdSessionId = data.sessionId || data.session_id || data.id;
+            const responseSessionNonce = typeof data.sessionNonce === 'string' ? data.sessionNonce : '';
+            const createdSessionNonce = responseSessionNonce || (createdSessionId === existingSessionId ? existingSessionNonce : '');
             if (createdSessionId) {
                 setSessionId(createdSessionId);
+                setSessionNonce(createdSessionNonce);
                 // Update storage with the real ID
                 try {
                     await AsyncStorage.setItem('signup_current_session', JSON.stringify({
@@ -823,18 +1253,61 @@ export default function SignupScreen() {
                         verificationMode,
                         selectedDocumentKey,
                         sSessionId: createdSessionId,
+                        sSessionNonce: createdSessionNonce,
+                        sVerificationUrl: createdVerificationUrl,
                     }));
+                    logSignupFlow('diditSession.statePersisted.postCreate', {
+                        email: maskEmailForLog(email),
+                        selectedRole,
+                        verificationMode,
+                        selectedDocumentKey,
+                        tempRef: summarizeSessionRefForLog(tempRef),
+                        sessionId: summarizeSessionRefForLog(createdSessionId),
+                        hasSessionNonce: Boolean(createdSessionNonce),
+                    });
                 } catch (e) {
-                    console.error('Failed to update session state with ID', e);
+                    logSignupFlowError('diditSession.statePersistFailed.postCreate', e, {
+                        tempRef: summarizeSessionRefForLog(tempRef),
+                        sessionId: summarizeSessionRefForLog(createdSessionId),
+                    });
                 }
+            } else {
+                logSignupFlow('diditSession.missingSessionIdInResponse', {
+                    tempRef: summarizeSessionRefForLog(tempRef),
+                    invokeData: summarizeSignupInvokeData(data),
+                });
             }
 
-            setVerificationUrl(data.verificationUrl);
-            return data.verificationUrl;
+            setVerificationUrl(createdVerificationUrl);
+            logSignupFlow('diditSession.ready', {
+                tempRef: summarizeSessionRefForLog(tempRef),
+                sessionId: summarizeSessionRefForLog(createdSessionId),
+                workflowId: data?.workflowId || data?.workflow_id || null,
+                hasSessionNonce: Boolean(createdSessionNonce),
+                hasVerificationUrl: Boolean(createdVerificationUrl),
+                reused: Boolean(data?.reused),
+            });
+            return createdVerificationUrl;
         } catch (e: any) {
-            console.error('Failed to create Didit session:', e);
-            Alert.alert('Error', 'Could not start verification session. Please try again.');
+            logSignupFlowError('diditSession.invokeCreate.error', e, {
+                tempRef: summarizeSessionRefForLog(tempRef),
+                email: maskEmailForLog(email),
+                selectedRole,
+                selectedDocumentKey,
+                existingSessionId: summarizeSessionRefForLog(existingSessionId),
+                hasExistingSessionNonce: Boolean(existingSessionNonce),
+            });
+            const errorMessage = String(e?.message || '').trim();
+            const isRateLimited = e?.status === 429 || /too many/i.test(errorMessage);
+            Alert.alert(
+                isRateLimited ? 'Verification Paused' : 'Error',
+                isRateLimited
+                    ? errorMessage || 'Too many verification attempts. Please wait before trying again.'
+                    : 'Could not start verification session. Please try again.',
+            );
             return '';
+        } finally {
+            creatingDiditSessionRef.current = false;
         }
     };
 
@@ -843,16 +1316,41 @@ export default function SignupScreen() {
      * We do NOT create the account yet. Verification happens first.
      */
     const handleWebVerify = async () => {
+        logSignupFlow('openVerification.requested', {
+            hasExistingVerificationUrl: Boolean(verificationUrl),
+            sessionId: summarizeSessionRefForLog(sessionId),
+            tempSessionRef: summarizeSessionRefForLog(tempSessionRef),
+            hasSessionNonce: Boolean(sessionNonce),
+            platform: Platform.OS,
+        });
         let urlToOpen = verificationUrl;
         if (!urlToOpen) {
             urlToOpen = await startNewVerificationSession();
         }
-        if (!urlToOpen) return;
+        if (!urlToOpen) {
+            logSignupFlow('openVerification.blockedNoUrl', {
+                sessionId: summarizeSessionRefForLog(sessionId),
+                tempSessionRef: summarizeSessionRefForLog(tempSessionRef),
+            });
+            return;
+        }
 
         if (Platform.OS === 'web') {
+            logSignupFlow('openVerification.webNavigate', {
+                hasUrl: Boolean(urlToOpen),
+            });
             window.open(urlToOpen, '_self');
         } else {
+            logSignupFlow('openVerification.nativeAuthSession.start', {
+                hasUrl: Boolean(urlToOpen),
+                sessionId: summarizeSessionRefForLog(sessionId),
+                tempSessionRef: summarizeSessionRefForLog(tempSessionRef),
+            });
             await WebBrowser.openAuthSessionAsync(urlToOpen);
+            logSignupFlow('openVerification.nativeAuthSession.returned', {
+                sessionId: summarizeSessionRefForLog(sessionId),
+                tempSessionRef: summarizeSessionRefForLog(tempSessionRef),
+            });
         }
     };
 
@@ -969,15 +1467,43 @@ export default function SignupScreen() {
     };
 
     const finishAccountCreationPendingReview = async (refToLink?: string) => {
+        if (pendingReviewSignupRef.current) {
+            logSignupFlow('pendingReviewAccountCreation.blocked', {
+                reason: 'already_in_flight',
+                diditSessionId: summarizeSessionRefForLog(refToLink),
+            });
+            return;
+        }
+        pendingReviewSignupRef.current = true;
+        logSignupFlow('pendingReviewAccountCreation.start', {
+            email: maskEmailForLog(email),
+            selectedRole,
+            selectedDocumentKey,
+            selectedDocumentLabel: selectedDocumentOption.label,
+            diditSessionId: summarizeSessionRefForLog(refToLink),
+            hasSessionNonce: Boolean(sessionNonce),
+        });
         if (!email || !password || !selectedRole) {
+            logSignupFlow('pendingReviewAccountCreation.blocked', {
+                reason: 'missing_signup_state',
+                hasEmail: Boolean(email),
+                hasPassword: Boolean(password),
+                hasSelectedRole: Boolean(selectedRole),
+            });
             Alert.alert('Session Reset', 'Please re-enter your details to continue signup.');
             setStep('details');
+            pendingReviewSignupRef.current = false;
             return;
         }
 
         if (!isAllowedSignupRole(selectedRole) || isAdminRole(selectedRole)) {
+            logSignupFlow('pendingReviewAccountCreation.blocked', {
+                reason: 'unsupported_role',
+                selectedRole,
+            });
             Alert.alert('Unsupported Account Type', 'Only fan and musician accounts can be registered right now.');
             setStep('details');
+            pendingReviewSignupRef.current = false;
             return;
         }
 
@@ -987,6 +1513,14 @@ export default function SignupScreen() {
 
         try {
             const emailRedirectTo = createEmailConfirmationRedirectUrl();
+            logSignupFlow('pendingReviewAccountCreation.invoke.start', {
+                functionName: 'create-unverified-user',
+                email: maskEmailForLog(email),
+                selectedRole,
+                diditSessionId: summarizeSessionRefForLog(refToLink),
+                hasSessionNonce: Boolean(sessionNonce),
+                redirectTo: emailRedirectTo,
+            });
             const { error: pendingSignupError } = await supabase.functions.invoke('create-unverified-user', {
                 body: {
                     email: email.trim(),
@@ -996,6 +1530,7 @@ export default function SignupScreen() {
                     isVerified: false,
                     verificationStatus: 'PENDING_REVIEW',
                     diditSessionId: refToLink || null,
+                    sessionNonce,
                     selectedDocumentType: selectedDocumentOption.label,
                     selectedDocumentTypeKey: selectedDocumentOption.key,
                     verificationMode: 'didit',
@@ -1004,24 +1539,28 @@ export default function SignupScreen() {
             });
 
             if (pendingSignupError) {
-                console.error('create-unverified-user didit pending failed', {
-                    message: pendingSignupError.message,
-                    status: (pendingSignupError as any).status,
-                    code: (pendingSignupError as any).code,
-                    details: (pendingSignupError as any).details,
-                    hint: (pendingSignupError as any).hint,
-                    context: (pendingSignupError as any).context,
+                logSignupFlowError('pendingReviewAccountCreation.invoke.error', pendingSignupError, {
+                    diditSessionId: summarizeSessionRefForLog(refToLink),
+                    email: maskEmailForLog(email),
                 });
                 throw pendingSignupError;
             }
+            logSignupFlow('pendingReviewAccountCreation.invoke.success', {
+                diditSessionId: summarizeSessionRefForLog(refToLink),
+                email: maskEmailForLog(email),
+            });
 
             try {
                 await AsyncStorage.removeItem('signup_current_session');
+                logSignupFlow('pendingReviewAccountCreation.sessionCleared', {
+                    storageKey: 'signup_current_session',
+                });
             } catch {
             }
 
             setVerificationUrl('');
             setSessionId('');
+            setSessionNonce('');
             setTempSessionRef('');
             router.setParams({ verified: '', check_verification: '' });
 
@@ -1033,30 +1572,59 @@ export default function SignupScreen() {
                     diditPendingReview: 'true',
                 },
             } as any);
+            logSignupFlow('pendingReviewAccountCreation.redirectLogin', {
+                email: maskEmailForLog(email),
+                diditSessionId: summarizeSessionRefForLog(refToLink),
+            });
         } catch (authErr: any) {
+            logSignupFlowError('pendingReviewAccountCreation.catch', authErr, {
+                email: maskEmailForLog(email),
+                diditSessionId: summarizeSessionRefForLog(refToLink),
+            });
             Alert.alert('Creation Failed', authErr?.message || 'Unable to create your account right now.');
         } finally {
             setLoading(false);
+            pendingReviewSignupRef.current = false;
         }
     };
 
     const submitManualReviewSignup = async () => {
+        logSignupFlow('manualSignup.submitRequested', {
+            email: maskEmailForLog(email),
+            selectedRole,
+            selectedDocumentKey,
+            selectedDocumentLabel: selectedDocumentOption.label,
+            diditSupported: selectedDocumentOption.diditSupported,
+            hasFrontImage: Boolean(manualFrontImage),
+            hasBackImage: Boolean(manualBackImage),
+            hasSelfieImage: Boolean(manualSelfieImage),
+            hasManualFullName: Boolean(manualFullName.trim()),
+            hasManualIdNumber: Boolean(manualIdNumber.trim()),
+            hasManualIdExpiration: Boolean(manualIdExpiration.trim()),
+        });
         if (selectedDocumentOption.diditSupported) {
+            logSignupFlow('manualSignup.blocked', {
+                reason: 'document_supported_by_didit',
+                selectedDocumentKey,
+            });
             Alert.alert('Supported ID', 'This document is supported by Didit. Please continue with automatic verification.');
             return;
         }
 
         if (!manualFrontImage) {
+            logSignupFlow('manualSignup.blocked', { reason: 'missing_front_image' });
             Alert.alert('Upload Required', 'Please upload the front photo of your ID to continue.');
             return;
         }
 
         if (!manualBackImage) {
+            logSignupFlow('manualSignup.blocked', { reason: 'missing_back_image' });
             Alert.alert('Upload Required', 'Please upload the back photo of your ID to continue.');
             return;
         }
 
         if (!manualSelfieImage) {
+            logSignupFlow('manualSignup.blocked', { reason: 'missing_selfie_image' });
             Alert.alert('Upload Required', 'Please upload a selfie holding your ID to continue.');
             return;
         }
@@ -1067,26 +1635,42 @@ export default function SignupScreen() {
         const expirationDate = new Date(`${enteredIdExpiration}T00:00:00Z`);
 
         if (!enteredFullName) {
+            logSignupFlow('manualSignup.blocked', { reason: 'missing_full_name' });
             Alert.alert('Name Required', 'Please enter the full name shown on your ID.');
             return;
         }
 
         if (!enteredIdNumber) {
+            logSignupFlow('manualSignup.blocked', { reason: 'missing_id_number' });
             Alert.alert('ID Number Required', 'Please enter the ID number shown on your document.');
             return;
         }
 
         if (!/^\d{4}-\d{2}-\d{2}$/.test(enteredIdExpiration) || Number.isNaN(expirationDate.getTime()) || expirationDate.toISOString().slice(0, 10) !== enteredIdExpiration) {
+            logSignupFlow('manualSignup.blocked', {
+                reason: 'invalid_expiration_date',
+                enteredIdExpiration,
+            });
             Alert.alert('Invalid Expiration Date', 'Please enter the ID expiration date in YYYY-MM-DD format.');
             return;
         }
 
         if (enteredIdExpiration < getLocalDateInputValue()) {
+            logSignupFlow('manualSignup.blocked', {
+                reason: 'expired_id',
+                enteredIdExpiration,
+            });
             Alert.alert('Expired ID', 'Please choose an ID expiration date that is today or later.');
             return;
         }
 
         if (!email || !password || !selectedRole) {
+            logSignupFlow('manualSignup.blocked', {
+                reason: 'missing_signup_state',
+                hasEmail: Boolean(email),
+                hasPassword: Boolean(password),
+                hasSelectedRole: Boolean(selectedRole),
+            });
             Alert.alert('Session Reset', 'Please go back and complete your signup details first.');
             setStep('details');
             return;
@@ -1095,6 +1679,20 @@ export default function SignupScreen() {
         setLoading(true);
 
         try {
+            logSignupFlow('manualSignup.invoke.start', {
+                functionName: 'manual-identity-review',
+                action: 'submit_manual_review_signup',
+                email: maskEmailForLog(email),
+                selectedRole,
+                selectedDocumentKey,
+                selectedDocumentLabel: selectedDocumentOption.label,
+                idExpiration: enteredIdExpiration,
+                imageSummary: {
+                    front: manualFrontImage ? { mimeType: manualFrontImage.mimeType, extension: manualFrontImage.extension } : null,
+                    back: manualBackImage ? { mimeType: manualBackImage.mimeType, extension: manualBackImage.extension } : null,
+                    selfie: manualSelfieImage ? { mimeType: manualSelfieImage.mimeType, extension: manualSelfieImage.extension } : null,
+                },
+            });
             const { error: manualSubmitError } = await supabase.functions.invoke('manual-identity-review', {
                 body: {
                     action: 'submit_manual_review_signup',
@@ -1114,20 +1712,28 @@ export default function SignupScreen() {
             });
 
             if (manualSubmitError) {
-                console.error('manual-identity-review failed', {
-                    message: manualSubmitError.message,
-                    status: (manualSubmitError as any).status,
-                    code: (manualSubmitError as any).code,
-                    details: (manualSubmitError as any).details,
-                    hint: (manualSubmitError as any).hint,
-                    context: (manualSubmitError as any).context,
+                logSignupFlowError('manualSignup.invoke.error', manualSubmitError, {
+                    email: maskEmailForLog(email),
+                    selectedRole,
+                    selectedDocumentKey,
                 });
                 throw manualSubmitError;
             }
+            logSignupFlow('manualSignup.invoke.success', {
+                email: maskEmailForLog(email),
+                selectedRole,
+                selectedDocumentKey,
+            });
 
             try {
                 await AsyncStorage.removeItem('signup_current_session');
+                logSignupFlow('manualSignup.sessionCleared', {
+                    storageKey: 'signup_current_session',
+                });
             } catch (storageError) {
+                logSignupFlowError('manualSignup.sessionClearError', storageError, {
+                    storageKey: 'signup_current_session',
+                });
             }
 
             router.replace({
@@ -1138,7 +1744,16 @@ export default function SignupScreen() {
                     verificationPendingReview: 'true',
                 },
             } as any);
+            logSignupFlow('manualSignup.redirectLogin', {
+                email: maskEmailForLog(email),
+                verificationPendingReview: true,
+            });
         } catch (authErr: any) {
+            logSignupFlowError('manualSignup.catch', authErr, {
+                email: maskEmailForLog(email),
+                selectedRole,
+                selectedDocumentKey,
+            });
             if (authErr?.message?.includes('already registered') || authErr?.status === 422) {
                 Alert.alert('Account Exists', 'This email is already registered. Please log in to continue.');
                 return;
@@ -1151,10 +1766,24 @@ export default function SignupScreen() {
     };
 
     const handleNext = async () => {
+        logSignupFlow('detailsNext.pressed', {
+            email: maskEmailForLog(email),
+            selectedRole,
+            selectedDocumentKey,
+            selectedDocumentLabel: selectedDocumentOption.label,
+            diditSupported: selectedDocumentOption.diditSupported,
+            passwordLength: password.length,
+            confirmPasswordLength: confirmPassword.length,
+            passwordsMatch: password === confirmPassword,
+        });
         setErrors({});
         const newErrors: any = {};
 
         if (!isAllowedSignupRole(selectedRole)) {
+            logSignupFlow('detailsNext.blocked', {
+                reason: 'unsupported_role',
+                selectedRole,
+            });
             setErrors({ role: 'Please select a valid account type.' });
             Alert.alert('Unsupported Account Type', 'Only fan and musician accounts can be registered right now.');
             setStep('details');
@@ -1178,6 +1807,13 @@ export default function SignupScreen() {
         if (password !== confirmPassword) newErrors.confirmPassword = 'Passwords do not match';
 
         if (Object.keys(newErrors).length > 0) {
+            logSignupFlow('detailsNext.validationFailed', {
+                email: maskEmailForLog(email),
+                selectedRole,
+                selectedDocumentKey,
+                errorFields: Object.keys(newErrors),
+                errors: newErrors,
+            });
             setErrors(newErrors);
             const issues = Object.entries(newErrors).map(([field, message]) => {
                 const label =
@@ -1196,14 +1832,30 @@ export default function SignupScreen() {
         setLoading(true);
 
         try {
+            logSignupFlow('detailsNext.profileLookup.start', {
+                email: maskEmailForLog(email),
+            });
             // Check if profile exists (optional, nice to have to prevent dupe emails early)
             const { data: profile } = await supabase
                 .from('profiles')
                 .select('id, is_verified, role, verification_status')
                 .eq('email', email.trim())
                 .maybeSingle();
+            logSignupFlow('detailsNext.profileLookup.result', {
+                email: maskEmailForLog(email),
+                foundProfile: Boolean(profile),
+                profileId: summarizeSessionRefForLog((profile as any)?.id),
+                profileRole: (profile as any)?.role ?? null,
+                profileVerificationStatus: (profile as any)?.verification_status ?? null,
+                profileIsVerified: Boolean((profile as any)?.is_verified),
+            });
 
             if (isAdminRole(profile?.role)) {
+                logSignupFlow('detailsNext.blocked', {
+                    reason: 'admin_profile',
+                    email: maskEmailForLog(email),
+                    profileId: summarizeSessionRefForLog((profile as any)?.id),
+                });
                 Alert.alert('Unsupported Account Type', 'Admin accounts cannot be used in the mobile app.');
                 setLoading(false);
                 return;
@@ -1214,12 +1866,24 @@ export default function SignupScreen() {
                 const canRetryVerification = ['DECLINED', 'ABANDONED'].includes(existingStatus);
 
                 if (profile.is_verified) {
+                    logSignupFlow('detailsNext.blocked', {
+                        reason: 'existing_verified_profile',
+                        email: maskEmailForLog(email),
+                        profileId: summarizeSessionRefForLog((profile as any)?.id),
+                        existingStatus,
+                    });
                     Alert.alert('Account Exists', 'This email is already registered and verified. Please login.', [{ text: 'Login', onPress: () => router.push('/') }]);
                     setLoading(false);
                     return;
                 }
 
                 if (!canRetryVerification) {
+                    logSignupFlow('detailsNext.blocked', {
+                        reason: 'existing_profile_not_retryable',
+                        email: maskEmailForLog(email),
+                        profileId: summarizeSessionRefForLog((profile as any)?.id),
+                        existingStatus,
+                    });
                     Alert.alert('Account Exists', 'This email is already registered. Please login to continue verification.', [{ text: 'Login', onPress: () => router.push('/') }]);
                     setLoading(false);
                     return;
@@ -1227,22 +1891,43 @@ export default function SignupScreen() {
             }
 
             if (selectedDocumentOption.diditSupported) {
+                logSignupFlow('detailsNext.modeSelected', {
+                    mode: 'didit',
+                    selectedDocumentKey,
+                    selectedDocumentLabel: selectedDocumentOption.label,
+                    diditDocumentType: selectedDocumentOption.diditDocumentType,
+                });
                 setVerificationMode('didit');
                 setManualFrontImage(null);
                 setManualBackImage(null);
                 setManualSelfieImage(null);
             } else {
+                logSignupFlow('detailsNext.modeSelected', {
+                    mode: 'manual',
+                    selectedDocumentKey,
+                    selectedDocumentLabel: selectedDocumentOption.label,
+                });
                 setVerificationMode('manual');
                 setVerificationUrl('');
                 setSessionId('');
+                setSessionNonce('');
                 setTempSessionRef('');
             }
 
             // Proceed to Verification Step WITHOUT creating account
             setStep('verification');
+            logSignupFlow('detailsNext.stepChanged', {
+                nextStep: 'verification',
+                verificationMode: selectedDocumentOption.diditSupported ? 'didit' : 'manual',
+                email: maskEmailForLog(email),
+            });
 
         } catch (e: any) {
-            console.error(e);
+            logSignupFlowError('detailsNext.error', e, {
+                email: maskEmailForLog(email),
+                selectedRole,
+                selectedDocumentKey,
+            });
             Alert.alert('Error', 'An unexpected error occurred.');
         } finally {
             setLoading(false);
@@ -1313,6 +1998,7 @@ export default function SignupScreen() {
         // Fetch Didit Data via Edge Function
         let verifiedName = '';
         let verifiedNameSource: 'didit' | 'email_fallback' = 'email_fallback';
+        let diditSessionData: any = null;
         try {
             logDiditEmailFlow('didit.getSession.start', {
                 diditSessionId: refToLink,
@@ -1321,7 +2007,7 @@ export default function SignupScreen() {
             });
 
             const { data: sessionData, error: invokeError } = await supabase.functions.invoke('create-didit-session', {
-                body: { action: 'get_session', session_id: refToLink }
+                body: { action: 'get_session', session_id: refToLink, sessionNonce }
             });
 
             if (invokeError) {
@@ -1333,7 +2019,9 @@ export default function SignupScreen() {
             }
 
             if (sessionData) {
+                diditSessionData = sessionData;
                 const diditSessionForLog = sessionData as any;
+                const faceMatchCheck = diditSessionHasApprovedFaceMatch(sessionData);
                 logDiditEmailFlow('didit.getSession.result', {
                     diditSessionId: refToLink,
                     email: maskEmailForLog(email),
@@ -1341,6 +2029,10 @@ export default function SignupScreen() {
                     status: diditSessionForLog.status ?? null,
                     decision: diditSessionForLog.decision ?? null,
                     verificationStatus: diditSessionForLog.verification_status ?? null,
+                    idStatus: faceMatchCheck.idStatus || null,
+                    faceStatus: faceMatchCheck.faceStatus || null,
+                    hasFaceMatch: faceMatchCheck.hasFaceMatch,
+                    hasApprovedFaceMatch: faceMatchCheck.approved,
                     hasDerivedFullName: Boolean(diditSessionForLog.derived?.fullName),
                     platform: Platform.OS,
                 });
@@ -1356,6 +2048,25 @@ export default function SignupScreen() {
                 email: maskEmailForLog(email),
                 platform: Platform.OS,
             });
+        }
+
+        const faceMatchCheck = diditSessionHasApprovedFaceMatch(diditSessionData);
+        if (!faceMatchCheck.approved) {
+            logDiditEmailFlow('finishAccountCreation.blocked', {
+                reason: 'missing_or_unapproved_face_match',
+                diditSessionId: refToLink,
+                email: maskEmailForLog(email),
+                idStatus: faceMatchCheck.idStatus || null,
+                faceStatus: faceMatchCheck.faceStatus || null,
+                hasFaceMatch: faceMatchCheck.hasFaceMatch,
+                platform: Platform.OS,
+            });
+            setLoading(false);
+            Alert.alert(
+                'Face Match Not Completed',
+                'Your ID was scanned, but Didit did not return an approved face match. Please restart identity verification after confirming the workflow requires Liveness and Face Match.',
+            );
+            return;
         }
 
         // Fallback for name if Didit fails
@@ -1404,6 +2115,7 @@ export default function SignupScreen() {
                     isVerified: true,
                     verificationStatus: 'APPROVED',
                     diditSessionId: refToLink,
+                    sessionNonce,
                     selectedDocumentType: selectedDocumentOption.label,
                     selectedDocumentTypeKey: selectedDocumentOption.key,
                     verificationMode,
@@ -1895,9 +2607,20 @@ export default function SignupScreen() {
 
         // Helper function to manually check status (used by "Click here" button)
         const manualStatusCheck = async () => {
+            logSignupFlow('manualStatusCheck.pressed', {
+                sessionId: summarizeSessionRefForLog(sessionId),
+                tempSessionRef: summarizeSessionRefForLog(tempSessionRef),
+                hasSessionNonce: Boolean(sessionNonce),
+                email: maskEmailForLog(email),
+            });
             setLoading(true);
             const refToCheck = sessionId || tempSessionRef;
             if (!refToCheck) {
+                logSignupFlow('manualStatusCheck.blocked', {
+                    reason: 'missing_session_ref',
+                    hasSessionId: Boolean(sessionId),
+                    hasTempSessionRef: Boolean(tempSessionRef),
+                });
                 Alert.alert('Error', 'No verification session found. Please try again.');
                 setLoading(false);
                 setStep('details');
@@ -1905,22 +2628,50 @@ export default function SignupScreen() {
             }
 
             try {
+                logSignupFlow('manualStatusCheck.invoke.start', {
+                    sessionId: summarizeSessionRefForLog(refToCheck),
+                    hasSessionNonce: Boolean(sessionNonce),
+                });
                 const { data: sessionData } = await supabase.functions.invoke('create-didit-session', {
-                    body: { action: 'get_session', session_id: refToCheck }
+                    body: { action: 'get_session', session_id: refToCheck, sessionNonce }
                 });
 
-                const status = sessionData?.status || sessionData?.verification_data?.status;
+                if (sessionData?.success === false && sessionData?.error) {
+                    throw new Error(String(sessionData.error));
+                }
 
-                if (status === 'Approved' || status === 'APPROVED') {
+                const status = sessionData?.status || sessionData?.verification_data?.status;
+                logSignupFlow('manualStatusCheck.invoke.result', {
+                    sessionId: summarizeSessionRefForLog(refToCheck),
+                    status: status ?? null,
+                    invokeData: summarizeSignupInvokeData(sessionData),
+                });
+
+                if (isApprovedDiditFlowStatus(status)) {
+                    logSignupFlow('manualStatusCheck.approved', {
+                        sessionId: summarizeSessionRefForLog(refToCheck),
+                    });
                     finishAccountCreation();
-                } else if (status === 'In Review' || status === 'PENDING_REVIEW') {
+                } else if (isPendingReviewDiditFlowStatus(status)) {
+                    const faceMatchCheck = diditSessionHasApprovedFaceMatch(sessionData);
+                    logSignupFlow('manualStatusCheck.pendingReview', {
+                        sessionId: summarizeSessionRefForLog(refToCheck),
+                        idStatus: faceMatchCheck.idStatus || null,
+                        faceStatus: faceMatchCheck.faceStatus || null,
+                        hasFaceMatch: faceMatchCheck.hasFaceMatch,
+                    });
                     await finishAccountCreationPendingReview(refToCheck);
                     return;
-                } else if (['DECLINED', 'Declined', 'ABANDONED', 'Abandoned'].includes(status) || isSupersededVerificationStatus(status)) {
+                } else if (isFailedDiditFlowStatus(status) || isSupersededVerificationStatus(status)) {
+                    logSignupFlow('manualStatusCheck.finalFailure', {
+                        sessionId: summarizeSessionRefForLog(refToCheck),
+                        status,
+                    });
                     // Failed - show alert and go back to form
                     setLoading(false);
                     setVerificationUrl('');
                     setSessionId('');
+                    setSessionNonce('');
                     setTempSessionRef('');
                     await AsyncStorage.removeItem('signup_current_session');
                     router.setParams({ verified: '', check_verification: '' });
@@ -1939,11 +2690,18 @@ export default function SignupScreen() {
                     Alert.alert(title, message, [{ text: 'OK' }]);
                 } else {
                     // Still processing - let the auto-check continue
+                    logSignupFlow('manualStatusCheck.stillProcessing', {
+                        sessionId: summarizeSessionRefForLog(refToCheck),
+                        status: status ?? null,
+                    });
                     setLoading(false);
                     Alert.alert('Still Processing', 'Verification is still in progress. Please wait a moment.');
                 }
             } catch (e: any) {
-                console.warn('Manual status check error:', e?.message || e);
+                logSignupFlowError('manualStatusCheck.error', e, {
+                    sessionId: summarizeSessionRefForLog(refToCheck),
+                    hasSessionNonce: Boolean(sessionNonce),
+                });
                 setLoading(false);
                 // More helpful error message for FunctionsHttpError
                 const isFunctionError = e?.name === 'FunctionsHttpError' || e?.message?.includes('FunctionsHttpError');
@@ -2224,8 +2982,8 @@ export default function SignupScreen() {
                                 // INTERCEPTOR: Prevent the broken HTML page from loading
                                 // Check for the function URL OR the static storage file
                                 if (request.url.includes('verification-redirect') || request.url.includes('verification-v2.html')) {
-                                    // We caught the redirect! Stop loading and force success.
-                                    router.setParams({ verified: 'true' });
+                                    // We caught the redirect; now confirm the real status with our Edge Function.
+                                    router.setParams({ verified: '', check_verification: 'true' });
                                     return false;
                                 }
                                 return true;
@@ -2261,7 +3019,7 @@ export default function SignupScreen() {
 
                     <TouchableOpacity activeOpacity={1}
                         onPress={() => {
-                            startNewVerificationSession().then(newUrl => {
+                            startNewVerificationSession({ forceNew: true }).then(newUrl => {
                                 if (newUrl && Platform.OS === 'web') window.open(newUrl, '_self');
                             });
                         }}
