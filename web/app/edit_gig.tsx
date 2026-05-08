@@ -11,7 +11,8 @@ import {
     Text,
     TextInput,
     TouchableOpacity,
-    View
+    View,
+    useWindowDimensions,
 } from "react-native";
 import { Calendar } from "react-native-calendars";
 import CustomAlert, { AlertType } from "../src/components/CustomAlert";
@@ -186,6 +187,9 @@ const removeStorageObjectsByUrl = async (urls: string[]) => {
 
 export default function EditGigScreen() {
   const { colors, isDark } = useTheme();
+  const { width } = useWindowDimensions();
+  const isWebDesktop = Platform.OS === 'web' && width >= 768;
+  const pageBackground = isWebDesktop ? (isDark ? '#0A1224' : '#E9EEF8') : colors.background;
   const { id, reapply } = useLocalSearchParams<{
     id?: string | string[];
     reapply?: string | string[];
@@ -1515,8 +1519,8 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
           style={{ display: "none" }}
         />
       )}
-      <View style={[styles.flex1, { backgroundColor: colors.background }]}>
-        <Header title="Edit Gig" onBackPress={handleAttemptLeave} />
+      <View style={[styles.flex1, { backgroundColor: pageBackground }]}>
+        <Header title="Edit Gig" cardStyle onBackPress={() => router.replace('/manage')} />
 
         <View style={styles.contentFrame}>
 

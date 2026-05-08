@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { supabase } from '../lib/supabase';
 import CustomAlert, { AlertType } from '../src/components/CustomAlert';
 import Header from '../src/components/header';
@@ -45,6 +45,9 @@ type TeamRecord = {
 
 export default function EditProductionScreen() {
   const { colors, isDark } = useTheme();
+  const { width } = useWindowDimensions();
+  const isWebDesktop = Platform.OS === 'web' && width >= 768;
+  const pageBackground = isWebDesktop ? (isDark ? '#0A1224' : '#E9EEF8') : colors.background;
   const { contentBottomPadding } = useBottomBarClearance(24);
   const { userId } = useRequireAuth();
   const { session, userRole } = useAuth();
@@ -224,8 +227,8 @@ export default function EditProductionScreen() {
   };
 
   return (
-    <View style={[styles.container, { backgroundColor: colors.background }]}>
-      <Header title="Edit Production" onBackPress={handleReturnToTabs} />
+    <View style={[styles.container, { backgroundColor: pageBackground }]}>
+      <Header title="Edit Production" cardStyle onBackPress={() => router.replace('/manage')} />
 
       <ScrollView contentContainerStyle={[styles.content, { paddingBottom: contentBottomPadding }]} showsVerticalScrollIndicator={false}>
         <View style={styles.contentFrame}>

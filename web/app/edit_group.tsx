@@ -13,7 +13,8 @@ import {
     Text,
     TextInput,
     TouchableOpacity,
-    View
+    View,
+    useWindowDimensions,
 } from "react-native";
 import CustomAlert, { AlertType } from "../src/components/CustomAlert";
 import Header from "../src/components/header";
@@ -77,6 +78,9 @@ const IS_WEB = Platform.OS === "web";
 
 export default function EditGroupScreen() {
   const { colors, isDark } = useTheme();
+  const { width } = useWindowDimensions();
+  const isWebDesktop = Platform.OS === 'web' && width >= 768;
+  const pageBackground = isWebDesktop ? (isDark ? '#0A1224' : '#E9EEF8') : colors.background;
   const { id } = useLocalSearchParams();
   const returnTab = useLocalSearchParams<{
     returnTab?: string | string[];
@@ -1433,8 +1437,8 @@ export default function EditGroupScreen() {
 
   return (
     <>
-      <View style={[styles.flex1, { backgroundColor: colors.background }]}>
-        <Header title="Edit Group" onBackPress={handleAttemptLeave} />
+      <View style={[styles.flex1, { backgroundColor: pageBackground }]}>
+        <Header title="Edit Group" cardStyle onBackPress={() => router.replace('/manage')} />
 
         <View style={styles.contentFrame}>
 

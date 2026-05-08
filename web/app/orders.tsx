@@ -1,4 +1,4 @@
-﻿import { Ionicons } from "@expo/vector-icons";
+import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect } from "@react-navigation/native";
 import { router } from "expo-router";
 import React, { useCallback, useState } from "react";
@@ -43,7 +43,7 @@ export default function OrdersScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
-  const bg = isWebDesktop ? (isDark ? "#0F172A" : "#F1F5F9") : colors.background;
+  const bg = isWebDesktop ? (isDark ? '#0A1224' : '#E9EEF8') : colors.background;
   const cardBg = isWebDesktop ? (isDark ? "#1E293B" : "#FFFFFF") : colors.surface;
   const borderCol = isWebDesktop ? (isDark ? "#334155" : "#E2E8F0") : colors.border;
   const frameMaxWidth = 980;
@@ -149,16 +149,18 @@ export default function OrdersScreen() {
   if (isGuest) {
     return (
       <View style={[styles.container, { backgroundColor: bg }]}>
-        <Header title="Orders" onBackPress={() => router.back()} />
-        <GuestSignInGate message="Sign in to view your orders" />
+        <View style={[styles.pageWrap, isWebDesktop && styles.pageWrapWeb]}>
+          <Header title="Orders" cardStyle hideBackButton />
+          <GuestSignInGate message="Sign in to view your orders" />
+        </View>
       </View>
     );
   }
 
   return (
     <View style={[styles.container, { backgroundColor: bg }]}>
-      <Header title="Orders" onBackPress={() => router.back()} />
       <View style={[styles.pageWrap, isWebDesktop && styles.pageWrapWeb]}>
+        <Header title="Orders" cardStyle hideBackButton />
         <View style={[styles.pageFrame, { maxWidth: frameMaxWidth, paddingHorizontal: framePad }]}>
           {tabs.length > 1 && (
             <View style={[styles.tabs, { borderColor: panelBorder, backgroundColor: panelBg }]}>

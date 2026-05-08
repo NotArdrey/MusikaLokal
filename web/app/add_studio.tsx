@@ -92,6 +92,7 @@ const formatTimeInput = (text: string): string => {
 
 const TITLE_MAX_LENGTH = 120;
 const DESCRIPTION_MAX_LENGTH = 1000;
+const IS_WEB = Platform.OS === "web";
 
 const canonicalizeStudioType = (
   value: unknown,
@@ -5884,36 +5885,34 @@ const styles = StyleSheet.create({
   instrumentsGrid: {
     flexDirection: "row",
     flexWrap: "wrap",
-    gap: 12,
+    gap: 8,
   },
   instrumentCard: {
-    width: "30%",
-    aspectRatio: 1,
-    borderRadius: 12,
-    borderWidth: 1.5,
-    padding: 8,
+    flexDirection: "row",
     alignItems: "center",
-    justifyContent: "center",
+    gap: 8,
+    borderRadius: 10,
+    borderWidth: 1.5,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
     position: "relative",
+    minWidth: IS_WEB ? 140 : 120,
+    maxWidth: IS_WEB ? 220 : undefined,
   },
   instrumentImage: {
-    width: 48,
-    height: 48,
-    borderRadius: 8,
-    marginBottom: 6,
+    width: 32,
+    height: 32,
+    borderRadius: 6,
   },
   instrumentName: {
-    fontSize: 10,
+    fontSize: 12,
     fontFamily: "Poppins_500Medium",
-    textAlign: "center",
+    flex: 1,
   },
   instrumentCheckmark: {
-    position: "absolute",
-    top: 6,
-    right: 6,
-    width: 20,
-    height: 20,
-    borderRadius: 10,
+    width: 18,
+    height: 18,
+    borderRadius: 9,
     alignItems: "center",
     justifyContent: "center",
   },

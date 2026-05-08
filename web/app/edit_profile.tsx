@@ -638,7 +638,7 @@ export default function EditProfileScreen() {
   return (
     <View style={[styles.container, { backgroundColor: pageBackground }]}>
       <View style={[styles.pageFrame, isWebDesktop && styles.pageFrameWeb]}>
-        <Header title="Edit Profile" onBackPress={handleAttemptLeave} />
+        <Header title="Edit Profile" cardStyle onBackPress={() => router.replace('/manage')} />
 
         <ScrollView
           style={styles.scroll}

@@ -615,9 +615,9 @@ export default function ShopScreen() {
 
   return (
     <View style={[styles.container, { backgroundColor: pageBackground }]}>
-      <Header title="Marketplace" />
-
       <View style={[styles.pageFrame, isWebDesktop && styles.pageFrameWeb]}>
+        <Header title="Marketplace" cardStyle hideBackButton />
+
         {tabs.length > 1 && (
           <View style={[styles.tabBar, { backgroundColor: cardBg, borderColor: borderSoft }]}>
             {tabs.map((t) => {
