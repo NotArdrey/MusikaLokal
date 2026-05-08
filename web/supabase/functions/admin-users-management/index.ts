@@ -695,65 +695,51 @@ async function fetchDiditReviewAssetUrls(sessionId: string) {
     };
   }
 
-  let lastError = "";
-  let lastAssets: any = null;
+  const endpoint = `https://verification.didit.me/v3/session/${encodeURIComponent(sessionId)}/decision/`;
+  const diditResponse = await fetch(endpoint, {
+    method: "GET",
+    headers: {
+      "x-api-key": diditApiKey,
+    },
+  });
 
-  for (const endpoint of [
-    `https://verification.didit.me/v3/session/${encodeURIComponent(sessionId)}/decision/`,
-    `https://verification.didit.me/v3/session/${encodeURIComponent(sessionId)}`,
-  ]) {
-    const diditResponse = await fetch(endpoint, {
-      method: "GET",
-      headers: {
-        "x-api-key": diditApiKey,
-      },
-    });
-
-    const responseText = await diditResponse.text();
-    let responsePayload: any = null;
-    if (responseText) {
-      try {
-        responsePayload = JSON.parse(responseText);
-      } catch {
-        responsePayload = { raw: responseText.slice(0, 500) };
-      }
-    }
-
-    if (!diditResponse.ok) {
-      const diditMessage = String(
-        responsePayload?.message ||
-          responsePayload?.detail ||
-          responsePayload?.error ||
-          responsePayload?.raw ||
-          "",
-      ).trim();
-      lastError = diditMessage || `Didit asset fetch failed with HTTP ${diditResponse.status}.`;
-
-      console.error("didit_manual_review_assets_fetch_failed", {
-        sessionId,
-        status: diditResponse.status,
-        endpoint,
-        message: diditMessage || null,
-      });
-      continue;
-    }
-
-    lastAssets = extractDiditReviewAssetUrls(responsePayload);
-    if (lastAssets.available) {
-      return { ...lastAssets, error: null };
+  const responseText = await diditResponse.text();
+  let responsePayload: any = null;
+  if (responseText) {
+    try {
+      responsePayload = JSON.parse(responseText);
+    } catch {
+      responsePayload = { raw: responseText.slice(0, 500) };
     }
   }
 
-  return {
-    ...(lastAssets || {
+  if (!diditResponse.ok) {
+    const diditMessage = String(
+      responsePayload?.message ||
+        responsePayload?.detail ||
+        responsePayload?.error ||
+        responsePayload?.raw ||
+        "",
+    ).trim();
+
+    console.error("didit_manual_review_assets_fetch_failed", {
+      sessionId,
+      status: diditResponse.status,
+      endpoint,
+      message: diditMessage || null,
+    });
+
+    return {
       front_image_url: null,
       back_image_url: null,
       selfie_image_url: null,
       source_status: null,
       available: false,
-    }),
-    error: lastAssets ? null : lastError || "Didit assets were unavailable.",
-  };
+      error: diditMessage || `Didit asset fetch failed with HTTP ${diditResponse.status}.`,
+    };
+  }
+
+  return { ...extractDiditReviewAssetUrls(responsePayload), error: null };
 }
 
 function isPendingDiditStatus(rawStatus: unknown) {
@@ -1107,18 +1093,6 @@ serve(async (req: Request) => {
         }
       }
 
-      const diditAssetUrlsBySession = new Map<string, any>();
-      const diditSessionIds = Array.from(new Set<string>(
-        (reviews || [])
-          .filter((review: any) => isDiditBackedReview(review))
-          .map((review: any) => String(review.didit_session_id || "").trim())
-          .filter(Boolean),
-      ));
-
-      for (const sessionId of diditSessionIds.slice(0, 50)) {
-        diditAssetUrlsBySession.set(sessionId, await fetchDiditReviewAssetUrls(sessionId));
-      }
-
       const items = await Promise.all((reviews || []).map(async (review: any) => {
         const profile = profilesById.get(String(review.user_id)) || null;
         const reviewEmail = String(profile?.email || review.submitted_by_email || "").trim().toLowerCase();
@@ -1235,20 +1209,6 @@ serve(async (req: Request) => {
           selfie_image_url: null,
         } as Record<string, any>;
 
-        const diditSessionId = String(review.didit_session_id || "").trim();
-        const diditAssetUrls = diditSessionId ? diditAssetUrlsBySession.get(diditSessionId) : null;
-        if (diditAssetUrls) {
-          item.didit_review = {
-            ...(item.didit_review || {}),
-            status: normalizeDiditReviewStatus(diditAssetUrls.source_status) || item.didit_review?.status || "In Review",
-            assets_available: Boolean(diditAssetUrls.available),
-            assets_error: diditAssetUrls.error || null,
-          };
-          item.front_image_url = diditAssetUrls.front_image_url || null;
-          item.back_image_url = diditAssetUrls.back_image_url || null;
-          item.selfie_image_url = diditAssetUrls.selfie_image_url || null;
-        }
-
         if (review.front_image_path) {
           const { data: signed } = await client.storage
             .from("identity-manual")
@@ -1274,6 +1234,72 @@ serve(async (req: Request) => {
       }));
 
       return jsonResponse({ items, didit_queue_hydration: diditQueueHydration });
+    }
+
+    if (action === "fetch_manual_identity_review_assets") {
+      const reviewId = String(body?.reviewId || "").trim();
+
+      if (!reviewId) {
+        return jsonResponse({ error: "Missing reviewId" }, 400);
+      }
+
+      const { data: review, error: reviewError } = await client
+        .from("manual_identity_reviews")
+        .select("id, source, status, didit_session_id, metadata, front_image_path, back_image_path, selfie_image_path")
+        .eq("id", reviewId)
+        .maybeSingle();
+
+      if (reviewError) {
+        return jsonResponse({ error: reviewError.message }, 400);
+      }
+
+      if (!review) {
+        return jsonResponse({ error: "Identity review not found." }, 404);
+      }
+
+      const item = {
+        id: review.id,
+        didit_review: getDiditReviewInfo(review),
+        front_image_url: null,
+        back_image_url: null,
+        selfie_image_url: null,
+      } as Record<string, any>;
+
+      if (isDiditBackedReview(review)) {
+        const diditAssets = await fetchDiditReviewAssetUrls(String(review.didit_session_id || "").trim());
+        item.didit_review = {
+          ...(item.didit_review || {}),
+          status: normalizeDiditReviewStatus(diditAssets.source_status) || item.didit_review?.status || "In Review",
+          assets_available: Boolean(diditAssets.available),
+          assets_error: diditAssets.error || null,
+        };
+        item.front_image_url = diditAssets.front_image_url || null;
+        item.back_image_url = diditAssets.back_image_url || null;
+        item.selfie_image_url = diditAssets.selfie_image_url || null;
+      } else {
+        if (review.front_image_path) {
+          const { data: signed } = await client.storage
+            .from("identity-manual")
+            .createSignedUrl(String(review.front_image_path), 60 * 30);
+          item.front_image_url = signed?.signedUrl || null;
+        }
+
+        if (review.back_image_path) {
+          const { data: signed } = await client.storage
+            .from("identity-manual")
+            .createSignedUrl(String(review.back_image_path), 60 * 30);
+          item.back_image_url = signed?.signedUrl || null;
+        }
+
+        if (review.selfie_image_path) {
+          const { data: signed } = await client.storage
+            .from("identity-manual")
+            .createSignedUrl(String(review.selfie_image_path), 60 * 30);
+          item.selfie_image_url = signed?.signedUrl || null;
+        }
+      }
+
+      return jsonResponse({ item });
     }
 
     if (action === "review_manual_identity") {

@@ -108,6 +108,7 @@ const cleanManualReviewEmailError = (rawError: string) => {
 };
 
 type Tab = 'dashboard' | 'users' | 'reports' | 'audit' | 'posts' | 'products';
+type ManualReviewAssetKind = 'front' | 'back' | 'selfie';
 
 interface IdentityMatchAccount {
   user_id?: string | null;
@@ -253,6 +254,18 @@ const getDiditReviewInfo = (review?: ManualIdentityReviewEntry | null) => {
     assets_available: Boolean(review.didit_review?.assets_available),
     assets_error: review.didit_review?.assets_error || null,
   };
+};
+
+const getManualReviewAssetUrl = (review: ManualIdentityReviewEntry, asset: ManualReviewAssetKind) => {
+  if (asset === 'front') return String(review.front_image_url || '').trim();
+  if (asset === 'back') return String(review.back_image_url || '').trim();
+  return String(review.selfie_image_url || '').trim();
+};
+
+const getManualReviewAssetTitle = (asset: ManualReviewAssetKind) => {
+  if (asset === 'front') return 'Front of ID';
+  if (asset === 'back') return 'Back of ID';
+  return 'Selfie holding ID';
 };
 
 const formatDiditSessionLabel = (sessionId?: string | null) => {
@@ -671,6 +684,7 @@ export default function AdminIdentityReviewsPage() {
   const [manualReviewNotes, setManualReviewNotes] = useState('');
   const [duplicateOverrideConfirmed, setDuplicateOverrideConfirmed] = useState(false);
   const [manualReviewSubmitting, setManualReviewSubmitting] = useState(false);
+  const [manualReviewAssetLoading, setManualReviewAssetLoading] = useState<{ reviewId: string; asset: ManualReviewAssetKind } | null>(null);
   const [manualReviewTarget, setManualReviewTarget] = useState<ManualIdentityReviewEntry | null>(null);
   const [identityMatchPreview, setIdentityMatchPreview] = useState<ManualIdentityReviewEntry | null>(null);
   const [manualReviewMediaPreview, setManualReviewMediaPreview] = useState<{ uri: string; title: string } | null>(null);
@@ -760,15 +774,67 @@ export default function AdminIdentityReviewsPage() {
     };
   }, [loading, roleResolved, session, isGuest, isAdmin, fetchManualReviews]);
 
-  const openManualReviewAsset = useCallback((url?: string | null, title = 'Uploaded file') => {
-    const normalized = String(url || '').trim();
-    if (!normalized) {
+  const openManualReviewAsset = useCallback(async (review: ManualIdentityReviewEntry, asset: ManualReviewAssetKind) => {
+    const title = getManualReviewAssetTitle(asset);
+    const existingUrl = getManualReviewAssetUrl(review, asset);
+
+    if (existingUrl) {
+      setManualReviewMediaPreview({ uri: existingUrl, title });
+      return;
+    }
+
+    const diditSessionId = review.didit_session_id || review.didit_review?.session_id || null;
+    if (!isDiditBackedReviewSource(review.source, diditSessionId)) {
       showAlert('warning', 'File unavailable', 'No uploaded file was found for this item.');
       return;
     }
 
-    setManualReviewMediaPreview({ uri: normalized, title });
-  }, [showAlert]);
+    setManualReviewAssetLoading({ reviewId: review.id, asset });
+
+    try {
+      const data = await invokeAdminUsersManagement({
+        action: 'fetch_manual_identity_review_assets',
+        reviewId: review.id,
+      });
+      const loadedItem = (data?.item || {}) as Partial<ManualIdentityReviewEntry>;
+      const mergedReview = {
+        ...review,
+        ...loadedItem,
+        didit_review: {
+          ...(review.didit_review || {}),
+          ...(loadedItem.didit_review || {}),
+        },
+      };
+      const loadedUrl = getManualReviewAssetUrl(mergedReview as ManualIdentityReviewEntry, asset);
+
+      setManualReviews((previousReviews) => previousReviews.map((item) => (
+        item.id === review.id
+          ? {
+              ...item,
+              ...loadedItem,
+              didit_review: {
+                ...(item.didit_review || {}),
+                ...(loadedItem.didit_review || {}),
+              },
+            }
+          : item
+      )));
+
+      if (!loadedUrl) {
+        showAlert('warning', 'File unavailable', 'No uploaded file was found for this item.');
+        return;
+      }
+
+      setManualReviewMediaPreview({ uri: loadedUrl, title });
+    } catch (error) {
+      const message = await getErrorMessage(error, 'Unable to load the selected identity file.');
+      showAlert('error', 'Failed to load file', message);
+    } finally {
+      setManualReviewAssetLoading((current) => (
+        current?.reviewId === review.id && current.asset === asset ? null : current
+      ));
+    }
+  }, [invokeAdminUsersManagement, showAlert]);
 
   const openManualReviewDecisionModal = useCallback((targetReview: ManualIdentityReviewEntry, decision: 'APPROVED' | 'DECLINED') => {
     setManualReviewTarget(targetReview);
@@ -1018,13 +1084,13 @@ export default function AdminIdentityReviewsPage() {
                 const profileName = review.profile?.full_name || review.submitted_by_email || 'Unknown user';
                 const profileEmail = review.profile?.email || review.submitted_by_email || '-';
                 const isReviewBusy = manualReviewActionLoadingId === review.id;
+                const loadingAsset = manualReviewAssetLoading?.reviewId === review.id ? manualReviewAssetLoading.asset : null;
                 const identityMatchWarning = getIdentityMatchWarning(review);
                 const matchedAccounts = identityMatchWarning?.matched_accounts || [];
                 const reviewReason = review.review_reason || String(review.metadata?.['review_reason'] || '') || review.duplicate_reason || null;
                 const matchTypeLabels = (identityMatchWarning?.match_types || [identityMatchWarning?.matched_on])
                   .filter(Boolean)
                   .map((matchType) => formatIdentityMatchType(String(matchType)));
-                const diditReview = getDiditReviewInfo(review);
 
                 return (
                   <View key={review.id} style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
@@ -1034,28 +1100,6 @@ export default function AdminIdentityReviewsPage() {
                     <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Document: {review.document_type} ({review.document_country || 'PHL'})</Text>
                     <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>ID expires: {review.profile?.id_document_expiry || '-'}</Text>
                     <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Source: {String(review.source || 'MANUAL_UPLOAD').replace(/_/g, ' ')}</Text>
-                    {diditReview ? (
-                      <View style={[styles.diditReviewBox, { backgroundColor: isDark ? '#172554' : '#EFF6FF', borderColor: '#3B82F6' }]}>
-                        <View style={styles.duplicateWarningTitleRow}>
-                          <Ionicons name="shield-checkmark-outline" size={16} color="#2563EB" />
-                          <Text style={[styles.duplicateWarningTitle, { color: isDark ? '#BFDBFE' : '#1D4ED8' }]}>Didit Review</Text>
-                        </View>
-                        <Text style={[styles.duplicateWarningText, { color: isDark ? '#DBEAFE' : '#1E40AF' }]}>
-                          Didit status: {diditReview.status} - MusikaLokal status: Pending Review
-                        </Text>
-                        <Text style={[styles.duplicateWarningText, { color: isDark ? '#DBEAFE' : '#1E40AF' }]}>
-                          Session: {formatDiditSessionLabel(diditReview.session_id)}
-                        </Text>
-                        <Text style={[styles.duplicateWarningText, { color: isDark ? '#DBEAFE' : '#1E40AF' }]}>
-                          Didit files: {diditReview.assets_available ? 'Ready' : 'Unavailable'}
-                        </Text>
-                        {diditReview.assets_error ? (
-                          <Text style={[styles.duplicateWarningText, { color: isDark ? '#FCA5A5' : '#B91C1C' }]}>
-                            {diditReview.assets_error}
-                          </Text>
-                        ) : null}
-                      </View>
-                    ) : null}
                     {reviewReason ? (
                       <Text style={[styles.cardMeta, { color: isDark ? '#FBBF24' : '#D97706' }]}>
                         Review reason: {formatIdentityReviewReason(reviewReason)}
@@ -1103,28 +1147,43 @@ export default function AdminIdentityReviewsPage() {
                     <View style={styles.cardActionsRow}>
                       <TouchableOpacity
                         activeOpacity={1}
-                        onPress={() => openManualReviewAsset(review.front_image_url, 'Front of ID')}
-                        style={[styles.smallActionButton, { borderColor: colors.border }]}
+                        disabled={Boolean(loadingAsset)}
+                        onPress={() => void openManualReviewAsset(review, 'front')}
+                        style={[styles.smallActionButton, { borderColor: colors.border, opacity: loadingAsset ? 0.65 : 1 }]}
                       >
-                        <Ionicons name="image-outline" size={14} color={colors.text} />
+                        {loadingAsset === 'front' ? (
+                          <ActivityIndicator size="small" color={colors.text} />
+                        ) : (
+                          <Ionicons name="image-outline" size={14} color={colors.text} />
+                        )}
                         <Text style={[styles.smallActionText, { color: colors.text }]}>Front</Text>
                       </TouchableOpacity>
 
                       <TouchableOpacity
                         activeOpacity={1}
-                        onPress={() => openManualReviewAsset(review.back_image_url, 'Back of ID')}
-                        style={[styles.smallActionButton, { borderColor: colors.border }]}
+                        disabled={Boolean(loadingAsset)}
+                        onPress={() => void openManualReviewAsset(review, 'back')}
+                        style={[styles.smallActionButton, { borderColor: colors.border, opacity: loadingAsset ? 0.65 : 1 }]}
                       >
-                        <Ionicons name="images-outline" size={14} color={colors.text} />
+                        {loadingAsset === 'back' ? (
+                          <ActivityIndicator size="small" color={colors.text} />
+                        ) : (
+                          <Ionicons name="images-outline" size={14} color={colors.text} />
+                        )}
                         <Text style={[styles.smallActionText, { color: colors.text }]}>Back</Text>
                       </TouchableOpacity>
 
                       <TouchableOpacity
                         activeOpacity={1}
-                        onPress={() => openManualReviewAsset(review.selfie_image_url, 'Selfie holding ID')}
-                        style={[styles.smallActionButton, { borderColor: colors.border }]}
+                        disabled={Boolean(loadingAsset)}
+                        onPress={() => void openManualReviewAsset(review, 'selfie')}
+                        style={[styles.smallActionButton, { borderColor: colors.border, opacity: loadingAsset ? 0.65 : 1 }]}
                       >
-                        <Ionicons name="person-circle-outline" size={14} color={colors.text} />
+                        {loadingAsset === 'selfie' ? (
+                          <ActivityIndicator size="small" color={colors.text} />
+                        ) : (
+                          <Ionicons name="person-circle-outline" size={14} color={colors.text} />
+                        )}
                         <Text style={[styles.smallActionText, { color: colors.text }]}>Selfie</Text>
                       </TouchableOpacity>
 
