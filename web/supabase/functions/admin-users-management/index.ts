@@ -6,6 +6,7 @@ import { sendEmailWithGmail } from "../_shared/gmailEmail.ts";
 import {
   claimApprovedIdentityDocument,
   getDuplicateIdentityReviewReason,
+  prepareIdentityNameBirthDateDuplicateInput,
   recordIdentityDocumentClaim,
   queueIdentityReview,
 } from "../_shared/identityDuplicate.ts";
@@ -34,6 +35,11 @@ const roleAliases: Record<string, string> = {
   manager: "musician",
   "musician-member": "musician",
 };
+
+const hiddenUserManagementVerificationStatuses = [
+  "DECLINED",
+  "PENDING_REVIEW",
+];
 
 function jsonResponse(payload: unknown, status = 200) {
   return new Response(JSON.stringify(payload), {
@@ -124,6 +130,105 @@ function parseBoolean(raw: unknown): boolean | null {
 function normalizeTextField(raw: unknown): string | null {
   const value = String(raw ?? "").trim();
   return value.length > 0 ? value : null;
+}
+
+function normalizeDateOnly(raw: unknown): string | null {
+  const value = String(raw ?? "").trim();
+  const match = value.match(/^(\d{4}-\d{2}-\d{2})/);
+  return match ? match[1] : null;
+}
+
+function getApprovalClaimReviewReason(approvalClaim: any, role: string) {
+  return String(approvalClaim?.review_reason || approvalClaim?.reason || "").trim() || getDuplicateIdentityReviewReason(role);
+}
+
+function getApprovalClaimMatchedOn(approvalClaim: any, fallback = "DOCUMENT_FINGERPRINT") {
+  return String(approvalClaim?.matched_on || approvalClaim?.match_type || fallback).trim().toUpperCase();
+}
+
+function getIdentityMatchLabel(matchType: unknown) {
+  const normalized = String(matchType || "").trim().toUpperCase();
+  if (normalized === "NAME_BIRTHDATE") return "Same name + birthdate";
+  if (normalized === "DOCUMENT_FINGERPRINT") return "Same verified ID";
+  return "Possible identity match";
+}
+
+function normalizeIdentityMatchType(matchType: unknown, fallback = "DOCUMENT_FINGERPRINT") {
+  const normalized = String(matchType || fallback || "").trim().toUpperCase();
+  return normalized || "DOCUMENT_FINGERPRINT";
+}
+
+function getReviewMetadataObject(review: any) {
+  return review?.metadata && typeof review.metadata === "object" ? review.metadata : {};
+}
+
+function metadataMatchSources(metadata: any) {
+  return [
+    metadata?.duplicate_matches,
+    metadata?.matches,
+    metadata?.approval_claim_result?.matches,
+    metadata?.claim_result?.matches,
+  ].filter(Array.isArray);
+}
+
+function mapMetadataIdentityMatch(rawMatch: any, fallbackMatchedOn: unknown) {
+  if (!rawMatch || typeof rawMatch !== "object") return null;
+  const matchedOn = normalizeIdentityMatchType(rawMatch.matched_on || rawMatch.match_type || fallbackMatchedOn);
+  const userId = String(rawMatch.user_id || rawMatch.original_user_id || rawMatch.matched_existing_user_id || "").trim();
+  const email = String(rawMatch.email || rawMatch.normalized_email || rawMatch.profiles?.email || "").trim().toLowerCase();
+  if (!userId && !email) return null;
+
+  return {
+    user_id: userId || null,
+    email: email || null,
+    full_name: rawMatch.full_name || rawMatch.verified_full_legal_name || rawMatch.profiles?.full_name || null,
+    role: rawMatch.role || null,
+    source: rawMatch.source || null,
+    verified_at: rawMatch.verified_at || rawMatch.created_at || null,
+    birth_date: normalizeDateOnly(rawMatch.birth_date),
+    matched_on: matchedOn,
+    match_type: matchedOn,
+    match_label: getIdentityMatchLabel(matchedOn),
+  };
+}
+
+function getReviewMetadataIdentityMatches(review: any, fallbackMatchedOn: unknown) {
+  const metadata = getReviewMetadataObject(review);
+  const matches: any[] = [];
+
+  for (const source of metadataMatchSources(metadata)) {
+    for (const rawMatch of source) {
+      const match = mapMetadataIdentityMatch(rawMatch, fallbackMatchedOn);
+      if (match) matches.push(match);
+    }
+  }
+
+  const matchedExistingUserId =
+    metadata?.matched_existing_user_id ||
+    metadata?.approval_claim_result?.matched_existing_user_id ||
+    metadata?.claim_result?.matched_existing_user_id;
+  if (matchedExistingUserId) {
+    const matchedOn = normalizeIdentityMatchType(metadata?.matched_on || metadata?.approval_claim_result?.matched_on || fallbackMatchedOn);
+    matches.push({
+      user_id: String(matchedExistingUserId),
+      email: null,
+      full_name: null,
+      role: null,
+      source: metadata?.source || null,
+      verified_at: null,
+      birth_date: null,
+      matched_on: matchedOn,
+      match_type: matchedOn,
+      match_label: getIdentityMatchLabel(matchedOn),
+    });
+  }
+
+  return matches.filter((match, index, all) => (
+    index === all.findIndex((other) => (
+      String(other.user_id || other.email || "") === String(match.user_id || match.email || "") &&
+      String(other.matched_on || "") === String(match.matched_on || "")
+    ))
+  ));
 }
 
 function normalizeStringList(raw: unknown): string[] {
@@ -430,12 +535,17 @@ function normalizeDiditReviewStatus(rawStatus: unknown) {
   return value || null;
 }
 
+function isDiditBackedReview(review: any) {
+  const source = String(review?.source || "").trim().toUpperCase();
+  return Boolean(String(review?.didit_session_id || "").trim()) && source.startsWith("DIDIT");
+}
+
 function isDiditPendingReview(review: any) {
   return String(review?.source || "").trim().toUpperCase() === "DIDIT_PENDING";
 }
 
 function getDiditReviewInfo(review: any) {
-  if (!isDiditPendingReview(review)) return null;
+  if (!isDiditBackedReview(review)) return null;
 
   const metadata = review?.metadata && typeof review.metadata === "object" ? review.metadata : {};
   const rawStatus = metadata.didit_status || metadata.source_session_status || review.status || "PENDING_REVIEW";
@@ -443,7 +553,7 @@ function getDiditReviewInfo(review: any) {
   return {
     status: normalizeDiditReviewStatus(rawStatus) || "In Review",
     session_id: review.didit_session_id || null,
-    action_available: Boolean(review.didit_session_id),
+    action_available: isDiditPendingReview(review) && Boolean(review.didit_session_id),
     last_synced_at: metadata.didit_status_synced_at || null,
   };
 }
@@ -461,35 +571,113 @@ function firstArrayItem(value: unknown) {
   return Array.isArray(value) && value.length > 0 ? value[0] : null;
 }
 
+function firstObject(...values: unknown[]) {
+  for (const value of values) {
+    if (Array.isArray(value) && value.length > 0 && value[0] && typeof value[0] === "object") {
+      return value[0];
+    }
+    if (value && typeof value === "object" && !Array.isArray(value)) {
+      return value;
+    }
+  }
+
+  return null;
+}
+
+function findDiditDecisionPayload(source: any) {
+  const candidates = [
+    source?.decision,
+    source?.verification_data?.decision,
+    source?.details?.decision,
+    source,
+  ];
+
+  return candidates.find((candidate) => (
+    candidate &&
+    typeof candidate === "object" &&
+    (
+      Array.isArray(candidate.id_verifications) ||
+      Array.isArray(candidate.face_matches) ||
+      candidate.id_verification ||
+      candidate.face_match ||
+      candidate.liveness_check
+    )
+  )) || source;
+}
+
 function extractDiditReviewAssetUrls(sessionDecision: any) {
-  const idVerification = firstArrayItem(sessionDecision?.id_verifications);
-  const livenessCheck = firstArrayItem(sessionDecision?.liveness_checks);
-  const faceMatch = firstArrayItem(sessionDecision?.face_matches);
-  const nfcVerification = firstArrayItem(sessionDecision?.nfc_verifications);
+  const decision = findDiditDecisionPayload(sessionDecision);
+  const idVerification = firstObject(
+    decision?.id_verifications,
+    decision?.id_verification,
+    decision?.idVerification,
+  );
+  const livenessCheck = firstObject(
+    decision?.liveness_checks,
+    decision?.liveness_check,
+    decision?.liveness,
+  );
+  const faceMatch = firstObject(
+    decision?.face_matches,
+    decision?.face_match,
+    decision?.faceMatch,
+  );
+  const nfcVerification = firstObject(
+    decision?.nfc_verifications,
+    decision?.nfc_verification,
+    decision?.nfcVerification,
+  );
 
   const frontImageUrl = firstNonEmptyString(
     idVerification?.full_front_image,
+    idVerification?.full_front_image_url,
     idVerification?.front_image,
+    idVerification?.front_image_url,
     idVerification?.front_image_camera_front,
+    idVerification?.front_image_camera_front_url,
+    idVerification?.document_front_image,
+    idVerification?.document_front_image_url,
+    idVerification?.images?.front,
+    idVerification?.images?.front_image,
+    idVerification?.document?.front_image,
   );
   const backImageUrl = firstNonEmptyString(
     idVerification?.full_back_image,
+    idVerification?.full_back_image_url,
     idVerification?.back_image,
+    idVerification?.back_image_url,
     idVerification?.back_image_camera_front,
+    idVerification?.back_image_camera_front_url,
+    idVerification?.document_back_image,
+    idVerification?.document_back_image_url,
+    idVerification?.images?.back,
+    idVerification?.images?.back_image,
+    idVerification?.document?.back_image,
   );
   const selfieImageUrl = firstNonEmptyString(
     livenessCheck?.reference_image,
+    livenessCheck?.reference_image_url,
+    livenessCheck?.image,
+    livenessCheck?.image_url,
+    livenessCheck?.selfie_image,
+    livenessCheck?.selfie_image_url,
     faceMatch?.source_image,
+    faceMatch?.source_image_url,
     faceMatch?.target_image,
+    faceMatch?.target_image_url,
+    faceMatch?.selfie_image,
+    faceMatch?.selfie_image_url,
     nfcVerification?.portrait_image,
+    nfcVerification?.portrait_image_url,
     idVerification?.portrait_image,
+    idVerification?.portrait_image_url,
   );
 
   return {
     front_image_url: frontImageUrl,
     back_image_url: backImageUrl,
     selfie_image_url: selfieImageUrl,
-    source_status: sessionDecision?.status || null,
+    source_status: decision?.status || sessionDecision?.status || null,
     available: Boolean(frontImageUrl || backImageUrl || selfieImageUrl),
   };
 }
@@ -507,15 +695,13 @@ async function fetchDiditReviewAssetUrls(sessionId: string) {
     };
   }
 
-  const diditResponse = await fetch(
-    `https://verification.didit.me/v3/session/${encodeURIComponent(sessionId)}/decision/`,
-    {
-      method: "GET",
-      headers: {
-        "x-api-key": diditApiKey,
-      },
+  const endpoint = `https://verification.didit.me/v3/session/${encodeURIComponent(sessionId)}/decision/`;
+  const diditResponse = await fetch(endpoint, {
+    method: "GET",
+    headers: {
+      "x-api-key": diditApiKey,
     },
-  );
+  });
 
   const responseText = await diditResponse.text();
   let responsePayload: any = null;
@@ -539,6 +725,7 @@ async function fetchDiditReviewAssetUrls(sessionId: string) {
     console.error("didit_manual_review_assets_fetch_failed", {
       sessionId,
       status: diditResponse.status,
+      endpoint,
       message: diditMessage || null,
     });
 
@@ -552,10 +739,7 @@ async function fetchDiditReviewAssetUrls(sessionId: string) {
     };
   }
 
-  return {
-    ...extractDiditReviewAssetUrls(responsePayload),
-    error: null,
-  };
+  return { ...extractDiditReviewAssetUrls(responsePayload), error: null };
 }
 
 function isPendingDiditStatus(rawStatus: unknown) {
@@ -607,7 +791,9 @@ async function queueMissingDiditPendingReviews(client: any) {
   }
 
   const existingByUser = new Set((existingReviews || []).map((review: any) => String(review.user_id || "")));
-  const sessionByRef = new Map((sessions || []).map((session: any) => [String(session.session_ref || ""), session]));
+  const sessionByRef = new Map<string, any>(
+    (sessions || []).map((session: any) => [String(session.session_ref || ""), session]),
+  );
   let created = 0;
 
   for (const profile of profiles) {
@@ -621,6 +807,11 @@ async function queueMissingDiditPendingReviews(client: any) {
     const verificationData = session?.verification_data && typeof session.verification_data === "object"
       ? session.verification_data
       : {};
+    const identityNameBirthDate = prepareIdentityNameBirthDateDuplicateInput(verificationData.raw_data || verificationData, {
+      fullLegalName: verificationData.verified_full_legal_name || verificationData.full_legal_name || verificationData.full_name,
+      normalizedFullLegalName: verificationData.normalized_full_legal_name,
+      birthDate: verificationData.birth_date || verificationData.date_of_birth,
+    });
 
     const queued = await queueIdentityReview(client, {
       userId,
@@ -632,6 +823,11 @@ async function queueMissingDiditPendingReviews(client: any) {
       source: "DIDIT_PENDING",
       diditSessionId,
       documentFingerprint: verificationData.document_fingerprint || null,
+      verifiedFullLegalName: identityNameBirthDate.fullLegalName,
+      normalizedFullLegalName: identityNameBirthDate.normalizedFullLegalName,
+      birthDate: identityNameBirthDate.birthDate,
+      reviewReason: verificationData.review_reason || null,
+      matchedOn: verificationData.matched_on || null,
       metadata: {
         didit_status: normalizeDiditReviewStatus(session?.status || profile.verification_status || "PENDING_REVIEW"),
         source_session_status: session?.status || profile.verification_status || "PENDING_REVIEW",
@@ -764,7 +960,7 @@ serve(async (req: Request) => {
         .select(
           "id, full_name, email, role, is_verified, verification_status, created_at, contact_number, address, location, bio",
         )
-        .or("verification_status.is.null,verification_status.neq.DECLINED")
+        .or(`verification_status.is.null,verification_status.not.in.(${hiddenUserManagementVerificationStatuses.join(",")})`)
         .order("created_at", { ascending: false })
         .limit(limit);
 
@@ -787,7 +983,7 @@ serve(async (req: Request) => {
       let reviewQuery = client
         .from("manual_identity_reviews")
         .select(
-          "id, user_id, submitted_by_email, submitted_role, document_type, document_type_key, document_country, source, status, didit_session_id, document_fingerprint, duplicate_reason, duplicate_match_count, metadata, front_image_path, back_image_path, selfie_image_path, review_notes, reviewed_by, reviewed_at, expected_decision_by, created_at, updated_at",
+          "id, user_id, submitted_by_email, submitted_role, document_type, document_type_key, document_country, source, status, didit_session_id, document_fingerprint, verified_full_legal_name, normalized_full_legal_name, birth_date, review_reason, matched_on, duplicate_reason, duplicate_match_count, metadata, front_image_path, back_image_path, selfie_image_path, review_notes, reviewed_by, reviewed_at, expected_decision_by, created_at, updated_at",
         )
         .order("created_at", { ascending: false })
         .limit(limit);
@@ -811,7 +1007,7 @@ serve(async (req: Request) => {
           .in("id", userIds);
 
         if (!linkedProfilesError && linkedProfiles) {
-          profilesById = new Map(linkedProfiles.map((item: any) => [String(item.id), item]));
+          profilesById = new Map<string, any>(linkedProfiles.map((item: any) => [String(item.id), item]));
         }
       }
 
@@ -833,16 +1029,16 @@ serve(async (req: Request) => {
       if (reviewFingerprints.length > 0 && reviewRoles.length > 0) {
         const { data: approvedClaims, error: approvedClaimsError } = await client
           .from("identity_document_claims")
-          .select("id, user_id, role, source, status, created_at, document_fingerprint, profiles:user_id(id, full_name, email, role)")
+          .select("id, user_id, role, source, status, created_at, document_fingerprint, verified_full_legal_name, normalized_full_legal_name, birth_date, profiles:user_id(id, full_name, email, role)")
           .in("document_fingerprint", reviewFingerprints)
           .in("role", reviewRoles)
-          .eq("status", "APPROVED");
+          .in("status", ["APPROVED", "PENDING_REVIEW"]);
 
         if (approvedClaimsError) {
           return jsonResponse({ error: approvedClaimsError.message }, 400);
         }
 
-        approvedClaimsByFingerprintRole = new Map();
+        approvedClaimsByFingerprintRole = new Map<string, any[]>();
         for (const claim of approvedClaims || []) {
           const key = `${String(claim.document_fingerprint || "")}:${String(claim.role || "").trim().toLowerCase()}`;
           const existing = approvedClaimsByFingerprintRole.get(key) || [];
@@ -851,16 +1047,50 @@ serve(async (req: Request) => {
         }
       }
 
-      const diditAssetUrlsBySession = new Map<string, any>();
-      const diditSessionIds = Array.from(new Set(
-        (reviews || [])
-          .filter((review: any) => isDiditPendingReview(review))
-          .map((review: any) => String(review.didit_session_id || "").trim())
-          .filter(Boolean),
-      ));
+      const reviewNameBirthInputs = (reviews || [])
+        .map((review: any) => {
+          const profile = profilesById.get(String(review.user_id));
+          const role = String(review.submitted_role || profile?.role || "").trim().toLowerCase();
+          const input = prepareIdentityNameBirthDateDuplicateInput(null, {
+            fullLegalName: review.verified_full_legal_name,
+            normalizedFullLegalName: review.normalized_full_legal_name,
+            birthDate: review.birth_date,
+          });
+          return {
+            role,
+            normalizedFullLegalName: input.normalizedFullLegalName,
+            birthDate: input.birthDate,
+          };
+        })
+        .filter((item: any) => item.role && item.normalizedFullLegalName && item.birthDate);
+      const reviewNormalizedNames = Array.from(new Set(reviewNameBirthInputs.map((item: any) => item.normalizedFullLegalName)));
+      const reviewBirthDates = Array.from(new Set(reviewNameBirthInputs.map((item: any) => item.birthDate)));
+      let approvedClaimsByNameBirthRole = new Map<string, any[]>();
 
-      for (const sessionId of diditSessionIds.slice(0, 50)) {
-        diditAssetUrlsBySession.set(sessionId, await fetchDiditReviewAssetUrls(sessionId));
+      if (reviewRoles.length > 0 && reviewNormalizedNames.length > 0 && reviewBirthDates.length > 0) {
+        const { data: approvedNameBirthClaims, error: approvedNameBirthClaimsError } = await client
+          .from("identity_document_claims")
+          .select("id, user_id, role, source, status, created_at, verified_full_legal_name, normalized_full_legal_name, birth_date, profiles:user_id(id, full_name, email, role)")
+          .in("role", reviewRoles)
+          .in("normalized_full_legal_name", reviewNormalizedNames)
+          .in("birth_date", reviewBirthDates)
+          .eq("status", "APPROVED");
+
+        if (approvedNameBirthClaimsError) {
+          return jsonResponse({ error: approvedNameBirthClaimsError.message }, 400);
+        }
+
+        approvedClaimsByNameBirthRole = new Map<string, any[]>();
+        for (const claim of approvedNameBirthClaims || []) {
+          const key = [
+            String(claim.role || "").trim().toLowerCase(),
+            String(claim.normalized_full_legal_name || "").trim(),
+            normalizeDateOnly(claim.birth_date) || "",
+          ].join(":");
+          const existing = approvedClaimsByNameBirthRole.get(key) || [];
+          existing.push(claim);
+          approvedClaimsByNameBirthRole.set(key, existing);
+        }
       }
 
       const items = await Promise.all((reviews || []).map(async (review: any) => {
@@ -882,8 +1112,83 @@ serve(async (req: Request) => {
             full_name: claim.profiles?.full_name || null,
             role: claim.role,
             source: claim.source,
+            claim_status: claim.status,
             verified_at: claim.created_at,
+            matched_on: "DOCUMENT_FINGERPRINT",
+            match_type: "DOCUMENT_FINGERPRINT",
+            match_label: getIdentityMatchLabel("DOCUMENT_FINGERPRINT"),
           }));
+        const reviewNameBirth = prepareIdentityNameBirthDateDuplicateInput(null, {
+          fullLegalName: review.verified_full_legal_name,
+          normalizedFullLegalName: review.normalized_full_legal_name,
+          birthDate: review.birth_date,
+        });
+        const nameBirthWarningKey = [
+          reviewRole,
+          String(reviewNameBirth.normalizedFullLegalName || "").trim(),
+          String(reviewNameBirth.birthDate || "").trim(),
+        ].join(":");
+        const nameBirthMatches = reviewNameBirth.hasNameBirthDate
+          ? (approvedClaimsByNameBirthRole.get(nameBirthWarningKey) || [])
+            .filter((claim: any) => {
+              const matchUserId = String(claim.user_id || "").trim();
+              const matchEmail = String(claim.profiles?.email || "").trim().toLowerCase();
+              return matchUserId &&
+                matchUserId !== String(review.user_id) &&
+                (!reviewEmail || !matchEmail || matchEmail !== reviewEmail);
+            })
+            .map((claim: any) => ({
+              user_id: claim.user_id,
+              email: claim.profiles?.email || null,
+              full_name: claim.profiles?.full_name || claim.verified_full_legal_name || null,
+              role: claim.role,
+              source: claim.source,
+              verified_at: claim.created_at,
+              birth_date: normalizeDateOnly(claim.birth_date),
+              matched_on: "NAME_BIRTHDATE",
+              match_type: "NAME_BIRTHDATE",
+              match_label: getIdentityMatchLabel("NAME_BIRTHDATE"),
+            }))
+          : [];
+        const reviewMetadata = getReviewMetadataObject(review);
+        const fallbackMatchedOn = review.matched_on || reviewMetadata?.matched_on || reviewMetadata?.approval_claim_result?.matched_on || "DOCUMENT_FINGERPRINT";
+        const metadataMatches = getReviewMetadataIdentityMatches(review, fallbackMatchedOn)
+          .filter((match: any) => {
+            const matchUserId = String(match.user_id || "").trim();
+            const matchEmail = String(match.email || "").trim().toLowerCase();
+            return matchUserId !== String(review.user_id) && (!reviewEmail || !matchEmail || matchEmail !== reviewEmail);
+          });
+        const allIdentityMatches = [
+          ...duplicateMatches,
+          ...nameBirthMatches.filter((nameMatch: any) => !duplicateMatches.some((docMatch: any) => (
+            String(docMatch.user_id || "") === String(nameMatch.user_id || "")
+          ))),
+          ...metadataMatches.filter((metadataMatch: any) => ![...duplicateMatches, ...nameBirthMatches].some((match: any) => (
+            String(match.user_id || match.email || "") === String(metadataMatch.user_id || metadataMatch.email || "") &&
+            String(match.matched_on || match.match_type || "") === String(metadataMatch.matched_on || metadataMatch.match_type || "")
+          ))),
+        ];
+        const matchTypes = Array.from(new Set(allIdentityMatches.map((match: any) => String(match.matched_on || match.match_type || "").trim()).filter(Boolean)));
+        const fallbackMatchCount = Number(
+          review.duplicate_match_count ||
+          reviewMetadata?.duplicate_match_count ||
+          reviewMetadata?.approval_claim_result?.duplicate_count ||
+          reviewMetadata?.approval_claim_result?.matches?.length ||
+          0,
+        );
+        const hasStoredDuplicateSignal = fallbackMatchCount > 0 || Boolean(review.duplicate_reason || review.review_reason);
+        const identityMatchWarning = allIdentityMatches.length > 0 || hasStoredDuplicateSignal
+          ? {
+              same_role: true,
+              match_count: Math.max(allIdentityMatches.length, Number.isFinite(fallbackMatchCount) ? fallbackMatchCount : 0),
+              match_types: matchTypes.length > 0 ? matchTypes : [normalizeIdentityMatchType(fallbackMatchedOn)],
+              has_document_match: duplicateMatches.length > 0,
+              has_name_birthdate_match: nameBirthMatches.length > 0,
+              review_reason: review.review_reason || reviewMetadata?.review_reason || review.duplicate_reason || null,
+              matched_on: review.matched_on || reviewMetadata?.matched_on || matchTypes[0] || normalizeIdentityMatchType(fallbackMatchedOn),
+              matched_accounts: allIdentityMatches.slice(0, 5),
+            }
+          : null;
 
         const item = {
           ...review,
@@ -898,24 +1203,11 @@ serve(async (req: Request) => {
                 matched_accounts: duplicateMatches.slice(0, 5),
               }
             : null,
+          identity_match_warning: identityMatchWarning,
           front_image_url: null,
           back_image_url: null,
           selfie_image_url: null,
         } as Record<string, any>;
-
-        const diditSessionId = String(review.didit_session_id || "").trim();
-        const diditAssetUrls = diditSessionId ? diditAssetUrlsBySession.get(diditSessionId) : null;
-        if (diditAssetUrls) {
-          item.didit_review = {
-            ...(item.didit_review || {}),
-            status: normalizeDiditReviewStatus(diditAssetUrls.source_status) || item.didit_review?.status || "In Review",
-            assets_available: Boolean(diditAssetUrls.available),
-            assets_error: diditAssetUrls.error || null,
-          };
-          item.front_image_url = diditAssetUrls.front_image_url || null;
-          item.back_image_url = diditAssetUrls.back_image_url || null;
-          item.selfie_image_url = diditAssetUrls.selfie_image_url || null;
-        }
 
         if (review.front_image_path) {
           const { data: signed } = await client.storage
@@ -942,6 +1234,72 @@ serve(async (req: Request) => {
       }));
 
       return jsonResponse({ items, didit_queue_hydration: diditQueueHydration });
+    }
+
+    if (action === "fetch_manual_identity_review_assets") {
+      const reviewId = String(body?.reviewId || "").trim();
+
+      if (!reviewId) {
+        return jsonResponse({ error: "Missing reviewId" }, 400);
+      }
+
+      const { data: review, error: reviewError } = await client
+        .from("manual_identity_reviews")
+        .select("id, source, status, didit_session_id, metadata, front_image_path, back_image_path, selfie_image_path")
+        .eq("id", reviewId)
+        .maybeSingle();
+
+      if (reviewError) {
+        return jsonResponse({ error: reviewError.message }, 400);
+      }
+
+      if (!review) {
+        return jsonResponse({ error: "Identity review not found." }, 404);
+      }
+
+      const item = {
+        id: review.id,
+        didit_review: getDiditReviewInfo(review),
+        front_image_url: null,
+        back_image_url: null,
+        selfie_image_url: null,
+      } as Record<string, any>;
+
+      if (isDiditBackedReview(review)) {
+        const diditAssets = await fetchDiditReviewAssetUrls(String(review.didit_session_id || "").trim());
+        item.didit_review = {
+          ...(item.didit_review || {}),
+          status: normalizeDiditReviewStatus(diditAssets.source_status) || item.didit_review?.status || "In Review",
+          assets_available: Boolean(diditAssets.available),
+          assets_error: diditAssets.error || null,
+        };
+        item.front_image_url = diditAssets.front_image_url || null;
+        item.back_image_url = diditAssets.back_image_url || null;
+        item.selfie_image_url = diditAssets.selfie_image_url || null;
+      } else {
+        if (review.front_image_path) {
+          const { data: signed } = await client.storage
+            .from("identity-manual")
+            .createSignedUrl(String(review.front_image_path), 60 * 30);
+          item.front_image_url = signed?.signedUrl || null;
+        }
+
+        if (review.back_image_path) {
+          const { data: signed } = await client.storage
+            .from("identity-manual")
+            .createSignedUrl(String(review.back_image_path), 60 * 30);
+          item.back_image_url = signed?.signedUrl || null;
+        }
+
+        if (review.selfie_image_path) {
+          const { data: signed } = await client.storage
+            .from("identity-manual")
+            .createSignedUrl(String(review.selfie_image_path), 60 * 30);
+          item.selfie_image_url = signed?.signedUrl || null;
+        }
+      }
+
+      return jsonResponse({ item });
     }
 
     if (action === "review_manual_identity") {
@@ -986,28 +1344,76 @@ serve(async (req: Request) => {
       const reviewRoleForClaim = String(review.submitted_role || preDecisionProfile?.role || "musician").trim().toLowerCase();
       let duplicateMatchesForApproval: any[] = [];
 
-      if (decision === "APPROVED" && review.document_fingerprint) {
+      if (decision === "APPROVED") {
         const reviewEmail = String(preDecisionProfile?.email || review.submitted_by_email || "").trim().toLowerCase();
-        const { data: duplicateClaims, error: duplicateClaimsError } = await client
-          .from("identity_document_claims")
-          .select("id, user_id, normalized_email, profiles:user_id(email)")
-          .eq("document_fingerprint", review.document_fingerprint)
-          .eq("role", reviewRoleForClaim)
-          .eq("status", "APPROVED");
+        if (review.document_fingerprint) {
+          const { data: duplicateClaims, error: duplicateClaimsError } = await client
+            .from("identity_document_claims")
+            .select("id, user_id, normalized_email, profiles:user_id(email)")
+            .eq("document_fingerprint", review.document_fingerprint)
+            .eq("role", reviewRoleForClaim)
+            .eq("status", "APPROVED");
 
-        if (duplicateClaimsError) {
-          return jsonResponse({ error: duplicateClaimsError.message }, 400);
+          if (duplicateClaimsError) {
+            return jsonResponse({ error: duplicateClaimsError.message }, 400);
+          }
+
+          duplicateMatchesForApproval.push(
+            ...(duplicateClaims || [])
+              .filter((claim: any) => {
+                const matchUserId = String(claim.user_id || "").trim();
+                const matchEmail = String(claim.normalized_email || claim.profiles?.email || "").trim().toLowerCase();
+                return matchUserId !== String(review.user_id) && (!reviewEmail || !matchEmail || matchEmail !== reviewEmail);
+              })
+              .map((claim: any) => ({ ...claim, matched_on: "DOCUMENT_FINGERPRINT" })),
+          );
         }
 
-        duplicateMatchesForApproval = (duplicateClaims || []).filter((claim: any) => {
-          const matchUserId = String(claim.user_id || "").trim();
-          const matchEmail = String(claim.normalized_email || claim.profiles?.email || "").trim().toLowerCase();
-          return matchUserId !== String(review.user_id) && (!reviewEmail || !matchEmail || matchEmail !== reviewEmail);
+        const reviewNameBirth = prepareIdentityNameBirthDateDuplicateInput(null, {
+          fullLegalName: review.verified_full_legal_name,
+          normalizedFullLegalName: review.normalized_full_legal_name,
+          birthDate: review.birth_date,
         });
+        if (reviewNameBirth.hasNameBirthDate) {
+          const { data: nameBirthClaims, error: nameBirthClaimsError } = await client
+            .from("identity_document_claims")
+            .select("id, user_id, normalized_email, profiles:user_id(email)")
+            .eq("normalized_full_legal_name", reviewNameBirth.normalizedFullLegalName)
+            .eq("birth_date", reviewNameBirth.birthDate)
+            .eq("role", reviewRoleForClaim)
+            .eq("status", "APPROVED");
+
+          if (nameBirthClaimsError) {
+            return jsonResponse({ error: nameBirthClaimsError.message }, 400);
+          }
+
+          duplicateMatchesForApproval.push(
+            ...(nameBirthClaims || [])
+              .filter((claim: any) => {
+                const matchUserId = String(claim.user_id || "").trim();
+                const matchEmail = String(claim.normalized_email || claim.profiles?.email || "").trim().toLowerCase();
+                return matchUserId !== String(review.user_id) && (!reviewEmail || !matchEmail || matchEmail !== reviewEmail);
+              })
+              .map((claim: any) => ({ ...claim, matched_on: "NAME_BIRTHDATE" })),
+          );
+        }
+
+        duplicateMatchesForApproval = duplicateMatchesForApproval.filter((claim: any, index: number, all: any[]) => (
+          index === all.findIndex((other: any) => (
+            String(other.user_id || "") === String(claim.user_id || "") &&
+            String(other.matched_on || "") === String(claim.matched_on || "")
+          ))
+        ));
 
         if (duplicateMatchesForApproval.length > 0 && (!duplicateOverrideConfirmed || !reviewNotes)) {
           return jsonResponse({
-            error: "This ID matches another approved same-role account. Confirm the duplicate override and add admin notes before approval.",
+            error: "This identity matches another approved same-role account. Confirm the duplicate override and add admin notes before approval.",
+          }, 400);
+        }
+
+        if (!review.document_fingerprint) {
+          return jsonResponse({
+            error: "This review is missing a verified document fingerprint and cannot be approved automatically. Keep it in review until the document number, type, and country are verified.",
           }, 400);
         }
       }
@@ -1053,6 +1459,7 @@ serve(async (req: Request) => {
               duplicate_override_confirmed_by: actorId,
               duplicate_override_confirmed_at: nowIso,
               duplicate_override_match_count: duplicateMatchesForApproval.length,
+              duplicate_override_matched_on: Array.from(new Set(duplicateMatchesForApproval.map((match: any) => match.matched_on).filter(Boolean))),
             }
           : {}),
       };
@@ -1117,6 +1524,12 @@ serve(async (req: Request) => {
         return jsonResponse({ error: authUpdateError.message }, 400);
       }
 
+      const reviewNameBirthForClaim = prepareIdentityNameBirthDateDuplicateInput(null, {
+        fullLegalName: review.verified_full_legal_name,
+        normalizedFullLegalName: review.normalized_full_legal_name,
+        birthDate: review.birth_date,
+      });
+
       if (review.document_fingerprint) {
         if (decision === "APPROVED") {
           const approvalClaim = await claimApprovedIdentityDocument(client, {
@@ -1132,10 +1545,16 @@ serve(async (req: Request) => {
             manualReviewId: reviewId,
             email: reviewProfile?.email || review.submitted_by_email || null,
             duplicateOverride: duplicateOverrideConfirmed,
+            verifiedFullLegalName: reviewNameBirthForClaim.fullLegalName,
+            normalizedFullLegalName: reviewNameBirthForClaim.normalizedFullLegalName,
+            birthDate: reviewNameBirthForClaim.birthDate,
             metadata: {
               approved_by: actorId,
               review_notes: reviewNotes,
               duplicate_override_confirmed: duplicateOverrideConfirmed,
+              duplicate_override_matched_on: duplicateOverrideConfirmed
+                ? Array.from(new Set(duplicateMatchesForApproval.map((match: any) => match.matched_on).filter(Boolean)))
+                : [],
             },
           });
 
@@ -1158,6 +1577,9 @@ serve(async (req: Request) => {
             diditSessionId: review.didit_session_id || null,
             manualReviewId: reviewId,
             email: reviewProfile?.email || review.submitted_by_email || null,
+            verifiedFullLegalName: reviewNameBirthForClaim.fullLegalName,
+            normalizedFullLegalName: reviewNameBirthForClaim.normalizedFullLegalName,
+            birthDate: reviewNameBirthForClaim.birthDate,
           });
         }
       }
@@ -1451,7 +1873,7 @@ serve(async (req: Request) => {
         if (wasVerified) {
           const { data: latestApprovedClaim } = await client
             .from("identity_document_claims")
-            .select("document_fingerprint, document_type, document_type_key, document_country, didit_session_id")
+            .select("document_fingerprint, document_type, document_type_key, document_country, didit_session_id, verified_full_legal_name, normalized_full_legal_name, birth_date")
             .eq("user_id", userId)
             .eq("role", previousRole)
             .eq("status", "APPROVED")
@@ -1470,6 +1892,9 @@ serve(async (req: Request) => {
               source: "DIDIT",
               diditSessionId: latestApprovedClaim.didit_session_id || null,
               email: existingProfileForUpdate["email"] || null,
+              verifiedFullLegalName: latestApprovedClaim.verified_full_legal_name || null,
+              normalizedFullLegalName: latestApprovedClaim.normalized_full_legal_name || null,
+              birthDate: latestApprovedClaim.birth_date || null,
               metadata: {
                 claimed_due_to_admin_role_change: true,
                 previous_role: previousRole,
@@ -1489,12 +1914,18 @@ serve(async (req: Request) => {
                 source: "DIDIT_DUPLICATE",
                 diditSessionId: latestApprovedClaim.didit_session_id || null,
                 documentFingerprint: latestApprovedClaim.document_fingerprint,
-                duplicateReason: getDuplicateIdentityReviewReason(nextRole),
+                duplicateReason: getApprovalClaimReviewReason(roleClaim, nextRole),
                 duplicateMatchCount: roleClaim?.duplicate_count || roleClaim?.matches?.length || 1,
+                verifiedFullLegalName: latestApprovedClaim.verified_full_legal_name || null,
+                normalizedFullLegalName: latestApprovedClaim.normalized_full_legal_name || null,
+                birthDate: latestApprovedClaim.birth_date || null,
+                reviewReason: getApprovalClaimReviewReason(roleClaim, nextRole),
+                matchedOn: getApprovalClaimMatchedOn(roleClaim),
                 metadata: {
                   created_due_to_admin_role_change: true,
                   previous_role: previousRole,
                   next_role: nextRole,
+                  matched_on: getApprovalClaimMatchedOn(roleClaim),
                   claim_result: roleClaim,
                 },
               });

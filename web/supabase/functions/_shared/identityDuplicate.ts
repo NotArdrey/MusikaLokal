@@ -42,6 +42,14 @@ function firstNonEmpty(paths: string[][], source: any) {
   return "";
 }
 
+function firstNonEmptyText(paths: string[][], source: any) {
+  for (const path of paths) {
+    const value = normalizeText(readPath(source, path));
+    if (value) return value;
+  }
+  return "";
+}
+
 function findLikelyDocumentNumber(source: any, depth = 0): string {
   if (!source || typeof source !== "object" || depth > 5) return "";
 
@@ -127,7 +135,7 @@ export function extractIdentityDocumentType(rawDocument: any, fallback?: unknown
     normalizeText(rawDocument?.document?.type) ||
     normalizeText(rawDocument?.document_details?.type);
 
-  return value.toLowerCase().replace(/[^a-z0-9_-]/g, "_") || "unknown";
+  return value.toLowerCase().replace(/[^a-z0-9_-]/g, "_");
 }
 
 export function extractIdentityDocumentCountry(rawDocument: any, fallback?: unknown) {
@@ -137,10 +145,93 @@ export function extractIdentityDocumentCountry(rawDocument: any, fallback?: unkn
     normalizeText(rawDocument?.issuingCountry) ||
     normalizeText(rawDocument?.country) ||
     normalizeText(rawDocument?.document?.country) ||
-    normalizeText(rawDocument?.document_details?.country) ||
-    "PHL";
+    normalizeText(rawDocument?.document_details?.country);
 
-  return value.toUpperCase().replace(/[^A-Z]/g, "").slice(0, 3) || "PHL";
+  return value.toUpperCase().replace(/[^A-Z]/g, "").slice(0, 3);
+}
+
+export function normalizeFullLegalName(value: unknown) {
+  return normalizeText(value)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toUpperCase()
+    .replace(/[^A-Z0-9 ]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim() || null;
+}
+
+export function normalizeBirthDate(value: unknown) {
+  const rawValue = normalizeText(value);
+  if (!rawValue) return null;
+
+  const isoMatch = rawValue.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if (isoMatch) {
+    const normalized = `${isoMatch[1]}-${isoMatch[2].padStart(2, "0")}-${isoMatch[3].padStart(2, "0")}`;
+    const parsed = new Date(`${normalized}T00:00:00Z`);
+    return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === normalized
+      ? normalized
+      : null;
+  }
+
+  const parsed = new Date(rawValue);
+  if (!Number.isNaN(parsed.getTime())) {
+    return parsed.toISOString().slice(0, 10);
+  }
+
+  return null;
+}
+
+function extractIdentityFullName(rawDocument: any) {
+  const direct =
+    normalizeText(rawDocument?.full_name) ||
+    normalizeText(rawDocument?.fullName) ||
+    normalizeText(rawDocument?.name) ||
+    normalizeText(rawDocument?.document?.full_name) ||
+    normalizeText(rawDocument?.document_details?.full_name) ||
+    normalizeText(rawDocument?.ocr_data?.full_name) ||
+    normalizeText(rawDocument?.extracted_data?.full_name);
+
+  if (direct) return direct;
+
+  const firstName = normalizeText(rawDocument?.first_name || rawDocument?.firstName || rawDocument?.given_name || rawDocument?.givenName);
+  const middleName = normalizeText(rawDocument?.middle_name || rawDocument?.middleName || rawDocument?.extra_fields?.middle_name);
+  const lastName = normalizeText(rawDocument?.last_name || rawDocument?.lastName || rawDocument?.surname || rawDocument?.extra_fields?.first_surname);
+  const secondSurname = normalizeText(rawDocument?.second_surname || rawDocument?.extra_fields?.second_surname);
+
+  return [firstName, middleName, lastName, secondSurname].filter(Boolean).join(" ");
+}
+
+function extractIdentityBirthDate(rawDocument: any) {
+  return firstNonEmptyText(
+    [
+      ["date_of_birth"],
+      ["dateOfBirth"],
+      ["birth_date"],
+      ["birthDate"],
+      ["dob"],
+      ["personal", "date_of_birth"],
+      ["document", "date_of_birth"],
+      ["document_details", "date_of_birth"],
+      ["ocr_data", "date_of_birth"],
+      ["extracted_data", "date_of_birth"],
+      ["extra_fields", "date_of_birth"],
+      ["extra_fields", "dob"],
+    ],
+    rawDocument,
+  );
+}
+
+export function prepareIdentityNameBirthDateDuplicateInput(rawDocument: any, options: Record<string, unknown> = {}) {
+  const fullLegalName = normalizeText(options.fullLegalName || extractIdentityFullName(rawDocument));
+  const normalizedFullLegalName = normalizeFullLegalName(options.normalizedFullLegalName || fullLegalName);
+  const birthDate = normalizeBirthDate(options.birthDate || extractIdentityBirthDate(rawDocument));
+
+  return {
+    fullLegalName: fullLegalName || null,
+    normalizedFullLegalName,
+    birthDate,
+    hasNameBirthDate: Boolean(normalizedFullLegalName && birthDate),
+  };
 }
 
 async function hmacSha256Hex(message: string) {
@@ -200,6 +291,14 @@ function getSessionNonceSecret() {
   return secret;
 }
 
+function getSessionNonceSecretCandidates() {
+  return [
+    Deno.env.get("DIDIT_SESSION_NONCE_SECRET"),
+    Deno.env.get("IDENTITY_DOCUMENT_HASH_SECRET"),
+    Deno.env.get("SUPABASE_SERVICE_ROLE_KEY"),
+  ].map(normalizeText).filter(Boolean);
+}
+
 export function createSessionNonce() {
   const bytes = new Uint8Array(32);
   crypto.getRandomValues(bytes);
@@ -218,8 +317,19 @@ export async function hashSessionNonce(sessionRef: unknown, nonce: unknown) {
 export async function verifySessionNonce(sessionRef: unknown, nonce: unknown, expectedHash: unknown) {
   const normalizedExpected = normalizeText(expectedHash).toLowerCase();
   if (!normalizedExpected) return false;
-  const actual = await hashSessionNonce(sessionRef, nonce);
-  return actual.length === normalizedExpected.length && constantTimeEqual(actual, normalizedExpected);
+
+  const normalizedSessionRef = normalizeText(sessionRef);
+  const normalizedNonce = normalizeText(nonce);
+  if (!normalizedSessionRef || !normalizedNonce) return false;
+
+  for (const secret of getSessionNonceSecretCandidates()) {
+    const actual = await hmacSha256HexWithSecret(`${normalizedSessionRef}:${normalizedNonce}`, secret);
+    if (actual.length === normalizedExpected.length && constantTimeEqual(actual, normalizedExpected)) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 function constantTimeEqual(a: string, b: string) {
@@ -263,10 +373,11 @@ export async function buildIdentityDocumentFingerprint(rawDocument: any, options
   const normalizedNumber = normalizeDocumentToken(
     options.documentNumber || extractIdentityDocumentNumber(rawDocument),
   );
-  if (!normalizedNumber) return null;
-
   const documentType = extractIdentityDocumentType(rawDocument, options.documentTypeKey || options.documentType);
   const documentCountry = extractIdentityDocumentCountry(rawDocument, options.documentCountry);
+
+  if (!normalizedNumber || !documentType || !documentCountry) return null;
+
   const canonical = `${documentCountry}|${documentType}|${normalizedNumber}`;
   return `v1:${await hmacSha256Hex(canonical)}`;
 }
@@ -334,9 +445,20 @@ export async function recordIdentityDocumentClaim(
     manualReviewId = null,
     email = null,
     metadata = {},
+    verifiedFullLegalName = null,
+    normalizedFullLegalName = null,
+    birthDate = null,
+    reviewReason = null,
+    matchedOn = null,
   }: Record<string, unknown>,
 ) {
-  if (!isUuid(userId) || !documentFingerprint) return null;
+  if (!isUuid(userId)) return null;
+
+  const nameBirthDateInput = prepareIdentityNameBirthDateDuplicateInput(null, {
+    fullLegalName: verifiedFullLegalName,
+    normalizedFullLegalName,
+    birthDate,
+  });
 
   if (status === "APPROVED") {
     return claimApprovedIdentityDocument(client, {
@@ -351,10 +473,20 @@ export async function recordIdentityDocumentClaim(
       manualReviewId,
       email,
       metadata,
+      verifiedFullLegalName: nameBirthDateInput.fullLegalName,
+      normalizedFullLegalName: nameBirthDateInput.normalizedFullLegalName,
+      birthDate: nameBirthDateInput.birthDate,
     });
   }
 
+  if (!documentFingerprint) return null;
+
   const nowIso = new Date().toISOString();
+  const claimMetadata = {
+    ...(metadata && typeof metadata === "object" ? metadata : {}),
+    ...(reviewReason ? { review_reason: reviewReason } : {}),
+    ...(matchedOn ? { matched_on: matchedOn } : {}),
+  };
   const { data, error } = await client
     .from("identity_document_claims")
     .upsert(
@@ -367,11 +499,14 @@ export async function recordIdentityDocumentClaim(
         document_type: documentType || null,
         document_type_key: documentTypeKey || null,
         document_country: normalizeText(documentCountry).toUpperCase() || "PHL",
+        verified_full_legal_name: nameBirthDateInput.fullLegalName,
+        normalized_full_legal_name: nameBirthDateInput.normalizedFullLegalName,
+        birth_date: nameBirthDateInput.birthDate,
         source: source || "DIDIT",
         status,
         didit_session_id: diditSessionId || null,
         manual_review_id: manualReviewId || null,
-        claim_metadata: metadata && typeof metadata === "object" ? metadata : {},
+        claim_metadata: claimMetadata,
         updated_at: nowIso,
         last_seen_at: nowIso,
       },
@@ -402,18 +537,30 @@ export async function claimApprovedIdentityDocument(
     email = null,
     metadata = {},
     duplicateOverride = false,
+    verifiedFullLegalName = null,
+    normalizedFullLegalName = null,
+    birthDate = null,
   }: Record<string, unknown>,
 ) {
-  if (!isUuid(userId) || !documentFingerprint) return null;
+  if (!isUuid(userId)) return null;
 
-  const { data, error } = await client.rpc("claim_identity_document_approval", {
+  const nameBirthDateInput = prepareIdentityNameBirthDateDuplicateInput(null, {
+    fullLegalName: verifiedFullLegalName,
+    normalizedFullLegalName,
+    birthDate,
+  });
+
+  const { data, error } = await client.rpc("claim_identity_document_approval_v2", {
     p_user_id: userId,
     p_role: normalizeIdentityRole(role),
-    p_document_fingerprint: documentFingerprint,
+    p_document_fingerprint: documentFingerprint || null,
     p_normalized_email: normalizeIdentityEmail(email),
     p_document_type: documentType || null,
     p_document_type_key: documentTypeKey || null,
     p_document_country: normalizeText(documentCountry).toUpperCase() || "PHL",
+    p_full_legal_name: nameBirthDateInput.fullLegalName,
+    p_normalized_full_legal_name: nameBirthDateInput.normalizedFullLegalName,
+    p_birth_date: nameBirthDateInput.birthDate,
     p_source: source || "DIDIT",
     p_didit_session_id: diditSessionId || null,
     p_manual_review_id: manualReviewId || null,
@@ -443,6 +590,11 @@ export async function queueIdentityReview(
     duplicateReason = null,
     duplicateMatchCount = 0,
     metadata = {},
+    verifiedFullLegalName = null,
+    normalizedFullLegalName = null,
+    birthDate = null,
+    reviewReason = null,
+    matchedOn = null,
   }: Record<string, unknown>,
 ) {
   if (!isUuid(userId)) return null;
@@ -451,6 +603,11 @@ export async function queueIdentityReview(
   const reviewSource = normalizeText(source).toUpperCase() || DIDIT_PENDING_SOURCE;
   const normalizedRole = normalizeIdentityRole(role);
   const reason = duplicateReason || (reviewSource === DUPLICATE_REVIEW_SOURCE ? getDuplicateIdentityReviewReason(normalizedRole) : null);
+  const nameBirthDateInput = prepareIdentityNameBirthDateDuplicateInput(null, {
+    fullLegalName: verifiedFullLegalName,
+    normalizedFullLegalName,
+    birthDate,
+  });
 
   const payload = {
     user_id: userId,
@@ -463,12 +620,19 @@ export async function queueIdentityReview(
     status: "PENDING_REVIEW",
     didit_session_id: diditSessionId || null,
     document_fingerprint: documentFingerprint || null,
+    verified_full_legal_name: nameBirthDateInput.fullLegalName,
+    normalized_full_legal_name: nameBirthDateInput.normalizedFullLegalName,
+    birth_date: nameBirthDateInput.birthDate,
+    review_reason: reviewReason || null,
+    matched_on: matchedOn || null,
     duplicate_reason: reason,
     duplicate_match_count: Number(duplicateMatchCount || 0),
     review_notes: reason,
     metadata: {
       ...(metadata && typeof metadata === "object" ? metadata : {}),
       duplicate_identity_review: reviewSource === DUPLICATE_REVIEW_SOURCE,
+      ...(reviewReason ? { review_reason: reviewReason } : {}),
+      ...(matchedOn ? { matched_on: matchedOn } : {}),
     },
     expected_decision_by: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
     updated_at: nowIso,

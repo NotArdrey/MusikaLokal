@@ -182,6 +182,8 @@ const userFilters: { value: UserFilter; label: string }[] = [
   { value: 'producer', label: 'producer' },
 ];
 
+const USER_MANAGEMENT_HIDDEN_VERIFICATION_STATUSES = new Set(['DECLINED', 'PENDING_REVIEW']);
+
 const getDetailsSectionIcon = (title: string) => {
   const normalized = title.toLowerCase();
   if (normalized.includes('account') || normalized.includes('profile')) return 'person-circle-outline';
@@ -255,7 +257,7 @@ const normalizeUserRole = (rawRole: unknown): UserRole => {
 
 const isVisibleInUserManagement = (user: UserEntry) => {
   const verificationStatus = String(user.verification_status || '').trim().toUpperCase();
-  return verificationStatus !== 'DECLINED';
+  return !USER_MANAGEMENT_HIDDEN_VERIFICATION_STATUSES.has(verificationStatus);
 };
 
 const styles = StyleSheet.create({

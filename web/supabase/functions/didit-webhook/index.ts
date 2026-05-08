@@ -9,6 +9,7 @@ import {
     getDuplicateIdentityReviewReason,
     isUuid,
     normalizeIdentityRole,
+    prepareIdentityNameBirthDateDuplicateInput,
     queueIdentityReview,
     recordIdentityDocumentClaim,
     sanitizeIdentityVerificationData,
@@ -36,46 +37,11 @@ const WEBHOOK_SECRET_KEY = Deno.env.get('DIDIT_WEBHOOK_SECRET') || Deno.env.get(
  * Security: Validates Didit v3 x-signature-v2 or x-signature-simple headers.
  */
 
-/**
- * Verify webhook signature using HMAC-SHA256
- */
-async function verifySignature(payload: string, signature: string): Promise<boolean> {
-    try {
-
-        // The signature is base64 encoded HMAC-SHA256
-        const encoder = new TextEncoder();
-        const keyData = encoder.encode(WEBHOOK_SECRET_KEY);
-
-        const cryptoKey = await crypto.subtle.importKey(
-            'raw',
-            keyData,
-            { name: 'HMAC', hash: 'SHA-256' },
-            false,
-            ['sign', 'verify']
-        );
-
-        const payloadData = encoder.encode(payload);
-
-        // Try decoding the signature
-        let signatureBytes: Uint8Array;
-        try {
-            signatureBytes = base64Decode(signature);
-        } catch (decodeError) {
-            // Maybe it's hex encoded instead
-            signatureBytes = new Uint8Array(signature.match(/.{1,2}/g)?.map(byte => parseInt(byte, 16)) || []);
-        }
-
-        const isValid = await crypto.subtle.verify(
-            'HMAC',
-            cryptoKey,
-            signatureBytes,
-            payloadData
-        );
-
-        return isValid;
-    } catch (error) {
-        console.error('Signature verification error:', error);
-        return false;
+function constantTimeEqual(a: string, b: string) {
+    if (a.length !== b.length) return false;
+    let result = 0;
+    for (let i = 0; i < a.length; i += 1) {
+        result |= a.charCodeAt(i) ^ b.charCodeAt(i);
     }
     return result === 0;
 }
@@ -203,11 +169,18 @@ async function upsertVerificationSession(
         .eq('session_ref', sessionRef)
         .maybeSingle();
 
-    const existingNonceHash = existing?.verification_data?.session_nonce_hash;
-    const nextVerificationData = {
-        ...(verificationData || {}),
-        ...(existingNonceHash ? { session_nonce_hash: existingNonceHash } : {}),
-    };
+    const existingVerificationData =
+        existing?.verification_data && typeof existing.verification_data === 'object'
+            ? existing.verification_data
+            : {};
+    const nextVerificationData = { ...existingVerificationData };
+
+    for (const [key, value] of Object.entries(verificationData || {})) {
+        if (value === undefined || value === null || value === '') {
+            continue;
+        }
+        nextVerificationData[key] = value;
+    }
 
     return supabaseAdmin
         .from('verification_sessions')
@@ -237,6 +210,39 @@ function normalizeDateOnly(value: any): string | null {
     return null;
 }
 
+function normalizeDiditDecisionStatus(value: any) {
+    return String(value || '').trim().replace(/[\s-]+/g, '_').toUpperCase();
+}
+
+function isDiditApprovedStatus(value: any) {
+    return normalizeDiditDecisionStatus(value) === 'APPROVED';
+}
+
+function isDiditDeclinedStatus(value: any) {
+    return ['DECLINED', 'REJECTED'].includes(normalizeDiditDecisionStatus(value));
+}
+
+function isDiditAbandonedStatus(value: any) {
+    return normalizeDiditDecisionStatus(value) === 'ABANDONED';
+}
+
+function isDiditReviewStatus(value: any) {
+    return ['IN_REVIEW', 'PENDING_REVIEW', 'REVIEW'].includes(normalizeDiditDecisionStatus(value));
+}
+
+function getApprovalClaimReviewReason(approvalClaim: any, role: string) {
+    return String(approvalClaim?.review_reason || approvalClaim?.reason || '').trim() || getDuplicateIdentityReviewReason(role);
+}
+
+function getApprovalClaimMatchedOn(approvalClaim: any, fallback = 'DOCUMENT_FINGERPRINT') {
+    return String(approvalClaim?.matched_on || approvalClaim?.match_type || fallback).trim().toUpperCase();
+}
+
+function getApprovalClaimMatchCount(approvalClaim: any, fallback = 1) {
+    const count = Number(approvalClaim?.duplicate_count || approvalClaim?.match_count || approvalClaim?.matches?.length || fallback);
+    return Number.isFinite(count) ? count : fallback;
+}
+
 function extractDocumentExpiry(idVerification: any): string | null {
     const rawExpiry = firstNonEmptyString([
         idVerification?.expiration_date,
@@ -262,6 +268,7 @@ function extractDocumentExpiry(idVerification: any): string | null {
 }
 
 serve(async (req) => {
+    console.log('=== DIDIT WEBHOOK v41 TRIGGERED ===');
 
     if (req.method === 'OPTIONS') {
         return new Response('ok', { headers: corsHeaders })
@@ -270,25 +277,7 @@ serve(async (req) => {
     try {
         // Get raw body for signature verification
         const rawBody = await req.text();
-        const signature = req.headers.get('x-signature') || '';
-
-        // Verify signature but log and continue if it fails (for debugging)
-        if (signature) {
-            const isValid = await verifySignature(rawBody, signature);
-            if (!isValid) {
-                console.error('Invalid webhook signature - BUT CONTINUING FOR DEBUG');
-                // Don't return 401 for now - let it continue to debug other issues
-                // TODO: Re-enable rejection after confirming signature format
-                // return new Response(JSON.stringify({ error: 'Invalid signature' }), {
-                //     headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-                //     status: 401,
-                // });
-            } else {
-            }
-        } else {
-            console.warn('No signature provided - proceeding without verification');
-        }
-
+        console.log('Raw body received, length:', rawBody.length);
         const payload = JSON.parse(rawBody);
 
         const isValidSignature = await verifyDiditWebhookSignature(rawBody, payload, req.headers);
@@ -301,6 +290,8 @@ serve(async (req) => {
         }
 
         // Log ALL top-level keys in the payload to understand the structure
+        console.log('=== DIDIT WEBHOOK PAYLOAD KEYS ===');
+        console.log('Top-level keys:', Object.keys(payload));
 
         const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
         const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
@@ -320,7 +311,7 @@ serve(async (req) => {
         const sessionId = payload.session_id || payload.sessionId || payload.id;
         const status = payload.status;
         const webhookType = payload.webhook_type || payload.event || payload.type;
-        const decision = payload.decision;
+        let decision = payload.decision;
 
         // The reference should be the user's UUID (passed during verification initiation)
         // Didit returns vendor_data that we passed when creating the session
@@ -331,11 +322,13 @@ serve(async (req) => {
         // Format: ADDRESS_<entityType>_<entityId>_<userId>_<timestamp>
         // ============================================
         if (userReference && typeof userReference === 'string' && userReference.startsWith('ADDRESS_')) {
+            console.log('=== ADDRESS VERIFICATION WEBHOOK ===');
             const parts = userReference.split('_');
             const entityType = parts[1]; // 'studio' or 'gig'
             const entityId = parts[2];
             const userId = parts[3];
 
+            console.log('Address verification details:', { entityType, entityId, userId, status });
 
             // Handle address verification
             await handleAddressVerification(supabaseAdmin, sessionId, entityType, entityId, userId, status, decision, payload);
@@ -353,16 +346,66 @@ serve(async (req) => {
             // Check if first part is a UUID
             const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
             if (uuidRegex.test(parts[0])) {
+                console.log(`Extracted real User ID from composite reference: ${parts[0]} (Original: ${userReference})`);
                 userReference = parts[0];
             }
         }
 
+        console.log('=== USER REFERENCE DEBUG ===');
+        console.log('vendor_data:', payload.vendor_data);
+        console.log('reference:', payload.reference);
+        console.log('external_id:', payload.external_id);
+        console.log('metadata:', JSON.stringify(payload.metadata));
+        console.log('session_id:', sessionId);
+        console.log('Final userReference:', userReference);
+        console.log('Is valid UUID:', /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(userReference || ''));
 
+        console.log('Webhook details:', {
+            webhookType,
+            status,
+            sessionId,
+            userReference,
+            hasDecision: !!decision
+        });
 
         // Handle different webhook types and statuses
 
-        // 1. Session Started - Update status to PENDING
-        if (status === 'Not Started' || status === 'In Progress') {
+        if (!decision && ['Approved', 'APPROVED'].includes(status) && sessionId) {
+            const diditApiKey = Deno.env.get('DIDIT_API_KEY') || '';
+            if (diditApiKey) {
+                try {
+                    const decisionResponse = await fetch(`https://verification.didit.me/v3/session/${sessionId}/decision/`, {
+                        method: 'GET',
+                        headers: { 'Content-Type': 'application/json', 'x-api-key': diditApiKey },
+                    });
+                    if (decisionResponse.ok) {
+                        const fetchedDecision = await decisionResponse.json();
+                        decision = fetchedDecision?.decision || fetchedDecision;
+                        console.log('Recovered Didit decision for Approved webhook without embedded decision.');
+                    } else {
+                        console.warn('Could not recover Didit decision for Approved webhook:', decisionResponse.status);
+                    }
+                } catch (decisionFetchError) {
+                    console.error('Error recovering Didit decision for Approved webhook:', decisionFetchError);
+                }
+            } else {
+                console.warn('DIDIT_API_KEY is missing; cannot recover Approved webhook decision.');
+            }
+        }
+
+        const normalizedWebhookStatus = String(status || '').trim().replace(/[\s-]+/g, '_').toUpperCase();
+        const webhookStatusIsRunning = [
+            'NOT_STARTED',
+            'IN_PROGRESS',
+            'PENDING',
+            'PROCESSING',
+            'SUBMITTED',
+            'CREATED',
+            'STARTED',
+        ].includes(normalizedWebhookStatus);
+
+        // 1. Session Started / still running - Update status to PENDING
+        if (webhookStatusIsRunning) {
             if (userReference) {
                 await supabaseAdmin
                     .from('profiles')
@@ -372,6 +415,9 @@ serve(async (req) => {
                     })
                     .eq('id', userReference);
 
+                console.log(`Verification running for user ${userReference}, session ${sessionId}`, {
+                    sourceStatus: status || null,
+                });
             }
 
             return new Response(JSON.stringify({ received: true }), {
@@ -421,14 +467,20 @@ serve(async (req) => {
             });
         }
 
-        // 2. Decision Made - Process the result
+            // 2. Decision Made - Process the result
         if (decision) {
             const idVerification = decision.id_verifications?.[0];
             const faceMatch = decision.face_matches?.[0];
+            const livenessCheck = decision.liveness_checks?.[0] || decision.liveness?.[0] || null;
             const faceMatchStatus = faceMatch?.status; // 'Approved', 'Declined', 'Abandoned', 'In Review'
 
-            // Log FULL idVerification object to debug field structure
-
+            console.log('Decision details:', {
+                faceMatchStatus,
+                idVerificationStatus: idVerification?.status,
+                livenessStatus: livenessCheck?.status,
+                hasOcrData: !!idVerification?.ocr_data,
+                idVerificationKeys: idVerification ? Object.keys(idVerification) : [],
+            });
 
             // Check if userReference is a valid UUID
             const isValidUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(userReference || '');
@@ -438,6 +490,7 @@ serve(async (req) => {
             let finalUserReference: string | null = (isValidUUID || isTempRef) ? userReference : null;
 
             if (!isValidUUID && !isTempRef && sessionId) {
+                console.log('vendor_data is not a UUID or TEMP ref, looking up user by session ID:', sessionId);
                 const { data: profileData, error: profileError } = await supabaseAdmin
                     .from('profiles')
                     .select('id')
@@ -446,6 +499,7 @@ serve(async (req) => {
 
                 if (profileData?.id) {
                     finalUserReference = profileData.id;
+                    console.log('Found user by session ID:', finalUserReference);
                 } else {
                     console.error('Could not find user by session ID:', profileError?.message || 'No matching profile');
                 }
@@ -469,8 +523,10 @@ serve(async (req) => {
                 authError = result.error;
 
                 if (authError) {
+                    console.log('Failed to get auth user:', authError.message);
                 }
             } else {
+                console.log('Skipping auth lookup for TEMP session:', finalUserReference);
             }
 
             // ROBUST EMAIL FALLBACK STRATEGY
@@ -479,6 +535,7 @@ serve(async (req) => {
 
             // 2. If missing, look up in Profiles table (where we store it during signup)
             if (!userEmail) {
+                console.log('Email not found in Auth User. Checking profiles table...');
                 const { data: profileWithEmail } = await supabaseAdmin
                     .from('profiles')
                     .select('email')
@@ -487,10 +544,12 @@ serve(async (req) => {
 
                 if (profileWithEmail?.email) {
                     userEmail = profileWithEmail.email;
+                    console.log('Recovered email from profiles table:', userEmail);
                 } else {
                     console.error('CRITICAL: Email not found in Auth OR Profiles. Verification email cannot be sent.');
                 }
             } else {
+                console.log('Email found in Auth User:', userEmail);
             }
 
             // Extract warnings for duplicate detection
@@ -529,13 +588,25 @@ serve(async (req) => {
                 return duplicateWarningCodes.some(dw => warningCode?.toUpperCase?.().includes(dw));
             });
 
+            console.log('Duplicate detection:', {
+                topLevelWarnings,
+                idVerificationWarnings,
+                faceSearchWarnings,
+                faceMatchWarnings,
+                allWarnings,
+                isDuplicateOfApprovedAccount
+            });
 
             const idStatus = idVerification?.status;
-            const faceStatus = faceMatch?.status || (idStatus === 'Approved' ? 'Approved' : undefined); // Fallback for face if ID is good (for doc-only flows)
+            const faceStatus = faceMatch?.status;
+            const livenessStatus = livenessCheck?.status;
+            const livenessPassed = !livenessCheck || isDiditApprovedStatus(livenessStatus);
 
+            console.log('Consolidated Verification Status:', { idStatus, faceStatus, livenessStatus, faceMatchRaw: faceMatch?.status });
 
             // 1. DECLINED: If EITHER is declined, the whole verification is declined.
-            if (faceStatus === 'Declined' || idStatus === 'Declined') {
+            if (isDiditDeclinedStatus(faceStatus) || isDiditDeclinedStatus(idStatus) || isDiditDeclinedStatus(livenessStatus)) {
+                console.log('Status is DECLINED (ID or Face)');
                 if (isDuplicateOfApprovedAccount) {
                     await handleDuplicateDetected(supabaseAdmin, finalUserReference, userEmail, allWarnings, sessionId, idVerification, authUser, payload.metadata);
                 } else {
@@ -544,28 +615,40 @@ serve(async (req) => {
                 }
             }
             // 2. ABANDONED: If either is abandoned (and not declined)
-            else if (faceStatus === 'Abandoned' || idStatus === 'Abandoned') {
+            else if (isDiditAbandonedStatus(faceStatus) || isDiditAbandonedStatus(idStatus) || isDiditAbandonedStatus(livenessStatus)) {
+                console.log('Status is ABANDONED');
                 await handleAbandoned(supabaseAdmin, finalUserReference, sessionId);
             }
             // 3. IN REVIEW: If manual review is required
-            else if (faceStatus === 'In Review' || idStatus === 'In Review' || faceStatus === 'Pending Review' || idStatus === 'Pending Review') {
+            else if (isDiditReviewStatus(faceStatus) || isDiditReviewStatus(idStatus) || isDiditReviewStatus(livenessStatus)) {
+                console.log('Status is IN REVIEW');
+                await handleInReview(supabaseAdmin, finalUserReference, sessionId);
+            }
+            // 3b. Missing Face Match: ID-only approval is not enough for MusikaLokal identity verification.
+            else if (idStatus === 'Approved' && !faceMatch) {
+                console.warn('ID was approved but Didit did not return a face match result. Sending to review instead of approving.', {
+                    sessionId,
+                    finalUserReference,
+                    idStatus,
+                    decisionKeys: Object.keys(decision || {}),
+                });
                 await handleInReview(supabaseAdmin, finalUserReference, sessionId);
             }
             // 4. APPROVED: Both must be effectively approved
-            else if (idStatus === 'Approved' && (faceStatus === 'Approved' || !faceMatch)) {
-                await handleApproved(supabaseAdmin, finalUserReference, userEmail, idVerification, authUser, sessionId, 'APPROVED');
+            else if (isDiditApprovedStatus(idStatus) && isDiditApprovedStatus(faceStatus) && livenessPassed) {
+                console.log('Status is APPROVED');
+                if (isDuplicateOfApprovedAccount) {
+                    await handleDuplicateDetected(supabaseAdmin, finalUserReference, userEmail, allWarnings, sessionId, idVerification, authUser, payload.metadata);
+                } else {
+                    await handleApproved(supabaseAdmin, finalUserReference, userEmail, idVerification, authUser, sessionId, 'APPROVED');
+                }
             }
             // 5. UNKNOWN / FALLBACK
             else {
                 console.warn('Unhandled Status Combination:', { idStatus, faceStatus });
                 // Default to abandoned/incomplete rather than accidental approval
-                // But if ID is approved and Face is missing (and not required/declined?), maybe approve?
-                // The priority logic above handles the specific 'Declined' cases, so this is just safety.
-                if (idStatus === 'Approved') {
-                    await handleApproved(supabaseAdmin, finalUserReference, userEmail, idVerification, authUser, sessionId, 'APPROVED');
-                } else {
-                    await handleAbandoned(supabaseAdmin, finalUserReference);
-                }
+                console.log('Unknown status - Treating as abandoned/retryable');
+                await handleAbandoned(supabaseAdmin, finalUserReference);
             }
         }
 
@@ -593,6 +676,10 @@ async function sendVerificationEmail(
     firstName: string,
     fullName: string
 ): Promise<boolean> {
+    console.log('=== Email Send Attempt via Supabase GoTrue ===');
+    console.log('Recipient:', userEmail);
+    console.log('First Name:', firstName || '(empty)');
+    console.log('Full Name:', fullName || '(empty)');
 
     if (!userEmail) {
         console.error('No email address provided, cannot send email');
@@ -655,6 +742,8 @@ async function sendVerificationEmail(
         const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 
         if (supabaseUrl && serviceRoleKey) {
+            console.log('Sending verification confirmation email via Supabase Auth...');
+            console.log('Using configured SMTP and custom email template');
 
             // Use magic link endpoint - customize the "Magic Link" template in 
             // Supabase Dashboard > Authentication > Email Templates
@@ -684,11 +773,14 @@ async function sendVerificationEmail(
             });
 
             if (response.ok) {
+                console.log(`✅ Verification email sent via Supabase Auth to ${userEmail}`);
                 return true;
             } else {
                 const errorText = await response.text();
+                console.log('Supabase Auth magiclink email failed:', response.status, errorText);
 
                 // Fallback: Try invite endpoint
+                console.log('Trying invite endpoint as fallback...');
                 const inviteResponse = await fetch(`${supabaseUrl}/auth/v1/invite`, {
                     method: 'POST',
                     headers: {
@@ -713,13 +805,16 @@ async function sendVerificationEmail(
                 });
 
                 if (inviteResponse.ok) {
+                    console.log(`✅ Invite email sent via Supabase Auth to ${userEmail}`);
                     return true;
                 } else {
                     const inviteError = await inviteResponse.text();
+                    console.log('Invite endpoint also failed:', inviteResponse.status, inviteError);
                 }
             }
         }
     } catch (error) {
+        console.log('Supabase Auth email method failed:', error);
     }
 
     // Method 2: Try Gmail sender as fallback
@@ -731,6 +826,7 @@ async function sendVerificationEmail(
         source: 'didit-webhook',
     });
     if (gmailDelivery.sent) {
+        console.log(`Verification email sent via ${gmailDelivery.provider} to ${userEmail}`);
         return true;
     }
     if (gmailDelivery.error) {
@@ -740,6 +836,7 @@ async function sendVerificationEmail(
     // Method 3: Use Supabase's built-in email by storing notification in database
     // This allows a database trigger/webhook to handle the actual email sending
     try {
+        console.log('Storing email notification in database for processing...');
         const { error: notifyError } = await supabaseAdmin
             .from('email_notifications')
             .insert({
@@ -753,10 +850,13 @@ async function sendVerificationEmail(
             });
 
         if (!notifyError) {
+            console.log('Email notification queued in database');
             return true;
         } else {
+            console.log('email_notifications table not available:', notifyError.message);
         }
     } catch (error) {
+        console.log('Database notification storage failed:', error);
     }
 
     console.error('=== EMAIL SEND INFO ===');
@@ -801,54 +901,64 @@ async function handleApproved(
 
     // Construct Full Name intelligently
     const nameParts = [firstName, middleName, lastName, secondSurname].filter(Boolean);
-    const fullName = nameParts.length > 0 ? nameParts.join(' ') : '';
+    let fullName = nameParts.length > 0 ? nameParts.join(' ') : '';
+    const identityNameBirthDate = prepareIdentityNameBirthDateDuplicateInput(idVerification, {
+        fullLegalName: fullName,
+    });
+    if (!fullName && identityNameBirthDate.fullLegalName) {
+        fullName = identityNameBirthDate.fullLegalName;
+    }
 
     const documentExpiry = extractDocumentExpiry(idVerification);
+    const documentType = idVerification?.document_type || idVerification?.documentType || idVerification?.type || 'Government ID';
+    const documentCountry = idVerification?.issuing_country || idVerification?.issuingCountry || idVerification?.country || '';
     const documentFingerprint = await buildIdentityDocumentFingerprint(idVerification, {
-        documentType: idVerification?.document_type || idVerification?.documentType || idVerification?.type,
-        documentCountry: idVerification?.issuing_country || idVerification?.issuingCountry || idVerification?.country || 'PHL',
+        documentType,
+        documentCountry,
     });
 
+    console.log('Approving user - extracted data:', {
+        userReference,
+        fullName,
+        firstName,
+        lastName,
+        documentExpiry,
+        hasDocumentFingerprint: Boolean(documentFingerprint),
+        hasNameBirthDateDuplicateInput: identityNameBirthDate.hasNameBirthDate,
+    });
 
     // ALWAYS Store verification result in verification_sessions table
     // This provides a persistent record for both TEMP and Registered users.
     // create-didit-session checks this table using the Didit Session ID.
     if (sessionId) {
-        const { data: existingSession } = await supabaseAdmin
-            .from('verification_sessions')
-            .select('status, verification_data')
-            .eq('session_ref', sessionId)
-            .maybeSingle();
+        console.log('Storing verification session details:', { sessionId, userReference });
 
-        const existingVerificationData = existingSession?.verification_data || {};
-        const existingStatus = String(existingSession?.status || '').toUpperCase();
-        const wasSuperseded = existingStatus.startsWith('SUPERSEDED');
-        const storedEmail = userEmail || existingVerificationData.email || null;
-
-        const { error: sessionError } = await supabaseAdmin
-            .from('verification_sessions')
-            .upsert({
-                session_ref: sessionId, // Must use Didit Session ID as key
-                verification_data: {
-                    ...existingVerificationData,
+        const { error: sessionError } = await upsertVerificationSession(
+            supabaseAdmin,
+            sessionId,
+            'APPROVED',
+            {
                     full_name: fullName,
                     first_name: firstName,
                     middle_name: middleName,
                     last_name: lastName,
                     raw_data: sanitizeIdentityVerificationData(idVerification),
                     document_fingerprint: documentFingerprint,
-                    document_country: idVerification?.issuing_country || idVerification?.issuingCountry || idVerification?.country || 'PHL',
+                    document_country: documentCountry || 'PHL',
+                    verified_full_legal_name: identityNameBirthDate.fullLegalName,
+                    normalized_full_legal_name: identityNameBirthDate.normalizedFullLegalName,
+                    birth_date: identityNameBirthDate.birthDate,
                     id_document_expiry: documentExpiry,
                     id_verified_at: new Date().toISOString(),
                     user_ref: userReference, // Store the user ID reference inside data
-                    email: storedEmail
-                },
-                status: wasSuperseded ? 'SUPERSEDED_APPROVED' : 'APPROVED'
-            });
+                    email: userEmail
+            },
+        );
 
         if (sessionError) {
             console.error('Failed to store verification_sessions record:', sessionError.message);
         } else {
+            console.log('Verification session recorded successfully.');
         }
     } else {
         console.warn('No sessionId available, skipping verification_sessions storage');
@@ -856,6 +966,7 @@ async function handleApproved(
 
     // CHECK IF THIS IS A TEMPORARY SESSION (User doesn't exist yet)
     if (userReference.startsWith('TEMP_')) {
+        console.log('TEMP session processed. Stopping here since no profile exists to update.');
         return;
     }
 
@@ -882,15 +993,22 @@ async function handleApproved(
                 userId: userReference,
                 email: resolvedEmail,
                 role: resolvedRole,
-                documentType: idVerification?.document_type || idVerification?.documentType || idVerification?.type || 'Government ID',
-                documentCountry: idVerification?.issuing_country || idVerification?.issuingCountry || idVerification?.country || 'PHL',
+                documentType,
+                documentCountry: documentCountry || 'PHL',
                 source: DUPLICATE_REVIEW_SOURCE,
                 diditSessionId: sessionId,
                 documentFingerprint,
                 duplicateReason,
                 duplicateMatchCount: duplicate.matches.length,
+                verifiedFullLegalName: identityNameBirthDate.fullLegalName,
+                normalizedFullLegalName: identityNameBirthDate.normalizedFullLegalName,
+                birthDate: identityNameBirthDate.birthDate,
+                reviewReason: duplicateReason,
+                matchedOn: 'DOCUMENT_FINGERPRINT',
                 metadata: {
                     duplicate_detected_by: 'local_document_fingerprint',
+                    matched_on: 'DOCUMENT_FINGERPRINT',
+                    duplicate_matches: duplicate.matches,
                 },
             });
 
@@ -898,13 +1016,18 @@ async function handleApproved(
                 userId: userReference,
                 role: resolvedRole,
                 documentFingerprint,
-                documentType: idVerification?.document_type || idVerification?.documentType || idVerification?.type || 'Government ID',
-                documentCountry: idVerification?.issuing_country || idVerification?.issuingCountry || idVerification?.country || 'PHL',
+                documentType,
+                documentCountry: documentCountry || 'PHL',
                 source: DUPLICATE_REVIEW_SOURCE,
                 status: 'PENDING_REVIEW',
                 diditSessionId: sessionId,
                 manualReviewId: reviewRecord?.id || null,
                 email: resolvedEmail,
+                verifiedFullLegalName: identityNameBirthDate.fullLegalName,
+                normalizedFullLegalName: identityNameBirthDate.normalizedFullLegalName,
+                birthDate: identityNameBirthDate.birthDate,
+                reviewReason: duplicateReason,
+                matchedOn: 'DOCUMENT_FINGERPRINT',
             });
 
             if (sessionId) {
@@ -919,12 +1042,18 @@ async function handleApproved(
                             last_name: lastName,
                             raw_data: sanitizeIdentityVerificationData(idVerification),
                             document_fingerprint: documentFingerprint,
+                            document_country: documentCountry || 'PHL',
+                            verified_full_legal_name: identityNameBirthDate.fullLegalName,
+                            normalized_full_legal_name: identityNameBirthDate.normalizedFullLegalName,
+                            birth_date: identityNameBirthDate.birthDate,
                             id_document_expiry: documentExpiry,
                             id_verified_at: new Date().toISOString(),
                             user_ref: userReference,
                             email: resolvedEmail,
                             duplicate_identity_review_required: true,
                             duplicate_reason: duplicateReason,
+                            review_reason: duplicateReason,
+                            matched_on: 'DOCUMENT_FINGERPRINT',
                             duplicate_match_count: duplicate.matches.length,
                     },
                 );
@@ -963,32 +1092,98 @@ async function handleApproved(
         userId: userReference,
         role: resolvedRole,
         documentFingerprint,
-        documentType: idVerification?.document_type || idVerification?.documentType || idVerification?.type || 'Government ID',
-        documentCountry: idVerification?.issuing_country || idVerification?.issuingCountry || idVerification?.country || 'PHL',
+        documentType,
+        documentCountry: documentCountry || 'PHL',
         source: 'DIDIT',
         status: 'APPROVED',
         diditSessionId: sessionId,
         email: resolvedEmail,
+        verifiedFullLegalName: identityNameBirthDate.fullLegalName,
+        normalizedFullLegalName: identityNameBirthDate.normalizedFullLegalName,
+        birthDate: identityNameBirthDate.birthDate,
     });
 
     if (approvalClaim?.decision === 'PENDING_REVIEW' || approvalClaim?.decision === 'EXISTING_ACCOUNT') {
-        const duplicateReason = getDuplicateIdentityReviewReason(resolvedRole);
+        const duplicateReason = getApprovalClaimReviewReason(approvalClaim, resolvedRole);
+        const matchedOn = getApprovalClaimMatchedOn(
+            approvalClaim,
+            duplicateReason === 'MISSING_DOCUMENT_FINGERPRINT' ? '' : 'DOCUMENT_FINGERPRINT',
+        );
+        const duplicateMatchCount = getApprovalClaimMatchCount(approvalClaim, duplicateReason === 'MISSING_DOCUMENT_FINGERPRINT' ? 0 : 1);
         const reviewRecord = await queueIdentityReview(supabaseAdmin, {
             userId: userReference,
             email: resolvedEmail,
             role: resolvedRole,
-            documentType: idVerification?.document_type || idVerification?.documentType || idVerification?.type || 'Government ID',
-            documentCountry: idVerification?.issuing_country || idVerification?.issuingCountry || idVerification?.country || 'PHL',
+            documentType,
+            documentCountry: documentCountry || 'PHL',
             source: DUPLICATE_REVIEW_SOURCE,
             diditSessionId: sessionId,
             documentFingerprint,
             duplicateReason,
-            duplicateMatchCount: approvalClaim?.duplicate_count || approvalClaim?.matches?.length || 1,
+            duplicateMatchCount,
+            verifiedFullLegalName: identityNameBirthDate.fullLegalName,
+            normalizedFullLegalName: identityNameBirthDate.normalizedFullLegalName,
+            birthDate: identityNameBirthDate.birthDate,
+            reviewReason: duplicateReason,
+            matchedOn,
             metadata: {
                 duplicate_detected_by: 'approval_rpc',
+                matched_on: matchedOn,
                 approval_claim_result: approvalClaim,
             },
         });
+
+        await recordIdentityDocumentClaim(supabaseAdmin, {
+            userId: userReference,
+            role: resolvedRole,
+            documentFingerprint,
+            documentType,
+            documentCountry: documentCountry || 'PHL',
+            source: DUPLICATE_REVIEW_SOURCE,
+            status: 'PENDING_REVIEW',
+            diditSessionId: sessionId,
+            manualReviewId: reviewRecord?.id || null,
+            email: resolvedEmail,
+            verifiedFullLegalName: identityNameBirthDate.fullLegalName,
+            normalizedFullLegalName: identityNameBirthDate.normalizedFullLegalName,
+            birthDate: identityNameBirthDate.birthDate,
+            reviewReason: duplicateReason,
+            matchedOn,
+            metadata: {
+                duplicate_detected_by: 'approval_rpc',
+                matched_on: matchedOn,
+                approval_claim_result: approvalClaim,
+            },
+        });
+
+        if (sessionId) {
+            await upsertVerificationSession(
+                supabaseAdmin,
+                sessionId,
+                'PENDING_REVIEW',
+                {
+                        full_name: fullName,
+                        first_name: firstName,
+                        middle_name: middleName,
+                        last_name: lastName,
+                        raw_data: sanitizeIdentityVerificationData(idVerification),
+                        document_fingerprint: documentFingerprint,
+                        document_country: documentCountry || 'PHL',
+                        verified_full_legal_name: identityNameBirthDate.fullLegalName,
+                        normalized_full_legal_name: identityNameBirthDate.normalizedFullLegalName,
+                        birth_date: identityNameBirthDate.birthDate,
+                        id_document_expiry: documentExpiry,
+                        id_verified_at: new Date().toISOString(),
+                        user_ref: userReference,
+                        email: resolvedEmail,
+                        duplicate_identity_review_required: true,
+                        duplicate_reason: duplicateReason,
+                        review_reason: duplicateReason,
+                        matched_on: matchedOn,
+                        duplicate_match_count: duplicateMatchCount,
+                },
+            );
+        }
 
         await supabaseAdmin
             .from('profiles')
@@ -1033,18 +1228,27 @@ async function handleApproved(
             });
 
             if (confirmError) {
+                console.log('Failed to confirm email and update metadata:', confirmError.message);
             } else {
+                console.log(`Email confirmed and display name set for verified user ${userReference} (${userEmail}) - Name: ${fullName}`);
             }
 
             // Send verification confirmation email using Supabase GoTrue
             await sendVerificationEmail(supabaseAdmin, userEmail, firstName, fullName);
 
         } catch (emailError) {
+            console.log('Email confirmation error:', emailError);
         }
     }
 
 
     // NOW store the full profile with verified ID details
+    console.log('Updating profile with verified data:', {
+        userReference,
+        fullName,
+        documentExpiry,
+        verificationStatus: 'APPROVED'
+    });
 
     const { error: updateError, data: updateData } = await supabaseAdmin
         .from('profiles')
@@ -1065,6 +1269,7 @@ async function handleApproved(
         if (updateError) {
             console.error('Failed to update profile:', updateError.message);
         } else {
+            console.log('No profile found to update, creating new profile via upsert...');
         }
 
         // Profile doesn't exist - create it with upsert
@@ -1086,8 +1291,10 @@ async function handleApproved(
         if (upsertError) {
             console.error('Upsert failed:', upsertError.message);
         } else {
+            console.log('Profile upserted successfully:', upsertData);
         }
     } else {
+        console.log('Profile updated successfully:', updateData);
     }
 
     // Send success notification
@@ -1100,6 +1307,7 @@ async function handleApproved(
             message: 'Your identity has been successfully verified. You now have full access to all features.',
         });
 
+    console.log(`Profile verified for user ${userReference}`);
 }
 
 /**
@@ -1107,6 +1315,7 @@ async function handleApproved(
  * Don't store any profile details, just mark as declined
  */
 async function handleDeclined(supabaseAdmin: any, userReference: string, sessionId: string | null) {
+    console.log('Verification declined for user:', userReference);
 
     // ALWAYS store status in verification_sessions for frontend polling
     if (sessionId) {
@@ -1117,8 +1326,9 @@ async function handleDeclined(supabaseAdmin: any, userReference: string, session
             {
                     user_ref: userReference,
                     declined_at: new Date().toISOString()
-                }
-            });
+            },
+        );
+        console.log('Stored DECLINED status in verification_sessions');
     }
 
     // Only update profiles if it's a real user (not TEMP_)
@@ -1134,6 +1344,7 @@ async function handleDeclined(supabaseAdmin: any, userReference: string, session
             .eq('id', userReference);
     }
 
+    console.log('Declined - no email sent, user will retry from app');
 }
 
 /**
@@ -1141,6 +1352,7 @@ async function handleDeclined(supabaseAdmin: any, userReference: string, session
  * Don't store any profile details, just mark as abandoned
  */
 async function handleAbandoned(supabaseAdmin: any, userReference: string, sessionId: string | null) {
+    console.log('Verification abandoned for user:', userReference);
 
     // ALWAYS store status in verification_sessions for frontend polling
     if (sessionId) {
@@ -1151,8 +1363,9 @@ async function handleAbandoned(supabaseAdmin: any, userReference: string, sessio
             {
                     user_ref: userReference,
                     abandoned_at: new Date().toISOString()
-                }
-            });
+            },
+        );
+        console.log('Stored ABANDONED status in verification_sessions');
     }
 
     // Only update profiles if it's a real user (not TEMP_)
@@ -1168,6 +1381,7 @@ async function handleAbandoned(supabaseAdmin: any, userReference: string, sessio
             .eq('id', userReference);
     }
 
+    console.log('Abandoned - no email sent, user will retry from app');
 }
 
 /**
@@ -1175,6 +1389,7 @@ async function handleAbandoned(supabaseAdmin: any, userReference: string, sessio
  * Don't store profile details yet - wait for manual review result
  */
 async function handleInReview(supabaseAdmin: any, userReference: string, sessionId: string | null) {
+    console.log('Verification in review for user:', userReference);
 
     // ALWAYS store status in verification_sessions for frontend polling
     if (sessionId) {
@@ -1185,8 +1400,9 @@ async function handleInReview(supabaseAdmin: any, userReference: string, session
             {
                     user_ref: userReference,
                     review_started_at: new Date().toISOString()
-                }
-            });
+            },
+        );
+        console.log('Stored PENDING_REVIEW status in verification_sessions');
     }
 
     // Only update profiles if it's a real user (not TEMP_)
@@ -1232,6 +1448,7 @@ async function handleInReview(supabaseAdmin: any, userReference: string, session
             });
     }
 
+    console.log('In Review - no email sent, user will be notified of review result');
 }
 
 /**
@@ -1248,9 +1465,12 @@ async function handleDuplicateDetected(
     authUser: any = null,
     sessionMetadata: any = null
 ) {
+    console.log('DUPLICATE DETECTED for user:', userReference);
+    console.log('Warnings received:', warnings);
 
     const documentType = idVerification?.document_type || idVerification?.documentType || idVerification?.type || 'Government ID';
-    const documentCountry = idVerification?.issuing_country || idVerification?.issuingCountry || idVerification?.country || 'PHL';
+    const documentCountry = idVerification?.issuing_country || idVerification?.issuingCountry || idVerification?.country || '';
+    const identityNameBirthDate = prepareIdentityNameBirthDateDuplicateInput(idVerification);
     const documentFingerprint = await buildIdentityDocumentFingerprint(idVerification, {
         documentType,
         documentCountry,
@@ -1272,45 +1492,23 @@ async function handleDuplicateDetected(
             .eq('id', userReference)
             .maybeSingle();
 
-        if (profileDeleteError) {
-        } else {
-        }
+        const rawRole = profile?.role || authUser?.user?.user_metadata?.role || '';
+        resolvedRole = rawRole ? normalizeIdentityRole(rawRole) : '';
+        resolvedEmail = resolvedEmail || profile?.email || authUser?.user?.email || '';
+    } else if (sessionId) {
+        const { data: pendingSession } = await supabaseAdmin
+            .from('verification_sessions')
+            .select('verification_data')
+            .eq('session_ref', sessionId)
+            .maybeSingle();
 
-        // Delete any notifications that might have been created
-        const { error: notificationDeleteError } = await supabaseAdmin
-            .from('notifications')
-            .delete()
-            .eq('user_id', userReference);
-
-        if (notificationDeleteError) {
-        }
-
-        // Finally, delete the auth.users record
-        const { error: authDeleteError } = await supabaseAdmin.auth.admin.deleteUser(userReference);
-
-        if (authDeleteError) {
-            // If we can't delete, at least mark the account as disabled
-            await supabaseAdmin.auth.admin.updateUserById(userReference, {
-                ban_duration: 'none', // Permanently ban if we can't delete
-            });
-        } else {
-        }
-
-
-    } catch (error: any) {
-        console.error('Error cleaning up duplicate account:', error.message);
-        // Fallback: at least mark the profile so it's clear this is a duplicate
-        await supabaseAdmin
-            .from('profiles')
-            .update({
-                is_verified: false,
-                verification_status: 'DECLINED',
-                didit_session_id: null,
-            })
-            .eq('id', userReference);
+        const rawRole = pendingSession?.verification_data?.signup_role || sessionMetadata?.signup_role || sessionMetadata?.role || '';
+        resolvedRole = rawRole ? normalizeIdentityRole(rawRole) : '';
+        resolvedEmail = resolvedEmail || pendingSession?.verification_data?.email || sessionMetadata?.email || '';
     }
 
     let duplicateMatchCount = 1;
+    let duplicateMatchesForReview: any[] = [];
     const hasRoleForDuplicateCheck = Boolean(resolvedRole);
     if (documentFingerprint && hasRoleForDuplicateCheck && canResolveDuplicateByRole) {
         const duplicate = await findSameRoleIdentityDuplicate(supabaseAdmin, {
@@ -1321,6 +1519,7 @@ async function handleDuplicateDetected(
         });
 
         duplicateMatchCount = duplicate.matches?.length || 0;
+        duplicateMatchesForReview = duplicate.matches || [];
         if (!duplicate.hasDuplicate) {
             await handleApproved(supabaseAdmin, userReference, resolvedEmail || userEmail, idVerification, authUser, sessionId, 'APPROVED');
             return;
@@ -1341,8 +1540,13 @@ async function handleDuplicateDetected(
                     signup_role: hasRoleForDuplicateCheck ? resolvedRole : null,
                     document_fingerprint: documentFingerprint,
                     document_country: documentCountry,
+                    verified_full_legal_name: identityNameBirthDate.fullLegalName,
+                    normalized_full_legal_name: identityNameBirthDate.normalizedFullLegalName,
+                    birth_date: identityNameBirthDate.birthDate,
                     duplicate_identity_review_required: true,
                     duplicate_reason: duplicateReason,
+                    review_reason: duplicateReason,
+                    matched_on: 'DOCUMENT_FINGERPRINT',
                     duplicate_match_count: duplicateMatchCount || 1,
                     warnings,
                     review_started_at: new Date().toISOString(),
@@ -1362,10 +1566,17 @@ async function handleDuplicateDetected(
         documentFingerprint,
         duplicateReason,
         duplicateMatchCount: duplicateMatchCount || 1,
+        verifiedFullLegalName: identityNameBirthDate.fullLegalName,
+        normalizedFullLegalName: identityNameBirthDate.normalizedFullLegalName,
+        birthDate: identityNameBirthDate.birthDate,
+        reviewReason: duplicateReason,
+        matchedOn: 'DOCUMENT_FINGERPRINT',
         metadata: {
             didit_warnings: warnings,
             duplicate_detected_by: 'didit_warning',
             role_scoped_duplicate_check: canResolveDuplicateByRole,
+            matched_on: 'DOCUMENT_FINGERPRINT',
+            duplicate_matches: duplicateMatchesForReview,
         },
     });
 
@@ -1380,6 +1591,11 @@ async function handleDuplicateDetected(
         diditSessionId: sessionId,
         manualReviewId: reviewRecord?.id || null,
         email: resolvedEmail,
+        verifiedFullLegalName: identityNameBirthDate.fullLegalName,
+        normalizedFullLegalName: identityNameBirthDate.normalizedFullLegalName,
+        birthDate: identityNameBirthDate.birthDate,
+        reviewReason: duplicateReason,
+        matchedOn: 'DOCUMENT_FINGERPRINT',
     });
 
     await supabaseAdmin
@@ -1418,6 +1634,10 @@ async function handleAddressVerification(
     decision: any,
     payload: any
 ) {
+    console.log('=== PROCESSING ADDRESS VERIFICATION ===');
+    console.log('Entity:', entityType, entityId);
+    console.log('User:', userId);
+    console.log('Status:', status);
 
     // Get the stored session data with expected values
     const { data: sessionData } = await supabaseAdmin
@@ -1441,6 +1661,14 @@ async function handleAddressVerification(
     const issuer = extractedData?.issuer || extractedData?.company || '';
     const issueDate = extractedData?.issue_date || extractedData?.date || '';
 
+    console.log('Extracted POA data:', {
+        extractedAddress,
+        extractedName,
+        issuer,
+        issueDate,
+        expectedAddress,
+        expectedName
+    });
 
     // Determine entity table
     const entityTable = entityType === 'studio' ? 'studios' : 'gigs';
@@ -1451,6 +1679,7 @@ async function handleAddressVerification(
     const isRecent = issueDate ? isWithinDays(issueDate, 90) : true; // Within 90 days
     const isValidIssuer = isValidUtilityIssuer(issuer);
 
+    console.log('Validation results:', { nameMatches, addressMatches, isRecent, isValidIssuer });
 
     // Determine final verification status
     let verificationStatus = 'PENDING';
@@ -1537,6 +1766,7 @@ async function handleAddressVerification(
             });
     }
 
+    console.log(`Address verification completed: ${verificationStatus} for ${entityType} ${entityId}`);
 }
 
 /**

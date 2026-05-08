@@ -6,8 +6,14 @@ import {
   buildIdentityDocumentFingerprint,
   findSameRoleIdentityDuplicate,
   getDuplicateIdentityReviewReason,
+  prepareIdentityNameBirthDateDuplicateInput,
   recordIdentityDocumentClaim,
 } from "../_shared/identityDuplicate.ts";
+import {
+  enforceRegistrationRateLimit,
+  getRegistrationRateLimitStatus,
+  markRegistrationAttempt,
+} from "../_shared/registrationRateLimit.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -527,6 +533,7 @@ serve(async (req: Request) => {
     const documentCountry = String(body?.documentCountry || "PHL").trim().toUpperCase();
     const diditSessionId = String(body?.diditSessionId || body?.didit_session_id || "").trim() || null;
     const verificationMode = source === "DIDIT_PENDING" ? "didit" : "manual_upload";
+    let registrationAttemptId: string | null = null;
 
     if (!email || !documentType) {
       return jsonResponse({ error: "Missing required fields: email, documentType" }, 400);
@@ -545,12 +552,37 @@ serve(async (req: Request) => {
     }
 
     await enforceManualReviewRateLimit(supabaseAdmin, email, userId || null);
+    try {
+      const registrationAttempt = await enforceRegistrationRateLimit(supabaseAdmin, req, {
+        action: "manual_identity_review",
+        email,
+        userId: userId || null,
+        diditSessionId,
+        metadata: {
+          role,
+          source,
+          verification_mode: verificationMode,
+        },
+      });
+      registrationAttemptId = registrationAttempt?.attemptId || null;
+    } catch (rateLimitError) {
+      const status = getRegistrationRateLimitStatus(rateLimitError);
+      if (status) {
+        return jsonResponse({ error: rateLimitError.message }, status);
+      }
+      throw rateLimitError;
+    }
 
     const documentFingerprint = await buildIdentityDocumentFingerprint(null, {
       documentNumber: identityDocumentNumber,
       documentType,
       documentTypeKey,
       documentCountry,
+    });
+    const identityNameBirthDate = prepareIdentityNameBirthDateDuplicateInput(null, {
+      fullLegalName: body?.verifiedFullLegalName || body?.fullLegalName || fullName,
+      normalizedFullLegalName: body?.normalizedFullLegalName || body?.normalized_full_legal_name,
+      birthDate: body?.birthDate || body?.birth_date || body?.dateOfBirth || body?.date_of_birth,
     });
 
     const duplicateIdentity = documentFingerprint
@@ -636,6 +668,11 @@ serve(async (req: Request) => {
           selfie_image_path: selfiePath,
           submitted_role: role,
           document_fingerprint: documentFingerprint,
+          verified_full_legal_name: identityNameBirthDate.fullLegalName,
+          normalized_full_legal_name: identityNameBirthDate.normalizedFullLegalName,
+          birth_date: identityNameBirthDate.birthDate,
+          review_reason: duplicateReason,
+          matched_on: duplicateReason ? "DOCUMENT_FINGERPRINT" : null,
           duplicate_reason: duplicateReason,
           duplicate_match_count: duplicateIdentity.matches?.length || 0,
           review_notes: duplicateReason,
@@ -663,6 +700,11 @@ serve(async (req: Request) => {
           status: "PENDING_REVIEW",
           submitted_role: role,
           document_fingerprint: documentFingerprint,
+          verified_full_legal_name: identityNameBirthDate.fullLegalName,
+          normalized_full_legal_name: identityNameBirthDate.normalizedFullLegalName,
+          birth_date: identityNameBirthDate.birthDate,
+          review_reason: duplicateReason,
+          matched_on: duplicateReason ? "DOCUMENT_FINGERPRINT" : null,
           duplicate_reason: duplicateReason,
           duplicate_match_count: duplicateIdentity.matches?.length || 0,
           review_notes: duplicateReason,
@@ -703,6 +745,11 @@ serve(async (req: Request) => {
       status: "PENDING_REVIEW",
       manualReviewId: reviewId,
       email,
+      verifiedFullLegalName: identityNameBirthDate.fullLegalName,
+      normalizedFullLegalName: identityNameBirthDate.normalizedFullLegalName,
+      birthDate: identityNameBirthDate.birthDate,
+      reviewReason: duplicateReason,
+      matchedOn: duplicateReason ? "DOCUMENT_FINGERPRINT" : null,
     });
 
     await supabaseAdmin.from("notifications").insert({
@@ -720,6 +767,17 @@ serve(async (req: Request) => {
 
     const submissionEmail = await sendSubmissionEmail(supabaseAdmin, email, documentType);
 
+    await markRegistrationAttempt(supabaseAdmin, registrationAttemptId, {
+      success: true,
+      user_id: userId,
+      metadata: {
+        role,
+        source,
+        duplicate_identity_review: duplicateIdentity.hasDuplicate,
+        manual_identity_review_id: reviewId,
+      },
+    });
+
     return jsonResponse({
       success: true,
       reviewId,
@@ -729,6 +787,6 @@ serve(async (req: Request) => {
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unexpected error";
-    return jsonResponse({ error: message }, 500);
+    return jsonResponse({ error: message }, getRegistrationRateLimitStatus(error) || 500);
   }
 });

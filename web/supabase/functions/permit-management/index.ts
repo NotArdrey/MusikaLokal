@@ -791,6 +791,7 @@ serve(async (req: Request) => {
         bookingRows,
         withdrawalRows,
         walletTransactionRows,
+        platformWithdrawalRows,
       ] = await Promise.all([
         safeCount(client.from("profiles").select("id", { count: "exact", head: true }), queryHealthTracker),
         safeCount(client.from("studios").select("id", { count: "exact", head: true }), queryHealthTracker),
@@ -921,6 +922,12 @@ serve(async (req: Request) => {
             .select("id, amount, type, reference_type, is_credit, status, created_at, reference_id"),
           queryHealthTracker,
         ),
+        safeRows(
+          client
+            .from("platform_withdrawals")
+            .select("id, amount, status, created_at"),
+          queryHealthTracker,
+        ),
       ]);
 
       let dau = 0;
@@ -944,7 +951,9 @@ serve(async (req: Request) => {
       }, 0);
 
       let grossBookingRevenue = 0;
+      let allTimeGrossBookingRevenue = 0;
       let refundedBookingRevenue = 0;
+      let allTimeRefundedBookingRevenue = 0;
       let paidPaymentEvents = 0;
       let failedPaymentEvents = 0;
       let paymongoLinkedPaymentEvents = 0;
@@ -953,13 +962,21 @@ serve(async (req: Request) => {
 
       for (const booking of bookingRows as any[]) {
         const activityDate = booking?.paid_at || booking?.created_at || booking?.booking_date;
+        const paymentStatus = String(booking?.payment_status || "").trim().toLowerCase();
+        const amount = toNumber(booking?.payment_amount) || toNumber(booking?.final_price);
+
+        if (["paid", "partial", "refunded", "refund_pending"].includes(paymentStatus)) {
+          allTimeGrossBookingRevenue += amount;
+        }
+
+        if (["refunded", "refund_pending"].includes(paymentStatus)) {
+          allTimeRefundedBookingRevenue += amount;
+        }
+
         if (!isInRange(activityDate, rangeStartMs)) continue;
 
         const activityTsMs = toTimestampMs(activityDate);
         const trendBucket = findRevenueTrendBucket(activityTsMs, revenueTrendBuckets);
-
-        const paymentStatus = String(booking?.payment_status || "").trim().toLowerCase();
-        const amount = toNumber(booking?.payment_amount) || toNumber(booking?.final_price);
 
         if (["paid", "partial", "refunded", "refund_pending"].includes(paymentStatus)) {
           grossBookingRevenue += amount;
@@ -1007,6 +1024,7 @@ serve(async (req: Request) => {
       }
 
       let providerEarningsInRange = 0;
+      let allTimeProviderEarnings = 0;
       const bookingEarningReferenceTypes = new Set([
         "",
         "booking",
@@ -1030,6 +1048,10 @@ serve(async (req: Request) => {
           bookingEarningReferenceTypes.has(referenceType)
         ) {
           const amount = toNumber(transaction?.amount);
+          allTimeProviderEarnings += amount;
+
+          if (!isInRange(transaction?.created_at, rangeStartMs)) continue;
+
           providerEarningsInRange += amount;
 
           const transactionTsMs = toTimestampMs(transaction?.created_at);
@@ -1038,9 +1060,22 @@ serve(async (req: Request) => {
         }
       }
 
+      const platformWithdrawn = (platformWithdrawalRows as any[]).reduce((sum, withdrawal) => {
+        const status = String(withdrawal?.status || "").trim().toLowerCase();
+        if (status !== "completed") return sum;
+        return sum + toNumber(withdrawal?.amount);
+      }, 0);
       const grossRevenue = roundTo(grossBookingRevenue, 2);
       const netRevenue = roundTo(
         Math.max(grossRevenue - providerEarningsInRange - refundedBookingRevenue, 0),
+        2,
+      );
+      const allTimePlatformNet = roundTo(
+        Math.max(allTimeGrossBookingRevenue - allTimeProviderEarnings - allTimeRefundedBookingRevenue, 0),
+        2,
+      );
+      const platformAvailable = roundTo(
+        Math.max(allTimePlatformNet - platformWithdrawn, 0),
         2,
       );
 
@@ -1242,6 +1277,9 @@ serve(async (req: Request) => {
         newSignups24h,
         grossRevenue,
         netRevenue,
+        allTimePlatformNet,
+        platformWithdrawn: roundTo(platformWithdrawn, 2),
+        platformAvailable,
         providerEarnings: roundTo(providerEarningsInRange, 2),
         pendingPayouts: roundTo(pendingPayouts, 2),
         avgReportResolutionHours,
@@ -1269,6 +1307,37 @@ serve(async (req: Request) => {
 
       writeMetricsCache(metricsCacheKey, responsePayload);
       return jsonResponse(responsePayload);
+    }
+
+    if (action === "admin_record_platform_withdrawal") {
+      const amount = toNumber(params.amount);
+      const notes = String(params.notes || "").trim();
+
+      if (!Number.isFinite(amount) || amount < 100) {
+        return jsonResponse({ error: "Minimum withdrawal amount is PHP 100" }, 400);
+      }
+
+      const { data, error } = await client.rpc("process_platform_manual_withdrawal", {
+        p_admin_user_id: userId,
+        p_amount: amount,
+        p_notes: notes || null,
+      });
+
+      if (error) {
+        return jsonResponse({
+          error: error.message || "Unable to record platform withdrawal",
+          details: error.details,
+          hint: error.hint,
+          code: error.code,
+        }, 400);
+      }
+
+      clearMetricsCache();
+
+      return jsonResponse({
+        success: true,
+        ...(data || {}),
+      });
     }
 
     if (action === "admin_fetch_withdrawals") {
@@ -1312,7 +1381,35 @@ serve(async (req: Request) => {
           .select("id,amount,net_amount,status,reference_number,notes"),
       );
 
-      const [listResult, totalsResult] = await Promise.all([listQuery, totalsQuery]);
+      let platformListQuery = client
+        .from("platform_withdrawals")
+        .select("id,amount,status,reference_number,notes,processed_at,processed_by,created_at,updated_at,available_before,available_after,payment_count");
+
+      let platformTotalsQuery = client
+        .from("platform_withdrawals")
+        .select("id,amount,status,reference_number,notes");
+
+      if (allowedStatuses.has(statusFilter)) {
+        platformListQuery = platformListQuery.eq("status", statusFilter);
+        platformTotalsQuery = platformTotalsQuery.eq("status", statusFilter);
+      }
+
+      if (searchTerm.length >= 2) {
+        const ilikePattern = `%${searchTerm}%`;
+        platformListQuery = platformListQuery.or(
+          `reference_number.ilike.${ilikePattern},notes.ilike.${ilikePattern}`,
+        );
+        platformTotalsQuery = platformTotalsQuery.or(
+          `reference_number.ilike.${ilikePattern},notes.ilike.${ilikePattern}`,
+        );
+      }
+
+      const [listResult, totalsResult, platformListRows, platformTotalRows] = await Promise.all([
+        listQuery,
+        totalsQuery,
+        safeRows(platformListQuery.order("created_at", { ascending: false }).limit(50)),
+        safeRows(platformTotalsQuery),
+      ]);
 
       if (listResult.error) throw listResult.error;
       if (totalsResult.error) throw totalsResult.error;
@@ -1353,19 +1450,86 @@ serve(async (req: Request) => {
         },
       );
 
+      const platformTotals = (platformTotalRows as any[]).reduce(
+        (acc: any, withdrawal: any) => {
+          const status = String(withdrawal?.status || "").trim().toLowerCase();
+          const amount = toNumber(withdrawal?.amount);
+
+          acc.count += 1;
+          acc.totalAmount += amount;
+          acc.totalNetAmount += amount;
+
+          if (status === "completed") {
+            acc.completedAmount += amount;
+          }
+
+          acc.platformCount += 1;
+          return acc;
+        },
+        {
+          count: 0,
+          totalAmount: 0,
+          totalNetAmount: 0,
+          completedAmount: 0,
+          pendingAmount: 0,
+          platformCount: 0,
+        },
+      );
+
+      const providerWithdrawals = (listResult.data || []).map((withdrawal: any) => ({
+        ...withdrawal,
+        source_type: "provider",
+      }));
+
+      const platformWithdrawals = (platformListRows as any[]).map((withdrawal: any) => ({
+        id: withdrawal.id,
+        user_id: null,
+        wallet_id: null,
+        payout_method_id: null,
+        amount: withdrawal.amount,
+        fee: 0,
+        net_amount: withdrawal.amount,
+        status: withdrawal.status,
+        payout_type: "manual",
+        payout_account_name: "Platform cashout",
+        payout_account_number: withdrawal.reference_number,
+        payout_bank_name: "Internal ledger",
+        reference_number: withdrawal.reference_number,
+        notes: withdrawal.notes || `Manual platform withdrawal linked to ${withdrawal.payment_count || 0} payment rows.`,
+        processed_at: withdrawal.processed_at,
+        processed_by: withdrawal.processed_by,
+        failure_reason: null,
+        created_at: withdrawal.created_at,
+        updated_at: withdrawal.updated_at,
+        user: {
+          id: withdrawal.processed_by,
+          full_name: "Platform",
+          email: null,
+          role: "admin",
+        },
+        source_type: "platform",
+      }));
+
+      const mergedWithdrawals = [...providerWithdrawals, ...platformWithdrawals]
+        .sort((a: any, b: any) =>
+          new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime(),
+        )
+        .slice(0, limit);
+
       return jsonResponse({
         success: true,
-        withdrawals: listResult.data || [],
+        withdrawals: mergedWithdrawals,
         totals: {
-          count: totals.count,
-          totalAmount: roundTo(totals.totalAmount, 2),
-          totalNetAmount: roundTo(totals.totalNetAmount, 2),
-          completedAmount: roundTo(totals.completedAmount, 2),
+          count: totals.count + platformTotals.count,
+          totalAmount: roundTo(totals.totalAmount + platformTotals.totalAmount, 2),
+          totalNetAmount: roundTo(totals.totalNetAmount + platformTotals.totalNetAmount, 2),
+          completedAmount: roundTo(totals.completedAmount + platformTotals.completedAmount, 2),
           pendingAmount: roundTo(totals.pendingAmount, 2),
           mockCount: totals.mockCount,
+          platformCount: platformTotals.platformCount,
         },
-        count: listResult.count || 0,
-        hasMore: offset + limit < (listResult.count || 0),
+        count: (listResult.count || 0) + platformTotals.count,
+        hasMore: offset + limit < ((listResult.count || 0) + platformTotals.count),
       });
     }
 

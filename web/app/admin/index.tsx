@@ -151,6 +151,9 @@ interface DashboardMetrics {
   newSignups24h: number;
   grossRevenue: number;
   netRevenue: number;
+  allTimePlatformNet: number;
+  platformWithdrawn: number;
+  platformAvailable: number;
   providerEarnings: number;
   pendingPayouts: number;
   avgReportResolutionHours: number;
@@ -204,6 +207,7 @@ interface AdminWithdrawalEntry {
   notes: string | null;
   created_at: string | null;
   processed_at: string | null;
+  source_type?: 'provider' | 'platform';
   user?: {
     id?: string;
     full_name?: string | null;
@@ -219,6 +223,7 @@ interface WithdrawalTotals {
   completedAmount: number;
   pendingAmount: number;
   mockCount: number;
+  platformCount: number;
 }
 
 const defaultMetrics: DashboardMetrics = {
@@ -242,6 +247,9 @@ const defaultMetrics: DashboardMetrics = {
   newSignups24h: 0,
   grossRevenue: 0,
   netRevenue: 0,
+  allTimePlatformNet: 0,
+  platformWithdrawn: 0,
+  platformAvailable: 0,
   providerEarnings: 0,
   pendingPayouts: 0,
   avgReportResolutionHours: 0,
@@ -275,6 +283,7 @@ const defaultWithdrawalTotals: WithdrawalTotals = {
   completedAmount: 0,
   pendingAmount: 0,
   mockCount: 0,
+  platformCount: 0,
 };
 
 const ADMIN_WITHDRAW_QUICK_AMOUNTS = [100, 500, 1000];
@@ -1091,6 +1100,7 @@ export default function AdminDashboardPage() {
   const [withdrawalStatusFilter, setWithdrawalStatusFilter] = useState<WithdrawalStatusFilter>('all');
   const [withdrawalsLoading, setWithdrawalsLoading] = useState(false);
   const [adminWithdrawAmount, setAdminWithdrawAmount] = useState('');
+  const [adminWithdrawSubmitting, setAdminWithdrawSubmitting] = useState(false);
   const [alertState, setAlertState] = useState<{
     visible: boolean;
     type: AlertType;
@@ -1229,6 +1239,9 @@ export default function AdminDashboardPage() {
       newSignups24h: Number(data?.newSignups24h || 0),
       grossRevenue: Number(data?.grossRevenue || 0),
       netRevenue: Number(data?.netRevenue || 0),
+      allTimePlatformNet: Number(data?.allTimePlatformNet || data?.netRevenue || 0),
+      platformWithdrawn: Number(data?.platformWithdrawn || 0),
+      platformAvailable: Number(data?.platformAvailable ?? data?.netRevenue ?? 0),
       providerEarnings: Number(data?.providerEarnings || 0),
       pendingPayouts: Number(data?.pendingPayouts || 0),
       avgReportResolutionHours: Number(data?.avgReportResolutionHours || 0),
@@ -1298,6 +1311,7 @@ export default function AdminDashboardPage() {
           notes: item?.notes || null,
           created_at: item?.created_at || null,
           processed_at: item?.processed_at || null,
+          source_type: item?.source_type === 'platform' ? 'platform' : 'provider',
           user: owner ? {
             id: owner.id,
             full_name: owner.full_name || null,
@@ -1316,6 +1330,7 @@ export default function AdminDashboardPage() {
       completedAmount: Number(totalsPayload?.completedAmount || 0),
       pendingAmount: Number(totalsPayload?.pendingAmount || 0),
       mockCount: Number(totalsPayload?.mockCount || 0),
+      platformCount: Number(totalsPayload?.platformCount || 0),
     };
 
     return { withdrawals: nextWithdrawals, totals: nextTotals };
@@ -1451,26 +1466,94 @@ export default function AdminDashboardPage() {
     adminWithdrawSheetRef.current?.dismiss();
   }, []);
 
-  const handleAdminWithdrawSubmit = useCallback(() => {
-    showAlert(
-      'info',
-      'Platform Cashout Not Connected',
-      'This admin sheet matches the app bottom-sheet flow, but platform cashout is not wired to a platform wallet ledger yet. User/provider cashouts still work from the Wallet page.',
-    );
-  }, [showAlert]);
+  const adminWithdrawAvailable = Math.max(Number(metrics.platformAvailable ?? metrics.netRevenue ?? 0), 0);
+  const parsedAdminWithdrawAmount = Number(adminWithdrawAmount);
+  const isAdminWithdrawReady =
+    Number.isFinite(parsedAdminWithdrawAmount) &&
+    parsedAdminWithdrawAmount >= 100 &&
+    parsedAdminWithdrawAmount <= adminWithdrawAvailable;
+
+  const handleAdminWithdrawSubmit = useCallback(async () => {
+    if (adminWithdrawSubmitting) return;
+
+    const amount = Number(adminWithdrawAmount);
+    if (!Number.isFinite(amount) || amount < 100 || amount > adminWithdrawAvailable) {
+      showAlert('error', 'Invalid Amount', 'Enter an amount within the available platform net.');
+      return;
+    }
+
+    try {
+      setAdminWithdrawSubmitting(true);
+
+      const { data, error } = await supabase.functions.invoke<any>('permit-management', {
+        body: {
+          action: 'admin_record_platform_withdrawal',
+          amount,
+          notes: 'Manual platform withdrawal from admin dashboard. No external payout provider was used.',
+        },
+      });
+
+      if (error) throw error;
+      if (data?.error) throw new Error(String(data.error));
+
+      const [nextMetrics, nextWithdrawals] = await Promise.all([
+        fetchMetrics({
+          dateRange: dashboardDateRange,
+          searchQuery: dashboardSearchQuery,
+        }),
+        fetchAdminWithdrawals({
+          status: withdrawalStatusFilter,
+          searchQuery: dashboardSearchQuery,
+        }),
+      ]);
+
+      setMetrics(nextMetrics);
+      setWithdrawals(nextWithdrawals.withdrawals);
+      setWithdrawalTotals(nextWithdrawals.totals);
+      setAdminWithdrawAmount('');
+      dismissAdminWithdrawSheet();
+
+      showAlert(
+        'success',
+        'Platform Withdrawal Recorded',
+        `${data?.reference || 'Manual cashout'} was saved to the database and linked to the current paid booking snapshot. No external transfer was sent.`,
+      );
+    } catch (error) {
+      void getErrorMessage(error, 'Unable to record platform withdrawal.').then((message) => {
+        showAlert('error', 'Withdrawal Failed', message);
+      });
+    } finally {
+      setAdminWithdrawSubmitting(false);
+    }
+  }, [
+    adminWithdrawAmount,
+    adminWithdrawAvailable,
+    adminWithdrawSubmitting,
+    dashboardDateRange,
+    dashboardSearchQuery,
+    dismissAdminWithdrawSheet,
+    fetchAdminWithdrawals,
+    fetchMetrics,
+    showAlert,
+    withdrawalStatusFilter,
+  ]);
 
   const handleWithdrawalDetails = useCallback((withdrawal: AdminWithdrawalEntry) => {
-    const destination = withdrawal.payout_type === 'bank'
+    const destination = withdrawal.source_type === 'platform'
+      ? 'Internal ledger'
+      : withdrawal.payout_type === 'bank'
       ? (withdrawal.payout_bank_name || 'Bank')
       : withdrawal.payout_type.toUpperCase();
-    const owner = withdrawal.user?.full_name || withdrawal.user?.email || 'Unknown user';
+    const owner = withdrawal.source_type === 'platform'
+      ? 'Platform'
+      : withdrawal.user?.full_name || withdrawal.user?.email || 'Unknown user';
     const account = maskAccountNumber(withdrawal.payout_account_number);
     const reference = withdrawal.reference_number || 'No reference';
 
     showAlert(
       'info',
       'Withdrawal Details',
-      `${owner}\n${destination} ${account}\nStatus: ${formatWithdrawalStatus(withdrawal.status)}\nNet: ${formatCurrency(withdrawal.net_amount)}\nRef: ${reference}`,
+      `${owner}\n${destination} ${account}\nStatus: ${formatWithdrawalStatus(withdrawal.status)}\nNet: ${formatCurrency(withdrawal.net_amount)}\nRef: ${reference}${withdrawal.source_type === 'platform' ? '\nManual record only; no external transfer was sent.' : ''}`,
     );
   }, [showAlert]);
 
@@ -1514,13 +1597,6 @@ export default function AdminDashboardPage() {
 
   const showWithdrawalRevenueContext =
     withdrawalTotals.count === 0 && (metrics.grossRevenue > 0 || metrics.providerEarnings > 0);
-
-  const adminWithdrawAvailable = Math.max(Number(metrics.netRevenue || 0), 0);
-  const parsedAdminWithdrawAmount = Number(adminWithdrawAmount);
-  const isAdminWithdrawReady =
-    Number.isFinite(parsedAdminWithdrawAmount) &&
-    parsedAdminWithdrawAmount >= 100 &&
-    parsedAdminWithdrawAmount <= adminWithdrawAvailable;
 
   const revenueTrendRows = useMemo(() => {
     return metrics.revenueTrend.map((row) => ({
@@ -1717,6 +1793,7 @@ export default function AdminDashboardPage() {
               <Text style={[styles.pulseSubtitle, { color: colors.textSecondary, marginTop: 2 }]}>{selectedRevenueLabel}</Text>
               <Text style={[styles.pulseSubtitle, { color: colors.textSecondary, marginTop: 12 }]}>Provider earnings: {formatCurrency(metrics.providerEarnings)}</Text>
               <Text style={[styles.pulseSubtitle, { color: colors.textSecondary, marginTop: 2 }]}>Pending payouts: {formatCurrency(metrics.pendingPayouts)}</Text>
+              <Text style={[styles.pulseSubtitle, { color: colors.textSecondary, marginTop: 2 }]}>Platform withdrawn: {formatCurrency(metrics.platformWithdrawn)}</Text>
               <Text style={[styles.pulseSubtitle, { color: colors.textSecondary, marginTop: 2 }]}>Gross: {formatCurrency(metrics.grossRevenue)} | Platform net: {formatCurrency(metrics.netRevenue)}</Text>
             </View>
 
@@ -1762,7 +1839,7 @@ export default function AdminDashboardPage() {
               <View>
                 <Text style={[styles.panelTitle, { color: colors.text, marginBottom: 0 }]}>Withdrawal Monitor</Text>
                 <Text style={[styles.panelSubtitle, { color: colors.textSecondary, marginBottom: 0 }]}>
-                  Completed: {formatCurrency(withdrawalTotals.completedAmount)} | Pending: {formatCurrency(withdrawalTotals.pendingAmount)} | Mock cashouts: {formatMetricCount(withdrawalTotals.mockCount)}
+                  Completed: {formatCurrency(withdrawalTotals.completedAmount)} | Pending: {formatCurrency(withdrawalTotals.pendingAmount)} | Platform records: {formatMetricCount(withdrawalTotals.platformCount)}
                 </Text>
               </View>
               <View style={styles.withdrawalButtonRow}>
@@ -1812,7 +1889,7 @@ export default function AdminDashboardPage() {
                   Revenue and withdrawals are separate.
                 </Text>
                 <Text style={[styles.withdrawalExplainerText, { color: colors.textSecondary }]}>
-                  Revenue is counted from paid bookings. Withdrawal rows appear only after a provider requests a cashout, so zero withdrawals can still be correct while revenue exists.
+                  Revenue is counted from paid bookings. Platform withdrawals are manual database records linked to the current payment snapshot; they do not send money outside the app.
                 </Text>
               </View>
             </View>
@@ -2119,7 +2196,7 @@ export default function AdminDashboardPage() {
             <View style={{ flex: 1 }}>
               <Text style={[styles.adminWithdrawTitle, { color: colors.text }]}>Withdraw Funds</Text>
               <Text style={[styles.adminWithdrawSubtitle, { color: colors.textSecondary }]}>
-                Available platform net: {formatCurrency(adminWithdrawAvailable)}
+                Available manual platform net: {formatCurrency(adminWithdrawAvailable)}
               </Text>
             </View>
             <TouchableOpacity
@@ -2176,13 +2253,13 @@ export default function AdminDashboardPage() {
           <View style={[styles.adminWithdrawNote, { backgroundColor: isDark ? '#172033' : '#EFF6FF' }]}>
             <Ionicons name="information-circle-outline" size={18} color={colors.primary} />
             <Text style={[styles.adminWithdrawNoteText, { color: isDark ? colors.textSecondary : '#1E40AF' }]}>
-              This dashboard sheet uses the same bottom-sheet presentation as feed cards. Platform cashout still needs a dedicated ledger before it can deduct funds here.
+              This records an internal database withdrawal and links it to the current paid booking snapshot. No external payout provider is used.
             </Text>
           </View>
 
           <TouchableOpacity
             activeOpacity={isAdminWithdrawReady ? 0.82 : 1}
-            disabled={!isAdminWithdrawReady}
+            disabled={adminWithdrawSubmitting || !isAdminWithdrawReady}
             onPress={handleAdminWithdrawSubmit}
             style={[
               styles.adminWithdrawSubmitButton,
@@ -2192,9 +2269,11 @@ export default function AdminDashboardPage() {
               },
             ]}
           >
-            <Ionicons name="arrow-down-circle" size={20} color={isAdminWithdrawReady ? '#FFFFFF' : colors.textSecondary} />
+            {adminWithdrawSubmitting
+              ? <ActivityIndicator size="small" color="#FFFFFF" />
+              : <Ionicons name="arrow-down-circle" size={20} color={isAdminWithdrawReady ? '#FFFFFF' : colors.textSecondary} />}
             <Text style={[styles.adminWithdrawSubmitText, { color: isAdminWithdrawReady ? '#FFFFFF' : colors.textSecondary }]}>
-              Confirm Withdrawal
+              {adminWithdrawSubmitting ? 'Recording...' : 'Confirm Withdrawal'}
             </Text>
           </TouchableOpacity>
         </BottomSheetScrollView>

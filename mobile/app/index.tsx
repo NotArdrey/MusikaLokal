@@ -346,7 +346,11 @@ export default function LoginScreen() {
 
           // SELF-HEALING: After the email confirmation link creates a valid auth session,
           // promote the Didit-approved profile from pending to verified.
-          if ((!profile || !profile.is_verified) && metaVerified) {
+          const metadataDiditSessionId = typeof user.user_metadata?.didit_session_id === 'string'
+            ? user.user_metadata.didit_session_id.trim()
+            : '';
+
+          if ((!profile || !profile.is_verified) && metaVerified && !metadataDiditSessionId) {
             const { error: upsertError } = await supabase
               .from('profiles')
               .upsert({
