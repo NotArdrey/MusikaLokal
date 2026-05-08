@@ -486,20 +486,10 @@ async function sendSubmissionEmail(
 
   if (error) {
     console.error("manual_identity_review_submission_email_queue_failed", { message: error.message });
-    return {
-      sent: false,
-      queued: false,
-      provider: "email_notifications",
-      error: error.message,
-    };
+    return { sent: false, queued: false, provider: "email_notifications", error: error.message };
   }
 
-  return {
-    sent: false,
-    queued: true,
-    provider: "email_notifications",
-    error: null,
-  };
+  return { sent: false, queued: true, provider: "email_notifications" };
 }
 
 serve(async (req: Request) => {

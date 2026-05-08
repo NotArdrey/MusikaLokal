@@ -57,7 +57,6 @@ serve(async (req) => {
 
         if (profileError) {
             // If profile doesn't exist, we can probably safely delete the auth user
-            console.log('Profile not found, proceeding with auth deletion');
         } else {
             // ONLY allow deletion if not verified or authorized
             const allowedStatuses = ['NOT_STARTED', 'ABANDONED', 'DECLINED', 'PENDING'];

@@ -27,7 +27,6 @@ serve(async (req) => {
         const bucketExists = buckets.some(b => b.name === BUCKET_NAME);
 
         if (!bucketExists) {
-            console.log(`Creating bucket ${BUCKET_NAME}...`);
             const { error: createError } = await supabase.storage.createBucket(BUCKET_NAME, {
                 public: true,
                 fileSizeLimit: 1048576, // 1MB
@@ -89,7 +88,6 @@ serve(async (req) => {
 </body>
 </html>`;
 
-        console.log('Uploading file...');
         const { data: uploadData, error: uploadError } = await supabase.storage
             .from(BUCKET_NAME)
             .upload(FILE_NAME, htmlContent, {
@@ -105,7 +103,6 @@ serve(async (req) => {
             .from(BUCKET_NAME)
             .getPublicUrl(FILE_NAME);
 
-        console.log('Public URL:', publicUrl);
 
         return new Response(JSON.stringify({ success: true, publicUrl }), {
             headers: { ...corsHeaders, 'Content-Type': 'application/json' },

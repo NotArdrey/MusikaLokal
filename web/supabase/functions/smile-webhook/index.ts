@@ -97,7 +97,6 @@ serve(async (req) => {
       const userId = url.searchParams.get("user_id");
       const redirectTo = url.searchParams.get("redirect_to");
 
-      console.log("Smile redirect callback:", { sessionId, entityType, entityId, userId });
 
       // Update session status to indicate user completed the flow
       if (sessionId) {
@@ -186,12 +185,10 @@ serve(async (req) => {
     // Handle POST request - Webhook from Smile API
     // ============================================
     const body = await req.json();
-    console.log("Smile webhook received:", JSON.stringify(body, null, 2));
 
     const { type, data } = body;
 
     if (!type || !data) {
-      console.log("Invalid webhook payload - missing type or data");
       return new Response(JSON.stringify({ received: true }), {
         status: 200,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -215,7 +212,6 @@ serve(async (req) => {
 
     switch (type) {
       case "ARCHIVE_STARTED":
-        console.log(`Archive started for user ${smileUserId}, archive ${archiveId}`);
         
         if (session) {
           await supabaseAdmin
@@ -230,7 +226,6 @@ serve(async (req) => {
         break;
 
       case "ARCHIVE_ANALYZED":
-        console.log(`Archive analyzed for user ${smileUserId}, archive ${archiveId}`);
         
         // Get the archive details to extract address
         if (SMILE_CLIENT_ID && SMILE_CLIENT_SECRET && archiveId) {
@@ -238,7 +233,6 @@ serve(async (req) => {
             const accessToken = await getSmileAccessToken(SMILE_CLIENT_ID, SMILE_CLIENT_SECRET);
             const archive = await getSmileArchive(accessToken, archiveId);
             
-            console.log("Archive details:", JSON.stringify(archive, null, 2));
 
             // Extract address from analysis
             let extractedAddress = null;
@@ -283,7 +277,6 @@ serve(async (req) => {
         break;
 
       case "ARCHIVE_FAILED":
-        console.log(`Archive failed for user ${smileUserId}, archive ${archiveId}`);
         
         if (session) {
           await supabaseAdmin
@@ -311,7 +304,6 @@ serve(async (req) => {
         break;
 
       case "ARCHIVE_REVOKED":
-        console.log(`Archive revoked for user ${smileUserId}, archive ${archiveId}`);
         
         if (session) {
           await supabaseAdmin
@@ -325,7 +317,6 @@ serve(async (req) => {
         break;
 
       default:
-        console.log(`Unhandled webhook type: ${type}`);
     }
 
     // Always return 200 to acknowledge receipt

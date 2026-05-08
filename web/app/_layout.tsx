@@ -18,6 +18,11 @@ import "../global.css";
 import { prepareRealtimeAuth, supabase } from "../lib/supabase";
 import SidebarNav from "../src/components/SidebarNav";
 import { AuthProvider, useAuth } from "../src/context/AuthContext";
+import { BottomOverlayProvider } from "../src/context/BottomOverlayContext";
+import {
+  GlobalRadioMiniPlayer,
+  RadioPlayerProvider,
+} from "../src/context/RadioPlayerContext";
 import { ThemeProvider, useTheme } from "../src/context/ThemeContext";
 import { TopToastProvider } from "../src/context/TopToastContext";
 import { emitToast, toastBus, type ToastType } from "../src/events/toastBus";
@@ -71,9 +76,13 @@ export default function RootLayout() {
         <PortalProvider>
           <TopToastProvider>
             <AuthProvider>
-              <BottomSheetModalProvider>
-                <RootContent />
-              </BottomSheetModalProvider>
+              <BottomOverlayProvider>
+                <BottomSheetModalProvider>
+                  <RadioPlayerProvider>
+                    <RootContent />
+                  </RadioPlayerProvider>
+                </BottomSheetModalProvider>
+              </BottomOverlayProvider>
             </AuthProvider>
           </TopToastProvider>
         </PortalProvider>
@@ -610,6 +619,7 @@ function RootContent() {
             }}
           />
         </View>
+        <GlobalRadioMiniPlayer />
       </View>
     </View>
   );

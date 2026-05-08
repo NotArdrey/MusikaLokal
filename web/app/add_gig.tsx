@@ -11,6 +11,7 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
+  useWindowDimensions,
   View
 } from "react-native";
 import { Calendar } from "react-native-calendars";
@@ -127,6 +128,13 @@ type EventSchedule = {
 
 export default function AddGigScreen() {
   const { colors, isDark } = useTheme();
+  const { width: viewportWidth } = useWindowDimensions();
+  const isWebDesktop = Platform.OS === "web" && viewportWidth >= 768;
+  const pageBackground = isWebDesktop
+    ? isDark
+      ? "#0A1224"
+      : "#E9EEF8"
+    : colors.background;
   const params = useLocalSearchParams();
   const [step, setStep] = useState(1);
   const [gigName, setGigName] = useState("");
@@ -267,14 +275,14 @@ export default function AddGigScreen() {
 
       if (profile?.role !== "venue-owner") {
         showAlert("warning", "Unauthorized", "Only venue owners can create gigs.");
-        router.replace("/home");
+        router.replace("/feed");
         return;
       }
 
       setAuthorized(true);
     } catch (e) {
       console.error("Authorization check failed:", e);
-      router.replace("/home");
+      router.replace("/feed");
     } finally {
       setCheckingAuth(false);
     }
@@ -1192,8 +1200,9 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
           style={{ display: "none" }}
         />
       )}
-      <View style={[styles.flex1, { backgroundColor: colors.background }]}>
-        <Header title="Create Gig" onBackPress={handleBack} />
+      <View style={[styles.flex1, { backgroundColor: pageBackground }]}>
+        <View style={[styles.pageFrame, isWebDesktop && styles.pageFrameWeb]}>
+        <Header title="Add Venue" onBackPress={handleBack} />
 
         {/* Enhanced Step Indicator (Fixed at top) */}
         <View style={styles.stepIndicatorContainer}>
@@ -3003,6 +3012,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
           </View>
         </ScrollView>
 
+        </View>
         <Navbar />
       </View>
 
@@ -3134,6 +3144,17 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
 const styles = StyleSheet.create({
   flex1: {
     flex: 1,
+  },
+  pageFrame: {
+    flex: 1,
+    width: "100%",
+  },
+  pageFrameWeb: {
+    maxWidth: 1240,
+    width: "100%",
+    alignSelf: "center",
+    paddingHorizontal: 20,
+    paddingTop: 12,
   },
   centerContainer: {
     alignItems: "center",

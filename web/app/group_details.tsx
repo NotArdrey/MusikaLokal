@@ -83,7 +83,7 @@ export default function GroupDetailsScreen() {
 
   const buildShareUrl = () => {
     if (!group?.id) {
-      return ExpoLinking.createURL('/home');
+      return ExpoLinking.createURL('/feed');
     }
 
     return ExpoLinking.createURL('/group_details', {
@@ -221,7 +221,7 @@ export default function GroupDetailsScreen() {
         </Text>
         <TouchableOpacity
           activeOpacity={1}
-          onPress={() => router.replace('/home')}
+          onPress={() => router.replace('/feed')}
           style={[styles.emptyButton, { backgroundColor: colors.primary }]}
         >
           <Text style={styles.emptyButtonText}>Back to Home</Text>

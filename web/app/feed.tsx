@@ -1,11 +1,13 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect } from "@react-navigation/native";
 import { router } from "expo-router";
-import React, { useCallback, useMemo, useState } from "react";
+import React, { useCallback, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
+  Modal,
   Platform,
+  Pressable,
   RefreshControl,
   StyleSheet,
   Text,
@@ -20,6 +22,7 @@ import CustomAlert, { AlertType } from "../src/components/CustomAlert";
 import Header from "../src/components/header";
 import { normalizeVisibleInput } from "../src/components/modal";
 import Navbar from "../src/components/navbar";
+import PostDetailsModal from "../src/components/PostDetailsModal";
 import SmoothTabTransition from "../src/components/SmoothTabTransition";
 import { useAuth } from "../src/context/AuthContext";
 import { emitToast } from "../src/events/toastBus";
@@ -348,9 +351,11 @@ type SocialPostCardProps = {
   isDark: boolean;
   mediaWidth: number;
   width: number;
+  currentUserId: string | null;
   onOpenPost: (postId: string) => void;
   onOpenStudio: (studioId: string) => void;
   onReaction: (postId: string, currentReaction: string | null) => void;
+  onRequestDelete: (postId: string) => void;
 };
 
 const SocialPostCard = React.memo(function SocialPostCard({
@@ -361,9 +366,11 @@ const SocialPostCard = React.memo(function SocialPostCard({
   isDark,
   mediaWidth,
   width,
+  currentUserId,
   onOpenPost,
   onOpenStudio,
   onReaction,
+  onRequestDelete,
 }: SocialPostCardProps) {
   const mediaUrls = useMemo(() => getWebFeedMediaUrls(item), [item]);
   const serviceBadges = useMemo(() => getSocialServiceBadges(item), [item]);
@@ -410,6 +417,30 @@ const SocialPostCard = React.memo(function SocialPostCard({
     event?.stopPropagation?.();
   }, []);
 
+  const isOwner = !!currentUserId && item?.author_id === currentUserId;
+  const [menuOpen, setMenuOpen] = useState(false);
+
+  const handleMenuPress = useCallback(
+    (event?: any) => {
+      event?.stopPropagation?.();
+      if (!isOwner) {
+        emitToast({ type: "info", title: "No actions", message: "You can only manage your own posts." });
+        return;
+      }
+      setMenuOpen((open) => !open);
+    },
+    [isOwner],
+  );
+
+  const handleSelectDelete = useCallback(
+    (event?: any) => {
+      event?.stopPropagation?.();
+      setMenuOpen(false);
+      onRequestDelete(item.id);
+    },
+    [item?.id, onRequestDelete],
+  );
+
   return (
     <TouchableOpacity
       activeOpacity={1}
@@ -451,15 +482,47 @@ const SocialPostCard = React.memo(function SocialPostCard({
           </View>
         </View>
 
-        <TouchableOpacity
-          activeOpacity={0.78}
-          accessibilityRole="button"
-          accessibilityLabel="More options"
-          onPress={handleShare}
-          style={styles.socialMenuButton}
-        >
-          <Ionicons name="ellipsis-horizontal" size={20} color={colors.textSecondary} />
-        </TouchableOpacity>
+        <View style={styles.socialMenuWrap}>
+          <TouchableOpacity
+            activeOpacity={0.78}
+            accessibilityRole="button"
+            accessibilityLabel="More options"
+            onPress={handleMenuPress}
+            style={styles.socialMenuButton}
+          >
+            <Ionicons name="ellipsis-horizontal" size={20} color={colors.textSecondary} />
+          </TouchableOpacity>
+          {menuOpen && isOwner && (
+            <>
+              <Pressable
+                style={styles.socialMenuBackdrop}
+                onPress={(e) => {
+                  e?.stopPropagation?.();
+                  setMenuOpen(false);
+                }}
+              />
+              <View
+                style={[
+                  styles.socialMenuPopover,
+                  {
+                    backgroundColor: cardColor,
+                    borderColor,
+                    shadowOpacity: isDark ? 0 : 0.18,
+                  },
+                ]}
+              >
+                <TouchableOpacity
+                  activeOpacity={0.7}
+                  onPress={handleSelectDelete}
+                  style={styles.socialMenuItem}
+                >
+                  <Ionicons name="trash-outline" size={16} color="#ef4444" />
+                  <Text style={[styles.socialMenuItemText, { color: "#ef4444" }]}>Delete</Text>
+                </TouchableOpacity>
+              </View>
+            </>
+          )}
+        </View>
       </View>
 
       <Text style={[styles.socialCaption, { color: colors.text }]} numberOfLines={3}>
@@ -512,7 +575,7 @@ const SocialPostCard = React.memo(function SocialPostCard({
           </Text>
         </View>
         <Text style={[styles.socialEngagementText, { color: colors.textSecondary }]} numberOfLines={1}>
-          {engagement.comments} comments {"\u2022"} {engagement.shares} shares
+          {engagement.comments} comments
         </Text>
       </View>
 
@@ -530,10 +593,6 @@ const SocialPostCard = React.memo(function SocialPostCard({
         <TouchableOpacity activeOpacity={0.78} onPress={handleComment} style={styles.socialActionButton}>
           <Ionicons name="chatbubble-outline" size={17} color={colors.textSecondary} />
           <Text style={[styles.socialActionText, { color: colors.textSecondary }]}>Comment</Text>
-        </TouchableOpacity>
-        <TouchableOpacity activeOpacity={0.78} onPress={handleShare} style={styles.socialActionButton}>
-          <Ionicons name="share-outline" size={18} color={colors.textSecondary} />
-          <Text style={[styles.socialActionText, { color: colors.textSecondary }]}>Share</Text>
         </TouchableOpacity>
       </View>
 
@@ -570,7 +629,10 @@ export default function FeedScreen() {
   const [tab, setTab] = useState<FeedTab>("for_you");
   const [posts, setPosts] = useState<any[]>([]);
   const [postBody, setPostBody] = useState("");
-  const [postVisibility, setPostVisibility] = useState<"public" | "followers_only">("public");
+  const [postVisibility, setPostVisibility] = useState<"public" | "followers">("public");
+  const [showCreate, setShowCreate] = useState(false);
+  const [selectedMedia, setSelectedMedia] = useState<{ file: File; preview: string }[]>([]);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -582,7 +644,7 @@ export default function FeedScreen() {
   const cardBg = isWebDesktop ? (isDark ? "#1E293B" : "#FFFFFF") : colors.surface;
   const borderCol = isWebDesktop ? (isDark ? "#334155" : "#E2E8F0") : colors.border;
 
-  const canCreatePost = !!session && !isGuest && normalizeVisibleInput(postBody).length > 0;
+  const canCreatePost = !!session && !isGuest && (normalizeVisibleInput(postBody).length > 0 || selectedMedia.length > 0);
 
   const fetchFeed = useCallback(
     async (feedTab: FeedTab, append = false) => {
@@ -651,16 +713,41 @@ export default function FeedScreen() {
 
   const handleCreatePost = async () => {
     const content = normalizeVisibleInput(postBody);
-    if (!content) {
-      setAlert({ type: "warning", title: "Empty Post", message: "Please write something." });
+    if (!content && selectedMedia.length === 0) {
+      setAlert({ type: "warning", title: "Empty Post", message: "Please write something or attach media." });
       return;
     }
 
     setCreating(true);
 
     try {
+      const userId = session?.user?.id;
+      let uploadedMedia: { storage_path: string; media_type: string; mime_type: string }[] = [];
+
+      if (selectedMedia.length > 0 && userId) {
+        for (const item of selectedMedia) {
+          const ext = (item.file.name.split(".").pop() || "bin").toLowerCase();
+          const filename = `${Date.now()}-${Math.random().toString(36).slice(2, 9)}.${ext}`;
+          const path = `${userId}/${filename}`;
+          const { error: upErr } = await supabase.storage
+            .from("post-media")
+            .upload(path, item.file, { contentType: item.file.type, upsert: false });
+          if (upErr) throw upErr;
+          uploadedMedia.push({
+            storage_path: `post-media/${path}`,
+            media_type: item.file.type.startsWith("video") ? "video" : "image",
+            mime_type: item.file.type,
+          });
+        }
+      }
+
       const { data, error } = await supabase.functions.invoke("manage-social-feed", {
-        body: { action: "create_post", content, visibility: postVisibility },
+        body: {
+          action: "create_post",
+          content,
+          visibility: postVisibility,
+          ...(uploadedMedia.length > 0 ? { media: uploadedMedia } : {}),
+        },
       });
 
       if (error) throw error;
@@ -668,6 +755,9 @@ export default function FeedScreen() {
       if (data?.success) {
         emitToast({ type: "success", title: "Posted!", message: "Your post is live." });
         setPostBody("");
+        selectedMedia.forEach((m) => URL.revokeObjectURL(m.preview));
+        setSelectedMedia([]);
+        setShowCreate(false);
         fetchFeed(tab);
         return;
       }
@@ -678,6 +768,30 @@ export default function FeedScreen() {
     } finally {
       setCreating(false);
     }
+  };
+
+  const handlePickMedia = () => {
+    if (Platform.OS !== "web") return;
+    fileInputRef.current?.click();
+  };
+
+  const handleMediaChange = (e: any) => {
+    const files: FileList | null = e?.target?.files;
+    if (!files || files.length === 0) return;
+    const next: { file: File; preview: string }[] = [];
+    Array.from(files).forEach((f) => {
+      next.push({ file: f as File, preview: URL.createObjectURL(f as File) });
+    });
+    setSelectedMedia((prev) => [...prev, ...next]);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  };
+
+  const removeSelectedMedia = (index: number) => {
+    setSelectedMedia((prev) => {
+      const removed = prev[index];
+      if (removed) URL.revokeObjectURL(removed.preview);
+      return prev.filter((_, i) => i !== index);
+    });
   };
 
   const handleReaction = useCallback(async (postId: string, currentReaction: string | null) => {
@@ -709,17 +823,85 @@ export default function FeedScreen() {
     }
   }, [fetchFeed, tab]);
 
-  const contentWidth = useMemo(() => (isWebDesktop ? Math.min(width - 48, 760) : width), [isWebDesktop, width]);
+  const contentWidth = useMemo(
+    () => (isWebDesktop ? Math.min(width - 64, 720) : width),
+    [isWebDesktop, width],
+  );
   const mediaWidth = useMemo(() => Math.max(240, contentWidth - 28), [contentWidth]);
+
+  const userMeta = (session?.user?.user_metadata || {}) as { full_name?: string; name?: string; avatar_url?: string };
+  const composerName = (userMeta.full_name || userMeta.name || session?.user?.email?.split("@")[0] || "there").split(" ")[0];
+  const composerAvatar = userMeta.avatar_url || "";
+
+  const [openPostId, setOpenPostId] = useState<string | null>(null);
 
   const openPostDetails = useCallback((postId: string) => {
     if (!postId) return;
-    router.push({ pathname: "/post_details", params: { post_id: postId } });
+    setOpenPostId(postId);
   }, []);
+
+  const closePostDetails = useCallback(() => setOpenPostId(null), []);
+
+  const handleModalReactionChanged = useCallback(
+    (postId: string, hasReaction: boolean, reactionCount: number) => {
+      setPosts((current) =>
+        current.map((p) =>
+          p.id === postId
+            ? { ...p, my_reaction: hasReaction ? "like" : null, reaction_count: reactionCount }
+            : p,
+        ),
+      );
+    },
+    [],
+  );
+
+  const handleModalCommentChanged = useCallback((postId: string, commentCount: number) => {
+    setPosts((current) =>
+      current.map((p) => (p.id === postId ? { ...p, comment_count: commentCount } : p)),
+    );
+  }, []);
+
+  const handleModalPostDeleted = useCallback((postId: string) => {
+    setPosts((current) => current.filter((p) => p.id !== postId));
+  }, []);
+
+  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
+
+  const requestDeletePost = useCallback((postId: string) => {
+    if (!postId) return;
+    setPendingDeleteId(postId);
+  }, []);
+
+  const cancelDeletePost = useCallback(() => {
+    if (deleting) return;
+    setPendingDeleteId(null);
+  }, [deleting]);
+
+  const confirmDeletePost = useCallback(async () => {
+    if (!pendingDeleteId) return;
+    setDeleting(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("manage-social-feed", {
+        body: { action: "delete_post", post_id: pendingDeleteId },
+      });
+      if (error) throw error;
+      if (!data?.success) {
+        throw new Error(data?.error || "Failed to delete post.");
+      }
+      setPosts((current) => current.filter((p) => p.id !== pendingDeleteId));
+      setPendingDeleteId(null);
+      emitToast({ type: "success", title: "Deleted", message: "Your post was removed." });
+    } catch (e: any) {
+      setAlert({ type: "error", title: "Delete failed", message: e?.message || "Could not delete post." });
+    } finally {
+      setDeleting(false);
+    }
+  }, [pendingDeleteId]);
 
   const openStudioDetails = useCallback((studioId: string) => {
     if (!studioId) return;
-    router.push({ pathname: "/home", params: { reopenListingId: studioId } });
+    router.push({ pathname: "/feed", params: { reopenListingId: studioId } });
   }, []);
 
   const renderPost = useCallback(
@@ -731,138 +913,367 @@ export default function FeedScreen() {
         colors={colors}
         isDark={isDark}
         mediaWidth={mediaWidth}
+        currentUserId={session?.user?.id || null}
         onOpenPost={openPostDetails}
         onOpenStudio={openStudioDetails}
         onReaction={handleReaction}
+        onRequestDelete={requestDeletePost}
         width={contentWidth}
       />
     ),
-    [borderCol, cardBg, colors, contentWidth, handleReaction, isDark, mediaWidth, openPostDetails, openStudioDetails],
+    [borderCol, cardBg, colors, contentWidth, handleReaction, isDark, mediaWidth, openPostDetails, openStudioDetails, requestDeletePost, session?.user?.id],
   );
 
   return (
     <View style={[styles.container, { backgroundColor: bg }]}>
-      <Header title="Feed" onBackPress={() => router.back()} />
+      {!isWebDesktop && <Header title="Feed" onBackPress={() => router.back()} />}
 
-      <SmoothTabTransition activeKey={tab} style={{ flex: 1 }}>
-        <FlatList
-          data={posts}
-          keyExtractor={(item) => item.id}
-          renderItem={renderPost}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={colors.primary} />}
-          onEndReached={loadMore}
-          onEndReachedThreshold={0.35}
-          contentContainerStyle={[styles.listContent, isWebDesktop && styles.listContentWeb]}
-          ListHeaderComponent={
-          <View style={[styles.headerBlock, { width: contentWidth }]}>
-            <LiveRadioCard
-              borderColor={borderCol}
-              cardColor={isDark ? "#111827" : "#F8FAFC"}
-              isDark={isDark}
-              primaryColor={colors.primary}
-              textColor={colors.text}
-              mutedTextColor={colors.textSecondary}
-            />
+      <View style={[styles.pageWrap, isWebDesktop && styles.pageWrapWeb]}>
+        <View style={[styles.centerColumn, isWebDesktop && { width: contentWidth }]}>
+          <SmoothTabTransition activeKey={tab} style={{ flex: 1 }}>
+            <FlatList
+              data={posts}
+              keyExtractor={(item) => item.id}
+              renderItem={renderPost}
+              refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={colors.primary} />}
+              onEndReached={loadMore}
+              onEndReachedThreshold={0.35}
+              contentContainerStyle={[styles.listContent, isWebDesktop && styles.listContentWeb]}
+              ListHeaderComponent={
+                <View style={[styles.headerBlock, { width: contentWidth }]}>
+                  {/* Search trigger row (mobile parity) */}
+                  <View style={styles.searchRow}>
+                    <TouchableOpacity
+                      activeOpacity={1}
+                      onPress={() => router.push("/discover")}
+                      style={[
+                        styles.searchTrigger,
+                        { backgroundColor: isDark ? "#374151" : "#F3F4F6" },
+                      ]}
+                    >
+                      <Ionicons name="search" size={20} color={colors.textSecondary} />
+                      <Text
+                        style={[styles.searchTriggerText, { color: colors.textSecondary }]}
+                        numberOfLines={1}
+                      >
+                        Search musicians, studios, gigs
+                      </Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      activeOpacity={1}
+                      onPress={() => router.push("/discover")}
+                      style={[
+                        styles.searchFilterBtn,
+                        { backgroundColor: isDark ? "#374151" : "#F3F4F6" },
+                      ]}
+                      accessibilityRole="button"
+                      accessibilityLabel="Open search filters"
+                    >
+                      <Ionicons name="options-outline" size={20} color={colors.textSecondary} />
+                    </TouchableOpacity>
+                  </View>
 
-            <View style={styles.tabRow}>
-              {[
-                { key: "for_you", label: "For You", icon: "for_you" },
-                { key: "following", label: "Following", icon: "people-outline" },
-              ].map((item) => {
-                const active = tab === item.key;
-                return (
-                  <TouchableOpacity
-                    key={item.key}
-                    activeOpacity={1}
+                  <LiveRadioCard
+                    borderColor={borderCol}
+                    cardColor={isDark ? "#111827" : "#F8FAFC"}
+                    isDark={isDark}
+                    primaryColor={colors.primary}
+                    textColor={colors.text}
+                    mutedTextColor={colors.textSecondary}
+                  />
+
+                  {/* "What's on your mind" trigger (opens modal, mobile parity) */}
+                  <View
                     style={[
-                      styles.tabButton,
-                      {
-                        backgroundColor: active ? colors.primary : cardBg,
-                        borderColor: active ? colors.primary : borderCol,
-                      },
+                      styles.composerTriggerCard,
+                      { backgroundColor: cardBg, borderColor: borderCol, shadowOpacity: isDark ? 0 : 0.06 },
                     ]}
-                    onPress={() => setTab(item.key as FeedTab)}
                   >
-                    {item.icon === "for_you" ? (
-                      <ForYouTabIcon
-                        active={active}
-                        primaryColor={colors.primary}
-                        mutedColor={colors.textSecondary}
-                      />
-                    ) : (
-                      <Ionicons
-                        name="people-outline"
-                        size={18}
-                        color={active ? "#FFFFFF" : colors.textSecondary}
-                      />
-                    )}
-                    <Text style={[styles.tabText, { color: active ? "#FFFFFF" : colors.text }]}>{item.label}</Text>
-                  </TouchableOpacity>
-                );
-              })}
+                    <View style={styles.composerTriggerTopRow}>
+                      <View style={styles.fbComposerAvatarWrap}>
+                        {composerAvatar ? (
+                          <CachedImage uri={composerAvatar} style={styles.fbComposerAvatar} width={40} height={40} />
+                        ) : (
+                          <View
+                            style={[
+                              styles.fbComposerAvatarFallback,
+                              { backgroundColor: colors.primary + "22" },
+                            ]}
+                          >
+                            <Ionicons name="person" size={20} color={colors.primary} />
+                          </View>
+                        )}
+                      </View>
+                      <TouchableOpacity
+                        activeOpacity={1}
+                        onPress={() => {
+                          if (!session || isGuest) return;
+                          setShowCreate(true);
+                        }}
+                        style={[
+                          styles.composerTriggerInput,
+                          { backgroundColor: isDark ? "#0F172A" : "#F1F5F9" },
+                        ]}
+                      >
+                        <Text style={[styles.composerTriggerText, { color: colors.textSecondary }]} numberOfLines={1}>
+                          {session && !isGuest
+                            ? `What's on your mind, ${composerName}?`
+                            : "Sign in to post and view your feed."}
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
+
+                    <View style={[styles.fbComposerDivider, { backgroundColor: borderCol }]} />
+
+                    <View style={styles.composerTriggerActions}>
+                      <TouchableOpacity
+                        activeOpacity={!session || isGuest ? 1 : 0.78}
+                        style={styles.composerTriggerActionBtn}
+                        onPress={() => {
+                          if (!session || isGuest) return;
+                          setShowCreate(true);
+                          setTimeout(() => handlePickMedia(), 50);
+                        }}
+                        disabled={!session || isGuest}
+                      >
+                        <Ionicons name="image" size={18} color="#22C55E" />
+                        <Text style={[styles.fbComposerActionText, { color: colors.textSecondary }]}>
+                          Photo/video
+                        </Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        activeOpacity={!session || isGuest ? 1 : 0.78}
+                        style={styles.composerTriggerActionBtn}
+                        onPress={() => {
+                          if (!session || isGuest) return;
+                          setShowCreate(true);
+                        }}
+                        disabled={!session || isGuest}
+                      >
+                        <Ionicons name="happy-outline" size={18} color="#F59E0B" />
+                        <Text style={[styles.fbComposerActionText, { color: colors.textSecondary }]}>
+                          Feeling
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+
+                  {/* Sliding pill tab bar (mobile parity) */}
+                  <View style={[styles.pillTabRow, { backgroundColor: isDark ? "#1E293B" : "#F1F5F9" }]}>
+                    {[
+                      { key: "for_you", label: "For You", icon: "for_you" as const },
+                      { key: "following", label: "Following", icon: "people-outline" as const },
+                    ].map((item) => {
+                      const active = tab === item.key;
+                      return (
+                        <TouchableOpacity
+                          key={item.key}
+                          activeOpacity={1}
+                          style={[
+                            styles.pillTabButton,
+                            active && { backgroundColor: cardBg, shadowOpacity: isDark ? 0 : 0.08 },
+                          ]}
+                          onPress={() => setTab(item.key as FeedTab)}
+                        >
+                          {item.icon === "for_you" ? (
+                            <ForYouTabIcon
+                              active={active}
+                              primaryColor={colors.primary}
+                              mutedColor={colors.textSecondary}
+                            />
+                          ) : (
+                            <Ionicons
+                              name="people-outline"
+                              size={18}
+                              color={active ? colors.primary : colors.textSecondary}
+                            />
+                          )}
+                          <Text
+                            style={[
+                              styles.pillTabText,
+                              { color: active ? colors.primary : colors.textSecondary },
+                            ]}
+                          >
+                            {item.label}
+                          </Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+                </View>
+              }
+              ListEmptyComponent={
+                loading ? (
+                  <ActivityIndicator size="large" color={colors.primary} style={styles.loading} />
+                ) : (
+                  <View style={[styles.emptyWrap, { width: contentWidth }]}>
+                    <Ionicons name="newspaper-outline" size={46} color={colors.textSecondary} />
+                    <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
+                      {session && !isGuest ? "No posts yet" : "Sign in to view the feed"}
+                    </Text>
+                  </View>
+                )
+              }
+              ListFooterComponent={
+                loadingMore ? (
+                  <ActivityIndicator size="small" color={colors.primary} style={styles.footerLoader} />
+                ) : (
+                  <View style={{ height: 80 }} />
+                )
+              }
+            />
+          </SmoothTabTransition>
+        </View>
+      </View>
+
+      {alert && <CustomAlert visible type={alert.type} title={alert.title} message={alert.message} onClose={() => setAlert(null)} />}
+      {pendingDeleteId && (
+        <CustomAlert
+          visible
+          type="warning"
+          title="Delete post?"
+          message="This will permanently remove your post, comments, and media. This action cannot be undone."
+          onClose={cancelDeletePost}
+          buttons={[
+            { text: "Cancel", style: "cancel", onPress: cancelDeletePost },
+            { text: deleting ? "Deleting..." : "Delete", style: "destructive", onPress: confirmDeletePost },
+          ]}
+        />
+      )}
+      <PostDetailsModal
+        postId={openPostId}
+        visible={!!openPostId}
+        onClose={closePostDetails}
+        onReactionChanged={handleModalReactionChanged}
+        onCommentChanged={handleModalCommentChanged}
+        onPostDeleted={handleModalPostDeleted}
+      />
+
+      {/* Create Post Modal (mobile parity) */}
+      <Modal visible={showCreate} transparent animationType="fade" onRequestClose={() => setShowCreate(false)}>
+        <Pressable style={styles.createModalOverlay} onPress={() => setShowCreate(false)}>
+          <Pressable
+            style={[styles.createModalBox, { backgroundColor: cardBg, borderColor: borderCol }]}
+            onPress={(e) => e?.stopPropagation?.()}
+          >
+            <View style={[styles.createModalHeader, { borderBottomColor: borderCol }]}>
+              <TouchableOpacity activeOpacity={1} onPress={() => setShowCreate(false)} style={styles.createModalCloseBtn}>
+                <Ionicons name="close" size={22} color={colors.text} />
+              </TouchableOpacity>
+              <Text style={[styles.createModalTitle, { color: colors.text }]}>Create Post</Text>
+              <TouchableOpacity
+                activeOpacity={!canCreatePost || creating ? 1 : 0.78}
+                style={[
+                  styles.createModalPostBtn,
+                  {
+                    backgroundColor: canCreatePost ? colors.primary : (isDark ? "#1F2937" : "#E2E8F0"),
+                    opacity: !canCreatePost || creating ? 0.6 : 1,
+                  },
+                ]}
+                onPress={handleCreatePost}
+                disabled={!canCreatePost || creating}
+              >
+                {creating ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <Text style={[styles.createModalPostText, { color: canCreatePost ? "#FFFFFF" : colors.textSecondary }]}>
+                    Post
+                  </Text>
+                )}
+              </TouchableOpacity>
             </View>
 
-            <View style={[styles.composer, { backgroundColor: cardBg, borderColor: borderCol }]}>
-              <TextInput
-                style={[styles.composerInput, { color: colors.text }]}
-                placeholder={session && !isGuest ? "Share an update..." : "Sign in to post and view your feed."}
-                placeholderTextColor={colors.textSecondary}
-                value={postBody}
-                onChangeText={setPostBody}
-                editable={!!session && !isGuest}
-                multiline
-                maxLength={1000}
-              />
-              <View style={styles.composerFooter}>
+            <View style={styles.createModalAuthorRow}>
+              <View style={styles.fbComposerAvatarWrap}>
+                {composerAvatar ? (
+                  <CachedImage uri={composerAvatar} style={styles.fbComposerAvatar} width={40} height={40} />
+                ) : (
+                  <View style={[styles.fbComposerAvatarFallback, { backgroundColor: colors.primary + "22" }]}>
+                    <Ionicons name="person" size={20} color={colors.primary} />
+                  </View>
+                )}
+              </View>
+              <View>
+                <Text style={[styles.createModalAuthorName, { color: colors.text }]}>{composerName}</Text>
                 <TouchableOpacity
                   activeOpacity={1}
-                  style={[styles.visibilityToggle, { borderColor: borderCol }]}
-                  onPress={() => setPostVisibility((current) => (current === "public" ? "followers_only" : "public"))}
-                  disabled={!session || isGuest}
+                  style={[styles.createModalVisibilityChip, { backgroundColor: isDark ? "#334155" : "#E2E8F0" }]}
+                  onPress={() => setPostVisibility(postVisibility === "public" ? "followers" : "public")}
                 >
-                  <Ionicons name={postVisibility === "public" ? "earth-outline" : "people-outline"} size={16} color={colors.textSecondary} />
-                  <Text style={[styles.visibilityToggleText, { color: colors.textSecondary }]}>
+                  <Ionicons
+                    name={postVisibility === "public" ? "globe-outline" : "people-outline"}
+                    size={11}
+                    color={colors.textSecondary}
+                  />
+                  <Text style={{ color: colors.textSecondary, fontSize: 11, marginLeft: 4 }}>
                     {postVisibility === "public" ? "Public" : "Followers"}
                   </Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  activeOpacity={!canCreatePost || creating ? 1 : 0.78}
-                  style={[
-                    styles.postButton,
-                    {
-                      backgroundColor: canCreatePost ? colors.primary : colors.border,
-                      opacity: !canCreatePost || creating ? 0.6 : 1,
-                    },
-                  ]}
-                  onPress={handleCreatePost}
-                  disabled={!canCreatePost || creating}
-                >
-                  {creating ? <ActivityIndicator size="small" color="#fff" /> : <Text style={styles.postButtonText}>Post</Text>}
+                  <Ionicons name="caret-down" size={10} color={colors.textSecondary} style={{ marginLeft: 3 }} />
                 </TouchableOpacity>
               </View>
             </View>
-          </View>
-        }
-        ListEmptyComponent={
-          loading ? (
-            <ActivityIndicator size="large" color={colors.primary} style={styles.loading} />
-          ) : (
-            <View style={[styles.emptyWrap, { width: contentWidth }]}>
-              <Ionicons name="newspaper-outline" size={46} color={colors.textSecondary} />
-              <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
-                {session && !isGuest ? "No posts yet" : "Sign in to view the feed"}
-              </Text>
-            </View>
-          )
-        }
-          ListFooterComponent={
-            loadingMore ? <ActivityIndicator size="small" color={colors.primary} style={styles.footerLoader} /> : <View style={{ height: 80 }} />
-          }
-        />
-      </SmoothTabTransition>
 
-      {alert && <CustomAlert visible type={alert.type} title={alert.title} message={alert.message} onClose={() => setAlert(null)} />}
-      <Navbar />
+            <TextInput
+              style={[styles.createModalTextArea, { color: colors.text }]}
+              placeholder="What's on your mind?"
+              placeholderTextColor={colors.textSecondary}
+              value={postBody}
+              onChangeText={setPostBody}
+              multiline
+              autoFocus
+              maxLength={1000}
+            />
+
+            {selectedMedia.length > 0 && (
+              <View style={styles.fbMediaPreviewRow}>
+                {selectedMedia.map((m, idx) => (
+                  <View key={`${m.preview}-${idx}`} style={styles.fbMediaPreviewItem}>
+                    {m.file.type.startsWith("video") ? (
+                      <View style={[styles.fbMediaPreviewImg, { backgroundColor: "#000", alignItems: "center", justifyContent: "center" }]}>
+                        <Ionicons name="videocam" size={28} color="#fff" />
+                      </View>
+                    ) : (
+                      <CachedImage uri={m.preview} style={styles.fbMediaPreviewImg} width={88} height={88} />
+                    )}
+                    <TouchableOpacity
+                      activeOpacity={0.8}
+                      onPress={() => removeSelectedMedia(idx)}
+                      style={styles.fbMediaPreviewRemove}
+                    >
+                      <Ionicons name="close" size={14} color="#fff" />
+                    </TouchableOpacity>
+                  </View>
+                ))}
+              </View>
+            )}
+
+            <View style={[styles.createModalActionsRow, { borderTopColor: borderCol }]}>
+              <TouchableOpacity
+                activeOpacity={0.78}
+                style={styles.fbComposerActionBtn}
+                onPress={handlePickMedia}
+              >
+                <Ionicons name="image" size={18} color="#22C55E" />
+                <Text style={[styles.fbComposerActionText, { color: colors.textSecondary }]}>
+                  Photo/video
+                </Text>
+              </TouchableOpacity>
+              {Platform.OS === "web" && (
+                <input
+                  ref={fileInputRef as any}
+                  type="file"
+                  accept="image/*,video/*"
+                  multiple
+                  onChange={handleMediaChange}
+                  style={{ display: "none" }}
+                />
+              )}
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      {!isWebDesktop && <Navbar />}
     </View>
   );
 }
@@ -870,7 +1281,7 @@ export default function FeedScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1 },
   listContent: { padding: 16, alignItems: "center" },
-  listContentWeb: { paddingTop: 22 },
+  listContentWeb: { paddingTop: 4 },
   headerBlock: { gap: 12, marginBottom: 12 },
   liveRadioCard: {
     borderWidth: 1,
@@ -1014,6 +1425,152 @@ const styles = StyleSheet.create({
   visibilityToggleText: { fontSize: 12, fontFamily: "Poppins_500Medium" },
   postButton: { minWidth: 92, minHeight: 38, borderRadius: 999, alignItems: "center", justifyContent: "center", paddingHorizontal: 16 },
   postButtonText: { color: "#FFFFFF", fontFamily: "Poppins_600SemiBold", fontSize: 13 },
+  pageWrap: { flex: 1 },
+  pageWrapWeb: {
+    flexDirection: "row",
+    alignSelf: "center",
+    justifyContent: "center",
+    width: "100%",
+    maxWidth: 1240,
+    alignItems: "flex-start",
+    paddingHorizontal: 20,
+    paddingTop: 0,
+    gap: 24,
+  },
+  centerColumn: { flex: 1, width: "100%", maxWidth: 720, alignSelf: "center" },
+  rightRail: {
+    width: 300,
+    gap: 14,
+    paddingTop: 6,
+    ...(Platform.OS === "web" ? ({ position: "sticky", top: 18 } as any) : null),
+  },
+  rightRailCard: {
+    borderWidth: 1,
+    borderRadius: 14,
+    padding: 16,
+    gap: 8,
+    shadowColor: "#0F172A",
+    shadowOffset: { width: 0, height: 4 },
+    shadowRadius: 12,
+  },
+  rightRailTitle: { fontSize: 15, fontFamily: "Poppins_700Bold" },
+  rightRailSubtitle: { fontSize: 12, lineHeight: 17, fontFamily: "Poppins_400Regular" },
+  rightRailButton: {
+    marginTop: 6,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    paddingVertical: 9,
+    borderRadius: 999,
+  },
+  rightRailButtonText: { color: "#FFFFFF", fontSize: 13, fontFamily: "Poppins_600SemiBold" },
+  fbMediaPreviewRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+    paddingHorizontal: 12,
+    paddingTop: 10,
+  },
+  fbMediaPreviewItem: {
+    position: "relative",
+    width: 88,
+    height: 88,
+    borderRadius: 8,
+    overflow: "hidden",
+  },
+  fbMediaPreviewImg: { width: 88, height: 88, borderRadius: 8 },
+  fbMediaPreviewRemove: {
+    position: "absolute",
+    top: 4,
+    right: 4,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: "rgba(0,0,0,0.7)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  rightRailGhostButton: {
+    marginTop: 6,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    paddingVertical: 9,
+    borderRadius: 999,
+    borderWidth: 1,
+  },
+  rightRailGhostButtonText: { fontSize: 13, fontFamily: "Poppins_600SemiBold" },
+  fbComposer: {
+    borderWidth: 1,
+    borderRadius: 14,
+    padding: 14,
+    shadowColor: "#0F172A",
+    shadowOffset: { width: 0, height: 4 },
+    shadowRadius: 12,
+  },
+  fbComposerTopRow: { flexDirection: "row", alignItems: "center", gap: 10 },
+  fbComposerAvatarWrap: { width: 40, height: 40, borderRadius: 20, overflow: "hidden" },
+  fbComposerAvatar: { width: 40, height: 40, borderRadius: 20 },
+  fbComposerAvatarFallback: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  fbComposerInput: {
+    flex: 1,
+    minHeight: 40,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 999,
+    fontSize: 14,
+    fontFamily: "Poppins_400Regular",
+  },
+  fbComposerDivider: { height: StyleSheet.hairlineWidth, marginVertical: 12 },
+  fbComposerActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 8,
+  },
+  fbComposerActionBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    borderRadius: 8,
+  },
+  fbComposerActionText: { fontSize: 13, fontFamily: "Poppins_500Medium" },
+  fbComposerPostBtn: {
+    minWidth: 84,
+    minHeight: 36,
+    paddingHorizontal: 18,
+    borderRadius: 999,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  fbComposerPostText: { fontSize: 13, fontFamily: "Poppins_700Bold" },
+  fbTabRow: {
+    flexDirection: "row",
+    borderWidth: 1,
+    borderRadius: 14,
+    overflow: "hidden",
+  },
+  fbTabButton: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    paddingVertical: 12,
+    borderBottomWidth: 3,
+    borderBottomColor: "transparent",
+  },
+  fbTabText: { fontSize: 14, fontFamily: "Poppins_600SemiBold" },
   socialPostCard: {
     borderWidth: 1,
     borderRadius: 16,
@@ -1079,6 +1636,38 @@ const styles = StyleSheet.create({
     borderRadius: 17,
     alignItems: "center",
     justifyContent: "center",
+  },
+  socialMenuWrap: {
+    position: "relative",
+  },
+  socialMenuBackdrop: {
+    ...(Platform.OS === "web"
+      ? ({ position: "fixed" as any, top: 0, left: 0, right: 0, bottom: 0, zIndex: 40 } as any)
+      : StyleSheet.absoluteFillObject),
+  },
+  socialMenuPopover: {
+    position: "absolute",
+    top: 38,
+    right: 0,
+    minWidth: 150,
+    borderRadius: 10,
+    borderWidth: 1,
+    paddingVertical: 4,
+    shadowColor: "#0F172A",
+    shadowOffset: { width: 0, height: 8 },
+    shadowRadius: 18,
+    zIndex: 50,
+  },
+  socialMenuItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  socialMenuItemText: {
+    fontSize: 13,
+    fontFamily: "Poppins_600SemiBold",
   },
   socialCaption: {
     fontSize: 14,
@@ -1208,4 +1797,164 @@ const styles = StyleSheet.create({
   emptyWrap: { minHeight: 260, alignItems: "center", justifyContent: "center" },
   emptyText: { marginTop: 10, fontSize: 14, fontFamily: "Poppins_500Medium" },
   footerLoader: { paddingVertical: 20 },
+  // Mobile-parity search trigger row
+  searchRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  searchTrigger: {
+    flex: 1,
+    height: 48,
+    borderRadius: 16,
+    paddingHorizontal: 16,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  searchTriggerText: {
+    flex: 1,
+    fontSize: 15,
+    fontFamily: "Poppins_500Medium",
+  },
+  searchFilterBtn: {
+    width: 48,
+    height: 48,
+    borderRadius: 16,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  // Mobile-parity composer trigger card
+  composerTriggerCard: {
+    borderWidth: 1,
+    borderRadius: 16,
+    padding: 14,
+    shadowColor: "#0F172A",
+    shadowOffset: { width: 0, height: 4 },
+    shadowRadius: 12,
+  },
+  composerTriggerTopRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  composerTriggerInput: {
+    flex: 1,
+    minHeight: 40,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 999,
+    justifyContent: "center",
+  },
+  composerTriggerText: {
+    fontSize: 14,
+    fontFamily: "Poppins_400Regular",
+  },
+  composerTriggerActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  composerTriggerActionBtn: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    paddingVertical: 8,
+    borderRadius: 8,
+  },
+  // Mobile-parity sliding pill tab bar
+  pillTabRow: {
+    flexDirection: "row",
+    borderRadius: 999,
+    padding: 4,
+    gap: 4,
+  },
+  pillTabButton: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    paddingVertical: 10,
+    borderRadius: 999,
+    shadowColor: "#0F172A",
+    shadowOffset: { width: 0, height: 2 },
+    shadowRadius: 6,
+  },
+  pillTabText: { fontSize: 14, fontFamily: "Poppins_600SemiBold" },
+  // Create post modal (mobile parity)
+  createModalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(15,23,42,0.55)",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 16,
+  },
+  createModalBox: {
+    width: "100%",
+    maxWidth: 540,
+    borderRadius: 16,
+    borderWidth: 1,
+    overflow: "hidden",
+    shadowColor: "#0F172A",
+    shadowOffset: { width: 0, height: 12 },
+    shadowOpacity: 0.25,
+    shadowRadius: 24,
+  },
+  createModalHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+  },
+  createModalCloseBtn: { padding: 4 },
+  createModalTitle: { fontSize: 16, fontFamily: "Poppins_700Bold" },
+  createModalPostBtn: {
+    minWidth: 76,
+    minHeight: 34,
+    paddingHorizontal: 16,
+    borderRadius: 999,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  createModalPostText: { fontSize: 13, fontFamily: "Poppins_700Bold" },
+  createModalAuthorRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    paddingHorizontal: 14,
+    paddingTop: 14,
+    paddingBottom: 6,
+  },
+  createModalAuthorName: { fontSize: 14, fontFamily: "Poppins_700Bold" },
+  createModalVisibilityChip: {
+    marginTop: 4,
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 999,
+    alignSelf: "flex-start",
+  },
+  createModalTextArea: {
+    minHeight: 140,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    fontSize: 15,
+    lineHeight: 22,
+    fontFamily: "Poppins_400Regular",
+    textAlignVertical: "top",
+  },
+  createModalActionsRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderTopWidth: 1,
+  },
 });

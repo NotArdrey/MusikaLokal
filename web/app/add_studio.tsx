@@ -13,6 +13,7 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
+  useWindowDimensions,
   View,
 } from "react-native";
 import { Calendar } from "react-native-calendars";
@@ -91,6 +92,7 @@ const formatTimeInput = (text: string): string => {
 
 const TITLE_MAX_LENGTH = 120;
 const DESCRIPTION_MAX_LENGTH = 1000;
+const IS_WEB = Platform.OS === "web";
 
 const canonicalizeStudioType = (
   value: unknown,
@@ -274,6 +276,13 @@ const normalizeWeeklySessionType = (
 
 export default function AddStudioScreen() {
   const { colors, isDark } = useTheme();
+  const { width: viewportWidth } = useWindowDimensions();
+  const isWebDesktop = Platform.OS === "web" && viewportWidth >= 768;
+  const pageBackground = isWebDesktop
+    ? isDark
+      ? "#0A1224"
+      : "#E9EEF8"
+    : colors.background;
   const { isSystemLocked, showLockAlert } = useAuth();
   const params = useLocalSearchParams<{ refresh?: string }>();
   const refreshKey = Array.isArray(params.refresh) ? params.refresh[0] : params.refresh;
@@ -660,7 +669,7 @@ export default function AddStudioScreen() {
 
       if (profile?.role !== "studio-owner") {
         showAlert("warning", "Unauthorized", "Only studio owners can create studios.");
-        router.replace("/home");
+        router.replace("/feed");
         return;
       }
 
@@ -670,7 +679,7 @@ export default function AddStudioScreen() {
       setAuthorized(true);
     } catch (e) {
       console.error("Authorization check failed:", e);
-      router.replace("/home");
+      router.replace("/feed");
     } finally {
       setCheckingAuth(false);
     }
@@ -2103,8 +2112,9 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
           style={{ display: "none" }}
         />
       )}
-      <View style={[styles.flex1, { backgroundColor: colors.background }]}>
-        <Header title="List Studio" onBackPress={handleBack} />
+      <View style={[styles.flex1, { backgroundColor: pageBackground }]}>
+        <View style={[styles.pageFrame, isWebDesktop && styles.pageFrameWeb]}>
+        <Header title="Add Studio" onBackPress={handleBack} />
 
         {/* Enhanced Step Indicator (Fixed at top) */}
         <View style={styles.stepIndicatorContainer}>
@@ -2508,7 +2518,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                           marginRight: 4,
                         }}
                       >
-                        ?
+                        ₱
                       </Text>
                       <TextInput
                         value={rehearsalRate}
@@ -2580,7 +2590,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                           marginRight: 4,
                         }}
                       >
-                        ?
+                        ₱
                       </Text>
                       <TextInput
                         value={recordingRate}
@@ -5092,7 +5102,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
               </View>
 
               <Text style={styles.termsText}>
-                By tapping List Studio, you agree to our Terms and Conditions.
+                By tapping Add Studio, you agree to our Terms and Conditions.
               </Text>
             </View>
           )}
@@ -5134,13 +5144,14 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                 <ActivityIndicator color="#fff" size="small" />
               ) : (
                 <Text style={[styles.nextBtnText, { color: isCurrentStepComplete ? "#FFFFFF" : colors.textSecondary }]}>
-                  {step === 4 ? "List Studio" : "Next"}
+                  {step === 4 ? "Add Studio" : "Next"}
                 </Text>
               )}
             </TouchableOpacity>
           </View>
         </ScrollView>
 
+        </View>
         <Navbar />
       </View>
 
@@ -5560,6 +5571,17 @@ const styles = StyleSheet.create({
   flex1: {
     flex: 1,
   },
+  pageFrame: {
+    flex: 1,
+    width: "100%",
+  },
+  pageFrameWeb: {
+    maxWidth: 1240,
+    width: "100%",
+    alignSelf: "center",
+    paddingHorizontal: 20,
+    paddingTop: 12,
+  },
   centerContainer: {
     alignItems: "center",
     justifyContent: "center",
@@ -5863,36 +5885,34 @@ const styles = StyleSheet.create({
   instrumentsGrid: {
     flexDirection: "row",
     flexWrap: "wrap",
-    gap: 12,
+    gap: 8,
   },
   instrumentCard: {
-    width: "30%",
-    aspectRatio: 1,
-    borderRadius: 12,
-    borderWidth: 1.5,
-    padding: 8,
+    flexDirection: "row",
     alignItems: "center",
-    justifyContent: "center",
+    gap: 8,
+    borderRadius: 10,
+    borderWidth: 1.5,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
     position: "relative",
+    minWidth: IS_WEB ? 140 : 120,
+    maxWidth: IS_WEB ? 220 : undefined,
   },
   instrumentImage: {
-    width: 48,
-    height: 48,
-    borderRadius: 8,
-    marginBottom: 6,
+    width: 32,
+    height: 32,
+    borderRadius: 6,
   },
   instrumentName: {
-    fontSize: 10,
+    fontSize: 12,
     fontFamily: "Poppins_500Medium",
-    textAlign: "center",
+    flex: 1,
   },
   instrumentCheckmark: {
-    position: "absolute",
-    top: 6,
-    right: 6,
-    width: 20,
-    height: 20,
-    borderRadius: 10,
+    width: 18,
+    height: 18,
+    borderRadius: 9,
     alignItems: "center",
     justifyContent: "center",
   },

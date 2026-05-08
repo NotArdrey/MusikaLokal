@@ -4,6 +4,7 @@ import React, { useCallback, useState } from "react";
 import {
   ActivityIndicator,
   Modal as RNModal,
+  Platform,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -25,6 +26,8 @@ import { useBottomBarClearance } from "../src/hooks/useBottomBarClearance";
 import { useAuth, useRequireAuth } from "../src/context/AuthContext";
 import { useTheme } from "../src/context/ThemeContext";
 import { ProductionInviteTarget, sendProductionTeamInvites } from "../src/utils/productionTeamInvites";
+
+const IS_WEB = Platform.OS === "web";
 
 interface Team {
   id: string;
@@ -485,6 +488,7 @@ export default function ProductionTeamScreen() {
             showsVerticalScrollIndicator={false}
             contentContainerStyle={[styles.detailScrollContent, { paddingBottom: contentBottomPadding }]}
           >
+          <View style={styles.contentFrame}>
           <View style={styles.headerContainer}>
             <View
               style={[
@@ -634,6 +638,7 @@ export default function ProductionTeamScreen() {
             )}
           </SmoothTabTransition>
 
+          </View>
           </ScrollView>
           <Navbar />
         </View>
@@ -738,6 +743,7 @@ export default function ProductionTeamScreen() {
           />
         }
       >
+        <View style={styles.contentFrame}>
         {loading ? (
           <View style={styles.loadingContainer}>
             <Skeleton width="100%" height={80} borderRadius={14} />
@@ -783,6 +789,7 @@ export default function ProductionTeamScreen() {
             </TouchableOpacity>
           ))
         )}
+        </View>
       </ScrollView>
 
       {isProducer ? (
@@ -866,6 +873,11 @@ export default function ProductionTeamScreen() {
 
 const styles = StyleSheet.create({
   flex1: { flex: 1 },
+  contentFrame: {
+    width: '100%',
+    maxWidth: IS_WEB ? 1080 : undefined,
+    alignSelf: 'center',
+  },
   scrollContent: { paddingHorizontal: 24, paddingTop: 16, paddingBottom: 180 },
   detailScrollContent: { paddingBottom: 180 },
   loadingContainer: { marginTop: 8 },

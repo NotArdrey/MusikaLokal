@@ -189,11 +189,10 @@ export default function ProductDetailsScreen() {
           )}
 
           {product.seller_name && (
-            <TouchableOpacity activeOpacity={1} style={[styles.sellerRow, { borderColor: borderCol }]} onPress={() => router.push("/seller_hub")}>
+            <View style={[styles.sellerRow, { borderColor: borderCol }]}>
               <Ionicons name="storefront-outline" size={18} color={colors.primary} />
               <Text style={{ color: colors.text, fontSize: 14, fontWeight: "600", marginLeft: 8 }}>{product.seller_name}</Text>
-              <Ionicons name="chevron-forward" size={16} color={colors.textSecondary} style={{ marginLeft: "auto" }} />
-            </TouchableOpacity>
+            </View>
           )}
           <View style={{ height: 100 }} />
         </View>

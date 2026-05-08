@@ -39,7 +39,11 @@ import {
   resolveRecordingRule,
 } from "../src/utils/recordingRule";
 
-const debugLog = (..._args: unknown[]) => { };
+const debugLog = (...args: unknown[]) => {
+  if (typeof console !== "undefined" && console.warn) {
+    console.warn("[bookings]", ...args);
+  }
+};
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
 
@@ -365,7 +369,7 @@ const mergePendingStudioBookingBatch = (items: any[]) => {
     status: hasBalanceDue ? "Balance Due" : first?.status,
     date:
       sorted.length > 1 && first?.raw_date
-        ? `${first.raw_date} • ${first?.start_time || "TBA"} - ${last?.end_time || "TBA"}`
+        ? `${first.raw_date} ï¿½ ${first?.start_time || "TBA"} - ${last?.end_time || "TBA"}`
         : first?.date,
   };
 };
@@ -1121,7 +1125,7 @@ export default function BookingsScreen() {
         start_time: b.start_time,
         end_time: b.end_time,
         name: b.studio?.name || "Unknown Studio",
-        date: `${b.booking_date} • ${b.start_time} - ${b.end_time}`,
+        date: `${b.booking_date} ï¿½ ${b.start_time} - ${b.end_time}`,
         image:
           b.studio?.studio_media
             ?.sort((a: any, b: any) => (a.sort_order || 0) - (b.sort_order || 0))[0]
@@ -1185,7 +1189,7 @@ export default function BookingsScreen() {
         fallback.Pending.push(item);
       } else if (b.status === "confirmed") {
         if (role === "musician" && b.payment_status === "partial" && (b.remaining_balance || 0) > 0) {
-          // Downpayment paid but balance still owed — keep in Pending so musician can pay balance
+          // Downpayment paid but balance still owed ï¿½ keep in Pending so musician can pay balance
           fallback.Pending.push({ ...item, status: "Balance Due" });
         } else if (now > endDate) {
           fallback.Review.push({ ...item, status: "Completed" });
@@ -1544,12 +1548,52 @@ export default function BookingsScreen() {
         },
       );
 
+      if (error) {
+        debugLog("manage-bookings invoke error:", error);
+      } else if (!bookings) {
+        debugLog("manage-bookings returned empty payload for user", targetUserId);
+      }
+
+      const needsLocalFallback = !!error || !bookings;
+
       const fallbackBookings =
-        error && role !== "venue-owner"
+        needsLocalFallback && role !== "venue-owner"
           ? await buildLocalStudioBookingsFallback(targetUserId, role)
           : null;
 
-      let effectiveBookings = fallbackBookings || bookings;
+      const producerFallbackBookings =
+        needsLocalFallback && (role === "musician" || isProducerActivityRole(role))
+          ? await buildLocalProducerGigApplicationsFallback(targetUserId)
+          : null;
+
+      let effectiveBookings: any = fallbackBookings || bookings || {
+        Pending: [],
+        Upcoming: [],
+        Ongoing: [],
+        Review: [],
+      };
+
+      if (producerFallbackBookings) {
+        effectiveBookings = {
+          ...effectiveBookings,
+          Pending: mergeUniqueActivityItems(
+            effectiveBookings?.Pending || [],
+            producerFallbackBookings.Pending,
+          ),
+          Upcoming: mergeUniqueActivityItems(
+            effectiveBookings?.Upcoming || [],
+            producerFallbackBookings.Upcoming,
+          ),
+          Ongoing: mergeUniqueActivityItems(
+            effectiveBookings?.Ongoing || [],
+            producerFallbackBookings.Ongoing,
+          ),
+          Review: mergeUniqueActivityItems(
+            effectiveBookings?.Review || [],
+            producerFallbackBookings.Review,
+          ),
+        };
+      }
 
       if (role === "venue-owner") {
         const venueFallbackBookings = await buildLocalVenueOwnerGigApplicationsFallback(targetUserId);
@@ -2560,7 +2604,7 @@ export default function BookingsScreen() {
                       needsRpcFallback = true;
                     } else {
                       result = data;
-                      // Edge function caught an internal error — fall through to RPC
+                      // Edge function caught an internal error ï¿½ fall through to RPC
                       if (result?.code === "DELETE_STUDIO_WITH_STORAGE_FAILED") {
                         needsRpcFallback = true;
                         result = null;
@@ -2948,7 +2992,7 @@ export default function BookingsScreen() {
     const timePart = timeValue.substring(0, 5);
     const parsed = new Date(`${dateValue}T${timePart}`);
     if (isNaN(parsed.getTime())) return `${dateValue} ${timePart}`;
-    return `${formatDashedNumericDate(parsed)} • ${parsed.toLocaleTimeString([], {
+    return `${formatDashedNumericDate(parsed)} ï¿½ ${parsed.toLocaleTimeString([], {
       hour: "2-digit",
       minute: "2-digit",
       hour12: true,
@@ -4194,7 +4238,7 @@ export default function BookingsScreen() {
                     : null,
                 ]
                   .filter(Boolean)
-                  .join(" • ");
+                  .join(" ï¿½ ");
 
                 return (
                   <TouchableOpacity
@@ -5695,7 +5739,7 @@ export default function BookingsScreen() {
                                             { color: colors.textSecondary },
                                           ]}
                                         >
-                                          Recording • {recordingSongCount} song
+                                          Recording ï¿½ {recordingSongCount} song
                                           {recordingSongCount > 1 ? "s" : ""}
                                         </Text>
                                       </View>
@@ -5713,7 +5757,7 @@ export default function BookingsScreen() {
                                             { color: colors.textSecondary },
                                           ]}
                                         >
-                                          Rule • {recordingRuleLabel}
+                                          Rule ï¿½ {recordingRuleLabel}
                                         </Text>
                                       </View>
                                     ) : null}
@@ -5731,11 +5775,11 @@ export default function BookingsScreen() {
                                           ]}
                                         >
                                           {requiredBlocks
-                                            ? `Need ${requiredBlocks} block${requiredBlocks > 1 ? "s" : ""} • `
+                                            ? `Need ${requiredBlocks} block${requiredBlocks > 1 ? "s" : ""} ï¿½ `
                                             : ""}
                                           Min {formatRecordingHours(requiredTotalHours)}h
                                           {selectedTotalHours
-                                            ? ` • Selected ${formatRecordingHours(selectedTotalHours)}h`
+                                            ? ` ï¿½ Selected ${formatRecordingHours(selectedTotalHours)}h`
                                             : ""}
                                         </Text>
                                       </View>
@@ -6105,7 +6149,7 @@ export default function BookingsScreen() {
                               flex: 1,
                             }}
                           >
-                            {/* Row 1 — Details + Pay Now (hidden when fully paid & awaiting confirmation) */}
+                            {/* Row 1 ï¿½ Details + Pay Now (hidden when fully paid & awaiting confirmation) */}
                             <View style={{ flexDirection: "row", gap: scale(8) }}>
                               {/* Details Button */}
                               <TouchableOpacity activeOpacity={1}
@@ -6130,7 +6174,7 @@ export default function BookingsScreen() {
                                 </Text>
                               </TouchableOpacity>
 
-                              {/* Pay Now / Pay Balance — only when payment is not fully settled */}
+                              {/* Pay Now / Pay Balance ï¿½ only when payment is not fully settled */}
                               {!isBookingPaymentSettled(item) &&
                                 !isBalancePaymentProcessing(item) && (
                                 <TouchableOpacity activeOpacity={1}

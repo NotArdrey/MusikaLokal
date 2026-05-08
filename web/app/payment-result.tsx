@@ -150,7 +150,7 @@ export default function PaymentResultScreen() {
           <TouchableOpacity
             activeOpacity={1}
             style={[styles.secondaryButton, { borderColor: colors.border }]}
-            onPress={() => router.replace(isDeposit ? "/wallet" : "/home")}
+            onPress={() => router.replace(isDeposit ? "/wallet" : "/feed")}
           >
             <Text style={[styles.secondaryButtonText, { color: colors.text }]}>
               {isDeposit ? "View Wallet" : "Go Home"}

@@ -64,6 +64,26 @@ const normalizeFavoriteTargetType = (rawType: unknown): FavoriteTargetType | nul
     return null
 }
 
+const getDetailsViewName = (rawType: unknown): string | null => {
+    const value = String(rawType || '').trim().toLowerCase()
+
+    if (value === 'venue') return 'studios_with_stats'
+    if (value === 'artist' || value === 'musician' || value === 'profile') return 'profiles_with_stats'
+    if (value === 'group') return 'groups_with_stats'
+    if (value === 'studio') return 'studios_with_stats'
+    if (value === 'gig') return 'gigs_with_stats'
+
+    return null
+}
+
+const getRelatedListingViewName = (rawType: unknown): string => {
+    const value = String(rawType || '').trim().toLowerCase()
+    if (value === 'studio' || value === 'venue') return 'studios_with_stats'
+    if (value === 'gig') return 'gigs_with_stats'
+    if (value === 'artist' || value === 'musician' || value === 'profile') return 'profiles_with_stats'
+    return 'groups_with_stats'
+}
+
 const getFavoriteTargetColumn = (type: FavoriteTargetType): string => favoriteTargetColumnMap[type]
 
 const normalizeRequiredText = (rawValue: unknown, maxLength: number): string => {
@@ -131,7 +151,11 @@ serve(async (req: Request) => {
 
         // 1. FETCH DETAILS (using views with computed stats)
         if (action === 'fetch') {
-            const viewName = type + 's_with_stats' // groups_with_stats, studios_with_stats, gigs_with_stats
+            const viewName = getDetailsViewName(type)
+            const normalizedFavoriteType = normalizeFavoriteTargetType(type)
+            if (!viewName || !normalizedFavoriteType) {
+                throw new Error('Invalid details target type.')
+            }
 
             // Fetch Main Entity from view with computed stats
             const { data: entity, error: entityError } = await supabaseClient
@@ -166,10 +190,26 @@ serve(async (req: Request) => {
                 }
             }
 
+            const ownerId =
+                normalizedFavoriteType === 'gig'
+                    ? entity.organizer_id
+                    : normalizedFavoriteType === 'profile'
+                      ? entity.id
+                      : entity.owner_id
+            const { data: ownerProfile } = ownerId
+                ? await supabaseClient
+                    .from('profiles')
+                    .select('id, full_name, avatar_url, role')
+                    .eq('id', ownerId)
+                    .maybeSingle()
+                : { data: null }
+
             // Check Ownership
             let isOwner = false
-            if (type === 'gig') {
+            if (normalizedFavoriteType === 'gig') {
                 isOwner = entity.organizer_id === userId
+            } else if (normalizedFavoriteType === 'profile') {
+                isOwner = entity.id === userId
             } else {
                 isOwner = entity.owner_id === userId
             }
@@ -181,19 +221,24 @@ serve(async (req: Request) => {
                     .from('favorites')
                     .select('id', { count: 'exact', head: true })
                     .eq('user_id', userId)
-                    .eq(type + '_id', id)
+                    .eq(getFavoriteTargetColumn(normalizedFavoriteType), id)
 
                 if (favoriteCheckError) throw favoriteCheckError
                 isFavorited = (count || 0) > 0
             }
 
-            const favoritesCount = await getFavoritesCount(supabaseClient, type, id)
+            const favoritesCount = await getFavoritesCount(supabaseClient, normalizedFavoriteType, id)
+
+            const reviewTargetColumn =
+                normalizedFavoriteType === 'profile'
+                    ? 'user_id'
+                    : getFavoriteTargetColumn(normalizedFavoriteType)
 
             // Fetch Reviews with computed likes count (using view)
             const { data: reviews } = await supabaseClient
                 .from('reviews_with_stats')
                 .select('*, profiles(full_name, avatar_url)')
-                .eq(type + '_id', id)
+                .eq(reviewTargetColumn, id)
                 .order('created_at', { ascending: false })
                 .limit(5)
 
@@ -203,6 +248,96 @@ serve(async (req: Request) => {
                 likes_count: r.computed_likes_count || 0
             }))
 
+            let auxiliary: Record<string, any> = {}
+
+            if (normalizedFavoriteType === 'group') {
+                const [settingsResult, membersResult] = await Promise.all([
+                    supabaseClient
+                        .from('groups')
+                        .select('open_group_applications')
+                        .eq('id', id)
+                        .maybeSingle(),
+                    supabaseClient
+                        .from('group_members')
+                        .select('user_id, role, profiles:user_id(full_name, avatar_url)')
+                        .eq('group_id', id),
+                ])
+
+                auxiliary = {
+                    ...auxiliary,
+                    group_settings: settingsResult.data || null,
+                    group_members: membersResult.data || [],
+                }
+            }
+
+            if (normalizedFavoriteType === 'studio') {
+                const [
+                    operatingHoursResult,
+                    dateOverridesResult,
+                    studioSettingsResult,
+                    studioTypesResult,
+                    studioPromotionsResult,
+                ] = await Promise.all([
+                    supabaseClient
+                        .from('studio_operating_hours')
+                        .select('*')
+                        .eq('studio_id', id)
+                        .order('slot_order', { ascending: true }),
+                    supabaseClient
+                        .from('studio_date_overrides')
+                        .select('*')
+                        .eq('studio_id', id)
+                        .order('override_date', { ascending: true })
+                        .order('slot_order', { ascending: true }),
+                    supabaseClient
+                        .from('studio_settings')
+                        .select('*')
+                        .eq('studio_id', id)
+                        .maybeSingle(),
+                    supabaseClient
+                        .from('studio_types')
+                        .select('studio_type')
+                        .eq('studio_id', id),
+                    supabaseClient
+                        .from('studio_promotions')
+                        .select('*')
+                        .eq('studio_id', id)
+                        .eq('is_active', true),
+                ])
+
+                auxiliary = {
+                    ...auxiliary,
+                    operating_hours: operatingHoursResult.data || [],
+                    date_overrides: dateOverridesResult.data || [],
+                    studio_settings: studioSettingsResult.data || null,
+                    studio_types: studioTypesResult.data || [],
+                    promotions: studioPromotionsResult.data || [],
+                }
+            }
+
+            let relatedListings: any[] = []
+            if (entity.embedding) {
+                const { data: relatedMatches } = await supabaseClient.rpc('match_listings', {
+                    query_embedding: entity.embedding,
+                    match_threshold: 0.5,
+                    match_count: 5,
+                    listing_type: type,
+                })
+
+                const relatedIds = (relatedMatches || [])
+                    .map((row: any) => row?.id)
+                    .filter((relatedId: any) => typeof relatedId === 'string' && relatedId !== id)
+
+                if (relatedIds.length > 0) {
+                    const { data: fullRelated } = await supabaseClient
+                        .from(getRelatedListingViewName(type))
+                        .select('*')
+                        .in('id', relatedIds)
+
+                    relatedListings = fullRelated || []
+                }
+            }
+
             return new Response(JSON.stringify({
                 ...entity,
                 rating: entity.computed_rating || 0,
@@ -210,7 +345,10 @@ serve(async (req: Request) => {
                 is_owner: isOwner,
                 is_favorited: isFavorited,
                 favorites_count: favoritesCount,
-                reviews: mappedReviews
+                reviews: mappedReviews,
+                owner_profile: ownerProfile || null,
+                related_listings: relatedListings,
+                auxiliary,
             }), {
                 headers: { ...corsHeaders, 'Content-Type': 'application/json' },
                 status: 200,

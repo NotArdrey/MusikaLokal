@@ -9,6 +9,7 @@ import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 import { isFanUserRole, resolveRoleManageRoute } from '../utils/roleRouting';
 import { formatDashedNumericDate } from '../utils/friendlyDateTime';
+import { resolveNotificationNavigationTarget } from '../utils/notificationNavigation';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
     UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -313,6 +314,29 @@ export default function SidebarNav() {
         setIsNotificationsPanelOpen(false);
     }, []);
 
+    const handleNotificationItemPress = useCallback(async (notification: any) => {
+        try {
+            await markNotificationAsRead(notification.id, notification.read);
+        } catch (err) {
+            console.warn('[SidebarNav] failed to mark notification as read:', err);
+        }
+
+        const target = resolveNotificationNavigationTarget(notification);
+        if (!target || target.pathname === '/notifications') {
+            return;
+        }
+
+        closeNotificationsPanel();
+
+        if (target.params && Object.keys(target.params).length > 0) {
+            router.push({ pathname: target.pathname as any, params: target.params } as any);
+            return;
+        }
+
+        router.push(target.pathname as any);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [closeNotificationsPanel]);
+
     const markNotificationAsRead = useCallback(async (notificationId: string, currentReadStatus: boolean) => {
         if (currentReadStatus || !session?.user?.id) return;
 
@@ -443,12 +467,14 @@ export default function SidebarNav() {
     const activeTab = useMemo(() => {
         if (isAdminContext) return activeAdminTab;
 
-        if (pathname.includes('feed') || pathname.includes('home')) return 'home';
+        if (pathname.includes('feed')) return 'feed';
+        if (pathname === '/home' || pathname.startsWith('/home/')) return 'feed';
         if (pathname.includes('discover')) return 'discover';
         if (pathname.includes('bookings')) return 'activity';
         if (pathname.includes('ai_suggestions')) return 'ai-suggest';
+        if (pathname.includes('marketplace')) return 'marketplace';
         if (pathname.includes('profile') || pathname.includes('settings') || pathname.includes('wallet')) {
-            return 'profile';
+            return isFan ? (pathname.includes('settings') ? 'settings' : 'profile') : 'profile';
         }
         if (
             pathname === '/manage' ||
@@ -464,7 +490,7 @@ export default function SidebarNav() {
         ) {
             return 'manage';
         }
-        return 'home';
+        return 'feed';
     }, [isAdminContext, activeAdminTab, pathname]);
 
     const navItems = useMemo(() => {
@@ -482,6 +508,7 @@ export default function SidebarNav() {
             return [
                 { id: 'home', icon: 'home', label: 'Home', route: '/feed' },
                 { id: 'profile', icon: 'person', label: 'Profile', route: '/profile' },
+                { id: 'settings', icon: 'settings', label: 'Settings', route: '/settings' },
             ];
         }
 
@@ -490,10 +517,11 @@ export default function SidebarNav() {
         }
 
         return [
-            { id: 'home', icon: 'home', label: 'Home', route: '/home' },
+            { id: 'feed', icon: 'newspaper', label: 'Feed', route: '/feed' },
             { id: 'discover', icon: 'compass', label: 'Discover', route: '/discover' },
             { id: 'ai-suggest', icon: 'sparkles', label: 'AI Discovery', route: '/ai_suggestions' },
             { id: 'activity', icon: 'calendar', label: 'Activity', route: '/bookings' },
+            { id: 'marketplace', icon: 'storefront', label: 'Marketplace', route: '/marketplace' },
             { id: 'manage', icon: 'briefcase', label: 'Manage', route: manageRoute },
         ];
     }, [isAdminContext, isFan, isGuest, manageRoute]);
@@ -855,7 +883,7 @@ export default function SidebarNav() {
                                                 ]}
                                                 onPress={() => {
                                                     if (!isTransfer) {
-                                                        markNotificationAsRead(notification.id, notification.read);
+                                                        void handleNotificationItemPress(notification);
                                                     }
                                                 }}
                                             >

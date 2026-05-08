@@ -565,7 +565,8 @@ serve(async (req) => {
         let createdNewUser = false
 
         if (existingUser) {
-            console.log('Found existing user:', existingUser.id)
+
+            // If they are already confirmed, STOP.
             if (existingUser.email_confirmed_at) {
                 return new Response(JSON.stringify({ error: 'This email is already registered and verified. Please login.' }), {
                     headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -573,11 +574,9 @@ serve(async (req) => {
                 })
             }
 
-            const { data: existingProfile } = await supabaseAdmin
-                .from('profiles')
-                .select('role, is_verified, verification_status')
-                .eq('id', existingUser.id)
-                .maybeSingle()
+            // If they are NOT confirmed, this is a stalled/failed signup.
+            // DELETE them to allow a fresh start.
+            const { error: deleteError } = await supabaseAdmin.auth.admin.deleteUser(existingUser.id)
 
             const existingRole = String(existingProfile?.role || existingUser.user_metadata?.role || '').trim().toLowerCase()
             const existingStatus = String(existingProfile?.verification_status || existingUser.user_metadata?.verification_status || '').trim().toUpperCase()
@@ -589,11 +588,28 @@ serve(async (req) => {
                 })
             }
 
-            if (existingProfile?.is_verified || existingStatus === 'APPROVED') {
-                return new Response(JSON.stringify({ error: 'This email is already registered and verified. Please login.' }), {
-                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-                    status: 400,
-                })
+            // Also clean up profile if it exists
+            await supabaseAdmin.from('profiles').delete().eq('id', existingUser.id)
+
+        }
+
+        // 2. Create Fresh User
+        // Didit approval verifies identity only. The Supabase auth email must
+        // still be confirmed before password login is allowed.
+        const { data: user, error: createError } = await supabaseAdmin.auth.admin.createUser({
+            email: normalizedEmail,
+            password,
+            email_confirm: false,
+            user_metadata: {
+                is_verified: approvedByDidit,
+                role: normalizedRole,
+                verification_status: approvedByDidit ? 'APPROVED' : pendingByDidit ? 'PENDING_REVIEW' : 'PENDING',
+                didit_session_id: diditSessionId || null,
+                selected_document_type: selectedDocumentType || null,
+                verification_mode: verificationMode || null,
+                full_name: fallbackName,
+                display_name: fallbackName,
+                name: fallbackName,
             }
 
             const { data: updatedUser, error: updateError } = await supabaseAdmin.auth.admin.updateUserById(existingUser.id, {

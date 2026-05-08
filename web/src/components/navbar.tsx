@@ -68,7 +68,7 @@ function Navbar() {
             }
 
             return [
-                { id: 'home', icon: 'home', label: 'Home', route: '/home' },
+                { id: 'home', icon: 'home', label: 'Home', route: '/feed' },
                 { id: 'ai-suggest', icon: 'sparkles', label: 'AI', route: '/ai_suggestions' },
                 { id: 'activity', icon: 'calendar', label: 'Activity', route: '/bookings' },
                 { id: 'manage', icon: 'briefcase', label: 'Manage', route: manageRoute },

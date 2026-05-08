@@ -15,9 +15,10 @@ interface HeaderProps {
     hideBackButton?: boolean;
     leftComponent?: React.ReactNode;
     rightComponent?: React.ReactNode;
+    cardStyle?: boolean;
 }
 
-function Header({ title, transparent, onBackPress, hideBackButton = false, leftComponent, rightComponent }: HeaderProps) {
+function Header({ title, transparent, onBackPress, hideBackButton = false, leftComponent, rightComponent, cardStyle }: HeaderProps) {
     const { colors, isDark } = useTheme();
     const { isGuest, setGuestMode, userRole } = useAuth();
     const insets = useSafeAreaInsets();
@@ -33,7 +34,7 @@ function Header({ title, transparent, onBackPress, hideBackButton = false, leftC
         [pathname],
     );
     const isMainNavPath = useMemo(
-        () => pathname === "/explore" || pathname === "/home" || pathname === "/manage" || pathname === "/bookings" || pathname === "/ai_suggestions",
+        () => pathname === "/explore" || pathname === "/feed" || pathname === "/manage" || pathname === "/bookings" || pathname === "/ai_suggestions",
         [pathname],
     );
 
@@ -135,15 +136,14 @@ function Header({ title, transparent, onBackPress, hideBackButton = false, leftC
         return null;
     }
 
-    return (
-        <>
-            <View style={[styles.container, {
-                backgroundColor: transparent ? 'transparent' : colors.background,
-                paddingTop: isWebDesktop ? 16 : (insets.top + 8),
-                paddingHorizontal: isWebDesktop ? 32 : 16,
-                paddingBottom: isWebDesktop ? 20 : 16,
-                borderRadius: transparent ? 0 : (isWebDesktop ? 18 : 14),
-            }]}>
+    const headerRow = (
+        <View style={[styles.container, {
+            backgroundColor: transparent ? 'transparent' : colors.background,
+            paddingTop: isWebDesktop ? 16 : (insets.top + 8),
+            paddingHorizontal: isWebDesktop ? 32 : 16,
+            paddingBottom: isWebDesktop ? 20 : 16,
+            borderRadius: transparent ? 0 : (isWebDesktop ? 18 : 14),
+        }]}>
                 {/* Left Container - Only for Back Button or left component */}
                 {(backVisible || leftComponent) && (
                     <View style={styles.leftContainer}>
@@ -226,6 +226,15 @@ function Header({ title, transparent, onBackPress, hideBackButton = false, leftC
                     ) : null}
                 </View>
             </View>
+    );
+
+    return (
+        <>
+            {cardStyle && isWebDesktop ? (
+                <View style={[styles.cardStyleWrapper, { backgroundColor: isDark ? '#0A1224' : '#E9EEF8' }]}>
+                    {headerRow}
+                </View>
+            ) : headerRow}
 
             <Modal
                 visible={guestMenuVisible}
@@ -273,8 +282,15 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'center',
-        paddingBottom: 16, // pb-4
-        paddingHorizontal: 16, // px-4
+        paddingBottom: 16,
+        paddingHorizontal: 16,
+    },
+    cardStyleWrapper: {
+        paddingHorizontal: 20,
+        paddingTop: 12,
+        width: '100%',
+        maxWidth: 1240,
+        alignSelf: 'center',
     },
     // Simplified Left Container logic - if not visible, it shouldn't take space in FB layout
     leftContainer: {

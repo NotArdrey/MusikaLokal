@@ -49,7 +49,6 @@ async function createWinkToken(
     callbackUrl: string;
   }
 ): Promise<{ winkToken: string; userId: string }> {
-  console.log("Creating Wink token for user:", params.userId);
   
   const response = await fetch(`${SMILE_API_BASE}/tokens`, {
     method: "POST",
@@ -70,7 +69,6 @@ async function createWinkToken(
   }
 
   const data = await response.json();
-  console.log("Wink token response:", { hasToken: !!data.data?.winkToken, userId: data.data?.userId });
   return data.data; // Response is wrapped in { code, message, data }
 }
 
@@ -139,7 +137,6 @@ serve(async (req) => {
       );
     }
 
-    console.log("Using Smile API Base:", SMILE_API_BASE);
 
     // Parse request body
     const body = await req.json();
@@ -154,7 +151,6 @@ serve(async (req) => {
       archive_id
     } = body;
 
-    console.log('Address Verification Request:', { action, userId, entityId, entityType });
 
     const supabaseAdmin = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
 
@@ -162,7 +158,6 @@ serve(async (req) => {
     // ACTION: GET SESSION - Retrieve verification results from local DB
     // ============================================
     if (action === 'get_session' && session_id) {
-      console.log(`Fetching address verification session: ${session_id}`);
 
       // Check local address_verification_sessions table
       const { data: localData } = await supabaseAdmin
@@ -284,7 +279,6 @@ serve(async (req) => {
     const mode = body.mode || 'post_creation';
     const isPreCreation = mode === 'pre_creation';
 
-    console.log(`Creating address verification session for ${entityType} (mode: ${mode})`);
 
     // Get user profile
     const { data: profile, error: profileError } = await supabaseAdmin
@@ -304,10 +298,6 @@ serve(async (req) => {
       });
     }
 
-    console.log('User profile:', { 
-      full_name: profile.full_name, 
-      is_verified: profile.is_verified 
-    });
 
     if (!profile.is_verified) {
       return new Response(JSON.stringify({ 
@@ -329,7 +319,6 @@ serve(async (req) => {
     // Build callback URL for webhook
     const callbackUrl = `${SUPABASE_URL}/functions/v1/smile-webhook?session_id=${sessionId}&entity_type=${entityType}${entityId ? `&entity_id=${entityId}` : ''}&user_id=${userId}`;
 
-    console.log('Callback URL:', callbackUrl);
 
     // Create Basic Auth header and get Wink token
     const authHeader = getSmileAuthHeader(SMILE_CLIENT_ID, SMILE_CLIENT_SECRET);
@@ -342,13 +331,11 @@ serve(async (req) => {
       throw new Error("Failed to get Smile Wink token");
     }
 
-    console.log('Got Wink token successfully');
 
     // Build the Wink Widget URL
     // For sandbox: https://link.sandbox.smileapi.io/v1/verify?tk=<token>
     const winkWidgetUrl = `${WINK_WIDGET_BASE}/v1/verify?tk=${winkResponse.winkToken}`;
 
-    console.log('Wink Widget URL generated');
 
     // Store session info in database
     await supabaseAdmin

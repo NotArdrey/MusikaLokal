@@ -324,7 +324,6 @@ serve(async (req: Request) => {
 
     try {
         const authHeader = req.headers.get('Authorization');
-        console.log('Authorization header present:', !!authHeader);
 
         if (!authHeader) {
             return new Response(JSON.stringify({ error: 'Missing authorization header' }), {
@@ -335,7 +334,6 @@ serve(async (req: Request) => {
 
         // Decode JWT to get user info
         const jwtPayload = decodeJwtPayload(authHeader)
-        console.log('JWT payload:', { sub: jwtPayload?.sub, email: jwtPayload?.email });
 
         if (!jwtPayload || !jwtPayload.sub) {
             return new Response(JSON.stringify({ error: 'Invalid token' }), {
@@ -545,7 +543,6 @@ serve(async (req: Request) => {
             const viewName = type + 's_with_stats'
             const ownerField = type === 'gig' ? 'organizer_id' : 'owner_id'
 
-            console.log('📥 Fetching single entity:', { type, id, viewName, ownerField, userId });
 
             const { data, error } = await supabaseClient
                 .from(viewName)
@@ -559,14 +556,11 @@ serve(async (req: Request) => {
                 throw error;
             }
 
-            console.log('📥 Fetched data:', JSON.stringify(data, null, 2));
             if (type === 'gig' && data) {
-                console.log('📦 Gig requirements from DB:', JSON.stringify(data.requirements, null, 2));
             }
 
             // Return null if not found (user doesn't own this entity or doesn't exist)
             if (!data) {
-                console.log('⚠️ No data found for entity');
                 return new Response(JSON.stringify(null), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 })
             }
 
@@ -764,7 +758,6 @@ serve(async (req: Request) => {
                     }
                 }
 
-                console.log('✅ Application checks passed - user can apply');
             }
 
 
@@ -787,7 +780,6 @@ serve(async (req: Request) => {
 
             // Log gig requirements if creating a gig
             if (type === 'gig') {
-                console.log('📦 Creating gig with requirements:', JSON.stringify(insertPayload.requirements, null, 2));
                 
                 // For gigs, only allow valid columns to prevent PGRST204 errors
                 const validGigColumns = [
@@ -805,8 +797,6 @@ serve(async (req: Request) => {
                 insertPayload = filteredPayload;
             }
 
-            console.log('📤 Inserting into table:', table);
-            console.log('📤 Insert payload:', JSON.stringify(insertPayload, null, 2));
 
             const { data, error } = await supabaseClient
                 .from(table)
@@ -819,7 +809,6 @@ serve(async (req: Request) => {
                 throw error;
             }
 
-            console.log('✅ Insert successful, returned data:', JSON.stringify(data, null, 2));
 
             // If creating a studio, create operating hours and settings
             if (type === 'studio') {
@@ -914,7 +903,6 @@ serve(async (req: Request) => {
 
                     if (dateOverrides.length > 0) {
                         await supabaseClient.from('studio_date_overrides').insert(dateOverrides);
-                        console.log(`📅 Inserted ${dateOverrides.length} date overrides for studio ${studioId}`);
                     }
                 }
             }
@@ -935,7 +923,6 @@ serve(async (req: Request) => {
                 if (memberError) {
                     console.error('⚠️ Failed to add owner to group_members:', memberError);
                 } else {
-                    console.log(`👤 Added owner ${userId} to group_members for group ${groupId}`);
                 }
 
                 // Also add any other members that have user_id in the members JSONB array
@@ -957,7 +944,6 @@ serve(async (req: Request) => {
                         if (additionalError) {
                             console.error('⚠️ Failed to add additional members:', additionalError);
                         } else {
-                            console.log(`👥 Added ${additionalMembers.length} additional members to group_members`);
                         }
                     }
                 }
@@ -1045,7 +1031,6 @@ serve(async (req: Request) => {
 
             // Log gig requirements if updating a gig
             if (type === 'gig') {
-                console.log('📦 Updating gig with requirements:', JSON.stringify(updatePayload.requirements, null, 2));
 
                 const validGigColumns = [
                     'name', 'location', 'budget', 'description', 'event_date',
@@ -1100,9 +1085,6 @@ serve(async (req: Request) => {
                 });
             }
 
-            console.log('📤 Updating table:', table);
-            console.log('📤 Update payload:', JSON.stringify(updatePayload, null, 2));
-            console.log('📤 Entity ID:', id);
 
             const { data, error } = await supabaseClient
                 .from(table)
@@ -1117,9 +1099,7 @@ serve(async (req: Request) => {
                 throw error;
             }
 
-            console.log('✅ Update successful, returned data:', JSON.stringify(data, null, 2));
             if (type === 'gig') {
-                console.log('✅ Gig requirements after update:', JSON.stringify(data.requirements, null, 2));
             }
 
             // Update studio operating hours if availability was provided
@@ -1190,7 +1170,6 @@ serve(async (req: Request) => {
 
                 if (dateOverrides.length > 0) {
                     await supabaseClient.from('studio_date_overrides').insert(dateOverrides);
-                    console.log(`📅 Updated ${dateOverrides.length} date overrides for studio ${studioId}`);
                 }
             }
 
@@ -1216,7 +1195,6 @@ serve(async (req: Request) => {
                 if (settingsError) {
                     console.error('⚠️ Failed to update studio settings:', settingsError);
                 } else {
-                    console.log('⚙️ Updated studio settings:', settingsUpdate);
                 }
             }
 
@@ -1265,7 +1243,6 @@ serve(async (req: Request) => {
                         if (addError) {
                             console.error('⚠️ Failed to add group members:', addError);
                         } else {
-                            console.log(`👥 Added ${toAdd.length} members to group_members`);
                         }
                     }
 
@@ -1280,7 +1257,6 @@ serve(async (req: Request) => {
                         if (removeError) {
                             console.error('⚠️ Failed to remove group members:', removeError);
                         } else {
-                            console.log(`👥 Removed ${toRemove.length} members from group_members`);
                         }
                     }
                 }

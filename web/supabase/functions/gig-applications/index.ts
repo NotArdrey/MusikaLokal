@@ -76,7 +76,15 @@ function getApplicationStatusNotification(
         }
     }
 
-    if (normalizedStatus === 'cancelled' || normalizedStatus === 'fired') {
+    if (normalizedStatus === 'fired') {
+        return {
+            type: 'error',
+            title: 'Removed from Gig',
+            message: `Your contract for "${gigName}"${productionLabel} has been ended by the venue.`,
+        }
+    }
+
+    if (normalizedStatus === 'cancelled') {
         return {
             type: 'error',
             title: 'Gig Cancelled',

@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { supabase } from '../lib/supabase';
 import CustomAlert, { AlertType } from '../src/components/CustomAlert';
 import Header from '../src/components/header';
@@ -14,6 +14,8 @@ import { useAuth, useRequireAuth } from '../src/context/AuthContext';
 import { emitToast } from '../src/events/toastBus';
 import { useTheme } from '../src/context/ThemeContext';
 import { ProductionInviteTarget, sendProductionTeamInvites } from '../src/utils/productionTeamInvites';
+
+const IS_WEB = Platform.OS === 'web';
 
 const readFunctionErrorBody = async (error: any) => {
   const response = error?.context;
@@ -43,6 +45,9 @@ type TeamRecord = {
 
 export default function EditProductionScreen() {
   const { colors, isDark } = useTheme();
+  const { width } = useWindowDimensions();
+  const isWebDesktop = Platform.OS === 'web' && width >= 768;
+  const pageBackground = isWebDesktop ? (isDark ? '#0A1224' : '#E9EEF8') : colors.background;
   const { contentBottomPadding } = useBottomBarClearance(24);
   const { userId } = useRequireAuth();
   const { session, userRole } = useAuth();
@@ -222,10 +227,11 @@ export default function EditProductionScreen() {
   };
 
   return (
-    <View style={[styles.container, { backgroundColor: colors.background }]}>
-      <Header title="Edit Production" onBackPress={handleReturnToTabs} />
+    <View style={[styles.container, { backgroundColor: pageBackground }]}>
+      <Header title="Edit Production" cardStyle onBackPress={() => router.replace('/manage')} />
 
       <ScrollView contentContainerStyle={[styles.content, { paddingBottom: contentBottomPadding }]} showsVerticalScrollIndicator={false}>
+        <View style={styles.contentFrame}>
         {loading ? (
           <View style={styles.loadingState}>
             <Skeleton width="100%" height={180} borderRadius={22} />
@@ -299,6 +305,7 @@ export default function EditProductionScreen() {
             </View>
           </>
         )}
+        </View>
       </ScrollView>
 
       {alert ? <CustomAlert visible type={alert.type} title={alert.title} message={alert.message} onClose={() => setAlert(null)} /> : null}
@@ -310,6 +317,12 @@ export default function EditProductionScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1 },
   content: { padding: 16, gap: 14 },
+  contentFrame: {
+    width: '100%',
+    maxWidth: IS_WEB ? 1080 : undefined,
+    alignSelf: 'center',
+    gap: 14,
+  },
   loadingState: { gap: 14 },
   heroCard: { borderWidth: 1, borderRadius: 22, padding: 18 },
   heroIcon: { width: 48, height: 48, borderRadius: 24, alignItems: 'center', justifyContent: 'center', marginBottom: 12 },

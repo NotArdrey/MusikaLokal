@@ -11,7 +11,8 @@ import {
     Text,
     TextInput,
     TouchableOpacity,
-    View
+    View,
+    useWindowDimensions,
 } from "react-native";
 import { Calendar } from "react-native-calendars";
 import CustomAlert, { AlertType } from "../src/components/CustomAlert";
@@ -186,6 +187,9 @@ const removeStorageObjectsByUrl = async (urls: string[]) => {
 
 export default function EditGigScreen() {
   const { colors, isDark } = useTheme();
+  const { width } = useWindowDimensions();
+  const isWebDesktop = Platform.OS === 'web' && width >= 768;
+  const pageBackground = isWebDesktop ? (isDark ? '#0A1224' : '#E9EEF8') : colors.background;
   const { id, reapply } = useLocalSearchParams<{
     id?: string | string[];
     reapply?: string | string[];
@@ -427,14 +431,14 @@ export default function EditGigScreen() {
 
       if (profile?.role !== "venue-owner") {
         showAlert("error", "Unauthorized", "Only venue owners can edit gigs.");
-        router.replace("/home");
+        router.replace("/feed");
         return;
       }
 
       setAuthorized(true);
     } catch (e) {
       console.error("Authorization check failed:", e);
-      router.replace("/home");
+      router.replace("/feed");
     } finally {
       setCheckingAuth(false);
     }
@@ -500,7 +504,7 @@ export default function EditGigScreen() {
       const gigId = Array.isArray(id) ? id[0] : id;
       if (!gigId) {
         showAlert("error", "Error", "Invalid gig ID");
-        router.replace("/home");
+        router.replace("/feed");
         return;
       }
 
@@ -544,7 +548,7 @@ export default function EditGigScreen() {
           "Not Found",
           "Gig not found or you do not have permission to edit it.",
         );
-        router.replace("/home");
+        router.replace("/feed");
         return;
       }
 
@@ -581,7 +585,7 @@ export default function EditGigScreen() {
           "Not Found",
           "Gig not found or you do not have permission to edit it.",
         );
-        router.replace("/home");
+        router.replace("/feed");
         return;
       }
 
@@ -714,7 +718,7 @@ export default function EditGigScreen() {
     } catch (e) {
       console.log("Error fetching gig details:", e);
       showAlert("error", "Error", "Failed to load gig details.");
-      router.replace("/home");
+      router.replace("/feed");
     } finally {
       setLoading(false);
     }
@@ -1515,8 +1519,8 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
           style={{ display: "none" }}
         />
       )}
-      <View style={[styles.flex1, { backgroundColor: colors.background }]}>
-        <Header title="Edit Gig" onBackPress={handleAttemptLeave} />
+      <View style={[styles.flex1, { backgroundColor: pageBackground }]}>
+        <Header title="Edit Gig" cardStyle onBackPress={() => router.replace('/manage')} />
 
         <View style={styles.contentFrame}>
 

@@ -13,7 +13,8 @@ import {
     Text,
     TextInput,
     TouchableOpacity,
-    View
+    View,
+    useWindowDimensions,
 } from "react-native";
 import CustomAlert, { AlertType } from "../src/components/CustomAlert";
 import Header from "../src/components/header";
@@ -77,6 +78,9 @@ const IS_WEB = Platform.OS === "web";
 
 export default function EditGroupScreen() {
   const { colors, isDark } = useTheme();
+  const { width } = useWindowDimensions();
+  const isWebDesktop = Platform.OS === 'web' && width >= 768;
+  const pageBackground = isWebDesktop ? (isDark ? '#0A1224' : '#E9EEF8') : colors.background;
   const { id } = useLocalSearchParams();
   const returnTab = useLocalSearchParams<{
     returnTab?: string | string[];
@@ -228,14 +232,14 @@ export default function EditGroupScreen() {
 
       if (profile?.role !== "musician") {
         showAlert("error", "Unauthorized", "Only musicians can edit groups.");
-        router.replace("/home");
+        router.replace("/feed");
         return;
       }
 
       setAuthorized(true);
     } catch (e) {
       console.error("Authorization check failed:", e);
-      router.replace("/home");
+      router.replace("/feed");
     } finally {
       setCheckingAuth(false);
     }
@@ -325,7 +329,7 @@ export default function EditGroupScreen() {
       const groupId = Array.isArray(id) ? id[0] : id;
       if (!groupId) {
         showAlert("error", "Error", "Invalid group ID");
-        router.replace("/home");
+        router.replace("/feed");
         return;
       }
 
@@ -398,7 +402,7 @@ export default function EditGroupScreen() {
           "Not Found",
           "Group not found or you do not have permission to edit it.",
         );
-        router.replace("/home");
+        router.replace("/feed");
         return;
       }
 
@@ -415,7 +419,7 @@ export default function EditGroupScreen() {
           "Not Found",
           "Group not found or you do not have permission to edit it.",
         );
-        router.replace("/home");
+        router.replace("/feed");
         return;
       }
 
@@ -545,7 +549,7 @@ export default function EditGroupScreen() {
     } catch (e) {
       console.log("Error fetching group details:", e);
       showAlert("error", "Error", "Failed to load group details.");
-      router.replace("/home");
+      router.replace("/feed");
     } finally {
       setLoading(false);
     }
@@ -1433,8 +1437,8 @@ export default function EditGroupScreen() {
 
   return (
     <>
-      <View style={[styles.flex1, { backgroundColor: colors.background }]}>
-        <Header title="Edit Group" onBackPress={handleAttemptLeave} />
+      <View style={[styles.flex1, { backgroundColor: pageBackground }]}>
+        <Header title="Edit Group" cardStyle onBackPress={() => router.replace('/manage')} />
 
         <View style={styles.contentFrame}>
 
