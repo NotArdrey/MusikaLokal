@@ -187,7 +187,7 @@ export default function OrdersScreen() {
                     {t.label}
                   </Text>
                 </TouchableOpacity>
-            ))}
+              ))}
             </View>
           )}
 
