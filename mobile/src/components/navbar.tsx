@@ -6,6 +6,7 @@ import { Animated as RNAnimated, Easing, Platform, StyleSheet, Text, TouchableOp
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
+import { isE2EFixtureMode } from '../utils/e2eFixtures';
 import { isFanUserRole, resolveRoleManageRoute } from '../utils/roleRouting';
 
 export const NAVBAR_BOTTOM_OFFSET = 24;
@@ -70,6 +71,17 @@ const GLOBAL_NAVBAR_ROUTES = new Set([
     '/submit_review',
     '/terms_and_conditions',
     '/to_review',
+    '/wallet',
+]);
+
+const E2E_NAVBAR_HIDDEN_ROUTES = new Set([
+    '/add_gig',
+    '/add_group',
+    '/add_production',
+    '/add_studio',
+    '/create_playlist',
+    '/edit_production',
+    '/marketplace',
     '/wallet',
 ]);
 
@@ -250,9 +262,12 @@ export function GlobalNavbar({ forceVisible = false }: Pick<NavbarProps, 'forceV
     const pendingNavigationFrameRef = useRef<number | null>(null);
     const isFan = isFanUserRole(userRole);
     const routeName = pathname.replace(/^\/+/, '').split('/')[0] || '';
+    const hideForE2EForm = isE2EFixtureMode() && E2E_NAVBAR_HIDDEN_ROUTES.has(pathname);
     const shouldRenderGlobalNavbar = forceVisible
-        || GLOBAL_NAVBAR_ROUTES.has(pathname)
-        || GLOBAL_NAVBAR_ROUTE_NAMES.has(routeName);
+        || (!hideForE2EForm && (
+            GLOBAL_NAVBAR_ROUTES.has(pathname)
+            || GLOBAL_NAVBAR_ROUTE_NAMES.has(routeName)
+        ));
 
     useEffect(() => {
         if (isGuest || isFan || !session?.user?.id) {

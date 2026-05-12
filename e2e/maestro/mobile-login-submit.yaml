@@ -1,0 +1,7 @@
+appId: ${APP_ID}
+---
+- tapOn:
+    id: "auth-sign-in-button"
+- extendedWaitUntil:
+    visible: "MusikaLokal"
+    timeout: 60000

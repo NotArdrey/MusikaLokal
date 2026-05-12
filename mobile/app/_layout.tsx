@@ -40,6 +40,7 @@ import { useGlobalRealtimeInvalidation } from "../src/data/realtime";
 import { ThemeProvider, useTheme } from "../src/context/ThemeContext";
 import { logLoadTime } from "../src/utils/loadTimeLogger";
 import { isFanUserRole } from "../src/utils/roleRouting";
+import { isE2EFixtureMode } from "../src/utils/e2eFixtures";
 
 SplashScreen.preventAutoHideAsync();
 
@@ -50,6 +51,10 @@ LogBox.ignoreLogs([
   "[expo-av]: Expo AV has been deprecated and will be removed in SDK 54.",
   "Unable to activate keep awake",
 ]);
+
+if (isE2EFixtureMode()) {
+  LogBox.ignoreAllLogs(true);
+}
 
 const NOTIFICATION_TOAST_BACKFILL_LIMIT = 12;
 const NOTIFICATION_TOAST_BACKFILL_SKEW_MS = 15000;

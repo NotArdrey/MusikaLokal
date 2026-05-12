@@ -251,6 +251,98 @@ const getWebFeedMediaUrls = (item: any) => {
   return Array.from(new Set([primaryImage, ...images].filter((value) => value.length > 0)));
 };
 
+const SOCIAL_GALLERY_GAP = 3;
+const SOCIAL_GALLERY_VISIBLE_LIMIT = 4;
+
+type SocialMediaGalleryProps = {
+  mediaUrls: string[];
+  mediaWidth: number;
+  onPress: () => void;
+};
+
+const SocialMediaGallery = React.memo(function SocialMediaGallery({
+  mediaUrls,
+  mediaWidth,
+  onPress,
+}: SocialMediaGalleryProps) {
+  const visibleMedia = mediaUrls.slice(0, SOCIAL_GALLERY_VISIBLE_LIMIT);
+  const remainingCount = Math.max(0, mediaUrls.length - visibleMedia.length);
+
+  const renderImageCell = (
+    uri: string,
+    index: number,
+    imageWidth: number,
+    imageHeight: number,
+    extraStyle?: any,
+  ) => (
+    <View key={`${uri}-${index}`} style={[styles.socialGalleryCell, extraStyle]}>
+      <CachedImage
+        uri={uri}
+        style={styles.socialGalleryImage}
+        width={Math.round(imageWidth)}
+        height={Math.round(imageHeight)}
+      />
+      {index === visibleMedia.length - 1 && remainingCount > 0 ? (
+        <View style={styles.socialGalleryMoreOverlay}>
+          <Text style={styles.socialGalleryMoreText}>+{remainingCount}</Text>
+        </View>
+      ) : null}
+    </View>
+  );
+
+  if (visibleMedia.length === 0) return null;
+
+  const singleHeight = Math.round(mediaWidth / SOCIAL_MEDIA_ASPECT_RATIO);
+  const halfWidth = (mediaWidth - SOCIAL_GALLERY_GAP) / 2;
+
+  let galleryContent: React.ReactNode;
+
+  if (visibleMedia.length === 1) {
+    galleryContent = renderImageCell(visibleMedia[0], 0, mediaWidth, singleHeight, {
+      height: singleHeight,
+    });
+  } else if (visibleMedia.length === 2) {
+    const rowHeight = Math.round(halfWidth);
+    galleryContent = (
+      <View style={[styles.socialGalleryRow, { height: rowHeight }]}>
+        {visibleMedia.map((uri, index) => renderImageCell(uri, index, halfWidth, rowHeight))}
+      </View>
+    );
+  } else if (visibleMedia.length === 3) {
+    const rowHeight = Math.round(mediaWidth * 0.72);
+    const stackedHeight = (rowHeight - SOCIAL_GALLERY_GAP) / 2;
+    galleryContent = (
+      <View style={[styles.socialGalleryRow, { height: rowHeight }]}>
+        {renderImageCell(visibleMedia[0], 0, halfWidth, rowHeight)}
+        <View style={styles.socialGalleryColumn}>
+          {renderImageCell(visibleMedia[1], 1, halfWidth, stackedHeight)}
+          {renderImageCell(visibleMedia[2], 2, halfWidth, stackedHeight)}
+        </View>
+      </View>
+    );
+  } else {
+    const rowHeight = Math.round(halfWidth * 0.82);
+    galleryContent = (
+      <View style={styles.socialGalleryGrid}>
+        <View style={[styles.socialGalleryRow, { height: rowHeight }]}>
+          {visibleMedia.slice(0, 2).map((uri, index) => renderImageCell(uri, index, halfWidth, rowHeight))}
+        </View>
+        <View style={[styles.socialGalleryRow, { height: rowHeight }]}>
+          {visibleMedia.slice(2, 4).map((uri, index) =>
+            renderImageCell(uri, index + 2, halfWidth, rowHeight),
+          )}
+        </View>
+      </View>
+    );
+  }
+
+  return (
+    <TouchableOpacity activeOpacity={0.92} onPress={onPress} style={styles.socialMediaWrap}>
+      {galleryContent}
+    </TouchableOpacity>
+  );
+});
+
 const getSocialAvatarUri = (item: any) =>
   resolveFeedMediaUrl(
     item?.author_avatar ||
@@ -334,12 +426,6 @@ const getSocialPriceChips = (item: any) => {
   return Array.from(new Set(chips)).slice(0, 2);
 };
 
-const getSocialEngagementCounts = (item: any) => ({
-  likes: Number(item?.reaction_count || 0),
-  comments: Number(item?.comment_count || 0),
-  shares: Number(item?.share_count || 0),
-});
-
 const getLinkedStudioId = (item: any) =>
   item?.linked_studio?.id || item?.studio?.id || item?.studio_id || item?.listing_id || "";
 
@@ -354,7 +440,6 @@ type SocialPostCardProps = {
   currentUserId: string | null;
   onOpenPost: (postId: string) => void;
   onOpenStudio: (studioId: string) => void;
-  onReaction: (postId: string, currentReaction: string | null) => void;
   onRequestDelete: (postId: string) => void;
 };
 
@@ -369,37 +454,17 @@ const SocialPostCard = React.memo(function SocialPostCard({
   currentUserId,
   onOpenPost,
   onOpenStudio,
-  onReaction,
   onRequestDelete,
 }: SocialPostCardProps) {
   const mediaUrls = useMemo(() => getWebFeedMediaUrls(item), [item]);
   const serviceBadges = useMemo(() => getSocialServiceBadges(item), [item]);
   const priceChips = useMemo(() => getSocialPriceChips(item), [item]);
-  const engagement = useMemo(() => getSocialEngagementCounts(item), [item]);
   const avatarUri = useMemo(() => getSocialAvatarUri(item), [item]);
-  const primaryMediaUri = mediaUrls[0] || "";
   const studioId = getLinkedStudioId(item);
-  const mediaHeight = Math.round(mediaWidth / SOCIAL_MEDIA_ASPECT_RATIO);
 
   const handleOpenPost = useCallback(() => {
     onOpenPost(item.id);
   }, [item?.id, onOpenPost]);
-
-  const handleReaction = useCallback(
-    (event?: any) => {
-      event?.stopPropagation?.();
-      onReaction(item.id, item.my_reaction);
-    },
-    [item?.id, item?.my_reaction, onReaction],
-  );
-
-  const handleComment = useCallback(
-    (event?: any) => {
-      event?.stopPropagation?.();
-      onOpenPost(item.id);
-    },
-    [item?.id, onOpenPost],
-  );
 
   const handleOpenCta = useCallback(
     (event?: any) => {
@@ -412,10 +477,6 @@ const SocialPostCard = React.memo(function SocialPostCard({
     },
     [item?.id, onOpenPost, onOpenStudio, studioId],
   );
-
-  const handleShare = useCallback((event?: any) => {
-    event?.stopPropagation?.();
-  }, []);
 
   const isOwner = !!currentUserId && item?.author_id === currentUserId;
   const [menuOpen, setMenuOpen] = useState(false);
@@ -529,21 +590,8 @@ const SocialPostCard = React.memo(function SocialPostCard({
         {getSocialCaption(item)}
       </Text>
 
-      {primaryMediaUri ? (
-        <View style={styles.socialMediaWrap}>
-          <CachedImage
-            uri={primaryMediaUri}
-            style={[styles.socialMedia, { height: mediaHeight }]}
-            width={Math.round(mediaWidth)}
-            height={mediaHeight}
-          />
-          {mediaUrls.length > 1 ? (
-            <View style={styles.socialMediaCount}>
-              <Ionicons name="albums-outline" size={12} color="#FFFFFF" />
-              <Text style={styles.socialMediaCountText}>1/{mediaUrls.length}</Text>
-            </View>
-          ) : null}
-        </View>
+      {mediaUrls.length > 0 ? (
+        <SocialMediaGallery mediaUrls={mediaUrls} mediaWidth={mediaWidth} onPress={handleOpenPost} />
       ) : null}
 
       {serviceBadges.length > 0 || priceChips.length > 0 ? (
@@ -564,37 +612,6 @@ const SocialPostCard = React.memo(function SocialPostCard({
           ))}
         </View>
       ) : null}
-
-      <View style={[styles.socialEngagementRow, { borderBottomColor: borderColor }]}>
-        <View style={styles.socialEngagementLeft}>
-          <View style={styles.socialLikeBubble}>
-            <Ionicons name="heart" size={10} color="#FFFFFF" />
-          </View>
-          <Text style={[styles.socialEngagementText, { color: colors.textSecondary }]}>
-            {engagement.likes} likes
-          </Text>
-        </View>
-        <Text style={[styles.socialEngagementText, { color: colors.textSecondary }]} numberOfLines={1}>
-          {engagement.comments} comments
-        </Text>
-      </View>
-
-      <View style={styles.socialActionRow}>
-        <TouchableOpacity activeOpacity={0.78} onPress={handleReaction} style={styles.socialActionButton}>
-          <Ionicons
-            name={item?.my_reaction ? "heart" : "heart-outline"}
-            size={18}
-            color={item?.my_reaction ? "#EF4444" : colors.textSecondary}
-          />
-          <Text style={[styles.socialActionText, { color: item?.my_reaction ? "#EF4444" : colors.textSecondary }]}>
-            Like
-          </Text>
-        </TouchableOpacity>
-        <TouchableOpacity activeOpacity={0.78} onPress={handleComment} style={styles.socialActionButton}>
-          <Ionicons name="chatbubble-outline" size={17} color={colors.textSecondary} />
-          <Text style={[styles.socialActionText, { color: colors.textSecondary }]}>Comment</Text>
-        </TouchableOpacity>
-      </View>
 
       <View style={styles.socialCtaRow}>
         <TouchableOpacity activeOpacity={0.78} onPress={handleOpenCta} style={styles.socialPrimaryCta}>
@@ -794,35 +811,6 @@ export default function FeedScreen() {
     });
   };
 
-  const handleReaction = useCallback(async (postId: string, currentReaction: string | null) => {
-    setPosts((current) =>
-      current.map((post) =>
-        post.id === postId
-          ? {
-              ...post,
-              my_reaction: currentReaction ? null : "like",
-              reaction_count: currentReaction
-                ? Math.max((post.reaction_count || 1) - 1, 0)
-                : (post.reaction_count || 0) + 1,
-            }
-          : post,
-      ),
-    );
-
-    try {
-      const { error } = await supabase.functions.invoke("manage-social-feed", {
-        body: currentReaction
-          ? { action: "remove_reaction", post_id: postId }
-          : { action: "react_to_post", post_id: postId, reaction_type: "like" },
-      });
-
-      if (error) throw error;
-    } catch (e: any) {
-      logFeedInvokeError("manage-social-feed:reaction", e, { postId });
-      fetchFeed(tab);
-    }
-  }, [fetchFeed, tab]);
-
   const contentWidth = useMemo(
     () => (isWebDesktop ? Math.min(width - 64, 720) : width),
     [isWebDesktop, width],
@@ -916,12 +904,11 @@ export default function FeedScreen() {
         currentUserId={session?.user?.id || null}
         onOpenPost={openPostDetails}
         onOpenStudio={openStudioDetails}
-        onReaction={handleReaction}
         onRequestDelete={requestDeletePost}
         width={contentWidth}
       />
     ),
-    [borderCol, cardBg, colors, contentWidth, handleReaction, isDark, mediaWidth, openPostDetails, openStudioDetails, requestDeletePost, session?.user?.id],
+    [borderCol, cardBg, colors, contentWidth, isDark, mediaWidth, openPostDetails, openStudioDetails, requestDeletePost, session?.user?.id],
   );
 
   return (
@@ -1682,9 +1669,37 @@ const styles = StyleSheet.create({
     position: "relative",
     backgroundColor: "rgba(124,58,237,0.08)",
   },
-  socialMedia: {
+  socialGalleryGrid: {
+    gap: SOCIAL_GALLERY_GAP,
+  },
+  socialGalleryRow: {
+    flexDirection: "row",
+    gap: SOCIAL_GALLERY_GAP,
+  },
+  socialGalleryColumn: {
+    flex: 1,
+    gap: SOCIAL_GALLERY_GAP,
+  },
+  socialGalleryCell: {
+    flex: 1,
+    overflow: "hidden",
+    backgroundColor: "#CBD5E1",
+    position: "relative",
+  },
+  socialGalleryImage: {
     width: "100%",
-    borderRadius: 14,
+    height: "100%",
+  },
+  socialGalleryMoreOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(15,23,42,0.56)",
+  },
+  socialGalleryMoreText: {
+    color: "#FFFFFF",
+    fontSize: 28,
+    fontFamily: "Poppins_700Bold",
   },
   socialMediaCount: {
     position: "absolute",
@@ -1728,33 +1743,6 @@ const styles = StyleSheet.create({
   socialPriceText: {
     fontSize: 10,
     fontFamily: "Poppins_700Bold",
-  },
-  socialEngagementRow: {
-    marginTop: 11,
-    paddingBottom: 9,
-    borderBottomWidth: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: 10,
-  },
-  socialEngagementLeft: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 5,
-  },
-  socialLikeBubble: {
-    width: 18,
-    height: 18,
-    borderRadius: 9,
-    backgroundColor: "#EF4444",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  socialEngagementText: {
-    fontSize: 11,
-    lineHeight: 15,
-    fontFamily: "Poppins_500Medium",
   },
   socialActionRow: {
     flexDirection: "row",

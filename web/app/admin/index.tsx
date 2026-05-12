@@ -1638,7 +1638,11 @@ export default function AdminDashboardPage() {
   }
 
   return (
-    <View style={[styles.flex1, { backgroundColor: colors.background }]}>
+    <View
+      testID="admin-dashboard-page"
+      accessibilityLabel="admin-dashboard-page"
+      style={[styles.flex1, { backgroundColor: colors.background }]}
+    >
       <Header title="Admin" hideBackButton />
 
       <ScrollView
@@ -1681,6 +1685,8 @@ export default function AdminDashboardPage() {
           <View style={{ flexDirection: 'row', gap: 12, marginBottom: 8, zIndex: 10, flexWrap: 'wrap' }}>
             <View style={{ flex: 1, minWidth: 200 }}>
               <TextInput
+                testID="admin-dashboard-global-search-input"
+                accessibilityLabel="admin-dashboard-global-search-input"
                 value={globalSearch}
                 onChangeText={setGlobalSearch}
                 placeholder="Global search (users, transactions, reports)..."
@@ -1834,7 +1840,11 @@ export default function AdminDashboardPage() {
             </View>
           </View>
 
-          <View style={[styles.dataEnginePanel, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          <View
+            testID="admin-withdrawals-section"
+            accessibilityLabel="admin-withdrawals-section"
+            style={[styles.dataEnginePanel, { backgroundColor: colors.card, borderColor: colors.border }]}
+          >
             <View style={[styles.pulseHeader, { marginBottom: 16, flexWrap: 'wrap', gap: 10 }]}>
               <View>
                 <Text style={[styles.panelTitle, { color: colors.text, marginBottom: 0 }]}>Withdrawal Monitor</Text>
@@ -1844,6 +1854,8 @@ export default function AdminDashboardPage() {
               </View>
               <View style={styles.withdrawalButtonRow}>
                 <TouchableOpacity
+                  testID="admin-platform-withdrawal-open-button"
+                  accessibilityLabel="admin-platform-withdrawal-open-button"
                   activeOpacity={0.88}
                   onPress={handleAdminWithdrawShortcut}
                   style={[
@@ -1858,6 +1870,8 @@ export default function AdminDashboardPage() {
                   <Text style={[styles.dashboardActionText, { color: '#FFFFFF' }]}>Withdraw</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
+                  testID="admin-withdrawals-view-all-button"
+                  accessibilityLabel="admin-withdrawals-view-all-button"
                   activeOpacity={0.88}
                   onPress={handleShowAllWithdrawals}
                   style={[
@@ -1969,7 +1983,12 @@ export default function AdminDashboardPage() {
                     : '#f59e0b';
 
                 return (
-                  <View key={withdrawal.id} style={[styles.tableRow, { borderBottomColor: colors.border }]}>
+                  <View
+                    key={withdrawal.id}
+                    testID={`admin-withdrawal-row-${withdrawal.id}`}
+                    accessibilityLabel={`admin-withdrawal-row-${withdrawal.id}`}
+                    style={[styles.tableRow, { borderBottomColor: colors.border }]}
+                  >
                     <View style={[styles.tableCell, { flex: 1.3 }]}>
                       <Text numberOfLines={1} style={{ color: colors.text, fontSize: 12, fontFamily: 'Poppins_500Medium' }}>{ownerLabel}</Text>
                       <Text numberOfLines={1} style={{ color: colors.textSecondary, fontSize: 11, fontFamily: 'Poppins_400Regular' }}>{formatDateTime(withdrawal.created_at)}</Text>
@@ -1997,6 +2016,8 @@ export default function AdminDashboardPage() {
                     </View>
                     <View style={[styles.tableCell, styles.withdrawalActionsCell]}>
                       <TouchableOpacity
+                        testID={`admin-withdrawal-details-${withdrawal.id}`}
+                        accessibilityLabel={`admin-withdrawal-details-${withdrawal.id}`}
                         activeOpacity={0.88}
                         onPress={() => handleWithdrawalDetails(withdrawal)}
                         style={[styles.miniActionButton, { borderColor: colors.border, backgroundColor: isDark ? '#0F172A' : '#FFFFFF' }]}
@@ -2005,6 +2026,8 @@ export default function AdminDashboardPage() {
                         <Text style={[styles.miniActionText, { color: colors.primary }]}>Details</Text>
                       </TouchableOpacity>
                       <TouchableOpacity
+                        testID={`admin-withdrawal-copy-${withdrawal.id}`}
+                        accessibilityLabel={`admin-withdrawal-copy-${withdrawal.id}`}
                         activeOpacity={0.88}
                         onPress={() => handleCopyWithdrawalReference(withdrawal.reference_number)}
                         style={[styles.miniActionButton, { borderColor: colors.border, backgroundColor: isDark ? '#0F172A' : '#FFFFFF' }]}
@@ -2189,6 +2212,8 @@ export default function AdminDashboardPage() {
         }}
       >
         <BottomSheetScrollView
+          testID="admin-platform-withdrawal-modal"
+          accessibilityLabel="admin-platform-withdrawal-modal"
           contentContainerStyle={styles.adminWithdrawSheetContent}
           showsVerticalScrollIndicator={false}
         >
@@ -2200,6 +2225,8 @@ export default function AdminDashboardPage() {
               </Text>
             </View>
             <TouchableOpacity
+              testID="admin-platform-withdrawal-close-button"
+              accessibilityLabel="admin-platform-withdrawal-close-button"
               activeOpacity={0.8}
               onPress={dismissAdminWithdrawSheet}
               style={[styles.adminWithdrawCloseButton, { backgroundColor: colors.card }]}
@@ -2213,6 +2240,8 @@ export default function AdminDashboardPage() {
             <View style={[styles.adminWithdrawInputWrap, { backgroundColor: colors.card, borderColor: colors.border }]}>
               <Text style={[styles.adminWithdrawCurrency, { color: colors.textSecondary }]}>₱</Text>
               <TextInput
+                testID="admin-platform-withdrawal-amount-input"
+                accessibilityLabel="admin-platform-withdrawal-amount-input"
                 value={adminWithdrawAmount}
                 onChangeText={setAdminWithdrawAmount}
                 keyboardType="decimal-pad"
@@ -2231,6 +2260,8 @@ export default function AdminDashboardPage() {
               const isActive = Number(adminWithdrawAmount) === normalizedAmount && normalizedAmount > 0;
               return (
                 <TouchableOpacity
+                  testID={isMax ? 'admin-platform-withdrawal-quick-max' : `admin-platform-withdrawal-quick-${normalizedAmount}`}
+                  accessibilityLabel={isMax ? 'admin-platform-withdrawal-quick-max' : `admin-platform-withdrawal-quick-${normalizedAmount}`}
                   key={isMax ? 'max' : String(amount)}
                   activeOpacity={0.8}
                   onPress={() => setAdminWithdrawAmount(String(normalizedAmount))}
@@ -2258,6 +2289,8 @@ export default function AdminDashboardPage() {
           </View>
 
           <TouchableOpacity
+            testID="admin-platform-withdrawal-submit-button"
+            accessibilityLabel="admin-platform-withdrawal-submit-button"
             activeOpacity={isAdminWithdrawReady ? 0.82 : 1}
             disabled={adminWithdrawSubmitting || !isAdminWithdrawReady}
             onPress={handleAdminWithdrawSubmit}

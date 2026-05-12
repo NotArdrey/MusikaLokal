@@ -706,17 +706,17 @@ export default function WalletScreen() {
               <View style={styles.decoBottomLeft} />
 
               <Text style={styles.balanceLabel}>Current Balance</Text>
-              <Text style={styles.balanceValue}>? {balance?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Text>
+              <Text style={styles.balanceValue}>₱ {balance?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Text>
 
               <View style={styles.balanceRow}>
                 <View>
                   <Text style={styles.balanceSubLabel}>Pending</Text>
-                  <Text style={styles.balanceSubValue}>? {pendingBalance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Text>
+                  <Text style={styles.balanceSubValue}>₱ {pendingBalance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Text>
                 </View>
                 <View style={[styles.balanceDivider, { backgroundColor: 'rgba(255,255,255,0.2)' }]} />
                 <View>
                   <Text style={styles.balanceSubLabel}>Available</Text>
-                  <Text style={styles.balanceSubValue}>? {balance?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Text>
+                  <Text style={styles.balanceSubValue}>₱ {balance?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Text>
                 </View>
               </View>
             </View>
@@ -930,7 +930,7 @@ export default function WalletScreen() {
                       </View>
                     </View>
                     <Text style={[styles.transactionAmount, { color: tx.is_credit ? '#10B981' : '#EF4444' }]}>
-                      {tx.is_credit ? '+' : '-'}? {tx.amount.toFixed(2)}
+                      {tx.is_credit ? '+' : '-'}₱{tx.amount.toFixed(2)}
                     </Text>
                   </View>
                 ))
@@ -974,7 +974,7 @@ export default function WalletScreen() {
             <View style={styles.inputSection}>
               <Text style={[styles.inputLabel, { color: colors.text }]}>Amount to Add</Text>
               <View style={[styles.amountInputContainer, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-                <Text style={[styles.currencyPrefix, { color: colors.textSecondary }]}>?</Text>
+                <Text style={[styles.currencyPrefix, { color: colors.textSecondary }]}>₱</Text>
                 <TextInput
                   style={[styles.amountInput, { color: colors.text }]}
                   placeholder="0.00"
@@ -1066,7 +1066,7 @@ export default function WalletScreen() {
               <View style={styles.inputSection}>
                 <Text style={[styles.inputLabel, { color: colors.text }]}>Amount to Withdraw</Text>
                 <View style={[styles.amountInputContainer, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-                  <Text style={[styles.currencyPrefix, { color: colors.textSecondary }]}>?</Text>
+                  <Text style={[styles.currencyPrefix, { color: colors.textSecondary }]}>₱</Text>
                   <TextInput
                     style={[styles.amountInput, { color: colors.text }]}
                     placeholder="0.00"
@@ -1143,12 +1143,12 @@ export default function WalletScreen() {
                             <View style={[styles.payoutIconBox, { backgroundColor: isDark ? colors.primaryLight : '#EEF2FF' }]}>
                               <Ionicons name={getPayoutIcon(method.type) as any} size={20} color={colors.primary} />
                             </View>
-                            <View>
+                            <View style={styles.payoutMethodTextBlock}>
                               <Text style={[styles.payoutMethodName, { color: colors.text }]}>
                                 {getPayoutLabel(method.type)}
                                 {method.bank_name ? ` - ${method.bank_name}` : ''}
                               </Text>
-                              <Text style={[styles.payoutMethodAccount, { color: colors.textSecondary }]}>
+                              <Text style={[styles.payoutMethodAccount, { color: colors.textSecondary }]} numberOfLines={1}>
                                 {method.account_name} • ****{method.account_number.slice(-4)}
                               </Text>
                             </View>
@@ -1638,13 +1638,21 @@ const styles = StyleSheet.create({
   },
   currencyPrefix: {
     fontSize: 24,
+    lineHeight: 32,
     fontFamily: 'Poppins_600SemiBold',
     marginRight: 8,
+    includeFontPadding: false,
+    textAlignVertical: 'center',
   },
   amountInput: {
     flex: 1,
+    height: 56,
     fontSize: 24,
+    lineHeight: 32,
     fontFamily: 'Poppins_600SemiBold',
+    includeFontPadding: false,
+    paddingVertical: 0,
+    textAlignVertical: 'center',
   },
   inputHint: {
     fontSize: 12,
@@ -1658,10 +1666,12 @@ const styles = StyleSheet.create({
   },
   quickAmountBtn: {
     flex: 1,
+    minHeight: 44,
     paddingVertical: 10,
     borderRadius: 10,
     borderWidth: 1,
     alignItems: 'center',
+    justifyContent: 'center',
   },
   quickAmountText: {
     fontSize: 14,
@@ -1723,6 +1733,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 12,
     flex: 1,
+    minWidth: 0,
   },
   payoutIconBox: {
     width: 44,
@@ -1734,6 +1745,10 @@ const styles = StyleSheet.create({
   payoutMethodName: {
     fontSize: 14,
     fontFamily: 'Poppins_600SemiBold',
+  },
+  payoutMethodTextBlock: {
+    flex: 1,
+    minWidth: 0,
   },
   payoutMethodAccount: {
     fontSize: 12,
@@ -1828,12 +1843,16 @@ const styles = StyleSheet.create({
     fontFamily: 'Poppins_500Medium',
   },
   textInput: {
+    height: 56,
     borderRadius: 12,
     borderWidth: 1,
     paddingHorizontal: 16,
-    paddingVertical: 14,
+    paddingVertical: 0,
     fontSize: 16,
+    lineHeight: 22,
     fontFamily: 'Poppins_400Regular',
+    includeFontPadding: false,
+    textAlignVertical: 'center',
   },
   // Withdrawal history styles
   withdrawalItem: {

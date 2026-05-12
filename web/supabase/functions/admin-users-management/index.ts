@@ -146,6 +146,22 @@ function getApprovalClaimMatchedOn(approvalClaim: any, fallback = "DOCUMENT_FING
   return String(approvalClaim?.matched_on || approvalClaim?.match_type || fallback).trim().toUpperCase();
 }
 
+function normalizeApprovalClaimResult(rawClaim: any): any {
+  if (Array.isArray(rawClaim)) {
+    return normalizeApprovalClaimResult(rawClaim[0]);
+  }
+
+  if (typeof rawClaim === "string") {
+    try {
+      return normalizeApprovalClaimResult(JSON.parse(rawClaim));
+    } catch {
+      return { decision: rawClaim };
+    }
+  }
+
+  return rawClaim;
+}
+
 function getIdentityMatchLabel(matchType: unknown) {
   const normalized = String(matchType || "").trim().toUpperCase();
   if (normalized === "NAME_BIRTHDATE") return "Same name + birthdate";
@@ -1778,7 +1794,7 @@ serve(async (req: Request) => {
 
       if (review.document_fingerprint) {
         if (decision === "APPROVED") {
-          const approvalClaim = await claimApprovedIdentityDocument(client, {
+          const approvalClaim = normalizeApprovalClaimResult(await claimApprovedIdentityDocument(client, {
             userId: review.user_id,
             role: reviewRoleForClaim,
             documentFingerprint: review.document_fingerprint,
@@ -1802,7 +1818,7 @@ serve(async (req: Request) => {
                 ? Array.from(new Set(duplicateMatchesForApproval.map((match: any) => match.matched_on).filter(Boolean)))
                 : [],
             },
-          });
+          }));
 
           if (approvalClaim?.decision !== "APPROVED") {
             return jsonResponse({

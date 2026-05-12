@@ -1,0 +1,17 @@
+appId: ${APP_ID}
+---
+- openLink: "musikalokal://marketplace"
+- assertVisible:
+    id: "mobile-marketplace-page"
+- tapOn:
+    id: "mobile-marketplace-create-listing-hero-button"
+- assertVisible:
+    id: "mobile-marketplace-listing-modal"
+- tapOn:
+    id: "mobile-marketplace-title-input"
+- inputText: ${E2E_PRODUCT_TITLE}
+- tapOn:
+    id: "mobile-marketplace-submit-button"
+- tapOn:
+    id: "mobile-marketplace-submit-button"
+    optional: true

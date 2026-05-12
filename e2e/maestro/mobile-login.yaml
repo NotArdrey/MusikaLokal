@@ -1,0 +1,17 @@
+appId: ${APP_ID}
+---
+- launchApp
+- extendedWaitUntil:
+    visible: "MusikaLokal"
+    timeout: 120000
+- tapOn:
+    id: "auth-email-input"
+- inputText: ${E2E_MOBILE_EMAIL}
+- tapOn:
+    id: "auth-password-input"
+- inputText: ${E2E_MOBILE_PASSWORD}
+- tapOn:
+    id: "auth-sign-in-button"
+- extendedWaitUntil:
+    visible: "MusikaLokal"
+    timeout: 120000

@@ -25,6 +25,7 @@ import Modal from "../src/components/modal";
 import Navbar from "../src/components/navbar";
 import { useAuth } from "../src/context/AuthContext";
 import { useTheme } from "../src/context/ThemeContext";
+import { createE2EImageFixtureUrls, isE2EFixtureMode } from "../src/utils/e2eFixtures";
 import {
   formatRecordingRuleSentence,
   formatRecordingRuleShort,
@@ -102,6 +103,8 @@ const formatSupabaseError = (error: any): string => {
 
   return parts.join("\n") || "Unknown error";
 };
+
+const normalizeE2ETestId = (value: string) => value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 
 const logActionError = (
   context: string,
@@ -537,6 +540,24 @@ export default function AddStudioScreen() {
 
   // Equipment image upload state
   const [uploadingEquipmentImage, setUploadingEquipmentImage] = useState(false);
+
+  useEffect(() => {
+    if (!isE2EFixtureMode()) return;
+
+    setAddress((current) => current || "E2E Studio Address");
+    setLatitude((current) => current ?? 14.5995);
+    setLongitude((current) => current ?? 120.9842);
+    setAddressVerified(true);
+    setAddressVerificationStatus((current) => current || "verified");
+    setImages((current) => current.length > 0 ? current : createE2EImageFixtureUrls(1));
+    setRehearsalRate((current) => current || "500");
+    setRecordingRate((current) => current || "1000");
+    setRecordingSongsPerBlock((current) => current || "2");
+    setRecordingHoursPerBlock((current) => current || "2");
+    setPax((current) => current || "10");
+    setContractUrl((current) => current || "https://example.com/e2e-contract.pdf");
+    setContractFileName((current) => current || "e2e-contract.pdf");
+  }, []);
 
   // Availability state
   const daysOfWeek = [
@@ -1470,6 +1491,19 @@ export default function AddStudioScreen() {
     router.replace({ pathname: "/my_studio", params: { refresh: String(Date.now()) } });
   };
 
+  const handleLocationSelectPress = () => {
+    if (isE2EFixtureMode()) {
+      setAddress("E2E Studio Address");
+      setLatitude(14.5995);
+      setLongitude(120.9842);
+      setAddressVerified(true);
+      setAddressVerificationStatus("verified");
+      return;
+    }
+
+    setLocationPickerVisible(true);
+  };
+
   // Start address verification (before studio creation)
   const startAddressVerification = async () => {
     // Check if identity is verified first
@@ -1742,6 +1776,12 @@ export default function AddStudioScreen() {
   const handleContractUpload = async () => {
     try {
       setUploadingContract(true);
+      if (isE2EFixtureMode()) {
+        setContractUrl("https://example.com/e2e-contract.pdf");
+        setContractFileName("e2e-contract.pdf");
+        setUploadingContract(false);
+        return;
+      }
 
       if (Platform.OS === "web") {
         // Web: Use HTML input element
@@ -2096,6 +2136,8 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
         ]}
       >
         <TextInput
+          testID={`mobile-add-studio-${normalizeE2ETestId(label)}-input`}
+          accessibilityLabel={`mobile-add-studio-${normalizeE2ETestId(label)}-input`}
           value={value}
           onChangeText={setValue}
           maxLength={inputMaxLength}
@@ -2104,6 +2146,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
           multiline={multiline}
           numberOfLines={multiline ? 4 : 1}
           keyboardType={keyboardType}
+          autoCapitalize={isE2EFixtureMode() && normalizedLabel.includes("description") ? "none" : "sentences"}
           style={[
             styles.textInput,
             {
@@ -2131,7 +2174,11 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
           style={{ display: "none" }}
         />
       )}
-      <View style={[styles.flex1, { backgroundColor: colors.background }]}>
+      <View
+        testID="mobile-add-studio-page"
+        accessibilityLabel="mobile-add-studio-page"
+        style={[styles.flex1, { backgroundColor: colors.background }]}
+      >
         <Header title="List Studio" onBackPress={handleBack} />
 
         {/* Enhanced Step Indicator (Fixed at top) */}
@@ -2233,7 +2280,10 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                 </Text>
                 <View style={{ flexDirection: "row", gap: 12 , flexWrap: "wrap", minWidth: "100%" }}>
                   {(["Rehearsal", "Recording", "Both"] as const).map((type) => (
-                    <TouchableOpacity activeOpacity={1}
+                    <TouchableOpacity
+                      activeOpacity={1}
+                      testID={`mobile-add-studio-type-${normalizeE2ETestId(type)}`}
+                      accessibilityLabel={`mobile-add-studio-type-${normalizeE2ETestId(type)}`}
                       key={type}
                       onPress={() => setStudioType(type)}
                       style={{
@@ -2302,8 +2352,11 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                 >
                   Studio Address
                 </Text>
-                <TouchableOpacity activeOpacity={1}
-                  onPress={() => setLocationPickerVisible(true)}
+                <TouchableOpacity
+                  activeOpacity={1}
+                  testID="mobile-add-studio-location-button"
+                  accessibilityLabel="mobile-add-studio-location-button"
+                  onPress={handleLocationSelectPress}
                   style={[
                     styles.inputWrapper,
                     {
@@ -2539,6 +2592,8 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                         ₱
                       </Text>
                       <TextInput
+                        testID="mobile-add-studio-rehearsal-rate-input"
+                        accessibilityLabel="mobile-add-studio-rehearsal-rate-input"
                         value={rehearsalRate}
                         onChangeText={setRehearsalRate}
                         placeholder="500"
@@ -2610,8 +2665,10 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                       >
                         ₱
                       </Text>
-                      <TextInput
-                        value={recordingRate}
+                        <TextInput
+                          testID="mobile-add-studio-recording-rate-input"
+                          accessibilityLabel="mobile-add-studio-recording-rate-input"
+                          value={recordingRate}
                         onChangeText={setRecordingRate}
                         placeholder="1000"
                         placeholderTextColor={colors.textSecondary}
@@ -2667,6 +2724,8 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                           style={{ marginRight: 10 }}
                         />
                         <TextInput
+                          testID="mobile-add-studio-recording-songs-input"
+                          accessibilityLabel="mobile-add-studio-recording-songs-input"
                           value={recordingSongsPerBlock}
                           onChangeText={(text) =>
                             setRecordingSongsPerBlock(
@@ -2726,6 +2785,8 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                           style={{ marginRight: 10 }}
                         />
                         <TextInput
+                          testID="mobile-add-studio-recording-hours-input"
+                          accessibilityLabel="mobile-add-studio-recording-hours-input"
                           value={recordingHoursPerBlock}
                           onChangeText={(text) => {
                             const sanitized = text.replace(/[^0-9.]/g, "");
@@ -3314,6 +3375,8 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                     style={{ marginRight: 12 }}
                   />
                   <TextInput
+                    testID="mobile-add-studio-capacity-input"
+                    accessibilityLabel="mobile-add-studio-capacity-input"
                     value={pax}
                     onChangeText={setPax}
                     placeholder="e.g. 10"
@@ -3413,6 +3476,8 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                   </View>
                 ) : (
                   <TouchableOpacity
+                    testID="mobile-add-studio-contract-upload-button"
+                    accessibilityLabel="mobile-add-studio-contract-upload-button"
                     onPress={handleContractUpload}
                     disabled={uploadingContract}
                     activeOpacity={uploadingContract ? 1 : 0.78}
@@ -5128,6 +5193,8 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
           {/* Navigation Buttons */}
           <View style={styles.navigationButtons}>
             <TouchableOpacity
+              testID="mobile-add-studio-back-button"
+              accessibilityLabel="mobile-add-studio-back-button"
               onPress={handleBack}
               disabled={creating}
               activeOpacity={creating ? 1 : 0.78}
@@ -5145,6 +5212,8 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
               </Text>
             </TouchableOpacity>
             <TouchableOpacity
+              testID="mobile-add-studio-next-button"
+              accessibilityLabel="mobile-add-studio-next-button"
               onPress={handleNext}
               disabled={creating || !isCurrentStepComplete}
               activeOpacity={creating || !isCurrentStepComplete ? 1 : 0.78}

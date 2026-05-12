@@ -1,0 +1,25 @@
+appId: ${APP_ID}
+---
+- openLink: "musikalokal://add_production"
+- assertVisible:
+    id: "mobile-add-production-page"
+- tapOn:
+    id: "e2e-image-upload-button"
+- tapOn:
+    id: "mobile-production-name-input"
+- inputText: ${E2E_PRODUCTION_NAME}
+- hideKeyboard
+- scrollUntilVisible:
+    element:
+      id: "mobile-production-description-input"
+    direction: DOWN
+- tapOn:
+    id: "mobile-production-description-input"
+- inputText: ${E2E_PRODUCTION_DESCRIPTION}
+- hideKeyboard
+- scrollUntilVisible:
+    element:
+      id: "mobile-production-submit-button"
+    direction: DOWN
+- tapOn:
+    id: "mobile-production-submit-button"

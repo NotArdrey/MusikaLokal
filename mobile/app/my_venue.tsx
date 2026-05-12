@@ -428,10 +428,15 @@ export default function MyVenueScreen() {
                         </View>
                     ) : (
                         gigs.map((gig) => (
-                            <View key={gig.id} style={[styles.cardContainer, {
+                            <View
+                                key={gig.id}
+                                testID={`mobile-gig-card-${gig.id}`}
+                                accessibilityLabel={`mobile-gig-card-${gig.id}`}
+                                style={[styles.cardContainer, {
                                 backgroundColor: colors.surface,
                                 shadowColor: colors.primary,
-                            }]}>
+                            }]}
+                            >
                                 {(() => {
                                     const normalizedPermitStatus = normalizePermitStatus(gig.permit_status);
                                     const isRejected = normalizedPermitStatus === 'rejected';
@@ -508,7 +513,10 @@ export default function MyVenueScreen() {
 
                                     <View style={[styles.actionRow, { borderColor: colors.border }]}>
                                         <View style={styles.actionLeft}>
-                                            <TouchableOpacity activeOpacity={1}
+                                            <TouchableOpacity
+                                                activeOpacity={1}
+                                                testID={`mobile-gig-manage-${gig.id}`}
+                                                accessibilityLabel={`mobile-gig-manage-${gig.id}`}
                                                 onPress={() => {
                                                     if (canManageGig) {
                                                         router.push({ pathname: '/manage_gig', params: { id: gig.id } });
@@ -546,6 +554,8 @@ export default function MyVenueScreen() {
                                             ) : canManageGig ? (
                                                 <TouchableOpacity
                                                     activeOpacity={1}
+                                                    testID={`mobile-gig-edit-${gig.id}`}
+                                                    accessibilityLabel={`mobile-gig-edit-${gig.id}`}
                                                     onPress={() => router.push({ pathname: '/edit_gig', params: { id: gig.id } })}
                                                     style={[styles.editBtn, { borderColor: colors.border }]}
                                                 >
@@ -563,7 +573,10 @@ export default function MyVenueScreen() {
                                         </View>
 
                                         {canManageGig ? (
-                                            <TouchableOpacity activeOpacity={1}
+                                            <TouchableOpacity
+                                                activeOpacity={1}
+                                                testID={`mobile-gig-delete-${gig.id}`}
+                                                accessibilityLabel={`mobile-gig-delete-${gig.id}`}
                                                 onPress={() => confirmDelete(gig.id, gig.name)}
                                                 style={styles.deleteBtn}
                                             >

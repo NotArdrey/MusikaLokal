@@ -1,6 +1,7 @@
 node_modules/
 .expo/
 .env
+.env.e2e
 .env.local
 dist/
 build/

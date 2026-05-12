@@ -14,6 +14,7 @@ import { useBottomBarClearance } from '../src/hooks/useBottomBarClearance';
 import { useRequireAuth } from '../src/context/AuthContext';
 import { useTheme } from '../src/context/ThemeContext';
 import { getActionErrorMessage, getResultErrorMessage, logActionError } from '../src/utils/actionError';
+import { isE2EFixtureMode } from '../src/utils/e2eFixtures';
 import { invalidateListingCaches } from '../src/utils/listingCacheInvalidation';
 
 const normalizePermitStatus = (permitStatus: string | null | undefined) => {
@@ -216,6 +217,15 @@ export default function MyStudioScreen() {
         try {
             let result: any = null;
             let invokeError: any = null;
+            if (isE2EFixtureMode()) {
+                const { error } = await supabase
+                    .from('studios')
+                    .delete()
+                    .eq('id', selectedId)
+                    .eq('owner_id', userId);
+                if (error) throw error;
+                result = { success: true };
+            } else {
             const {
                 data: { session },
             } = await supabase.auth.getSession();
@@ -250,6 +260,7 @@ export default function MyStudioScreen() {
                 });
                 if (rpcError) throw rpcError;
                 result = rpcData;
+            }
             }
 
             if (!result?.success) {
@@ -333,6 +344,8 @@ export default function MyStudioScreen() {
                         studios.map((studio) => (
                             <View
                                 key={studio.id}
+                                testID={`mobile-studio-card-${studio.id}`}
+                                accessibilityLabel={`mobile-studio-card-${studio.id}`}
                                 style={[
                                     styles.cardContainer,
                                     {
@@ -403,7 +416,10 @@ export default function MyStudioScreen() {
 
                                     <View style={[styles.actionRow, { borderColor: colors.border }]}>
                                         <View style={styles.actionLeft}>
-                                            <TouchableOpacity activeOpacity={1}
+                                            <TouchableOpacity
+                                                activeOpacity={1}
+                                                testID={`mobile-studio-manage-${studio.id}`}
+                                                accessibilityLabel={`mobile-studio-manage-${studio.id}`}
                                                 onPress={() => router.push({ pathname: '/manage_studio', params: { id: studio.id } })}
                                                 style={[styles.manageBtn, { backgroundColor: colors.primary }]}
                                             >
@@ -434,6 +450,8 @@ export default function MyStudioScreen() {
                                             ) : (
                                                 <TouchableOpacity
                                                     activeOpacity={1}
+                                                    testID={`mobile-studio-edit-${studio.id}`}
+                                                    accessibilityLabel={`mobile-studio-edit-${studio.id}`}
                                                     onPress={() => router.push({ pathname: '/edit_studio', params: { id: studio.id } })}
                                                     style={[styles.editBtn, { borderColor: colors.border }]}
                                                 >
@@ -442,7 +460,10 @@ export default function MyStudioScreen() {
                                             )}
                                         </View>
 
-                                        <TouchableOpacity activeOpacity={1}
+                                        <TouchableOpacity
+                                            activeOpacity={1}
+                                            testID={`mobile-studio-delete-${studio.id}`}
+                                            accessibilityLabel={`mobile-studio-delete-${studio.id}`}
                                             onPress={() => confirmDelete(studio.id, studio.name)}
                                             style={styles.deleteBtn}
                                         >

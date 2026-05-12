@@ -3,7 +3,7 @@
 const DUPLICATE_REVIEW_SOURCE = "DIDIT_DUPLICATE";
 const DIDIT_PENDING_SOURCE = "DIDIT_PENDING";
 
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function normalizeText(value: unknown) {
   return String(value || "").trim();

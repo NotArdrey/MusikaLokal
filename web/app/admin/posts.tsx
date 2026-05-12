@@ -119,7 +119,11 @@ export default function AdminPostsPage() {
   if (!isAdmin) return <View style={[styles.container, { backgroundColor: colors.background }]}><Header title="Admin" onBackPress={() => router.back()} /><View style={styles.centered}><Text style={{ color: colors.textSecondary }}>Access denied</Text></View></View>;
 
   return (
-    <View style={[styles.container, { backgroundColor: colors.background }]}>
+    <View
+      testID="admin-posts-page"
+      accessibilityLabel="admin-posts-page"
+      style={[styles.container, { backgroundColor: colors.background }]}
+    >
       <Header title="Admin" onBackPress={() => router.back()} />
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tabsRow}>
         {tabItems.map((item) => {
@@ -133,10 +137,25 @@ export default function AdminPostsPage() {
         })}
       </ScrollView>
       <View style={{ paddingHorizontal: 16, marginTop: 12 }}>
-        <TextInput value={search} onChangeText={setSearch} placeholder="Search posts..." placeholderTextColor={colors.textSecondary} style={[styles.searchInput, { color: colors.text, backgroundColor: colors.card, borderColor: colors.border }]} />
+        <TextInput
+          testID="admin-posts-search-input"
+          accessibilityLabel="admin-posts-search-input"
+          value={search}
+          onChangeText={setSearch}
+          placeholder="Search posts..."
+          placeholderTextColor={colors.textSecondary}
+          style={[styles.searchInput, { color: colors.text, backgroundColor: colors.card, borderColor: colors.border }]}
+        />
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 8 }}>
           {(['all', 'reported', 'hidden'] as PostFilter[]).map((f) => (
-            <TouchableOpacity activeOpacity={1} key={f} onPress={() => setFilter(f)} style={[styles.filterChip, { backgroundColor: filter === f ? colors.primary : colors.card, borderColor: filter === f ? colors.primary : colors.border }]}>
+            <TouchableOpacity
+              activeOpacity={1}
+              key={f}
+              testID={`admin-posts-filter-${f}`}
+              accessibilityLabel={`admin-posts-filter-${f}`}
+              onPress={() => setFilter(f)}
+              style={[styles.filterChip, { backgroundColor: filter === f ? colors.primary : colors.card, borderColor: filter === f ? colors.primary : colors.border }]}
+            >
               <Text style={{ color: filter === f ? '#fff' : colors.text, fontSize: 13, textTransform: 'capitalize' }}>{f}</Text>
             </TouchableOpacity>
           ))}
@@ -148,7 +167,11 @@ export default function AdminPostsPage() {
           keyExtractor={(i) => i.id}
           contentContainerStyle={{ padding: 16, paddingBottom: 100 }}
           renderItem={({ item }) => (
-            <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            <View
+              testID={`admin-post-card-${item.id}`}
+              accessibilityLabel={`admin-post-card-${item.id}`}
+              style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}
+            >
               <View style={styles.cardRow}>
                 <View style={{ flex: 1 }}>
                   <Text style={{ color: colors.text, fontSize: 14, fontWeight: '600' }} numberOfLines={2}>{item.body || '(no text)'}</Text>
@@ -162,10 +185,22 @@ export default function AdminPostsPage() {
                 )}
               </View>
               <View style={styles.actionRow}>
-                <TouchableOpacity activeOpacity={1} style={[styles.actionBtn, { backgroundColor: '#eab30820' }]} onPress={() => handleHidePost(item.id)}>
+                <TouchableOpacity
+                  activeOpacity={1}
+                  testID={`admin-post-hide-${item.id}`}
+                  accessibilityLabel={`admin-post-hide-${item.id}`}
+                  style={[styles.actionBtn, { backgroundColor: '#eab30820' }]}
+                  onPress={() => handleHidePost(item.id)}
+                >
                   <Text style={{ color: '#eab308', fontSize: 12, fontWeight: '600' }}>{item.is_hidden ? 'Restore' : 'Hide'}</Text>
                 </TouchableOpacity>
-                <TouchableOpacity activeOpacity={1} style={[styles.actionBtn, { backgroundColor: '#ef444420' }]} onPress={() => handleDeletePost(item.id)}>
+                <TouchableOpacity
+                  activeOpacity={1}
+                  testID={`admin-post-delete-${item.id}`}
+                  accessibilityLabel={`admin-post-delete-${item.id}`}
+                  style={[styles.actionBtn, { backgroundColor: '#ef444420' }]}
+                  onPress={() => handleDeletePost(item.id)}
+                >
                   <Text style={{ color: '#ef4444', fontSize: 12, fontWeight: '600' }}>Delete</Text>
                 </TouchableOpacity>
               </View>

@@ -215,7 +215,12 @@ export default function MyProductionScreen() {
               const canOnlyViewAndChat = isMusicianView && !isOwnerTeam;
 
               return (
-                <View key={team.id} style={[styles.cardContainer, { backgroundColor: colors.surface, shadowColor: colors.primary }]}> 
+                <View
+                  key={team.id}
+                  testID={`mobile-production-card-${team.id}`}
+                  accessibilityLabel={`mobile-production-card-${team.id}`}
+                  style={[styles.cardContainer, { backgroundColor: colors.surface, shadowColor: colors.primary }]}
+                >
                   <View style={styles.imageWrapper}>
                     {team.logo_url ? (
                       <CachedImage
@@ -244,7 +249,10 @@ export default function MyProductionScreen() {
 
                     <View style={[styles.actionRow, { borderColor: colors.border }]}> 
                       <View style={styles.actionLeft}>
-                        <TouchableOpacity activeOpacity={1}
+                        <TouchableOpacity
+                          activeOpacity={1}
+                          testID={`mobile-production-manage-${team.id}`}
+                          accessibilityLabel={`mobile-production-manage-${team.id}`}
                           onPress={() => router.push({ pathname: '/production_team', params: { teamId: team.id } })}
                           style={[styles.manageBtn, { backgroundColor: colors.primary }]}
                         >
@@ -275,7 +283,10 @@ export default function MyProductionScreen() {
                         ) : null}
 
                         {canEdit ? (
-                          <TouchableOpacity activeOpacity={1}
+                          <TouchableOpacity
+                            activeOpacity={1}
+                            testID={`mobile-production-edit-${team.id}`}
+                            accessibilityLabel={`mobile-production-edit-${team.id}`}
                             onPress={() => router.push({ pathname: '/edit_production', params: { id: team.id } })}
                             style={[styles.editBtn, { borderColor: colors.border }]}
                           >
@@ -285,7 +296,10 @@ export default function MyProductionScreen() {
                       </View>
 
                       {canDelete ? (
-                        <TouchableOpacity activeOpacity={1}
+                        <TouchableOpacity
+                          activeOpacity={1}
+                          testID={`mobile-production-delete-${team.id}`}
+                          accessibilityLabel={`mobile-production-delete-${team.id}`}
                           onPress={() => confirmDelete(team.id, team.name)}
                           style={styles.deleteBtn}
                         >

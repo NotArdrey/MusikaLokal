@@ -5,6 +5,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Image, Modal, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { supabase } from '../../lib/supabase';
 import { useTheme } from '../context/ThemeContext';
+import { createE2EImageFixtureUrls, isE2EFixtureMode } from '../utils/e2eFixtures';
 import CustomAlert, { AlertType } from './CustomAlert';
 
 const debugLog = (..._args: unknown[]) => {};
@@ -246,6 +247,18 @@ export default function ImageUploader({
         return;
       }
 
+      if (isE2EFixtureMode()) {
+        if (images.length >= maxImages) {
+          showAlert('error', 'Limit Reached', `You can only upload up to ${maxImages} images.`);
+          return;
+        }
+
+        const fixtureUrls = createE2EImageFixtureUrls(Math.min(1, maxImages - images.length));
+        onImagesChange([...images, ...fixtureUrls]);
+        showAlert('success', 'Upload Complete', `${fixtureUrls.length} E2E fixture image(s) added.`);
+        return;
+      }
+
       const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (!permissionResult.granted) {
         showAlert('warning', 'Permission needed', 'Please allow access to your photos.');
@@ -424,6 +437,8 @@ export default function ImageUploader({
         <View style={styles.imagesRow}>
           {/* Add Image Button */}
           <TouchableOpacity activeOpacity={uploading || images.length >= maxImages ? 1 : 0.78}
+            testID="e2e-image-upload-button"
+            accessibilityLabel="e2e-image-upload-button"
             style={[styles.addImageButton, { borderColor: colors.border, backgroundColor: isDark ? colors.card : '#F3F4F6', opacity: uploading || images.length >= maxImages ? 0.6 : 1 }]}
             onPress={pickAndUploadImages}
             disabled={uploading || images.length >= maxImages}
@@ -450,6 +465,8 @@ export default function ImageUploader({
                 )}
               </TouchableOpacity>
               <TouchableOpacity activeOpacity={1}
+                testID={`e2e-image-remove-${index}`}
+                accessibilityLabel={`e2e-image-remove-${index}`}
                 style={[styles.removeImageButton, { backgroundColor: 'rgba(0,0,0,0.6)' }]}
                 onPress={() => removeImage(index)}
               >

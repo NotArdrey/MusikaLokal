@@ -1,0 +1,16 @@
+appId: ${APP_ID}
+---
+- openLink: "musikalokal://wallet"
+- assertVisible:
+    id: "mobile-wallet-page"
+- tapOn:
+    id: "mobile-wallet-open-withdraw-button"
+- assertVisible:
+    id: "mobile-wallet-withdraw-modal"
+- tapOn:
+    id: "mobile-wallet-withdraw-amount-input"
+- inputText: "200"
+- tapOn:
+    id: ${E2E_PAYOUT_METHOD_TEST_ID}
+- tapOn:
+    id: "mobile-wallet-withdraw-submit-button"

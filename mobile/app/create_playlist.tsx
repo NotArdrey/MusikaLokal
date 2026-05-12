@@ -25,6 +25,10 @@ import {
   uploadPlaylistAudioFile,
   type PlaylistAudioFile,
 } from "../src/utils/playlistAudio";
+import {
+  createE2EPlaylistAudioFixture,
+  isE2EFixtureMode,
+} from "../src/utils/e2eFixtures";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const moderateScale = (size: number, factor = 0.3) => {
@@ -215,6 +219,11 @@ export default function CreatePlaylistScreen() {
 
   const handlePickTrackAudio = useCallback(async (trackId: string) => {
     try {
+      if (isE2EFixtureMode()) {
+        setTrackAudioFile(trackId, createE2EPlaylistAudioFixture());
+        return;
+      }
+
       const audioFile = await pickPlaylistAudioFile();
       if (!audioFile) return;
 
@@ -302,7 +311,9 @@ export default function CreatePlaylistScreen() {
           for (const track of draftItems) {
             try {
               const sourceUrl = track.audio_file
-                ? (await uploadPlaylistAudioFile(track.audio_file, playlistId)).publicUrl
+                ? isE2EFixtureMode()
+                  ? track.audio_file.uri
+                  : (await uploadPlaylistAudioFile(track.audio_file, playlistId)).publicUrl
                 : null;
 
               const itemBody = {
@@ -402,12 +413,18 @@ export default function CreatePlaylistScreen() {
   }
 
   return (
-    <View style={[styles.container, { backgroundColor: colors.background }]}>
+    <View
+      testID="mobile-create-playlist-page"
+      accessibilityLabel="mobile-create-playlist-page"
+      style={[styles.container, { backgroundColor: colors.background }]}
+    >
       <Header title={isEditing ? "Edit Playlist" : "Create Playlist"} onBackPress={() => router.back()} />
 
       <ScrollView style={styles.content} contentContainerStyle={{ paddingBottom: contentBottomPadding }}>
         <Text style={[styles.label, { color: colors.text }]}>Title *</Text>
         <TextInput
+          testID="mobile-playlist-title-input"
+          accessibilityLabel="mobile-playlist-title-input"
           style={[styles.input, { color: colors.text, borderColor: colors.border, backgroundColor: colors.surface }]}
           placeholder="Playlist title"
           placeholderTextColor={colors.textSecondary}
@@ -417,6 +434,8 @@ export default function CreatePlaylistScreen() {
 
         <Text style={[styles.label, { color: colors.text }]}>Description</Text>
         <TextInput
+          testID="mobile-playlist-description-input"
+          accessibilityLabel="mobile-playlist-description-input"
           style={[styles.input, styles.textArea, { color: colors.text, borderColor: colors.border, backgroundColor: colors.surface }]}
           placeholder="Describe your playlist..."
           placeholderTextColor={colors.textSecondary}
@@ -424,10 +443,13 @@ export default function CreatePlaylistScreen() {
           onChangeText={setDescription}
           multiline
           numberOfLines={4}
+          autoCapitalize={isE2EFixtureMode() ? "none" : "sentences"}
         />
 
         <Text style={[styles.label, { color: colors.text }]}>Genre</Text>
         <TextInput
+          testID="mobile-playlist-genre-input"
+          accessibilityLabel="mobile-playlist-genre-input"
           style={[styles.input, { color: colors.text, borderColor: colors.border, backgroundColor: colors.surface }]}
           placeholder="e.g. OPM, Jazz, Rock"
           placeholderTextColor={colors.textSecondary}
@@ -438,7 +460,10 @@ export default function CreatePlaylistScreen() {
         <Text style={[styles.label, { color: colors.text }]}>Visibility</Text>
         <View style={styles.visibilityRow}>
           {(["public", "private"] as const).map((v) => (
-            <TouchableOpacity activeOpacity={1}
+            <TouchableOpacity
+              testID={`mobile-playlist-visibility-${v}`}
+              accessibilityLabel={`mobile-playlist-visibility-${v}`}
+              activeOpacity={1}
               key={v}
               style={[
                 styles.visibilityPill,
@@ -472,6 +497,8 @@ export default function CreatePlaylistScreen() {
             <View style={styles.sectionHeader}>
               <Text style={[styles.label, styles.sectionLabel, { color: colors.text }]}>Musics</Text>
               <TouchableOpacity
+                testID="mobile-playlist-add-track-button"
+                accessibilityLabel="mobile-playlist-add-track-button"
                 activeOpacity={1}
                 style={[styles.addTrackBtn, { backgroundColor: colors.primary + "18", borderColor: colors.primary + "30" }]}
                 onPress={addTrackDraft}
@@ -490,15 +517,28 @@ export default function CreatePlaylistScreen() {
               </View>
             ) : (
               trackDrafts.map((track, index) => (
-                <View key={track.id} style={[styles.trackCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+                <View
+                  key={track.id}
+                  testID={`mobile-playlist-track-card-${index}`}
+                  accessibilityLabel={`mobile-playlist-track-card-${index}`}
+                  style={[styles.trackCard, { backgroundColor: colors.surface, borderColor: colors.border }]}
+                >
                   <View style={styles.trackCardHeader}>
                     <Text style={[styles.trackCardTitle, { color: colors.text }]}>Music {index + 1}</Text>
-                    <TouchableOpacity activeOpacity={1} onPress={() => removeTrackDraft(track.id)} style={styles.trackRemoveBtn}>
+                    <TouchableOpacity
+                      testID={`mobile-playlist-track-remove-${index}`}
+                      accessibilityLabel={`mobile-playlist-track-remove-${index}`}
+                      activeOpacity={1}
+                      onPress={() => removeTrackDraft(track.id)}
+                      style={styles.trackRemoveBtn}
+                    >
                       <Ionicons name="trash-outline" size={16} color="#ef4444" />
                     </TouchableOpacity>
                   </View>
 
                   <TextInput
+                    testID={`mobile-playlist-track-title-${index}`}
+                    accessibilityLabel={`mobile-playlist-track-title-${index}`}
                     style={[styles.input, styles.trackInput, { color: colors.text, borderColor: colors.border, backgroundColor: colors.background }]}
                     placeholder="Track title"
                     placeholderTextColor={colors.textSecondary}
@@ -506,6 +546,8 @@ export default function CreatePlaylistScreen() {
                     onChangeText={(value) => updateTrackDraft(track.id, "title", value)}
                   />
                   <TextInput
+                    testID={`mobile-playlist-track-artist-${index}`}
+                    accessibilityLabel={`mobile-playlist-track-artist-${index}`}
                     style={[styles.input, styles.trackInput, { color: colors.text, borderColor: colors.border, backgroundColor: colors.background }]}
                     placeholder="Artist name"
                     placeholderTextColor={colors.textSecondary}
@@ -513,6 +555,8 @@ export default function CreatePlaylistScreen() {
                     onChangeText={(value) => updateTrackDraft(track.id, "artist_name", value)}
                   />
                   <TouchableOpacity
+                    testID={`mobile-playlist-track-audio-${index}`}
+                    accessibilityLabel={`mobile-playlist-track-audio-${index}`}
                     activeOpacity={1}
                     style={[styles.audioPickerBtn, { borderColor: colors.border, backgroundColor: colors.background }]}
                     onPress={() => void handlePickTrackAudio(track.id)}
@@ -545,7 +589,10 @@ export default function CreatePlaylistScreen() {
           </View>
         )}
 
-        <TouchableOpacity activeOpacity={isSaveDisabled ? 1 : 0.78}
+        <TouchableOpacity
+          testID="mobile-playlist-save-button"
+          accessibilityLabel="mobile-playlist-save-button"
+          activeOpacity={isSaveDisabled ? 1 : 0.78}
           style={[styles.saveBtn, { backgroundColor: isSaveReady ? colors.primary : colors.border, opacity: isSaveDisabled ? 0.6 : 1 }]}
           onPress={handleSave}
           disabled={isSaveDisabled}

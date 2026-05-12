@@ -582,6 +582,8 @@ export default function LoginScreen() {
                 <Ionicons name="mail-outline" size={20} color={colors.textSecondary} />
                 <TextInput
                   ref={emailInputRef}
+                  testID="auth-email-input"
+                  accessibilityLabel="auth-email-input"
                   style={[styles.input, themeStyles.text]}
                   placeholder="name@email.com"
                   placeholderTextColor={colors.textSecondary}
@@ -612,6 +614,8 @@ export default function LoginScreen() {
                 <Ionicons name="lock-closed-outline" size={20} color={colors.textSecondary} />
                 <TextInput
                   ref={passwordInputRef}
+                  testID="auth-password-input"
+                  accessibilityLabel="auth-password-input"
                   style={[styles.input, themeStyles.text]}
                   placeholder="Enter your password"
                   placeholderTextColor={colors.textSecondary}
@@ -622,14 +626,25 @@ export default function LoginScreen() {
                   }}
                   secureTextEntry={!showPassword}
                 />
-                <TouchableOpacity activeOpacity={1} onPress={() => setShowPassword(!showPassword)}>
+                <TouchableOpacity
+                  activeOpacity={1}
+                  testID="auth-toggle-password-button"
+                  accessibilityLabel="auth-toggle-password-button"
+                  onPress={() => setShowPassword(!showPassword)}
+                >
                   <Ionicons name={showPassword ? "eye-off-outline" : "eye-outline"} size={20} color={colors.textSecondary} />
                 </TouchableOpacity>
               </View>
               {errors.password ? (
                 <Text style={styles.errorText}>{errors.password}</Text>
               ) : (
-                <TouchableOpacity activeOpacity={1} onPress={() => router.push('/forget_password' as any)} style={styles.forgotPasswordButton}>
+                <TouchableOpacity
+                  activeOpacity={1}
+                  testID="auth-forgot-password-link"
+                  accessibilityLabel="auth-forgot-password-link"
+                  onPress={() => router.push('/forget_password' as any)}
+                  style={styles.forgotPasswordButton}
+                >
                   <Text style={[styles.forgotPasswordText, themeStyles.primaryText]}>
                     Forgot Password?
                   </Text>
@@ -638,6 +653,8 @@ export default function LoginScreen() {
             </View>
 
             <TouchableOpacity
+              testID="auth-sign-in-button"
+              accessibilityLabel="auth-sign-in-button"
               onPress={handleLogin}
               disabled={loading}
               activeOpacity={loading ? 1 : 0.78}
@@ -691,6 +708,8 @@ export default function LoginScreen() {
               </Text>
               <TouchableOpacity
                 activeOpacity={0.65}
+                testID="auth-register-link"
+                accessibilityLabel="auth-register-link"
                 onPress={() => router.push('/signup' as any)}
                 style={styles.signupLinkPressable}
               >

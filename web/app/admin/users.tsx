@@ -1257,7 +1257,11 @@ export default function AdminUsersPage() {
   }
 
   return (
-    <View style={[styles.flex1, { backgroundColor: colors.background }]}>
+    <View
+      testID="admin-users-page"
+      accessibilityLabel="admin-users-page"
+      style={[styles.flex1, { backgroundColor: colors.background }]}
+    >
       <Header title="Admin" hideBackButton />
 
       <ScrollView
@@ -1298,6 +1302,8 @@ export default function AdminUsersPage() {
 
         <View style={styles.sectionGap}>
           <TextInput
+            testID="admin-users-search-input"
+            accessibilityLabel="admin-users-search-input"
             value={userSearch}
             onChangeText={setUserSearch}
             placeholder="Search users"
@@ -1318,6 +1324,8 @@ export default function AdminUsersPage() {
               return (
                 <TouchableOpacity
                   key={filter.value}
+                  testID={`admin-users-filter-${filter.value}`}
+                  accessibilityLabel={`admin-users-filter-${filter.value}`}
                   activeOpacity={1}
                   onPress={() => setUserFilter(filter.value)}
                   style={[
@@ -1338,6 +1346,8 @@ export default function AdminUsersPage() {
 
           <View style={styles.inlineActionsRow}>
             <TouchableOpacity
+              testID="admin-users-add-button"
+              accessibilityLabel="admin-users-add-button"
               activeOpacity={1}
               onPress={openCreateUserModal}
               style={[styles.primaryActionButton, { backgroundColor: colors.primary }]}
@@ -1359,7 +1369,12 @@ export default function AdminUsersPage() {
                 const userViewLoadingKey = `user-card-${user.id}`;
 
                 return (
-                  <View key={user.id} style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}> 
+                  <View
+                    key={user.id}
+                    testID={`admin-user-card-${user.id}`}
+                    accessibilityLabel={`admin-user-card-${user.id}`}
+                    style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}
+                  >
                     <Text style={[styles.cardTitle, { color: colors.text }]}>{user.full_name || 'Unknown'}</Text>
                     <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>{user.email}</Text>
                     <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Role: {user.role}</Text>
@@ -1369,6 +1384,8 @@ export default function AdminUsersPage() {
 
                     <View style={styles.cardActionsRow}>
                       <TouchableOpacity
+                        testID={`admin-user-view-${user.id}`}
+                        accessibilityLabel={`admin-user-view-${user.id}`}
                         activeOpacity={1}
                         disabled={userDetailsLoadingKey === userViewLoadingKey}
                         onPress={() => void openUserDetailsModal(user, userViewLoadingKey)}
@@ -1385,6 +1402,8 @@ export default function AdminUsersPage() {
                       </TouchableOpacity>
 
                       <TouchableOpacity
+                        testID={`admin-user-edit-${user.id}`}
+                        accessibilityLabel={`admin-user-edit-${user.id}`}
                         activeOpacity={1}
                         onPress={() => openEditUserModal(user)}
                         style={[styles.smallActionButton, { borderColor: colors.border }]}
@@ -1394,6 +1413,8 @@ export default function AdminUsersPage() {
                       </TouchableOpacity>
 
                       <TouchableOpacity
+                        testID={`admin-user-delete-${user.id}`}
+                        accessibilityLabel={`admin-user-delete-${user.id}`}
                         activeOpacity={1}
                         disabled={userActionLoadingId === user.id || user.id === session.user.id}
                         onPress={() => deleteUser(user)}
@@ -1424,7 +1445,11 @@ export default function AdminUsersPage() {
 
       <Modal visible={userModalVisible} transparent animationType="fade" onRequestClose={closeUserModal}>
         <View style={styles.modalBackdrop}>
-          <View style={[styles.modalCard, { backgroundColor: colors.card, borderColor: colors.border }]}> 
+          <View
+            testID="admin-user-form-modal"
+            accessibilityLabel="admin-user-form-modal"
+            style={[styles.modalCard, { backgroundColor: colors.card, borderColor: colors.border }]}
+          >
             <Text style={[styles.modalTitle, { color: colors.text }]}>
               {userModalMode === 'create' ? 'Create User' : 'Edit User'}
             </Text>
@@ -1447,6 +1472,8 @@ export default function AdminUsersPage() {
                     Full name <Text style={styles.requiredMark}>*</Text>
                   </Text>
                   <TextInput
+                    testID="admin-user-full-name-input"
+                    accessibilityLabel="admin-user-full-name-input"
                     value={userFormFullName}
                     onChangeText={setUserFormFullName}
                     placeholder="Full name"
@@ -1471,6 +1498,8 @@ export default function AdminUsersPage() {
                     Email address <Text style={styles.requiredMark}>*</Text>
                   </Text>
                   <TextInput
+                    testID="admin-user-email-input"
+                    accessibilityLabel="admin-user-email-input"
                     value={userFormEmail}
                     onChangeText={setUserFormEmail}
                     placeholder="Email address"
@@ -1502,6 +1531,8 @@ export default function AdminUsersPage() {
                       return (
                         <TouchableOpacity
                           key={role}
+                          testID={`admin-user-role-${role}`}
+                          accessibilityLabel={`admin-user-role-${role}`}
                           activeOpacity={1}
                           onPress={() => setUserFormRole(role)}
                           style={[
@@ -1533,6 +1564,8 @@ export default function AdminUsersPage() {
                 <View style={styles.fieldGroup}>
                   <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>Contact number</Text>
                   <TextInput
+                    testID="admin-user-contact-input"
+                    accessibilityLabel="admin-user-contact-input"
                     value={userFormContactNumber}
                     onChangeText={setUserFormContactNumber}
                     placeholder="Contact number"
@@ -1552,6 +1585,8 @@ export default function AdminUsersPage() {
                 <View style={styles.fieldGroup}>
                   <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>Address</Text>
                   <TextInput
+                    testID="admin-user-address-input"
+                    accessibilityLabel="admin-user-address-input"
                     value={userFormAddress}
                     onChangeText={setUserFormAddress}
                     placeholder="Address"
@@ -1570,6 +1605,8 @@ export default function AdminUsersPage() {
                 <View style={styles.fieldGroup}>
                   <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>Roles & instruments</Text>
                   <TextInput
+                    testID="admin-user-skills-input"
+                    accessibilityLabel="admin-user-skills-input"
                     value={userFormSkills}
                     onChangeText={setUserFormSkills}
                     placeholder="Vocalist, Guitarist, Producer"
@@ -1588,6 +1625,8 @@ export default function AdminUsersPage() {
                 <View style={styles.fieldGroup}>
                   <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>Genres</Text>
                   <TextInput
+                    testID="admin-user-genres-input"
+                    accessibilityLabel="admin-user-genres-input"
                     value={userFormGenres}
                     onChangeText={setUserFormGenres}
                     placeholder="OPM, Rock, Jazz"
@@ -1606,6 +1645,8 @@ export default function AdminUsersPage() {
                 <View style={styles.fieldGroup}>
                   <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>Bio</Text>
                   <TextInput
+                    testID="admin-user-bio-input"
+                    accessibilityLabel="admin-user-bio-input"
                     value={userFormBio}
                     onChangeText={setUserFormBio}
                     placeholder="Short profile bio"
@@ -1639,6 +1680,8 @@ export default function AdminUsersPage() {
                     Password <Text style={styles.requiredMark}>*</Text>
                   </Text>
                   <TextInput
+                    testID="admin-user-password-input"
+                    accessibilityLabel="admin-user-password-input"
                     value={userFormPassword}
                     onChangeText={setUserFormPassword}
                     placeholder="Password"
@@ -1665,6 +1708,8 @@ export default function AdminUsersPage() {
                     Confirm password <Text style={styles.requiredMark}>*</Text>
                   </Text>
                   <TextInput
+                    testID="admin-user-confirm-password-input"
+                    accessibilityLabel="admin-user-confirm-password-input"
                     value={userFormConfirmPassword}
                     onChangeText={setUserFormConfirmPassword}
                     placeholder="Confirm password"
@@ -1699,6 +1744,8 @@ export default function AdminUsersPage() {
                 <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>Verified</Text>
                 <View style={styles.booleanToggleRow}>
                   <TouchableOpacity
+                    testID="admin-user-verified-yes"
+                    accessibilityLabel="admin-user-verified-yes"
                     activeOpacity={1}
                     onPress={() => setUserFormIsVerified(true)}
                     style={[
@@ -1713,6 +1760,8 @@ export default function AdminUsersPage() {
                   </TouchableOpacity>
 
                   <TouchableOpacity
+                    testID="admin-user-verified-no"
+                    accessibilityLabel="admin-user-verified-no"
                     activeOpacity={1}
                     onPress={() => setUserFormIsVerified(false)}
                     style={[
@@ -1732,6 +1781,8 @@ export default function AdminUsersPage() {
                     <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>Email confirmed</Text>
                 <View style={styles.booleanToggleRow}>
                   <TouchableOpacity
+                    testID="admin-user-email-confirmed-yes"
+                    accessibilityLabel="admin-user-email-confirmed-yes"
                     activeOpacity={1}
                     onPress={() => setUserFormEmailConfirmed(true)}
                     style={[
@@ -1746,6 +1797,8 @@ export default function AdminUsersPage() {
                   </TouchableOpacity>
 
                   <TouchableOpacity
+                    testID="admin-user-email-confirmed-no"
+                    accessibilityLabel="admin-user-email-confirmed-no"
                     activeOpacity={1}
                     onPress={() => setUserFormEmailConfirmed(false)}
                     style={[
@@ -1766,6 +1819,8 @@ export default function AdminUsersPage() {
 
             <View style={styles.modalActionsRow}>
               <TouchableOpacity
+                testID="admin-user-form-cancel"
+                accessibilityLabel="admin-user-form-cancel"
                 activeOpacity={1}
                 onPress={closeUserModal}
                 disabled={userFormSubmitting}
@@ -1775,6 +1830,8 @@ export default function AdminUsersPage() {
               </TouchableOpacity>
 
               <TouchableOpacity
+                testID="admin-user-form-submit"
+                accessibilityLabel="admin-user-form-submit"
                 activeOpacity={1}
                 onPress={() => void submitUserForm()}
                 disabled={userFormSubmitting}
@@ -1822,6 +1879,8 @@ export default function AdminUsersPage() {
 
             <View style={styles.modalActionsRow}>
               <TouchableOpacity
+                testID="admin-user-details-close"
+                accessibilityLabel="admin-user-details-close"
                 activeOpacity={1}
                 onPress={closeUserDetailsModal}
                 style={[styles.modalButton, { backgroundColor: isDark ? '#334155' : '#E5E7EB' }]}

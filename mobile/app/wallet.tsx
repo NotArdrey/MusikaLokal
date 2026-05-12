@@ -1,14 +1,15 @@
 import { Ionicons } from '@expo/vector-icons';
+import { BottomSheetBackdrop, BottomSheetModal, BottomSheetScrollView, BottomSheetView, useBottomSheetSpringConfigs } from '@gorhom/bottom-sheet';
 import * as ExpoLinking from 'expo-linking';
 import { useLocalSearchParams } from 'expo-router';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Image, Linking, Platform, RefreshControl, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { supabase } from '../lib/supabase';
 import CustomAlert, { AlertType } from '../src/components/CustomAlert';
-import BottomModal from '../src/components/BottomModal';
 import GuestSignInGate from '../src/components/GuestSignInGate';
 import Header from '../src/components/header';
 import CustomModal from '../src/components/modal';
+import TrackedBottomSheetModal from '../src/components/TrackedBottomSheetModal';
 import AppNavbar from '../src/components/navbar';
 import { useBottomBarClearance } from '../src/hooks/useBottomBarClearance';
 import { emitToast } from '../src/events/toastBus';
@@ -16,7 +17,9 @@ import { useTheme } from '../src/context/ThemeContext';
 import { useAuth } from '../src/context/AuthContext';
 import { useWalletSummaryQuery } from '../src/data/hooks';
 import { formatFriendlyDateTime } from '../src/utils/friendlyDateTime';
+import { isE2EFixtureMode } from '../src/utils/e2eFixtures';
 import { usePageLoadLogger } from '../src/utils/loadTimeLogger';
+import { bottomSheetSpringConfig } from '../src/utils/motion';
 
 // Payout Method Type
 interface PayoutMethod {
@@ -55,6 +58,11 @@ export default function WalletScreen() {
   const { contentBottomPadding } = useBottomBarClearance(24);
   const params = useLocalSearchParams<{ refresh?: string }>();
   const walletRefreshKey = Array.isArray(params.refresh) ? params.refresh[0] : params.refresh;
+  const topUpSheetRef = useRef<BottomSheetModal>(null);
+  const withdrawSheetRef = useRef<BottomSheetModal>(null);
+  const addPayoutSheetRef = useRef<BottomSheetModal>(null);
+  const walletSheetSnapPoints = useMemo(() => ['90%'], []);
+  const walletSheetAnimationConfigs = useBottomSheetSpringConfigs(bottomSheetSpringConfig);
 
   // Withdrawal modal states
   const [withdrawModalVisible, setWithdrawModalVisible] = useState(false);
@@ -102,6 +110,12 @@ export default function WalletScreen() {
   const walletSummaryQuery = useWalletSummaryQuery(userId);
   const walletSummary = walletSummaryQuery.data as any;
   const refetchWalletSummary = walletSummaryQuery.refetch;
+
+  useEffect(() => {
+    if (!isE2EFixtureMode() || !addPayoutModalVisible) return;
+    setNewPayoutType('gcash');
+    setNewAccountNumber((current) => current || '09171234567');
+  }, [addPayoutModalVisible]);
 
   usePageLoadLogger({
     counts: {
@@ -166,6 +180,52 @@ export default function WalletScreen() {
   const isTopUpSubmitDisabled = isTopping || !isTopUpReady;
   const isWithdrawSubmitDisabled = withdrawing || !isWithdrawReady;
   const isPayoutMethodSubmitDisabled = addingPayoutMethod || !isPayoutMethodReady;
+  const walletSheetBackgroundStyle = useMemo(
+    () => ({ backgroundColor: colors.background }),
+    [colors.background],
+  );
+  const walletSheetHandleIndicatorStyle = useMemo(
+    () => ({
+      backgroundColor: isDark ? '#4B5563' : '#E5E7EB',
+      width: 40,
+    }),
+    [isDark],
+  );
+  const renderWalletSheetBackdrop = useCallback(
+    (props: any) => (
+      <BottomSheetBackdrop
+        {...props}
+        disappearsOnIndex={-1}
+        appearsOnIndex={0}
+        opacity={0.5}
+      />
+    ),
+    [],
+  );
+
+  useEffect(() => {
+    if (topUpModalVisible) {
+      topUpSheetRef.current?.present();
+    } else {
+      topUpSheetRef.current?.dismiss();
+    }
+  }, [topUpModalVisible]);
+
+  useEffect(() => {
+    if (withdrawModalVisible) {
+      withdrawSheetRef.current?.present();
+    } else {
+      withdrawSheetRef.current?.dismiss();
+    }
+  }, [withdrawModalVisible]);
+
+  useEffect(() => {
+    if (addPayoutModalVisible) {
+      addPayoutSheetRef.current?.present();
+    } else {
+      addPayoutSheetRef.current?.dismiss();
+    }
+  }, [addPayoutModalVisible]);
 
   const showAlert = (type: AlertType, title: string, message: string, buttons?: any[]) => {
     setAlertConfig({ type, title, message, buttons });
@@ -666,7 +726,11 @@ export default function WalletScreen() {
 
   if (isGuest) {
     return (
-      <View style={[styles.container, { backgroundColor: colors.background }]}>
+      <View
+        testID="mobile-wallet-page"
+        accessibilityLabel="mobile-wallet-page"
+        style={[styles.container, { backgroundColor: colors.background }]}
+      >
         <Header title="Wallet" />
         <GuestSignInGate message="Sign in to view your wallet and payment history." />
         <View style={styles.navbarContainer}>
@@ -678,7 +742,11 @@ export default function WalletScreen() {
 
   return (
     <>
-      <View style={[styles.container, { backgroundColor: colors.background }]}>
+      <View
+        testID="mobile-wallet-page"
+        accessibilityLabel="mobile-wallet-page"
+        style={[styles.container, { backgroundColor: colors.background }]}
+      >
         <Header title="Wallet" />
 
         <ScrollView
@@ -700,24 +768,27 @@ export default function WalletScreen() {
               <View style={styles.decoBottomLeft} />
 
               <Text style={styles.balanceLabel}>Current Balance</Text>
-              <Text style={styles.balanceValue}>? {balance?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Text>
+              <Text style={styles.balanceValue}>₱ {balance?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Text>
 
               <View style={styles.balanceRow}>
                 <View>
                   <Text style={styles.balanceSubLabel}>Pending</Text>
-                  <Text style={styles.balanceSubValue}>? {pendingBalance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Text>
+                  <Text style={styles.balanceSubValue}>₱ {pendingBalance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Text>
                 </View>
                 <View style={[styles.balanceDivider, { backgroundColor: 'rgba(255,255,255,0.2)' }]} />
                 <View>
                   <Text style={styles.balanceSubLabel}>Available</Text>
-                  <Text style={styles.balanceSubValue}>? {balance?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Text>
+                  <Text style={styles.balanceSubValue}>₱ {balance?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Text>
                 </View>
               </View>
             </View>
 
             {/* Action Buttons */}
             <View style={styles.actionButtonsRow}>
-              <TouchableOpacity activeOpacity={1}
+              <TouchableOpacity
+                testID="mobile-wallet-open-withdraw-button"
+                accessibilityLabel="mobile-wallet-open-withdraw-button"
+                activeOpacity={1}
                 onPress={openWithdrawModal}
                 style={[
                   styles.actionButton,
@@ -727,7 +798,10 @@ export default function WalletScreen() {
                 <Ionicons name="arrow-down-circle-outline" size={20} color={colors.primary} />
                 <Text style={{ fontFamily: 'Poppins_600SemiBold', color: colors.primary }}>Withdraw</Text>
               </TouchableOpacity>
-              <TouchableOpacity activeOpacity={1}
+              <TouchableOpacity
+                testID="mobile-wallet-open-topup-button"
+                accessibilityLabel="mobile-wallet-open-topup-button"
+                activeOpacity={1}
                 onPress={() => setTopUpModalVisible(true)}
                 style={[
                   styles.actionButton,
@@ -924,7 +998,7 @@ export default function WalletScreen() {
                       </View>
                     </View>
                     <Text style={[styles.transactionAmount, { color: tx.is_credit ? '#10B981' : '#EF4444' }]}>
-                      {tx.is_credit ? '+' : '-'}? {tx.amount.toFixed(2)}
+                      {tx.is_credit ? '+' : '-'}₱{tx.amount.toFixed(2)}
                     </Text>
                   </View>
                 ))
@@ -939,13 +1013,29 @@ export default function WalletScreen() {
       </View>
 
       {/* Top-Up Modal */}
-      <BottomModal
-        visible={topUpModalVisible}
+      <TrackedBottomSheetModal
+        ref={topUpSheetRef}
         overlayLabel="WalletTopUpModal"
-        onClose={() => setTopUpModalVisible(false)}
-        keyboardAvoiding
+        index={0}
+        snapPoints={walletSheetSnapPoints}
+        animationConfigs={walletSheetAnimationConfigs}
+        animateOnMount={true}
+        enableDynamicSizing={false}
+        enableContentPanningGesture={false}
+        enableOverDrag={false}
+        backdropComponent={renderWalletSheetBackdrop}
+        backgroundStyle={walletSheetBackgroundStyle}
+        handleIndicatorStyle={walletSheetHandleIndicatorStyle}
+        enablePanDownToClose={true}
+        keyboardBehavior="interactive"
+        keyboardBlurBehavior="restore"
+        onDismiss={() => setTopUpModalVisible(false)}
       >
-          <View style={[styles.withdrawModal, { backgroundColor: colors.background }]}>
+          <BottomSheetView
+            testID="mobile-wallet-topup-modal"
+            accessibilityLabel="mobile-wallet-topup-modal"
+            style={styles.walletSheetContent}
+          >
             <View style={styles.withdrawModalHeader}>
               <View>
                 <Text style={[styles.withdrawModalTitle, { color: colors.text }]}>Top Up Wallet</Text>
@@ -964,7 +1054,7 @@ export default function WalletScreen() {
             <View style={styles.inputSection}>
               <Text style={[styles.inputLabel, { color: colors.text }]}>Amount to Add</Text>
               <View style={[styles.amountInputContainer, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-                <Text style={[styles.currencyPrefix, { color: colors.textSecondary }]}>?</Text>
+                <Text style={[styles.currencyPrefix, { color: colors.textSecondary }]}>₱</Text>
                 <TextInput
                   style={[styles.amountInput, { color: colors.text }]}
                   placeholder="0.00"
@@ -1019,17 +1109,33 @@ export default function WalletScreen() {
                 : <Text style={[styles.withdrawSubmitText, { color: isTopUpReady ? "white" : colors.textSecondary }]}>Proceed to Payment</Text>
               }
             </TouchableOpacity>
-          </View>
-      </BottomModal>
+          </BottomSheetView>
+      </TrackedBottomSheetModal>
 
       {/* Withdraw Modal */}
-      <BottomModal
-        visible={withdrawModalVisible}
+      <TrackedBottomSheetModal
+        ref={withdrawSheetRef}
         overlayLabel="WalletWithdrawModal"
-        onClose={() => setWithdrawModalVisible(false)}
-        keyboardAvoiding
+        index={0}
+        snapPoints={walletSheetSnapPoints}
+        animationConfigs={walletSheetAnimationConfigs}
+        animateOnMount={true}
+        enableDynamicSizing={false}
+        enableContentPanningGesture={false}
+        enableOverDrag={false}
+        backdropComponent={renderWalletSheetBackdrop}
+        backgroundStyle={walletSheetBackgroundStyle}
+        handleIndicatorStyle={walletSheetHandleIndicatorStyle}
+        enablePanDownToClose={true}
+        keyboardBehavior="interactive"
+        keyboardBlurBehavior="restore"
+        onDismiss={() => setWithdrawModalVisible(false)}
       >
-          <View style={[styles.withdrawModal, { backgroundColor: colors.background }]}>
+          <View
+            testID="mobile-wallet-withdraw-modal"
+            accessibilityLabel="mobile-wallet-withdraw-modal"
+            style={styles.walletSheetContent}
+          >
             {/* Header */}
             <View style={styles.withdrawModalHeader}>
               <View>
@@ -1038,7 +1144,10 @@ export default function WalletScreen() {
                   Available: PHP {balance?.toLocaleString(undefined, { minimumFractionDigits: 2 })}
                 </Text>
               </View>
-              <TouchableOpacity activeOpacity={1}
+              <TouchableOpacity
+                testID="mobile-wallet-withdraw-close-button"
+                accessibilityLabel="mobile-wallet-withdraw-close-button"
+                activeOpacity={1}
                 onPress={() => setWithdrawModalVisible(false)}
                 style={[styles.closeModalButton, { backgroundColor: colors.surface }]}
               >
@@ -1046,13 +1155,15 @@ export default function WalletScreen() {
               </TouchableOpacity>
             </View>
 
-            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 20 }}>
+            <BottomSheetScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 20 }}>
               {/* Amount Input */}
               <View style={styles.inputSection}>
                 <Text style={[styles.inputLabel, { color: colors.text }]}>Amount to Withdraw</Text>
                 <View style={[styles.amountInputContainer, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-                  <Text style={[styles.currencyPrefix, { color: colors.textSecondary }]}>?</Text>
+                  <Text style={[styles.currencyPrefix, { color: colors.textSecondary }]}>₱</Text>
                   <TextInput
+                    testID="mobile-wallet-withdraw-amount-input"
+                    accessibilityLabel="mobile-wallet-withdraw-amount-input"
                     style={[styles.amountInput, { color: colors.text }]}
                     placeholder="0.00"
                     placeholderTextColor={colors.textSecondary}
@@ -1094,7 +1205,12 @@ export default function WalletScreen() {
                 <View style={styles.inputSection}>
                   <View style={styles.payoutMethodHeader}>
                     <Text style={[styles.inputLabel, { color: colors.text }]}>Payout Method</Text>
-                    <TouchableOpacity activeOpacity={1} onPress={() => setAddPayoutModalVisible(true)}>
+                    <TouchableOpacity
+                      testID="mobile-wallet-add-payout-link"
+                      accessibilityLabel="mobile-wallet-add-payout-link"
+                      activeOpacity={1}
+                      onPress={() => setAddPayoutModalVisible(true)}
+                    >
                       <Text style={[styles.addMethodLink, { color: colors.primary }]}>+ Add New</Text>
                     </TouchableOpacity>
                   </View>
@@ -1102,7 +1218,10 @@ export default function WalletScreen() {
                   {loadingPayoutMethods ? (
                     <ActivityIndicator size="small" color={colors.primary} style={{ marginVertical: 20 }} />
                   ) : payoutMethods.length === 0 ? (
-                    <TouchableOpacity activeOpacity={1}
+                    <TouchableOpacity
+                      testID="mobile-wallet-add-payout-empty-button"
+                      accessibilityLabel="mobile-wallet-add-payout-empty-button"
+                      activeOpacity={1}
                       onPress={() => setAddPayoutModalVisible(true)}
                       style={[styles.addPayoutBtn, { backgroundColor: colors.surface, borderColor: colors.border }]}
                     >
@@ -1112,7 +1231,10 @@ export default function WalletScreen() {
                   ) : (
                     <View style={styles.payoutMethodsList}>
                       {payoutMethods.map((method) => (
-                        <TouchableOpacity activeOpacity={1}
+                        <TouchableOpacity
+                          testID={`mobile-wallet-payout-method-${method.id}`}
+                          accessibilityLabel={`mobile-wallet-payout-method-${method.id}`}
+                          activeOpacity={1}
                           key={method.id}
                           onPress={() => setSelectedPayoutMethod(method)}
                           style={[
@@ -1128,12 +1250,12 @@ export default function WalletScreen() {
                             <View style={[styles.payoutIconBox, { backgroundColor: isDark ? colors.primaryLight : '#EEF2FF' }]}>
                               <Ionicons name={getPayoutIcon(method.type) as any} size={20} color={colors.primary} />
                             </View>
-                            <View>
+                            <View style={styles.payoutMethodTextBlock}>
                               <Text style={[styles.payoutMethodName, { color: colors.text }]}>
                                 {getPayoutLabel(method.type)}
                                 {method.bank_name ? ` - ${method.bank_name}` : ''}
                               </Text>
-                              <Text style={[styles.payoutMethodAccount, { color: colors.textSecondary }]}>
+                              <Text style={[styles.payoutMethodAccount, { color: colors.textSecondary }]} numberOfLines={1}>
                                 {method.account_name} | ****{method.account_number.slice(-4)}
                               </Text>
                             </View>
@@ -1173,10 +1295,13 @@ export default function WalletScreen() {
                   Simulated withdrawals complete immediately and deduct from your real in-app wallet balance. No external money is sent.
                 </Text>
               </View>
-            </ScrollView>
+            </BottomSheetScrollView>
 
             {/* Submit Button */}
-            <TouchableOpacity activeOpacity={isWithdrawSubmitDisabled ? 1 : 0.78}
+            <TouchableOpacity
+              testID="mobile-wallet-withdraw-submit-button"
+              accessibilityLabel="mobile-wallet-withdraw-submit-button"
+              activeOpacity={isWithdrawSubmitDisabled ? 1 : 0.78}
               onPress={handleWithdraw}
               disabled={isWithdrawSubmitDisabled}
               style={[
@@ -1199,19 +1324,38 @@ export default function WalletScreen() {
               )}
             </TouchableOpacity>
           </View>
-      </BottomModal>
+      </TrackedBottomSheetModal>
 
       {/* Add Payout Method Modal */}
-      <BottomModal
-        visible={addPayoutModalVisible}
+      <TrackedBottomSheetModal
+        ref={addPayoutSheetRef}
         overlayLabel="WalletAddPayoutModal"
-        onClose={() => setAddPayoutModalVisible(false)}
-        keyboardAvoiding
+        index={0}
+        snapPoints={walletSheetSnapPoints}
+        animationConfigs={walletSheetAnimationConfigs}
+        animateOnMount={true}
+        enableDynamicSizing={false}
+        enableContentPanningGesture={false}
+        enableOverDrag={false}
+        backdropComponent={renderWalletSheetBackdrop}
+        backgroundStyle={walletSheetBackgroundStyle}
+        handleIndicatorStyle={walletSheetHandleIndicatorStyle}
+        enablePanDownToClose={true}
+        keyboardBehavior="interactive"
+        keyboardBlurBehavior="restore"
+        onDismiss={() => setAddPayoutModalVisible(false)}
       >
-          <View style={[styles.addPayoutModal, { backgroundColor: colors.background }]}>
+          <View
+            testID="mobile-wallet-add-payout-modal"
+            accessibilityLabel="mobile-wallet-add-payout-modal"
+            style={styles.walletSheetContent}
+          >
             <View style={styles.withdrawModalHeader}>
               <Text style={[styles.withdrawModalTitle, { color: colors.text }]}>Add Payout Method</Text>
-              <TouchableOpacity activeOpacity={1}
+              <TouchableOpacity
+                testID="mobile-wallet-add-payout-close-button"
+                accessibilityLabel="mobile-wallet-add-payout-close-button"
+                activeOpacity={1}
                 onPress={() => setAddPayoutModalVisible(false)}
                 style={[styles.closeModalButton, { backgroundColor: colors.surface }]}
               >
@@ -1219,13 +1363,16 @@ export default function WalletScreen() {
               </TouchableOpacity>
             </View>
 
-            <ScrollView showsVerticalScrollIndicator={false}>
+            <BottomSheetScrollView showsVerticalScrollIndicator={false}>
               {/* Payout Type Selection */}
               <View style={styles.inputSection}>
                 <Text style={[styles.inputLabel, { color: colors.text }]}>Payout Type</Text>
                 <View style={styles.payoutTypeGrid}>
                   {(['gcash', 'maya', 'bank'] as const).map((type) => (
-                    <TouchableOpacity activeOpacity={1}
+                    <TouchableOpacity
+                      testID={`mobile-wallet-payout-type-${type}`}
+                      accessibilityLabel={`mobile-wallet-payout-type-${type}`}
+                      activeOpacity={1}
                       key={type}
                       onPress={() => setNewPayoutType(type)}
                       style={[
@@ -1257,6 +1404,8 @@ export default function WalletScreen() {
                 <View style={styles.inputSection}>
                   <Text style={[styles.inputLabel, { color: colors.text }]}>Bank Name</Text>
                   <TextInput
+                    testID="mobile-wallet-bank-name-input"
+                    accessibilityLabel="mobile-wallet-bank-name-input"
                     style={[styles.textInput, { backgroundColor: colors.surface, borderColor: colors.border, color: colors.text }]}
                     placeholder="e.g., BDO, BPI, Metrobank"
                     placeholderTextColor={colors.textSecondary}
@@ -1270,6 +1419,8 @@ export default function WalletScreen() {
               <View style={styles.inputSection}>
                 <Text style={[styles.inputLabel, { color: colors.text }]}>Account Name</Text>
                 <TextInput
+                  testID="mobile-wallet-account-name-input"
+                  accessibilityLabel="mobile-wallet-account-name-input"
                   style={[styles.textInput, { backgroundColor: colors.surface, borderColor: colors.border, color: colors.text }]}
                   placeholder="Full name as registered"
                   placeholderTextColor={colors.textSecondary}
@@ -1284,6 +1435,8 @@ export default function WalletScreen() {
                   {newPayoutType === 'gcash' || newPayoutType === 'maya' ? 'Mobile Number' : 'Account Number'}
                 </Text>
                 <TextInput
+                  testID="mobile-wallet-account-number-input"
+                  accessibilityLabel="mobile-wallet-account-number-input"
                   style={[styles.textInput, { backgroundColor: colors.surface, borderColor: colors.border, color: colors.text }]}
                   placeholder={
                     newPayoutType === 'gcash' || newPayoutType === 'maya' ? '09XX XXX XXXX' : 'XXXX XXXX XXXX'
@@ -1294,10 +1447,13 @@ export default function WalletScreen() {
                   onChangeText={setNewAccountNumber}
                 />
               </View>
-            </ScrollView>
+            </BottomSheetScrollView>
 
             {/* Add Button */}
-            <TouchableOpacity activeOpacity={isPayoutMethodSubmitDisabled ? 1 : 0.78}
+            <TouchableOpacity
+              testID="mobile-wallet-add-payout-submit-button"
+              accessibilityLabel="mobile-wallet-add-payout-submit-button"
+              activeOpacity={isPayoutMethodSubmitDisabled ? 1 : 0.78}
               onPress={handleAddPayoutMethod}
               disabled={isPayoutMethodSubmitDisabled}
               style={[styles.withdrawSubmitBtn, { backgroundColor: isPayoutMethodReady ? colors.primary : colors.border, opacity: isPayoutMethodSubmitDisabled ? 0.6 : 1 }]}
@@ -1312,7 +1468,7 @@ export default function WalletScreen() {
               )}
             </TouchableOpacity>
           </View>
-      </BottomModal>
+      </TrackedBottomSheetModal>
 
       <CustomModal
         visible={withdrawing}
@@ -1577,6 +1733,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   // Withdraw Modal Styles
+  walletSheetContent: {
+    flex: 1,
+    padding: 24,
+    paddingBottom: Platform.OS === 'ios' ? 40 : 24,
+  },
   withdrawModal: {
     borderTopLeftRadius: 28,
     borderTopRightRadius: 28,
@@ -1617,13 +1778,20 @@ const styles = StyleSheet.create({
   },
   currencyPrefix: {
     fontSize: 24,
+    lineHeight: 32,
     fontFamily: 'Poppins_600SemiBold',
     marginRight: 8,
+    includeFontPadding: false,
+    textAlignVertical: 'center',
   },
   amountInput: {
     flex: 1,
+    height: 56,
     fontSize: 24,
+    lineHeight: 32,
     fontFamily: 'Poppins_600SemiBold',
+    includeFontPadding: false,
+    paddingVertical: 0,
     textAlignVertical: 'center',
   },
   inputHint: {
@@ -1638,6 +1806,7 @@ const styles = StyleSheet.create({
   },
   quickAmountBtn: {
     flex: 1,
+    minHeight: 44,
     paddingVertical: 10,
     borderRadius: 10,
     borderWidth: 1,
@@ -1704,6 +1873,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 12,
     flex: 1,
+    minWidth: 0,
   },
   payoutIconBox: {
     width: 44,
@@ -1715,6 +1885,10 @@ const styles = StyleSheet.create({
   payoutMethodName: {
     fontSize: 14,
     fontFamily: 'Poppins_600SemiBold',
+  },
+  payoutMethodTextBlock: {
+    flex: 1,
+    minWidth: 0,
   },
   payoutMethodAccount: {
     fontSize: 12,
@@ -1809,12 +1983,15 @@ const styles = StyleSheet.create({
     fontFamily: 'Poppins_500Medium',
   },
   textInput: {
+    height: 56,
     borderRadius: 12,
     borderWidth: 1,
     paddingHorizontal: 16,
-    paddingVertical: 14,
+    paddingVertical: 0,
     fontSize: 16,
+    lineHeight: 22,
     fontFamily: 'Poppins_400Regular',
+    includeFontPadding: false,
     textAlignVertical: 'center',
   },
   // Withdrawal history styles

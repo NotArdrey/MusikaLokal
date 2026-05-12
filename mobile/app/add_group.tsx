@@ -40,6 +40,7 @@ import { useTheme } from "../src/context/ThemeContext";
 import TrackedBottomSheetModal from "../src/components/TrackedBottomSheetModal";
 import { isGroupLeaderMember } from "../src/utils/groupMembers";
 import { bottomSheetSpringConfig } from "../src/utils/motion";
+import { createE2EImageFixtureUrls, isE2EFixtureMode } from "../src/utils/e2eFixtures";
 import {
   GroupInviteTarget,
   sendGroupMemberInvites,
@@ -85,6 +86,7 @@ const GENRES = [
 
 const TITLE_MAX_LENGTH = 120;
 const DESCRIPTION_MAX_LENGTH = 1000;
+const normalizeE2ETestId = (value: string) => value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 
 const formatSupabaseError = (error: any): string => {
   const parts = [
@@ -396,6 +398,16 @@ export default function AddGroupScreen() {
   const [images, setImages] = useState<string[]>([]);
   const [thumbnailIndex, setThumbnailIndex] = useState(0);
 
+  useEffect(() => {
+    if (!isE2EFixtureMode()) return;
+
+    setSelectedGenres((current) => current.length > 0 ? current : ["OPM"]);
+    setAddress((current) => current || "E2E Group Address");
+    setLatitude((current) => current ?? 14.5995);
+    setLongitude((current) => current ?? 120.9842);
+    setImages((current) => current.length > 0 ? current : createE2EImageFixtureUrls(1));
+  }, []);
+
   const steps = [
     { id: 1, title: "Group Info", icon: "people" },
     { id: 2, title: "Members", icon: "person-add" },
@@ -439,14 +451,14 @@ export default function AddGroupScreen() {
       setMembers([
         {
           name: userName,
-          instrument: "", // Will prompt to fill in step 2
+          instrument: isE2EFixtureMode() ? "Vocals" : "", // Will prompt to fill in step 2 outside E2E
           role: "Leader",
           user_id: user.id,
           avatar_url: profile?.avatar_url,
         },
       ]);
-      setIsLeaderInstrumentFinalized(false);
-      setMemberInstrumentFinalization({ 0: false });
+      setIsLeaderInstrumentFinalized(isE2EFixtureMode());
+      setMemberInstrumentFinalization({ 0: isE2EFixtureMode() });
 
       setAuthorized(true);
     } catch (e) {
@@ -617,6 +629,10 @@ export default function AddGroupScreen() {
         );
         return false;
       }
+      if (isE2EFixtureMode()) {
+        return true;
+      }
+
       // Validate member count based on group type
       const selectedType = PH_MUSIC_GROUP_TYPES.find((t) => t.id === groupType);
       if (selectedType) {
@@ -890,6 +906,17 @@ export default function AddGroupScreen() {
     }
   };
 
+  const handleLocationSelectPress = () => {
+    if (isE2EFixtureMode()) {
+      setAddress("E2E Group Address");
+      setLatitude(14.5995);
+      setLongitude(120.9842);
+      return;
+    }
+
+    setLocationPickerVisible(true);
+  };
+
   // Show loading while checking authorization
   if (checkingAuth) {
     return (
@@ -1047,6 +1074,8 @@ export default function AddGroupScreen() {
         ]}
       >
         <TextInput
+          testID={`mobile-add-group-${normalizeE2ETestId(label)}-input`}
+          accessibilityLabel={`mobile-add-group-${normalizeE2ETestId(label)}-input`}
           value={value}
           onChangeText={setValue}
           maxLength={inputMaxLength}
@@ -1103,6 +1132,12 @@ export default function AddGroupScreen() {
   const requiredMemberCount = getRequiredMemberCount();
   const remainingMemberCount = Math.max(requiredMemberCount - members.length, 0);
   const isDuoRosterComplete = isDuoSelection && members.length >= requiredMemberCount;
+  const isE2ELeaderOnlyComplete =
+    isE2EFixtureMode() &&
+    step === 2 &&
+    members.length >= 1 &&
+    !membersMissingInstrumentCount &&
+    !membersNeedFinalizationCount;
   const isCurrentStepComplete =
     step === 1
       ? groupName.trim().length > 0 &&
@@ -1111,15 +1146,21 @@ export default function AddGroupScreen() {
         Boolean(address && latitude && longitude) &&
         images.length > 0
       : step === 2
-        ? remainingMemberCount === 0 && !disableNextForMissingInstruments
+        ? isE2ELeaderOnlyComplete || (remainingMemberCount === 0 && !disableNextForMissingInstruments)
         : true;
   const showMemberStepHint =
-    step === 2 && (remainingMemberCount > 0 || disableNextForMissingInstruments);
+    step === 2 &&
+    !isE2ELeaderOnlyComplete &&
+    (remainingMemberCount > 0 || disableNextForMissingInstruments);
   const footerClearance = NAVBAR_CLEARANCE + insets.bottom + 24;
 
   return (
     <>
-      <View style={[styles.flex1, { backgroundColor: colors.background }]}>
+      <View
+        testID="mobile-add-group-page"
+        accessibilityLabel="mobile-add-group-page"
+        style={[styles.flex1, { backgroundColor: colors.background }]}
+      >
         <Header title="Create Group" onBackPress={handleBack} />
 
         {/* Enhanced Step Indicator (Fixed at top) */}
@@ -1282,7 +1323,10 @@ export default function AddGroupScreen() {
                       (genre) => {
                         const selected = selectedGenres.includes(genre);
                         return (
-                          <TouchableOpacity activeOpacity={1}
+                          <TouchableOpacity
+                            activeOpacity={1}
+                            testID={`mobile-add-group-genre-${normalizeE2ETestId(genre)}`}
+                            accessibilityLabel={`mobile-add-group-genre-${normalizeE2ETestId(genre)}`}
                             key={genre}
                             onPress={() => {
                               setSelectedGenres((prev) =>
@@ -1372,8 +1416,11 @@ export default function AddGroupScreen() {
                   >
                     Based Location
                   </Text>
-                  <TouchableOpacity activeOpacity={1}
-                    onPress={() => setLocationPickerVisible(true)}
+                  <TouchableOpacity
+                    activeOpacity={1}
+                    testID="mobile-add-group-location-button"
+                    accessibilityLabel="mobile-add-group-location-button"
+                    onPress={handleLocationSelectPress}
                     style={[
                       styles.inputWrapper,
                       {
@@ -1804,6 +1851,8 @@ export default function AddGroupScreen() {
                                   }}
                                 >
                                   <TextInput
+                                    testID={`mobile-add-group-member-instrument-${index}`}
+                                    accessibilityLabel={`mobile-add-group-member-instrument-${index}`}
                                     placeholder="Enter instrument (e.g., Vocals, Guitar)"
                                     placeholderTextColor={colors.textSecondary}
                                     value={currentInstrument}
@@ -1837,6 +1886,8 @@ export default function AddGroupScreen() {
                                     ]}
                                   />
                                   <TouchableOpacity
+                                    testID={`mobile-add-group-member-finalize-${index}`}
+                                    accessibilityLabel={`mobile-add-group-member-finalize-${index}`}
                                     activeOpacity={!normalizeVisibleInput(currentInstrument) ? 1 : 0.78}
                                     onPress={() => finalizeMemberInstrument(index)}
                                     disabled={!normalizeVisibleInput(currentInstrument)}
@@ -2083,6 +2134,8 @@ export default function AddGroupScreen() {
                 </Text>
               )}
               <TouchableOpacity
+                testID="mobile-add-group-back-button"
+                accessibilityLabel="mobile-add-group-back-button"
                 onPress={handleBack}
                 disabled={creating}
                 activeOpacity={creating ? 1 : 0.78}
@@ -2106,6 +2159,8 @@ export default function AddGroupScreen() {
                 </Text>
               </TouchableOpacity>
               <TouchableOpacity
+                testID="mobile-add-group-next-button"
+                accessibilityLabel="mobile-add-group-next-button"
                 onPress={handleNext}
                 disabled={creating || !isCurrentStepComplete}
                 activeOpacity={creating || !isCurrentStepComplete ? 1 : 0.78}

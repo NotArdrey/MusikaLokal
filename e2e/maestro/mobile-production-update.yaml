@@ -1,0 +1,25 @@
+appId: ${APP_ID}
+---
+- openLink: "musikalokal://edit_production?id=${E2E_PRODUCTION_ID}"
+- assertVisible:
+    id: "mobile-edit-production-page"
+- tapOn:
+    id: "mobile-edit-production-name-input"
+- eraseText: 140
+- inputText: ${E2E_PRODUCTION_UPDATED_NAME}
+- hideKeyboard
+- scrollUntilVisible:
+    element:
+      id: "mobile-edit-production-description-input"
+    direction: DOWN
+- tapOn:
+    id: "mobile-edit-production-description-input"
+- eraseText: 500
+- inputText: ${E2E_PRODUCTION_UPDATED_DESCRIPTION}
+- hideKeyboard
+- scrollUntilVisible:
+    element:
+      id: "mobile-edit-production-save-button"
+    direction: DOWN
+- tapOn:
+    id: "mobile-edit-production-save-button"

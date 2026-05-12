@@ -156,7 +156,11 @@ export default function AddProductionScreen() {
   };
 
   return (
-    <View style={[styles.container, { backgroundColor: colors.background }]}> 
+    <View
+      testID="mobile-add-production-page"
+      accessibilityLabel="mobile-add-production-page"
+      style={[styles.container, { backgroundColor: colors.background }]}
+    >
       <Header title="Add Production" onBackPress={() => router.replace('/my_production')} />
 
       <ScrollView contentContainerStyle={[styles.content, { paddingBottom: contentBottomPadding }]} showsVerticalScrollIndicator={false}>
@@ -183,6 +187,8 @@ export default function AddProductionScreen() {
 
           <Text style={[styles.label, { color: colors.text }]}>Team Name *</Text>
           <TextInput
+            testID="mobile-production-name-input"
+            accessibilityLabel="mobile-production-name-input"
             style={[styles.input, { color: colors.text, borderColor: colors.border, backgroundColor: colors.background }]}
             value={teamName}
             onChangeText={setTeamName}
@@ -192,6 +198,8 @@ export default function AddProductionScreen() {
 
           <Text style={[styles.label, { color: colors.text }]}>Description *</Text>
           <TextInput
+            testID="mobile-production-description-input"
+            accessibilityLabel="mobile-production-description-input"
             style={[styles.input, styles.textArea, { color: colors.text, borderColor: colors.border, backgroundColor: colors.background }]}
             value={description}
             onChangeText={setDescription}
@@ -216,7 +224,10 @@ export default function AddProductionScreen() {
             <Text style={[styles.helperText, { color: '#F59E0B' }]}>Complete all required fields before creating your production team.</Text>
           ) : null}
 
-          <TouchableOpacity activeOpacity={saving || hasIncompleteRequiredFields ? 1 : 0.78}
+          <TouchableOpacity
+            testID="mobile-production-submit-button"
+            accessibilityLabel="mobile-production-submit-button"
+            activeOpacity={saving || hasIncompleteRequiredFields ? 1 : 0.78}
             style={[styles.submitBtn, { backgroundColor: hasIncompleteRequiredFields ? colors.border : colors.primary, opacity: saving || hasIncompleteRequiredFields ? 0.6 : 1 }]}
             onPress={handleSubmit}
             disabled={saving || hasIncompleteRequiredFields}

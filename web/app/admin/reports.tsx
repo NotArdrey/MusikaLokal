@@ -1240,13 +1240,17 @@ export default function AdminReportsPage() {
     async (incidentId: string, resolution: BookingIncidentResolution, adminResolutionNotes = '') => {
       setIncidentActionLoadingId(incidentId);
       try {
-        const { error } = await supabase.rpc('admin_resolve_booking_incident', {
-          p_incident_id: incidentId,
-          p_resolution: resolution,
-          p_admin_notes: adminResolutionNotes.trim() || null,
+        const { data, error } = await supabase.functions.invoke<any>('admin-reports-management', {
+          body: {
+            action: 'admin_resolve_booking_incident',
+            incident_id: incidentId,
+            resolution,
+            admin_notes: adminResolutionNotes.trim() || null,
+          },
         });
 
         if (error) throw error;
+        if (data?.error) throw new Error(String(data.error));
 
         invalidateAdminPageCache();
         showAlert('success', 'Incident updated', `Incident marked as ${resolution.replace(/_/g, ' ')}.`);
@@ -1567,6 +1571,8 @@ export default function AdminReportsPage() {
   const renderReportsManagementSection = () => (
     <View style={styles.sectionGap}>
       <TextInput
+        testID="admin-reports-search-input"
+        accessibilityLabel="admin-reports-search-input"
         value={reportSearch}
         onChangeText={setReportSearch}
         placeholder="Search reports"
@@ -1645,7 +1651,12 @@ export default function AdminReportsPage() {
         <View style={styles.sectionGap}>
           {filteredReports.map((report) => {
             return (
-              <View key={report.id} style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}> 
+              <View
+                key={report.id}
+                testID={`admin-report-card-${report.id}`}
+                accessibilityLabel={`admin-report-card-${report.id}`}
+                style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}
+              >
                 <Text style={[styles.cardTitle, { color: colors.text }]}>{report.reason}</Text>
                 {report.details ? (
                   <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>{report.details}</Text>
@@ -1670,6 +1681,8 @@ export default function AdminReportsPage() {
 
                 <View style={styles.cardActionsRow}>
                   <TouchableOpacity
+                    testID={`admin-report-view-${report.id}`}
+                    accessibilityLabel={`admin-report-view-${report.id}`}
                     activeOpacity={1}
                     disabled={reportViewLoadingId === report.id}
                     onPress={() => void openReportDetailsModal(report.id)}
@@ -1686,6 +1699,8 @@ export default function AdminReportsPage() {
                   </TouchableOpacity>
 
                   <TouchableOpacity
+                    testID={`admin-report-moderate-${report.id}`}
+                    accessibilityLabel={`admin-report-moderate-${report.id}`}
                     activeOpacity={1}
                     disabled={reportActionLoadingId === report.id}
                     onPress={() => openReportModerationModal(report)}
@@ -1700,6 +1715,8 @@ export default function AdminReportsPage() {
                   {report.status === 'pending' ? (
                     <>
                       <TouchableOpacity
+                        testID={`admin-report-resolve-${report.id}`}
+                        accessibilityLabel={`admin-report-resolve-${report.id}`}
                         activeOpacity={1}
                         disabled={reportActionLoadingId === report.id}
                         onPress={() => void moderateReport({ reportId: report.id, nextStatus: 'resolved' })}
@@ -1708,6 +1725,8 @@ export default function AdminReportsPage() {
                         <Text style={styles.smallActionTextFilled}>Resolve</Text>
                       </TouchableOpacity>
                       <TouchableOpacity
+                        testID={`admin-report-dismiss-${report.id}`}
+                        accessibilityLabel={`admin-report-dismiss-${report.id}`}
                         activeOpacity={1}
                         disabled={reportActionLoadingId === report.id}
                         onPress={() => void moderateReport({ reportId: report.id, nextStatus: 'dismissed' })}
@@ -1717,6 +1736,8 @@ export default function AdminReportsPage() {
                       </TouchableOpacity>
 
                       <TouchableOpacity
+                        testID={`admin-report-escalate-${report.id}`}
+                        accessibilityLabel={`admin-report-escalate-${report.id}`}
                         activeOpacity={1}
                         disabled={reportActionLoadingId === report.id}
                         onPress={() => openReportModerationModal(report, 'pending', 'manual_review')}
@@ -1727,6 +1748,8 @@ export default function AdminReportsPage() {
                     </>
                   ) : (
                     <TouchableOpacity
+                      testID={`admin-report-reopen-${report.id}`}
+                      accessibilityLabel={`admin-report-reopen-${report.id}`}
                       activeOpacity={1}
                       disabled={reportActionLoadingId === report.id}
                       onPress={() => void moderateReport({ reportId: report.id, nextStatus: 'pending' })}
@@ -1783,7 +1806,11 @@ export default function AdminReportsPage() {
   );
 
   const renderIncidentQueueSection = () => (
-    <View style={styles.sectionGap}>
+    <View
+      testID="admin-incidents-section"
+      accessibilityLabel="admin-incidents-section"
+      style={styles.sectionGap}
+    >
       <View style={styles.filterGroup}>
         <Text style={[styles.filterLabel, { color: colors.textSecondary }]}>Incident Status</Text>
         <View style={[styles.filterRow, styles.filterRowWrap]}>
@@ -1791,6 +1818,8 @@ export default function AdminReportsPage() {
             const active = incidentFilter === status;
             return (
               <TouchableOpacity
+                testID={`admin-incidents-filter-${status}`}
+                accessibilityLabel={`admin-incidents-filter-${status}`}
                 key={status}
                 activeOpacity={1}
                 onPress={() => setIncidentFilter(status)}
@@ -1826,7 +1855,12 @@ export default function AdminReportsPage() {
             const incidentCounterpartyLoadingKey = `incident-card-${incident.id}-counterparty`;
 
             return (
-              <View key={incident.id} style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}> 
+              <View
+                key={incident.id}
+                testID={`admin-incident-card-${incident.id}`}
+                accessibilityLabel={`admin-incident-card-${incident.id}`}
+                style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}
+              >
                 <Text style={[styles.cardTitle, { color: colors.text }]}>{String(incident.issue_type || 'issue').replace(/_/g, ' ')}</Text>
                 <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Status: {String(incident.status || '').replace(/_/g, ' ')}</Text>
                 <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Studio: {incident.studio_name || 'Unknown studio'}</Text>
@@ -1843,6 +1877,8 @@ export default function AdminReportsPage() {
 
                 <View style={styles.cardActionsRow}>
                   <TouchableOpacity
+                    testID={`admin-incident-reporter-${incident.id}`}
+                    accessibilityLabel={`admin-incident-reporter-${incident.id}`}
                     activeOpacity={1}
                     disabled={!reporterId || userDetailsLoadingKey === incidentReporterLoadingKey}
                     onPress={() => {
@@ -1866,6 +1902,8 @@ export default function AdminReportsPage() {
                   </TouchableOpacity>
 
                   <TouchableOpacity
+                    testID={`admin-incident-counterparty-${incident.id}`}
+                    accessibilityLabel={`admin-incident-counterparty-${incident.id}`}
                     activeOpacity={1}
                     disabled={!counterpartyId || userDetailsLoadingKey === incidentCounterpartyLoadingKey}
                     onPress={() => {
@@ -1892,6 +1930,8 @@ export default function AdminReportsPage() {
                 {incidentActionable(String(incident.status || '')) && (
                   <View style={styles.cardActionsRow}>
                     <TouchableOpacity
+                      testID={`admin-incident-resolve-no-refund-${incident.id}`}
+                      accessibilityLabel={`admin-incident-resolve-no-refund-${incident.id}`}
                       activeOpacity={1}
                       disabled={incidentActionLoadingId === incident.id}
                       onPress={() => openIncidentResolutionModal(incident, 'resolved_no_refund')}
@@ -1900,6 +1940,8 @@ export default function AdminReportsPage() {
                       <Text style={styles.smallActionTextFilled}>Resolve No Refund</Text>
                     </TouchableOpacity>
                     <TouchableOpacity
+                      testID={`admin-incident-resolve-refund-${incident.id}`}
+                      accessibilityLabel={`admin-incident-resolve-refund-${incident.id}`}
                       activeOpacity={1}
                       disabled={incidentActionLoadingId === incident.id}
                       onPress={() => openIncidentResolutionModal(incident, 'resolved_refund')}
@@ -1908,6 +1950,8 @@ export default function AdminReportsPage() {
                       <Text style={styles.smallActionTextFilled}>Resolve Refund</Text>
                     </TouchableOpacity>
                     <TouchableOpacity
+                      testID={`admin-incident-dismiss-${incident.id}`}
+                      accessibilityLabel={`admin-incident-dismiss-${incident.id}`}
                       activeOpacity={1}
                       disabled={incidentActionLoadingId === incident.id}
                       onPress={() => openIncidentResolutionModal(incident, 'dismissed')}
@@ -1939,7 +1983,11 @@ export default function AdminReportsPage() {
   }
 
   return (
-    <View style={[styles.flex1, { backgroundColor: colors.background }]}>
+    <View
+      testID="admin-reports-page"
+      accessibilityLabel="admin-reports-page"
+      style={[styles.flex1, { backgroundColor: colors.background }]}
+    >
       <Header title="Admin" hideBackButton />
 
       <ScrollView
@@ -1992,7 +2040,11 @@ export default function AdminReportsPage() {
 
       <Modal visible={!!userDetailsTarget} transparent animationType="fade" onRequestClose={closeUserDetailsModal}>
         <View style={styles.modalBackdrop}>
-          <View style={[styles.modalCardLarge, { backgroundColor: colors.card, borderColor: colors.border }]}> 
+          <View
+            testID="admin-report-details-modal"
+            accessibilityLabel="admin-report-details-modal"
+            style={[styles.modalCardLarge, { backgroundColor: colors.card, borderColor: colors.border }]}
+          >
             <View style={styles.detailsModalHeader}>
               <View style={[styles.detailsModalIcon, { backgroundColor: `${colors.primary}18` }]}>
                 <Ionicons name="person-circle-outline" size={24} color={colors.primary} />
@@ -2100,6 +2152,8 @@ export default function AdminReportsPage() {
 
             <View style={styles.modalActionsRow}>
               <TouchableOpacity
+                testID="admin-report-details-reporter-button"
+                accessibilityLabel="admin-report-details-reporter-button"
                 activeOpacity={1}
                 disabled={!reportDetailsReporterId || userDetailsLoadingKey === reportDetailsReporterLoadingKey}
                 onPress={() => {
@@ -2138,6 +2192,8 @@ export default function AdminReportsPage() {
               </TouchableOpacity>
 
               <TouchableOpacity
+                testID="admin-report-details-owner-button"
+                accessibilityLabel="admin-report-details-owner-button"
                 activeOpacity={1}
                 disabled={userDetailsLoadingKey === reportDetailsOwnerLoadingKey}
                 onPress={() => {
@@ -2172,6 +2228,8 @@ export default function AdminReportsPage() {
               </TouchableOpacity>
 
               <TouchableOpacity
+                testID="admin-report-details-close-button"
+                accessibilityLabel="admin-report-details-close-button"
                 activeOpacity={1}
                 onPress={closeReportDetailsModal}
                 style={[styles.modalButton, { backgroundColor: isDark ? '#334155' : '#E5E7EB' }]}
@@ -2185,7 +2243,11 @@ export default function AdminReportsPage() {
 
       <Modal visible={!!reportModerationTarget} transparent animationType="fade" onRequestClose={closeReportModerationModal}>
         <View style={styles.modalBackdrop}>
-          <View style={[styles.modalCardLarge, { backgroundColor: colors.card, borderColor: colors.border }]}> 
+          <View
+            testID="admin-report-moderation-modal"
+            accessibilityLabel="admin-report-moderation-modal"
+            style={[styles.modalCardLarge, { backgroundColor: colors.card, borderColor: colors.border }]}
+          >
             <Text style={[styles.modalTitle, { color: colors.text }]}>Moderate Report</Text>
             <Text style={[styles.modalDescription, { color: colors.textSecondary }]}>
               {reportModerationTarget?.reason || 'Select moderation outcome and action.'}
@@ -2197,6 +2259,8 @@ export default function AdminReportsPage() {
                 const active = reportModerationStatus === status;
                 return (
                   <TouchableOpacity
+                    testID={`admin-report-moderation-status-${status}`}
+                    accessibilityLabel={`admin-report-moderation-status-${status}`}
                     key={status}
                     activeOpacity={1}
                     onPress={() => setReportModerationStatus(status)}
@@ -2222,6 +2286,8 @@ export default function AdminReportsPage() {
                 const active = reportModerationAction === action;
                 return (
                   <TouchableOpacity
+                    testID={`admin-report-moderation-action-${action}`}
+                    accessibilityLabel={`admin-report-moderation-action-${action}`}
                     key={action}
                     activeOpacity={1}
                     onPress={() => {
@@ -2247,6 +2313,8 @@ export default function AdminReportsPage() {
             </ScrollView>
 
             <TextInput
+              testID="admin-report-moderation-notes-input"
+              accessibilityLabel="admin-report-moderation-notes-input"
               value={reportModerationNotes}
               onChangeText={setReportModerationNotes}
               placeholder="Moderation notes (optional)"
@@ -2264,6 +2332,8 @@ export default function AdminReportsPage() {
 
             {reportModerationAction === 'manual_review' && (
               <TextInput
+                testID="admin-report-escalation-reason-input"
+                accessibilityLabel="admin-report-escalation-reason-input"
                 value={reportEscalationReason}
                 onChangeText={setReportEscalationReason}
                 placeholder="Escalation reason (recommended)"
@@ -2282,6 +2352,8 @@ export default function AdminReportsPage() {
 
             <View style={styles.modalActionsRow}>
               <TouchableOpacity
+                testID="admin-report-moderation-cancel-button"
+                accessibilityLabel="admin-report-moderation-cancel-button"
                 activeOpacity={1}
                 onPress={closeReportModerationModal}
                 disabled={reportModerationSubmitting}
@@ -2291,6 +2363,8 @@ export default function AdminReportsPage() {
               </TouchableOpacity>
 
               <TouchableOpacity
+                testID="admin-report-moderation-apply-button"
+                accessibilityLabel="admin-report-moderation-apply-button"
                 activeOpacity={1}
                 onPress={() => void submitReportModeration()}
                 disabled={reportModerationSubmitting}
@@ -2309,7 +2383,11 @@ export default function AdminReportsPage() {
 
       <Modal visible={!!incidentResolutionTarget} transparent animationType="fade" onRequestClose={closeIncidentResolutionModal}>
         <View style={styles.modalBackdrop}>
-          <View style={[styles.modalCard, { backgroundColor: colors.card, borderColor: colors.border }]}> 
+          <View
+            testID="admin-incident-resolution-modal"
+            accessibilityLabel="admin-incident-resolution-modal"
+            style={[styles.modalCard, { backgroundColor: colors.card, borderColor: colors.border }]}
+          >
             <Text style={[styles.modalTitle, { color: colors.text }]}>Resolve Incident</Text>
             <Text style={[styles.modalDescription, { color: colors.textSecondary }]}>
               {incidentResolutionTarget
@@ -2318,6 +2396,8 @@ export default function AdminReportsPage() {
             </Text>
 
             <TextInput
+              testID="admin-incident-resolution-notes-input"
+              accessibilityLabel="admin-incident-resolution-notes-input"
               value={incidentResolutionNotes}
               onChangeText={setIncidentResolutionNotes}
               placeholder="Admin notes (optional)"
@@ -2335,6 +2415,8 @@ export default function AdminReportsPage() {
 
             <View style={styles.modalActionsRow}>
               <TouchableOpacity
+                testID="admin-incident-resolution-cancel-button"
+                accessibilityLabel="admin-incident-resolution-cancel-button"
                 activeOpacity={1}
                 onPress={closeIncidentResolutionModal}
                 disabled={incidentResolutionSubmitting}
@@ -2344,6 +2426,8 @@ export default function AdminReportsPage() {
               </TouchableOpacity>
 
               <TouchableOpacity
+                testID="admin-incident-resolution-confirm-button"
+                accessibilityLabel="admin-incident-resolution-confirm-button"
                 activeOpacity={1}
                 onPress={() => void submitIncidentResolution()}
                 disabled={incidentResolutionSubmitting}

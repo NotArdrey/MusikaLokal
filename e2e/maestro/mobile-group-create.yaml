@@ -1,0 +1,29 @@
+appId: ${APP_ID}
+---
+- openLink: "musikalokal://add_group"
+- assertVisible:
+    id: "mobile-add-group-page"
+- tapOn:
+    id: "mobile-add-group-group-name-input"
+- inputText: ${E2E_GROUP_NAME}
+- hideKeyboard
+- tapOn:
+    id: "mobile-add-group-description-input"
+- inputText: ${E2E_GROUP_DESCRIPTION}
+- hideKeyboard
+- scrollUntilVisible:
+    element:
+      id: "mobile-add-group-next-button"
+    direction: DOWN
+- tapOn:
+    id: "mobile-add-group-next-button"
+- scrollUntilVisible:
+    element:
+      id: "mobile-add-group-next-button"
+    direction: DOWN
+- tapOn:
+    id: "mobile-add-group-next-button"
+- tapOn:
+    id: "mobile-add-group-next-button"
+- tapOn:
+    id: "custom-alert-button-create"

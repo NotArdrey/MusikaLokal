@@ -25,6 +25,7 @@ import Skeleton from "../src/components/Skeleton";
 import { DEFAULT_AVATAR } from "../src/constants/Images";
 import { useTheme } from "../src/context/ThemeContext";
 import { ensureUploadPassesSafetyScreening } from "../src/services/uploadSafetyScreen";
+import { isE2EFixtureMode } from "../src/utils/e2eFixtures";
 
 
 
@@ -700,12 +701,19 @@ export default function EditProfileScreen() {
   }
 
   return (
-    <View style={[styles.container, { backgroundColor: colors.background }]}>
+    <View
+      testID="mobile-edit-profile-page"
+      accessibilityLabel="mobile-edit-profile-page"
+      style={[styles.container, { backgroundColor: colors.background }]}
+    >
       <Header title="Edit Profile" onBackPress={handleAttemptLeave} />
 
       <ScrollView
         style={styles.scroll}
-        contentContainerStyle={styles.scrollContent}
+        contentContainerStyle={[
+          styles.scrollContent,
+          isE2EFixtureMode() && styles.e2eScrollContent,
+        ]}
         showsVerticalScrollIndicator={false}
       >
         {/* Avatar */}
@@ -718,6 +726,8 @@ export default function EditProfileScreen() {
               style={[styles.avatar, { borderColor: colors.primary }]}
             />
             <TouchableOpacity
+              testID="mobile-profile-photo-button"
+              accessibilityLabel="mobile-profile-photo-button"
               style={[styles.cameraBtn, { backgroundColor: colors.primary, opacity: uploadingPhoto ? 0.6 : 1 }]}
               onPress={handleChangePhoto}
               disabled={uploadingPhoto}
@@ -764,6 +774,8 @@ export default function EditProfileScreen() {
             CONTACT NUMBER <Text style={{ color: "#ef4444" }}>*</Text>
           </Text>
           <TextInput
+            testID="mobile-profile-contact-input"
+            accessibilityLabel="mobile-profile-contact-input"
             style={[
               styles.input,
               {
@@ -836,6 +848,8 @@ export default function EditProfileScreen() {
           <View style={[styles.searchInputWrap, { backgroundColor: isDark ? "#374151" : "#F3F4F6" }]}>
             <Ionicons name="search" size={20} color={colors.textSecondary} />
             <TextInput
+              testID="mobile-profile-role-search-input"
+              accessibilityLabel="mobile-profile-role-search-input"
               style={[styles.searchInput, { color: colors.text }]}
               value={roleSearch}
               onChangeText={setRoleSearch}
@@ -852,7 +866,10 @@ export default function EditProfileScreen() {
             )
               .slice(0, roleSearch ? 20 : 8)
               .map((role) => (
-                <TouchableOpacity activeOpacity={1}
+                <TouchableOpacity
+                  testID={`mobile-profile-role-${role.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`}
+                  accessibilityLabel={`mobile-profile-role-${role.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`}
+                  activeOpacity={1}
                   key={role}
                   onPress={() => toggleRole(role)}
                   style={[
@@ -925,6 +942,8 @@ export default function EditProfileScreen() {
           <View style={[styles.searchInputWrap, { backgroundColor: isDark ? "#374151" : "#F3F4F6" }]}>
             <Ionicons name="search" size={20} color={colors.textSecondary} />
             <TextInput
+              testID="mobile-profile-genre-search-input"
+              accessibilityLabel="mobile-profile-genre-search-input"
               style={[styles.searchInput, { color: colors.text }]}
               value={genreSearch}
               onChangeText={setGenreSearch}
@@ -941,7 +960,10 @@ export default function EditProfileScreen() {
             )
               .slice(0, genreSearch ? 20 : 8)
               .map((genre) => (
-                <TouchableOpacity activeOpacity={1}
+                <TouchableOpacity
+                  testID={`mobile-profile-genre-${genre.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`}
+                  accessibilityLabel={`mobile-profile-genre-${genre.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`}
+                  activeOpacity={1}
                   key={genre}
                   onPress={() => toggleGenre(genre)}
                   style={[
@@ -976,6 +998,8 @@ export default function EditProfileScreen() {
             BIO <Text style={{ color: "#ef4444" }}>*</Text>
           </Text>
           <TextInput
+            testID="mobile-profile-bio-input"
+            accessibilityLabel="mobile-profile-bio-input"
             style={[
               styles.textArea,
               {
@@ -1011,6 +1035,8 @@ export default function EditProfileScreen() {
           </Text>
         )}
         <TouchableOpacity
+          testID="mobile-profile-save-button"
+          accessibilityLabel="mobile-profile-save-button"
           style={[
             styles.saveBtn,
             {
@@ -1033,6 +1059,8 @@ export default function EditProfileScreen() {
         </TouchableOpacity>
 
         <TouchableOpacity
+          testID="mobile-profile-cancel-button"
+          accessibilityLabel="mobile-profile-cancel-button"
           style={[styles.cancelBtn, { borderColor: colors.border }]}
           onPress={handleAttemptLeave}
           disabled={saving}
@@ -1046,7 +1074,7 @@ export default function EditProfileScreen() {
         <View style={{ height: 40 }} />
       </ScrollView>
 
-      <Navbar />
+      {!isE2EFixtureMode() && <Navbar />}
 
       <Modal
         visible={saving}
@@ -1077,6 +1105,7 @@ const styles = StyleSheet.create({
   },
   scroll: { flex: 1 },
   scrollContent: { padding: 20, paddingBottom: 150 },
+  e2eScrollContent: { paddingBottom: 280 },
   editProfileSkeletonContent: { padding: 20, paddingBottom: 150 },
 
   avatarContainer: { alignItems: "center", marginBottom: 24 },
