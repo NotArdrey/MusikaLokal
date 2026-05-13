@@ -1,5 +1,4 @@
 import { Ionicons } from '@expo/vector-icons';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import React, { useCallback, useEffect, useState } from 'react';
 import { InteractionManager, RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
@@ -18,6 +17,37 @@ import { useTheme } from '../src/context/ThemeContext';
 import { getActionErrorMessage, getResultErrorMessage, logActionError } from '../src/utils/actionError';
 import { formatFriendlyDateTime } from '../src/utils/friendlyDateTime';
 import { invalidateListingCaches } from '../src/utils/listingCacheInvalidation';
+
+const DEFAULT_GIG_IMAGE = 'https://images.unsplash.com/photo-1501281668745-f7f57925c3b4?w=800&fit=crop';
+
+const looksLikeDisplayImage = (uri: string) => {
+    if (!uri) return false;
+
+    const trimmed = uri.trim();
+    const lowered = trimmed.toLowerCase();
+    if (!lowered) return false;
+
+    if (lowered.startsWith('data:image/')) return true;
+
+    if (
+        lowered.includes('/documents/') ||
+        lowered.includes('/contracts/') ||
+        lowered.includes('business_permit') ||
+        lowered.includes('application/pdf')
+    ) {
+        return false;
+    }
+
+    if (/\.(jpg|jpeg|png|webp|gif|bmp|svg)(\?|$)/i.test(trimmed)) return true;
+    if (lowered.includes('/image') || lowered.includes('/images/')) return true;
+    return lowered.startsWith('http');
+};
+
+const resolveGigImage = (gig: any) => {
+    const imageList = Array.isArray(gig?.images) ? gig.images.filter((item: any) => typeof item === 'string') : [];
+    const best = imageList.find((img: string) => looksLikeDisplayImage(img));
+    return best || imageList[0] || DEFAULT_GIG_IMAGE;
+};
 
 const normalizePermitStatus = (permitStatus: string | null | undefined) => {
     const normalizedPermitStatus = String(permitStatus || '').trim().toLowerCase();
@@ -352,18 +382,6 @@ export default function MyVenueScreen() {
         }
     };
 
-    const openGigPreview = async (gigId: string) => {
-        if (!gigId) return;
-
-        try {
-            await AsyncStorage.setItem('pending_reopen_listing_id', gigId);
-        } catch (error) {
-            logActionError('MyVenue', 'cache gig preview id', error, { gigId });
-        }
-
-        router.push('/feed');
-    };
-
     const handleOpenGigChat = (gig: any) => {
         if (!gig?.organizer_id) {
             showAlert('warning', 'Chat Unavailable', 'Venue organizer is unavailable for this gig.');
@@ -404,7 +422,7 @@ export default function MyVenueScreen() {
 
                     {loading ? (
                         <View style={styles.skeletonList}>
-                            {[0, 1, 2].map((index) => (
+                            {[0, 1].map((index) => (
                                 <View
                                     key={`gig-skeleton-${index}`}
                                     style={[styles.skeletonCard, { backgroundColor: colors.surface, borderColor: colors.border }]}
@@ -424,7 +442,10 @@ export default function MyVenueScreen() {
                     ) : gigs.length === 0 ? (
                         <View style={styles.emptyState}>
                             <Ionicons name="musical-notes-outline" size={48} color={colors.textSecondary} />
-                            <Text style={[styles.emptyText, { color: colors.textSecondary }]}>{isMusicianView ? 'No joined venues found' : 'No gigs found'}</Text>
+                            <Text style={[styles.emptyTitle, { color: colors.text }]}>{isMusicianView ? 'No joined venues yet' : 'No gigs yet'}</Text>
+                            <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
+                                {isMusicianView ? 'Accepted venue gigs will appear here.' : 'Create your first gig to manage applications and event details.'}
+                            </Text>
                         </View>
                     ) : (
                         gigs.map((gig) => (
@@ -466,7 +487,7 @@ export default function MyVenueScreen() {
                                         <>
                                 <View style={styles.imageWrapper}>
                                     <CachedImage
-                                        uri={(gig.images && gig.images[0]) || 'https://images.unsplash.com/photo-1501281668745-f7f57925c3b4?w=800&fit=crop'}
+                                        uri={resolveGigImage(gig)}
                                         style={styles.cardImage}
                                         width={420}
                                         height={220}
@@ -483,7 +504,7 @@ export default function MyVenueScreen() {
                                 </View>
 
                                 <View style={styles.cardContent}>
-                                    <Text style={[styles.cardTitle, { color: colors.text }]}>{gig.name}</Text>
+                                    <Text style={[styles.cardTitle, { color: colors.text }]} numberOfLines={1}>{gig.name}</Text>
                                     <Text style={[styles.cardSubTitle, { color: colors.primary }]}>
                                         {gig.event_date ? formatFriendlyDateTime(gig.event_date, { forceDateOnly: true }) : 'Date TBA'}
                                         {gig.requirements?.event_start_time && gig.requirements?.event_end_time ? ` at ${gig.requirements.event_start_time} - ${gig.requirements.event_end_time}` : ''} - {gig.location}
@@ -523,7 +544,7 @@ export default function MyVenueScreen() {
                                                         return;
                                                     }
 
-                                                    void openGigPreview(gig.id);
+                                                    router.push({ pathname: '/manage_gig', params: { id: gig.id } });
                                                 }}
                                                 style={[styles.manageBtn, { backgroundColor: colors.primary }]}
                                             >
@@ -675,12 +696,17 @@ const styles = StyleSheet.create({
     },
     emptyState: {
         alignItems: 'center',
-        paddingVertical: 40,
-        opacity: 0.5,
+        paddingVertical: 48,
+    },
+    emptyTitle: {
+        marginTop: 16,
+        fontFamily: 'Poppins_600SemiBold',
+        fontSize: 20,
     },
     emptyText: {
-        marginTop: 16,
+        marginTop: 10,
         fontFamily: 'Poppins_400Regular',
+        textAlign: 'center',
     },
     cardContainer: {
         marginBottom: 24,

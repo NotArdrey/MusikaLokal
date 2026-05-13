@@ -1,5 +1,4 @@
 import { Ionicons } from '@expo/vector-icons';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import React, { useCallback, useEffect, useState } from 'react';
 import { RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View, Platform, useWindowDimensions } from 'react-native';
@@ -10,6 +9,7 @@ import Header from '../src/components/header';
 import Modal, { normalizeVisibleInput } from '../src/components/modal';
 import MusicianWorkspaceTabs from '../src/components/MusicianWorkspaceTabs';
 import Navbar from '../src/components/navbar';
+import Skeleton from '../src/components/Skeleton';
 import { useAuth, useRequireAuth } from '../src/context/AuthContext';
 import { useTheme } from '../src/context/ThemeContext';
 import { formatDashedNumericDate } from '../src/utils/friendlyDateTime';
@@ -373,18 +373,6 @@ export default function MyVenueScreen() {
         }
     };
 
-    const openGigPreview = async (gigId: string) => {
-        if (!gigId) return;
-
-        try {
-            await AsyncStorage.setItem('pending_reopen_listing_id', gigId);
-        } catch {
-            // Continue navigation even if caching fails.
-        }
-
-        router.push('/feed');
-    };
-
     const handleOpenGigChat = (gig: any) => {
         if (!gig?.organizer_id) {
             showAlert('warning', 'Chat Unavailable', 'Venue organizer is unavailable for this gig.');
@@ -417,11 +405,31 @@ export default function MyVenueScreen() {
                         )}
 
                         {loading ? (
-                            <Text style={[styles.loadingText, { color: colors.textSecondary }]}>Loading gigs...</Text>
+                            <View style={[styles.gridWrap, isWebDesktop && styles.gridWrapWeb]}>
+                                {[0, 1].map((index) => (
+                                    <View key={`venue-skeleton-${index}`} style={[styles.gridItem, isWebDesktop && styles.gridItemWeb]}>
+                                        <View style={[styles.cardContainer, { backgroundColor: pageCardBackground, borderColor: borderSoft }]}>
+                                            <Skeleton width="100%" height={isWebDesktop ? 186 : 170} borderRadius={0} />
+                                            <View style={styles.cardContent}>
+                                                <Skeleton width="56%" height={16} />
+                                                <Skeleton width="100%" height={12} style={{ marginTop: 8 }} />
+                                                <Skeleton width="78%" height={12} style={{ marginTop: 6 }} />
+                                                <View style={styles.skeletonActionRow}>
+                                                    <Skeleton width={92} height={32} borderRadius={10} />
+                                                    <Skeleton width={32} height={32} borderRadius={10} />
+                                                </View>
+                                            </View>
+                                        </View>
+                                    </View>
+                                ))}
+                            </View>
                         ) : gigs.length === 0 ? (
                             <View style={styles.emptyState}>
                                 <Ionicons name="musical-notes-outline" size={48} color={colors.textSecondary} />
-                                <Text style={[styles.emptyText, { color: colors.textSecondary }]}>{isMusicianView ? 'No joined venues found' : 'No gigs found'}</Text>
+                                <Text style={[styles.emptyTitle, { color: colors.text }]}>{isMusicianView ? 'No joined venues yet' : 'No gigs yet'}</Text>
+                                <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
+                                    {isMusicianView ? 'Accepted venue gigs will appear here.' : 'Create your first gig to manage applications and event details.'}
+                                </Text>
                             </View>
                         ) : (
                             <View style={[styles.gridWrap, isWebDesktop && styles.gridWrapWeb]}>
@@ -514,7 +522,7 @@ export default function MyVenueScreen() {
                                                                     return;
                                                                 }
 
-                                                                void openGigPreview(gig.id);
+                                                                router.push({ pathname: '/manage_gig', params: { id: gig.id } });
                                                             }}
                                                             style={[styles.manageBtn, { backgroundColor: colors.primary }]}
                                                         >
@@ -630,19 +638,21 @@ const styles = StyleSheet.create({
         width: '49%',
         marginBottom: 18,
     },
-    loadingText: {
-        textAlign: 'center',
-        marginTop: 20,
-        fontFamily: 'Poppins_400Regular',
-    },
+    skeletonActionRow: { marginTop: 12, flexDirection: 'row', gap: 8 },
     emptyState: {
         alignItems: 'center',
-        paddingVertical: 40,
-        opacity: 0.5,
+        paddingVertical: 48,
+    },
+    emptyTitle: {
+        marginTop: 16,
+        fontFamily: 'Poppins_600SemiBold',
+        fontSize: 18,
     },
     emptyText: {
-        marginTop: 16,
+        marginTop: 8,
         fontFamily: 'Poppins_400Regular',
+        fontSize: 13,
+        textAlign: 'center',
     },
     cardContainer: {
         borderRadius: 18,

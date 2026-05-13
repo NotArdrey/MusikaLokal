@@ -29,7 +29,9 @@ import { formatDashedNumericDate } from "../src/utils/friendlyDateTime";
 
 const { width: screenWidth } = Dimensions.get("window");
 const PORTFOLIO_ITEM_SIZE = (screenWidth - 48 - 8) / 3; // 3 columns with gaps
-const GIG_TABS = ["About", "Applicants", "Review"];
+const OWNER_GIG_TABS = ["About", "Applicants", "Review"];
+const VIEWER_GIG_TABS = ["About", "Review"];
+const ACCEPTED_GIG_STATUSES = ["accepted", "approved", "confirmed", "happening now", "completed"];
 
 import { useLocalSearchParams } from "expo-router";
 
@@ -55,7 +57,7 @@ export default function GigDetailsScreen() {
   const { id, tab } = useLocalSearchParams<{ id?: string | string[]; tab?: string | string[] }>();
   const requestedTab = Array.isArray(tab) ? tab[0] : tab;
   const [activeTab, setActiveTab] = useState(
-    GIG_TABS.includes(requestedTab || "") ? requestedTab || "About" : "About",
+    OWNER_GIG_TABS.includes(requestedTab || "") ? requestedTab || "About" : "About",
   );
   const [modalVisible, setModalVisible] = useState(false);
   const [modalTitle, setModalTitle] = useState("");
@@ -66,6 +68,7 @@ export default function GigDetailsScreen() {
   );
 
   const [authorized, setAuthorized] = useState(false);
+  const [canManageGig, setCanManageGig] = useState(false);
   const [checkingAuth, setCheckingAuth] = useState(true);
 
   const [gig, setGig] = useState<any>(null);
@@ -74,10 +77,15 @@ export default function GigDetailsScreen() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (requestedTab && GIG_TABS.includes(requestedTab) && requestedTab !== activeTab) {
+    const availableTabs = canManageGig ? OWNER_GIG_TABS : VIEWER_GIG_TABS;
+    if (requestedTab && availableTabs.includes(requestedTab) && requestedTab !== activeTab) {
       setActiveTab(requestedTab);
+      return;
     }
-  }, [activeTab, requestedTab]);
+    if (!availableTabs.includes(activeTab)) {
+      setActiveTab("About");
+    }
+  }, [activeTab, canManageGig, requestedTab]);
   const [alertVisible, setAlertVisible] = useState(false);
   const [alertConfig, setAlertConfig] = useState<{
     type: AlertType;
@@ -158,6 +166,55 @@ export default function GigDetailsScreen() {
     checkAuthorization();
   }, []);
 
+  const getRouteGigId = () => {
+    const gigId = Array.isArray(id) ? id[0] : id;
+    return typeof gigId === "string" && gigId.length > 0 ? gigId : null;
+  };
+
+  const hasAcceptedGigAccess = async (userId: string, gigId: string) => {
+    const { data: soloApplication, error: soloError } = await supabase
+      .from("gig_applications")
+      .select("id")
+      .eq("gig_id", gigId)
+      .eq("applicant_id", userId)
+      .is("group_id", null)
+      .in("status", ACCEPTED_GIG_STATUSES)
+      .limit(1)
+      .maybeSingle();
+
+    if (soloError) throw soloError;
+    if (soloApplication?.id) return true;
+
+    const { data: groupMembershipRows, error: membershipError } = await supabase
+      .from("group_members")
+      .select("group_id")
+      .eq("user_id", userId);
+
+    if (membershipError) throw membershipError;
+
+    const joinedGroupIds = Array.from(
+      new Set(
+        (groupMembershipRows || [])
+          .map((row: any) => row?.group_id)
+          .filter((value: any): value is string => typeof value === "string" && value.length > 0),
+      ),
+    );
+
+    if (joinedGroupIds.length === 0) return false;
+
+    const { data: groupApplication, error: groupError } = await supabase
+      .from("gig_applications")
+      .select("id")
+      .eq("gig_id", gigId)
+      .in("group_id", joinedGroupIds)
+      .in("status", ACCEPTED_GIG_STATUSES)
+      .limit(1)
+      .maybeSingle();
+
+    if (groupError) throw groupError;
+    return !!groupApplication?.id;
+  };
+
   const checkAuthorization = async () => {
     try {
       const {
@@ -176,14 +233,34 @@ export default function GigDetailsScreen() {
 
       if (profileError) throw profileError;
 
-      if (profile?.role !== "venue-owner") {
-        Alert.alert("Unauthorized", "Only venue owners can access this page.");
+      const gigId = getRouteGigId();
+      if (!gigId) {
+        Alert.alert("Error", "Invalid gig ID");
         router.replace("/feed");
         return;
       }
 
+      const { data: ownedGig, error: ownedGigError } = await supabase
+        .from("gigs")
+        .select("id")
+        .eq("id", gigId)
+        .eq("organizer_id", user.id)
+        .maybeSingle();
+
+      if (ownedGigError) throw ownedGigError;
+
+      const ownsGig = !!ownedGig?.id && profile?.role === "venue-owner";
+      const canViewAcceptedGig = ownsGig ? true : await hasAcceptedGigAccess(user.id, gigId);
+
+      if (!ownsGig && !canViewAcceptedGig) {
+        Alert.alert("Unauthorized", "You can only view gigs you manage or have been accepted for.");
+        router.replace("/feed");
+        return;
+      }
+
+      setCanManageGig(ownsGig);
       setAuthorized(true);
-      if (id) fetchData(user.id);
+      fetchData(user.id, ownsGig);
     } catch (e) {
       console.error("Authorization check failed:", e);
       router.replace("/feed");
@@ -192,11 +269,11 @@ export default function GigDetailsScreen() {
     }
   };
 
-  const fetchData = async (userId: string) => {
+  const fetchData = async (userId: string, canManage = canManageGig) => {
     setLoading(true);
     try {
       // Ensure id is a string, not an array
-      const gigId = Array.isArray(id) ? id[0] : id;
+      const gigId = getRouteGigId();
       if (!gigId) {
         Alert.alert("Error", "Invalid gig ID");
         router.replace("/feed");
@@ -216,8 +293,7 @@ export default function GigDetailsScreen() {
           .from('gigs')
           .select('*')
           .eq('id', gigId)
-          .eq('organizer_id', userId)
-          .single(),
+          .maybeSingle(),
         supabase
           .from('gig_requirements')
           .select('requirement_key, requirement_value')
@@ -240,6 +316,8 @@ export default function GigDetailsScreen() {
         console.log('[manage_gig] Failed to fetch gig details:', gigError.message);
         throw gigError;
       }
+      if (!gigData) throw new Error("Gig not found");
+      if (canManage && gigData.organizer_id !== userId) throw new Error("Unauthorized");
       if (requirementsError) throw requirementsError;
       if (mediaError) throw mediaError;
 
@@ -268,27 +346,30 @@ export default function GigDetailsScreen() {
         documents: legacyGig?.documents || [],
       });
 
-      // Fetch Applications
-      try {
-        const { data: { session } } = await supabase.auth.getSession();
-        if (!session) throw new Error("No active session");
+      if (canManage) {
+        try {
+          const { data: { session } } = await supabase.auth.getSession();
+          if (!session) throw new Error("No active session");
 
-        const { data: appData, error: appError } =
-          await supabase.functions.invoke("gig-applications", {
-            body: { action: "fetch_gig_applications", gigId: gigId, userId },
-            headers: {
-              Authorization: `Bearer ${session.access_token}`,
-            },
-          });
-        if (appError) {
-          console.log('[manage_gig] Edge function failed for applications, trying direct query fallback.');
-          const fallbackApps = await fetchApplicationsFallback(gigId);
-          setApplications(fallbackApps);
-        } else {
-          setApplications(appData || []);
+          const { data: appData, error: appError } =
+            await supabase.functions.invoke("gig-applications", {
+              body: { action: "fetch_gig_applications", gigId: gigId, userId },
+              headers: {
+                Authorization: `Bearer ${session.access_token}`,
+              },
+            });
+          if (appError) {
+            console.log('[manage_gig] Edge function failed for applications, trying direct query fallback.');
+            const fallbackApps = await fetchApplicationsFallback(gigId);
+            setApplications(fallbackApps);
+          } else {
+            setApplications(appData || []);
+          }
+        } catch (appErr) {
+          console.log('[manage_gig] Exception fetching applications; using empty list fallback:', appErr);
+          setApplications([]);
         }
-      } catch (appErr) {
-        console.log('[manage_gig] Exception fetching applications; using empty list fallback:', appErr);
+      } else {
         setApplications([]);
       }
 
@@ -366,7 +447,7 @@ export default function GigDetailsScreen() {
     setModalVisible(true);
   };
 
-  const tabs = GIG_TABS;
+  const tabs = canManageGig ? OWNER_GIG_TABS : VIEWER_GIG_TABS;
 
   const formatMusicianType = (requirements?: any) => {
     const slots = requirements?.slots || {};
@@ -418,7 +499,7 @@ export default function GigDetailsScreen() {
     <>
       <View style={[styles.flex1, { backgroundColor: pageBackground }]}>
         <View style={[styles.pageFrame, isWebDesktop && styles.pageFrameWeb]}>
-        <Header title="Manage Gig" />
+        <Header title={canManageGig ? "Manage Gig" : "View Gig"} />
 
         <ScrollView
           showsVerticalScrollIndicator={false}
@@ -1536,7 +1617,7 @@ export default function GigDetailsScreen() {
                       </TouchableOpacity>
 
                       {/* Action Buttons */}
-                      {app.status === "pending" && (
+                      {canManageGig && app.status === "pending" && (
                         <View style={[styles.actionButtons, { marginTop: 12 }]}>
                           <TouchableOpacity activeOpacity={1}
                             onPress={() => confirmAction(app.id, "rejected")}
