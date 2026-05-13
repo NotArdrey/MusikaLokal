@@ -1,12 +1,17 @@
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
-import React, { useEffect, useState } from "react";
+import {
+    BottomSheetBackdrop,
+    BottomSheetModal,
+    BottomSheetScrollView,
+    useBottomSheetTimingConfigs,
+} from "@gorhom/bottom-sheet";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
     ActivityIndicator,
     Dimensions,
     Image,
     Linking,
-    Modal as RNModal,
     Platform,
     ScrollView,
     StyleSheet,
@@ -15,6 +20,7 @@ import {
     useWindowDimensions,
     View,
 } from "react-native";
+import { Easing } from "react-native-reanimated";
 import { supabase } from "../lib/supabase";
 import CustomAlert, { AlertType } from "../src/components/CustomAlert";
 import Header from "../src/components/header";
@@ -93,6 +99,30 @@ export default function GigDetailsScreen() {
   const [inviteMessage, setInviteMessage] = useState("");
   const [selectedInviteTargets, setSelectedInviteTargets] = useState<ProductionInviteTarget[]>([]);
   const [sendingInvites, setSendingInvites] = useState(false);
+  const inviteSheetRef = useRef<BottomSheetModal>(null);
+  const inviteSnapPoints = useMemo(() => ["90%"], []);
+  const inviteAnimationConfigs = useBottomSheetTimingConfigs({
+    duration: 320,
+    easing: Easing.inOut(Easing.cubic),
+  });
+  const renderInviteBackdrop = useCallback(
+    (props: any) => (
+      <BottomSheetBackdrop
+        {...props}
+        appearsOnIndex={0}
+        disappearsOnIndex={-1}
+        opacity={0.5}
+      />
+    ),
+    [],
+  );
+  const handleInviteSheetDismiss = useCallback(() => {
+    setInviteModalVisible(false);
+    if (!sendingInvites) {
+      setInviteMessage("");
+      setSelectedInviteTargets([]);
+    }
+  }, [sendingInvites]);
 
   useEffect(() => {
     const availableTabs = canManageGig ? OWNER_GIG_TABS : VIEWER_GIG_TABS;
@@ -104,6 +134,13 @@ export default function GigDetailsScreen() {
       setActiveTab("About");
     }
   }, [activeTab, canManageGig, requestedTab]);
+  useEffect(() => {
+    if (inviteModalVisible) {
+      inviteSheetRef.current?.present();
+    } else {
+      inviteSheetRef.current?.dismiss();
+    }
+  }, [inviteModalVisible]);
   const [alertVisible, setAlertVisible] = useState(false);
   const [alertConfig, setAlertConfig] = useState<{
     type: AlertType;
@@ -1879,89 +1916,92 @@ export default function GigDetailsScreen() {
         buttonText={modalButtonText}
         danger={modalButtonText === "Decline"}
       />
-      <RNModal
-        visible={inviteModalVisible}
-        transparent
-        animationType="slide"
-        onRequestClose={closeInviteModal}
+      <BottomSheetModal
+        ref={inviteSheetRef}
+        index={0}
+        snapPoints={inviteSnapPoints}
+        animationConfigs={inviteAnimationConfigs}
+        animateOnMount
+        enableDynamicSizing={false}
+        enableContentPanningGesture={false}
+        enableOverDrag={false}
+        enablePanDownToClose={!sendingInvites}
+        backdropComponent={renderInviteBackdrop}
+        backgroundStyle={{ backgroundColor: colors.background }}
+        handleIndicatorStyle={{
+          backgroundColor: isDark ? "#4B5563" : "#E5E7EB",
+          width: 40,
+        }}
+        onDismiss={handleInviteSheetDismiss}
       >
-        <View style={styles.sheetOverlay}>
-          <TouchableOpacity
-            activeOpacity={1}
-            onPress={closeInviteModal}
-            style={styles.sheetBackdrop}
-          />
-          <View style={[styles.sheetContainer, { backgroundColor: colors.background, borderColor: colors.border }]}>
-            <View style={[styles.sheetHandle, { backgroundColor: isDark ? "#4B5563" : "#E5E7EB" }]} />
-            <View style={[styles.sheetHeader, { borderBottomColor: colors.border }]}>
-              <View style={styles.sheetHeaderCopy}>
-                <Text style={[styles.sheetEyebrow, { color: colors.textSecondary }]}>{gig?.name || "Gig"}</Text>
-                <Text style={[styles.sheetTitle, { color: colors.text }]}>Invite Performers</Text>
-              </View>
-              <TouchableOpacity
-                activeOpacity={1}
-                onPress={closeInviteModal}
-                style={[styles.sheetCloseButton, { backgroundColor: colors.card, borderColor: colors.border }]}
-              >
-                <Ionicons name="close" size={18} color={colors.text} />
-              </TouchableOpacity>
+        <BottomSheetScrollView
+          contentContainerStyle={styles.inviteSheetContent}
+          showsVerticalScrollIndicator={false}
+          showsHorizontalScrollIndicator={false}
+          nestedScrollEnabled
+          keyboardShouldPersistTaps="handled"
+        >
+          <View style={[styles.inviteSheetHeader, { borderBottomColor: colors.border }]}>
+            <View style={styles.sheetHeaderCopy}>
+              <Text style={[styles.sheetEyebrow, { color: colors.textSecondary }]}>{gig?.name || "Gig"}</Text>
+              <Text style={[styles.sheetTitle, { color: colors.text }]}>Invite Performers</Text>
             </View>
-            <ScrollView
-              style={styles.sheetBody}
-              contentContainerStyle={styles.sheetBodyContent}
-              showsVerticalScrollIndicator={false}
-              keyboardShouldPersistTaps="handled"
+            <TouchableOpacity
+              activeOpacity={1}
+              onPress={closeInviteModal}
+              style={[styles.sheetCloseButton, { backgroundColor: colors.card, borderColor: colors.border }]}
             >
-              <View style={styles.modalContent}>
-                <ProductionInviteSection
-                  currentUserId={currentUserId}
-                  selectedTargets={selectedInviteTargets}
-                  onSelectedTargetsChange={setSelectedInviteTargets}
-                  inviteMessage={inviteMessage}
-                  onInviteMessageChange={setInviteMessage}
-                  disabled={sendingInvites}
-                  title="Invite Musicians, Duo, or Group"
-                  description="Search performers to invite to this gig. Recipients can respond from Bookings > Pending."
-                  searchPlaceholder="Search musician, duo, or group"
-                  messagePlaceholder="Add optional gig details for the invite"
-                />
+              <Ionicons name="close" size={18} color={colors.text} />
+            </TouchableOpacity>
+          </View>
+          <View style={styles.modalContent}>
+            <ProductionInviteSection
+              currentUserId={currentUserId}
+              selectedTargets={selectedInviteTargets}
+              onSelectedTargetsChange={setSelectedInviteTargets}
+              inviteMessage={inviteMessage}
+              onInviteMessageChange={setInviteMessage}
+              disabled={sendingInvites}
+              title="Invite Musicians, Duo, or Group"
+              description="Search performers to invite to this gig. Recipients can respond from Bookings > Pending."
+              searchPlaceholder="Search musician, duo, or group"
+              messagePlaceholder="Add optional gig details for the invite"
+            />
 
-                <TouchableOpacity
-                  activeOpacity={isInviteSubmitDisabled ? 1 : 0.78}
-                  onPress={handleSendVenueInvites}
-                  disabled={isInviteSubmitDisabled}
+            <TouchableOpacity
+              activeOpacity={isInviteSubmitDisabled ? 1 : 0.78}
+              onPress={handleSendVenueInvites}
+              disabled={isInviteSubmitDisabled}
+              style={[
+                styles.submitBtn,
+                {
+                  backgroundColor:
+                    selectedInviteTargets.length > 0 ? colors.primary : colors.border,
+                  opacity: isInviteSubmitDisabled ? 0.6 : 1,
+                },
+              ]}
+            >
+              {sendingInvites ? (
+                <ActivityIndicator size="small" color="#fff" />
+              ) : (
+                <Text
                   style={[
-                    styles.submitBtn,
+                    styles.submitBtnText,
                     {
-                      backgroundColor:
-                        selectedInviteTargets.length > 0 ? colors.primary : colors.border,
-                      opacity: isInviteSubmitDisabled ? 0.6 : 1,
+                      color:
+                        selectedInviteTargets.length > 0
+                          ? "#FFFFFF"
+                          : colors.textSecondary,
                     },
                   ]}
                 >
-                  {sendingInvites ? (
-                    <ActivityIndicator size="small" color="#fff" />
-                  ) : (
-                    <Text
-                      style={[
-                        styles.submitBtnText,
-                        {
-                          color:
-                            selectedInviteTargets.length > 0
-                              ? "#FFFFFF"
-                              : colors.textSecondary,
-                        },
-                      ]}
-                    >
-                      Send Invites
-                    </Text>
-                  )}
-                </TouchableOpacity>
-              </View>
-            </ScrollView>
+                  Send Invites
+                </Text>
+              )}
+            </TouchableOpacity>
           </View>
-        </View>
-      </RNModal>
+        </BottomSheetScrollView>
+      </BottomSheetModal>
       <CustomAlert
         visible={alertVisible}
         type={alertConfig.type}
@@ -2309,37 +2349,6 @@ const styles = StyleSheet.create({
     paddingVertical: 2,
     borderRadius: 6,
   },
-  sheetOverlay: {
-    flex: 1,
-    justifyContent: "flex-end",
-    backgroundColor: "rgba(0,0,0,0.45)",
-  },
-  sheetBackdrop: {
-    ...StyleSheet.absoluteFillObject,
-  },
-  sheetContainer: {
-    maxHeight: "88%",
-    borderTopLeftRadius: 28,
-    borderTopRightRadius: 28,
-    borderWidth: 1,
-    borderBottomWidth: 0,
-    paddingTop: 10,
-  },
-  sheetHandle: {
-    alignSelf: "center",
-    width: 54,
-    height: 5,
-    borderRadius: 999,
-    marginBottom: 12,
-  },
-  sheetHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    borderBottomWidth: 1,
-    paddingHorizontal: 20,
-    paddingBottom: 14,
-  },
   sheetHeaderCopy: {
     flex: 1,
     paddingRight: 12,
@@ -2363,13 +2372,18 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  sheetBody: {
-    maxHeight: "100%",
-  },
-  sheetBodyContent: {
+  inviteSheetContent: {
     paddingHorizontal: 20,
-    paddingTop: 14,
+    paddingTop: 10,
     paddingBottom: 28,
+  },
+  inviteSheetHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    borderBottomWidth: 1,
+    paddingBottom: 14,
+    marginBottom: 14,
   },
   modalContent: {
     paddingHorizontal: 4,
