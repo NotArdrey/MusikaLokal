@@ -1949,10 +1949,11 @@ export default function AddStudioScreen() {
       }
 
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: "images",
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
         allowsEditing: true,
         aspect: [1, 1],
         quality: 0.8,
+        base64: Platform.OS !== 'web', // Don't need base64 on web
       });
 
       if (result.canceled || !result.assets || result.assets.length === 0)
@@ -1962,25 +1963,44 @@ export default function AddStudioScreen() {
       const asset = result.assets[0];
       const fileExt = asset.uri.split(".").pop()?.toLowerCase() || "jpg";
       const fileName = `${session.user.id}/equipment/${Date.now()}_${Math.random().toString(36).substring(7)}.${fileExt}`;
+      const contentType = `image/${fileExt}`;
 
-      const base64 = await FileSystem.readAsStringAsync(asset.uri, {
-        encoding: FileSystem.EncodingType.Base64,
-      });
-      const bytes = base64ToUint8Array(base64);
-      const { data, error } = await supabase.storage
-        .from("listings")
-        .upload(fileName, bytes, {
-          contentType: `image/${fileExt}`,
-          upsert: false,
-        });
+      let uploadError: Error | null = null;
+      let uploadPath: string | null = null;
 
-      if (error) {
-        throw error;
+      if (Platform.OS === 'web') {
+        // Web: Use the URI directly (it's a blob URL)
+        const response = await fetch(asset.uri);
+        const blob = await response.blob();
+        const { data, error } = await supabase.storage
+          .from("listings")
+          .upload(fileName, blob, { contentType, upsert: false });
+        if (data) uploadPath = data.path;
+        uploadError = error;
+      } else {
+        // Native: Use base64 string
+        if (!asset.base64) {
+          throw new Error("Image base64 data is missing on native platform.");
+        }
+        const bytes = base64ToUint8Array(asset.base64);
+        const { data, error } = await supabase.storage
+          .from("listings")
+          .upload(fileName, bytes, { contentType, upsert: false });
+        if (data) uploadPath = data.path;
+        uploadError = error;
+      }
+
+      if (uploadError) {
+        throw uploadError;
+      }
+
+      if (!uploadPath) {
+        throw new Error("File uploaded but no path was returned.");
       }
 
       const { data: urlData } = supabase.storage
         .from("listings")
-        .getPublicUrl(data.path);
+        .getPublicUrl(uploadPath);
 
       setEquipmentForm({ ...equipmentForm, image: urlData.publicUrl });
     } catch (error) {

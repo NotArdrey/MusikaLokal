@@ -3441,6 +3441,45 @@ export default function EditStudioScreen() {
         return;
       }
 
+      if (Platform.OS === 'web') {
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = 'image/*';
+        input.onchange = async (e: any) => {
+          const file = e.target.files?.[0];
+          if (!file) return;
+
+          setUploadingEquipmentImage(true);
+          try {
+            const fileExt = file.name.split('.').pop()?.toLowerCase() || 'jpg';
+            const fileName = `${session.user.id}/equipment/${Date.now()}_${Math.random().toString(36).substring(7)}.${fileExt}`;
+
+            const { data, error } = await supabase.storage
+              .from('listings')
+              .upload(fileName, file, {
+                contentType: file.type || `image/${fileExt}`,
+                upsert: false,
+              });
+
+            if (error) throw error;
+
+            const { data: urlData } = supabase.storage
+              .from('listings')
+              .getPublicUrl(data.path);
+
+            setEquipmentForm({ ...equipmentForm, image: urlData.publicUrl });
+          } catch (error) {
+            console.error('Error uploading equipment image on web:', error);
+            showAlert('warning', 'Upload Failed', 'Failed to upload image. Please try again.');
+          } finally {
+            setUploadingEquipmentImage(false);
+          }
+        };
+        input.click();
+        return;
+      }
+
+      // Native platform logic
       const permissionResult =
         await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (!permissionResult.granted) {
@@ -3453,7 +3492,7 @@ export default function EditStudioScreen() {
       }
 
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: "images",
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
         allowsEditing: true,
         aspect: [1, 1],
         quality: 0.8,
