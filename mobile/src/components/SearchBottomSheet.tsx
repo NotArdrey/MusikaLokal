@@ -1092,7 +1092,10 @@ const styles = StyleSheet.create({
     flex: 1,
     fontFamily: "Poppins_500Medium",
     fontSize: 15,
+    lineHeight: 20,
+    height: 24,
     padding: 0,
+    includeFontPadding: false,
     textAlignVertical: "center",
   },
   filterButton: {
