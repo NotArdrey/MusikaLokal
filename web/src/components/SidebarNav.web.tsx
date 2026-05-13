@@ -98,6 +98,20 @@ const getBrowserSearch = () => {
     return window.location.search;
 };
 
+const normalizeNotificationsPayload = (payload: unknown): TopbarNotification[] => {
+    if (Array.isArray(payload)) {
+        return payload as TopbarNotification[];
+    }
+
+    if (payload && typeof payload === 'object') {
+        const source = payload as Record<string, unknown>;
+        if (Array.isArray(source.items)) return source.items as TopbarNotification[];
+        if (Array.isArray(source.data)) return source.data as TopbarNotification[];
+    }
+
+    return [];
+};
+
 export default function SidebarNav() {
     const { colors, isDark } = useTheme();
     const { isAdmin, isGuest, roleResolved, session, setGuestMode, userRole } = useAuth();
@@ -272,9 +286,19 @@ export default function SidebarNav() {
 
             if (error) throw error;
 
-            const next = Array.isArray(data) ? data : [];
+            const next = normalizeNotificationsPayload(data);
             setNotifications(next);
-            setHasUnreadNotifications(next.some((n: TopbarNotification) => !n.read));
+
+            const unreadCount =
+                data && typeof data === 'object' && !Array.isArray(data)
+                    ? Number((data as { unreadCount?: number }).unreadCount ?? NaN)
+                    : NaN;
+
+            if (Number.isFinite(unreadCount)) {
+                setHasUnreadNotifications(unreadCount > 0);
+            } else {
+                setHasUnreadNotifications(next.some((n: TopbarNotification) => !n.read));
+            }
         } catch {
             setNotifications([]);
         } finally {

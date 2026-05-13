@@ -18,7 +18,7 @@ import {
     Platform,
 } from "react-native";
 import { supabase } from "../lib/supabase";
-import BookingDetailsSheet from "../src/components/BookingDetailsSheet";
+import BookingDetailsSheet, { BookingDetailsHandle } from "../src/components/BookingDetailsSheet";
 import CachedImage from "../src/components/CachedImage";
 import CustomAlert, { AlertType } from "../src/components/CustomAlert";
 import GuestSignInGate from "../src/components/GuestSignInGate";
@@ -484,8 +484,7 @@ export default function BookingsScreen() {
   const [modalVisible, setModalVisible] = useState(false);
   const [selectedItem, setSelectedItem] = useState<any>(null);
   const [cancellationReason, setCancellationReason] = useState("");
-  const bookingDetailsRef =
-    React.useRef<import("@gorhom/bottom-sheet").BottomSheetModal>(null);
+  const bookingDetailsRef = React.useRef<BookingDetailsHandle>(null);
   const { width } = useWindowDimensions();
   const isWebDesktop = Platform.OS === "web" && width >= 768;
   const pageBackground = isWebDesktop

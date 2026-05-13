@@ -1,11 +1,21 @@
 import { Ionicons } from "@expo/vector-icons";
 import { BottomSheetModal, BottomSheetScrollView } from "@gorhom/bottom-sheet";
 import { router } from "expo-router";
-import React, { forwardRef, useEffect, useMemo, useState } from "react";
+import React, {
+  forwardRef,
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
     ActivityIndicator,
     Dimensions,
     Linking,
+    Modal as RNModal,
+    Platform,
+    ScrollView,
     StyleSheet,
     Text,
     TouchableOpacity,
@@ -52,11 +62,19 @@ interface BookingDetailsSheetProps {
   onLeaveReview?: (booking: any) => void;
 }
 
+export type BookingDetailsHandle = {
+  present: () => void;
+  dismiss: () => void;
+};
+
 const BookingDetailsSheet = forwardRef<
-  BottomSheetModal,
+  BookingDetailsHandle,
   BookingDetailsSheetProps
 >(({ booking, readOnly = false, onCancel, onConfirm, onLeaveReview }, ref) => {
   const { colors, isDark } = useTheme();
+  const bottomSheetRef = useRef<BottomSheetModal>(null);
+  const [modalVisible, setModalVisible] = useState(false);
+  const isWeb = Platform.OS === "web";
   const [loading, setLoading] = useState(false);
   const [studioDetails, setStudioDetails] = useState<any>(null);
   const [dateOverride, setDateOverride] = useState<any>(null);
@@ -64,6 +82,39 @@ const BookingDetailsSheet = forwardRef<
   const [mediaViewerTitle, setMediaViewerTitle] = useState("Media");
 
   const snapPoints = useMemo(() => ["85%"], []);
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      present: () => {
+        if (isWeb) {
+          setModalVisible(true);
+          return;
+        }
+        bottomSheetRef.current?.present();
+      },
+      dismiss: () => {
+        if (isWeb) {
+          setModalVisible(false);
+          return;
+        }
+        bottomSheetRef.current?.dismiss();
+      },
+    }),
+    [isWeb],
+  );
+
+  const handleClose = () => {
+    if (isWeb) {
+      setModalVisible(false);
+      return;
+    }
+    bottomSheetRef.current?.dismiss();
+  };
+
+  const DetailsScroll = (isWeb
+    ? ScrollView
+    : BottomSheetScrollView) as React.ComponentType<any>;
 
   const openMediaOrExternal = async (url: string, label: string) => {
     const normalizedUrl = String(url || "").trim();
@@ -363,16 +414,9 @@ const BookingDetailsSheet = forwardRef<
   const baseRateValue = Number(booking.base_rate || 0);
   const normalizedTotalCost = Number(booking.total_cost || 0);
 
-  return (
-    <BottomSheetModal
-      ref={ref}
-      index={0}
-      snapPoints={snapPoints}
-      backgroundStyle={{ backgroundColor: colors.background }}
-      handleIndicatorStyle={{ backgroundColor: isDark ? "#4B5563" : "#E5E7EB" }}
-    >
-      <BottomSheetScrollView style={{ flex: 1 }}>
-        <View style={styles.container}>
+  const detailsContent = (
+    <DetailsScroll style={{ flex: 1 }}>
+      <View style={styles.container}>
           {/* Header */}
           <View style={styles.header}>
             <View style={styles.headerTop}>
@@ -380,7 +424,7 @@ const BookingDetailsSheet = forwardRef<
                 {isGig ? "Application Details" : "Booking Details"}
               </Text>
               <TouchableOpacity activeOpacity={1}
-                onPress={() => (ref as any)?.current?.dismiss()}
+                onPress={handleClose}
                 style={[
                   styles.closeBtn,
                   { backgroundColor: isDark ? "#374151" : "#F3F4F6" },
@@ -1366,7 +1410,7 @@ const BookingDetailsSheet = forwardRef<
                       styles.cancelBtn,
                       { borderColor: colors.border },
                     ]}
-                    onPress={() => (ref as any)?.current?.dismiss()}
+                    onPress={handleClose}
                   >
                     <Ionicons
                       name="close-circle-outline"
@@ -1382,7 +1426,7 @@ const BookingDetailsSheet = forwardRef<
                     style={[styles.actionBtn, styles.confirmBtn]}
                     onPress={() => {
                       onConfirm(booking.id);
-                      (ref as any)?.current?.dismiss();
+                      handleClose();
                     }}
                   >
                     <Ionicons
@@ -1408,7 +1452,7 @@ const BookingDetailsSheet = forwardRef<
                       } else {
                         router.push("/submit_review" as any);
                       }
-                      (ref as any)?.current?.dismiss();
+                      handleClose();
                     }}
                   >
                     <Ionicons name="star-outline" size={20} color="#FFFFFF" />
@@ -1428,7 +1472,7 @@ const BookingDetailsSheet = forwardRef<
                       ]}
                       onPress={() => {
                         onCancel(booking.id);
-                        (ref as any)?.current?.dismiss();
+                        handleClose();
                       }}
                     >
                       <Ionicons
@@ -1445,15 +1489,67 @@ const BookingDetailsSheet = forwardRef<
             </>
           )}
       </View>
-    </BottomSheetScrollView>
-    <InAppMediaViewer
-      visible={!!mediaViewerUrl}
-      uri={mediaViewerUrl}
-      title={mediaViewerTitle}
-      onClose={() => setMediaViewerUrl(null)}
-    />
-  </BottomSheetModal>
-);
+    </DetailsScroll>
+  );
+
+  if (isWeb) {
+    return (
+      <>
+        <RNModal
+          visible={modalVisible}
+          transparent
+          statusBarTranslucent
+          navigationBarTranslucent
+          presentationStyle="overFullScreen"
+          hardwareAccelerated
+          animationType="fade"
+          onRequestClose={handleClose}
+        >
+          <View style={styles.modalOverlay}>
+            <TouchableOpacity
+              activeOpacity={1}
+              onPress={handleClose}
+              style={[
+                styles.modalBackdrop,
+                {
+                  backgroundColor: isDark
+                    ? "rgba(15, 23, 42, 0.72)"
+                    : "rgba(15, 23, 42, 0.45)",
+                },
+              ]}
+            />
+            <View style={[styles.modalCard, { backgroundColor: colors.background }]}>
+              {detailsContent}
+            </View>
+          </View>
+        </RNModal>
+        <InAppMediaViewer
+          visible={!!mediaViewerUrl}
+          uri={mediaViewerUrl}
+          title={mediaViewerTitle}
+          onClose={() => setMediaViewerUrl(null)}
+        />
+      </>
+    );
+  }
+
+  return (
+    <BottomSheetModal
+      ref={bottomSheetRef}
+      index={0}
+      snapPoints={snapPoints}
+      backgroundStyle={{ backgroundColor: colors.background }}
+      handleIndicatorStyle={{ backgroundColor: isDark ? "#4B5563" : "#E5E7EB" }}
+    >
+      {detailsContent}
+      <InAppMediaViewer
+        visible={!!mediaViewerUrl}
+        uri={mediaViewerUrl}
+        title={mediaViewerTitle}
+        onClose={() => setMediaViewerUrl(null)}
+      />
+    </BottomSheetModal>
+  );
 });
 
 BookingDetailsSheet.displayName = "BookingDetailsSheet";
@@ -1623,6 +1719,27 @@ const styles = StyleSheet.create({
     gap: moderateScale(12),
     marginTop: moderateScale(8),
     marginBottom: moderateScale(24),
+  },
+  modalOverlay: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    padding: scale(16),
+  },
+  modalBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  modalCard: {
+    width: "100%",
+    maxWidth: 980,
+    maxHeight: "90%",
+    borderRadius: moderateScale(20),
+    overflow: "hidden",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 12 },
+    shadowOpacity: 0.25,
+    shadowRadius: 24,
+    elevation: 8,
   },
   actionBtn: {
     flexDirection: "row",

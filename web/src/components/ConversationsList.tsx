@@ -21,12 +21,14 @@ interface ConversationsListProps {
     currentUserId: string;
     onSelectConversation: (conversation: Conversation) => void;
     onNewConversation?: () => void;
+    selectedConversationId?: string | null;
 }
 
 const ConversationsList: React.FC<ConversationsListProps> = ({
     currentUserId,
     onSelectConversation,
     onNewConversation,
+    selectedConversationId = null,
 }) => {
     const { colors, isDark } = useTheme();
     const insets = useSafeAreaInsets();
@@ -97,6 +99,7 @@ const ConversationsList: React.FC<ConversationsListProps> = ({
         const isLastMessageFromMe = !!lastMessage && lastMessage.sender_id === currentUserId;
         const isLastMessageSeen = !isGroup && isLastMessageFromMe && !!lastMessage?.read_at;
         const showOutgoingStatus = !hasUnread && isLastMessageFromMe;
+        const isSelected = selectedConversationId === item.id;
 
         // Determine display info based on chat type
         const displayName = isGroup
@@ -126,7 +129,8 @@ const ConversationsList: React.FC<ConversationsListProps> = ({
             <TouchableOpacity
                 style={[
                     styles.conversationItem,
-                    hasUnread && { backgroundColor: isDark ? 'rgba(99,102,241,0.06)' : 'rgba(99,102,241,0.04)' },
+                    { backgroundColor: isSelected ? (isDark ? 'rgba(255,255,255,0.1)' : '#F0F2F5') : 'transparent' },
+                    hasUnread && !isSelected && { backgroundColor: isDark ? 'rgba(0,132,255,0.12)' : 'rgba(0,132,255,0.08)' },
                 ]}
                 onPress={() => onSelectConversation(item)}
                 onLongPress={() => {
@@ -240,18 +244,18 @@ const ConversationsList: React.FC<ConversationsListProps> = ({
                         onPress={() => setShowNewMessageModal(true)}
                         activeOpacity={1}
                     >
-                        <Ionicons name="create-outline" size={26} color={colors.primary} />
+                        <Ionicons name="create" size={20} color="#0084FF" />
                     </TouchableOpacity>
                 </View>
 
                 {/* Search Bar */}
                 <TouchableOpacity
-                    style={[styles.searchBar, { backgroundColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.05)' }]}
+                    style={[styles.searchBar, { backgroundColor: isDark ? 'rgba(255,255,255,0.08)' : '#F0F2F5' }]}
                     onPress={() => setShowNewMessageModal(true)}
                     activeOpacity={1}
                 >
                     <Ionicons name="search" size={17} color={colors.textSecondary} style={{ marginRight: 8 }} />
-                    <Text style={{ color: colors.textSecondary, fontSize: 15 }}>Search or start new chat…</Text>
+                    <Text style={{ color: colors.textSecondary, fontSize: 15 }}>Search Messenger</Text>
                 </TouchableOpacity>
             </View>
 
@@ -311,9 +315,8 @@ const styles = StyleSheet.create({
         flex: 1,
     },
     header: {
-        paddingHorizontal: 20,
-        paddingBottom: 12,
-        borderBottomWidth: StyleSheet.hairlineWidth,
+        paddingHorizontal: 14,
+        paddingBottom: 10,
     },
     headerTopRow: {
         flexDirection: 'row',
@@ -322,12 +325,17 @@ const styles = StyleSheet.create({
         marginBottom: 12,
     },
     headerTitle: {
-        fontSize: 28,
+        fontSize: 24,
         fontWeight: '800',
-        letterSpacing: -0.5,
+        letterSpacing: 0,
     },
     composeBtn: {
-        padding: 4,
+        width: 36,
+        height: 36,
+        borderRadius: 18,
+        justifyContent: 'center',
+        alignItems: 'center',
+        backgroundColor: 'rgba(0,132,255,0.12)',
     },
     searchBar: {
         flexDirection: 'row',
@@ -368,27 +376,30 @@ const styles = StyleSheet.create({
         paddingHorizontal: 24,
     },
     list: {
-        paddingTop: 6,
+        paddingTop: 4,
+        paddingHorizontal: 8,
     },
     conversationItem: {
         flexDirection: 'row',
         alignItems: 'center',
-        paddingHorizontal: 16,
-        paddingVertical: 12,
+        paddingHorizontal: 8,
+        paddingVertical: 9,
+        borderRadius: 12,
+        marginVertical: 1,
     },
     avatarContainer: {
         position: 'relative',
         marginRight: 12,
     },
     avatar: {
-        width: 56,
-        height: 56,
-        borderRadius: 28,
+        width: 50,
+        height: 50,
+        borderRadius: 25,
     },
     groupAvatar: {
-        width: 56,
-        height: 56,
-        borderRadius: 28,
+        width: 50,
+        height: 50,
+        borderRadius: 25,
         justifyContent: 'center',
         alignItems: 'center',
     },
@@ -459,8 +470,7 @@ const styles = StyleSheet.create({
         fontWeight: '700',
     },
     separator: {
-        height: StyleSheet.hairlineWidth,
-        marginLeft: 84,
+        height: 0,
     },
     newMessageButton: {
         flexDirection: 'row',

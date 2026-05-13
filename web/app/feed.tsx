@@ -1,7 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect } from "@react-navigation/native";
 import { router } from "expo-router";
-import React, { useCallback, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
@@ -27,6 +27,7 @@ import SmoothTabTransition from "../src/components/SmoothTabTransition";
 import { useAuth } from "../src/context/AuthContext";
 import { emitToast } from "../src/events/toastBus";
 import { useTheme } from "../src/context/ThemeContext";
+import { useRadioPlayer } from "../src/context/RadioPlayerContext";
 
 type FeedTab = "for_you" | "following";
 
@@ -69,6 +70,97 @@ type LiveRadioCardProps = {
   mutedTextColor: string;
 };
 
+const DEMO_RADIO_STATION = {
+  id: "musikalokal-demo-radio",
+  name: "MusikaLokal Radio",
+  description: "Stream local music and artist features",
+  is_active: true,
+  is_featured: true,
+  __queueReady: true,
+  __isDemoStation: true,
+  created_at: "2026-01-01T00:00:00.000Z",
+  updated_at: "2026-01-01T00:00:00.000Z",
+  live_anchor_at: "2026-01-01T00:00:00.000Z",
+  rotation_interval_minutes: 15,
+  slot_count: 1,
+  creator: { full_name: "MusikaLokal" },
+  live_slots: [
+    {
+      id: "musikalokal-demo-slot",
+      station_id: "musikalokal-demo-radio",
+      position: 0,
+      label: "Artist spotlight",
+      playlist: {
+        id: "musikalokal-demo-playlist",
+        title: "Artist spotlight",
+        track_count: 3,
+        items: [
+          {
+            id: "musikalokal-demo-sky-high",
+            title: "SoundHelix Song 1",
+            artist_name: "SoundHelix",
+            audio_url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3",
+          },
+          {
+            id: "musikalokal-demo-nekozilla",
+            title: "SoundHelix Song 2",
+            artist_name: "SoundHelix",
+            audio_url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3",
+          },
+          {
+            id: "musikalokal-demo-on-and-on",
+            title: "SoundHelix Song 3",
+            artist_name: "SoundHelix",
+            audio_url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-3.mp3",
+          },
+        ],
+      },
+    },
+  ],
+};
+
+const getStationSlots = (station: any) => {
+  if (Array.isArray(station?.live_slots) && station.live_slots.length > 0) return station.live_slots;
+  return Array.isArray(station?.slots) ? station.slots : [];
+};
+
+const getStationSlotCount = (station: any) =>
+  Number(station?.slot_count ?? station?.slot_playlist_ids?.length ?? getStationSlots(station).length ?? 0);
+
+const getStationTrackCount = (station: any) =>
+  getStationSlots(station).reduce((total: number, slot: any) => {
+    const items = Array.isArray(slot?.playlist?.items) ? slot.playlist.items : [];
+    const playlistCount = Number(slot?.playlist?.track_count || 0);
+    return total + Math.max(items.length, playlistCount);
+  }, 0);
+
+const isLikelyBrowserAudioUrl = (value: unknown) => {
+  if (typeof value !== "string") return false;
+  const candidate = value.trim();
+  if (!candidate) return false;
+  if (/^data:audio\//i.test(candidate)) return true;
+  if (candidate.startsWith("/storage/v1/") || candidate.includes("/storage/v1/object/")) return true;
+  return /\.(mp3|m4a|aac|wav|ogg|oga|opus|webm)(?:[?#].*)?$/i.test(candidate);
+};
+
+const getStationPlayableTrackCount = (station: any) =>
+  getStationSlots(station).reduce((total: number, slot: any) => {
+    const items = Array.isArray(slot?.playlist?.items) ? slot.playlist.items : [];
+    return total + items.filter((item: any) => (
+      isLikelyBrowserAudioUrl(item?.audio_url)
+    ) || (
+      typeof item?.teaser?.storage_path === "string" && item.teaser.storage_path.trim().length > 0
+    )).length;
+  }, 0);
+
+const getStationNowPlayingTitle = (station: any, slotIndex = 0) => {
+  const slots = getStationSlots(station);
+  const slot = slots[slotIndex] || slots[0] || null;
+  const firstItem = Array.isArray(slot?.playlist?.items) ? slot.playlist.items[0] : null;
+
+  return firstItem?.title || slot?.playlist?.title || slot?.label || "Local artist spotlight";
+};
+
 const LiveRadioCard = React.memo(function LiveRadioCard({
   borderColor,
   cardColor,
@@ -77,11 +169,131 @@ const LiveRadioCard = React.memo(function LiveRadioCard({
   textColor,
   mutedTextColor,
 }: LiveRadioCardProps) {
-  const [isPlayingPreview, setIsPlayingPreview] = useState(false);
+  const {
+    activeStation,
+    currentSlotIndex,
+    currentTrack,
+    isPlaying,
+    loadingStationId,
+    togglePlayPause,
+    tuneIn,
+  } = useRadioPlayer();
+  const [featuredStation, setFeaturedStation] = useState<any | null>(null);
+  const [loadingStation, setLoadingStation] = useState(true);
 
-  const togglePreview = useCallback(() => {
-    setIsPlayingPreview((current) => !current);
+  useEffect(() => {
+    let cancelled = false;
+
+    const fetchLiveStation = async () => {
+      setLoadingStation(true);
+
+      try {
+        const fetchStations = async (featuredOnly: boolean) => {
+          const { data, error } = await supabase.functions.invoke("manage-playlists", {
+            body: {
+              action: "browse_stations",
+              featured_only: featuredOnly,
+              include_items: true,
+              limit: 1,
+            },
+          });
+
+          if (error) throw error;
+          return Array.isArray(data?.data) ? data.data : [];
+        };
+
+        const featuredStations = await fetchStations(true);
+        const stations = featuredStations.length > 0 ? featuredStations : await fetchStations(false);
+
+        if (!cancelled) {
+          setFeaturedStation(stations[0] || null);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          console.warn("Live radio station fetch error:", error);
+          setFeaturedStation(null);
+        }
+      } finally {
+        if (!cancelled) setLoadingStation(false);
+      }
+    };
+
+    void fetchLiveStation();
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
+
+  const liveFeaturedStation = featuredStation && getStationPlayableTrackCount(featuredStation) > 0
+    ? featuredStation
+    : null;
+  const displayStation = activeStation || liveFeaturedStation || DEMO_RADIO_STATION;
+  const stationSlotCount = getStationSlotCount(displayStation);
+  const stationTrackCount = getStationTrackCount(displayStation);
+  const isCurrentStation = Boolean(displayStation?.id && activeStation?.id && displayStation.id === activeStation.id);
+  const isTuneInLoading = Boolean(displayStation?.id && loadingStationId === displayStation.id);
+  const canTuneIn = Boolean(displayStation?.id && displayStation?.is_active !== false && stationSlotCount > 0);
+  const stationName = typeof displayStation?.name === "string" && displayStation.name.trim()
+    ? displayStation.name.trim()
+    : "MusikaLokal Radio";
+  const stationSubtitle = typeof displayStation?.description === "string" && displayStation.description.trim()
+    ? displayStation.description.trim()
+    : "Stream local music and artist features";
+  const nowPlayingTitle = isCurrentStation
+    ? currentTrack?.title || getStationNowPlayingTitle(displayStation, currentSlotIndex)
+    : getStationNowPlayingTitle(displayStation, 0);
+  const rotationSummary = stationTrackCount > 0
+    ? `${stationTrackCount} track${stationTrackCount === 1 ? "" : "s"}`
+    : stationSlotCount > 0
+      ? `${stationSlotCount} playlist${stationSlotCount === 1 ? "" : "s"}`
+      : "-- listeners";
+  const playButtonLabel = loadingStation || isTuneInLoading
+    ? "Loading"
+    : !canTuneIn
+      ? "Offline"
+      : isCurrentStation && isPlaying
+        ? "Pause"
+        : isCurrentStation
+          ? "Resume"
+          : "Play";
+  const playIcon = isCurrentStation && isPlaying ? "pause" : "play";
+  const badgeLabel = loadingStation ? "..." : canTuneIn ? "LIVE" : "OFF";
+
+  const handlePlayPress = useCallback(async () => {
+    if (!displayStation || loadingStation || isTuneInLoading) return;
+
+    if (!canTuneIn) {
+      emitToast({
+        dedupeKey: "live-radio-offline",
+        type: "info",
+        title: "Station offline",
+        message: "This station needs at least one playlist on air before it can play.",
+      });
+      return;
+    }
+
+    try {
+      if (isCurrentStation) {
+        await togglePlayPause();
+        return;
+      }
+
+      await tuneIn({
+        ...displayStation,
+        __queueReady: displayStation.__queueReady === true,
+      });
+    } catch (error: any) {
+      emitToast({
+        dedupeKey: "live-radio-unavailable",
+        type: "error",
+        title: "Radio unavailable",
+        message: /no supported sources/i.test(error?.message || "")
+          ? "No playable audio URL is available for this station."
+          : error?.message || "Unable to start this station right now.",
+      });
+    }
+  }, [canTuneIn, displayStation, isCurrentStation, isTuneInLoading, loadingStation, togglePlayPause, tuneIn]);
 
   return (
     <View
@@ -102,17 +314,17 @@ const LiveRadioCard = React.memo(function LiveRadioCard({
           <Text style={[styles.liveRadioTitle, { color: textColor }]} numberOfLines={1}>
             Live Radio
           </Text>
-          <View style={styles.liveRadioBadge}>
+          <View style={[styles.liveRadioBadge, !canTuneIn && styles.liveRadioBadgeMuted]}>
             <View style={styles.liveRadioBadgeDot} />
-            <Text style={styles.liveRadioBadgeText}>LIVE</Text>
+            <Text style={styles.liveRadioBadgeText}>{badgeLabel}</Text>
           </View>
         </View>
 
         <Text style={[styles.liveRadioStation, { color: textColor }]} numberOfLines={1}>
-          MusikaloKal Radio
+          {loadingStation ? "Finding live stations..." : stationName}
         </Text>
         <Text style={[styles.liveRadioSubtitle, { color: mutedTextColor }]} numberOfLines={2}>
-          Stream local music and artist features
+          {stationSubtitle}
         </Text>
 
         <View style={styles.liveRadioMetaRow}>
@@ -121,13 +333,13 @@ const LiveRadioCard = React.memo(function LiveRadioCard({
               Now playing
             </Text>
             <Text style={[styles.liveRadioMetaValue, { color: textColor }]} numberOfLines={1}>
-              Local artist spotlight
+              {loadingStation ? "Loading rotation" : nowPlayingTitle}
             </Text>
           </View>
           <View style={styles.liveRadioListeners}>
-            <Ionicons name="headset-outline" size={14} color={mutedTextColor} />
+            <Ionicons name={stationTrackCount > 0 ? "musical-notes-outline" : "headset-outline"} size={14} color={mutedTextColor} />
             <Text style={[styles.liveRadioListenerText, { color: mutedTextColor }]} numberOfLines={1}>
-              -- listeners
+              {rotationSummary}
             </Text>
           </View>
         </View>
@@ -136,12 +348,23 @@ const LiveRadioCard = React.memo(function LiveRadioCard({
       <TouchableOpacity
         activeOpacity={0.78}
         accessibilityRole="button"
-        accessibilityLabel={isPlayingPreview ? "Pause Live Radio" : "Play Live Radio"}
-        onPress={togglePreview}
-        style={[styles.liveRadioPlayButton, { backgroundColor: primaryColor }]}
+        accessibilityLabel={`${playButtonLabel} Live Radio`}
+        disabled={loadingStation || isTuneInLoading}
+        onPress={handlePlayPress}
+        style={[
+          styles.liveRadioPlayButton,
+          {
+            backgroundColor: canTuneIn ? primaryColor : (isDark ? "#334155" : "#CBD5E1"),
+            opacity: loadingStation || isTuneInLoading ? 0.8 : 1,
+          },
+        ]}
       >
-        <Ionicons name={isPlayingPreview ? "pause" : "play"} size={16} color="#FFFFFF" />
-        <Text style={styles.liveRadioPlayText}>{isPlayingPreview ? "Pause" : "Play"}</Text>
+        {loadingStation || isTuneInLoading ? (
+          <ActivityIndicator size="small" color="#FFFFFF" />
+        ) : (
+          <Ionicons name={playIcon} size={16} color="#FFFFFF" />
+        )}
+        <Text style={styles.liveRadioPlayText}>{playButtonLabel}</Text>
       </TouchableOpacity>
     </View>
   );
@@ -1311,6 +1534,9 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 4,
+  },
+  liveRadioBadgeMuted: {
+    backgroundColor: "#64748B",
   },
   liveRadioBadgeDot: {
     width: 5,

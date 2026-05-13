@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
 import React, { useState } from 'react';
-import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { KeyboardAvoidingView, Modal as RNModal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { supabase } from '../lib/supabase';
 import CustomAlert, { AlertType } from '../src/components/CustomAlert';
 import Header from '../src/components/header';
@@ -13,6 +13,7 @@ import { useTheme } from '../src/context/ThemeContext';
 export default function SubmitReviewScreen() {
   const { colors, isDark } = useTheme();
   const { userId, isAuthenticated } = useRequireAuth();
+  const isWeb = Platform.OS === 'web';
   const params = useLocalSearchParams<{
     studioId?: string;
     gigId?: string;
@@ -122,82 +123,135 @@ export default function SubmitReviewScreen() {
     }
   };
 
+  const reviewForm = (
+    <KeyboardAvoidingView
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      style={styles.formBody}
+    >
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={[
+          styles.scrollContent,
+          isWeb && styles.modalScrollContent,
+        ]}
+      >
+        <View style={styles.header}>
+          <Text style={[styles.title, { color: colors.text }]}>
+            {reviewTitle}
+          </Text>
+          <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
+            {reviewSubtitle}
+          </Text>
+        </View>
+
+        <View style={styles.starsContainer}>
+          {ratingOptions.map((item) => (
+            <TouchableOpacity
+              key={item}
+              onPress={() => setSelectedValue(item)}
+              activeOpacity={1}
+            >
+              <Ionicons
+                name={item <= selectedValue ? "star" : "star-outline"}
+                size={48}
+                color={item <= selectedValue ? "#F59E0B" : colors.border}
+              />
+            </TouchableOpacity>
+          ))}
+        </View>
+
+        <View>
+          <Text style={[styles.label, { color: colors.text }]}>Additional Comments</Text>
+          <TextInput
+            style={[
+              styles.textArea,
+              {
+                borderColor: isDark ? '#374151' : '#E5E7EB',
+                backgroundColor: colors.inputBackground,
+                color: colors.text,
+              },
+            ]}
+            placeholder="Share your experience..."
+            placeholderTextColor={colors.textSecondary}
+            multiline
+            value={feedback}
+            onChangeText={setFeedback}
+          />
+        </View>
+
+        <TouchableOpacity
+          style={[
+            styles.submitButton,
+            {
+              backgroundColor: selectedValue > 0 ? colors.primary : colors.border,
+              opacity: isSubmitDisabled ? 0.6 : 1,
+            },
+          ]}
+          onPress={() => {
+            if (selectedValue > 0 && !submitting) setModalVisible(true)
+          }}
+          disabled={isSubmitDisabled}
+          activeOpacity={isSubmitDisabled ? 1 : 0.78}
+        >
+          <Text
+            style={[
+              styles.submitButtonText,
+              { color: selectedValue > 0 ? "#FFFFFF" : colors.textSecondary },
+            ]}
+          >
+            {submitting ? 'Submitting...' : 'Submit Review'}
+          </Text>
+        </TouchableOpacity>
+      </ScrollView>
+    </KeyboardAvoidingView>
+  );
+
   return (
     <>
-      <View style={[styles.container, { backgroundColor: colors.background }]}>
-        <Header title="Submit Review" />
-
-        <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          style={styles.container}
+      {isWeb ? (
+        <RNModal
+          visible
+          transparent
+          statusBarTranslucent
+          navigationBarTranslucent
+          presentationStyle="overFullScreen"
+          hardwareAccelerated
+          animationType="fade"
+          onRequestClose={() => router.back()}
         >
-          <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
-            <View style={styles.header}>
-              <Text style={[styles.title, { color: colors.text }]}>
-                {reviewTitle}
-              </Text>
-              <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
-                {reviewSubtitle}
-              </Text>
-            </View>
-
-            <View style={styles.starsContainer}>
-              {ratingOptions.map((item) => (
-                <TouchableOpacity
-                  key={item}
-                  onPress={() => setSelectedValue(item)}
-                  activeOpacity={1}
-                >
-                  <Ionicons
-                    name={item <= selectedValue ? "star" : "star-outline"}
-                    size={48}
-                    color={item <= selectedValue ? "#F59E0B" : colors.border}
-                  />
-                </TouchableOpacity>
-              ))}
-            </View>
-
-            <View>
-              <Text style={[styles.label, { color: colors.text }]}>Additional Comments</Text>
-              <TextInput
-                style={[
-                  styles.textArea,
-                  {
-                    borderColor: isDark ? '#374151' : '#E5E7EB',
-                    backgroundColor: colors.inputBackground,
-                    color: colors.text
-                  }
-                ]}
-                placeholder="Share your experience..."
-                placeholderTextColor={colors.textSecondary}
-                multiline
-                value={feedback}
-                onChangeText={setFeedback}
-              />
-            </View>
-
+          <View style={styles.modalOverlay}>
             <TouchableOpacity
-              style={[
-                styles.submitButton,
-                { backgroundColor: selectedValue > 0 ? colors.primary : colors.border, opacity: isSubmitDisabled ? 0.6 : 1 }
-              ]}
-              onPress={() => {
-                if (selectedValue > 0 && !submitting) setModalVisible(true)
-              }}
-              disabled={isSubmitDisabled}
-              activeOpacity={isSubmitDisabled ? 1 : 0.78}
-            >
-              <Text style={[styles.submitButtonText, { color: selectedValue > 0 ? "#FFFFFF" : colors.textSecondary }]}>
-                {submitting ? 'Submitting...' : 'Submit Review'}
-              </Text>
-            </TouchableOpacity>
-          </ScrollView>
-        </KeyboardAvoidingView>
-
-        <View style={styles.navbar}>
-          <Navbar />
+              activeOpacity={1}
+              onPress={() => router.back()}
+              style={styles.modalBackdrop}
+            />
+            <View style={[styles.modalCard, { backgroundColor: colors.background }]}>
+              <View style={styles.modalHeader}>
+                <Text style={[styles.modalTitle, { color: colors.text }]}>Submit Review</Text>
+                <TouchableOpacity
+                  activeOpacity={1}
+                  onPress={() => router.back()}
+                  style={[
+                    styles.modalCloseButton,
+                    { backgroundColor: isDark ? '#374151' : '#F3F4F6' },
+                  ]}
+                >
+                  <Ionicons name="close" size={20} color={colors.text} />
+                </TouchableOpacity>
+              </View>
+              {reviewForm}
+            </View>
+          </View>
+        </RNModal>
+      ) : (
+        <View style={[styles.container, { backgroundColor: colors.background }]}>
+          <Header title="Submit Review" />
+          {reviewForm}
+          <View style={styles.navbar}>
+            <Navbar />
+          </View>
         </View>
-      </View >
+      )}
 
       <Modal
         visible={modalVisible}
@@ -231,10 +285,17 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
   },
+  formBody: {
+    flex: 1,
+  },
   scrollContent: {
     paddingBottom: 100,
     paddingHorizontal: 24,
     paddingTop: 20,
+  },
+  modalScrollContent: {
+    paddingTop: 0,
+    paddingBottom: 24,
   },
   header: {
     alignItems: 'center',
@@ -287,6 +348,47 @@ const styles = StyleSheet.create({
     color: 'white',
     fontSize: 16,
     fontFamily: 'Poppins_600SemiBold',
+  },
+  modalOverlay: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  modalBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(15, 23, 42, 0.6)',
+  },
+  modalCard: {
+    width: '100%',
+    maxWidth: 860,
+    maxHeight: '90%',
+    borderRadius: 20,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 16 },
+    shadowOpacity: 0.25,
+    shadowRadius: 30,
+    elevation: 8,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 24,
+    paddingTop: 22,
+    paddingBottom: 12,
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontFamily: 'Poppins_600SemiBold',
+  },
+  modalCloseButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   navbar: {
     position: 'absolute',
