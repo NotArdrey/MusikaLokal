@@ -1,0 +1,43 @@
+appId: ${APP_ID}
+---
+- launchApp
+- extendedWaitUntil:
+    visible: "MusikaLokal"
+    timeout: 120000
+- tapOn:
+    id: "auth-register-link"
+- extendedWaitUntil:
+    visible: "Create your account"
+    timeout: 120000
+- tapOn:
+    id: ${E2E_SIGNUP_ROLE_ID}
+- tapOn:
+    id: "signup-email-input"
+- inputText: ${E2E_SIGNUP_EMAIL}
+- tapOn:
+    id: "signup-password-input"
+- inputText: ${E2E_SIGNUP_PASSWORD}
+- pressKey: Back
+- tapOn:
+    id: "signup-confirm-password-input"
+- inputText: ${E2E_SIGNUP_PASSWORD}
+- pressKey: Back
+- tapOn:
+    id: "signup-document-select-button"
+- scrollUntilVisible:
+    element:
+      id: "signup-document-option-health_insurance"
+    direction: DOWN
+- tapOn:
+    id: "signup-document-option-health_insurance"
+- scrollUntilVisible:
+    element:
+      id: "signup-next-button"
+    direction: DOWN
+- tapOn:
+    id: "signup-next-button"
+- extendedWaitUntil:
+    visible:
+      id: "signup-manual-review-page"
+    timeout: 120000
+- assertVisible: "Manual ID review"

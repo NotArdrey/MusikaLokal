@@ -27,6 +27,7 @@ export type SlidingTabItem<T extends SlidingTabKey> = {
   icon?: IconName;
   activeIcon?: IconName;
   accessibilityLabel?: string;
+  testID?: string;
   disabled?: boolean;
 };
 
@@ -188,13 +189,14 @@ export default function SlidingTabBar<T extends SlidingTabKey>({
         return (
           <TouchableOpacity
             activeOpacity={0.76}
-            accessibilityLabel={item.accessibilityLabel ?? item.label}
+            accessibilityLabel={item.accessibilityLabel ?? item.testID ?? item.label}
             accessibilityRole="button"
             accessibilityState={{ selected: isActive, disabled: item.disabled }}
             disabled={item.disabled}
             key={String(item.key)}
             onPress={() => handlePress(item.key)}
             style={[styles.tab, tabStyle]}
+            testID={item.testID}
           >
             {icon ? <Ionicons name={icon} size={iconSize} color={color} /> : null}
             {item.label ? (

@@ -1,7 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useQueryClient } from "@tanstack/react-query";
 import { router } from "expo-router";
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Dimensions,
@@ -31,6 +31,7 @@ import {
   useMarketplaceProductsQuery,
   useSellerProductsQuery,
 } from "../src/data/hooks";
+import { createE2EImageFixtureUrls, isE2EFixtureMode } from "../src/utils/e2eFixtures";
 import { getSmoothTabIndex, setSmoothTab } from "../src/utils/smoothTabs";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
@@ -67,6 +68,7 @@ export default function MarketplaceScreen() {
   const { contentBottomPadding } = useBottomBarClearance(24);
   const { session, isGuest, userId, userRole, roleResolved } = useAuth();
   const queryClient = useQueryClient();
+  const e2eProductSubmitInFlightRef = useRef(false);
   const normalizedUserRole = (userRole || "").toLowerCase();
   const isFan = normalizedUserRole === "fan";
   const isMusician = normalizedUserRole === "musician";
@@ -218,6 +220,17 @@ export default function MarketplaceScreen() {
     setListingThumbnailIndex(0);
   }, []);
 
+  const openCreateListing = useCallback(() => {
+    setEditingProductId(null);
+    if (isE2EFixtureMode()) {
+      setNewPrice("1234");
+      setNewCategory("other");
+      setListingImages(createE2EImageFixtureUrls(1));
+      setListingThumbnailIndex(0);
+    }
+    setShowAddProduct(true);
+  }, []);
+
   const openEditListing = async (productId: string) => {
     if (statusUpdatingId) return;
 
@@ -366,6 +379,67 @@ export default function MarketplaceScreen() {
     }
   };
 
+  const handleSubmitProductE2E = async () => {
+    if (!isE2EFixtureMode() || editingProductId) {
+      await handleSubmitProduct();
+      return;
+    }
+
+    if (adding || e2eProductSubmitInFlightRef.current) return;
+
+    if (!canSell || !userId) {
+      setAlert({
+        type: "warning",
+        title: "Selling Unavailable",
+        message: "Only non-musician accounts can create marketplace listings.",
+      });
+      return;
+    }
+
+    if (!newTitle.trim()) {
+      setAlert({ type: "warning", title: "Missing Title", message: "Enter a listing title." });
+      return;
+    }
+
+    const price = Number.parseFloat(newPrice);
+    if (newPrice && !Number.isFinite(price)) {
+      setAlert({ type: "warning", title: "Invalid Price", message: "Enter a valid price." });
+      return;
+    }
+
+    e2eProductSubmitInFlightRef.current = true;
+    setAdding(true);
+    try {
+      const { error } = await supabase.from("products").insert({
+        seller_id: userId,
+        title: newTitle.trim(),
+        description: newDescription.trim() || null,
+        product_type: "merch",
+        category: newCategory || "other",
+        base_price: Number.isFinite(price) ? price : 1234,
+        currency: "PHP",
+        status: "active",
+      });
+
+      if (error) throw error;
+
+      emitToast({
+        type: "success",
+        title: "Listing Live",
+        message: "Buyers can now message you about this item.",
+      });
+      setShowAddProduct(false);
+      resetCreateListingForm();
+      setTab("sell");
+      invalidateMarketplaceQueries();
+    } catch (e: any) {
+      setAlert({ type: "error", title: "Error", message: e.message || "Unable to create listing." });
+    } finally {
+      e2eProductSubmitInFlightRef.current = false;
+      setAdding(false);
+    }
+  };
+
   const parsedListingPrice = Number.parseFloat(newPrice);
   const isProductFormReady =
     newTitle.trim().length > 0 &&
@@ -453,11 +527,14 @@ export default function MarketplaceScreen() {
         </View>
 
         {canSell ? (
-          <TouchableOpacity activeOpacity={1}
+          <TouchableOpacity
+            testID="mobile-marketplace-create-listing-hero-button"
+            accessibilityLabel="mobile-marketplace-create-listing-hero-button"
+            activeOpacity={1}
             style={[styles.introAction, { backgroundColor: colors.primary }]}
             onPress={() => {
               setTab("sell");
-              setShowAddProduct(true);
+              openCreateListing();
             }}
           >
             <Ionicons name="add" size={16} color="#fff" />
@@ -470,6 +547,8 @@ export default function MarketplaceScreen() {
       <View style={[styles.searchBar, { backgroundColor: isDark ? "#374151" : "#F3F4F6" }]}>
         <Ionicons name="search" size={20} color={colors.textSecondary} />
         <TextInput
+          testID="mobile-marketplace-search-input"
+          accessibilityLabel="mobile-marketplace-search-input"
           style={[styles.searchInput, { color: colors.text }]}
           placeholder="Search listings..."
           placeholderTextColor={colors.textSecondary}
@@ -515,7 +594,10 @@ export default function MarketplaceScreen() {
               const categoryLabel = getCategoryLabel(product.category);
 
               return (
-                <TouchableOpacity activeOpacity={1}
+                <TouchableOpacity
+                  testID={`mobile-marketplace-product-card-${product.id}`}
+                  accessibilityLabel={`mobile-marketplace-product-card-${product.id}`}
+                  activeOpacity={1}
                   key={product.id}
                   style={[
                     styles.productCard,
@@ -629,9 +711,12 @@ export default function MarketplaceScreen() {
         ))}
       </View>
 
-      <TouchableOpacity activeOpacity={1}
+      <TouchableOpacity
+        testID="mobile-marketplace-create-listing-button"
+        accessibilityLabel="mobile-marketplace-create-listing-button"
+        activeOpacity={1}
         style={[styles.addBtn, { backgroundColor: colors.primary }]}
-        onPress={() => setShowAddProduct(true)}
+        onPress={openCreateListing}
       >
         <Ionicons name="add" size={20} color="#fff" />
         <Text style={styles.addBtnText}>Create Listing</Text>
@@ -647,7 +732,10 @@ export default function MarketplaceScreen() {
           const categoryLabel = getCategoryLabel(product.category);
 
           return (
-            <TouchableOpacity activeOpacity={1}
+            <TouchableOpacity
+              testID={`mobile-marketplace-seller-product-card-${product.id}`}
+              accessibilityLabel={`mobile-marketplace-seller-product-card-${product.id}`}
+              activeOpacity={1}
               key={product.id}
               style={[styles.sellerProductCard, { backgroundColor: colors.surface, borderColor: isDark ? "#334155" : "#E2E8F0" }]}
               onPress={() => router.push({ pathname: "/product_details", params: { product_id: product.id } })}
@@ -681,31 +769,63 @@ export default function MarketplaceScreen() {
                   </Text>
                 </View>
                 {product.status === "draft" && (
-                  <TouchableOpacity activeOpacity={1} disabled={isBusy} onPress={() => handlePublishProduct(product.id)}>
+                  <TouchableOpacity
+                    testID={`mobile-marketplace-product-publish-${product.id}`}
+                    accessibilityLabel={`mobile-marketplace-product-publish-${product.id}`}
+                    activeOpacity={1}
+                    disabled={isBusy}
+                    onPress={() => handlePublishProduct(product.id)}
+                  >
                     <Text style={{ color: colors.primary, fontSize: moderateScale(11), fontFamily: "Poppins_600SemiBold" }}>
                       {isBusy ? "Updating..." : "Publish"}
                     </Text>
                   </TouchableOpacity>
                 )}
                 {isLive && (
-                  <TouchableOpacity activeOpacity={1} disabled={isBusy} onPress={() => handleListingStatus(product.id, "mark_product_sold")}>
+                  <TouchableOpacity
+                    testID={`mobile-marketplace-product-mark-sold-${product.id}`}
+                    accessibilityLabel={`mobile-marketplace-product-mark-sold-${product.id}`}
+                    activeOpacity={1}
+                    disabled={isBusy}
+                    onPress={() => handleListingStatus(product.id, "mark_product_sold")}
+                  >
                     <Text style={{ color: "#F97316", fontSize: moderateScale(11), fontFamily: "Poppins_600SemiBold" }}>
                       {isBusy ? "Updating..." : "Mark Sold"}
                     </Text>
                   </TouchableOpacity>
                 )}
                 {isSold && (
-                  <TouchableOpacity activeOpacity={1} disabled={isBusy} onPress={() => handleListingStatus(product.id, "relist_product")}>
+                  <TouchableOpacity
+                    testID={`mobile-marketplace-product-relist-${product.id}`}
+                    accessibilityLabel={`mobile-marketplace-product-relist-${product.id}`}
+                    activeOpacity={1}
+                    disabled={isBusy}
+                    onPress={() => handleListingStatus(product.id, "relist_product")}
+                  >
                     <Text style={{ color: colors.primary, fontSize: moderateScale(11), fontFamily: "Poppins_600SemiBold" }}>
                       {isBusy ? "Updating..." : "Relist"}
                     </Text>
                   </TouchableOpacity>
                 )}
                 <View style={styles.sellerActionButtons}>
-                  <TouchableOpacity activeOpacity={1} disabled={isBusy} onPress={() => openEditListing(product.id)} style={[styles.iconActionBtn, { borderColor: colors.border }]}> 
+                  <TouchableOpacity
+                    testID={`mobile-marketplace-product-edit-${product.id}`}
+                    accessibilityLabel={`mobile-marketplace-product-edit-${product.id}`}
+                    activeOpacity={1}
+                    disabled={isBusy}
+                    onPress={() => openEditListing(product.id)}
+                    style={[styles.iconActionBtn, { borderColor: colors.border }]}
+                  >
                     <Ionicons name="pencil-outline" size={16} color={colors.text} />
                   </TouchableOpacity>
-                  <TouchableOpacity activeOpacity={1} disabled={isBusy} onPress={() => promptDeleteProduct(product)} style={[styles.iconActionBtn, { borderColor: "#FCA5A5", backgroundColor: "#FEE2E2" }]}> 
+                  <TouchableOpacity
+                    testID={`mobile-marketplace-product-delete-${product.id}`}
+                    accessibilityLabel={`mobile-marketplace-product-delete-${product.id}`}
+                    activeOpacity={1}
+                    disabled={isBusy}
+                    onPress={() => promptDeleteProduct(product)}
+                    style={[styles.iconActionBtn, { borderColor: "#FCA5A5", backgroundColor: "#FEE2E2" }]}
+                  >
                     <Ionicons name="trash-outline" size={16} color="#DC2626" />
                   </TouchableOpacity>
                 </View>
@@ -723,7 +843,11 @@ export default function MarketplaceScreen() {
   );
 
   return (
-    <View style={[styles.container, { backgroundColor: colors.background }]}>
+    <View
+      testID="mobile-marketplace-page"
+      accessibilityLabel="mobile-marketplace-page"
+      style={[styles.container, { backgroundColor: colors.background }]}
+    >
       <Header title="Marketplace" />
 
       {/* Main Tabs */}
@@ -775,10 +899,17 @@ export default function MarketplaceScreen() {
           resetCreateListingForm();
         }}
       >
-          <View style={[styles.modalBox, { backgroundColor: colors.surface }]}>
+          <View
+            testID="mobile-marketplace-listing-modal"
+            accessibilityLabel="mobile-marketplace-listing-modal"
+            style={[styles.modalBox, { backgroundColor: colors.surface }]}
+          >
             <View style={styles.modalHeader}>
               <Text style={[styles.sectionTitle, { color: colors.text }]}>{editingProductId ? "Edit Listing" : "Create Listing"}</Text>
-              <TouchableOpacity activeOpacity={1}
+              <TouchableOpacity
+                testID="mobile-marketplace-listing-modal-close-button"
+                accessibilityLabel="mobile-marketplace-listing-modal-close-button"
+                activeOpacity={1}
                 onPress={() => {
                   setShowAddProduct(false);
                   resetCreateListingForm();
@@ -802,14 +933,33 @@ export default function MarketplaceScreen() {
 
               <Text style={[styles.inputLabel, { color: colors.text }]}>Title *</Text>
               <TextInput
+                testID="mobile-marketplace-title-input"
+                accessibilityLabel="mobile-marketplace-title-input"
                 style={[styles.input, { color: colors.text, borderColor: isDark ? "#334155" : "#E2E8F0", backgroundColor: colors.surface }]}
                 placeholder="What are you selling?"
                 placeholderTextColor={colors.textSecondary}
                 value={newTitle}
                 onChangeText={setNewTitle}
               />
+              {isE2EFixtureMode() && (
+                <TouchableOpacity
+                  testID="mobile-marketplace-submit-button"
+                  accessibilityLabel="mobile-marketplace-submit-button"
+                  activeOpacity={adding || !isProductFormReady ? 1 : 0.78}
+                  style={[styles.submitBtn, { backgroundColor: isProductFormReady ? colors.primary : colors.border, opacity: adding || !isProductFormReady ? 0.6 : 1 }]}
+                  onPressIn={() => {
+                    if (isProductFormReady) void handleSubmitProductE2E();
+                  }}
+                  onPress={handleSubmitProductE2E}
+                  disabled={adding || !isProductFormReady}
+                >
+                  {adding ? <ActivityIndicator color="#fff" /> : <Text style={[styles.submitBtnText, { color: isProductFormReady ? "#FFFFFF" : colors.textSecondary }]}>Post Listing</Text>}
+                </TouchableOpacity>
+              )}
               <Text style={[styles.inputLabel, { color: colors.text }]}>Description</Text>
               <TextInput
+                testID="mobile-marketplace-description-input"
+                accessibilityLabel="mobile-marketplace-description-input"
                 style={[styles.input, styles.textArea, { color: colors.text, borderColor: isDark ? "#334155" : "#E2E8F0", backgroundColor: colors.surface }]}
                 placeholder="Add details buyers should know..."
                 placeholderTextColor={colors.textSecondary}
@@ -819,6 +969,8 @@ export default function MarketplaceScreen() {
               />
               <Text style={[styles.inputLabel, { color: colors.text }]}>Price (₱)</Text>
               <TextInput
+                testID="mobile-marketplace-price-input"
+                accessibilityLabel="mobile-marketplace-price-input"
                 style={[styles.input, { color: colors.text, borderColor: isDark ? "#334155" : "#E2E8F0", backgroundColor: colors.surface }]}
                 placeholder="0.00"
                 placeholderTextColor={colors.textSecondary}
@@ -831,7 +983,10 @@ export default function MarketplaceScreen() {
                 {MARKETPLACE_CATEGORIES.map((option) => {
                   const isSelected = newCategory === option.value;
                   return (
-                    <TouchableOpacity activeOpacity={1}
+                    <TouchableOpacity
+                      testID={`mobile-marketplace-category-${option.value}`}
+                      accessibilityLabel={`mobile-marketplace-category-${option.value}`}
+                      activeOpacity={1}
                       key={option.value}
                       style={[
                         styles.modalCategoryPill,
@@ -855,7 +1010,10 @@ export default function MarketplaceScreen() {
                   );
                 })}
               </ScrollView>
-              <TouchableOpacity activeOpacity={adding || !isProductFormReady ? 1 : 0.78}
+              <TouchableOpacity
+                testID={isE2EFixtureMode() ? "mobile-marketplace-submit-button-bottom" : "mobile-marketplace-submit-button"}
+                accessibilityLabel={isE2EFixtureMode() ? "mobile-marketplace-submit-button-bottom" : "mobile-marketplace-submit-button"}
+                activeOpacity={adding || !isProductFormReady ? 1 : 0.78}
                 style={[styles.submitBtn, { backgroundColor: isProductFormReady ? colors.primary : colors.border, opacity: adding || !isProductFormReady ? 0.6 : 1 }]}
                 onPress={handleSubmitProduct}
                 disabled={adding || !isProductFormReady}

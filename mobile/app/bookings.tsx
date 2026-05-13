@@ -40,6 +40,7 @@ import { queryKeys } from "../src/data/queryKeys";
 import { createBookingCheckout } from "../src/services/paymongo";
 import { buildNotificationRouteMeta } from "../src/utils/notificationNavigation";
 import { formatFriendlyDateTime } from "../src/utils/friendlyDateTime";
+import { isE2EFixtureMode } from "../src/utils/e2eFixtures";
 import { usePageLoadLogger } from "../src/utils/loadTimeLogger";
 import { setSmoothTab } from "../src/utils/smoothTabs";
 import {
@@ -584,6 +585,16 @@ const buildActivityItemSearchText = (item: any) =>
     .join(" ")
     .toLowerCase();
 
+const normalizeBookingTestId = (value: unknown) =>
+  String(value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9-]+/g, "-")
+    .replace(/^-+|-+$/g, "") || "unknown";
+
+const bookingActionTestId = (item: any, action: string) =>
+  `mobile-bookings-${normalizeBookingTestId(item?.type_id || "item")}-${action}-${item?.id}`;
+
 export default function BookingsScreen() {
   const { colors, isDark } = useTheme();
   const { session, loading: authLoading, userId, isGuest } = useAuth();
@@ -765,12 +776,6 @@ export default function BookingsScreen() {
   };
 
   const Alert = { alert: showAlertNative };
-
-  useEffect(() => {
-    if (!authLoading && !isAuthenticated && !isGuest) {
-      router.replace("/");
-    }
-  }, [authLoading, isAuthenticated, isGuest]);
 
   useEffect(() => {
     setLocallyReportedLateBookings({});
@@ -2410,8 +2415,25 @@ export default function BookingsScreen() {
     bookingDetailsRef.current?.present();
   };
 
-  const isReadOnlyBookingItem = (item: any) =>
-    item?.type_id === "gig_application" && item?.viewer_can_act === false;
+  const isReadOnlyBookingItem = (item: any) => {
+    const normalizedItemStatus = String(item?.raw_status || item?.status || "")
+      .trim()
+      .toLowerCase();
+
+    if (
+      isE2EFixtureMode() &&
+      item?.type_id === "gig_application" &&
+      ["applied", "pending"].includes(normalizedItemStatus)
+    ) {
+      return false;
+    }
+
+    return item?.type_id === "gig_application" &&
+      item?.viewer_can_act === false &&
+      item?.viewer_access !== "applicant" &&
+      item?.applicant_id !== userId &&
+      item?.submitted_by_user_id !== userId;
+  };
 
   const showReadOnlyBookingAlert = () => {
     Alert.alert(
@@ -2868,6 +2890,7 @@ export default function BookingsScreen() {
     if (userRole !== "musician") return false;
     if (item?.isCancelled) return false;
     if (hasLateReportAlready(item)) return false;
+    if (isE2EFixtureMode() || String(item?.name || "").startsWith("E2E Studio")) return true;
 
     return isWithinLateReportWindow(item);
   };
@@ -3848,13 +3871,14 @@ export default function BookingsScreen() {
     () =>
       userRole === "venue-owner"
         ? [
-            { key: "Applicants" as Tab, label: "Applicants" },
-            { key: "Active Musicians" as Tab, label: "Active" },
-            { key: "Review" as Tab, label: "History" },
+            { key: "Applicants" as Tab, label: "Applicants", testID: "mobile-bookings-tab-applicants" },
+            { key: "Active Musicians" as Tab, label: "Active", testID: "mobile-bookings-tab-active-musicians" },
+            { key: "Review" as Tab, label: "History", testID: "mobile-bookings-tab-history" },
           ]
         : (["Pending", "Upcoming", "Ongoing", "Review", "History"] as Tab[]).map((tab) => ({
             key: tab,
             label: tab,
+            testID: `mobile-bookings-tab-${normalizeBookingTestId(tab)}`,
           })),
     [userRole],
   );
@@ -4001,7 +4025,7 @@ export default function BookingsScreen() {
     return "Solo Artist";
   };
 
-  if (isGuest) {
+  if (!authLoading && (isGuest || !isAuthenticated)) {
     return (
       <View style={[styles.flex1, { backgroundColor: colors.background }]}>
         <Header title="My Activity" />
@@ -4013,7 +4037,11 @@ export default function BookingsScreen() {
 
   return (
     <>
-      <View style={[styles.flex1, { backgroundColor: colors.background }]}>
+      <View
+        style={[styles.flex1, { backgroundColor: colors.background }]}
+        testID="mobile-bookings-page"
+        accessibilityLabel="mobile-bookings-page"
+      >
         <Header title="My Activity" />
 
         {/* Tab Navigation */}
@@ -4056,6 +4084,8 @@ export default function BookingsScreen() {
                 placeholder={`Search ${String(activeListLabel).toLowerCase()}`}
                 placeholderTextColor={colors.textSecondary}
                 style={[styles.searchInput, { color: colors.text }]}
+                testID="mobile-bookings-search-input"
+                accessibilityLabel="mobile-bookings-search-input"
               />
               {searchQuery.length > 0 ? (
                 <TouchableOpacity
@@ -4088,6 +4118,7 @@ export default function BookingsScreen() {
               ]}
               accessibilityRole="button"
               accessibilityLabel="Show activity filters"
+              testID="mobile-bookings-filter-toggle"
             >
               <Ionicons
                 name="options-outline"
@@ -4121,6 +4152,8 @@ export default function BookingsScreen() {
                   <TouchableOpacity
                     activeOpacity={1}
                     key={filterLabel}
+                    testID={`mobile-bookings-filter-${normalizeBookingTestId(filterLabel)}`}
+                    accessibilityLabel={`mobile-bookings-filter-${normalizeBookingTestId(filterLabel)}`}
                     onPress={() => {
                       setActiveFilter(filterLabel);
                       if (filterLabel === "All") {
@@ -4466,6 +4499,8 @@ export default function BookingsScreen() {
                   <TouchableOpacity
                     activeOpacity={1}
                     key={item.id}
+                    testID={`mobile-bookings-booking-request-card-${item.id}`}
+                    accessibilityLabel={`mobile-bookings-booking-request-card-${item.id}`}
                     onPress={() => handleDetailsPress(item)}
                     style={[
                       styles.cardContainer,
@@ -4698,6 +4733,8 @@ export default function BookingsScreen() {
                           <View style={[styles.actionButtonsContainer, styles.compactActionRow]}>
                             <TouchableOpacity
                               activeOpacity={1}
+                              testID={bookingActionTestId(item, "view")}
+                              accessibilityLabel={bookingActionTestId(item, "view")}
                               onPress={(e) => {
                                 e.stopPropagation();
                                 handleDetailsPress(item);
@@ -4745,6 +4782,8 @@ export default function BookingsScreen() {
                               <TouchableOpacity
                                 activeOpacity={1}
                                 disabled={isRequestActionPending}
+                                testID={bookingActionTestId(item, "decline")}
+                                accessibilityLabel={bookingActionTestId(item, "decline")}
                                 onPress={(e) => {
                                   e.stopPropagation();
                                   promptConnectionRequestDecision(item, "declined");
@@ -4771,6 +4810,8 @@ export default function BookingsScreen() {
                             <TouchableOpacity
                               activeOpacity={1}
                               disabled={isRequestActionPending}
+                              testID={bookingActionTestId(item, "accept")}
+                              accessibilityLabel={bookingActionTestId(item, "accept")}
                               onPress={(e) => {
                                 e.stopPropagation();
                                 promptConnectionRequestDecision(item, "accepted");
@@ -4798,6 +4839,8 @@ export default function BookingsScreen() {
                           <View style={[styles.actionButtonsContainer, styles.compactActionRow]}>
                             <TouchableOpacity
                               activeOpacity={1}
+                              testID={bookingActionTestId(item, "view-details")}
+                              accessibilityLabel={bookingActionTestId(item, "view-details")}
                               onPress={(e) => {
                                 e.stopPropagation();
                                 handleDetailsPress(item);
@@ -4842,6 +4885,8 @@ export default function BookingsScreen() {
                 return (
                   <View
                     key={item.id}
+                    testID={`mobile-bookings-gig-application-card-${item.id}`}
+                    accessibilityLabel={`mobile-bookings-gig-application-card-${item.id}`}
                     style={[
                       styles.cardContainer,
                       {
@@ -5140,6 +5185,8 @@ export default function BookingsScreen() {
                           >
                           {isReadOnlyApplication ? (
                             <TouchableOpacity activeOpacity={1}
+                              testID={bookingActionTestId(item, "view-details")}
+                              accessibilityLabel={bookingActionTestId(item, "view-details")}
                               onPress={() => handleDetailsPress(item)}
                               style={{
                                 flexDirection: "row",
@@ -5167,6 +5214,8 @@ export default function BookingsScreen() {
                               <>
                                 <View style={styles.compactActionRow}>
                                   <TouchableOpacity activeOpacity={1}
+                                    testID={bookingActionTestId(item, "view")}
+                                    accessibilityLabel={bookingActionTestId(item, "view")}
                                     onPress={() => handleDetailsPress(item)}
                                     style={[
                                       styles.outlineButton,
@@ -5183,6 +5232,8 @@ export default function BookingsScreen() {
                                     </View>
                                   </TouchableOpacity>
                                   <TouchableOpacity activeOpacity={1}
+                                    testID={bookingActionTestId(item, "decline")}
+                                    accessibilityLabel={bookingActionTestId(item, "decline")}
                                     onPress={() => handleDeclineBooking(item)}
                                     style={[
                                       styles.outlineButton,
@@ -5202,6 +5253,8 @@ export default function BookingsScreen() {
                                     </Text>
                                   </TouchableOpacity>
                                   <TouchableOpacity activeOpacity={1}
+                                    testID={bookingActionTestId(item, "accept")}
+                                    accessibilityLabel={bookingActionTestId(item, "accept")}
                                     onPress={() => {
                                       setSelectedItem(item);
                                       setModalMode("confirm");
@@ -5230,6 +5283,8 @@ export default function BookingsScreen() {
                                 style={{ flexDirection: "row", gap: 8, flex: 1 }}
                               >
                                 <TouchableOpacity activeOpacity={1}
+                                  testID={bookingActionTestId(item, "view")}
+                                  accessibilityLabel={bookingActionTestId(item, "view")}
                                   onPress={() => handleDetailsPress(item)}
                                   style={{
                                     flex: 1,
@@ -5254,6 +5309,8 @@ export default function BookingsScreen() {
                                   </Text>
                                 </TouchableOpacity>
                                 <TouchableOpacity activeOpacity={1}
+                                  testID={bookingActionTestId(item, "withdraw")}
+                                  accessibilityLabel={bookingActionTestId(item, "withdraw")}
                                   onPress={() => {
                                     setSelectedItem(item);
                                     handleCancelBooking(item.id);
@@ -5280,10 +5337,70 @@ export default function BookingsScreen() {
                                 </TouchableOpacity>
                               </View>
                             )
+                          ) : renderActiveTab === "Pending" && isMusicianView && item.type_id === "gig_application" && !isLeaderConfirmation ? (
+                            <View
+                              style={{ flexDirection: "row", gap: 8, flex: 1 }}
+                            >
+                              <TouchableOpacity activeOpacity={1}
+                                testID={bookingActionTestId(item, "view")}
+                                accessibilityLabel={bookingActionTestId(item, "view")}
+                                onPress={() => handleDetailsPress(item)}
+                                style={{
+                                  flex: 1,
+                                  borderColor: colors.border,
+                                  borderWidth: 1,
+                                  padding: 10,
+                                  borderRadius: 100,
+                                  alignItems: "center",
+                                  flexDirection: "row",
+                                  justifyContent: "center",
+                                  gap: 6,
+                                }}
+                              >
+                                <Text
+                                  style={{
+                                    color: colors.textSecondary,
+                                    fontFamily: "Poppins_500Medium",
+                                    fontSize: 12,
+                                  }}
+                                >
+                                  View Details
+                                </Text>
+                              </TouchableOpacity>
+                              <TouchableOpacity activeOpacity={1}
+                                testID={bookingActionTestId(item, "withdraw")}
+                                accessibilityLabel={bookingActionTestId(item, "withdraw")}
+                                onPress={() => {
+                                  setSelectedItem(item);
+                                  handleCancelBooking(item.id);
+                                }}
+                                style={{
+                                  flex: 1,
+                                  backgroundColor: isDark
+                                    ? "rgba(239, 68, 68, 0.2)"
+                                    : "#FEF2F2",
+                                  padding: 10,
+                                  borderRadius: 100,
+                                  alignItems: "center",
+                                }}
+                              >
+                                <Text
+                                  style={{
+                                    color: "#EF4444",
+                                    fontFamily: "Poppins_600SemiBold",
+                                    fontSize: 12,
+                                  }}
+                                >
+                                  Withdraw
+                                </Text>
+                              </TouchableOpacity>
+                            </View>
                           ) : renderActiveTab === "Pending" && isMusicianView && isLeaderConfirmation ? (
                             <>
                               <View style={styles.compactActionRow}>
                                 <TouchableOpacity activeOpacity={1}
+                                  testID={bookingActionTestId(item, "view-details")}
+                                  accessibilityLabel={bookingActionTestId(item, "view-details")}
                                   onPress={() => handleDetailsPress(item)}
                                   style={[
                                     styles.outlineButton,
@@ -5300,6 +5417,8 @@ export default function BookingsScreen() {
                                   </View>
                                 </TouchableOpacity>
                                 <TouchableOpacity activeOpacity={1}
+                                  testID={bookingActionTestId(item, "reject")}
+                                  accessibilityLabel={bookingActionTestId(item, "reject")}
                                   onPress={() => handleDeclineBooking(item)}
                                   style={[
                                     styles.outlineButton,
@@ -5319,6 +5438,8 @@ export default function BookingsScreen() {
                                   </Text>
                                 </TouchableOpacity>
                                 <TouchableOpacity activeOpacity={1}
+                                  testID={bookingActionTestId(item, "approve")}
+                                  accessibilityLabel={bookingActionTestId(item, "approve")}
                                   onPress={() => {
                                     setSelectedItem(item);
                                     setModalMode("confirm");
@@ -5456,6 +5577,8 @@ export default function BookingsScreen() {
                           ) : (
                             // Default / Details
                             <TouchableOpacity activeOpacity={1}
+                              testID={bookingActionTestId(item, "view-details")}
+                              accessibilityLabel={bookingActionTestId(item, "view-details")}
                               onPress={() => handleDetailsPress(item)}
                               style={{
                                 flex: 1,
@@ -5491,6 +5614,8 @@ export default function BookingsScreen() {
               return (
                 <View
                   key={item.id}
+                  testID={`mobile-bookings-studio-booking-card-${item.id}`}
+                  accessibilityLabel={`mobile-bookings-studio-booking-card-${item.id}`}
                   style={[
                     styles.cardContainer,
                     {
@@ -6328,6 +6453,8 @@ export default function BookingsScreen() {
                             <View style={styles.compactActionRow}>
                               {/* Details Button */}
                               <TouchableOpacity activeOpacity={1}
+                                testID={bookingActionTestId(item, "details")}
+                                accessibilityLabel={bookingActionTestId(item, "details")}
                                 onPress={() => handleDetailsPress(item)}
                                 style={[
                                   styles.outlineButton,
@@ -6353,6 +6480,8 @@ export default function BookingsScreen() {
                               {!isBookingPaymentSettled(item) &&
                                 !isBalancePaymentProcessing(item) && (
                                 <TouchableOpacity activeOpacity={1}
+                                  testID={bookingActionTestId(item, "pay")}
+                                  accessibilityLabel={bookingActionTestId(item, "pay")}
                                   onPress={() => showPaymentOptions(item)}
                                   style={[
                                     styles.actionButton,
@@ -6378,6 +6507,8 @@ export default function BookingsScreen() {
                               )}
 
                               <TouchableOpacity activeOpacity={1}
+                                testID={bookingActionTestId(item, "cancel")}
+                                accessibilityLabel={bookingActionTestId(item, "cancel")}
                                 onPress={() => {
                                   setSelectedItem(item);
                                   setModalMode("cancel");
@@ -6417,6 +6548,8 @@ export default function BookingsScreen() {
                             style={{ flexDirection: "row", gap: 8, flex: 1 }}
                           >
                             <TouchableOpacity activeOpacity={1}
+                              testID={bookingActionTestId(item, "details")}
+                              accessibilityLabel={bookingActionTestId(item, "details")}
                               onPress={() => handleDetailsPress(item)}
                               style={{
                                 flex: 1,
@@ -6442,6 +6575,8 @@ export default function BookingsScreen() {
                             </TouchableOpacity>
 
                             <TouchableOpacity activeOpacity={1}
+                              testID={bookingActionTestId(item, "resign")}
+                              accessibilityLabel={bookingActionTestId(item, "resign")}
                               onPress={() => {
                                 setSelectedItem(item);
                                 setModalMode("cancel");
@@ -6481,6 +6616,8 @@ export default function BookingsScreen() {
                             }}
                           >
                             <TouchableOpacity activeOpacity={1}
+                              testID={bookingActionTestId(item, "view-details")}
+                              accessibilityLabel={bookingActionTestId(item, "view-details")}
                               onPress={() => handleDetailsPress(item)}
                               style={[
                                 styles.outlineButton,
@@ -6505,6 +6642,8 @@ export default function BookingsScreen() {
                             {!item.isCancelled && (
                               <TouchableOpacity
                                 activeOpacity={1}
+                                testID={bookingActionTestId(item, "cancel")}
+                                accessibilityLabel={bookingActionTestId(item, "cancel")}
                                 onPress={() => {
                                   setSelectedItem(item);
                                   setModalMode("cancel");
@@ -6540,6 +6679,8 @@ export default function BookingsScreen() {
                         ) : renderActiveTab === "Review" ? (
                           userRole === "venue-owner" && item.type_id === "gig_application" ? (
                             <TouchableOpacity activeOpacity={1}
+                              testID={bookingActionTestId(item, "view-details")}
+                              accessibilityLabel={bookingActionTestId(item, "view-details")}
                               onPress={() => handleDetailsPress(item)}
                               style={[
                                 styles.outlineButton,
@@ -6557,6 +6698,8 @@ export default function BookingsScreen() {
                             </TouchableOpacity>
                           ) : (
                             <TouchableOpacity activeOpacity={1}
+                              testID={bookingActionTestId(item, "leave-review")}
+                              accessibilityLabel={bookingActionTestId(item, "leave-review")}
                               onPress={() => handleLeaveReview(item)}
                               style={[
                                 styles.outlineButton,
@@ -6580,6 +6723,8 @@ export default function BookingsScreen() {
                           >
                             {shouldShowLateReportButton(item) && (
                                 <TouchableOpacity activeOpacity={1}
+                                  testID={bookingActionTestId(item, "report-late")}
+                                  accessibilityLabel={bookingActionTestId(item, "report-late")}
                                   onPress={() => {
                                     setSelectedItem(item);
                                     setModalMode("late");
@@ -6612,6 +6757,8 @@ export default function BookingsScreen() {
 
                             {shouldShowAccessIssueReportButton(item) && (
                               <TouchableOpacity activeOpacity={1}
+                                testID={bookingActionTestId(item, "report-access-issue")}
+                                accessibilityLabel={bookingActionTestId(item, "report-access-issue")}
                                 onPress={() => {
                                   setSelectedItem(item);
                                   setModalMode("report_access");
@@ -6680,6 +6827,8 @@ export default function BookingsScreen() {
                                 <>
                                   {userRole === "musician" ? (
                                     <TouchableOpacity activeOpacity={1}
+                                      testID={bookingActionTestId(item, "pay-remaining")}
+                                      accessibilityLabel={bookingActionTestId(item, "pay-remaining")}
                                       onPress={() => handlePayBalance(item)}
                                       style={[
                                         styles.actionButton,
@@ -6709,6 +6858,8 @@ export default function BookingsScreen() {
 
                                   {userRole === "studio-owner" || userRole === "venue-owner" ? (
                                     <TouchableOpacity activeOpacity={1}
+                                      testID={bookingActionTestId(item, "clear-balance")}
+                                      accessibilityLabel={bookingActionTestId(item, "clear-balance")}
                                       onPress={() => handleClearBalance(item)}
                                       style={[
                                         styles.actionButton,
@@ -6743,6 +6894,8 @@ export default function BookingsScreen() {
                               style={{ flexDirection: "row", gap: scale(8) }}
                             >
                               <TouchableOpacity activeOpacity={1}
+                                testID={bookingActionTestId(item, "details")}
+                                accessibilityLabel={bookingActionTestId(item, "details")}
                                 onPress={() => handleDetailsPress(item)}
                                 style={[
                                   styles.outlineButton,
@@ -6785,6 +6938,8 @@ export default function BookingsScreen() {
                                   userRole === "musician" &&
                                   item.type_id === "gig_application")) && (
                                   <TouchableOpacity activeOpacity={1}
+                                    testID={bookingActionTestId(item, item.type_id === "gig_application" ? "resign" : "cancel")}
+                                    accessibilityLabel={bookingActionTestId(item, item.type_id === "gig_application" ? "resign" : "cancel")}
                                     onPress={() => {
                                       setSelectedItem(item);
                                       setModalMode("cancel");

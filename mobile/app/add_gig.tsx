@@ -23,6 +23,7 @@ import Modal from "../src/components/modal";
 import Navbar from "../src/components/navbar";
 import { PH_MUSIC_GROUP_TYPES } from "../src/constants/groupTypes";
 import { useTheme } from "../src/context/ThemeContext";
+import { isE2EFixtureMode } from "../src/utils/e2eFixtures";
 
 // Decode base64 to Uint8Array without using fetch().arrayBuffer() which crashes on Android New Architecture
 const base64ToUint8Array = (base64: string): Uint8Array => {
@@ -85,6 +86,8 @@ const formatTimeInput = (text: string): string => {
 
 const TITLE_MAX_LENGTH = 120;
 const DESCRIPTION_MAX_LENGTH = 1000;
+const normalizeE2ETestId = (value: string) => value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+const getE2EEventDate = () => new Date(Date.now() + 8 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
 
 const GENRES = [
   "Rock",
@@ -309,7 +312,9 @@ export default function AddGigScreen() {
   };
 
   const handleAddEventCondition = () => {
-    if (!eventDate.trim()) {
+    const nextEventDate = eventDate.trim() || (isE2EFixtureMode() ? getE2EEventDate() : "");
+
+    if (!nextEventDate) {
       showAlert("warning", "Required Field", "Please select an event date first");
       return;
     }
@@ -320,10 +325,11 @@ export default function AddGigScreen() {
     }
 
     const newCondition: EventSchedule = {
-      date: eventDate,
+      date: nextEventDate,
       start_time: eventStartTime,
       end_time: eventEndTime,
     };
+    if (!eventDate.trim()) setEventDate(nextEventDate);
 
     const alreadyExists = eventSchedules.some(
       (item) =>
@@ -635,6 +641,19 @@ export default function AddGigScreen() {
     router.replace({ pathname: "/my_venue", params: { refresh: String(Date.now()) } });
   };
 
+  const handleLocationSelectPress = () => {
+    if (isE2EFixtureMode()) {
+      setAddress("E2E Venue Address");
+      setLatitude(14.5995);
+      setLongitude(120.9842);
+      setAddressVerified(true);
+      setAddressVerificationStatus("verified");
+      return;
+    }
+
+    setLocationPickerVisible(true);
+  };
+
   // Start address verification (before gig creation)
   const startAddressVerification = async () => {
     setAddressVerificationLoading(true);
@@ -878,6 +897,8 @@ export default function AddGigScreen() {
         ]}
       >
         <TextInput
+          testID={`mobile-add-gig-${normalizeE2ETestId(label)}-input`}
+          accessibilityLabel={`mobile-add-gig-${normalizeE2ETestId(label)}-input`}
           value={value}
           onChangeText={setValue}
           maxLength={inputMaxLength}
@@ -1173,7 +1194,11 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
           style={{ display: "none" }}
         />
       )}
-      <View style={[styles.flex1, { backgroundColor: colors.background }]}>
+      <View
+        testID="mobile-add-gig-page"
+        accessibilityLabel="mobile-add-gig-page"
+        style={[styles.flex1, { backgroundColor: colors.background }]}
+      >
         <Header title="Create Gig" onBackPress={handleBack} />
 
         {/* Enhanced Step Indicator (Fixed at top) */}
@@ -1299,8 +1324,11 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                 >
                   Venue Address
                 </Text>
-                <TouchableOpacity activeOpacity={1}
-                  onPress={() => setLocationPickerVisible(true)}
+                <TouchableOpacity
+                  activeOpacity={1}
+                  testID="mobile-add-gig-location-button"
+                  accessibilityLabel="mobile-add-gig-location-button"
+                  onPress={handleLocationSelectPress}
                   style={[
                     styles.inputWrapper,
                     {
@@ -1647,6 +1675,8 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                   </View>
 
                   <TouchableOpacity activeOpacity={1}
+                    testID="mobile-add-gig-add-schedule-button"
+                    accessibilityLabel="mobile-add-gig-add-schedule-button"
                     onPress={handleAddEventCondition}
                     style={{
                       marginTop: 12,
@@ -2857,8 +2887,10 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
 
           {/* Navigation Buttons */}
           <View style={styles.navigationButtons}>
-            <TouchableOpacity
-              onPress={handleBack}
+              <TouchableOpacity
+                testID="mobile-add-gig-back-button"
+                accessibilityLabel="mobile-add-gig-back-button"
+                onPress={handleBack}
               disabled={creating}
               activeOpacity={creating ? 1 : 0.78}
               style={[
@@ -2874,8 +2906,10 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                 {step === 1 ? "Cancel" : "Back"}
               </Text>
             </TouchableOpacity>
-            <TouchableOpacity
-              onPress={handleNext}
+              <TouchableOpacity
+                testID="mobile-add-gig-next-button"
+                accessibilityLabel="mobile-add-gig-next-button"
+                onPress={handleNext}
               disabled={creating || !isCurrentStepComplete}
               activeOpacity={creating || !isCurrentStepComplete ? 1 : 0.78}
               style={[

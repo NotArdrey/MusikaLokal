@@ -1,0 +1,17 @@
+appId: ${APP_ID}
+---
+- openLink: "musikalokal://bookings"
+- assertVisible:
+    id: "mobile-bookings-page"
+- tapOn:
+    id: "mobile-bookings-tab-applicants"
+- scrollUntilVisible:
+    element:
+      id: ${E2E_GIG_APPLICATION_CARD_ID}
+    direction: DOWN
+- assertVisible:
+    id: ${E2E_GIG_APPLICATION_CARD_ID}
+- tapOn:
+    id: ${E2E_GIG_APPLICATION_ACCEPT_ID}
+- tapOn:
+    id: "app-modal-confirm-button"

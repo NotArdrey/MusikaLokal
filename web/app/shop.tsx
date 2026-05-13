@@ -1,7 +1,12 @@
 import { Ionicons } from "@expo/vector-icons";
+import {
+  BottomSheetBackdrop,
+  BottomSheetModal,
+  BottomSheetScrollView,
+  useBottomSheetTimingConfigs,
+} from "@gorhom/bottom-sheet";
 import { useFocusEffect } from "@react-navigation/native";
-import { router } from "expo-router";
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Modal as RNModal,
@@ -16,6 +21,7 @@ import {
   useWindowDimensions,
   View,
 } from "react-native";
+import { Easing } from "react-native-reanimated";
 import { supabase } from "../lib/supabase";
 import CachedImage from "../src/components/CachedImage";
 import CustomAlert, { AlertType } from "../src/components/CustomAlert";
@@ -63,7 +69,8 @@ export default function ShopScreen() {
   const { width } = useWindowDimensions();
   const isWebDesktop = Platform.OS === "web" && width >= 768;
   const { contentBottomPadding } = useBottomBarClearance(24);
-  const { session, isGuest, userId, userRole, roleResolved } = useAuth();
+  const { session, userId, userRole, roleResolved } = useAuth();
+  const createListingSheetRef = useRef<BottomSheetModal>(null);
   const normalizedUserRole = (userRole || "").toLowerCase();
   const isFan = normalizedUserRole === "fan";
   const isMusician = normalizedUserRole === "musician";
@@ -103,6 +110,33 @@ export default function ShopScreen() {
 
   const [alert, setAlert] = useState<{ type: AlertType; title: string; message: string; buttons?: any[] } | null>(null);
   const [detailsProductId, setDetailsProductId] = useState<string | null>(null);
+  const createListingSnapPoints = useMemo(() => ["90%"], []);
+  const createListingAnimationConfigs = useBottomSheetTimingConfigs({
+    duration: 320,
+    easing: Easing.inOut(Easing.cubic),
+  });
+  const createListingSheetBackgroundStyle = useMemo(
+    () => ({ backgroundColor: cardBg }),
+    [cardBg],
+  );
+  const createListingHandleIndicatorStyle = useMemo(
+    () => ({
+      backgroundColor: isDark ? "#4B5563" : "#E5E7EB",
+      width: 40,
+    }),
+    [isDark],
+  );
+  const renderCreateListingBackdrop = useCallback(
+    (props: any) => (
+      <BottomSheetBackdrop
+        {...props}
+        disappearsOnIndex={-1}
+        appearsOnIndex={0}
+        opacity={0.5}
+      />
+    ),
+    [],
+  );
 
   const invokeMarketplace = useCallback(async (body: Record<string, unknown>) => {
     const { data, error } = await supabase.functions.invoke("manage-marketplace", { body });
@@ -201,6 +235,23 @@ export default function ShopScreen() {
     setListingImages([]);
     setListingThumbnailIndex(0);
   }, []);
+
+  const closeCreateListing = useCallback(() => {
+    setShowAddProduct(false);
+    resetCreateListingForm();
+  }, [resetCreateListingForm]);
+
+  useEffect(() => {
+    if (isWebDesktop) {
+      return;
+    }
+
+    if (showAddProduct) {
+      createListingSheetRef.current?.present();
+    } else {
+      createListingSheetRef.current?.dismiss();
+    }
+  }, [isWebDesktop, showAddProduct]);
 
   const openEditListing = async (productId: string) => {
     if (statusUpdatingId) return;
@@ -613,6 +664,96 @@ export default function ShopScreen() {
     </>
   );
 
+  const renderCreateListingContent = (useBottomSheetScroll = false) => {
+    const FormScroll = useBottomSheetScroll ? BottomSheetScrollView : ScrollView;
+
+    return (
+      <View style={useBottomSheetScroll ? styles.createListingSheetContent : undefined}>
+        <View style={styles.modalHeader}>
+          <Text style={[styles.sectionTitle, { color: colors.text }]}>{editingProductId ? "Edit Listing" : "Create Listing"}</Text>
+          <TouchableOpacity activeOpacity={0.85} onPress={closeCreateListing}>
+            <Ionicons name="close" size={24} color={colors.text} />
+          </TouchableOpacity>
+        </View>
+        <FormScroll showsVerticalScrollIndicator={false} style={useBottomSheetScroll ? undefined : { maxHeight: 600 }}>
+          <Text style={[styles.inputLabel, { color: colors.text }]}>Photos</Text>
+          <ImageUploader
+            images={listingImages}
+            onImagesChange={setListingImages}
+            thumbnailIndex={listingThumbnailIndex}
+            onThumbnailChange={setListingThumbnailIndex}
+            maxImages={10}
+            bucketName="listings"
+            userId={userId || session?.user?.id || "marketplace-user"}
+            folder="marketplace"
+          />
+
+          <Text style={[styles.inputLabel, { color: colors.text }]}>Title *</Text>
+          <TextInput
+            style={[styles.input, { color: colors.text, borderColor: borderSoft, backgroundColor: pageBackground }]}
+            placeholder="What are you selling?"
+            placeholderTextColor={colors.textSecondary}
+            value={newTitle}
+            onChangeText={setNewTitle}
+          />
+
+          <Text style={[styles.inputLabel, { color: colors.text }]}>Description</Text>
+          <TextInput
+            style={[styles.input, styles.textArea, { color: colors.text, borderColor: borderSoft, backgroundColor: pageBackground }]}
+            placeholder="Add details buyers should know..."
+            placeholderTextColor={colors.textSecondary}
+            value={newDescription}
+            onChangeText={setNewDescription}
+            multiline
+          />
+
+          <Text style={[styles.inputLabel, { color: colors.text }]}>Price (₱)</Text>
+          <TextInput
+            style={[styles.input, { color: colors.text, borderColor: borderSoft, backgroundColor: pageBackground }]}
+            placeholder="0.00"
+            placeholderTextColor={colors.textSecondary}
+            value={newPrice}
+            onChangeText={setNewPrice}
+            keyboardType="decimal-pad"
+          />
+
+          <Text style={[styles.inputLabel, { color: colors.text }]}>Category</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.modalCategoryRow}>
+            {MARKETPLACE_CATEGORIES.map((option) => {
+              const isSelected = newCategory === option.value;
+              return (
+                <TouchableOpacity
+                  activeOpacity={0.85}
+                  key={option.value}
+                  style={[
+                    styles.modalCategoryPill,
+                    { borderColor: isSelected ? colors.primary : borderSoft, backgroundColor: isSelected ? colors.primary + "16" : "transparent" },
+                  ]}
+                  onPress={() => setNewCategory(isSelected ? "" : option.value)}
+                >
+                  <Text style={{ color: isSelected ? colors.primary : colors.textSecondary, fontSize: 12, fontFamily: "Poppins_500Medium" }}>{option.label}</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+
+          <TouchableOpacity
+            activeOpacity={adding || !isProductFormReady ? 1 : 0.85}
+            style={[styles.submitBtn, { backgroundColor: isProductFormReady ? colors.primary : borderSoft, opacity: adding || !isProductFormReady ? 0.6 : 1 }]}
+            onPress={handleSubmitProduct}
+            disabled={adding || !isProductFormReady}
+          >
+            {adding ? (
+              <ActivityIndicator color="#fff" />
+            ) : (
+              <Text style={[styles.submitBtnText, { color: isProductFormReady ? "#FFFFFF" : colors.textSecondary }]}>{editingProductId ? "Save Changes" : "Post Listing"}</Text>
+            )}
+          </TouchableOpacity>
+        </FormScroll>
+      </View>
+    );
+  };
+
   return (
     <View style={[styles.container, { backgroundColor: pageBackground }]}>
       <View style={[styles.pageFrame, isWebDesktop && styles.pageFrameWeb]}>
@@ -647,99 +788,35 @@ export default function ShopScreen() {
         </ScrollView>
       </View>
 
-      <RNModal visible={showAddProduct} transparent animationType="fade" onRequestClose={() => { setShowAddProduct(false); resetCreateListingForm(); }}>
-        <Pressable
-          style={styles.modalOverlay}
-          onPress={() => {
-            setShowAddProduct(false);
-            resetCreateListingForm();
-          }}
-        >
+      {isWebDesktop ? (
+      <RNModal visible={showAddProduct} transparent animationType="fade" onRequestClose={closeCreateListing}>
+        <Pressable style={styles.modalOverlay} onPress={closeCreateListing}>
           <Pressable style={[styles.modalBox, { backgroundColor: cardBg, borderColor: borderSoft }]} onPress={(e) => e.stopPropagation()}>
-            <View style={styles.modalHeader}>
-              <Text style={[styles.sectionTitle, { color: colors.text }]}>{editingProductId ? "Edit Listing" : "Create Listing"}</Text>
-              <TouchableOpacity activeOpacity={0.85} onPress={() => { setShowAddProduct(false); resetCreateListingForm(); }}>
-                <Ionicons name="close" size={24} color={colors.text} />
-              </TouchableOpacity>
-            </View>
-            <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: 600 }}>
-              <Text style={[styles.inputLabel, { color: colors.text }]}>Photos</Text>
-              <ImageUploader
-                images={listingImages}
-                onImagesChange={setListingImages}
-                thumbnailIndex={listingThumbnailIndex}
-                onThumbnailChange={setListingThumbnailIndex}
-                maxImages={10}
-                bucketName="listings"
-                userId={userId || session?.user?.id || "marketplace-user"}
-                folder="marketplace"
-              />
-
-              <Text style={[styles.inputLabel, { color: colors.text }]}>Title *</Text>
-              <TextInput
-                style={[styles.input, { color: colors.text, borderColor: borderSoft, backgroundColor: pageBackground }]}
-                placeholder="What are you selling?"
-                placeholderTextColor={colors.textSecondary}
-                value={newTitle}
-                onChangeText={setNewTitle}
-              />
-
-              <Text style={[styles.inputLabel, { color: colors.text }]}>Description</Text>
-              <TextInput
-                style={[styles.input, styles.textArea, { color: colors.text, borderColor: borderSoft, backgroundColor: pageBackground }]}
-                placeholder="Add details buyers should know..."
-                placeholderTextColor={colors.textSecondary}
-                value={newDescription}
-                onChangeText={setNewDescription}
-                multiline
-              />
-
-              <Text style={[styles.inputLabel, { color: colors.text }]}>Price (₱)</Text>
-              <TextInput
-                style={[styles.input, { color: colors.text, borderColor: borderSoft, backgroundColor: pageBackground }]}
-                placeholder="0.00"
-                placeholderTextColor={colors.textSecondary}
-                value={newPrice}
-                onChangeText={setNewPrice}
-                keyboardType="decimal-pad"
-              />
-
-              <Text style={[styles.inputLabel, { color: colors.text }]}>Category</Text>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.modalCategoryRow}>
-                {MARKETPLACE_CATEGORIES.map((option) => {
-                  const isSelected = newCategory === option.value;
-                  return (
-                    <TouchableOpacity
-                      activeOpacity={0.85}
-                      key={option.value}
-                      style={[
-                        styles.modalCategoryPill,
-                        { borderColor: isSelected ? colors.primary : borderSoft, backgroundColor: isSelected ? colors.primary + "16" : "transparent" },
-                      ]}
-                      onPress={() => setNewCategory(isSelected ? "" : option.value)}
-                    >
-                      <Text style={{ color: isSelected ? colors.primary : colors.textSecondary, fontSize: 12, fontFamily: "Poppins_500Medium" }}>{option.label}</Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </ScrollView>
-
-              <TouchableOpacity
-                activeOpacity={adding || !isProductFormReady ? 1 : 0.85}
-                style={[styles.submitBtn, { backgroundColor: isProductFormReady ? colors.primary : borderSoft, opacity: adding || !isProductFormReady ? 0.6 : 1 }]}
-                onPress={handleSubmitProduct}
-                disabled={adding || !isProductFormReady}
-              >
-                {adding ? (
-                  <ActivityIndicator color="#fff" />
-                ) : (
-                  <Text style={[styles.submitBtnText, { color: isProductFormReady ? "#FFFFFF" : colors.textSecondary }]}>{editingProductId ? "Save Changes" : "Post Listing"}</Text>
-                )}
-              </TouchableOpacity>
-            </ScrollView>
+            {renderCreateListingContent(false)}
           </Pressable>
         </Pressable>
       </RNModal>
+      ) : (
+        <BottomSheetModal
+          ref={createListingSheetRef}
+          index={0}
+          snapPoints={createListingSnapPoints}
+          animationConfigs={createListingAnimationConfigs}
+          animateOnMount={true}
+          enableDynamicSizing={false}
+          enableContentPanningGesture={false}
+          enableOverDrag={false}
+          backdropComponent={renderCreateListingBackdrop}
+          backgroundStyle={createListingSheetBackgroundStyle}
+          handleIndicatorStyle={createListingHandleIndicatorStyle}
+          enablePanDownToClose={true}
+          keyboardBehavior="interactive"
+          keyboardBlurBehavior="restore"
+          onDismiss={closeCreateListing}
+        >
+          {renderCreateListingContent(true)}
+        </BottomSheetModal>
+      )}
 
       {alert && <CustomAlert visible type={alert.type} title={alert.title} message={alert.message} buttons={alert.buttons} onClose={() => setAlert(null)} />}
       <ProductDetailsModal
@@ -839,11 +916,12 @@ const styles = StyleSheet.create({
 
   modalOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.55)", alignItems: "center", justifyContent: "center", padding: 16 },
   modalBox: { width: "100%", maxWidth: 560, borderRadius: 18, borderWidth: 1, padding: 20, maxHeight: "90%" as any },
+  createListingSheetContent: { flex: 1, paddingHorizontal: 18, paddingTop: 4, paddingBottom: Platform.OS === "ios" ? 34 : 20 },
   modalHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 8 },
   sectionTitle: { fontSize: 17, fontFamily: "Poppins_700Bold" },
   inputLabel: { fontSize: 13, fontFamily: "Poppins_600SemiBold", marginBottom: 6, marginTop: 12 },
-  input: { borderWidth: 1, borderRadius: 10, padding: 12, fontSize: 14 },
-  textArea: { minHeight: 80, textAlignVertical: "top" },
+  input: { height: 44, borderWidth: 1, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 0, fontSize: 14, lineHeight: 20, includeFontPadding: false, textAlignVertical: "center" },
+  textArea: { height: undefined, minHeight: 80, paddingTop: 12, paddingBottom: 12, textAlignVertical: "top" },
   submitBtn: { alignItems: "center", justifyContent: "center", paddingVertical: 14, borderRadius: 12, marginTop: 20, marginBottom: 8 },
   submitBtnText: { color: "#fff", fontSize: 15, fontFamily: "Poppins_700Bold" },
 });

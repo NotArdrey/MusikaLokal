@@ -29,6 +29,7 @@ import Navbar, {
   NAVBAR_CLEARANCE,
   NAVBAR_HEIGHT,
 } from "../src/components/navbar";
+import PostDetailsModal from "../src/components/PostDetailsModal";
 import ProductionTeamDetailsSheet from "../src/components/ProductionTeamDetailsSheet";
 import SearchBottomSheet from "../src/components/SearchBottomSheet";
 import Skeleton from "../src/components/Skeleton";
@@ -467,6 +468,30 @@ const ensureRecommendationTypeCoverage = (
   return [...items.slice(0, Math.max(0, limit - additions.length)), ...additions].slice(0, limit);
 };
 
+const normalizeFeedUserRole = (role: unknown) =>
+  typeof role === "string" ? role.trim().toLowerCase().replace(/[_\s]+/g, "-") : "";
+
+const shouldShowListingForUserRole = (item: any, role: unknown) => {
+  const normalizedRole = normalizeFeedUserRole(role);
+  const itemType = String(item?.type || "").toLowerCase();
+
+  if (!itemType) return false;
+
+  if (normalizedRole === "venue-owner" || normalizedRole === "studio-owner") {
+    return itemType === "group" || itemType === "artist";
+  }
+
+  if (normalizedRole === "producer") {
+    return itemType === "group" || itemType === "artist" || itemType === "studio";
+  }
+
+  if (normalizedRole === "fan") {
+    return itemType === "group" || itemType === "artist" || itemType === "production";
+  }
+
+  return true;
+};
+
 const rankForYouOnDevice = (
   items: any[],
   profileSignals: { skills: string[]; genres: string[] },
@@ -757,6 +782,99 @@ const getFeedMediaUrls = (item: any) => {
   return Array.from(new Set([primaryImage, ...imageUrls].filter((value) => value.length > 0)));
 };
 
+const SOCIAL_GALLERY_GAP = 3;
+const SOCIAL_GALLERY_VISIBLE_LIMIT = 4;
+
+type SocialMediaGalleryProps = {
+  mediaUrls: string[];
+  mediaWidth: number;
+  onPress: () => void;
+};
+
+const SocialMediaGallery = React.memo(function SocialMediaGallery({
+  mediaUrls,
+  mediaWidth,
+  onPress,
+}: SocialMediaGalleryProps) {
+  const visibleMedia = mediaUrls.slice(0, SOCIAL_GALLERY_VISIBLE_LIMIT);
+  const remainingCount = Math.max(0, mediaUrls.length - visibleMedia.length);
+
+  const renderImageCell = (
+    uri: string,
+    index: number,
+    imageWidth: number,
+    imageHeight: number,
+    extraStyle?: any,
+  ) => (
+    <View key={`${uri}-${index}`} style={[styles.socialGalleryCell, extraStyle]}>
+      <CachedImage
+        uri={uri}
+        style={styles.socialGalleryImage}
+        width={Math.round(imageWidth)}
+        height={Math.round(imageHeight)}
+        priority={index === 0 ? "normal" : "low"}
+      />
+      {index === visibleMedia.length - 1 && remainingCount > 0 ? (
+        <View style={styles.socialGalleryMoreOverlay}>
+          <Text style={styles.socialGalleryMoreText}>+{remainingCount}</Text>
+        </View>
+      ) : null}
+    </View>
+  );
+
+  if (visibleMedia.length === 0) return null;
+
+  const singleHeight = Math.round(mediaWidth / SOCIAL_MEDIA_ASPECT_RATIO);
+  const halfWidth = (mediaWidth - SOCIAL_GALLERY_GAP) / 2;
+
+  let galleryContent: React.ReactNode;
+
+  if (visibleMedia.length === 1) {
+    galleryContent = renderImageCell(visibleMedia[0], 0, mediaWidth, singleHeight, {
+      height: singleHeight,
+    });
+  } else if (visibleMedia.length === 2) {
+    const rowHeight = Math.round(halfWidth);
+    galleryContent = (
+      <View style={[styles.socialGalleryRow, { height: rowHeight }]}>
+        {visibleMedia.map((uri, index) => renderImageCell(uri, index, halfWidth, rowHeight))}
+      </View>
+    );
+  } else if (visibleMedia.length === 3) {
+    const rowHeight = Math.round(mediaWidth * 0.72);
+    const stackedHeight = (rowHeight - SOCIAL_GALLERY_GAP) / 2;
+    galleryContent = (
+      <View style={[styles.socialGalleryRow, { height: rowHeight }]}>
+        {renderImageCell(visibleMedia[0], 0, halfWidth, rowHeight)}
+        <View style={styles.socialGalleryColumn}>
+          {renderImageCell(visibleMedia[1], 1, halfWidth, stackedHeight)}
+          {renderImageCell(visibleMedia[2], 2, halfWidth, stackedHeight)}
+        </View>
+      </View>
+    );
+  } else {
+    const rowHeight = Math.round(halfWidth * 0.82);
+    galleryContent = (
+      <View style={styles.socialGalleryGrid}>
+        <View style={[styles.socialGalleryRow, { height: rowHeight }]}>
+          {visibleMedia.slice(0, 2).map((uri, index) => renderImageCell(uri, index, halfWidth, rowHeight))}
+        </View>
+        <View style={[styles.socialGalleryRow, { height: rowHeight }]}>
+          {visibleMedia.slice(2, 4).map((uri, index) =>
+            renderImageCell(uri, index + 2, halfWidth, rowHeight),
+          )}
+        </View>
+      </View>
+    );
+  }
+
+  return (
+    <TouchableOpacity activeOpacity={0.92} onPress={onPress} style={styles.socialMediaWrap}>
+      {galleryContent}
+    </TouchableOpacity>
+  );
+});
+
 const getFeedAvatarUri = (item: any) => {
   const avatar = resolveFeedMediaUrl(item?.author_avatar || item?.avatar_url || item?.logo_url || "");
   if (avatar) return avatar;
@@ -806,12 +924,6 @@ const getFeedPrimaryCtaLabel = (item: any) => {
   if (item?.type === "Production") return "View Team";
   return "View Details";
 };
-
-const getFeedEngagementCounts = (item: any) => ({
-  likes: Number(item?.reaction_count || item?.review_count || 0),
-  comments: Number(item?.comment_count || 0),
-  shares: Number(item?.share_count || 0),
-});
 
 const DEMO_RADIO_STATION = {
   id: "musikalokal-ncs-radio",
@@ -1170,7 +1282,6 @@ type SocialFeedCardProps = {
   onOpenProfile: (profileId: string) => void;
   onOpenProductionTeam: (teamId: string) => void;
   onOpenPlaylist: (playlistId: string) => void;
-  onReaction: (postId: string, currentReaction: string | null) => void;
   showAuthorFollow: boolean;
   timeAgo: (value: string) => string;
 };
@@ -1192,24 +1303,22 @@ const SocialFeedCard = React.memo(function SocialFeedCard({
   onOpenProfile,
   onOpenProductionTeam,
   onOpenPlaylist,
-  onReaction,
   showAuthorFollow,
   timeAgo,
 }: SocialFeedCardProps) {
   const isSuggestion = item?.__feedKind === "ai_card";
   const mediaUrls = useMemo(() => getFeedMediaUrls(item), [item]);
   const badges = useMemo(() => getFeedServiceBadges(item), [item]);
+  const headerBadge = badges[0] || "";
+  const bodyBadges = headerBadge ? badges.slice(1) : badges;
   const priceChips = useMemo(() => getFeedPriceChips(item), [item]);
   const quickInfoItems = useMemo(() => getFeedQuickInfoItems(item), [item]);
-  const engagement = useMemo(() => getFeedEngagementCounts(item), [item]);
   const avatarUri = useMemo(() => getFeedAvatarUri(item), [item]);
   const displayName = getFeedDisplayName(item);
   const metaLabel = getFeedMetaLabel(item);
   const caption = getFeedCaption(item);
   const timestamp = getFeedTimestampLabel(item, timeAgo);
   const primaryCtaLabel = getFeedPrimaryCtaLabel(item);
-  const primaryMediaUri = mediaUrls[0] || "";
-  const mediaHeight = Math.round(mediaWidth / SOCIAL_MEDIA_ASPECT_RATIO);
 
   const handleOpenPrimary = useCallback(() => {
     if (isSuggestion) {
@@ -1232,17 +1341,6 @@ const SocialFeedCard = React.memo(function SocialFeedCard({
     if (!followTarget?.id || !followTarget?.type) return;
     onFollow(followTarget.id, followTarget.type, isFollowing);
   }, [followTarget, isFollowing, onFollow]);
-
-  const handleReaction = useCallback(() => {
-    if (isSuggestion) return;
-    onReaction(item.id, item.my_reaction);
-  }, [isSuggestion, item?.id, item?.my_reaction, onReaction]);
-
-  const handleComment = useCallback(() => {
-    if (!isSuggestion) {
-      onOpenPost(item.id);
-    }
-  }, [isSuggestion, item?.id, onOpenPost]);
 
   const handleLinkedPlaylist = useCallback(() => {
     if (item?.linked_playlist?.id) {
@@ -1299,33 +1397,43 @@ const SocialFeedCard = React.memo(function SocialFeedCard({
           </View>
         </TouchableOpacity>
 
-        {showAuthorFollow ? (
-          <TouchableOpacity
-            activeOpacity={followBusy ? 1 : 0.78}
-            disabled={followBusy}
-            onPress={handleFollow}
-            style={[
-              styles.socialFollowButton,
-              {
-                backgroundColor: isFollowing ? (isDark ? "#111827" : "#FFFFFF") : colors.primary,
-                borderColor: isFollowing ? borderColor : colors.primary,
-                opacity: followBusy ? 0.7 : 1,
-              },
-            ]}
-          >
-            {followBusy ? (
-              <ActivityIndicator size="small" color={isFollowing ? colors.textSecondary : "#FFFFFF"} />
-            ) : (
-              <Text style={[styles.socialFollowText, { color: isFollowing ? colors.textSecondary : "#FFFFFF" }]}>
-                {isFollowing ? "Following" : "Follow"}
-              </Text>
-            )}
-          </TouchableOpacity>
-        ) : null}
+        <View style={styles.socialHeaderActions}>
+          {showAuthorFollow ? (
+            <TouchableOpacity
+              activeOpacity={followBusy ? 1 : 0.78}
+              disabled={followBusy}
+              onPress={handleFollow}
+              style={[
+                styles.socialFollowButton,
+                {
+                  backgroundColor: isFollowing ? (isDark ? "#111827" : "#FFFFFF") : colors.primary,
+                  borderColor: isFollowing ? borderColor : colors.primary,
+                  opacity: followBusy ? 0.7 : 1,
+                },
+              ]}
+            >
+              {followBusy ? (
+                <ActivityIndicator size="small" color={isFollowing ? colors.textSecondary : "#FFFFFF"} />
+              ) : (
+                <Text style={[styles.socialFollowText, { color: isFollowing ? colors.textSecondary : "#FFFFFF" }]}>
+                  {isFollowing ? "Following" : "Follow"}
+                </Text>
+              )}
+            </TouchableOpacity>
+          ) : null}
 
-        <TouchableOpacity activeOpacity={0.78} accessibilityRole="button" accessibilityLabel="More options" style={styles.socialMenuButton}>
-          <Ionicons name="ellipsis-horizontal" size={20} color={colors.textSecondary} />
-        </TouchableOpacity>
+          {headerBadge ? (
+            <View style={[styles.socialHeaderBadgeChip, { backgroundColor: colors.primary + "12" }]}>
+              <Text style={[styles.socialHeaderBadgeText, { color: colors.primary }]} numberOfLines={1}>
+                {headerBadge}
+              </Text>
+            </View>
+          ) : null}
+
+          <TouchableOpacity activeOpacity={0.78} accessibilityRole="button" accessibilityLabel="More options" style={styles.socialMenuButton}>
+            <Ionicons name="ellipsis-horizontal" size={20} color={colors.textSecondary} />
+          </TouchableOpacity>
+        </View>
       </View>
 
       <TouchableOpacity activeOpacity={0.9} onPress={handleOpenPrimary}>
@@ -1334,27 +1442,13 @@ const SocialFeedCard = React.memo(function SocialFeedCard({
         </Text>
       </TouchableOpacity>
 
-      {primaryMediaUri ? (
-        <TouchableOpacity activeOpacity={0.92} onPress={handleOpenPrimary} style={styles.socialMediaWrap}>
-          <CachedImage
-            uri={primaryMediaUri}
-            style={[styles.socialMedia, { height: mediaHeight }]}
-            width={Math.round(mediaWidth)}
-            height={mediaHeight}
-            priority="normal"
-          />
-          {mediaUrls.length > 1 ? (
-            <View style={styles.socialMediaCount}>
-              <Ionicons name="albums-outline" size={12} color="#FFFFFF" />
-              <Text style={styles.socialMediaCountText}>1/{mediaUrls.length}</Text>
-            </View>
-          ) : null}
-        </TouchableOpacity>
+      {mediaUrls.length > 0 ? (
+        <SocialMediaGallery mediaUrls={mediaUrls} mediaWidth={mediaWidth} onPress={handleOpenPrimary} />
       ) : null}
 
-      {badges.length > 0 || priceChips.length > 0 ? (
+      {bodyBadges.length > 0 || priceChips.length > 0 ? (
         <View style={styles.socialChipRow}>
-          {badges.map((badge) => (
+          {bodyBadges.map((badge) => (
             <View key={`badge-${badge}`} style={[styles.socialBadgeChip, { backgroundColor: colors.primary + "12" }]}>
               <Text style={[styles.socialBadgeText, { color: colors.primary }]} numberOfLines={1}>
                 {badge}
@@ -1403,14 +1497,7 @@ const SocialFeedCard = React.memo(function SocialFeedCard({
         <View style={[styles.socialQuickInfoRow, { borderTopColor: borderColor }]}>
           {quickInfoItems.map((info) => (
             <View key={`${info.icon}-${info.label}`} style={styles.socialQuickInfoItem}>
-              <View
-                style={[
-                  styles.socialQuickInfoIconBox,
-                  info.icon === "star" && styles.socialQuickInfoStarIconBox,
-                  info.icon === "location" && styles.socialQuickInfoLocationIconBox,
-                  info.icon === "chatbubble-ellipses" && styles.socialQuickInfoChatIconBox,
-                ]}
-              >
+              <View style={styles.socialQuickInfoIconBox}>
                 <Ionicons
                   name={info.icon}
                   size={15}
@@ -1424,52 +1511,7 @@ const SocialFeedCard = React.memo(function SocialFeedCard({
             </View>
           ))}
         </View>
-      ) : (
-        <>
-          <View style={[styles.socialEngagementRow, { borderBottomColor: borderColor }]}>
-            <View style={styles.socialEngagementLeft}>
-              <View style={styles.socialLikeBubble}>
-                <Ionicons name="heart" size={10} color="#FFFFFF" />
-              </View>
-              <Text style={[styles.socialEngagementText, { color: colors.textSecondary }]}>
-                {engagement.likes} likes
-              </Text>
-            </View>
-            <Text style={[styles.socialEngagementText, { color: colors.textSecondary }]} numberOfLines={1}>
-          {engagement.comments} comments • {engagement.shares} shares
-            </Text>
-          </View>
-
-          <View style={styles.socialActionRow}>
-            <TouchableOpacity
-              activeOpacity={0.78}
-              onPress={handleReaction}
-              style={styles.socialActionButton}
-            >
-              <Ionicons
-                name={item?.my_reaction ? "heart" : "heart-outline"}
-                size={18}
-                color={item?.my_reaction ? "#EF4444" : colors.textSecondary}
-              />
-              <Text style={[styles.socialActionText, { color: item?.my_reaction ? "#EF4444" : colors.textSecondary }]}>
-                Like
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              activeOpacity={0.78}
-              onPress={handleComment}
-              style={styles.socialActionButton}
-            >
-              <Ionicons name="chatbubble-outline" size={17} color={colors.textSecondary} />
-              <Text style={[styles.socialActionText, { color: colors.textSecondary }]}>Comment</Text>
-            </TouchableOpacity>
-            <TouchableOpacity activeOpacity={0.78} style={styles.socialActionButton}>
-              <Ionicons name="share-outline" size={18} color={colors.textSecondary} />
-              <Text style={[styles.socialActionText, { color: colors.textSecondary }]}>Share</Text>
-            </TouchableOpacity>
-          </View>
-        </>
-      )}
+      ) : null}
 
       <View style={styles.socialCtaRow}>
         <TouchableOpacity
@@ -1509,7 +1551,7 @@ const SocialFeedCard = React.memo(function SocialFeedCard({
 
 export default function FeedScreen() {
   const { colors, isDark } = useTheme();
-  const { session, userId, isGuest, loading: authLoading } = useAuth();
+  const { session, userId, isGuest, loading: authLoading, roleResolved, userRole } = useAuth();
   const { clearBottomOverlays } = useBottomOverlay();
   const { activeStation } = useRadioPlayerPresence();
   const insets = useSafeAreaInsets();
@@ -1548,6 +1590,7 @@ export default function FeedScreen() {
   const hasFocusedFeedRef = React.useRef(false);
   const previousTabRef = React.useRef<FeedTab>(tab);
   const [selectedListingId, setSelectedListingId] = useState<string | null>(null);
+  const [selectedPostId, setSelectedPostId] = useState<string | null>(null);
   const [selectedProductionTeamId, setSelectedProductionTeamId] = useState<string | null>(null);
   const [pendingReopenListingId, setPendingReopenListingId] = useState<string | null>(null);
 
@@ -1628,7 +1671,7 @@ export default function FeedScreen() {
 
     const nextFollowingKeys = followingKeysRef.current;
     const latestPage = pages[pages.length - 1] as any;
-    const nextPosts = pages
+    const fetchedPosts = pages
       .flatMap((page: any) =>
         Array.isArray(page?.items)
           ? page.items
@@ -1643,6 +1686,7 @@ export default function FeedScreen() {
           post.is_following === true ||
           nextFollowingKeys.has(buildSocialFollowKey("profile", post.author_id)),
       }));
+    const nextPosts = feedTab === "for_you" || feedTab === "following" ? [] : fetchedPosts;
     const cachedEntry = feedCacheRef.current[feedTab];
 
     return {
@@ -1807,7 +1851,7 @@ export default function FeedScreen() {
   }, [pendingReopenListingId, selectedListingId]);
 
   const fetchAiCardsForYou = useCallback(async (): Promise<FeedAiCardsResult> => {
-    if (!session || !userId) {
+    if (!session || !userId || !roleResolved) {
       return { cards: [], provider: groqModelLabel, message: "" };
     }
 
@@ -2089,7 +2133,10 @@ export default function FeedScreen() {
         ...normalizedGigs,
         ...normalizedArtists,
         ...normalizedTeams,
-      ].map(withFeedDistance).map(ensureFeedCardImage);
+      ]
+        .filter((item) => shouldShowListingForUserRole(item, userRole))
+        .map(withFeedDistance)
+        .map(ensureFeedCardImage);
 
       if (allCandidates.length === 0) {
         return { cards: [], provider: "", message: "" };
@@ -2162,7 +2209,7 @@ export default function FeedScreen() {
         message: error?.message || "Unable to load recommendation cards right now.",
       };
     }
-  }, [groqModelLabel, session, userId]);
+  }, [groqModelLabel, roleResolved, session, userId, userRole]);
 
   const loadFollowingGraph = useCallback(async () => {
     if (!session) {
@@ -2222,7 +2269,7 @@ export default function FeedScreen() {
 
   /* ── Data fetching ── */
   const fetchFeed = useCallback(async (feedTab: FeedTab, append = false, currentLength = 0) => {
-    if (authLoading) {
+    if (authLoading || (feedTab === "for_you" && Boolean(userId) && !isGuest && !roleResolved)) {
       return;
     }
 
@@ -2274,7 +2321,7 @@ export default function FeedScreen() {
 
       const pages = queryResult.data?.pages || [];
       const latestPage = pages[pages.length - 1] as any;
-      const nextPosts = pages
+      const fetchedPosts = pages
         .flatMap((page: any) =>
           Array.isArray(page?.items)
             ? page.items
@@ -2289,6 +2336,7 @@ export default function FeedScreen() {
             post.is_following === true ||
             nextFollowingKeys.has(buildSocialFollowKey("profile", post.author_id)),
         }));
+      const nextPosts = feedTab === "for_you" || feedTab === "following" ? [] : fetchedPosts;
       const cachedEntry = feedCacheRef.current[feedTab];
       let nextAiCards = cachedEntry.aiCards;
       let nextAiFeedMessage = normalizeAiFeedMessage(cachedEntry.aiFeedMessage || "");
@@ -2429,18 +2477,21 @@ export default function FeedScreen() {
     authLoading,
     fetchAiCardsForYou,
     groqModelLabel,
+    isGuest,
     loadFollowingGraph,
+    roleResolved,
     session,
+    userId,
   ]);
 
   useFocusEffect(useCallback(() => {
-    if (authLoading) {
+    const currentTab = activeTabRef.current;
+    if (authLoading || (currentTab === "for_you" && Boolean(userId) && !isGuest && !roleResolved)) {
       return;
     }
 
     hasFocusedFeedRef.current = true;
     clearBottomOverlays();
-    const currentTab = activeTabRef.current;
     const hydrated = hydrateCachedFeed(currentTab);
     const hydratedSnapshot = feedCacheRef.current[currentTab];
     const isHydratedEmptyForYou =
@@ -2490,10 +2541,10 @@ export default function FeedScreen() {
     return () => {
       focusRefreshTask.cancel();
     };
-  }, [authLoading, clearBottomOverlays, fetchFeed, hydrateCachedFeed, isEmptyForYouSnapshot]));
+  }, [authLoading, clearBottomOverlays, fetchFeed, hydrateCachedFeed, isEmptyForYouSnapshot, isGuest, roleResolved, userId]));
 
   useEffect(() => {
-    if (authLoading || !hasFocusedFeedRef.current) {
+    if (authLoading || !hasFocusedFeedRef.current || (tab === "for_you" && Boolean(userId) && !isGuest && !roleResolved)) {
       return;
     }
 
@@ -2532,10 +2583,10 @@ export default function FeedScreen() {
     });
 
     return () => tabSwitchTask.cancel();
-  }, [authLoading, fetchFeed, hydrateCachedFeed, isEmptyForYouSnapshot, tab]);
+  }, [authLoading, fetchFeed, hydrateCachedFeed, isEmptyForYouSnapshot, isGuest, roleResolved, tab, userId]);
 
   const onRefresh = useCallback(() => {
-    if (authLoading) {
+    if (authLoading || (tab === "for_you" && Boolean(userId) && !isGuest && !roleResolved)) {
       return;
     }
 
@@ -2544,7 +2595,7 @@ export default function FeedScreen() {
       setIsAiCardsLoading(true);
     }
     void fetchFeed(tab);
-  }, [aiCards.length, authLoading, fetchFeed, posts.length, tab]);
+  }, [aiCards.length, authLoading, fetchFeed, isGuest, posts.length, roleResolved, tab, userId]);
 
   const loadMore = useCallback(() => {
     if (
@@ -2593,28 +2644,6 @@ export default function FeedScreen() {
       setCreating(false);
     }
   };
-
-  const handleReaction = useCallback(async (postId: string, currentReaction: string | null) => {
-    // optimistic
-    setPosts((prev) =>
-      prev.map((p) =>
-        p.id === postId
-          ? { ...p, my_reaction: currentReaction ? null : "like", reaction_count: currentReaction ? Math.max((p.reaction_count || 1) - 1, 0) : (p.reaction_count || 0) + 1 }
-          : p
-      )
-    );
-    try {
-      const { error } = await supabase.functions.invoke("manage-social-feed", {
-        body: currentReaction ? { action: "remove_reaction", post_id: postId } : { action: "react_to_post", post_id: postId, reaction_type: "like" },
-      });
-
-      if (error) {
-        throw error;
-      }
-    } catch (e: any) {
-      console.error("Reaction error:", e);
-    }
-  }, []);
 
   const handleFollow = useCallback(async (
     targetId: string,
@@ -2692,8 +2721,36 @@ export default function FeedScreen() {
 
   const openPostDetails = useCallback((postId: string) => {
     if (!postId) return;
-    router.push({ pathname: "/post_details", params: { post_id: postId } });
+    setSelectedPostId(postId);
   }, []);
+
+  const closePostDetails = useCallback(() => {
+    setSelectedPostId(null);
+  }, []);
+
+  const handleModalReactionChanged = useCallback(
+    (postId: string, hasReaction: boolean, reactionCount: number) => {
+      setPosts((current) =>
+        current.map((post) =>
+          post.id === postId
+            ? { ...post, my_reaction: hasReaction ? "like" : null, reaction_count: reactionCount }
+            : post,
+        ),
+      );
+    },
+    [],
+  );
+
+  const handleModalCommentChanged = useCallback((postId: string, commentCount: number) => {
+    setPosts((current) =>
+      current.map((post) => (post.id === postId ? { ...post, comment_count: commentCount } : post)),
+    );
+  }, []);
+
+  const handleModalPostDeleted = useCallback((postId: string) => {
+    setPosts((current) => current.filter((post) => post.id !== postId));
+    invalidateFeedCache("following");
+  }, [invalidateFeedCache]);
 
   const openProfileDetails = useCallback((profileId: string) => {
     if (!profileId) return;
@@ -2850,7 +2907,6 @@ export default function FeedScreen() {
           onOpenProfile={openProfileDetails}
           onOpenProductionTeam={openProductionTeamDetails}
           onOpenPlaylist={openPlaylistDetails}
-          onReaction={handleReaction}
           showAuthorFollow={false}
           timeAgo={timeAgo}
         />
@@ -2888,7 +2944,6 @@ export default function FeedScreen() {
         onOpenProfile={openProfileDetails}
         onOpenProductionTeam={openProductionTeamDetails}
         onOpenPlaylist={openPlaylistDetails}
-        onReaction={handleReaction}
         showAuthorFollow={Boolean(authorFollowTarget)}
         timeAgo={timeAgo}
       />
@@ -2901,7 +2956,6 @@ export default function FeedScreen() {
     followBusyByKey,
     followingKeys,
     handleFollow,
-    handleReaction,
     isDark,
     openListingDetails,
     openPlaylistDetails,
@@ -2989,9 +3043,9 @@ export default function FeedScreen() {
 
     return (
       <ScrollView
-        style={{ flex: 1 }}
+        style={[styles.feedViewport, { marginBottom: feedBottomSpacer }]}
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={[styles.feedSkeletonContent, { paddingBottom: feedBottomSpacer + 20 }]}
+        contentContainerStyle={styles.feedSkeletonContent}
       >
         <View style={[styles.feedSkeletonSearchWrap, { backgroundColor: cardBg }]}>
           <Skeleton width="100%" height={48} borderRadius={16} />
@@ -3059,32 +3113,16 @@ export default function FeedScreen() {
     );
   };
 
-  const postAuthorIdsWithPosts = useMemo(
-    () =>
-      new Set(
-        posts
-          .map((post) => post?.author_id)
-          .filter((authorId): authorId is string => typeof authorId === "string" && authorId.length > 0),
-      ),
-    [posts],
-  );
-
   const feedItems = useMemo(() => {
     if (loading) return [];
     if (tab === "for_you" && posts.length === 0 && aiCards.length > 0) {
       return dedupeFeedItems(aiCards);
     }
-    if (tab === "following" && followingEntities.length > 0) {
-      const entitiesWithoutPosts = followingEntities.filter(
-        (entity) => entity.followed_type !== "profile" || !postAuthorIdsWithPosts.has(entity.id),
-      );
-
-      if (entitiesWithoutPosts.length > 0) {
-        return dedupeFeedItems([...entitiesWithoutPosts, ...posts]);
-      }
+    if (tab === "following") {
+      return dedupeFeedItems(followingEntities);
     }
     return dedupeFeedItems(posts);
-  }, [aiCards, followingEntities, loading, postAuthorIdsWithPosts, posts, tab]);
+  }, [aiCards, followingEntities, loading, posts, tab]);
 
   const isShowingAiCards = tab === "for_you" && posts.length === 0 && aiCards.length > 0;
   const showRecommendationLoadingState = tab === "for_you" && isAiCardsLoading;
@@ -3099,17 +3137,17 @@ export default function FeedScreen() {
     [],
   );
   const feedSeparator = useCallback(
-    () => <View style={{ height: isShowingAiCards ? 10 : 8 }} />,
+    () => <View style={{ height: isShowingAiCards ? 12 : 12 }} />,
     [isShowingAiCards],
   );
   const feedFooter = useMemo(
     () => (
       <>
         {loadingMore && <ActivityIndicator style={{ marginVertical: 20 }} color={colors.primary} />}
-        <View style={{ height: feedBottomSpacer }} />
+        <View style={{ height: 20 }} />
       </>
     ),
-    [colors.primary, feedBottomSpacer, loadingMore],
+    [colors.primary, loadingMore],
   );
   const feedEmpty = useMemo(
     () =>
@@ -3167,7 +3205,11 @@ export default function FeedScreen() {
       tab,
     ],
   );
-  const feedContentContainerStyle = useMemo(() => ({ paddingBottom: 20 }), []);
+  const feedViewportStyle = useMemo(
+    () => ({ marginBottom: feedBottomSpacer }),
+    [feedBottomSpacer],
+  );
+  const feedContentContainerStyle = useMemo(() => ({ paddingBottom: 0 }), []);
 
   if (isGuest) {
     return (
@@ -3186,6 +3228,7 @@ export default function FeedScreen() {
         renderFeedSkeleton()
       ) : (
         <FlatList
+            style={[styles.feedViewport, feedViewportStyle]}
             data={feedItems}
             initialNumToRender={4}
             keyExtractor={feedKeyExtractor}
@@ -3202,6 +3245,7 @@ export default function FeedScreen() {
             refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
             ItemSeparatorComponent={feedSeparator}
             contentContainerStyle={feedContentContainerStyle}
+            scrollIndicatorInsets={{ bottom: feedBottomSpacer }}
           />
       )}
 
@@ -3269,6 +3313,15 @@ export default function FeedScreen() {
         onDismiss={handleDetailsSheetDismiss}
       />
 
+      <PostDetailsModal
+        postId={selectedPostId}
+        visible={Boolean(selectedPostId)}
+        onClose={closePostDetails}
+        onReactionChanged={handleModalReactionChanged}
+        onCommentChanged={handleModalCommentChanged}
+        onPostDeleted={handleModalPostDeleted}
+      />
+
       {alert && <CustomAlert visible type={alert.type} title={alert.title} message={alert.message} onClose={() => setAlert(null)} />}
 
       <Navbar />
@@ -3279,6 +3332,9 @@ export default function FeedScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1 },
 
+  feedViewport: {
+    flex: 1,
+  },
   feedSkeletonContent: {
     paddingBottom: 20,
   },
@@ -3306,7 +3362,7 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
   },
   feedTabBottomSpacer: {
-    height: 12,
+    height: 5,
   },
   feedSkeletonPostCard: {
     marginHorizontal: 16,
@@ -3352,7 +3408,7 @@ const styles = StyleSheet.create({
   },
 
   /* Composer prompt */
-  composerRow: { flexDirection: "row", alignItems: "center", paddingHorizontal: 14, paddingVertical: 10, gap: 8 },
+  composerRow: { flexDirection: "row", alignItems: "center", paddingHorizontal: 14, paddingVertical: 12, gap: 10 },
   composerAvatar: { width: 36, height: 36, borderRadius: 18, alignItems: "center", justifyContent: "center" },
   composerInput: { flex: 1, height: 48, borderRadius: 16, paddingHorizontal: 16, justifyContent: "center", flexDirection: "row", alignItems: "center", gap: 10 },
   composerSearchText: { flex: 1, fontSize: moderateScale(15), fontFamily: "Poppins_500Medium", lineHeight: 20, includeFontPadding: false },
@@ -3361,7 +3417,8 @@ const styles = StyleSheet.create({
 
   liveRadioWrap: {
     paddingHorizontal: 14,
-    paddingBottom: 10,
+    paddingTop: 10,
+    paddingBottom: 14,
   },
   liveRadioCard: {
     minHeight: 88,
@@ -3481,10 +3538,11 @@ const styles = StyleSheet.create({
 
   socialPostCard: {
     marginHorizontal: 16,
+    marginTop: 15,
     borderRadius: 18,
     borderWidth: 1,
     paddingTop: 12,
-    paddingBottom: 10,
+    paddingBottom: 14,
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 6 },
     shadowRadius: 16,
@@ -3517,6 +3575,30 @@ const styles = StyleSheet.create({
     flex: 1,
     minWidth: 0,
   },
+  socialHeaderActions: {
+    height: 30,
+    flexDirection: "row",
+    alignItems: "flex-start",
+    alignSelf: "flex-start",
+    gap: 6,
+    flexShrink: 0,
+    marginTop: 1,
+  },
+  socialHeaderBadgeChip: {
+    height: 28,
+    maxWidth: 82,
+    borderRadius: 999,
+    paddingHorizontal: 9,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  socialHeaderBadgeText: {
+    fontSize: moderateScale(10),
+    lineHeight: 14,
+    fontFamily: "Poppins_700Bold",
+    includeFontPadding: false,
+    textAlignVertical: "center",
+  },
   socialName: {
     fontSize: moderateScale(14),
     fontFamily: "Poppins_700Bold",
@@ -3540,11 +3622,12 @@ const styles = StyleSheet.create({
   },
   socialFollowButton: {
     minWidth: 68,
-    height: 32,
+    height: 28,
     borderRadius: 999,
     borderWidth: 1,
     paddingHorizontal: 10,
     alignItems: "center",
+    alignSelf: "flex-start",
     justifyContent: "center",
   },
   socialFollowText: {
@@ -3552,10 +3635,11 @@ const styles = StyleSheet.create({
     fontFamily: "Poppins_700Bold",
   },
   socialMenuButton: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
     alignItems: "center",
+    alignSelf: "flex-start",
     justifyContent: "center",
   },
   socialCaption: {
@@ -3573,9 +3657,37 @@ const styles = StyleSheet.create({
     backgroundColor: "#E2E8F0",
     position: "relative",
   },
-  socialMedia: {
+  socialGalleryGrid: {
+    gap: SOCIAL_GALLERY_GAP,
+  },
+  socialGalleryRow: {
+    flexDirection: "row",
+    gap: SOCIAL_GALLERY_GAP,
+  },
+  socialGalleryColumn: {
+    flex: 1,
+    gap: SOCIAL_GALLERY_GAP,
+  },
+  socialGalleryCell: {
+    flex: 1,
+    overflow: "hidden",
+    backgroundColor: "#CBD5E1",
+    position: "relative",
+  },
+  socialGalleryImage: {
     width: "100%",
-    resizeMode: "cover",
+    height: "100%",
+  },
+  socialGalleryMoreOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(15,23,42,0.56)",
+  },
+  socialGalleryMoreText: {
+    color: "#FFFFFF",
+    fontSize: moderateScale(28),
+    fontFamily: "Poppins_700Bold",
   },
   socialMediaCount: {
     position: "absolute",
@@ -3649,33 +3761,6 @@ const styles = StyleSheet.create({
     fontSize: moderateScale(12),
     fontFamily: "Poppins_600SemiBold",
   },
-  socialEngagementRow: {
-    marginHorizontal: 12,
-    paddingTop: 10,
-    paddingBottom: 8,
-    borderBottomWidth: 1,
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    gap: 8,
-  },
-  socialEngagementLeft: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 5,
-  },
-  socialLikeBubble: {
-    width: 18,
-    height: 18,
-    borderRadius: 9,
-    backgroundColor: "#EF4444",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  socialEngagementText: {
-    fontSize: moderateScale(11),
-    fontFamily: "Poppins_400Regular",
-  },
   socialQuickInfoRow: {
     marginHorizontal: 12,
     marginTop: 10,
@@ -3691,31 +3776,22 @@ const styles = StyleSheet.create({
   socialQuickInfoItem: {
     flex: 1,
     minWidth: 0,
-    height: 24,
+    height: 20,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    gap: 5,
+    gap: 4,
   },
   socialQuickInfoIconBox: {
-    width: 20,
-    height: 24,
+    width: 18,
+    height: 18,
     alignItems: "center",
     justifyContent: "center",
   },
-  socialQuickInfoStarIconBox: {
-    transform: [{ translateY: -0.5 }],
-  },
-  socialQuickInfoLocationIconBox: {
-    transform: [{ translateY: -2 }],
-  },
-  socialQuickInfoChatIconBox: {
-    transform: [{ translateY: -1.5 }],
-  },
   socialQuickInfoIcon: {
-    width: 20,
-    height: 24,
-    lineHeight: 24,
+    width: 18,
+    height: 18,
+    lineHeight: 18,
     includeFontPadding: false,
     textAlign: "center",
     textAlignVertical: "center",
@@ -3723,11 +3799,10 @@ const styles = StyleSheet.create({
   socialQuickInfoText: {
     flexShrink: 1,
     fontSize: moderateScale(10.5),
-    lineHeight: 24,
+    lineHeight: 16,
     fontFamily: "Poppins_700Bold",
     includeFontPadding: false,
     textAlignVertical: "center",
-    transform: [{ translateY: 0.5 }],
   },
   socialActionRow: {
     flexDirection: "row",
@@ -3751,7 +3826,8 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     gap: 8,
     paddingHorizontal: 12,
-    paddingTop: 8,
+    paddingTop: 10,
+    paddingBottom: 4,
   },
   socialPrimaryCta: {
     flex: 1,

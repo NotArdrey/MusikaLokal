@@ -398,10 +398,15 @@ export default function MyGroupScreen() {
                             const canManageGroup = !isMusicianView || group.is_owner === true;
 
                             return (
-                                <View key={group.id} style={[styles.cardContainer, {
+                                <View
+                                    key={group.id}
+                                    testID={`mobile-group-card-${group.id}`}
+                                    accessibilityLabel={`mobile-group-card-${group.id}`}
+                                    style={[styles.cardContainer, {
                                     backgroundColor: colors.surface,
                                     shadowColor: colors.primary,
-                                }]}> 
+                                }]}
+                                >
                                     <View style={styles.imageWrapper}>
                                         <CachedImage
                                             uri={(group.images && group.images[0]) || 'https://images.unsplash.com/photo-1511735111819-9a3f7709049c?w=800&fit=crop'}
@@ -425,7 +430,10 @@ export default function MyGroupScreen() {
 
                                         <View style={[styles.actionRow, { borderColor: colors.border }]}>
                                             <View style={styles.actionLeft}>
-                                                <TouchableOpacity activeOpacity={1}
+                                                <TouchableOpacity
+                                                    activeOpacity={1}
+                                                    testID={`mobile-group-manage-${group.id}`}
+                                                    accessibilityLabel={`mobile-group-manage-${group.id}`}
                                                     onPress={() =>
                                                         canManageGroup
                                                             ? router.push({ pathname: '/manage_group', params: { id: group.id } })
@@ -451,7 +459,10 @@ export default function MyGroupScreen() {
                                                 </TouchableOpacity>
 
                                                 {canManageGroup ? (
-                                                    <TouchableOpacity activeOpacity={1}
+                                                    <TouchableOpacity
+                                                        activeOpacity={1}
+                                                        testID={`mobile-group-edit-${group.id}`}
+                                                        accessibilityLabel={`mobile-group-edit-${group.id}`}
                                                         onPress={() => router.push({ pathname: '/edit_group', params: { id: group.id } })}
                                                         style={[styles.editBtn, { borderColor: colors.border }]}
                                                     >
@@ -461,7 +472,10 @@ export default function MyGroupScreen() {
                                             </View>
 
                                             {canManageGroup ? (
-                                                <TouchableOpacity activeOpacity={1}
+                                                <TouchableOpacity
+                                                    activeOpacity={1}
+                                                    testID={`mobile-group-delete-${group.id}`}
+                                                    accessibilityLabel={`mobile-group-delete-${group.id}`}
                                                     onPress={() => confirmDelete(group.id, group.name)}
                                                     style={styles.deleteBtn}
                                                 >

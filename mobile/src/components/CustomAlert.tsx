@@ -150,6 +150,9 @@ export default function CustomAlert({
   }
 
   const usesStackedButtons = buttons.length > 2;
+  const normalizeTestId = (value: string) => (
+    value.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'action'
+  );
 
   const handleButtonPress = (button: AlertButton) => {
     // Call the onPress callback first, then close the alert
@@ -235,6 +238,8 @@ export default function CustomAlert({
               return (
                 <TouchableOpacity
                   key={index}
+                  testID={`custom-alert-button-${normalizeTestId(button.text)}`}
+                  accessibilityLabel={`custom-alert-button-${normalizeTestId(button.text)}`}
                   onPress={() => handleButtonPress(button)}
                   style={[
                     styles.button,

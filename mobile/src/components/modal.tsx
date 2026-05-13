@@ -9,6 +9,7 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 import { useTheme } from '../context/ThemeContext';
+import { isE2EFixtureMode } from '../utils/e2eFixtures';
 import { motion } from '../utils/motion';
 import CustomAlert from './CustomAlert';
 import InAppMediaViewer from './InAppMediaViewer';
@@ -309,6 +310,8 @@ const CustomModal: React.FC<CustomModalProps> = ({
 
               {showInput && (
                 <TextInput
+                  testID="app-modal-input"
+                  accessibilityLabel="app-modal-input"
                   style={[
                     styles.input,
                     {
@@ -327,6 +330,7 @@ const CustomModal: React.FC<CustomModalProps> = ({
                   multiline={inputMultiline}
                   numberOfLines={inputMultiline ? 3 : 1}
                   autoCapitalize="none"
+                  showSoftInputOnFocus={!isE2EFixtureMode()}
                 />
               )}
 
@@ -405,6 +409,8 @@ const CustomModal: React.FC<CustomModalProps> = ({
 
               <View style={styles.buttonContainer}>
                 <TouchableOpacity
+                  testID="app-modal-confirm-button"
+                  accessibilityLabel="app-modal-confirm-button"
                   activeOpacity={!canInteract || loading || isConfirmDisabled ? 1 : 0.78}
                   accessibilityState={{ disabled: isConfirmDisabled || loading }}
                   style={[
@@ -421,6 +427,8 @@ const CustomModal: React.FC<CustomModalProps> = ({
                 </TouchableOpacity>
 
                 <TouchableOpacity
+                  testID="app-modal-cancel-button"
+                  accessibilityLabel="app-modal-cancel-button"
                   activeOpacity={!canInteract ? 1 : 0.78}
                   style={styles.cancelButton}
                   disabled={!canInteract}

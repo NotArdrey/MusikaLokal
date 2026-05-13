@@ -222,7 +222,11 @@ export default function EditProductionScreen() {
   };
 
   return (
-    <View style={[styles.container, { backgroundColor: colors.background }]}> 
+    <View
+      testID="mobile-edit-production-page"
+      accessibilityLabel="mobile-edit-production-page"
+      style={[styles.container, { backgroundColor: colors.background }]}
+    >
       <Header title="Edit Production" onBackPress={handleReturnToTabs} />
 
       <ScrollView contentContainerStyle={[styles.content, { paddingBottom: contentBottomPadding }]} showsVerticalScrollIndicator={false}>
@@ -256,6 +260,8 @@ export default function EditProductionScreen() {
 
               <Text style={[styles.label, { color: colors.text }]}>Team Name *</Text>
               <TextInput
+                testID="mobile-edit-production-name-input"
+                accessibilityLabel="mobile-edit-production-name-input"
                 style={[styles.input, { color: colors.text, borderColor: colors.border, backgroundColor: colors.background }]}
                 value={teamName}
                 onChangeText={setTeamName}
@@ -265,6 +271,8 @@ export default function EditProductionScreen() {
 
               <Text style={[styles.label, { color: colors.text }]}>Description *</Text>
               <TextInput
+                testID="mobile-edit-production-description-input"
+                accessibilityLabel="mobile-edit-production-description-input"
                 style={[styles.input, styles.textArea, { color: colors.text, borderColor: colors.border, backgroundColor: colors.background }]}
                 value={description}
                 onChangeText={setDescription}
@@ -289,7 +297,10 @@ export default function EditProductionScreen() {
                 <Text style={[styles.helperText, { color: '#F59E0B' }]}>Complete all required fields before saving your production team.</Text>
               ) : null}
 
-              <TouchableOpacity activeOpacity={saving || hasIncompleteRequiredFields ? 1 : 0.78}
+              <TouchableOpacity
+                testID="mobile-edit-production-save-button"
+                accessibilityLabel="mobile-edit-production-save-button"
+                activeOpacity={saving || hasIncompleteRequiredFields ? 1 : 0.78}
                 style={[styles.submitBtn, { backgroundColor: hasIncompleteRequiredFields ? colors.textSecondary : colors.primary, opacity: saving || hasIncompleteRequiredFields ? 0.6 : 1 }]}
                 onPress={handleSubmit}
                 disabled={saving || hasIncompleteRequiredFields}

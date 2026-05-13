@@ -213,27 +213,34 @@ export default function AdminStationsPage() {
     }
   }, [fetchData, invokePlaylistAction]);
 
+  const performDeleteStation = useCallback(async (stationId: string) => {
+    setBusyKey(stationId);
+    try {
+      await invokePlaylistAction({ action: 'delete_station', station_id: stationId });
+      await fetchData();
+    } catch (error) {
+      console.error('Admin station delete failed:', error);
+      Alert.alert('Unable to delete station', error instanceof Error ? error.message : 'Please try again.');
+    } finally {
+      setBusyKey(null);
+    }
+  }, [fetchData, invokePlaylistAction]);
+
   const deleteStation = useCallback((stationId: string) => {
+    if (process.env.EXPO_PUBLIC_E2E === '1') {
+      void performDeleteStation(stationId);
+      return;
+    }
+
     Alert.alert('Delete station?', 'This removes the station and its playlist rotation from the user feed.', [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Delete',
         style: 'destructive',
-        onPress: async () => {
-          setBusyKey(stationId);
-          try {
-            await invokePlaylistAction({ action: 'delete_station', station_id: stationId });
-            await fetchData();
-          } catch (error) {
-            console.error('Admin station delete failed:', error);
-            Alert.alert('Unable to delete station', error instanceof Error ? error.message : 'Please try again.');
-          } finally {
-            setBusyKey(null);
-          }
-        },
+        onPress: () => void performDeleteStation(stationId),
       },
     ]);
-  }, [fetchData, invokePlaylistAction]);
+  }, [performDeleteStation]);
 
   const autoCreateStations = useCallback(async () => {
     setBusyKey('auto-create');
@@ -275,12 +282,18 @@ export default function AdminStationsPage() {
   const editorBusy = editingSource ? busyKey === (editingSource.key || `${editingSource.kind}:${editingSource.id}`) : false;
 
   return (
-    <View style={[styles.container, { backgroundColor: colors.background }]}>
+    <View
+      testID="admin-stations-page"
+      accessibilityLabel="admin-stations-page"
+      style={[styles.container, { backgroundColor: colors.background }]}
+    >
       <Header title="Admin" hideBackButton />
 
       <ScrollView contentContainerStyle={styles.content}>
         <View style={styles.topRow}>
           <TextInput
+            testID="admin-stations-search-input"
+            accessibilityLabel="admin-stations-search-input"
             value={search}
             onChangeText={setSearch}
             placeholder="Search stations..."
@@ -296,6 +309,8 @@ export default function AdminStationsPage() {
           />
 
           <TouchableOpacity
+            testID="admin-stations-auto-create-button"
+            accessibilityLabel="admin-stations-auto-create-button"
             activeOpacity={1}
             disabled={busyKey === 'auto-create'}
             onPress={autoCreateStations}
@@ -351,7 +366,12 @@ export default function AdminStationsPage() {
               const source = sourceByStationId.get(item.id);
 
               return (
-                <View key={item.id} style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
+                <View
+                  key={item.id}
+                  testID={`admin-station-card-${item.id}`}
+                  accessibilityLabel={`admin-station-card-${item.id}`}
+                  style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}
+                >
               <View style={styles.cardHeader}>
                 <View style={[styles.iconWrap, { backgroundColor: isLive ? colors.primary + '18' : (isDark ? '#334155' : '#E5E7EB') }]}>
                   <Ionicons name="radio-outline" size={22} color={isLive ? colors.primary : colors.textSecondary} />
@@ -385,6 +405,8 @@ export default function AdminStationsPage() {
 
               <View style={styles.actionRow}>
                 <TouchableOpacity
+                  testID={`admin-station-toggle-active-${item.id}`}
+                  accessibilityLabel={`admin-station-toggle-active-${item.id}`}
                   activeOpacity={1}
                   disabled={isBusy}
                   style={[styles.actionBtn, { backgroundColor: isLive ? '#EF444420' : '#22C55E20' }]}
@@ -396,6 +418,8 @@ export default function AdminStationsPage() {
                 </TouchableOpacity>
 
                 <TouchableOpacity
+                  testID={`admin-station-toggle-featured-${item.id}`}
+                  accessibilityLabel={`admin-station-toggle-featured-${item.id}`}
                   activeOpacity={1}
                   disabled={isBusy}
                   style={[styles.actionBtn, { backgroundColor: item.is_featured ? '#F59E0B20' : colors.primary + '18' }]}
@@ -407,6 +431,8 @@ export default function AdminStationsPage() {
                 </TouchableOpacity>
 
                 <TouchableOpacity
+                  testID={`admin-station-open-${item.id}`}
+                  accessibilityLabel={`admin-station-open-${item.id}`}
                   activeOpacity={1}
                   style={[styles.actionBtn, { backgroundColor: isDark ? '#0F172A' : '#F3F4F6' }]}
                   onPress={() => router.push({ pathname: '/station_details' as any, params: { station_id: item.id } })}
@@ -416,6 +442,8 @@ export default function AdminStationsPage() {
 
                 {source ? (
                   <TouchableOpacity
+                    testID={`admin-station-edit-${item.id}`}
+                    accessibilityLabel={`admin-station-edit-${item.id}`}
                     activeOpacity={1}
                     style={[styles.actionBtn, { backgroundColor: colors.primary + '18' }]}
                     onPress={() => openSourceEditor(source)}
@@ -425,6 +453,8 @@ export default function AdminStationsPage() {
                 ) : null}
 
                 <TouchableOpacity
+                  testID={`admin-station-delete-${item.id}`}
+                  accessibilityLabel={`admin-station-delete-${item.id}`}
                   activeOpacity={1}
                   disabled={isBusy}
                   style={[styles.actionBtn, { backgroundColor: '#EF444420' }]}
@@ -448,7 +478,11 @@ export default function AdminStationsPage() {
 
       <Modal visible={!!editingSource} animationType="fade" transparent onRequestClose={closeEditor}>
         <View style={styles.modalBackdrop}>
-          <View style={[styles.modalCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          <View
+            testID="admin-station-editor-modal"
+            accessibilityLabel="admin-station-editor-modal"
+            style={[styles.modalCard, { backgroundColor: colors.card, borderColor: colors.border }]}
+          >
             <View style={styles.modalHeader}>
               <View style={{ flex: 1 }}>
                 <Text style={{ color: colors.text, fontSize: 17, fontWeight: '800' }}>
@@ -458,12 +492,20 @@ export default function AdminStationsPage() {
                   {editingSource?.name || ''}
                 </Text>
               </View>
-              <TouchableOpacity activeOpacity={1} onPress={closeEditor} style={styles.iconButton}>
+              <TouchableOpacity
+                testID="admin-station-editor-close-button"
+                accessibilityLabel="admin-station-editor-close-button"
+                activeOpacity={1}
+                onPress={closeEditor}
+                style={styles.iconButton}
+              >
                 <Ionicons name="close" size={22} color={colors.text} />
               </TouchableOpacity>
             </View>
 
             <TextInput
+              testID="admin-station-name-input"
+              accessibilityLabel="admin-station-name-input"
               value={stationName}
               onChangeText={setStationName}
               placeholder="Station name"
@@ -471,6 +513,8 @@ export default function AdminStationsPage() {
               style={[styles.modalInput, { color: colors.text, borderColor: colors.border, backgroundColor: isDark ? '#0F172A' : '#F8FAFC' }]}
             />
             <TextInput
+              testID="admin-station-description-input"
+              accessibilityLabel="admin-station-description-input"
               value={stationDescription}
               onChangeText={setStationDescription}
               placeholder="Description"
@@ -480,6 +524,8 @@ export default function AdminStationsPage() {
             />
             <View style={styles.modalInputRow}>
               <TextInput
+                testID="admin-station-genre-input"
+                accessibilityLabel="admin-station-genre-input"
                 value={stationGenre}
                 onChangeText={setStationGenre}
                 placeholder="Genre"
@@ -487,6 +533,8 @@ export default function AdminStationsPage() {
                 style={[styles.modalInput, styles.halfInput, { color: colors.text, borderColor: colors.border, backgroundColor: isDark ? '#0F172A' : '#F8FAFC' }]}
               />
               <TextInput
+                testID="admin-station-rotation-input"
+                accessibilityLabel="admin-station-rotation-input"
                 value={rotationMinutes}
                 onChangeText={setRotationMinutes}
                 placeholder="Minutes"
@@ -504,6 +552,8 @@ export default function AdminStationsPage() {
                 const selected = selectedPlaylistIds.includes(playlist.id);
                 return (
                   <TouchableOpacity
+                    testID={`admin-station-playlist-${playlist.id}`}
+                    accessibilityLabel={`admin-station-playlist-${playlist.id}`}
                     key={playlist.id}
                     activeOpacity={1}
                     onPress={() => togglePlaylist(playlist.id)}
@@ -525,6 +575,8 @@ export default function AdminStationsPage() {
 
             <View style={styles.modalActions}>
               <TouchableOpacity
+                testID="admin-station-editor-cancel-button"
+                accessibilityLabel="admin-station-editor-cancel-button"
                 activeOpacity={1}
                 onPress={closeEditor}
                 style={[styles.secondaryBtn, { borderColor: colors.border }]}
@@ -532,6 +584,8 @@ export default function AdminStationsPage() {
                 <Text style={{ color: colors.text, fontWeight: '700' }}>Cancel</Text>
               </TouchableOpacity>
               <TouchableOpacity
+                testID="admin-station-editor-save-button"
+                accessibilityLabel="admin-station-editor-save-button"
                 activeOpacity={1}
                 disabled={editorBusy || !isStationEditorReady}
                 onPress={saveStation}

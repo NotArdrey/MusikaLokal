@@ -113,7 +113,11 @@ export default function AdminProductsPage() {
   if (!isAdmin) return <View style={[styles.container, { backgroundColor: colors.background }]}><Header title="Admin" onBackPress={() => router.back()} /><View style={styles.centered}><Text style={{ color: colors.textSecondary }}>Access denied</Text></View></View>;
 
   return (
-    <View style={[styles.container, { backgroundColor: colors.background }]}>
+    <View
+      testID="admin-products-page"
+      accessibilityLabel="admin-products-page"
+      style={[styles.container, { backgroundColor: colors.background }]}
+    >
       <Header title="Admin" onBackPress={() => router.back()} />
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tabsRow}>
         {tabItems.map((item) => {
@@ -127,10 +131,25 @@ export default function AdminProductsPage() {
         })}
       </ScrollView>
       <View style={{ paddingHorizontal: 16, marginTop: 12 }}>
-        <TextInput value={search} onChangeText={setSearch} placeholder="Search products..." placeholderTextColor={colors.textSecondary} style={[styles.searchInput, { color: colors.text, backgroundColor: colors.card, borderColor: colors.border }]} />
+        <TextInput
+          testID="admin-products-search-input"
+          accessibilityLabel="admin-products-search-input"
+          value={search}
+          onChangeText={setSearch}
+          placeholder="Search products..."
+          placeholderTextColor={colors.textSecondary}
+          style={[styles.searchInput, { color: colors.text, backgroundColor: colors.card, borderColor: colors.border }]}
+        />
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 8 }}>
           {(['all', 'draft', 'active', 'reported', 'suspended'] as ProductFilter[]).map((f) => (
-            <TouchableOpacity activeOpacity={1} key={f} onPress={() => setFilter(f)} style={[styles.filterChip, { backgroundColor: filter === f ? colors.primary : colors.card, borderColor: filter === f ? colors.primary : colors.border }]}>
+            <TouchableOpacity
+              activeOpacity={1}
+              key={f}
+              testID={`admin-products-filter-${f}`}
+              accessibilityLabel={`admin-products-filter-${f}`}
+              onPress={() => setFilter(f)}
+              style={[styles.filterChip, { backgroundColor: filter === f ? colors.primary : colors.card, borderColor: filter === f ? colors.primary : colors.border }]}
+            >
               <Text style={{ color: filter === f ? '#fff' : colors.text, fontSize: 13, textTransform: 'capitalize' }}>{f}</Text>
             </TouchableOpacity>
           ))}
@@ -142,7 +161,11 @@ export default function AdminProductsPage() {
           keyExtractor={(i) => i.id}
           contentContainerStyle={{ padding: 16, paddingBottom: 100 }}
           renderItem={({ item }) => (
-            <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            <View
+              testID={`admin-product-card-${item.id}`}
+              accessibilityLabel={`admin-product-card-${item.id}`}
+              style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}
+            >
               <View style={styles.cardRow}>
                 <View style={{ flex: 1 }}>
                   <Text style={{ color: colors.text, fontSize: 14, fontWeight: '600' }} numberOfLines={1}>{item.title}</Text>
@@ -153,12 +176,24 @@ export default function AdminProductsPage() {
               </View>
               <View style={styles.actionRow}>
                 {item.status !== 'suspended' && (
-                  <TouchableOpacity activeOpacity={1} style={[styles.actionBtn, { backgroundColor: '#ef444420' }]} onPress={() => handleSuspend(item.id)}>
+                  <TouchableOpacity
+                    activeOpacity={1}
+                    testID={`admin-product-suspend-${item.id}`}
+                    accessibilityLabel={`admin-product-suspend-${item.id}`}
+                    style={[styles.actionBtn, { backgroundColor: '#ef444420' }]}
+                    onPress={() => handleSuspend(item.id)}
+                  >
                     <Text style={{ color: '#ef4444', fontSize: 12, fontWeight: '600' }}>Suspend</Text>
                   </TouchableOpacity>
                 )}
                 {item.status === 'suspended' && (
-                  <TouchableOpacity activeOpacity={1} style={[styles.actionBtn, { backgroundColor: '#22c55e20' }]} onPress={() => handleActivate(item.id)}>
+                  <TouchableOpacity
+                    activeOpacity={1}
+                    testID={`admin-product-activate-${item.id}`}
+                    accessibilityLabel={`admin-product-activate-${item.id}`}
+                    style={[styles.actionBtn, { backgroundColor: '#22c55e20' }]}
+                    onPress={() => handleActivate(item.id)}
+                  >
                     <Text style={{ color: '#22c55e', fontSize: 12, fontWeight: '600' }}>Activate</Text>
                   </TouchableOpacity>
                 )}

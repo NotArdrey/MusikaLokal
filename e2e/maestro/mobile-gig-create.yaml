@@ -1,0 +1,45 @@
+appId: ${APP_ID}
+---
+- openLink: "musikalokal://add_gig"
+- assertVisible:
+    id: "mobile-add-gig-page"
+- tapOn:
+    id: "mobile-add-gig-event-name-input"
+- inputText: ${E2E_GIG_NAME}
+- tapOn:
+    id: "mobile-add-gig-description-input"
+- inputText: ${E2E_GIG_DESCRIPTION}
+- hideKeyboard
+- tapOn:
+    id: "e2e-image-upload-button"
+- tapOn:
+    id: "mobile-add-gig-location-button"
+- scrollUntilVisible:
+    element:
+      id: "mobile-add-gig-payout-input"
+    direction: DOWN
+- tapOn:
+    id: "mobile-add-gig-payout-input"
+- inputText: "5000"
+- hideKeyboard
+- scrollUntilVisible:
+    element:
+      id: "mobile-add-gig-add-schedule-button"
+    direction: DOWN
+- tapOn:
+    id: "mobile-add-gig-add-schedule-button"
+- scrollUntilVisible:
+    element:
+      id: "mobile-add-gig-next-button"
+    direction: DOWN
+- tapOn:
+    id: "mobile-add-gig-next-button"
+- tapOn:
+    id: "mobile-add-gig-next-button"
+- tapOn:
+    id: "mobile-add-gig-next-button"
+- tapOn:
+    id: "mobile-add-gig-next-button"
+    optional: true
+- tapOn:
+    id: "custom-alert-button-create"

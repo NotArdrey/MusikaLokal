@@ -2373,7 +2373,9 @@ export default function SignupScreen() {
                                 key={option.role}
                                 activeOpacity={1}
                                 accessibilityRole="button"
+                                accessibilityLabel={`signup-role-${option.role}`}
                                 accessibilityState={{ selected }}
+                                testID={`signup-role-${option.role}`}
                                 onPress={() => handleRoleSelect(option.role)}
                                 style={[
                                     styles.roleCardBig,
@@ -2409,6 +2411,8 @@ export default function SignupScreen() {
                         value={email}
                         onChangeText={setEmail}
                         autoCapitalize="none"
+                        accessibilityLabel="signup-email-input"
+                        testID="signup-email-input"
                     />
                 </View>
                 {errors.email && <Text style={{ color: 'red', fontSize: 12 }}>{errors.email}</Text>}
@@ -2423,6 +2427,8 @@ export default function SignupScreen() {
                         value={password}
                         onChangeText={setPassword}
                         secureTextEntry={!showPassword}
+                        accessibilityLabel="signup-password-input"
+                        testID="signup-password-input"
                     />
                     <TouchableOpacity activeOpacity={1} onPress={() => setShowPassword(!showPassword)}>
                         <Ionicons name={showPassword ? "eye-off-outline" : "eye-outline"} size={20} color={colors.textSecondary} />
@@ -2440,6 +2446,8 @@ export default function SignupScreen() {
                         value={confirmPassword}
                         onChangeText={setConfirmPassword}
                         secureTextEntry={!showConfirmPassword}
+                        accessibilityLabel="signup-confirm-password-input"
+                        testID="signup-confirm-password-input"
                     />
                     <TouchableOpacity activeOpacity={1} onPress={() => setShowConfirmPassword(!showConfirmPassword)}>
                         <Ionicons name={showConfirmPassword ? "eye-off-outline" : "eye-outline"} size={20} color={colors.textSecondary} />
@@ -2455,8 +2463,10 @@ export default function SignupScreen() {
 
                     <TouchableOpacity
                         activeOpacity={1}
+                        accessibilityLabel="signup-document-select-button"
                         onPress={() => setDocumentModalVisible(true)}
                         style={[styles.documentSelectButton, themeStyles.inputContainer, errors.document ? { borderColor: 'red' } : null]}
+                        testID="signup-document-select-button"
                     >
                         <Ionicons name="id-card-outline" size={20} color={colors.textSecondary} />
                         <View style={styles.documentSelectCopy}>
@@ -2481,12 +2491,14 @@ export default function SignupScreen() {
                 onPress={handleNext}
                 disabled={loading || !isDetailsStepReady}
                 activeOpacity={loading || !isDetailsStepReady ? 1 : 0.78}
+                accessibilityLabel="signup-next-button"
                 style={[
                     styles.nextButton,
                     { backgroundColor: isDetailsStepReady ? colors.primary : (isDark ? '#374151' : '#E5E7EB') },
                     { opacity: loading || !isDetailsStepReady ? 0.6 : 1 },
                     !isDetailsStepReady ? styles.nextButtonDisabled : null,
                 ]}
+                testID="signup-next-button"
             >
                 {loading ? <ActivityIndicator color="white" /> : <Text style={[styles.nextButtonText, { color: isDetailsStepReady ? "white" : colors.textSecondary }]}>Next</Text>}
             </TouchableOpacity>
@@ -2553,7 +2565,9 @@ export default function SignupScreen() {
                                     <TouchableOpacity
                                         key={option.key}
                                         activeOpacity={1}
+                                        accessibilityLabel={`signup-document-option-${option.key}`}
                                         onPress={() => handleDocumentSelect(option.key)}
+                                        testID={`signup-document-option-${option.key}`}
                                         style={[
                                             styles.documentModalOption,
                                             {
@@ -2782,7 +2796,11 @@ export default function SignupScreen() {
                             <View style={[styles.manualReviewIntroIcon, { backgroundColor: `${colors.primary}1A` }]}>
                                 <Ionicons name="id-card-outline" size={26} color={colors.primary} />
                             </View>
-                            <View style={styles.manualReviewIntroCopy}>
+                            <View
+                                style={styles.manualReviewIntroCopy}
+                                testID="signup-manual-review-page"
+                                accessibilityLabel="signup-manual-review-page"
+                            >
                                 <Text style={[styles.stepTitle, themeStyles.text, styles.manualReviewTitle]}>Manual ID review</Text>
                                 <Text style={[styles.stepSubtitle, themeStyles.textSecondary, styles.manualReviewSubtitle]}>
                                     {selectedDocumentOption.label} is not currently supported by Didit in the Philippines. Upload your ID below and our team will review within 5-7 business days.

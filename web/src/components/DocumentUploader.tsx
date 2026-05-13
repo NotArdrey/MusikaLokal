@@ -3,6 +3,7 @@ import * as DocumentPicker from 'expo-document-picker';
 import React, { useState } from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useTheme } from '../context/ThemeContext';
+import { createE2EDocumentFixture, isE2EFixtureMode } from '../utils/e2eFixtures';
 import CustomAlert, { AlertType } from './CustomAlert';
 
 interface DocumentUploaderProps {
@@ -35,6 +36,13 @@ const DocumentUploader: React.FC<DocumentUploaderProps> = ({ onFileSelect, label
     const pickDocument = async () => {
         try {
             setChecking(true);
+            if (isE2EFixtureMode()) {
+                const fixture = createE2EDocumentFixture();
+                setFileName(fixture.name);
+                onFileSelect(fixture);
+                return;
+            }
+
             const result = await DocumentPicker.getDocumentAsync({
                 type: 'application/pdf', // Limit to PDFs for now, or '*/*'
                 copyToCacheDirectory: true,
@@ -65,6 +73,8 @@ const DocumentUploader: React.FC<DocumentUploaderProps> = ({ onFileSelect, label
 
             {!fileName ? (
                 <TouchableOpacity activeOpacity={1}
+                    testID="e2e-document-upload-button"
+                    accessibilityLabel="e2e-document-upload-button"
                     style={[styles.uploadBtn, { borderColor: colors.border, backgroundColor: isDark ? '#374151' : '#F9FAFB' }]}
                     onPress={pickDocument}
                     disabled={checking}
