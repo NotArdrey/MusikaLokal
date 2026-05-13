@@ -6,6 +6,7 @@ import {
     Dimensions,
     Image,
     Linking,
+    Modal as RNModal,
     ScrollView,
     StyleSheet,
     Text,
@@ -18,6 +19,7 @@ import Header from "../src/components/header";
 import InAppMediaViewer, { isInAppMediaUrl } from "../src/components/InAppMediaViewer";
 import Modal from "../src/components/modal";
 import Navbar from "../src/components/navbar";
+import ProductionInviteSection from "../src/components/ProductionInviteSection";
 import SlidingTabBar from "../src/components/SlidingTabBar";
 import SmoothTabTransition from "../src/components/SmoothTabTransition";
 import { useBottomBarClearance } from "../src/hooks/useBottomBarClearance";
@@ -27,6 +29,8 @@ import {
     openNavigationDirections,
 } from "../src/utils/navigation";
 import { formatFriendlyDateTime } from "../src/utils/friendlyDateTime";
+import { ProductionInviteTarget } from "../src/utils/productionTeamInvites";
+import { sendVenueGigInvites } from "../src/utils/venueGigInvites";
 import { getSmoothTabIndex, setSmoothTab } from "../src/utils/smoothTabs";
 
 const { width: screenWidth } = Dimensions.get("window");
@@ -34,6 +38,15 @@ const PORTFOLIO_ITEM_SIZE = (screenWidth - 48 - 8) / 3; // 3 columns with gaps
 const OWNER_GIG_TABS = ["About", "Applicants", "Review"];
 const VIEWER_GIG_TABS = ["About", "Review"];
 const ACCEPTED_GIG_STATUSES = ["accepted", "approved", "confirmed", "happening now", "completed"];
+const HIDDEN_APPLICANT_STATUSES = new Set([
+  "cancelled",
+  "canceled",
+  "completed",
+  "declined",
+  "fired",
+  "rejected",
+  "resigned",
+]);
 
 import { useLocalSearchParams } from "expo-router";
 
@@ -55,6 +68,7 @@ export default function GigDetailsScreen() {
 
   const [authorized, setAuthorized] = useState(false);
   const [canManageGig, setCanManageGig] = useState(false);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [checkingAuth, setCheckingAuth] = useState(true);
 
   const [gig, setGig] = useState<any>(null);
@@ -74,6 +88,10 @@ export default function GigDetailsScreen() {
   });
   const [mediaViewerUrl, setMediaViewerUrl] = useState<string | null>(null);
   const [mediaViewerTitle, setMediaViewerTitle] = useState("Media");
+  const [inviteModalVisible, setInviteModalVisible] = useState(false);
+  const [inviteMessage, setInviteMessage] = useState("");
+  const [selectedInviteTargets, setSelectedInviteTargets] = useState<ProductionInviteTarget[]>([]);
+  const [sendingInvites, setSendingInvites] = useState(false);
 
   useEffect(() => {
     const availableTabs = canManageGig ? OWNER_GIG_TABS : VIEWER_GIG_TABS;
@@ -233,6 +251,8 @@ export default function GigDetailsScreen() {
         router.replace("/");
         return;
       }
+
+      setCurrentUserId(user.id);
 
       const { data: profile, error: profileError } = await supabase
         .from('profiles')
@@ -445,7 +465,105 @@ export default function GigDetailsScreen() {
     setModalVisible(true);
   };
 
+  const getApplicationStatusMeta = (status: unknown) => {
+    const normalizedStatus = String(status || "pending").trim().toLowerCase();
+
+    if (normalizedStatus === "accepted" || normalizedStatus === "approved") {
+      return { label: "Accepted", color: "#10B981", backgroundColor: "#10B98115" };
+    }
+
+    if (normalizedStatus === "pending") {
+      return { label: "Pending", color: colors.primary, backgroundColor: colors.primary + "15" };
+    }
+
+    if (normalizedStatus === "completed") {
+      return { label: "Completed", color: "#2563EB", backgroundColor: "#2563EB15" };
+    }
+
+    if (normalizedStatus === "fired") {
+      return { label: "Fired", color: "#EF4444", backgroundColor: "#EF444415" };
+    }
+
+    if (normalizedStatus === "resigned") {
+      return { label: "Resigned", color: "#F97316", backgroundColor: "#F9731615" };
+    }
+
+    if (normalizedStatus === "cancelled" || normalizedStatus === "canceled") {
+      return { label: "Cancelled", color: "#EF4444", backgroundColor: "#EF444415" };
+    }
+
+    if (normalizedStatus === "rejected" || normalizedStatus === "declined") {
+      return { label: "Declined", color: "#EF4444", backgroundColor: "#EF444415" };
+    }
+
+    return {
+      label: normalizedStatus
+        .split("_")
+        .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+        .join(" "),
+      color: colors.textSecondary,
+      backgroundColor: colors.textSecondary + "15",
+    };
+  };
+
+  const closeInviteModal = () => {
+    if (sendingInvites) return;
+    setInviteModalVisible(false);
+    setInviteMessage("");
+    setSelectedInviteTargets([]);
+  };
+
+  const handleSendVenueInvites = async () => {
+    if (!currentUserId || !gig?.id || !canManageGig || sendingInvites) {
+      return;
+    }
+
+    if (selectedInviteTargets.length === 0) {
+      showAlert("warning", "No Talent Selected", "Select at least one musician, duo, or group to invite.");
+      return;
+    }
+
+    setSendingInvites(true);
+    try {
+      const inviteSummary = await sendVenueGigInvites({
+        currentUserId,
+        gigId: gig.id,
+        gigName: gig.name,
+        gigImage: Array.isArray(gig.images) ? gig.images[0] || null : null,
+        inviteMessage,
+        inviteTargets: selectedInviteTargets,
+      });
+
+      if (inviteSummary.sentCount === 0 && inviteSummary.failedCount > 0) {
+        const failureMessage =
+          inviteSummary.failures.map((failure) => failure.error).find(Boolean) ||
+          "No invites were sent. Please try again.";
+        throw new Error(failureMessage);
+      }
+
+      setInviteModalVisible(false);
+      setInviteMessage("");
+      setSelectedInviteTargets([]);
+      showAlert(
+        inviteSummary.failedCount > 0 ? "warning" : "success",
+        inviteSummary.failedCount > 0 ? "Invites Partially Sent" : "Invites Sent",
+        inviteSummary.failedCount > 0
+          ? `${inviteSummary.sentCount} invite(s) sent, ${inviteSummary.failedCount} failed.`
+          : `${inviteSummary.sentCount} invite(s) sent.`,
+      );
+    } catch (error: any) {
+      showAlert("error", "Invite Failed", error?.message || "Failed to send invites.");
+    } finally {
+      setSendingInvites(false);
+    }
+  };
+
   const tabs = canManageGig ? OWNER_GIG_TABS : VIEWER_GIG_TABS;
+  const isInviteSubmitDisabled = sendingInvites || selectedInviteTargets.length === 0;
+  const visibleApplications = applications.filter((app) => {
+    const normalizedStatus = String(app?.status || "").trim().toLowerCase();
+    return !HIDDEN_APPLICANT_STATUSES.has(normalizedStatus);
+  });
 
   const formatMusicianType = (requirements?: any) => {
     const slots = requirements?.slots || {};
@@ -1131,16 +1249,28 @@ export default function GigDetailsScreen() {
 
             {activeTab === "Applicants" && (
               <View style={styles.applicantsContainer}>
-                <Text
-                  style={[
-                    styles.applicantsTitle,
-                    { color: colors.textSecondary },
-                  ]}
-                >
-                  APPLICANTS LIST
-                </Text>
+                <View style={styles.applicantsHeader}>
+                  <Text
+                    style={[
+                      styles.applicantsTitle,
+                      { color: colors.textSecondary },
+                    ]}
+                  >
+                    APPLICANTS LIST
+                  </Text>
+                  {canManageGig ? (
+                    <TouchableOpacity
+                      activeOpacity={1}
+                      onPress={() => setInviteModalVisible(true)}
+                      style={[styles.inviteBtn, { backgroundColor: colors.primary }]}
+                    >
+                      <Ionicons name="person-add-outline" size={16} color="#FFFFFF" />
+                      <Text style={styles.inviteBtnText}>Invite</Text>
+                    </TouchableOpacity>
+                  ) : null}
+                </View>
 
-                {applications.length === 0 ? (
+                {visibleApplications.length === 0 ? (
                   <Text
                     style={{
                       color: colors.textSecondary,
@@ -1148,10 +1278,11 @@ export default function GigDetailsScreen() {
                       marginTop: 20,
                     }}
                   >
-                    No applications yet.
+                    No active applications yet.
                   </Text>
                 ) : (
-                  applications.map((app) => {
+                  visibleApplications.map((app) => {
+                    const statusMeta = getApplicationStatusMeta(app.status);
                     const rosterProfile = app.production_roster?.roster_profile;
                     const rosterGroup = app.production_roster?.roster_group;
                     const displayGroup = app.group || rosterGroup;
@@ -1212,22 +1343,9 @@ export default function GigDetailsScreen() {
                               style={[
                                 styles.statusBadge,
                                 {
-                                  backgroundColor:
-                                    app.status === "pending"
-                                      ? colors.primary + "15"
-                                      : app.status === "accepted"
-                                        ? "#10B98115"
-                                        : app.status === "approved"
-                                          ? "#10B98115"
-                                          : "#EF444415",
+                                  backgroundColor: statusMeta.backgroundColor,
                                   borderWidth: 1,
-                                  borderColor:
-                                    app.status === "pending"
-                                      ? colors.primary
-                                      : app.status === "accepted" ||
-                                        app.status === "approved"
-                                        ? "#10B981"
-                                        : "#EF4444",
+                                  borderColor: statusMeta.color,
                                 },
                               ]}
                             >
@@ -1235,21 +1353,10 @@ export default function GigDetailsScreen() {
                                 style={{
                                   fontFamily: "Poppins_600SemiBold",
                                   fontSize: 11,
-                                  color:
-                                    app.status === "pending"
-                                      ? colors.primary
-                                      : app.status === "accepted" ||
-                                        app.status === "approved"
-                                        ? "#10B981"
-                                        : "#EF4444",
+                                  color: statusMeta.color,
                                 }}
                               >
-                                {app.status === "accepted" ||
-                                  app.status === "approved"
-                                  ? "Accepted"
-                                  : app.status === "rejected"
-                                    ? "Declined"
-                                    : "Pending"}
+                                {statusMeta.label}
                               </Text>
                             </View>
                           </View>
@@ -1713,7 +1820,7 @@ export default function GigDetailsScreen() {
                       </TouchableOpacity>
 
                       {/* Action Buttons */}
-                      {canManageGig && app.status === "pending" && (
+                      {canManageGig && String(app.status || "").toLowerCase() === "pending" && (
                         <View style={[styles.actionButtons, { marginTop: 12 }]}>
                           <TouchableOpacity activeOpacity={1}
                             onPress={() => confirmAction(app.id, "rejected")}
@@ -1866,6 +1973,89 @@ export default function GigDetailsScreen() {
         buttonText={modalButtonText}
         danger={modalButtonText === "Decline"}
       />
+      <RNModal
+        visible={inviteModalVisible}
+        transparent
+        animationType="slide"
+        onRequestClose={closeInviteModal}
+      >
+        <View style={styles.sheetOverlay}>
+          <TouchableOpacity
+            activeOpacity={1}
+            onPress={closeInviteModal}
+            style={styles.sheetBackdrop}
+          />
+          <View style={[styles.sheetContainer, { backgroundColor: colors.background, borderColor: colors.border }]}>
+            <View style={[styles.sheetHandle, { backgroundColor: isDark ? "#4B5563" : "#E5E7EB" }]} />
+            <View style={[styles.sheetHeader, { borderBottomColor: colors.border }]}>
+              <View style={styles.sheetHeaderCopy}>
+                <Text style={[styles.sheetEyebrow, { color: colors.textSecondary }]}>{gig?.name || "Gig"}</Text>
+                <Text style={[styles.sheetTitle, { color: colors.text }]}>Invite Performers</Text>
+              </View>
+              <TouchableOpacity
+                activeOpacity={1}
+                onPress={closeInviteModal}
+                style={[styles.sheetCloseButton, { backgroundColor: colors.card, borderColor: colors.border }]}
+              >
+                <Ionicons name="close" size={18} color={colors.text} />
+              </TouchableOpacity>
+            </View>
+            <ScrollView
+              style={styles.sheetBody}
+              contentContainerStyle={styles.sheetBodyContent}
+              showsVerticalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
+            >
+              <View style={styles.modalContent}>
+                <ProductionInviteSection
+                  currentUserId={currentUserId}
+                  selectedTargets={selectedInviteTargets}
+                  onSelectedTargetsChange={setSelectedInviteTargets}
+                  inviteMessage={inviteMessage}
+                  onInviteMessageChange={setInviteMessage}
+                  disabled={sendingInvites}
+                  title="Invite Musicians, Duo, or Group"
+                  description="Search performers to invite to this gig. Recipients can respond from Bookings > Pending."
+                  searchPlaceholder="Search musician, duo, or group"
+                  messagePlaceholder="Add optional gig details for the invite"
+                />
+
+                <TouchableOpacity
+                  activeOpacity={isInviteSubmitDisabled ? 1 : 0.78}
+                  onPress={handleSendVenueInvites}
+                  disabled={isInviteSubmitDisabled}
+                  style={[
+                    styles.submitBtn,
+                    {
+                      backgroundColor:
+                        selectedInviteTargets.length > 0 ? colors.primary : colors.border,
+                      opacity: isInviteSubmitDisabled ? 0.6 : 1,
+                    },
+                  ]}
+                >
+                  {sendingInvites ? (
+                    <ActivityIndicator size="small" color="#fff" />
+                  ) : (
+                    <Text
+                      style={[
+                        styles.submitBtnText,
+                        {
+                          color:
+                            selectedInviteTargets.length > 0
+                              ? "#FFFFFF"
+                              : colors.textSecondary,
+                        },
+                      ]}
+                    >
+                      Send Invites
+                    </Text>
+                  )}
+                </TouchableOpacity>
+              </View>
+            </ScrollView>
+          </View>
+        </View>
+      </RNModal>
       <CustomAlert
         visible={alertVisible}
         type={alertConfig.type}
@@ -2091,10 +2281,29 @@ const styles = StyleSheet.create({
   applicantsContainer: {
     gap: 16,
   },
+  applicantsHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+  },
   applicantsTitle: {
     fontSize: 13,
     letterSpacing: 0.5,
     fontFamily: "Poppins_600SemiBold",
+  },
+  inviteBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  inviteBtnText: {
+    color: "#FFFFFF",
+    fontFamily: "Poppins_600SemiBold",
+    fontSize: 12,
   },
   applicantCard: {
     padding: 16,
@@ -2220,6 +2429,82 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 2,
     borderRadius: 6,
+  },
+  sheetOverlay: {
+    flex: 1,
+    justifyContent: "flex-end",
+    backgroundColor: "rgba(0,0,0,0.45)",
+  },
+  sheetBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  sheetContainer: {
+    maxHeight: "88%",
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    borderWidth: 1,
+    borderBottomWidth: 0,
+    paddingTop: 10,
+  },
+  sheetHandle: {
+    alignSelf: "center",
+    width: 54,
+    height: 5,
+    borderRadius: 999,
+    marginBottom: 12,
+  },
+  sheetHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    borderBottomWidth: 1,
+    paddingHorizontal: 20,
+    paddingBottom: 14,
+  },
+  sheetHeaderCopy: {
+    flex: 1,
+    paddingRight: 12,
+  },
+  sheetEyebrow: {
+    fontSize: 11,
+    letterSpacing: 1.4,
+    textTransform: "uppercase",
+    fontFamily: "Poppins_700Bold",
+  },
+  sheetTitle: {
+    marginTop: 2,
+    fontSize: 20,
+    fontFamily: "Poppins_700Bold",
+  },
+  sheetCloseButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  sheetBody: {
+    maxHeight: "100%",
+  },
+  sheetBodyContent: {
+    paddingHorizontal: 20,
+    paddingTop: 14,
+    paddingBottom: 28,
+  },
+  modalContent: {
+    paddingHorizontal: 4,
+  },
+  submitBtn: {
+    marginTop: 20,
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: "center",
+  },
+  submitBtnText: {
+    color: "#fff",
+    fontFamily: "Poppins_600SemiBold",
+    fontSize: 15,
   },
   skillTag: {
     paddingHorizontal: 10,

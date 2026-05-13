@@ -23,6 +23,10 @@ type ProductionInviteSectionProps = {
   inviteMessage: string;
   onInviteMessageChange: (value: string) => void;
   disabled?: boolean;
+  title?: string;
+  description?: string;
+  searchPlaceholder?: string;
+  messagePlaceholder?: string;
 };
 
 const FILTER_OPTIONS: { value: ProductionInviteFilter; label: string }[] = [
@@ -39,6 +43,10 @@ export default function ProductionInviteSection({
   inviteMessage,
   onInviteMessageChange,
   disabled = false,
+  title = "Invite Musicians, Duo, or Group",
+  description = "Search for performers to invite after you save this production team. Accepted invites will add them to your production roster, and recipients can respond from Bookings > Pending.",
+  searchPlaceholder = "Search musician, duo, or group",
+  messagePlaceholder = "Add optional context for the invite",
 }: ProductionInviteSectionProps) {
   const { colors, isDark } = useTheme();
   const [searchQuery, setSearchQuery] = useState("");
@@ -114,8 +122,8 @@ export default function ProductionInviteSection({
 
   return (
     <View style={[styles.sectionCard, { borderColor: isDark ? "#334155" : "#E2E8F0", backgroundColor: colors.surface }]}>
-      <Text style={[styles.sectionTitle, { color: colors.text }]}>Invite Musicians, Duo, or Group</Text>
-      <Text style={[styles.sectionText, { color: colors.textSecondary }]}>Search for performers to invite after you save this production team. Accepted invites will add them to your production roster, and recipients can respond from Bookings &gt; Pending.</Text>
+      <Text style={[styles.sectionTitle, { color: colors.text }]}>{title}</Text>
+      <Text style={[styles.sectionText, { color: colors.textSecondary }]}>{description}</Text>
 
       <Text style={[styles.label, { color: colors.text }]}>Search Talent</Text>
       <View style={[styles.searchInputWrap, { borderColor: colors.border, backgroundColor: colors.background }]}>
@@ -124,7 +132,7 @@ export default function ProductionInviteSection({
           style={[styles.searchInput, { color: colors.text }]}
           value={searchQuery}
           onChangeText={setSearchQuery}
-          placeholder="Search musician, duo, or group"
+          placeholder={searchPlaceholder}
           placeholderTextColor={colors.textSecondary}
           editable={!disabled}
         />
@@ -237,7 +245,7 @@ export default function ProductionInviteSection({
         style={[styles.messageInput, { color: colors.text, borderColor: colors.border, backgroundColor: colors.background }]}
         value={inviteMessage}
         onChangeText={onInviteMessageChange}
-        placeholder="Add optional context for the invite"
+        placeholder={messagePlaceholder}
         placeholderTextColor={colors.textSecondary}
         editable={!disabled}
         multiline
