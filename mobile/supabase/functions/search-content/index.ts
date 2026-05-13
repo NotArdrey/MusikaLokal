@@ -141,6 +141,7 @@ const normalizeResult = (
           : ""),
     rate: (item.rate || item.hourly_rate || item.budget || item.budget_range)?.toString(),
     show_gig_statuses: item.show_gig_statuses,
+    open_production_applications: item.open_production_applications,
   };
 };
 
@@ -177,10 +178,6 @@ serve(async (req: Request) => {
         query = query
           .select("id, full_name, avatar_url, address, created_at, role, show_gig_statuses")
           .eq("role", "musician");
-      }
-
-      if (table === "production_teams") {
-        query = query.select("id, owner_id, name, description, logo_url, created_at, updated_at");
       }
 
       if (queryText.length > 0) {

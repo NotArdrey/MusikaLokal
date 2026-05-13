@@ -2785,10 +2785,12 @@ serve(async (req: Request) => {
 
         const organizerAllowedStatuses = ["accepted", "rejected", "completed", "cancelled", "fired"];
         const applicantAllowedStatuses = ["cancelled", "resigned"];
+        const productionManagerAllowedStatuses = ["cancelled", "resigned", "fired"];
 
         if (
           !(isOrganizer && organizerAllowedStatuses.includes(new_status)) &&
-          !((isApplicant || isProductionManager) && applicantAllowedStatuses.includes(new_status))
+          !(isApplicant && applicantAllowedStatuses.includes(new_status)) &&
+          !(isProductionManager && productionManagerAllowedStatuses.includes(new_status))
         ) {
           return new Response(JSON.stringify({ error: "Forbidden" }), {
             headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -2946,6 +2948,13 @@ serve(async (req: Request) => {
               const actorIsOrganizer =
                 authUser.id === gigRow?.organizer_id ||
                 authUser.id === application.gig?.organizer_id;
+              const actorIsProductionManager =
+                Boolean(application.production_team_id) &&
+                audience.some(
+                  (member: any) =>
+                    member.user_id === authUser.id &&
+                    member.viewer_access === "production_manager",
+                );
               const cancelledByApplicant =
                 (new_status === "cancelled" || new_status === "resigned") &&
                 actorIsApplicant &&
@@ -2965,7 +2974,9 @@ serve(async (req: Request) => {
                 notificationType = "success";
               } else if (new_status === "fired") {
                 notificationTitle = "Removed from Gig";
-                notificationMessage = `Your contract for ${gigName} has been ended by the venue.`;
+                notificationMessage = actorIsProductionManager
+                  ? `Your contract for ${gigName} has been ended by the production team.`
+                  : `Your contract for ${gigName} has been ended by the venue.`;
                 notificationType = "error";
               } else if (new_status === "resigned") {
                 notificationTitle = "Musician Resigned";

@@ -577,12 +577,12 @@ const ListingCard: React.FC<ListingCardProps> = ({
 
   const showOpenApplicationsBadge = useMemo(
     () =>
-      item.type === "Group" &&
-      item.open_group_applications === true &&
+      ((item.type === "Group" && item.open_group_applications === true) ||
+        (item.type === "Production" && item.open_production_applications === true)) &&
       !!userId &&
       userRole === "musician" &&
       item.owner_id !== userId,
-    [item.open_group_applications, item.owner_id, item.type, userId, userRole],
+    [item.open_group_applications, item.open_production_applications, item.owner_id, item.type, userId, userRole],
   );
 
   const showCustomContractBadge = Boolean(item?.contract_url);

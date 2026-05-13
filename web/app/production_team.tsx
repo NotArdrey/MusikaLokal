@@ -8,6 +8,7 @@ import {
   RefreshControl,
   ScrollView,
   StyleSheet,
+  Switch,
   Text,
   TextInput,
   TouchableOpacity,
@@ -36,6 +37,7 @@ interface Team {
   logo_url: string | null;
   owner_id: string;
   member_role: string;
+  open_production_applications?: boolean;
   created_at: string;
 }
 
@@ -44,6 +46,18 @@ interface TeamMember {
   role: string;
   full_name: string;
   avatar_url: string | null;
+}
+
+interface TeamRosterEntry {
+  id: string;
+  entity_kind: "musician" | "duo" | "group";
+  display_name: string;
+  avatar_url: string | null;
+  group_type?: string | null;
+  profile_id?: string | null;
+  group_id?: string | null;
+  profile?: any;
+  group?: any;
 }
 
 const PRODUCTION_TABS: ("About" | "Members" | "Reviews")[] = ["About", "Members", "Reviews"];
@@ -91,7 +105,9 @@ export default function ProductionTeamScreen() {
   const [selectedTeam, setSelectedTeam] = useState<Team | null>(null);
   const [activeTab, setActiveTab] = useState<"About" | "Members" | "Reviews">(requestedTab);
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
+  const [teamRoster, setTeamRoster] = useState<TeamRosterEntry[]>([]);
   const [loadingMembers, setLoadingMembers] = useState(false);
+  const [rosterActionId, setRosterActionId] = useState<string | null>(null);
   const [fireModalVisible, setFireModalVisible] = useState(false);
   const [memberToFire, setMemberToFire] = useState<TeamMember | null>(null);
   const [fireReason, setFireReason] = useState("");
@@ -100,6 +116,7 @@ export default function ProductionTeamScreen() {
   const [inviteMessage, setInviteMessage] = useState("");
   const [selectedInviteTargets, setSelectedInviteTargets] = useState<ProductionInviteTarget[]>([]);
   const [sendingInvites, setSendingInvites] = useState(false);
+  const [updatingApplications, setUpdatingApplications] = useState(false);
 
   // Alert
   const [alertVisible, setAlertVisible] = useState(false);
@@ -224,32 +241,39 @@ export default function ProductionTeamScreen() {
   const fetchTeamMembers = useCallback(async (teamId: string) => {
     setLoadingMembers(true);
     try {
-      const { data, error } = await supabase
-        .from("production_team_members")
-        .select("user_id, role, profiles(id, full_name, avatar_url)")
-        .eq("team_id", teamId);
+      const [membersResult, rosterResult] = await Promise.all([
+        supabase
+          .from("production_team_members")
+          .select("user_id, role, profiles(id, full_name, avatar_url)")
+          .eq("team_id", teamId),
+        invokeProduction({
+          action: "list_team_roster",
+          team_id: teamId,
+        }),
+      ]);
 
-      if (error) throw error;
+      if (membersResult.error) throw membersResult.error;
       setTeamMembers(
-        (data || []).map((m: any) => ({
+        (membersResult.data || []).map((m: any) => ({
           user_id: m.user_id,
           role: m.role,
           full_name: m.profiles?.full_name || "Unknown",
           avatar_url: m.profiles?.avatar_url || null,
         }))
       );
+      setTeamRoster((rosterResult?.roster || []) as TeamRosterEntry[]);
     } catch (e: any) {
       showAlert("error", "Error", e.message || "Failed to fetch members");
     } finally {
       setLoadingMembers(false);
     }
-  }, []);
+  }, [invokeProduction]);
 
   const fetchTeamById = useCallback(async (teamId: string) => {
     try {
       const { data, error } = await supabase
         .from("production_teams")
-        .select("id, name, description, logo_url, owner_id, created_at")
+        .select("*")
         .eq("id", teamId)
         .maybeSingle();
 
@@ -271,6 +295,10 @@ export default function ProductionTeamScreen() {
       setSelectedTeam({
         ...data,
         member_role: data.owner_id === userId ? "owner" : membershipData?.role || "viewer",
+        open_production_applications:
+          typeof data.open_production_applications === "boolean"
+            ? data.open_production_applications
+            : undefined,
       });
       setActiveTab(requestedTab);
       await fetchTeamMembers(teamId);
@@ -389,6 +417,26 @@ export default function ProductionTeamScreen() {
     }
   };
 
+  const handleRemoveRosterEntry = async (entry: TeamRosterEntry) => {
+    if (!selectedTeam || rosterActionId) return;
+
+    setRosterActionId(entry.id);
+    try {
+      const data = await invokeProduction({
+        action: "remove_team_roster_entry",
+        team_id: selectedTeam.id,
+        roster_id: entry.id,
+      });
+
+      setTeamRoster((data?.roster || []) as TeamRosterEntry[]);
+      showAlert("success", "Roster Updated", `${entry.display_name || "Performer"} was removed from the production roster.`);
+    } catch (e: any) {
+      showAlert("error", "Error", e.message || "Failed to remove roster entry");
+    } finally {
+      setRosterActionId(null);
+    }
+  };
+
   const closeInviteMemberModal = () => {
     if (sendingInvites) return;
     setInviteModalVisible(false);
@@ -444,6 +492,59 @@ export default function ProductionTeamScreen() {
     }
   };
 
+  const handleToggleProductionApplications = async (value: boolean) => {
+    if (!selectedTeam || updatingApplications) return;
+    if (typeof selectedTeam.open_production_applications !== "boolean") return;
+
+    const previous = selectedTeam.open_production_applications;
+    setSelectedTeam((prev) =>
+      prev ? { ...prev, open_production_applications: value } : prev,
+    );
+    setTeams((prev) =>
+      prev.map((team) =>
+        team.id === selectedTeam.id
+          ? { ...team, open_production_applications: value }
+          : team,
+      ),
+    );
+    setUpdatingApplications(true);
+
+    try {
+      const data = await invokeProduction({
+        action: "update_production_team",
+        team_id: selectedTeam.id,
+        name: selectedTeam.name,
+        description: selectedTeam.description,
+        logo_url: selectedTeam.logo_url,
+        open_production_applications: value,
+      });
+
+      if (!data?.success) throw new Error(data?.error || "Could not update applications setting.");
+
+      showAlert(
+        "success",
+        "Applications Setting Updated",
+        value
+          ? "Your production team is now open for applications."
+          : "Your production team is now closed for applications.",
+      );
+    } catch (e: any) {
+      setSelectedTeam((prev) =>
+        prev ? { ...prev, open_production_applications: previous } : prev,
+      );
+      setTeams((prev) =>
+        prev.map((team) =>
+          team.id === selectedTeam.id
+            ? { ...team, open_production_applications: previous }
+            : team,
+        ),
+      );
+      showAlert("error", "Update Failed", e.message || "Could not update applications setting.");
+    } finally {
+      setUpdatingApplications(false);
+    }
+  };
+
   const openTeamDetail = (team: Team) => {
     setActiveTab("About");
     setSelectedTeam(team);
@@ -459,6 +560,7 @@ export default function ProductionTeamScreen() {
     setActiveTab("About");
     setSelectedTeam(null);
     setTeamMembers([]);
+    setTeamRoster([]);
     setFireModalVisible(false);
     setMemberToFire(null);
     setFireReason("");
@@ -556,11 +658,50 @@ export default function ProductionTeamScreen() {
                   {selectedTeam.description || "No description available."}
                 </Text>
 
+                {canManage && typeof selectedTeam.open_production_applications === "boolean" ? (
+                  <View
+                    style={[
+                      styles.visibilityCard,
+                      {
+                        backgroundColor: colors.surface,
+                        borderColor: colors.border,
+                      },
+                    ]}
+                  >
+                    <View style={styles.visibilityTextWrap}>
+                      <Text style={[styles.visibilityTitle, { color: colors.text }]}>
+                        Open applications to this production team
+                      </Text>
+                      <Text
+                        style={[
+                          styles.visibilitySubtitle,
+                          { color: colors.textSecondary },
+                        ]}
+                      >
+                        Shows an Open Applications badge on your production team cards in Search.
+                      </Text>
+                    </View>
+                    <Switch
+                      value={selectedTeam.open_production_applications !== false}
+                      onValueChange={handleToggleProductionApplications}
+                      disabled={updatingApplications}
+                      trackColor={{ false: isDark ? "#374151" : "#D1D5DB", true: colors.primary + "66" }}
+                      thumbColor={selectedTeam.open_production_applications !== false ? colors.primary : "#9CA3AF"}
+                    />
+                  </View>
+                ) : null}
+
                 <View style={styles.statsRow}>
                   <View style={[styles.infoCard, { backgroundColor: colors.surface }]}>
-                    <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>Members</Text>
+                    <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>Team Members</Text>
                     <Text style={[styles.infoValue, { color: colors.text }]}>
                       {loadingMembers ? "-" : teamMembers.length}
+                    </Text>
+                  </View>
+                  <View style={[styles.infoCard, { backgroundColor: colors.surface }]}>
+                    <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>Roster</Text>
+                    <Text style={[styles.infoValue, { color: colors.text }]}>
+                      {loadingMembers ? "-" : teamRoster.length}
                     </Text>
                   </View>
                   <View style={[styles.infoCard, { backgroundColor: colors.surface }]}>
@@ -576,7 +717,7 @@ export default function ProductionTeamScreen() {
             {activeTab === "Members" && (
               <>
                 <View style={styles.sectionHeader}>
-                  <Text style={[styles.sectionTitle, { color: colors.text }]}>Members</Text>
+                  <Text style={[styles.sectionTitle, { color: colors.text }]}>Roster & Members</Text>
                   {canManage ? (
                     <TouchableOpacity
                       activeOpacity={1}
@@ -594,38 +735,102 @@ export default function ProductionTeamScreen() {
                     <Skeleton width="100%" height={56} borderRadius={12} />
                     <Skeleton width="100%" height={56} borderRadius={12} style={{ marginTop: 8 }} />
                   </View>
-                ) : teamMembers.length === 0 ? (
-                  <Text style={[styles.emptyText, { color: colors.textSecondary }]}>No members found</Text>
                 ) : (
-                  teamMembers.map((member) => (
-                    <View
-                      key={member.user_id}
-                      style={[styles.memberCard, { backgroundColor: colors.card, borderColor: colors.border }]}
-                    >
-                      <View style={styles.memberRow}>
-                        {member.avatar_url ? (
-                          <CachedImage uri={member.avatar_url} style={styles.avatar} />
-                        ) : (
-                          <View style={[styles.avatarPlaceholder, { backgroundColor: colors.border }]}>
-                            <Ionicons name="person" size={18} color={colors.textSecondary} />
-                          </View>
-                        )}
-                        <View style={styles.memberInfo}>
-                          <Text style={[styles.memberName, { color: colors.text }]}>{member.full_name}</Text>
-                          <Text style={[styles.memberRole, { color: statusColor(member.role) }]}>{member.role}</Text>
-                        </View>
-                        {canManage && member.role !== "owner" && member.user_id !== userId && (
-                          <TouchableOpacity
-                            activeOpacity={1}
-                            onPress={() => openFireMemberModal(member)}
-                            style={styles.removeBtn}
-                          >
-                            <Ionicons name="close-circle" size={22} color="#EF4444" />
-                          </TouchableOpacity>
-                        )}
-                      </View>
+                  <>
+                    <View style={styles.subsectionHeader}>
+                      <Text style={[styles.subsectionTitle, { color: colors.textSecondary }]}>Production Roster</Text>
+                      <Text style={[styles.subsectionCount, { color: colors.textSecondary }]}>{teamRoster.length}</Text>
                     </View>
-                  ))
+
+                    {teamRoster.length === 0 ? (
+                      <Text style={[styles.emptyInlineText, { color: colors.textSecondary }]}>No musicians, duos, or groups on the roster yet</Text>
+                    ) : (
+                      teamRoster.map((entry) => {
+                        const isGroupEntry = entry.entity_kind === "duo" || entry.entity_kind === "group";
+                        const entryType =
+                          entry.entity_kind === "musician"
+                            ? "Solo Musician"
+                            : entry.entity_kind === "duo"
+                              ? "Duo"
+                              : "Group";
+                        const isBusy = rosterActionId === entry.id;
+
+                        return (
+                          <View
+                            key={entry.id}
+                            style={[styles.memberCard, { backgroundColor: colors.card, borderColor: colors.border }]}
+                          >
+                            <View style={styles.memberRow}>
+                              {entry.avatar_url ? (
+                                <CachedImage uri={entry.avatar_url} style={styles.avatar} />
+                              ) : (
+                                <View style={[styles.avatarPlaceholder, { backgroundColor: colors.border }]}>
+                                  <Ionicons name={isGroupEntry ? "people" : "person"} size={18} color={colors.textSecondary} />
+                                </View>
+                              )}
+                              <View style={styles.memberInfo}>
+                                <Text style={[styles.memberName, { color: colors.text }]}>{entry.display_name}</Text>
+                                <Text style={[styles.memberRole, { color: colors.primary }]}>{entryType}</Text>
+                              </View>
+                              {canManage ? (
+                                <TouchableOpacity
+                                  activeOpacity={1}
+                                  disabled={Boolean(rosterActionId)}
+                                  onPress={() => handleRemoveRosterEntry(entry)}
+                                  style={[styles.removeBtn, { opacity: isBusy ? 0.5 : 1 }]}
+                                >
+                                  {isBusy ? (
+                                    <ActivityIndicator size="small" color="#EF4444" />
+                                  ) : (
+                                    <Ionicons name="close-circle" size={22} color="#EF4444" />
+                                  )}
+                                </TouchableOpacity>
+                              ) : null}
+                            </View>
+                          </View>
+                        );
+                      })
+                    )}
+
+                    <View style={[styles.subsectionHeader, styles.memberSubsectionSpacing]}>
+                      <Text style={[styles.subsectionTitle, { color: colors.textSecondary }]}>Team Access</Text>
+                      <Text style={[styles.subsectionCount, { color: colors.textSecondary }]}>{teamMembers.length}</Text>
+                    </View>
+
+                    {teamMembers.length === 0 ? (
+                      <Text style={[styles.emptyInlineText, { color: colors.textSecondary }]}>No team members found</Text>
+                    ) : (
+                      teamMembers.map((member) => (
+                        <View
+                          key={member.user_id}
+                          style={[styles.memberCard, { backgroundColor: colors.card, borderColor: colors.border }]}
+                        >
+                          <View style={styles.memberRow}>
+                            {member.avatar_url ? (
+                              <CachedImage uri={member.avatar_url} style={styles.avatar} />
+                            ) : (
+                              <View style={[styles.avatarPlaceholder, { backgroundColor: colors.border }]}>
+                                <Ionicons name="person" size={18} color={colors.textSecondary} />
+                              </View>
+                            )}
+                            <View style={styles.memberInfo}>
+                              <Text style={[styles.memberName, { color: colors.text }]}>{member.full_name}</Text>
+                              <Text style={[styles.memberRole, { color: statusColor(member.role) }]}>{member.role}</Text>
+                            </View>
+                            {canManage && member.role !== "owner" && member.user_id !== userId && (
+                              <TouchableOpacity
+                                activeOpacity={1}
+                                onPress={() => openFireMemberModal(member)}
+                                style={styles.removeBtn}
+                              >
+                                <Ionicons name="close-circle" size={22} color="#EF4444" />
+                              </TouchableOpacity>
+                            )}
+                          </View>
+                        </View>
+                      ))
+                    )}
+                  </>
                 )}
               </>
             )}
@@ -964,12 +1169,34 @@ const styles = StyleSheet.create({
     lineHeight: 24,
     fontFamily: "Poppins_400Regular",
   },
+  visibilityCard: {
+    borderWidth: 1,
+    borderRadius: 18,
+    padding: 18,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 14,
+  },
+  visibilityTextWrap: { flex: 1 },
+  visibilityTitle: {
+    fontFamily: "Poppins_700Bold",
+    fontSize: 16,
+    marginBottom: 6,
+  },
+  visibilitySubtitle: {
+    fontFamily: "Poppins_400Regular",
+    fontSize: 13,
+    lineHeight: 20,
+  },
   statsRow: {
     flexDirection: "row",
     gap: 16,
+    flexWrap: "wrap",
   },
   infoCard: {
     flex: 1,
+    minWidth: 96,
     borderRadius: 16,
     padding: 16,
   },
@@ -988,6 +1215,11 @@ const styles = StyleSheet.create({
   // Members
   sectionHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 12 },
   sectionTitle: { fontFamily: "Poppins_600SemiBold", fontSize: 16 },
+  subsectionHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 8 },
+  memberSubsectionSpacing: { marginTop: 18 },
+  subsectionTitle: { fontFamily: "Poppins_600SemiBold", fontSize: 12, textTransform: "uppercase", letterSpacing: 0.6 },
+  subsectionCount: { fontFamily: "Poppins_600SemiBold", fontSize: 12 },
+  emptyInlineText: { fontFamily: "Poppins_400Regular", fontSize: 13, marginBottom: 10 },
   inviteBtn: { flexDirection: "row", alignItems: "center", gap: 6, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8 },
   inviteBtnText: { color: "#FFFFFF", fontFamily: "Poppins_600SemiBold", fontSize: 12 },
   memberCard: { borderRadius: 12, borderWidth: 1, padding: 12, marginBottom: 8 },

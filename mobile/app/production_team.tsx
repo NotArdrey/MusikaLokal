@@ -7,6 +7,7 @@ import {
   RefreshControl,
   ScrollView,
   StyleSheet,
+  Switch,
   Text,
   TextInput,
   TouchableOpacity,
@@ -26,6 +27,7 @@ import SmoothTabTransition from "../src/components/SmoothTabTransition";
 import { useBottomBarClearance } from "../src/hooks/useBottomBarClearance";
 import { useAuth, useRequireAuth } from "../src/context/AuthContext";
 import { useTheme } from "../src/context/ThemeContext";
+import { invalidateListingCaches } from "../src/utils/listingCacheInvalidation";
 import { ProductionInviteTarget, sendProductionTeamInvites } from "../src/utils/productionTeamInvites";
 import { getSmoothTabIndex, setSmoothTab } from "../src/utils/smoothTabs";
 
@@ -36,6 +38,7 @@ interface Team {
   logo_url: string | null;
   owner_id: string;
   member_role: string;
+  open_production_applications?: boolean;
   created_at: string;
 }
 
@@ -98,6 +101,7 @@ export default function ProductionTeamScreen() {
   const [inviteMessage, setInviteMessage] = useState("");
   const [selectedInviteTargets, setSelectedInviteTargets] = useState<ProductionInviteTarget[]>([]);
   const [sendingInvites, setSendingInvites] = useState(false);
+  const [updatingApplications, setUpdatingApplications] = useState(false);
 
   // Alert
   const [alertVisible, setAlertVisible] = useState(false);
@@ -233,7 +237,7 @@ export default function ProductionTeamScreen() {
     try {
       const { data, error } = await supabase
         .from("production_teams")
-        .select("id, name, description, logo_url, owner_id, created_at")
+        .select("*")
         .eq("id", teamId)
         .maybeSingle();
 
@@ -255,6 +259,10 @@ export default function ProductionTeamScreen() {
       setSelectedTeam({
         ...data,
         member_role: data.owner_id === userId ? "owner" : membershipData?.role || "viewer",
+        open_production_applications:
+          typeof data.open_production_applications === "boolean"
+            ? data.open_production_applications
+            : undefined,
       });
       setActiveTab(requestedTab);
       await fetchTeamMembers(teamId);
@@ -378,6 +386,7 @@ export default function ProductionTeamScreen() {
       setFireModalVisible(false);
       setMemberToFire(null);
       setFireReason("");
+      invalidateListingCaches(userId, ["bookings", "details", "home", "notifications"]);
       showAlert(
         data?.notification_sent === false ? "warning" : "success",
         "Member Fired",
@@ -409,6 +418,7 @@ export default function ProductionTeamScreen() {
       if (data?.error) throw new Error(data.error);
 
       setTeamRoster((data?.roster || []) as TeamRosterEntry[]);
+      invalidateListingCaches(userId, ["bookings", "details", "home", "notifications"]);
       showAlert("success", "Roster Updated", `${entry.display_name || "Performer"} was removed from the production roster.`);
     } catch (e: any) {
       showAlert("error", "Error", e.message || "Failed to remove roster entry");
@@ -469,6 +479,62 @@ export default function ProductionTeamScreen() {
       showAlert("error", "Error", e.message || "Failed to send invites");
     } finally {
       setSendingInvites(false);
+    }
+  };
+
+  const handleToggleProductionApplications = async (value: boolean) => {
+    if (!selectedTeam || updatingApplications) return;
+    if (typeof selectedTeam.open_production_applications !== "boolean") return;
+
+    const previous = selectedTeam.open_production_applications;
+    setSelectedTeam((prev) =>
+      prev ? { ...prev, open_production_applications: value } : prev,
+    );
+    setTeams((prev) =>
+      prev.map((team) =>
+        team.id === selectedTeam.id
+          ? { ...team, open_production_applications: value }
+          : team,
+      ),
+    );
+    setUpdatingApplications(true);
+
+    try {
+      const { data, error } = await supabase.functions.invoke("manage-production", {
+        body: {
+          action: "update_production_team",
+          team_id: selectedTeam.id,
+          name: selectedTeam.name,
+          description: selectedTeam.description,
+          logo_url: selectedTeam.logo_url,
+          open_production_applications: value,
+        },
+      });
+
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+
+      showAlert(
+        "success",
+        "Applications Setting Updated",
+        value
+          ? "Your production team is now open for applications."
+          : "Your production team is now closed for applications.",
+      );
+    } catch (e: any) {
+      setSelectedTeam((prev) =>
+        prev ? { ...prev, open_production_applications: previous } : prev,
+      );
+      setTeams((prev) =>
+        prev.map((team) =>
+          team.id === selectedTeam.id
+            ? { ...team, open_production_applications: previous }
+            : team,
+        ),
+      );
+      showAlert("error", "Update Failed", e.message || "Could not update applications setting.");
+    } finally {
+      setUpdatingApplications(false);
     }
   };
 
@@ -567,6 +633,39 @@ export default function ProductionTeamScreen() {
                 <Text style={[styles.aboutText, { color: colors.textSecondary }]}> 
                   {selectedTeam.description || "No description available."}
                 </Text>
+
+                {canManage && typeof selectedTeam.open_production_applications === "boolean" ? (
+                  <View
+                    style={[
+                      styles.visibilityCard,
+                      {
+                        backgroundColor: colors.surface,
+                        borderColor: colors.border,
+                      },
+                    ]}
+                  >
+                    <View style={styles.visibilityTextWrap}>
+                      <Text style={[styles.visibilityTitle, { color: colors.text }]}>
+                        Open applications to this production team
+                      </Text>
+                      <Text
+                        style={[
+                          styles.visibilitySubtitle,
+                          { color: colors.textSecondary },
+                        ]}
+                      >
+                        Shows an Open Applications badge on your production team cards in Search.
+                      </Text>
+                    </View>
+                    <Switch
+                      value={selectedTeam.open_production_applications !== false}
+                      onValueChange={handleToggleProductionApplications}
+                      disabled={updatingApplications}
+                      trackColor={{ false: isDark ? "#374151" : "#D1D5DB", true: colors.primary + "66" }}
+                      thumbColor={selectedTeam.open_production_applications !== false ? colors.primary : "#9CA3AF"}
+                    />
+                  </View>
+                ) : null}
 
                 <View style={styles.statsRow}>
                   <View style={[styles.infoCard, { backgroundColor: colors.surface }]}> 
@@ -1034,6 +1133,26 @@ const styles = StyleSheet.create({
     fontSize: 16,
     lineHeight: 24,
     fontFamily: "Poppins_400Regular",
+  },
+  visibilityCard: {
+    borderWidth: 1,
+    borderRadius: 18,
+    padding: 18,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 14,
+  },
+  visibilityTextWrap: { flex: 1 },
+  visibilityTitle: {
+    fontFamily: "Poppins_700Bold",
+    fontSize: 16,
+    marginBottom: 6,
+  },
+  visibilitySubtitle: {
+    fontFamily: "Poppins_400Regular",
+    fontSize: 13,
+    lineHeight: 20,
   },
   statsRow: {
     flexDirection: "row",

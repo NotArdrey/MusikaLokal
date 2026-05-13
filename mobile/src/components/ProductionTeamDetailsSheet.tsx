@@ -43,6 +43,7 @@ type ProductionTeamRecord = {
   description: string | null;
   logo_url: string | null;
   owner_id: string;
+  open_production_applications?: boolean | null;
   created_at: string;
 };
 
@@ -215,7 +216,7 @@ const ProductionTeamDetailsSheet = forwardRef<
         const [teamResponse, membersResponse, membershipResponse] = await Promise.all([
           supabase
             .from("production_teams")
-            .select("id, name, description, logo_url, owner_id, created_at")
+            .select("*")
             .eq("id", teamId)
             .maybeSingle(),
           supabase
@@ -467,7 +468,11 @@ const ProductionTeamDetailsSheet = forwardRef<
     return ratings.reduce((sum, rating) => sum + rating, 0) / ratings.length;
   }, [reviews]);
   const canShowConnectTab = Boolean(
-    team && membershipRole == null && currentUserRole === "musician" && team.owner_id !== userId,
+    team &&
+      team.open_production_applications !== false &&
+      membershipRole == null &&
+      currentUserRole === "musician" &&
+      team.owner_id !== userId,
   );
   const tabsToRender = useMemo<readonly ProductionTeamTab[]>(
     () => (canShowConnectTab ? (["About", "Connect", "Review"] as const) : (["About", "Review"] as const)),
@@ -572,6 +577,11 @@ const ProductionTeamDetailsSheet = forwardRef<
 
     if (currentUserRole !== "musician") {
       showSheetAlert("warning", "Unavailable", "Only musicians can apply to this production team.");
+      return;
+    }
+
+    if (team.open_production_applications === false) {
+      showSheetAlert("warning", "Applications Closed", "This production team is not accepting applications right now.");
       return;
     }
 
@@ -708,6 +718,7 @@ const ProductionTeamDetailsSheet = forwardRef<
     team?.id,
     team?.logo_url,
     team?.name,
+    team?.open_production_applications,
     team?.owner_id,
     showSheetAlert,
     userId,

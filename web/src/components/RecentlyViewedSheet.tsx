@@ -1,6 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { BottomSheetBackdrop, BottomSheetFlatList, BottomSheetModal, useBottomSheetTimingConfigs } from '@gorhom/bottom-sheet';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { router } from 'expo-router';
 import React, { forwardRef, useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Dimensions, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Easing } from 'react-native-reanimated';
@@ -30,10 +31,11 @@ const moderateScale = (size: number, factor = 0.3) => {
 interface RecentlyViewedSheetProps {
     onClose?: () => void;
     onItemPress?: (listingId: string) => void;
+    onProductionTeamPress?: (teamId: string) => void;
     onChat?: (item: any) => void;
 }
 
-const RecentlyViewedSheet = forwardRef<BottomSheetModal, RecentlyViewedSheetProps>(({ onClose, onItemPress, onChat }, ref) => {
+const RecentlyViewedSheet = forwardRef<BottomSheetModal, RecentlyViewedSheetProps>(({ onClose, onItemPress, onProductionTeamPress, onChat }, ref) => {
     const { colors, isDark } = useTheme();
     const snapPoints = useMemo(() => ['90%'], []);
     const animationConfigs = useBottomSheetTimingConfigs({
@@ -66,13 +68,23 @@ const RecentlyViewedSheet = forwardRef<BottomSheetModal, RecentlyViewedSheetProp
     }, [ref]);
 
     const handleCardPress = useCallback((item: any) => {
-        if (onItemPress) {
+        if (onItemPress || onProductionTeamPress || item?.type === 'Production') {
             closeSheet();
             setTimeout(() => {
-                onItemPress(item.id);
+                if (item?.type === 'Production') {
+                    if (onProductionTeamPress) {
+                        onProductionTeamPress(item.id);
+                        return;
+                    }
+
+                    router.push({ pathname: '/production_team', params: { teamId: item.id } });
+                    return;
+                }
+
+                onItemPress?.(item.id);
             }, 120);
         }
-    }, [closeSheet, onItemPress]);
+    }, [closeSheet, onItemPress, onProductionTeamPress]);
 
     // Fetch recently viewed items - uses full objects stored by home.tsx
     useEffect(() => {

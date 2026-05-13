@@ -1725,6 +1725,21 @@ const ListingDetailsSheet = forwardRef<
               data = profileData;
               type = "Artist";
               ownerId = profileData.id; // Self-managed
+            } else {
+              const { data: productionTeamData } = await supabase
+                .from("production_teams")
+                .select("id")
+                .eq("id", listingId)
+                .maybeSingle();
+
+              if (productionTeamData?.id) {
+                setGroup(null);
+                router.push({
+                  pathname: "/production_team",
+                  params: { teamId: productionTeamData.id },
+                });
+                return;
+              }
             }
           }
         }

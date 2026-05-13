@@ -254,8 +254,10 @@ const ListingCard: React.FC<ListingCardProps> = ({
   );
 
   const showOpenApplicationsBadge = useMemo(
-    () => item.type === "Group" && item.open_group_applications !== false,
-    [item.open_group_applications, item.type],
+    () =>
+      (item.type === "Group" && item.open_group_applications !== false) ||
+      (item.type === "Production" && item.open_production_applications === true),
+    [item.open_group_applications, item.open_production_applications, item.type],
   );
 
   const gigSummary = useMemo(

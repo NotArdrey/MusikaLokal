@@ -144,40 +144,111 @@ async function removeProductionRosterForFiredMember(
     teamId: string;
     userId: string;
     ownedGroupIds: string[];
+    reason?: string | null;
   },
 ) {
-  const { teamId, userId, ownedGroupIds } = params;
-  let removedCount = 0;
+  const { teamId, userId, ownedGroupIds, reason } = params;
+  const rosterIdsToRemove: string[] = [];
 
-  const { data: removedSoloRows, error: soloDeleteError } = await supabaseAdmin
+  const { data: soloRows, error: soloSelectError } = await supabaseAdmin
     .from("production_team_roster")
-    .delete()
+    .select("id")
     .eq("team_id", teamId)
-    .eq("profile_id", userId)
-    .select("id");
+    .eq("profile_id", userId);
 
-  if (soloDeleteError) {
-    throw soloDeleteError;
+  if (soloSelectError) {
+    throw soloSelectError;
   }
 
-  removedCount += removedSoloRows?.length || 0;
+  rosterIdsToRemove.push(
+    ...(soloRows || [])
+      .map((row: any) => toNonEmptyString(row?.id))
+      .filter((id: string | null): id is string => Boolean(id)),
+  );
 
   if (ownedGroupIds.length > 0) {
-    const { data: removedGroupRows, error: groupDeleteError } = await supabaseAdmin
+    const { data: groupRows, error: groupSelectError } = await supabaseAdmin
+      .from("production_team_roster")
+      .select("id")
+      .eq("team_id", teamId)
+      .in("group_id", ownedGroupIds);
+
+    if (groupSelectError) {
+      throw groupSelectError;
+    }
+
+    rosterIdsToRemove.push(
+      ...(groupRows || [])
+        .map((row: any) => toNonEmptyString(row?.id))
+        .filter((id: string | null): id is string => Boolean(id)),
+    );
+  }
+
+  const uniqueRosterIds = Array.from(new Set(rosterIdsToRemove));
+  const firedApplicationCount = await fireActiveProductionRosterApplications(
+    supabaseAdmin,
+    {
+      teamId,
+      rosterIds: uniqueRosterIds,
+      reason,
+    },
+  );
+
+  let removedCount = 0;
+
+  if (uniqueRosterIds.length > 0) {
+    const { data: removedRows, error: deleteError } = await supabaseAdmin
       .from("production_team_roster")
       .delete()
       .eq("team_id", teamId)
-      .in("group_id", ownedGroupIds)
+      .in("id", uniqueRosterIds)
       .select("id");
 
-    if (groupDeleteError) {
-      throw groupDeleteError;
+    if (deleteError) {
+      throw deleteError;
     }
 
-    removedCount += removedGroupRows?.length || 0;
+    removedCount = removedRows?.length || 0;
   }
 
-  return removedCount;
+  return { removedCount, firedApplicationCount };
+}
+
+async function fireActiveProductionRosterApplications(
+  supabaseAdmin: any,
+  params: {
+    teamId: string;
+    rosterIds: string[];
+    reason?: string | null;
+  },
+) {
+  const { teamId, rosterIds, reason } = params;
+  const uniqueRosterIds = Array.from(new Set(rosterIds.filter(Boolean)));
+
+  if (uniqueRosterIds.length === 0) {
+    return 0;
+  }
+
+  const cancellationReason =
+    toNonEmptyString(reason) || "Removed from production roster by the production team.";
+
+  const { data, error } = await supabaseAdmin
+    .from("gig_applications")
+    .update({
+      status: "fired",
+      cancellation_reason: cancellationReason,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("production_team_id", teamId)
+    .in("production_roster_id", uniqueRosterIds)
+    .eq("status", "accepted")
+    .select("id");
+
+  if (error) {
+    throw error;
+  }
+
+  return data?.length || 0;
 }
 
 async function retireAcceptedProductionInviteRequests(
@@ -510,6 +581,66 @@ function isProductionTeamInviteEvent(eventDetails: any) {
     senderEntityType === "production_team" &&
     getListingRequestKind(eventDetails) === "invite"
   );
+}
+
+function isProductionTeamApplicationEvent(eventDetails: any) {
+  const receiverEntityType = String(eventDetails?.receiver_entity_type || "")
+    .trim()
+    .toLowerCase();
+
+  return (
+    receiverEntityType === "production_team" &&
+    getListingRequestKind(eventDetails) === "application"
+  );
+}
+
+function isMissingOpenProductionApplicationsColumnError(error: any) {
+  const message = String(error?.message || error?.details || "").toLowerCase();
+  return (
+    (error?.code === "42703" || error?.code === "PGRST204") &&
+    message.includes("open_production_applications")
+  );
+}
+
+async function validateProductionTeamApplicationAvailability(
+  supabaseAdmin: any,
+  eventDetails: any,
+) {
+  if (!isProductionTeamApplicationEvent(eventDetails)) {
+    return null;
+  }
+
+  const productionTeamId = toNonEmptyString(
+    eventDetails.production_team_id || eventDetails.receiver_entity_id,
+  );
+
+  if (!productionTeamId) {
+    return { error: "Production team application is missing a team reference", status: 400 };
+  }
+
+  const { data: team, error: teamError } = await supabaseAdmin
+    .from("production_teams")
+    .select("*")
+    .eq("id", productionTeamId)
+    .maybeSingle();
+
+  if (teamError && isMissingOpenProductionApplicationsColumnError(teamError)) {
+    return null;
+  }
+
+  if (teamError) {
+    throw teamError;
+  }
+
+  if (!team) {
+    return { error: "Production team not found", status: 404 };
+  }
+
+  if (team.open_production_applications === false) {
+    return { error: "This production team is not accepting applications right now.", status: 403 };
+  }
+
+  return null;
 }
 
 async function validateProductionTeamInviteAvailability(
@@ -918,6 +1049,18 @@ serve(async (req: Request) => {
           return jsonResponse({ error: validationResult.error }, validationResult.status || 400);
         }
 
+        const applicationAvailability = await validateProductionTeamApplicationAvailability(
+          supabaseAdmin,
+          eventDetails,
+        );
+
+        if (applicationAvailability?.error) {
+          return jsonResponse(
+            { error: applicationAvailability.error },
+            applicationAvailability.status || 400,
+          );
+        }
+
         const duplicateValidation = await validateActiveListingRequestDuplicate(supabaseAdmin, {
           eventDetails,
           groupId,
@@ -1201,7 +1344,7 @@ serve(async (req: Request) => {
     }
 
     if (action === "update_production_team") {
-      const { team_id, name, description, logo_url } = params;
+      const { team_id, name, description, logo_url, open_production_applications } = params;
       if (!team_id) return jsonResponse({ error: "team_id is required" }, 400);
       if (!name?.trim()) return jsonResponse({ error: "Team name is required" }, 400);
 
@@ -1257,6 +1400,9 @@ serve(async (req: Request) => {
           name: name.trim(),
           description: description?.trim() || null,
           logo_url: logo_url || null,
+          ...(typeof open_production_applications === "boolean"
+            ? { open_production_applications }
+            : {}),
         })
         .eq("id", team_id)
         .select()
@@ -1397,13 +1543,17 @@ serve(async (req: Request) => {
       if (deleteError) return jsonResponse({ error: deleteError.message }, 500);
 
       let removedRosterEntries = 0;
+      let firedApplications = 0;
       let retiredInviteRequests = 0;
       try {
-        removedRosterEntries = await removeProductionRosterForFiredMember(supabaseAdmin, {
+        const rosterCleanup = await removeProductionRosterForFiredMember(supabaseAdmin, {
           teamId: team_id,
           userId: user_id,
           ownedGroupIds,
+          reason,
         });
+        removedRosterEntries = rosterCleanup.removedCount;
+        firedApplications = rosterCleanup.firedApplicationCount;
         retiredInviteRequests = await retireAcceptedProductionInviteRequests(supabaseAdmin, {
           teamId: team_id,
           profileId: user_id,
@@ -1441,6 +1591,7 @@ serve(async (req: Request) => {
         success: true,
         notification_sent: notificationSent,
         roster_entries_removed: removedRosterEntries,
+        fired_applications_updated: firedApplications,
         invite_requests_retired: retiredInviteRequests,
       });
     }
@@ -1575,6 +1726,31 @@ serve(async (req: Request) => {
         return jsonResponse({ error: "Only team owners or managers can update the roster" }, 403);
       }
 
+      const { data: rosterEntry, error: rosterEntryError } = await supabaseAdmin
+        .from("production_team_roster")
+        .select("id")
+        .eq("id", roster_id)
+        .eq("team_id", team_id)
+        .maybeSingle();
+
+      if (rosterEntryError) {
+        return jsonResponse({ error: rosterEntryError.message }, 500);
+      }
+
+      if (!rosterEntry) {
+        return jsonResponse({ error: "Roster entry not found" }, 404);
+      }
+
+      const firedApplications = await fireActiveProductionRosterApplications(
+        supabaseAdmin,
+        {
+          teamId: team_id,
+          rosterIds: [roster_id],
+          reason: toNonEmptyString(params.reason ?? params.removal_reason) ||
+            "Removed from production roster by the production team.",
+        },
+      );
+
       const { error: deleteError } = await supabaseAdmin
         .from("production_team_roster")
         .delete()
@@ -1586,7 +1762,7 @@ serve(async (req: Request) => {
       }
 
       const roster = await getTeamRosterEntries(supabaseAdmin, team_id);
-      return jsonResponse({ success: true, roster });
+      return jsonResponse({ success: true, roster, fired_applications_updated: firedApplications });
     }
 
     if (action === "respond_to_production_team_invite") {
@@ -1812,7 +1988,7 @@ serve(async (req: Request) => {
           team_id,
           role,
           production_teams (
-            id, name, description, logo_url, owner_id, created_at
+            *
           )
         `)
         .eq("user_id", authUser.id);
@@ -1821,7 +1997,7 @@ serve(async (req: Request) => {
 
       const { data: ownedTeams, error: ownedTeamsError } = await supabaseAdmin
         .from("production_teams")
-        .select("id, name, description, logo_url, owner_id, created_at")
+        .select("*")
         .eq("owner_id", authUser.id);
 
       if (ownedTeamsError) return jsonResponse({ error: ownedTeamsError.message }, 500);

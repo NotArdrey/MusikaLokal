@@ -766,6 +766,9 @@ const getFeedServiceBadges = (item: any) => {
     badges.push("Live Gig");
   } else if (type === "Production") {
     badges.push("Production");
+    if (item?.open_production_applications === true) {
+      badges.push("Open Applications");
+    }
   } else if (type === "Group") {
     badges.push(formatGroupTypeLabel(item?.group_type));
   } else if (type === "Artist") {
@@ -1914,7 +1917,7 @@ export default function FeedScreen() {
           .limit(24),
         supabase
           .from("production_teams")
-          .select("id, owner_id, name, description, logo_url, created_at, updated_at")
+          .select("*")
           .order("created_at", { ascending: false })
           .limit(24),
         supabase
@@ -2149,6 +2152,7 @@ export default function FeedScreen() {
           owner_id: item.owner_id || null,
           owner_name: owner?.full_name || null,
           logo_url: item.logo_url || null,
+          open_production_applications: item.open_production_applications === true,
           social_follow_target_id: item.owner_id || null,
           social_follow_target_type: "profile",
         };

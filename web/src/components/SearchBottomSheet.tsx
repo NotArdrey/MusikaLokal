@@ -4,6 +4,7 @@ import {
     BottomSheetModal,
     useBottomSheetTimingConfigs,
 } from "@gorhom/bottom-sheet";
+import { router } from "expo-router";
 import React, {
     forwardRef,
     useCallback,
@@ -156,11 +157,12 @@ const collectProfileValues = (rows: any[] | null | undefined, valueKey: string) 
 interface SearchBottomSheetProps {
   onClose?: () => void;
   onItemPress?: (listingId: string) => void;
+  onProductionTeamPress?: (teamId: string) => void;
   onChat?: (item: any) => void;
 }
 
 const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
-  function SearchBottomSheet({ onClose, onItemPress, onChat }, ref) {
+  function SearchBottomSheet({ onClose, onItemPress, onProductionTeamPress, onChat }, ref) {
     const { colors, isDark } = useTheme();
     const { userRole, isGuest } = useAuth();
     const snapPoints = useMemo(() => ["90%"], []);
@@ -666,10 +668,20 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
         // @ts-ignore
         ref?.current?.dismiss();
         setTimeout(() => {
+          if (item?.type === "Production") {
+            if (onProductionTeamPress) {
+              onProductionTeamPress(item.id);
+              return;
+            }
+
+            router.push({ pathname: "/production_team", params: { teamId: item.id } });
+            return;
+          }
+
           onItemPress?.(item.id);
         }, 120);
       },
-      [onItemPress, ref],
+      [onItemPress, onProductionTeamPress, ref],
     );
 
     const clearSearch = () => setSearchQuery("");

@@ -2030,7 +2030,7 @@ export default function BookingsScreen() {
         }
 
         if (isProducerActivityRole(role)) {
-          return item.reviewed_by_applicant === true;
+          return status === "fired" || item.reviewed_by_applicant === true;
         }
 
         return true;
@@ -2065,9 +2065,11 @@ export default function BookingsScreen() {
           }
 
           if (isProducerActivityRole(role)) {
+            const status = normalizeStatus(item.raw_status || item.status);
             return item.type_id === "gig_application" &&
               item.viewer_can_act !== false &&
-              item.reviewed_by_applicant !== true;
+              item.reviewed_by_applicant !== true &&
+              status !== "fired";
           }
 
           if (item.type_id === "gig_application") return false;
@@ -2282,8 +2284,11 @@ export default function BookingsScreen() {
         return false;
       }
 
-      // Refresh list
-      if (userId) fetchBookings(userId);
+      // Refresh list immediately so terminal actions move cards between tabs without
+      // waiting for realtime timers.
+      if (userId) {
+        await fetchBookings(userId);
+      }
       setModalVisible(false);
       return true;
     } catch (e) {
@@ -6814,11 +6819,18 @@ export default function BookingsScreen() {
                 selectedItem.type_id === "gig_application"
                   ? "rejected"
                   : "cancelled";
-            } else if (modalMode === "cancel" || modalMode === "fire") {
-              // Cancel mode (from Upcoming tab) or Fire mode
+            } else if (modalMode === "cancel") {
+              // Cancel mode (from Upcoming tab)
               status =
                 selectedItem.type_id === "gig_application"
-                  ? "rejected"
+                  ? userRole === "musician"
+                    ? "resigned"
+                    : "cancelled"
+                  : "cancelled";
+            } else if (modalMode === "fire") {
+              status =
+                selectedItem.type_id === "gig_application"
+                  ? "fired"
                   : "cancelled";
             } else if (modalMode === "complete") {
               status = "completed";
@@ -6857,12 +6869,16 @@ export default function BookingsScreen() {
               );
             }
 
-            // If FIRING or COMPLETED, redirect to review
-            if (modalMode === "fire" || modalMode === "complete") {
-              // Give a small delay or just switch
-              setActiveTab("Review");
-              // Open review flow for this item
-              handleLeaveReview(selectedItem);
+            // Keep completion in review, but fired production applications belong in History.
+            if (didUpdate && (modalMode === "fire" || modalMode === "complete")) {
+              setActiveTab(
+                modalMode === "fire" && isProducerActivityRole(userRole)
+                  ? "History"
+                  : "Review",
+              );
+              if (modalMode === "complete") {
+                handleLeaveReview(selectedItem);
+              }
             }
           }
         }}

@@ -2071,12 +2071,12 @@ export default function BookingsScreen() {
       const terminalGigApplications = rawReview.filter((item: any) => {
         if (item.type_id !== "gig_application") return false;
         const status = normalizeStatus(item.status);
-          if (!["completed", "fired", "declined", "rejected", "cancelled", "resigned"].includes(status)) {
+        if (!["completed", "fired", "declined", "rejected", "cancelled", "resigned"].includes(status)) {
             return false;
           }
 
           if (isProducerActivityRole(role)) {
-            return item.reviewed_by_applicant === true;
+            return status === "fired" || item.reviewed_by_applicant === true;
           }
 
           return true;
@@ -2111,9 +2111,11 @@ export default function BookingsScreen() {
           }
 
           if (isProducerActivityRole(role)) {
+            const status = normalizeStatus(item.raw_status || item.status);
             return item.type_id === "gig_application" &&
               item.viewer_can_act !== false &&
-              item.reviewed_by_applicant !== true;
+              item.reviewed_by_applicant !== true &&
+              status !== "fired";
           }
 
           if (item.type_id === "gig_application") return false;
@@ -2342,8 +2344,13 @@ export default function BookingsScreen() {
         return false;
       }
 
-      // Refresh list
-      if (userId) fetchBookings(userId);
+      // Refresh list immediately so terminal actions move cards between tabs without
+      // waiting for realtime/query stale timers.
+      if (userId) {
+        bookingsScreenCache.delete(userId);
+        await queryClient.invalidateQueries({ queryKey: queryKeys.bookings.summary(userId) });
+        await fetchBookings(userId, { showLoading: false });
+      }
       setModalVisible(false);
       return true;
     } catch (e) {
@@ -7289,7 +7296,11 @@ export default function BookingsScreen() {
             // Keep completion/termination as status updates only.
             // Users can submit reviews manually from the Review tab.
             if (didUpdate && (modalMode === "fire" || modalMode === "complete")) {
-              setActiveTab("Review");
+              setActiveTab(
+                modalMode === "fire" && isProducerActivityRole(userRole)
+                  ? "History"
+                  : "Review",
+              );
             }
           }
         }}

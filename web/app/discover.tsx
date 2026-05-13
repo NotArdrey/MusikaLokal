@@ -22,8 +22,8 @@ import ListingDetailsSheet from "../src/components/ListingDetailsSheet";
 import { useAuth } from "../src/context/AuthContext";
 import { useTheme } from "../src/context/ThemeContext";
 
-type ListingType = "Studio" | "Gig" | "Group" | "Artist";
-type FilterChip = "All" | "Studios" | "Gigs" | "Groups" | "Artists";
+type ListingType = "Studio" | "Gig" | "Group" | "Artist" | "Production";
+type FilterChip = "All" | "Studios" | "Gigs" | "Groups" | "Artists" | "Production Teams";
 
 type DiscoverListing = {
 	id: string;
@@ -41,15 +41,19 @@ type DiscoverListing = {
 	rate?: number | string;
 	permit_status?: string;
 	created_at?: string;
+	owner_id?: string | null;
+	logo_url?: string | null;
+	open_production_applications?: boolean;
 };
 
-const FULL_FILTERS: FilterChip[] = ["All", "Studios", "Gigs", "Groups", "Artists"];
+const FULL_FILTERS: FilterChip[] = ["All", "Studios", "Gigs", "Groups", "Artists", "Production Teams"];
 const MUSICIAN_ONLY_FILTERS: FilterChip[] = ["All", "Groups", "Artists"];
 const CHIP_TO_TYPE: Record<Exclude<FilterChip, "All">, ListingType> = {
 	Studios: "Studio",
 	Gigs: "Gig",
 	Groups: "Group",
 	Artists: "Artist",
+	"Production Teams": "Production",
 };
 
 const toSearchable = (value: unknown) =>
@@ -112,7 +116,7 @@ export default function DiscoverScreen() {
 
 	const searchPlaceholder = useMemo(() => {
 		if (showMusiciansOnly) return "Search artists and groups...";
-		return "Search studios and gigs...";
+		return "Search studios, gigs, and production teams...";
 	}, [showMusiciansOnly]);
 
 	const fetchListings = useCallback(async (isRefresh = false) => {
@@ -149,11 +153,19 @@ export default function DiscoverScreen() {
 					.order("created_at", { ascending: false })
 					.limit(40),
 			]);
+			const teamsRes = showMusiciansOnly
+				? { data: [], error: null }
+				: await supabase
+						.from("production_teams")
+						.select("*")
+						.order("created_at", { ascending: false })
+						.limit(40);
 
 			if (studiosRes.error) console.error("Discover studios fetch error:", studiosRes.error);
 			if (gigsRes.error) console.error("Discover gigs fetch error:", gigsRes.error);
 			if (groupsRes.error) console.error("Discover groups fetch error:", groupsRes.error);
 			if (artistsRes.error) console.error("Discover artists fetch error:", artistsRes.error);
+			if (teamsRes.error) console.error("Discover production teams fetch error:", teamsRes.error);
 
 			const studioListings: DiscoverListing[] = showMusiciansOnly
 				? []
@@ -241,12 +253,31 @@ export default function DiscoverScreen() {
 					created_at: artist.created_at,
 				}),
 			);
+			const productionListings: DiscoverListing[] = (teamsRes.data || []).map(
+				(team: any) => ({
+					...team,
+					id: team.id,
+					type: "Production",
+					name: team.name || "Production Team",
+					description: team.description || "",
+					image: team.logo_url || undefined,
+					images: team.logo_url ? [team.logo_url] : [],
+					location: team.description || "Production Team",
+					rating: 0,
+					review_count: 0,
+					created_at: team.created_at,
+					owner_id: team.owner_id || null,
+					logo_url: team.logo_url || null,
+					open_production_applications: team.open_production_applications === true,
+				}),
+			);
 
 			const merged = [
 				...studioListings,
 				...gigListings,
 				...groupListings,
 				...artistListings,
+				...productionListings,
 			].sort((a, b) => {
 				const aTime = a.created_at ? new Date(a.created_at).getTime() : 0;
 				const bTime = b.created_at ? new Date(b.created_at).getTime() : 0;
@@ -280,7 +311,7 @@ export default function DiscoverScreen() {
 
 		if (priceRange !== "all") {
 			items = items.filter((item) => {
-				if (item.type === "Group" || item.type === "Artist") return true;
+				if (item.type === "Group" || item.type === "Artist" || item.type === "Production") return true;
 				const p = priceOf(item);
 				if (priceRange === "low") return p > 0 && p < 1000;
 				if (priceRange === "mid") return p >= 1000 && p <= 3000;
@@ -325,6 +356,8 @@ export default function DiscoverScreen() {
 				return "musical-notes";
 			case "Group":
 				return "people";
+			case "Production":
+				return "briefcase";
 			default:
 				return "person";
 		}
@@ -335,7 +368,7 @@ export default function DiscoverScreen() {
 		const budget = Number(item.budget || 0);
 		const rate = Number(item.rate || 0);
 
-		if (item.type === "Group" || item.type === "Artist") {
+		if (item.type === "Group" || item.type === "Artist" || item.type === "Production") {
 			return "";
 		}
 
@@ -357,6 +390,10 @@ export default function DiscoverScreen() {
 	const openListing = useCallback((item: DiscoverListing) => {
 		if (item.type === "Artist") {
 			setSelectedListing(item);
+			return;
+		}
+		if (item.type === "Production") {
+			router.push({ pathname: "/production_team", params: { teamId: String(item.id) } });
 			return;
 		}
 		setSheetListingId(String(item.id));
@@ -718,7 +755,9 @@ export default function DiscoverScreen() {
 										? "#10B981"
 										: item.type === "Group"
 											? "#3B82F6"
-											: "#EC4899";
+											: item.type === "Production"
+												? "#F97316"
+												: "#EC4899";
 
 							return (
 								<View
@@ -769,6 +808,12 @@ export default function DiscoverScreen() {
 											<View style={[styles.typePill, { backgroundColor: badgeColor }]}>
 												<Text style={styles.typePillText}>{item.type}</Text>
 											</View>
+
+											{item.type === "Production" && item.open_production_applications === true ? (
+												<View style={[styles.openApplicationsPill, { backgroundColor: colors.primary }]}>
+													<Text style={styles.typePillText}>Open Applications</Text>
+												</View>
+											) : null}
 										</View>
 
 										<View style={styles.listCardBody}>
@@ -875,7 +920,9 @@ export default function DiscoverScreen() {
 															? "#10B981"
 															: selectedListing.type === "Group"
 																? "#3B82F6"
-																: "#EC4899",
+																: selectedListing.type === "Production"
+																	? "#F97316"
+																	: "#EC4899",
 											},
 										]}
 									>
@@ -1143,6 +1190,14 @@ const styles = StyleSheet.create({
 		position: "absolute",
 		top: 10,
 		left: 10,
+		paddingHorizontal: 8,
+		paddingVertical: 4,
+		borderRadius: 999,
+	},
+	openApplicationsPill: {
+		position: "absolute",
+		right: 10,
+		bottom: 10,
 		paddingHorizontal: 8,
 		paddingVertical: 4,
 		borderRadius: 999,

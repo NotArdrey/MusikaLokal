@@ -193,6 +193,14 @@ const isProductionTeamInvitePayload = (payload: ListingRequestPayload) => {
   );
 };
 
+const isProductionTeamApplicationPayload = (payload: ListingRequestPayload) => {
+  const extraMeta = normalizeExtraMeta(payload.extraMeta);
+  return (
+    payload.receiverEntityType === "production_team" &&
+    String(extraMeta.request_kind || "").trim().toLowerCase() === "application"
+  );
+};
+
 export const uploadListingRequestDocument = async (
   userId: string,
   file: any,
@@ -322,8 +330,8 @@ export const submitListingRequest = async ({
 
   if (error) {
     const contextBody = await readFunctionsErrorBody(error as FunctionsInvokeError);
-    if (isProductionTeamInvitePayload(body)) {
-      console.error("create_listing_request failed for production invite", {
+    if (isProductionTeamInvitePayload(body) || isProductionTeamApplicationPayload(body)) {
+      console.error("create_listing_request failed for production team request", {
         message: getFunctionsErrorMessage(error as FunctionsInvokeError, contextBody),
         status: (error as any).status || (error as any).context?.status,
         code: (error as any).code || contextBody?.code,
