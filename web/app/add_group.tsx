@@ -709,6 +709,12 @@ export default function AddGroupScreen() {
   };
 
   const updateMemberInstrument = (index: number, instrument: string) => {
+    const currentValue = normalizeVisibleInput(members[index]?.instrument ?? "");
+    const nextValue = normalizeVisibleInput(instrument);
+    if (currentValue === nextValue) {
+      return;
+    }
+
     setMemberInstrumentFinalization((prev) => ({
       ...prev,
       [index]: false,
@@ -873,7 +879,7 @@ export default function AddGroupScreen() {
   return (
     <>
       <View style={[styles.flex1, { backgroundColor: pageBackground }]}>
-        <Header title="Create Group" onBackPress={handleBack} />
+        <Header title="Create Group" cardStyle onBackPress={handleBack} />
 
         <View style={styles.contentFrame}>
 
@@ -1807,56 +1813,63 @@ export default function AddGroupScreen() {
                           : "Add instruments for all members to continue."}
                   </Text>
                 )}
-                <TouchableOpacity
-                  onPress={handleBack}
-                  disabled={creating}
-                  activeOpacity={creating ? 1 : 0.78}
-                  style={[
-                    styles.backBtn,
-                    {
-                      flex: 1,
-                      borderColor: isDark ? "#6366F1" : "#E5E7EB",
-                      backgroundColor: isDark ? "transparent" : "#fff",
-                      opacity: creating ? 0.5 : 1,
-                    },
-                  ]}
-                >
-                  <Text
+                <View style={styles.navigationButtonRow}>
+                  <TouchableOpacity
+                    onPress={handleBack}
+                    disabled={creating}
+                    activeOpacity={creating ? 1 : 0.78}
                     style={[
-                      styles.backBtnText,
-                      { color: isDark ? "#A5B4FC" : colors.text },
+                      styles.backBtn,
+                      {
+                        flex: 1,
+                        borderColor: isDark ? "#6366F1" : "#E5E7EB",
+                        backgroundColor: isDark ? "transparent" : "#fff",
+                        opacity: creating ? 0.5 : 1,
+                      },
                     ]}
                   >
-                    {step === 1 ? "Cancel" : "Back"}
-                  </Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  onPress={handleNext}
-                  disabled={creating || !isCurrentStepComplete}
-                  activeOpacity={creating || !isCurrentStepComplete ? 1 : 0.78}
-                  style={[
-                    styles.nextBtn,
-                    {
-                      backgroundColor: creating
-                        ? isDark
-                          ? "#4338CA"
-                          : "#9CA3AF"
-                        : isCurrentStepComplete
-                          ? colors.primary
-                          : colors.border,
-                      opacity: creating || !isCurrentStepComplete ? 0.6 : 1,
-                      flex: 1
-                    },
-                  ]}
-                >
-                  {creating ? (
-                    <ActivityIndicator color="#fff" size="small" />
-                  ) : (
-                    <Text style={[styles.nextBtnText, { color: isCurrentStepComplete ? "#FFFFFF" : colors.textSecondary }]}>
-                      {step === 3 ? "Create Group" : "Next"}
+                    <Text
+                      style={[
+                        styles.backBtnText,
+                        { color: isDark ? "#A5B4FC" : colors.text },
+                      ]}
+                    >
+                      {step === 1 ? "Cancel" : "Back"}
                     </Text>
-                  )}
-                </TouchableOpacity>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    onPress={handleNext}
+                    disabled={creating || !isCurrentStepComplete}
+                    activeOpacity={creating || !isCurrentStepComplete ? 1 : 0.78}
+                    style={[
+                      styles.nextBtn,
+                      {
+                        backgroundColor: creating
+                          ? isDark
+                            ? "#4338CA"
+                            : "#9CA3AF"
+                          : isCurrentStepComplete
+                            ? colors.primary
+                            : colors.border,
+                        opacity: creating || !isCurrentStepComplete ? 0.6 : 1,
+                        flex: 1,
+                      },
+                    ]}
+                  >
+                    {creating ? (
+                      <ActivityIndicator color="#fff" size="small" />
+                    ) : (
+                      <Text
+                        style={[
+                          styles.nextBtnText,
+                          { color: isCurrentStepComplete ? "#FFFFFF" : colors.textSecondary },
+                        ]}
+                      >
+                        {step === 3 ? "Create Group" : "Next"}
+                      </Text>
+                    )}
+                  </TouchableOpacity>
+                </View>
               </View>
             )}
           </ScrollView>
@@ -2183,9 +2196,14 @@ const styles = StyleSheet.create({
   },
   navigationButtons: {
     marginTop: IS_WEB ? 30 : 32,
-    flexDirection: "row",
+    width: "100%",
     gap: 12,
     marginBottom: 16,
+  },
+  navigationButtonRow: {
+    flexDirection: "row",
+    gap: 12,
+    width: "100%",
   },
   backBtn: {
     flex: 1,

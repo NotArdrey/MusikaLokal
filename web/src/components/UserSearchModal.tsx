@@ -5,10 +5,12 @@ import {
     FlatList,
     Image,
     Modal,
+    Pressable,
     StyleSheet,
     Text,
     TextInput,
     TouchableOpacity,
+    useWindowDimensions,
     View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -37,6 +39,7 @@ const UserSearchModal: React.FC<UserSearchModalProps> = ({
 }) => {
     const { colors, isDark } = useTheme();
     const insets = useSafeAreaInsets();
+    const { width, height } = useWindowDimensions();
     const [searchQuery, setSearchQuery] = useState('');
     const [users, setUsers] = useState<User[]>([]);
     const [loading, setLoading] = useState(false);
@@ -79,14 +82,7 @@ const UserSearchModal: React.FC<UserSearchModalProps> = ({
         }, 300);
     };
 
-    // Load recent conversations' users when modal opens
-    React.useEffect(() => {
-        if (visible) {
-            loadRecentUsers();
-        }
-    }, [visible]);
-
-    const loadRecentUsers = async () => {
+    const loadRecentUsers = useCallback(async () => {
         try {
             const { data: myParticipations, error: participationError } = await supabase
                 .from('conversation_participants')
@@ -140,7 +136,14 @@ const UserSearchModal: React.FC<UserSearchModalProps> = ({
         } catch (err) {
             console.error('Error loading recent users:', err);
         }
-    };
+    }, [currentUserId]);
+
+    // Load recent conversations' users when modal opens
+    React.useEffect(() => {
+        if (visible) {
+            loadRecentUsers();
+        }
+    }, [visible, loadRecentUsers]);
 
     const handleSelectUser = (user: User) => {
         onSelectUser(user);
@@ -175,139 +178,168 @@ const UserSearchModal: React.FC<UserSearchModalProps> = ({
     return (
         <Modal
             visible={visible}
-            animationType="slide"
-            presentationStyle="fullScreen"
+            transparent
+            animationType="fade"
             onRequestClose={onClose}
         >
-            <View style={[styles.container, { backgroundColor: colors.background, paddingTop: insets.top }]}>
-                {/* Header */}
-                <View style={[styles.header, { borderBottomColor: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)' }]}>
-                    <TouchableOpacity activeOpacity={1} onPress={onClose} style={styles.closeButton}>
-                        <Ionicons name="close" size={24} color={colors.text} />
-                    </TouchableOpacity>
-                    <Text style={[styles.headerTitle, { color: colors.text }]}>New Message</Text>
-                    <View style={{ width: 40 }} />
-                </View>
-
-                {/* Search Input */}
-                <View style={[styles.searchContainer, { backgroundColor: isDark ? '#374151' : '#F3F4F6' }]}>
-                    <Ionicons name="search" size={20} color={colors.textSecondary} />
-                    <TextInput
-                        style={[styles.searchInput, { color: colors.text }]}
-                        placeholder="Search people..."
-                        placeholderTextColor={colors.textSecondary}
-                        value={searchQuery}
-                        onChangeText={handleSearchChange}
-                        autoFocus
-                    />
-                    {searchQuery.length > 0 && (
-                        <TouchableOpacity activeOpacity={1} onPress={() => setSearchQuery('')}>
-                            <Ionicons name="close-circle" size={20} color={colors.textSecondary} />
+            <Pressable style={styles.overlay} onPress={onClose}>
+                <Pressable
+                    style={[
+                        styles.popover,
+                        {
+                            backgroundColor: isDark ? '#111827' : '#FFFFFF',
+                            borderColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)',
+                            width: Math.min(width - 32, 420),
+                            maxHeight: Math.min(height - insets.top - 40, 560),
+                        },
+                    ]}
+                    onPress={(event) => event.stopPropagation()}
+                >
+                    <View style={styles.header}>
+                        <Text style={[styles.headerTitle, { color: colors.text }]}>New Message</Text>
+                        <TouchableOpacity activeOpacity={1} onPress={onClose} style={[styles.closeButton, { backgroundColor: isDark ? 'rgba(255,255,255,0.08)' : '#F0F2F5' }]}>
+                            <Ionicons name="close" size={18} color={colors.text} />
                         </TouchableOpacity>
-                    )}
-                </View>
-
-                {/* Content */}
-                {loading ? (
-                    <View style={styles.loadingContainer}>
-                        <ActivityIndicator size="large" color={colors.primary} />
                     </View>
-                ) : searchQuery.length > 0 ? (
-                    // Search results
-                    users.length > 0 ? (
-                        <FlatList
-                            data={users}
-                            keyExtractor={(item) => item.id}
-                            renderItem={renderUser}
-                            contentContainerStyle={styles.list}
+
+                    <View style={[styles.searchContainer, { backgroundColor: isDark ? 'rgba(255,255,255,0.08)' : '#F0F2F5' }]}>
+                        <Ionicons name="search" size={18} color={colors.textSecondary} />
+                        <TextInput
+                            style={[styles.searchInput, { color: colors.text }]}
+                            placeholder="Search people"
+                            placeholderTextColor={colors.textSecondary}
+                            value={searchQuery}
+                            onChangeText={handleSearchChange}
+                            autoFocus
                         />
+                        {searchQuery.length > 0 && (
+                            <TouchableOpacity activeOpacity={1} onPress={() => setSearchQuery('')}>
+                                <Ionicons name="close-circle" size={18} color={colors.textSecondary} />
+                            </TouchableOpacity>
+                        )}
+                    </View>
+
+                    {loading ? (
+                        <View style={styles.loadingContainer}>
+                            <ActivityIndicator size="large" color="#0084FF" />
+                        </View>
+                    ) : searchQuery.length > 0 ? (
+                        users.length > 0 ? (
+                            <FlatList
+                                data={users}
+                                keyExtractor={(item) => item.id}
+                                renderItem={renderUser}
+                                contentContainerStyle={styles.list}
+                                keyboardShouldPersistTaps="handled"
+                            />
+                        ) : (
+                            <View style={styles.emptyContainer}>
+                                <Ionicons name="search-outline" size={32} color={colors.textSecondary} />
+                                <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
+                                    No users found
+                                </Text>
+                            </View>
+                        )
                     ) : (
-                        <View style={styles.emptyContainer}>
-                            <Ionicons name="search-outline" size={48} color={colors.textSecondary} />
-                            <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
-                                No users found
+                        <View>
+                            {recentUsers.length > 0 && (
+                                <>
+                                    <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>
+                                        Recent
+                                    </Text>
+                                    <FlatList
+                                        data={recentUsers}
+                                        keyExtractor={(item) => item.id}
+                                        renderItem={renderUser}
+                                        contentContainerStyle={styles.list}
+                                        scrollEnabled={false}
+                                        keyboardShouldPersistTaps="handled"
+                                    />
+                                </>
+                            )}
+                            <Text style={[styles.hintText, { color: colors.textSecondary }]}>
+                                Search for someone to start a conversation
                             </Text>
                         </View>
-                    )
-                ) : (
-                    // Recent users
-                    <View>
-                        {recentUsers.length > 0 && (
-                            <>
-                                <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>
-                                    Recent
-                                </Text>
-                                <FlatList
-                                    data={recentUsers}
-                                    keyExtractor={(item) => item.id}
-                                    renderItem={renderUser}
-                                    contentContainerStyle={styles.list}
-                                    scrollEnabled={false}
-                                />
-                            </>
-                        )}
-                        <Text style={[styles.hintText, { color: colors.textSecondary }]}>
-                            Search for someone to start a conversation
-                        </Text>
-                    </View>
-                )}
-            </View>
+                    )}
+                </Pressable>
+            </Pressable>
         </Modal>
     );
 };
 
 const styles = StyleSheet.create({
-    container: {
+    overlay: {
         flex: 1,
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: 16,
+        backgroundColor: 'rgba(0,0,0,0.24)',
+    },
+    popover: {
+        borderRadius: 14,
+        borderWidth: StyleSheet.hairlineWidth,
+        overflow: 'hidden',
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 10 },
+        shadowOpacity: 0.22,
+        shadowRadius: 24,
+        elevation: 18,
     },
     header: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
-        paddingHorizontal: 16,
-        paddingVertical: 12,
-        borderBottomWidth: 1,
+        paddingHorizontal: 14,
+        paddingTop: 12,
+        paddingBottom: 10,
     },
     closeButton: {
-        width: 40,
-        height: 40,
+        width: 32,
+        height: 32,
+        borderRadius: 16,
         justifyContent: 'center',
         alignItems: 'center',
     },
     headerTitle: {
-        fontSize: 18,
-        fontWeight: '600',
+        fontSize: 16,
+        fontWeight: '700',
     },
     searchContainer: {
         flexDirection: 'row',
         alignItems: 'center',
-        margin: 16,
+        marginHorizontal: 12,
+        marginBottom: 10,
         paddingHorizontal: 12,
-        paddingVertical: 10,
-        borderRadius: 12,
+        minHeight: 38,
+        borderRadius: 19,
     },
     searchInput: {
         flex: 1,
         marginLeft: 8,
-        fontSize: 16,
+        fontSize: 15,
+        paddingVertical: 8,
     },
     loadingContainer: {
-        flex: 1,
+        minHeight: 180,
         justifyContent: 'center',
         alignItems: 'center',
     },
     list: {
-        paddingHorizontal: 16,
+        paddingHorizontal: 8,
+        paddingBottom: 8,
     },
     userItem: {
         flexDirection: 'row',
         alignItems: 'center',
-        paddingVertical: 12,
+        paddingHorizontal: 8,
+        paddingVertical: 9,
+        borderRadius: 10,
     },
     avatar: {
-        width: 48,
-        height: 48,
-        borderRadius: 24,
+        width: 42,
+        height: 42,
+        borderRadius: 21,
     },
     avatarPlaceholder: {
         justifyContent: 'center',
@@ -315,38 +347,39 @@ const styles = StyleSheet.create({
     },
     userInfo: {
         flex: 1,
-        marginLeft: 12,
+        marginLeft: 10,
     },
     userName: {
-        fontSize: 16,
-        fontWeight: '500',
+        fontSize: 15,
+        fontWeight: '600',
     },
     userRole: {
-        fontSize: 13,
+        fontSize: 12,
         marginTop: 2,
     },
     emptyContainer: {
-        flex: 1,
+        minHeight: 180,
         justifyContent: 'center',
         alignItems: 'center',
-        padding: 32,
+        padding: 24,
     },
     emptyText: {
-        fontSize: 16,
-        marginTop: 12,
+        fontSize: 14,
+        marginTop: 10,
     },
     sectionTitle: {
-        fontSize: 13,
-        fontWeight: '600',
+        fontSize: 12,
+        fontWeight: '700',
         marginLeft: 16,
-        marginTop: 16,
-        marginBottom: 8,
+        marginTop: 4,
+        marginBottom: 6,
         textTransform: 'uppercase',
     },
     hintText: {
-        fontSize: 14,
+        fontSize: 13,
         textAlign: 'center',
         marginTop: 24,
+        marginBottom: 28,
         paddingHorizontal: 32,
     },
 });

@@ -1,6 +1,6 @@
 ﻿import { router, useLocalSearchParams } from 'expo-router';
 import React, { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, View } from 'react-native';
+import { ActivityIndicator, Platform, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { supabase } from '../lib/supabase';
 import ChatScreen from '../src/components/ChatScreen';
 import ConversationsList from '../src/components/ConversationsList';
@@ -12,6 +12,8 @@ import { Conversation, isConversationMuted, useConversation, useGroupConversatio
 export default function ChatPage() {
     const { colors } = useTheme();
     const { loading: authLoading, userId, isGuest } = useAuth();
+    const { width } = useWindowDimensions();
+    const isDesktopMessengerLayout = Platform.OS === 'web' && width >= 900;
     const params = useLocalSearchParams<{
         recipientId?: string;
         conversationId?: string;
@@ -229,6 +231,75 @@ export default function ChatPage() {
         );
     }
 
+    if (isDesktopMessengerLayout && userId) {
+        const renderSelectedChat = () => {
+            if (!selectedConversation) {
+                return (
+                    <View style={[styles.emptyChatPane, { backgroundColor: colors.background }]}>
+                        <View style={[styles.emptyBubble, { backgroundColor: colors.card, borderColor: colors.border }]}>
+                            <Text style={[styles.emptyChatTitle, { color: colors.text }]}>Select a conversation</Text>
+                            <Text style={[styles.emptyChatText, { color: colors.textSecondary }]}>
+                                Choose a message from the list or start a new chat.
+                            </Text>
+                        </View>
+                    </View>
+                );
+            }
+
+            if (isGroupChat || selectedConversation.is_group) {
+                return (
+                    <ChatScreen
+                        conversationId={selectedConversation.id}
+                        currentUserId={userId}
+                        isGroupChat={true}
+                        groupId={selectedConversation.group_id || params.groupChatId || null}
+                        groupName={selectedConversation.group_name || 'Group Chat'}
+                        groupAvatar={selectedConversation.group_avatar_url}
+                        isMuted={isConversationMuted(selectedConversation)}
+                        mutedUntil={selectedConversation.muted_until ?? null}
+                        onMuteChange={handleMuteChange}
+                    />
+                );
+            }
+
+            if (otherUser) {
+                return (
+                    <ChatScreen
+                        conversationId={selectedConversation.id}
+                        currentUserId={userId}
+                        otherUser={otherUser}
+                        isGroupChat={false}
+                        isMuted={isConversationMuted(selectedConversation)}
+                        mutedUntil={selectedConversation.muted_until ?? null}
+                        onMuteChange={handleMuteChange}
+                    />
+                );
+            }
+
+            return (
+                <View style={[styles.emptyChatPane, { backgroundColor: colors.background }]}>
+                    <ActivityIndicator size="large" color={colors.primary} />
+                </View>
+            );
+        };
+
+        return (
+            <View style={[styles.desktopShell, { backgroundColor: colors.background }]}>
+                <View style={[styles.desktopSidebar, { backgroundColor: colors.background, borderRightColor: colors.border }]}>
+                    <ConversationsList
+                        currentUserId={userId}
+                        onSelectConversation={handleSelectConversation}
+                        onNewConversation={() => router.push('/feed')}
+                        selectedConversationId={selectedConversation?.id ?? null}
+                    />
+                </View>
+                <View style={styles.desktopChatPane}>
+                    {renderSelectedChat()}
+                </View>
+            </View>
+        );
+    }
+
     // If we have a selected conversation, show the chat
     if (selectedConversation && userId) {
         // For group chats
@@ -281,4 +352,46 @@ export default function ChatPage() {
 
     return null;
 }
+
+const styles = StyleSheet.create({
+    desktopShell: {
+        flex: 1,
+        flexDirection: 'row',
+        minHeight: 0,
+    },
+    desktopSidebar: {
+        width: 380,
+        maxWidth: 420,
+        borderRightWidth: StyleSheet.hairlineWidth,
+    },
+    desktopChatPane: {
+        flex: 1,
+        minWidth: 0,
+    },
+    emptyChatPane: {
+        flex: 1,
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: 32,
+    },
+    emptyBubble: {
+        alignItems: 'center',
+        justifyContent: 'center',
+        borderWidth: StyleSheet.hairlineWidth,
+        borderRadius: 18,
+        paddingHorizontal: 32,
+        paddingVertical: 28,
+        maxWidth: 360,
+    },
+    emptyChatTitle: {
+        fontSize: 20,
+        fontWeight: '700',
+        marginBottom: 8,
+    },
+    emptyChatText: {
+        fontSize: 14,
+        textAlign: 'center',
+        lineHeight: 20,
+    },
+});
 

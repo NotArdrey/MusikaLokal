@@ -111,6 +111,11 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
     const sendControlScale = useRef(new Animated.Value(1)).current;
     const normalizedText = React.useMemo(() => normalizeVisibleInput(text), [text]);
     const hasMessageText = normalizedText.length > 0;
+    const messengerBlue = '#0084FF';
+    const chatSurface = isDark ? '#0B1220' : '#FFFFFF';
+    const headerSurface = isDark ? '#111827' : '#FFFFFF';
+    const softControl = isDark ? 'rgba(255,255,255,0.1)' : '#F0F2F5';
+    const theirBubbleColor = isDark ? '#263241' : '#F0F2F5';
 
     const showAlert = (type: AlertType, title: string, message: string, buttons?: any[]) => {
         setAlertConfig({ type, title, message, buttons });
@@ -528,14 +533,14 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
                                 style={styles.avatar}
                             />
                         ) : (
-                            <View style={[styles.avatar, styles.avatarPlaceholder, { backgroundColor: colors.primary }]}>
+                            <View style={[styles.avatar, styles.avatarPlaceholder, { backgroundColor: messengerBlue }]}>
                                 <Ionicons name="person" size={20} color="#FFF" />
                             </View>
                         )
                     )}
                     <View style={styles.messageContent}>
                         {showSenderName && senderProfile && (
-                            <Text style={[styles.senderName, { color: colors.primary }]}>
+                            <Text style={[styles.senderName, { color: messengerBlue }]}>
                                 {senderProfile.full_name}
                             </Text>
                         )}
@@ -547,8 +552,8 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
                             <View style={[
                                 styles.messageBubble,
                                 isMe
-                                    ? [styles.myMessage, { backgroundColor: colors.primary }, !isLastInRun && { borderBottomRightRadius: 18 }]
-                                    : [styles.theirMessage, { backgroundColor: isDark ? '#374151' : '#E5E7EB' }, !isLastInRun && { borderBottomLeftRadius: 18 }],
+                                    ? [styles.myMessage, { backgroundColor: messengerBlue }, !isLastInRun && { borderBottomRightRadius: 18 }]
+                                    : [styles.theirMessage, { backgroundColor: theirBubbleColor }, !isLastInRun && { borderBottomLeftRadius: 18 }],
                                 item.message_type === 'image' && styles.imageBubble,
                                 item.local_status === 'sending' && styles.pendingMessage,
                                 item.local_status === 'failed' && styles.failedMessage,
@@ -569,7 +574,7 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
                                         style={[styles.fileBubble, { borderColor: isMe ? 'rgba(255,255,255,0.3)' : colors.border }]}
                                         onPress={() => openAttachment(item.attachment_url, item.content.replace('ðŸ“„ ', '') || 'Attachment')}
                                     >
-                                        <Ionicons name="document-attach" size={28} color={isMe ? '#FFF' : colors.primary} />
+                                        <Ionicons name="document-attach" size={28} color={isMe ? '#FFF' : messengerBlue} />
                                         <View style={{ flex: 1, marginLeft: 8 }}>
                                             <Text style={[styles.fileName, { color: isMe ? '#FFF' : colors.text }]} numberOfLines={2}>
                                                 {item.content.replace('📄 ', '')}
@@ -667,13 +672,13 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
                         {otherUser.avatar_url ? (
                             <Image
                                 source={{ uri: otherUser.avatar_url }}
-                                style={[styles.seenAvatar, { borderColor: colors.background }]}
+                                style={[styles.seenAvatar, { borderColor: chatSurface }]}
                             />
                         ) : (
                             <View style={[
                                 styles.seenAvatar,
                                 styles.avatarPlaceholder,
-                                { backgroundColor: colors.primary, borderColor: colors.background },
+                                { backgroundColor: messengerBlue, borderColor: chatSurface },
                             ]}>
                                 <Ionicons name="person" size={9} color="#FFF" />
                             </View>
@@ -714,12 +719,12 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
     const reportTitle = isGroupChat ? 'Report Group' : 'Report User';
 
     return (
-        <View style={[styles.container, { backgroundColor: colors.background }]}>
+        <View style={[styles.container, { backgroundColor: chatSurface }]}>
             {/* Header */}
             <View style={[
                 styles.header,
                 {
-                    backgroundColor: colors.background,
+                    backgroundColor: headerSurface,
                     borderBottomColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)',
                     paddingTop: (insets.top || 16) + 6,
                 },
@@ -743,7 +748,7 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
                     {/* Avatar with online indicator */}
                     <View style={styles.headerAvatarWrap}>
                         {isGroupChat ? (
-                            <View style={[styles.groupAvatarContainer, { backgroundColor: colors.primary }]}>
+                            <View style={[styles.groupAvatarContainer, { backgroundColor: messengerBlue }]}>
                                 {displayAvatar ? (
                                     <Image source={{ uri: displayAvatar }} style={styles.headerAvatar} />
                                 ) : (
@@ -754,13 +759,13 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
                             displayAvatar ? (
                                 <Image source={{ uri: displayAvatar }} style={styles.headerAvatar} />
                             ) : (
-                                <View style={[styles.headerAvatar, styles.avatarPlaceholder, { backgroundColor: colors.primary }]}>
+                                <View style={[styles.headerAvatar, styles.avatarPlaceholder, { backgroundColor: messengerBlue }]}>
                                     <Ionicons name="person" size={20} color="#FFF" />
                                 </View>
                             )
                         )}
                         {!isGroupChat && otherUserOnline && (
-                            <View style={[styles.onlineDot, { borderColor: colors.background }]} />
+                            <View style={[styles.onlineDot, { borderColor: headerSurface }]} />
                         )}
                     </View>
                     <View style={styles.headerInfo}>
@@ -779,7 +784,7 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
                 </TouchableOpacity>
                 <View style={styles.headerActions}>
                     <TouchableOpacity
-                        style={[styles.headerActionBtn, { backgroundColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)' }]}
+                        style={[styles.headerActionBtn, { backgroundColor: softControl }]}
                         onPress={() => setShowOptions(true)}
                         activeOpacity={1}
                     >
@@ -788,81 +793,71 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
                 </View>
             </View>
 
-            {/* Options Bottom Sheet */}
-            <Modal
-                visible={showOptions}
-                transparent
-                animationType="slide"
-                onRequestClose={() => setShowOptions(false)}
-            >
-                <Pressable
-                    style={[styles.modalOverlay, styles.dimOverlay]}
-                    onPress={() => setShowOptions(false)}
-                >
-                    <View style={[styles.optionsSheet, { backgroundColor: isDark ? '#1E2530' : '#FFFFFF' }]}>
-                        <View style={styles.attachmentPickerHandle} />
-                        <Text style={[styles.optionsSheetTitle, { color: colors.text }]}>
+            {showOptions && (
+                <Pressable style={styles.popoverOverlay} onPress={() => setShowOptions(false)}>
+                    <Pressable
+                        style={[
+                            styles.optionsPopover,
+                            {
+                                backgroundColor: isDark ? '#1F2937' : '#FFFFFF',
+                                borderColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)',
+                                top: (insets.top || 16) + 54,
+                            },
+                        ]}
+                        onPress={(event) => event.stopPropagation()}
+                    >
+                        <Text style={[styles.popoverTitle, { color: colors.text }]} numberOfLines={1}>
                             {displayName || 'Options'}
                         </Text>
                         {!isGroupChat && otherUser?.id !== currentUserId && (
                         <TouchableOpacity activeOpacity={1}
-                            style={[styles.optionRow, { borderBottomColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)' }]}
+                            style={styles.optionRow}
                             onPress={() => {
                                 setShowOptions(false);
                                 openOtherUserProfile();
                             }}
                         >
-                            <View style={[styles.optionIconWrap, { backgroundColor: isDark ? 'rgba(99,102,241,0.15)' : 'rgba(99,102,241,0.1)' }]}>
-                                <Ionicons name="person" size={20} color={colors.primary} />
+                            <View style={[styles.optionIconWrap, { backgroundColor: isDark ? 'rgba(0,132,255,0.18)' : 'rgba(0,132,255,0.12)' }]}>
+                                <Ionicons name="person" size={18} color={messengerBlue} />
                             </View>
                             <Text style={[styles.optionLabel, { color: colors.text }]}>View Profile</Text>
-                            <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
                         </TouchableOpacity>
                         )}
                         <TouchableOpacity activeOpacity={1}
-                            style={[styles.optionRow, { borderBottomColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)' }]}
+                            style={styles.optionRow}
                             onPress={handleToggleMute}
                             disabled={updatingMute}
                             accessibilityRole="button"
                             accessibilityLabel={effectiveMuted ? 'Unmute notifications' : 'Mute notifications'}
                         >
-                            <View style={[styles.optionIconWrap, { backgroundColor: isDark ? 'rgba(99,102,241,0.15)' : 'rgba(99,102,241,0.1)' }]}>
+                            <View style={[styles.optionIconWrap, { backgroundColor: isDark ? 'rgba(0,132,255,0.18)' : 'rgba(0,132,255,0.12)' }]}>
                                 <Ionicons
                                     name={effectiveMuted ? 'notifications-outline' : 'notifications-off-outline'}
-                                    size={20}
-                                    color={colors.primary}
+                                    size={18}
+                                    color={messengerBlue}
                                 />
                             </View>
                             <Text style={[styles.optionLabel, { color: colors.text }]}>
                                 {effectiveMuted ? 'Unmute Notifications' : 'Mute Notifications'}
                             </Text>
                             {updatingMute ? (
-                                <ActivityIndicator size="small" color={colors.primary} />
-                            ) : (
-                                <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
-                            )}
+                                <ActivityIndicator size="small" color={messengerBlue} />
+                            ) : null}
                         </TouchableOpacity>
                         {!isGuest && (
                         <TouchableOpacity activeOpacity={1}
-                            style={[styles.optionRow, { borderBottomColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)' }]}
+                            style={styles.optionRow}
                             onPress={handleOpenReport}
                         >
                             <View style={[styles.optionIconWrap, { backgroundColor: 'rgba(239,68,68,0.12)' }]}>
-                                <Ionicons name="flag" size={20} color="#EF4444" />
+                                <Ionicons name="flag" size={18} color="#EF4444" />
                             </View>
                             <Text style={[styles.optionLabel, { color: '#EF4444' }]}>Report</Text>
-                            <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
                         </TouchableOpacity>
                         )}
-                        <TouchableOpacity activeOpacity={1}
-                            style={styles.optionCancelBtn}
-                            onPress={() => setShowOptions(false)}
-                        >
-                            <Text style={[styles.optionCancelText, { color: colors.textSecondary }]}>Cancel</Text>
-                        </TouchableOpacity>
-                    </View>
+                    </Pressable>
                 </Pressable>
-            </Modal>
+            )}
 
             {/* Report Modal */}
             <ReportModal
@@ -886,7 +881,7 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
                 ) : messages.length === 0 ? (
                     <View style={styles.emptyContainer}>
                         <View style={[styles.emptyIconWrap, { backgroundColor: isDark ? 'rgba(99,102,241,0.15)' : 'rgba(99,102,241,0.1)' }]}>
-                            <Ionicons name="chatbubble-ellipses-outline" size={36} color={colors.primary} />
+                            <Ionicons name="chatbubble-ellipses-outline" size={36} color={messengerBlue} />
                         </View>
                         <Text style={[styles.emptyText, { color: colors.text }]}>
                             No messages yet
@@ -914,7 +909,7 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
                 <View style={[
                     styles.inputContainer,
                     {
-                        backgroundColor: colors.background,
+                        backgroundColor: headerSurface,
                         borderTopColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.07)',
                         paddingBottom: Math.max(insets.bottom, 8) + (Platform.OS === 'ios' ? 4 : 2),
                         borderTopWidth: StyleSheet.hairlineWidth,
@@ -927,21 +922,21 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
                         activeOpacity={uploading ? 1 : 0.78}
                     >
                         {uploading ? (
-                            <ActivityIndicator size="small" color={colors.primary} />
+                            <ActivityIndicator size="small" color={messengerBlue} />
                         ) : (
-                            <Ionicons name="add-circle" size={30} color={colors.primary} />
+                            <Ionicons name="add-circle" size={30} color={messengerBlue} />
                         )}
                     </TouchableOpacity>
 
                     <View style={[
                         styles.textInputWrapper,
-                        { backgroundColor: isDark ? '#2C2F3A' : '#F0F2F5' }
+                        { backgroundColor: softControl }
                     ]}>
                         <TextInput
                             style={[styles.input, { color: colors.text }]}
                             value={text}
                             onChangeText={handleTextChange}
-                            placeholder="Message…"
+                            placeholder="Message..."
                             placeholderTextColor={colors.textSecondary}
                             multiline
                             maxLength={1000}
@@ -953,14 +948,14 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
                             <TouchableOpacity
                                 onPress={handleSend}
                                 disabled={!hasMessageText}
-                                style={[styles.sendButton, { backgroundColor: colors.primary }]}
+                                style={[styles.sendButton, { backgroundColor: messengerBlue }]}
                                 activeOpacity={!hasMessageText ? 1 : 0.78}
                             >
                                 <Ionicons name="send" size={19} color="#FFF" style={{ marginLeft: 2 }} />
                             </TouchableOpacity>
                         ) : (
                             <TouchableOpacity style={styles.thumbsUpButton} onPress={handleQuickLike} activeOpacity={0.78}>
-                                <Ionicons name="thumbs-up" size={28} color={colors.primary} />
+                                <Ionicons name="thumbs-up" size={28} color={messengerBlue} />
                             </TouchableOpacity>
                         )}
                     </Animated.View>
@@ -995,41 +990,31 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
                 </Pressable>
             </Modal>
 
-            {/* Attachment Picker Modal */}
-            <Modal
-                visible={showAttachmentPicker}
-                transparent
-                animationType="slide"
-                onRequestClose={() => setShowAttachmentPicker(false)}
-            >
-                <Pressable
-                    style={[styles.modalOverlay, styles.dimOverlay]}
-                    onPress={() => setShowAttachmentPicker(false)}
-                >
-                    <View style={[
-                        styles.attachmentPicker,
-                        { backgroundColor: isDark ? '#1F2937' : '#FFFFFF' }
-                    ]}>
-                        <View style={styles.attachmentPickerHandle} />
-                        <Text style={[styles.attachmentPickerTitle, { color: colors.text }]}>
-                            Share
-                        </Text>
-                        <View style={styles.attachmentOptions}>
-                            <TouchableOpacity activeOpacity={1}
-                                style={styles.attachmentOption}
-                                onPress={handlePickFile}
-                            >
-                                <View style={[styles.attachmentOptionIcon, { backgroundColor: '#3B82F6' }]}>
-                                    <Ionicons name="document-attach" size={28} color="#FFF" />
-                                </View>
-                                <Text style={[styles.attachmentOptionText, { color: colors.text }]}>
-                                    Files
-                                </Text>
-                            </TouchableOpacity>
-                        </View>
-                    </View>
+            {showAttachmentPicker && (
+                <Pressable style={styles.popoverOverlay} onPress={() => setShowAttachmentPicker(false)}>
+                    <Pressable
+                        style={[
+                            styles.attachmentPopover,
+                            {
+                                backgroundColor: isDark ? '#1F2937' : '#FFFFFF',
+                                borderColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)',
+                                bottom: Math.max(insets.bottom, 8) + 58,
+                            },
+                        ]}
+                        onPress={(event) => event.stopPropagation()}
+                    >
+                        <TouchableOpacity activeOpacity={1}
+                            style={styles.attachmentRow}
+                            onPress={handlePickFile}
+                        >
+                            <View style={[styles.attachmentOptionIcon, { backgroundColor: messengerBlue }]}>
+                                <Ionicons name="document-attach" size={20} color="#FFF" />
+                            </View>
+                            <Text style={[styles.attachmentOptionText, { color: colors.text }]}>Attach file</Text>
+                        </TouchableOpacity>
+                    </Pressable>
                 </Pressable>
-            </Modal>
+            )}
 
             <CustomAlert
                 visible={alertVisible}
@@ -1053,12 +1038,13 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
 const styles = StyleSheet.create({
     container: {
         flex: 1,
+        position: 'relative',
     },
     header: {
         flexDirection: 'row',
         alignItems: 'center',
-        paddingHorizontal: 12,
-        paddingBottom: 10,
+        paddingHorizontal: 16,
+        paddingBottom: 8,
         borderBottomWidth: 1,
         gap: 4,
     },
@@ -1074,14 +1060,14 @@ const styles = StyleSheet.create({
         position: 'relative',
     },
     headerAvatar: {
-        width: 42,
-        height: 42,
-        borderRadius: 21,
+        width: 38,
+        height: 38,
+        borderRadius: 19,
     },
     groupAvatarContainer: {
-        width: 42,
-        height: 42,
-        borderRadius: 21,
+        width: 38,
+        height: 38,
+        borderRadius: 19,
         justifyContent: 'center',
         alignItems: 'center',
     },
@@ -1153,9 +1139,9 @@ const styles = StyleSheet.create({
         lineHeight: 20,
     },
     messagesList: {
-        paddingHorizontal: 12,
+        paddingHorizontal: 18,
         paddingTop: 12,
-        paddingBottom: 8,
+        paddingBottom: 10,
     },
     dateContainer: {
         flexDirection: 'row',
@@ -1210,7 +1196,7 @@ const styles = StyleSheet.create({
     },
     messageBubble: {
         paddingHorizontal: 12,
-        paddingVertical: 8,
+        paddingVertical: 7,
         borderRadius: 18,
         maxWidth: '100%',
     },
@@ -1244,7 +1230,7 @@ const styles = StyleSheet.create({
     inputContainer: {
         flexDirection: 'row',
         alignItems: 'flex-end',
-        paddingHorizontal: 8,
+        paddingHorizontal: 12,
         paddingTop: 8,
         gap: 6,
     },
@@ -1258,7 +1244,7 @@ const styles = StyleSheet.create({
         flex: 1,
         flexDirection: 'row',
         alignItems: 'flex-end',
-        borderRadius: 22,
+        borderRadius: 20,
         paddingHorizontal: 14,
         paddingVertical: 6,
         minHeight: 40,
@@ -1395,39 +1381,44 @@ const styles = StyleSheet.create({
         fontSize: 11,
         marginTop: 2,
     },
-    // Options bottom sheet
-    optionsSheet: {
+    popoverOverlay: {
+        ...StyleSheet.absoluteFillObject,
+        zIndex: 30,
+        elevation: 30,
+    },
+    optionsPopover: {
         position: 'absolute',
-        bottom: 0,
-        left: 0,
-        right: 0,
-        borderTopLeftRadius: 24,
-        borderTopRightRadius: 24,
-        paddingHorizontal: 16,
-        paddingBottom: 32,
+        right: 16,
+        width: 286,
+        borderRadius: 12,
+        borderWidth: StyleSheet.hairlineWidth,
+        padding: 8,
         shadowColor: '#000',
-        shadowOffset: { width: 0, height: -4 },
-        shadowOpacity: 0.2,
-        shadowRadius: 12,
+        shadowOffset: { width: 0, height: 8 },
+        shadowOpacity: 0.22,
+        shadowRadius: 18,
         elevation: 16,
     },
-    optionsSheetTitle: {
-        fontSize: 16,
+    popoverTitle: {
+        fontSize: 13,
         fontWeight: '700',
-        textAlign: 'center',
-        marginBottom: 16,
+        paddingHorizontal: 10,
+        paddingTop: 6,
+        paddingBottom: 8,
     },
     optionRow: {
         flexDirection: 'row',
         alignItems: 'center',
-        paddingVertical: 14,
-        borderBottomWidth: 1,
-        gap: 14,
+        minHeight: 44,
+        paddingHorizontal: 8,
+        paddingVertical: 7,
+        borderRadius: 8,
+        gap: 10,
     },
     optionIconWrap: {
-        width: 40,
-        height: 40,
-        borderRadius: 20,
+        width: 32,
+        height: 32,
+        borderRadius: 16,
         justifyContent: 'center',
         alignItems: 'center',
     },
@@ -1436,65 +1427,38 @@ const styles = StyleSheet.create({
         fontWeight: '500',
         flex: 1,
     },
-    optionCancelBtn: {
-        marginTop: 12,
-        alignItems: 'center',
-        paddingVertical: 14,
-    },
-    optionCancelText: {
-        fontSize: 15,
-        fontWeight: '600',
-    },
-    // Attachment picker styles
-    attachmentPicker: {
+    attachmentPopover: {
         position: 'absolute',
-        bottom: 0,
-        left: 0,
-        right: 0,
-        borderTopLeftRadius: 20,
-        borderTopRightRadius: 20,
-        paddingBottom: 40,
-        paddingHorizontal: 20,
+        left: 12,
+        width: 214,
+        borderRadius: 14,
+        borderWidth: StyleSheet.hairlineWidth,
+        padding: 8,
         shadowColor: '#000',
-        shadowOffset: { width: 0, height: -2 },
-        shadowOpacity: 0.25,
-        shadowRadius: 8,
-        elevation: 10,
+        shadowOffset: { width: 0, height: 8 },
+        shadowOpacity: 0.2,
+        shadowRadius: 18,
+        elevation: 16,
     },
-    attachmentPickerHandle: {
-        width: 40,
-        height: 4,
-        backgroundColor: '#9CA3AF',
-        borderRadius: 2,
-        alignSelf: 'center',
-        marginTop: 12,
-        marginBottom: 16,
-    },
-    attachmentPickerTitle: {
-        fontSize: 18,
-        fontWeight: '600',
-        marginBottom: 20,
-        textAlign: 'center',
-    },
-    attachmentOptions: {
+    attachmentRow: {
         flexDirection: 'row',
-        justifyContent: 'center',
-        gap: 32,
-    },
-    attachmentOption: {
         alignItems: 'center',
+        minHeight: 44,
+        paddingHorizontal: 8,
+        paddingVertical: 7,
+        borderRadius: 8,
+        gap: 10,
     },
     attachmentOptionIcon: {
-        width: 56,
-        height: 56,
-        borderRadius: 28,
+        width: 32,
+        height: 32,
+        borderRadius: 16,
         justifyContent: 'center',
         alignItems: 'center',
-        marginBottom: 8,
     },
     attachmentOptionText: {
-        fontSize: 12,
-        fontWeight: '500',
+        fontSize: 14,
+        fontWeight: '600',
     },
 });
 
