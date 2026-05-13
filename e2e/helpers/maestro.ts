@@ -177,10 +177,7 @@ const resetAndWarmLaunchApp = async (appId: string) => {
     timeout: 30_000,
     env: childEnv,
   });
-  await execAdbFileWithRetry(['shell', 'monkey', '-p', appId, '1'], {
-    timeout: 30_000,
-    env: childEnv,
-  });
+  await launchAndroidApp(appId);
   await delay(105_000);
   await execAdbFileWithRetry(['shell', 'am', 'force-stop', appId], {
     timeout: 15_000,
@@ -235,6 +232,47 @@ const hideKeyboardWithAdb = async () => {
     env: childEnv,
   });
   await delay(1_000);
+};
+
+const launchAndroidApp = async (appId: string) => {
+  const childEnv = getChildEnvWithAndroidTools();
+
+  try {
+    await execAdbFileWithRetry(['shell', 'monkey', '-p', appId, '1'], {
+      timeout: 30_000,
+      env: childEnv,
+    });
+    return;
+  } catch (monkeyError) {
+    try {
+      await execAdbFileWithRetry([
+        'shell',
+        'am',
+        'start',
+        '-W',
+        '-a',
+        'android.intent.action.MAIN',
+        '-c',
+        'android.intent.category.LAUNCHER',
+        '-n',
+        `${appId}/.MainActivity`,
+      ], {
+        timeout: 30_000,
+        env: childEnv,
+      });
+      return;
+    } catch (startError: any) {
+      const monkeyOutput = `${(monkeyError as any)?.message || ''}\n${(monkeyError as any)?.stdout || ''}\n${(monkeyError as any)?.stderr || ''}`.trim();
+      const startOutput = `${startError?.message || ''}\n${startError?.stdout || ''}\n${startError?.stderr || ''}`.trim();
+      throw new Error(
+        [
+          `Failed to launch ${appId}.`,
+          monkeyOutput ? `monkey output:\n${monkeyOutput}` : '',
+          startOutput ? `am start output:\n${startOutput}` : '',
+        ].filter(Boolean).join('\n\n'),
+      );
+    }
+  }
 };
 
 const runMaestroCliFlow = async (

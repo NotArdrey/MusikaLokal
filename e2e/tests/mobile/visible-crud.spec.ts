@@ -1,8 +1,10 @@
 import { test } from '@playwright/test';
+import { randomUUID } from 'node:crypto';
 import { cleanupE2ERecords } from '../../helpers/cleanup';
 import { expectDbRecord, expectNoDbRecord } from '../../helpers/assertions';
 import { makeRunId } from '../../helpers/env';
 import { requireAndroidApp, runMaestroFlow } from '../../helpers/maestro';
+import { getSupabaseAdmin } from '../../helpers/supabase';
 import {
   seedE2EGig,
   seedE2EGigApplication,
@@ -49,6 +51,43 @@ const formatSameDayManilaWindow = (startDate: Date, endDate: Date) => {
   }
 
   return { start, end };
+};
+
+type NotificationToastFixture = {
+  title: string;
+  message: string;
+  type: 'success' | 'error' | 'warning' | 'info';
+  meta?: Record<string, unknown>;
+};
+
+const insertAndAssertVisibleNotificationToast = async (userId: string, fixture: NotificationToastFixture) => {
+  const notificationId = randomUUID();
+
+  const { error } = await getSupabaseAdmin()
+    .from('notifications')
+    .insert({
+      id: notificationId,
+      user_id: userId,
+      type: fixture.type,
+      title: fixture.title,
+      message: fixture.message,
+      read: false,
+      meta: fixture.meta ?? {},
+    });
+
+  if (error) throw error;
+
+  await runMaestroFlow('mobile-notification-toast-visible.yaml', {
+    E2E_NOTIFICATION_TOAST_ID: `top-toast-${notificationId}`,
+    E2E_NOTIFICATION_TOAST_TITLE: fixture.title,
+  });
+
+  await expectDbRecord<any>('notifications', 'id', notificationId, (record) => (
+    record.user_id === userId &&
+    record.type === fixture.type &&
+    record.title === fixture.title &&
+    record.read === false
+  ));
 };
 
 test.describe.configure({ mode: 'serial' });
@@ -522,6 +561,191 @@ test.describe('mobile visible CRUD flows', () => {
     });
 
     await expectDbRecord<any>('gig_applications', 'id', application.id, (record) => record.status === 'accepted');
+  });
+
+  test('shows an accepted application popup notification while the applicant app is active', async () => {
+    const applicant = await seedE2EUser({
+      suffix: 'mobile-notification-toast-applicant',
+      role: 'musician',
+      fullName: 'E2E Mobile Notification Toast Applicant',
+    });
+
+    await runMaestroFlow('mobile-login.yaml', {
+      E2E_MOBILE_EMAIL: applicant.email,
+      E2E_MOBILE_PASSWORD: applicant.password,
+    });
+
+    await insertAndAssertVisibleNotificationToast(applicant.id, {
+      type: 'success',
+      title: 'Application Accepted!',
+      message: `Your application for E2E Gig ${makeRunId('notification-toast')} has been accepted!`,
+      meta: {
+        route: '/bookings',
+        event_type: 'gig_application_accepted',
+        status: 'accepted',
+      },
+    });
+  });
+
+  test('shows other important popup notifications while the user app is active', async () => {
+    const receiver = await seedE2EUser({
+      suffix: 'mobile-notification-toast-other',
+      role: 'musician',
+      fullName: 'E2E Mobile Notification Toast Receiver',
+    });
+    const runId = makeRunId('notification-toast-other');
+
+    await runMaestroFlow('mobile-login.yaml', {
+      E2E_MOBILE_EMAIL: receiver.email,
+      E2E_MOBILE_PASSWORD: receiver.password,
+    });
+
+    const fixtures: NotificationToastFixture[] = [
+      {
+        type: 'warning',
+        title: 'Application Declined',
+        message: `Your application for E2E Gig ${runId} was declined.`,
+        meta: {
+          route: '/bookings',
+          event_type: 'gig_application_declined',
+          status: 'rejected',
+        },
+      },
+      {
+        type: 'success',
+        title: 'Booking Confirmed!',
+        message: `Your booking for E2E Studio ${runId} was confirmed.`,
+        meta: {
+          route: '/bookings',
+          event_type: 'studio_booking_confirmed',
+          status: 'confirmed',
+        },
+      },
+      {
+        type: 'warning',
+        title: 'Booking Cancelled',
+        message: `Your booking for E2E Studio ${runId} was cancelled.`,
+        meta: {
+          route: '/bookings',
+          event_type: 'studio_booking_cancelled',
+          status: 'cancelled',
+        },
+      },
+      {
+        type: 'warning',
+        title: 'Booking Incident Reported',
+        message: `An incident was reported for E2E Booking ${runId}.`,
+        meta: {
+          route: '/bookings',
+          event_type: 'booking_incident_reported',
+          status: 'reported',
+        },
+      },
+      {
+        type: 'success',
+        title: 'Booking Incident Resolved',
+        message: `The incident for E2E Booking ${runId} was resolved.`,
+        meta: {
+          route: '/bookings',
+          event_type: 'booking_incident_resolved',
+          status: 'resolved',
+        },
+      },
+      {
+        type: 'warning',
+        title: 'Booking Cancelled & Refunded',
+        message: `Your booking for E2E Studio ${runId} was cancelled and refunded.`,
+        meta: {
+          route: '/bookings',
+          event_type: 'studio_booking_cancelled_refunded',
+          status: 'refunded',
+        },
+      },
+      {
+        type: 'info',
+        title: 'New production team invite',
+        message: `E2E Production ${runId} invited you to join their production team.`,
+        meta: {
+          route: '/bookings',
+          event_type: 'production_team_invite',
+          request_kind: 'invite',
+        },
+      },
+      {
+        type: 'info',
+        title: 'New group invite',
+        message: `E2E Group ${runId} invited you to join their group.`,
+        meta: {
+          route: '/bookings',
+          event_type: 'group_invite',
+          request_kind: 'invite',
+        },
+      },
+      {
+        type: 'info',
+        title: 'New Gig Application',
+        message: `A musician applied for E2E Gig ${runId}.`,
+        meta: {
+          route: '/bookings',
+          event_type: 'gig_application_submitted',
+          status: 'pending',
+        },
+      },
+      {
+        type: 'info',
+        title: 'Group Gig Application',
+        message: `A group applied for E2E Gig ${runId}.`,
+        meta: {
+          route: '/bookings',
+          event_type: 'group_gig_application_submitted',
+          status: 'pending',
+        },
+      },
+      {
+        type: 'info',
+        title: 'New Group Application',
+        message: `A musician applied to join E2E Group ${runId}.`,
+        meta: {
+          route: '/groups',
+          event_type: 'group_application_submitted',
+          status: 'pending',
+        },
+      },
+      {
+        type: 'success',
+        title: 'Group Application Accepted',
+        message: `Your application to join E2E Group ${runId} was accepted.`,
+        meta: {
+          route: '/groups',
+          event_type: 'group_application_accepted',
+          status: 'accepted',
+        },
+      },
+      {
+        type: 'warning',
+        title: 'Group Application Declined',
+        message: `Your application to join E2E Group ${runId} was declined.`,
+        meta: {
+          route: '/groups',
+          event_type: 'group_application_declined',
+          status: 'declined',
+        },
+      },
+      {
+        type: 'success',
+        title: 'Member Added',
+        message: `You were added to E2E Group ${runId}.`,
+        meta: {
+          route: '/groups',
+          event_type: 'group_member_added',
+          status: 'accepted',
+        },
+      },
+    ];
+
+    for (const fixture of fixtures) {
+      await insertAndAssertVisibleNotificationToast(receiver.id, fixture);
+    }
   });
 
   test('reads and withdraws a seeded gig application as the applicant through mobile UI', async () => {

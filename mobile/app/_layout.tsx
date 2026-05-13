@@ -57,8 +57,12 @@ if (isE2EFixtureMode()) {
 }
 
 const NOTIFICATION_TOAST_BACKFILL_LIMIT = 12;
+const NOTIFICATION_TOAST_BACKFILL_LOOKBACK_MS = 5 * 60 * 1000;
 const NOTIFICATION_TOAST_BACKFILL_SKEW_MS = 15000;
 const NOTIFICATION_TOAST_RECONNECT_DELAY_MS = 1500;
+const NOTIFICATION_TOAST_RECOVERY_POLL_INTERVAL_MS = isE2EFixtureMode()
+  ? 3_000
+  : 30_000;
 const NOTIFICATION_TOAST_SEEN_LIMIT = 240;
 const NOTIFICATION_TOAST_DEBUG_LOGS = __DEV__;
 
@@ -359,7 +363,9 @@ function RootContent() {
     let activeChannelGeneration = 0;
     let connectAttemptGeneration = 0;
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-    let notificationGapBackfillCursorMs = Date.now();
+    let recoveryPollTimer: ReturnType<typeof setInterval> | null = null;
+    let notificationGapBackfillCursorMs =
+      Date.now() - NOTIFICATION_TOAST_BACKFILL_LOOKBACK_MS;
 
     const isNotificationAppActive = () =>
       notificationAppStateRef.current === "active";
@@ -368,6 +374,13 @@ function RootContent() {
       if (reconnectTimer) {
         clearTimeout(reconnectTimer);
         reconnectTimer = null;
+      }
+    };
+
+    const clearRecoveryPollTimer = () => {
+      if (recoveryPollTimer) {
+        clearInterval(recoveryPollTimer);
+        recoveryPollTimer = null;
       }
     };
 
@@ -408,6 +421,17 @@ function RootContent() {
       void backfillRecentNotificationToasts(activeUserId, sinceMs, reason);
     };
 
+    const startRecoveryPoll = () => {
+      clearRecoveryPollTimer();
+      recoveryPollTimer = setInterval(() => {
+        if (isDisposed || !isNotificationAppActive()) {
+          return;
+        }
+
+        backfillNotificationGap("recovery-poll");
+      }, NOTIFICATION_TOAST_RECOVERY_POLL_INTERVAL_MS);
+    };
+
     const connectChannel = async (reason: string) => {
       clearReconnectTimer();
       const connectAttempt = ++connectAttemptGeneration;
@@ -436,6 +460,7 @@ function RootContent() {
           reason,
           activeUserId,
         });
+        backfillNotificationGap("auth-unavailable");
         scheduleReconnect("auth-unavailable");
         return;
       }
@@ -507,12 +532,14 @@ function RootContent() {
               status,
               activeUserId,
             });
+            backfillNotificationGap(status.toLowerCase());
             scheduleReconnect(status.toLowerCase());
           }
         });
     };
 
     void connectChannel("initial");
+    startRecoveryPoll();
 
     const appStateSub = AppState.addEventListener("change", (nextState) => {
       const previousState = notificationAppStateRef.current;
@@ -527,6 +554,7 @@ function RootContent() {
         notificationBackgroundedAtRef.current = now;
         notificationGapBackfillCursorMs = now;
         clearReconnectTimer();
+        clearRecoveryPollTimer();
         void disposeChannel(`app-state:${nextState}`);
         return;
       }
@@ -539,6 +567,8 @@ function RootContent() {
           void connectChannel("foreground");
         }
 
+        startRecoveryPoll();
+
         if (backgroundedAt) {
           notificationGapBackfillCursorMs = backgroundedAt;
           backfillNotificationGap("foreground");
@@ -549,6 +579,7 @@ function RootContent() {
     return () => {
       isDisposed = true;
       clearReconnectTimer();
+      clearRecoveryPollTimer();
       appStateSub.remove();
       void disposeChannel("cleanup");
     };

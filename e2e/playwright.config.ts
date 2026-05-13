@@ -2,6 +2,7 @@ import { defineConfig, devices } from '@playwright/test';
 import { getChildProcessEnv, loadE2EEnv } from './helpers/env';
 
 const e2eEnv = loadE2EEnv();
+const shouldStartWebServer = process.env.E2E_SKIP_WEB_SERVER !== '1';
 
 export default defineConfig({
   testDir: './tests',
@@ -20,13 +21,17 @@ export default defineConfig({
     screenshot: 'only-on-failure',
     video: 'retain-on-failure',
   },
-  webServer: {
-    command: 'node scripts/start-web.mjs',
-    url: e2eEnv.E2E_WEB_BASE_URL,
-    reuseExistingServer: false,
-    timeout: 180_000,
-    env: getChildProcessEnv(e2eEnv),
-  },
+  ...(shouldStartWebServer
+    ? {
+        webServer: {
+          command: 'node scripts/start-web.mjs',
+          url: e2eEnv.E2E_WEB_BASE_URL,
+          reuseExistingServer: false,
+          timeout: 180_000,
+          env: getChildProcessEnv(e2eEnv),
+        },
+      }
+    : {}),
   projects: [
     {
       name: 'admin',

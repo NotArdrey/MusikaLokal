@@ -1,5 +1,4 @@
 import { Ionicons } from "@expo/vector-icons";
-import { Portal } from "@gorhom/portal";
 import * as Haptics from "expo-haptics";
 import React, {
   createContext,
@@ -27,6 +26,7 @@ import {
   type ToastPayload,
   type ToastType,
 } from "../events/toastBus";
+import { isE2EFixtureMode } from "../utils/e2eFixtures";
 import { useTheme } from "./ThemeContext";
 
 export type TopToastType = ToastType;
@@ -112,6 +112,7 @@ const MAX_VISIBLE_TOASTS = 4;
 const ENTRY_OFFSET = -28;
 const SWIPE_DISMISS_DISTANCE = 88;
 const OFFSCREEN_DISTANCE = 420;
+const E2E_MIN_VISIBLE_DURATION_MS = 60_000;
 
 const triggerToastHaptic = (type: TopToastType) => {
   if (Platform.OS === "web") {
@@ -165,9 +166,9 @@ export function TopToastProvider({ children }: { children: React.ReactNode }) {
 
   return (
     <TopToastContext.Provider value={value}>
-      {children}
+      <View style={styles.root}>
+        {children}
 
-      <Portal name="top-toast">
         <View pointerEvents="box-none" style={StyleSheet.absoluteFillObject}>
           <View pointerEvents="box-none" style={[styles.toastStack, { top: topOffset }]}>
             {toasts.map((toast, index) => (
@@ -182,7 +183,7 @@ export function TopToastProvider({ children }: { children: React.ReactNode }) {
             ))}
           </View>
         </View>
-      </Portal>
+      </View>
     </TopToastContext.Provider>
   );
 }
@@ -200,13 +201,17 @@ function ToastCard({
   onDismiss: (id: string) => void;
   toast: ToastEvent;
 }) {
-  const translateY = useRef(new Animated.Value(ENTRY_OFFSET)).current;
-  const opacity = useRef(new Animated.Value(0)).current;
+  const isE2EToast = isE2EFixtureMode();
+  const translateY = useRef(new Animated.Value(isE2EToast ? 0 : ENTRY_OFFSET)).current;
+  const opacity = useRef(new Animated.Value(isE2EToast ? 1 : 0)).current;
   const dragX = useRef(new Animated.Value(0)).current;
   const progress = useRef(new Animated.Value(1)).current;
   const exitStartedRef = useRef(false);
   const config = toastTypeConfig[toast.type];
-  const duration = Math.max(toast.duration ?? DEFAULT_DURATION_BY_TYPE[toast.type], 1200);
+  const baseDuration = Math.max(toast.duration ?? DEFAULT_DURATION_BY_TYPE[toast.type], 1200);
+  const duration = isE2EToast
+    ? Math.max(baseDuration, E2E_MIN_VISIBLE_DURATION_MS)
+    : baseDuration;
   const title = toast.title?.trim() || defaultTitleByType[toast.type];
 
   const finishDismiss = useCallback(
@@ -274,6 +279,14 @@ function ToastCard({
   );
 
   useEffect(() => {
+    if (isE2EToast) {
+      const dismissTimer = setTimeout(() => finishDismiss(), duration);
+
+      return () => {
+        clearTimeout(dismissTimer);
+      };
+    }
+
     Animated.parallel([
       Animated.spring(translateY, {
         toValue: 0,
@@ -300,7 +313,7 @@ function ToastCard({
     return () => {
       progress.stopAnimation();
     };
-  }, [duration, finishDismiss, opacity, progress, translateY]);
+  }, [duration, finishDismiss, isE2EToast, opacity, progress, translateY]);
 
   const progressWidth = progress.interpolate({
     inputRange: [0, 1],
@@ -310,8 +323,13 @@ function ToastCard({
   return (
     <Animated.View
       pointerEvents="box-none"
+      testID={`top-toast-${toast.id}`}
       style={[
         styles.toast,
+        {
+          backgroundColor: isDark ? config.darkBackground : config.lightBackground,
+          borderColor: isDark ? config.darkBorder : config.lightBorder,
+        },
         {
           opacity,
           zIndex: 99999 - index,
@@ -399,6 +417,9 @@ export function useTopToast() {
 }
 
 const styles = StyleSheet.create({
+  root: {
+    flex: 1,
+  },
   toastStack: {
     position: "absolute",
     left: 14,
