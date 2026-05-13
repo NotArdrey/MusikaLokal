@@ -123,6 +123,116 @@ async function getTeamRosterEntries(supabaseAdmin: any, teamId: string) {
   });
 }
 
+async function getGroupIdsOwnedByUser(supabaseAdmin: any, userId: string) {
+  const { data, error } = await supabaseAdmin
+    .from("groups")
+    .select("id")
+    .eq("owner_id", userId);
+
+  if (error) {
+    throw error;
+  }
+
+  return (data || [])
+    .map((group: any) => toNonEmptyString(group?.id))
+    .filter((groupId: string | null): groupId is string => Boolean(groupId));
+}
+
+async function removeProductionRosterForFiredMember(
+  supabaseAdmin: any,
+  params: {
+    teamId: string;
+    userId: string;
+    ownedGroupIds: string[];
+  },
+) {
+  const { teamId, userId, ownedGroupIds } = params;
+  let removedCount = 0;
+
+  const { data: removedSoloRows, error: soloDeleteError } = await supabaseAdmin
+    .from("production_team_roster")
+    .delete()
+    .eq("team_id", teamId)
+    .eq("profile_id", userId)
+    .select("id");
+
+  if (soloDeleteError) {
+    throw soloDeleteError;
+  }
+
+  removedCount += removedSoloRows?.length || 0;
+
+  if (ownedGroupIds.length > 0) {
+    const { data: removedGroupRows, error: groupDeleteError } = await supabaseAdmin
+      .from("production_team_roster")
+      .delete()
+      .eq("team_id", teamId)
+      .in("group_id", ownedGroupIds)
+      .select("id");
+
+    if (groupDeleteError) {
+      throw groupDeleteError;
+    }
+
+    removedCount += removedGroupRows?.length || 0;
+  }
+
+  return removedCount;
+}
+
+async function retireAcceptedProductionInviteRequests(
+  supabaseAdmin: any,
+  params: {
+    teamId: string;
+    profileId?: string | null;
+    groupIds?: string[];
+  },
+) {
+  const { teamId, profileId, groupIds = [] } = params;
+  let retiredCount = 0;
+  const retiredStatuses = ["accepted", "approved", "connected"];
+  const inviteDetails = {
+    production_team_id: teamId,
+    sender_entity_type: "production_team",
+    request_kind: "invite",
+  };
+
+  if (profileId) {
+    const { data: retiredProfileRows, error: profileUpdateError } = await supabaseAdmin
+      .from("booking_requests")
+      .update({ status: "cancelled" })
+      .eq("receiver_id", profileId)
+      .is("group_id", null)
+      .in("status", retiredStatuses)
+      .contains("event_details", inviteDetails)
+      .select("id");
+
+    if (profileUpdateError) {
+      throw profileUpdateError;
+    }
+
+    retiredCount += retiredProfileRows?.length || 0;
+  }
+
+  if (groupIds.length > 0) {
+    const { data: retiredGroupRows, error: groupUpdateError } = await supabaseAdmin
+      .from("booking_requests")
+      .update({ status: "cancelled" })
+      .in("group_id", groupIds)
+      .in("status", retiredStatuses)
+      .contains("event_details", inviteDetails)
+      .select("id");
+
+    if (groupUpdateError) {
+      throw groupUpdateError;
+    }
+
+    retiredCount += retiredGroupRows?.length || 0;
+  }
+
+  return retiredCount;
+}
+
 async function ensureAccessibleGroupForRoster(
   supabaseAdmin: any,
   groupId: string,
@@ -346,7 +456,12 @@ async function validateActiveListingRequestDuplicate(
     .select("id, status, event_details")
     .eq("sender_id", actorUserId)
     .eq("receiver_id", receiverUserId)
-    .in("status", ACTIVE_LISTING_REQUEST_STATUSES);
+    .in(
+      "status",
+      isProductionTeamInviteEvent(eventDetails)
+        ? ["pending"]
+        : ACTIVE_LISTING_REQUEST_STATUSES,
+    );
 
   query = groupId ? query.eq("group_id", groupId) : query.is("group_id", null);
   query = studioId ? query.eq("studio_id", studioId) : query.is("studio_id", null);
@@ -450,7 +565,7 @@ async function validateProductionTeamInviteAvailability(
       .from("booking_requests")
       .select("id, status")
       .eq("group_id", groupId)
-      .in("status", ["pending", "accepted"])
+      .eq("status", "pending")
       .contains("event_details", {
         production_team_id: productionTeamId,
         sender_entity_type: "production_team",
@@ -498,7 +613,7 @@ async function validateProductionTeamInviteAvailability(
     .select("id, status")
     .eq("receiver_id", profileId)
     .is("group_id", null)
-    .in("status", ["pending", "accepted"])
+    .eq("status", "pending")
     .contains("event_details", {
       production_team_id: productionTeamId,
       sender_entity_type: "production_team",
@@ -1246,15 +1361,7 @@ serve(async (req: Request) => {
       if (teamError) return jsonResponse({ error: teamError.message }, 500);
       if (!team) return jsonResponse({ error: "Production team not found" }, 404);
 
-      // Verify caller is owner/manager
-      const { data: callerMember } = await supabaseAdmin
-        .from("production_team_members")
-        .select("role")
-        .eq("team_id", team_id)
-        .eq("user_id", authUser.id)
-        .in("role", ["owner", "manager"])
-        .maybeSingle();
-
+      const callerMember = await getTeamManagerMembership(supabaseAdmin, team_id, authUser.id);
       if (!callerMember) return jsonResponse({ error: "Only team owners or managers can remove members" }, 403);
 
       // Cannot remove the team owner
@@ -1274,6 +1381,13 @@ serve(async (req: Request) => {
         .eq("id", user_id)
         .maybeSingle();
 
+      let ownedGroupIds: string[] = [];
+      try {
+        ownedGroupIds = await getGroupIdsOwnedByUser(supabaseAdmin, user_id);
+      } catch (groupLookupError: any) {
+        return jsonResponse({ error: groupLookupError.message || "Failed to check owned groups" }, 500);
+      }
+
       const { error: deleteError } = await supabaseAdmin
         .from("production_team_members")
         .delete()
@@ -1281,6 +1395,23 @@ serve(async (req: Request) => {
         .eq("user_id", user_id);
 
       if (deleteError) return jsonResponse({ error: deleteError.message }, 500);
+
+      let removedRosterEntries = 0;
+      let retiredInviteRequests = 0;
+      try {
+        removedRosterEntries = await removeProductionRosterForFiredMember(supabaseAdmin, {
+          teamId: team_id,
+          userId: user_id,
+          ownedGroupIds,
+        });
+        retiredInviteRequests = await retireAcceptedProductionInviteRequests(supabaseAdmin, {
+          teamId: team_id,
+          profileId: user_id,
+          groupIds: ownedGroupIds,
+        });
+      } catch (cleanupError: any) {
+        return jsonResponse({ error: cleanupError.message || "Failed to clean up production roster" }, 500);
+      }
 
       let notificationSent = false;
       try {
@@ -1306,7 +1437,12 @@ serve(async (req: Request) => {
         console.error("Failed to send production team removal notification:", notificationError);
       }
 
-      return jsonResponse({ success: true, notification_sent: notificationSent });
+      return jsonResponse({
+        success: true,
+        notification_sent: notificationSent,
+        roster_entries_removed: removedRosterEntries,
+        invite_requests_retired: retiredInviteRequests,
+      });
     }
 
     if (action === "list_team_roster") {

@@ -134,7 +134,12 @@ const findActiveDuplicateListingRequest = async (payload: ListingRequestPayload)
     .select("id, status, event_details")
     .eq("sender_id", payload.currentUserId)
     .eq("receiver_id", payload.receiverUserId)
-    .in("status", ACTIVE_LISTING_REQUEST_STATUSES);
+    .in(
+      "status",
+      isProductionTeamInvitePayload(payload)
+        ? ["pending"]
+        : ACTIVE_LISTING_REQUEST_STATUSES,
+    );
 
   query = payload.groupId
     ? query.eq("group_id", payload.groupId)
