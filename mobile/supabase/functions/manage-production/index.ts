@@ -36,7 +36,22 @@ async function getTeamManagerMembership(supabaseAdmin: any, teamId: string, user
     .in("role", ["owner", "manager"])
     .maybeSingle();
 
-  return data || null;
+  if (data) {
+    return data;
+  }
+
+  const { data: ownedTeam, error: ownedTeamError } = await supabaseAdmin
+    .from("production_teams")
+    .select("id")
+    .eq("id", teamId)
+    .eq("owner_id", userId)
+    .maybeSingle();
+
+  if (ownedTeamError) {
+    throw ownedTeamError;
+  }
+
+  return ownedTeam ? { role: "owner" } : null;
 }
 
 async function getTeamRosterEntries(supabaseAdmin: any, teamId: string) {
@@ -378,7 +393,7 @@ function isProductionTeamInviteEvent(eventDetails: any) {
 
   return (
     senderEntityType === "production_team" &&
-    getListingRequestKind({ event_details: eventDetails }) === "invite"
+    getListingRequestKind(eventDetails) === "invite"
   );
 }
 

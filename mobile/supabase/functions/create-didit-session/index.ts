@@ -41,8 +41,15 @@ async function sha256Hex(value: string) {
     .join("");
 }
 
-async function resolveDiditVendorData(userId: unknown, normalizedEmail: string) {
+async function resolveDiditVendorData(
+  userId: unknown,
+  normalizedEmail: string,
+  options: { forceNew?: boolean } = {},
+) {
   const rawUserId = String(userId || "").trim();
+  if (options.forceNew && rawUserId.startsWith("TEMP_")) {
+    return rawUserId;
+  }
   if (rawUserId.startsWith("TEMP_") && normalizedEmail) {
     const emailHash = await sha256Hex(normalizedEmail);
     return `TEMP_SIGNUP_${emailHash.slice(0, 32)}`;
@@ -223,8 +230,8 @@ function normalizeDiditStatus(value: unknown) {
   if (normalized === "APPROVED") return "APPROVED";
   if (["DECLINED", "REJECTED", "DENIED"].includes(normalized)) return "DECLINED";
   if (["ABANDONED", "EXPIRED", "CANCELLED", "CANCELED"].includes(normalized)) return "ABANDONED";
+  if (normalized === "IN_REVIEW") return "PENDING";
   if ([
-    "IN_REVIEW",
     "PENDING_REVIEW",
     "PENDING_REVIEW_REQUIRED",
     "REVIEW",
@@ -268,7 +275,7 @@ function resolveSourceStatus(source: any) {
 
 function shouldReviewMissingFaceMatch(sourceStatus: unknown) {
   const normalized = normalizeDiditStatus(sourceStatus);
-  return normalized === "APPROVED" || normalized === "PENDING_REVIEW";
+  return normalized === "PENDING_REVIEW";
 }
 
 function resolveDecisionStatus(decision: any, sourceStatus: unknown = "") {
@@ -475,7 +482,7 @@ serve(async (req) => {
               findDecisionObject(sessionData),
               resolveSourceStatus(sessionData),
             );
-            const storedStatus = diditDecisionStatus || (normalizeDiditStatus(localData.status) === 'APPROVED' ? 'PENDING_REVIEW' : localData.status) || 'PENDING';
+            const storedStatus = diditDecisionStatus || (normalizeDiditStatus(localData.status) === 'APPROVED' ? 'PENDING' : localData.status) || 'PENDING';
             console.log("[didit] get_session status resolved", {
               sessionId: session_id,
               storedStatus: localData.status || null,
@@ -572,10 +579,12 @@ serve(async (req) => {
       });
     }
 
-    const signupAttemptRef = String(userId || "").trim();
-    const diditVendorData = await resolveDiditVendorData(signupAttemptRef, normalizedEmail);
-    const isPreAuthSignup = signupAttemptRef.startsWith("TEMP_");
     const shouldForceNewSession = force_new === true || force_new === "true";
+    const signupAttemptRef = String(userId || "").trim();
+    const diditVendorData = await resolveDiditVendorData(signupAttemptRef, normalizedEmail, {
+      forceNew: shouldForceNewSession,
+    });
+    const isPreAuthSignup = signupAttemptRef.startsWith("TEMP_");
 
     const supabaseAdmin = SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY
       ? createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)

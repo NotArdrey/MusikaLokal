@@ -300,6 +300,27 @@ const getBookingRemainingBalance = (item: any) =>
 const isBookingPaymentSettled = (item: any) =>
   getBookingPaymentStatus(item) === "paid";
 
+const getBookingPaidAmount = (item: any) => {
+  const paymentStatus = getBookingPaymentStatus(item);
+  const paymentAmount = toPaymentAmount(item?.payment_amount);
+  const totalAmount = getPaymentItemTotalAmount(item);
+  const remainingBalance = getBookingRemainingBalance(item);
+
+  if (paymentStatus === "paid") {
+    return paymentAmount > 0 ? paymentAmount : totalAmount;
+  }
+
+  if (paymentStatus === "partial") {
+    if (paymentAmount > 0 && (!totalAmount || paymentAmount < totalAmount || remainingBalance <= 0)) {
+      return paymentAmount;
+    }
+
+    return Math.max(0, totalAmount - remainingBalance);
+  }
+
+  return 0;
+};
+
 const isDownpaymentBalanceItem = (item: any) =>
   item?.payment_type === "downpayment" && getBookingRemainingBalance(item) > 0;
 
@@ -1157,7 +1178,8 @@ export default function BookingsScreen() {
         reviewed_by_owner: b.reviewed_by_owner || false,
         proof_url: b.proof_url,
         payment_status: b.payment_status || "unpaid",
-        payment_amount: b.payment_amount || b.final_price,
+        payment_amount:
+          b.payment_amount ?? (b.payment_status === "paid" ? b.final_price : 0),
         payment_type: b.payment_type || null,
         remaining_balance: b.remaining_balance || 0,
         studio_owner_id: b.studio?.owner_id || null,
@@ -7067,22 +7089,19 @@ export default function BookingsScreen() {
                             }
                           } else {
                             // For studio bookings - strictly no-refund policy
-                            const isFullyPaid = selectedItem?.payment_status === "paid";
-                            const isPartialPaid = selectedItem?.payment_status === "partial";
+                            const paidAmount = getBookingPaidAmount(selectedItem);
 
-                            if (isFullyPaid) {
-                              const paidAmount = selectedItem?.payment_amount || selectedItem?.total_cost || 0;
-                              return `Cancellation Policy: Booking cancellations are non-refundable. Your paid amount of ₱${paidAmount.toLocaleString()} will be forfeited.`;
+                            if (paidAmount > 0) {
+                              const paidLabel =
+                                selectedItem?.payment_type === "downpayment" &&
+                                getBookingRemainingBalance(selectedItem) > 0
+                                  ? "downpayment"
+                                  : "paid amount";
+
+                              return `Cancellation Policy: Booking cancellations are non-refundable. Your ${paidLabel} of ₱${paidAmount.toLocaleString()} will be forfeited.`;
                             }
 
-                            if (isPartialPaid) {
-                              const paidPortion =
-                                (selectedItem?.payment_amount || selectedItem?.total_cost || 0) -
-                                (selectedItem?.remaining_balance || 0);
-                              return `Cancellation Policy: Booking cancellations are non-refundable. Your downpayment of ₱${Math.max(0, paidPortion).toLocaleString()} will be forfeited.`;
-                            }
-
-                            return "Cancellation Policy: Booking cancellations are non-refundable. Any amount already paid will be forfeited.";
+                            return "Cancellation Policy: Booking cancellations are non-refundable. No paid amount has been recorded for this booking yet.";
                           }
                         })()
         }

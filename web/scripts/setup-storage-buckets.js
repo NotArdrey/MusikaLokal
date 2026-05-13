@@ -1,69 +1,78 @@
 /**
- * Script to create required storage buckets in Supabase
+ * Script to create or update required storage buckets in Supabase.
  * Run: node scripts/setup-storage-buckets.js
  */
 
-require('dotenv').config();
-const { createClient } = require('@supabase/supabase-js');
+require("dotenv").config();
+const { createClient } = require("@supabase/supabase-js");
 
 const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL;
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
+const supabaseServiceKey =
+  process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
 
 if (!supabaseUrl || !supabaseServiceKey) {
-  console.error('❌ Error: Missing Supabase credentials');
-  console.error('Please set EXPO_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in your .env file');
+  console.error("Error: Missing Supabase credentials");
+  console.error("Please set EXPO_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in your .env file");
   process.exit(1);
 }
 
 const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
 const buckets = [
-  { id: 'avatars', name: 'avatars', public: true },
-  { id: 'portfolio', name: 'portfolio', public: true },
-  { id: 'listings', name: 'listings', public: true },
-  { id: 'documents', name: 'documents', public: false },
+  { id: "avatars", name: "avatars", public: true },
+  { id: "portfolio", name: "portfolio", public: true },
+  { id: "listings", name: "listings", public: true },
+  { id: "documents", name: "documents", public: false },
 ];
 
-async function setupBuckets() {
-  console.log('🚀 Setting up storage buckets...\n');
+const getAllowedMimeTypes = (bucket) =>
+  bucket.public
+    ? ["image/png", "image/jpeg", "image/jpg", "image/gif", "video/mp4", "video/quicktime"]
+    : ["application/pdf", "image/png", "image/jpeg", "image/jpg", "audio/mpeg", "audio/mp3"];
 
-  // List existing buckets
+async function setupBuckets() {
+  console.log("Setting up storage buckets...");
+
   const { data: existingBuckets, error: listError } = await supabase.storage.listBuckets();
-  
+
   if (listError) {
-    console.error('❌ Error listing buckets:', listError.message);
+    console.error("Error listing buckets:", listError.message);
     process.exit(1);
   }
 
-  console.log('📦 Existing buckets:', existingBuckets.map(b => b.name).join(', ') || 'None');
-  console.log('');
+  console.log("Existing buckets:", existingBuckets.map((bucket) => bucket.name).join(", ") || "None");
 
-  // Create each bucket
   for (const bucket of buckets) {
-    const exists = existingBuckets.some(b => b.name === bucket.name);
-    
+    const exists = existingBuckets.some((existingBucket) => existingBucket.name === bucket.name);
+    const bucketOptions = {
+      public: bucket.public,
+      fileSizeLimit: 52428800,
+      allowedMimeTypes: getAllowedMimeTypes(bucket),
+    };
+    const bucketUpdateOptions = {
+      fileSizeLimit: bucketOptions.fileSizeLimit,
+      allowedMimeTypes: bucketOptions.allowedMimeTypes,
+    };
+
     if (exists) {
-      console.log(`✓ Bucket "${bucket.name}" already exists`);
+      const { error } = await supabase.storage.updateBucket(bucket.id, bucketUpdateOptions);
+      if (error) {
+        console.error(`Error updating bucket "${bucket.name}":`, error.message);
+      } else {
+        console.log(`Updated bucket "${bucket.name}" settings`);
+      }
       continue;
     }
 
-    console.log(`Creating bucket "${bucket.name}"...`);
-    const { data, error } = await supabase.storage.createBucket(bucket.id, {
-      public: bucket.public,
-      fileSizeLimit: 52428800, // 50MB
-      allowedMimeTypes: bucket.public 
-        ? ['image/png', 'image/jpeg', 'image/jpg', 'image/gif', 'video/mp4', 'video/quicktime']
-        : ['application/pdf', 'image/png', 'image/jpeg'],
-    });
-
+    const { error } = await supabase.storage.createBucket(bucket.id, bucketOptions);
     if (error) {
-      console.error(`❌ Error creating bucket "${bucket.name}":`, error.message);
+      console.error(`Error creating bucket "${bucket.name}":`, error.message);
     } else {
-      console.log(`✓ Created bucket "${bucket.name}" (${bucket.public ? 'public' : 'private'})`);
+      console.log(`Created bucket "${bucket.name}" (${bucket.public ? "public" : "private"})`);
     }
   }
 
-  console.log('\n✅ Storage setup complete!');
+  console.log("Storage setup complete.");
 }
 
 setupBuckets().catch(console.error);

@@ -256,6 +256,77 @@ function getReviewMetadataIdentityMatches(review: any, fallbackMatchedOn: unknow
   ));
 }
 
+function getEmbeddedProfile(rawProfile: any) {
+  if (Array.isArray(rawProfile)) return rawProfile[0] || null;
+  return rawProfile && typeof rawProfile === "object" ? rawProfile : null;
+}
+
+function getClaimProfile(claim: any, profilesById?: Map<string, any>) {
+  const embeddedProfile = getEmbeddedProfile(claim?.profiles);
+  if (embeddedProfile?.id || embeddedProfile?.email) return embeddedProfile;
+
+  const userId = String(claim?.user_id || "").trim();
+  return userId && profilesById ? profilesById.get(userId) || null : null;
+}
+
+function claimHasCurrentProfile(claim: any, profilesById?: Map<string, any>) {
+  const userId = String(claim?.user_id || "").trim();
+  const profile = getClaimProfile(claim, profilesById);
+  return Boolean(userId && profile);
+}
+
+async function hydrateProfilesById(client: any, profilesById: Map<string, any>, ids: unknown[]) {
+  const missingIds = Array.from(new Set(
+    ids
+      .map((id) => String(id || "").trim())
+      .filter((id) => id && !profilesById.has(id)),
+  ));
+
+  if (missingIds.length === 0) return;
+
+  const { data: profiles } = await client
+    .from("profiles")
+    .select("id, full_name, email, role, verification_status, id_document_expiry")
+    .in("id", missingIds);
+
+  for (const profile of profiles || []) {
+    profilesById.set(String(profile.id), profile);
+  }
+}
+
+async function hydrateProfilesByEmail(client: any, profilesById: Map<string, any>, emails: unknown[]) {
+  const knownEmails = new Set(
+    Array.from(profilesById.values())
+      .map((profile: any) => String(profile?.email || "").trim().toLowerCase())
+      .filter(Boolean),
+  );
+  const missingEmails = Array.from(new Set(
+    emails
+      .map((email) => String(email || "").trim().toLowerCase())
+      .filter((email) => email && !knownEmails.has(email)),
+  ));
+
+  if (missingEmails.length === 0) return;
+
+  const { data: profiles } = await client
+    .from("profiles")
+    .select("id, full_name, email, role, verification_status, id_document_expiry")
+    .in("email", missingEmails);
+
+  for (const profile of profiles || []) {
+    profilesById.set(String(profile.id), profile);
+  }
+}
+
+function getProfileByEmail(profilesById: Map<string, any>, email: unknown) {
+  const normalizedEmail = String(email || "").trim().toLowerCase();
+  if (!normalizedEmail) return null;
+
+  return Array.from(profilesById.values()).find((profile: any) => (
+    String(profile?.email || "").trim().toLowerCase() === normalizedEmail
+  )) || null;
+}
+
 function normalizeStringList(raw: unknown): string[] {
   const source = Array.isArray(raw) ? raw : String(raw ?? "").split(/[,;\n]/);
   const seen = new Set<string>();
@@ -1154,6 +1225,23 @@ serve(async (req: Request) => {
         }
       }
 
+      const metadataMatchUserIds = Array.from(new Set<string>(
+        (reviews || [])
+          .flatMap((review: any) => getReviewMetadataIdentityMatches(review, review?.matched_on || "DOCUMENT_FINGERPRINT"))
+          .map((match: any) => String(match.user_id || "").trim())
+          .filter(Boolean),
+      ));
+      const metadataMatchEmails = Array.from(new Set<string>(
+        (reviews || [])
+          .flatMap((review: any) => getReviewMetadataIdentityMatches(review, review?.matched_on || "DOCUMENT_FINGERPRINT"))
+          .map((match: any) => String(match.email || "").trim().toLowerCase())
+          .filter(Boolean),
+      ));
+      const missingMetadataProfileIds = metadataMatchUserIds.filter((id) => !profilesById.has(id));
+
+      await hydrateProfilesById(client, profilesById, missingMetadataProfileIds);
+      await hydrateProfilesByEmail(client, profilesById, metadataMatchEmails);
+
       const reviewFingerprints = Array.from(new Set(
         (reviews || [])
           .map((item: any) => String(item.document_fingerprint || "").trim())
@@ -1180,6 +1268,8 @@ serve(async (req: Request) => {
         if (approvedClaimsError) {
           return jsonResponse({ error: approvedClaimsError.message }, 400);
         }
+
+        await hydrateProfilesById(client, profilesById, (approvedClaims || []).map((claim: any) => claim.user_id));
 
         approvedClaimsByFingerprintRole = new Map<string, any[]>();
         for (const claim of approvedClaims || []) {
@@ -1223,6 +1313,8 @@ serve(async (req: Request) => {
           return jsonResponse({ error: approvedNameBirthClaimsError.message }, 400);
         }
 
+        await hydrateProfilesById(client, profilesById, (approvedNameBirthClaims || []).map((claim: any) => claim.user_id));
+
         approvedClaimsByNameBirthRole = new Map<string, any[]>();
         for (const claim of approvedNameBirthClaims || []) {
           const key = [
@@ -1243,9 +1335,11 @@ serve(async (req: Request) => {
         const duplicateWarningKey = `${String(review.document_fingerprint || "").trim()}:${reviewRole}`;
         const duplicateMatches = (approvedClaimsByFingerprintRole.get(duplicateWarningKey) || [])
           .filter((claim: any) => {
-            const matchUserId = String(claim.user_id || claim.original_user_id || "").trim();
-            const matchEmail = String(claim.profiles?.email || claim.normalized_email || "").trim().toLowerCase();
+            const linkedProfile = getClaimProfile(claim, profilesById);
+            const matchUserId = String(claim.user_id || "").trim();
+            const matchEmail = String(linkedProfile?.email || "").trim().toLowerCase();
             return matchUserId &&
+              linkedProfile &&
               matchUserId !== String(review.user_id) &&
               (!reviewEmail || !matchEmail || matchEmail !== reviewEmail);
           })
@@ -1253,10 +1347,37 @@ serve(async (req: Request) => {
             claim_id: claim.id || null,
             didit_session_id: claim.didit_session_id || null,
             manual_review_id: claim.manual_review_id || null,
-            user_id: claim.user_id || claim.original_user_id || null,
+            user_id: claim.user_id || null,
             original_user_id: claim.original_user_id || null,
-            email: claim.profiles?.email || claim.normalized_email || null,
-            full_name: claim.profiles?.full_name || claim.verified_full_legal_name || null,
+            email: getClaimProfile(claim, profilesById)?.email || null,
+            full_name: getClaimProfile(claim, profilesById)?.full_name || null,
+            role: getClaimProfile(claim, profilesById)?.role || claim.role,
+            source: claim.source,
+            claim_status: claim.status,
+            verified_at: claim.created_at,
+            birth_date: normalizeDateOnly(claim.birth_date),
+            matched_on: "DOCUMENT_FINGERPRINT",
+            match_type: "DOCUMENT_FINGERPRINT",
+            match_label: getIdentityMatchLabel("DOCUMENT_FINGERPRINT"),
+          }));
+        const staleDuplicateMatches = (approvedClaimsByFingerprintRole.get(duplicateWarningKey) || [])
+          .filter((claim: any) => {
+            const linkedProfile = getClaimProfile(claim, profilesById);
+            const matchUserId = String(claim.user_id || claim.original_user_id || "").trim();
+            const matchEmail = String(claim.normalized_email || "").trim().toLowerCase();
+            return matchUserId &&
+              !linkedProfile &&
+              matchUserId !== String(review.user_id) &&
+              (!reviewEmail || !matchEmail || matchEmail !== reviewEmail);
+          })
+          .map((claim: any) => ({
+            claim_id: claim.id || null,
+            didit_session_id: claim.didit_session_id || null,
+            manual_review_id: claim.manual_review_id || null,
+            user_id: null,
+            original_user_id: claim.original_user_id || claim.user_id || null,
+            email: claim.normalized_email || null,
+            full_name: claim.verified_full_legal_name || null,
             role: claim.role,
             source: claim.source,
             claim_status: claim.status,
@@ -1279,9 +1400,11 @@ serve(async (req: Request) => {
         const nameBirthMatches = reviewNameBirth.hasNameBirthDate
           ? (approvedClaimsByNameBirthRole.get(nameBirthWarningKey) || [])
             .filter((claim: any) => {
-              const matchUserId = String(claim.user_id || claim.original_user_id || "").trim();
-              const matchEmail = String(claim.profiles?.email || claim.normalized_email || "").trim().toLowerCase();
+              const linkedProfile = getClaimProfile(claim, profilesById);
+              const matchUserId = String(claim.user_id || "").trim();
+              const matchEmail = String(linkedProfile?.email || "").trim().toLowerCase();
               return matchUserId &&
+                linkedProfile &&
                 matchUserId !== String(review.user_id) &&
                 (!reviewEmail || !matchEmail || matchEmail !== reviewEmail);
             })
@@ -1289,10 +1412,39 @@ serve(async (req: Request) => {
               claim_id: claim.id || null,
               didit_session_id: claim.didit_session_id || null,
               manual_review_id: claim.manual_review_id || null,
-              user_id: claim.user_id || claim.original_user_id || null,
+              user_id: claim.user_id || null,
               original_user_id: claim.original_user_id || null,
-              email: claim.profiles?.email || claim.normalized_email || null,
-              full_name: claim.profiles?.full_name || claim.verified_full_legal_name || null,
+              email: getClaimProfile(claim, profilesById)?.email || null,
+              full_name: getClaimProfile(claim, profilesById)?.full_name || null,
+              role: getClaimProfile(claim, profilesById)?.role || claim.role,
+              source: claim.source,
+              claim_status: claim.status,
+              verified_at: claim.created_at,
+              birth_date: normalizeDateOnly(claim.birth_date),
+              matched_on: "NAME_BIRTHDATE",
+              match_type: "NAME_BIRTHDATE",
+              match_label: getIdentityMatchLabel("NAME_BIRTHDATE"),
+            }))
+          : [];
+        const staleNameBirthMatches = reviewNameBirth.hasNameBirthDate
+          ? (approvedClaimsByNameBirthRole.get(nameBirthWarningKey) || [])
+            .filter((claim: any) => {
+              const linkedProfile = getClaimProfile(claim, profilesById);
+              const matchUserId = String(claim.user_id || claim.original_user_id || "").trim();
+              const matchEmail = String(claim.normalized_email || "").trim().toLowerCase();
+              return matchUserId &&
+                !linkedProfile &&
+                matchUserId !== String(review.user_id) &&
+                (!reviewEmail || !matchEmail || matchEmail !== reviewEmail);
+            })
+            .map((claim: any) => ({
+              claim_id: claim.id || null,
+              didit_session_id: claim.didit_session_id || null,
+              manual_review_id: claim.manual_review_id || null,
+              user_id: null,
+              original_user_id: claim.original_user_id || claim.user_id || null,
+              email: claim.normalized_email || null,
+              full_name: claim.verified_full_legal_name || null,
               role: claim.role,
               source: claim.source,
               claim_status: claim.status,
@@ -1305,11 +1457,50 @@ serve(async (req: Request) => {
           : [];
         const reviewMetadata = getReviewMetadataObject(review);
         const fallbackMatchedOn = review.matched_on || reviewMetadata?.matched_on || reviewMetadata?.approval_claim_result?.matched_on || "DOCUMENT_FINGERPRINT";
-        const metadataMatches = getReviewMetadataIdentityMatches(review, fallbackMatchedOn)
+        const rawMetadataMatches = getReviewMetadataIdentityMatches(review, fallbackMatchedOn);
+        const metadataMatches = rawMetadataMatches
+          .map((match: any) => {
+            const matchUserId = String(match.user_id || "").trim();
+            const linkedProfile = matchUserId ? profilesById.get(matchUserId) : getProfileByEmail(profilesById, match.email);
+            return linkedProfile
+              ? {
+                  ...match,
+                  user_id: linkedProfile.id,
+                  email: linkedProfile.email || null,
+                  full_name: linkedProfile.full_name || null,
+                  role: linkedProfile.role || match.role || null,
+                }
+              : null;
+          })
           .filter((match: any) => {
+            if (!match) return false;
             const matchUserId = String(match.user_id || "").trim();
             const matchEmail = String(match.email || "").trim().toLowerCase();
-            return matchUserId !== String(review.user_id) && (!reviewEmail || !matchEmail || matchEmail !== reviewEmail);
+            return matchUserId &&
+              matchUserId !== String(review.user_id) &&
+              (!reviewEmail || !matchEmail || matchEmail !== reviewEmail);
+          });
+        const staleMetadataMatches = rawMetadataMatches
+          .map((match: any) => {
+            const matchUserId = String(match.user_id || match.original_user_id || "").trim();
+            const matchEmail = String(match.email || "").trim().toLowerCase();
+            const linkedProfile = matchUserId ? profilesById.get(matchUserId) : getProfileByEmail(profilesById, matchEmail);
+            return !linkedProfile && (matchUserId || matchEmail)
+              ? {
+                  ...match,
+                  user_id: null,
+                  original_user_id: match.original_user_id || matchUserId || null,
+                  email: matchEmail || null,
+                }
+              : null;
+          })
+          .filter((match: any) => {
+            if (!match) return false;
+            const matchUserId = String(match.original_user_id || "").trim();
+            const matchEmail = String(match.email || "").trim().toLowerCase();
+            return (matchUserId || matchEmail) &&
+              matchUserId !== String(review.user_id) &&
+              (!reviewEmail || !matchEmail || matchEmail !== reviewEmail);
           });
         const allIdentityMatches = [
           ...duplicateMatches,
@@ -1321,7 +1512,18 @@ serve(async (req: Request) => {
             String(match.matched_on || match.match_type || "") === String(metadataMatch.matched_on || metadataMatch.match_type || "")
           ))),
         ];
+        const staleIdentityMatches = [
+          ...staleDuplicateMatches,
+          ...staleNameBirthMatches.filter((nameMatch: any) => !staleDuplicateMatches.some((docMatch: any) => (
+            String(docMatch.original_user_id || docMatch.email || "") === String(nameMatch.original_user_id || nameMatch.email || "")
+          ))),
+          ...staleMetadataMatches.filter((metadataMatch: any) => ![...staleDuplicateMatches, ...staleNameBirthMatches].some((match: any) => (
+            String(match.original_user_id || match.email || "") === String(metadataMatch.original_user_id || metadataMatch.email || "") &&
+            String(match.matched_on || match.match_type || "") === String(metadataMatch.matched_on || metadataMatch.match_type || "")
+          ))),
+        ];
         const matchTypes = Array.from(new Set(allIdentityMatches.map((match: any) => String(match.matched_on || match.match_type || "").trim()).filter(Boolean)));
+        const staleMatchTypes = Array.from(new Set(staleIdentityMatches.map((match: any) => String(match.matched_on || match.match_type || "").trim()).filter(Boolean)));
         const fallbackMatchCount = Number(
           review.duplicate_match_count ||
           reviewMetadata?.duplicate_match_count ||
@@ -1330,16 +1532,17 @@ serve(async (req: Request) => {
           0,
         );
         const hasStoredDuplicateSignal = fallbackMatchCount > 0 || Boolean(review.duplicate_reason || review.review_reason);
-        const identityMatchWarning = allIdentityMatches.length > 0 || hasStoredDuplicateSignal
+        const identityMatchWarning = allIdentityMatches.length > 0 || staleIdentityMatches.length > 0 || hasStoredDuplicateSignal
           ? {
               same_role: true,
-              match_count: Math.max(allIdentityMatches.length, Number.isFinite(fallbackMatchCount) ? fallbackMatchCount : 0),
-              match_types: matchTypes.length > 0 ? matchTypes : [normalizeIdentityMatchType(fallbackMatchedOn)],
-              has_document_match: duplicateMatches.length > 0,
-              has_name_birthdate_match: nameBirthMatches.length > 0,
+              match_count: allIdentityMatches.length,
+              match_types: matchTypes.length > 0 ? matchTypes : (staleMatchTypes.length > 0 ? staleMatchTypes : [normalizeIdentityMatchType(fallbackMatchedOn)]),
+              has_document_match: duplicateMatches.length > 0 || staleDuplicateMatches.length > 0,
+              has_name_birthdate_match: nameBirthMatches.length > 0 || staleNameBirthMatches.length > 0,
               review_reason: review.review_reason || reviewMetadata?.review_reason || review.duplicate_reason || null,
-              matched_on: review.matched_on || reviewMetadata?.matched_on || matchTypes[0] || normalizeIdentityMatchType(fallbackMatchedOn),
+              matched_on: review.matched_on || reviewMetadata?.matched_on || matchTypes[0] || staleMatchTypes[0] || normalizeIdentityMatchType(fallbackMatchedOn),
               matched_accounts: allIdentityMatches.slice(0, 5),
+              stale_matched_accounts: staleIdentityMatches.slice(0, 5),
             }
           : null;
 
@@ -1355,6 +1558,14 @@ serve(async (req: Request) => {
                 match_count: duplicateMatches.length,
                 matched_accounts: duplicateMatches.slice(0, 5),
               }
+            : hasStoredDuplicateSignal && normalizeIdentityMatchType(fallbackMatchedOn) === "DOCUMENT_FINGERPRINT"
+              ? {
+                  same_verified_id_fingerprint: true,
+                  same_role: true,
+                  different_email_or_account: true,
+                  match_count: 0,
+                  matched_accounts: [],
+                }
             : null,
           identity_match_warning: identityMatchWarning,
           front_image_url: null,
@@ -1608,10 +1819,11 @@ serve(async (req: Request) => {
 
       if (decision === "APPROVED") {
         const reviewEmail = String(preDecisionProfile?.email || review.submitted_by_email || "").trim().toLowerCase();
+        const approvalProfilesById = new Map<string, any>();
         if (review.document_fingerprint) {
           const { data: duplicateClaims, error: duplicateClaimsError } = await client
             .from("identity_document_claims")
-            .select("id, user_id, normalized_email, profiles:user_id(email)")
+            .select("id, user_id, normalized_email, profiles:user_id(id, email, role)")
             .eq("document_fingerprint", review.document_fingerprint)
             .eq("role", reviewRoleForClaim)
             .eq("status", "APPROVED");
@@ -1620,12 +1832,18 @@ serve(async (req: Request) => {
             return jsonResponse({ error: duplicateClaimsError.message }, 400);
           }
 
+          await hydrateProfilesById(client, approvalProfilesById, (duplicateClaims || []).map((claim: any) => claim.user_id));
+
           duplicateMatchesForApproval.push(
             ...(duplicateClaims || [])
               .filter((claim: any) => {
+                const linkedProfile = getClaimProfile(claim, approvalProfilesById);
                 const matchUserId = String(claim.user_id || "").trim();
-                const matchEmail = String(claim.normalized_email || claim.profiles?.email || "").trim().toLowerCase();
-                return matchUserId !== String(review.user_id) && (!reviewEmail || !matchEmail || matchEmail !== reviewEmail);
+                const matchEmail = String(linkedProfile?.email || "").trim().toLowerCase();
+                return matchUserId &&
+                  linkedProfile &&
+                  matchUserId !== String(review.user_id) &&
+                  (!reviewEmail || !matchEmail || matchEmail !== reviewEmail);
               })
               .map((claim: any) => ({ ...claim, matched_on: "DOCUMENT_FINGERPRINT" })),
           );
@@ -1639,7 +1857,7 @@ serve(async (req: Request) => {
         if (reviewNameBirth.hasNameBirthDate) {
           const { data: nameBirthClaims, error: nameBirthClaimsError } = await client
             .from("identity_document_claims")
-            .select("id, user_id, normalized_email, profiles:user_id(email)")
+            .select("id, user_id, normalized_email, profiles:user_id(id, email, role)")
             .eq("normalized_full_legal_name", reviewNameBirth.normalizedFullLegalName)
             .eq("birth_date", reviewNameBirth.birthDate)
             .eq("role", reviewRoleForClaim)
@@ -1649,12 +1867,18 @@ serve(async (req: Request) => {
             return jsonResponse({ error: nameBirthClaimsError.message }, 400);
           }
 
+          await hydrateProfilesById(client, approvalProfilesById, (nameBirthClaims || []).map((claim: any) => claim.user_id));
+
           duplicateMatchesForApproval.push(
             ...(nameBirthClaims || [])
               .filter((claim: any) => {
+                const linkedProfile = getClaimProfile(claim, approvalProfilesById);
                 const matchUserId = String(claim.user_id || "").trim();
-                const matchEmail = String(claim.normalized_email || claim.profiles?.email || "").trim().toLowerCase();
-                return matchUserId !== String(review.user_id) && (!reviewEmail || !matchEmail || matchEmail !== reviewEmail);
+                const matchEmail = String(linkedProfile?.email || "").trim().toLowerCase();
+                return matchUserId &&
+                  linkedProfile &&
+                  matchUserId !== String(review.user_id) &&
+                  (!reviewEmail || !matchEmail || matchEmail !== reviewEmail);
               })
               .map((claim: any) => ({ ...claim, matched_on: "NAME_BIRTHDATE" })),
           );

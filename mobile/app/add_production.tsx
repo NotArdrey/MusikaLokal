@@ -140,6 +140,19 @@ export default function AddProductionScreen() {
           : `${inviteSummary.sentCount} invite(s) sent.`
         : null;
 
+      if (inviteSummary?.sentCount === 0 && inviteSummary.failedCount > 0) {
+        const failureMessage =
+          inviteSummary.failures.map((failure) => failure.error).find(Boolean) ||
+          'No invites were sent. Please try again.';
+        emitToast({
+          type: 'warning',
+          title: 'Production Team Created',
+          message: `Your production team was created, but the invite was not sent. ${failureMessage}`,
+        });
+        router.replace({ pathname: '/my_production', params: { refresh: String(Date.now()) } });
+        return;
+      }
+
       emitToast({
         type: 'success',
         title: 'Production Team Created',

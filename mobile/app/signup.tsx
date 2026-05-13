@@ -298,7 +298,6 @@ const normalizeDiditFlowStatus = (value: unknown) => String(value || '').trim().
 const isApprovedDiditFlowStatus = (status: unknown) => normalizeDiditFlowStatus(status) === 'APPROVED';
 
 const isPendingReviewDiditFlowStatus = (status: unknown) => [
-    'IN_REVIEW',
     'PENDING_REVIEW',
     'PENDING_REVIEW_REQUIRED',
     'REVIEW',
@@ -942,6 +941,35 @@ export default function SignupScreen() {
 
                         setStep('details');
                         Alert.alert(title, message, [{ text: 'OK' }]);
+                        return;
+                    }
+
+                    const isSessionValidationError = /verification session could not be validated|start verification again|session_validation_failed/i.test(errorMessage);
+                    if (isSessionValidationError) {
+                        logSignupFlowError('returnCheck.sessionValidationReset', e, {
+                            attempt: retries + 1,
+                            sessionId: summarizeSessionRefForLog(refToCheck),
+                            hasSessionNonce: Boolean(sessionNonce),
+                            errorMessage,
+                        });
+                        setLoading(false);
+                        setVerificationUrl('');
+                        setSessionId('');
+                        setSessionNonce('');
+                        setTempSessionRef('');
+                        await AsyncStorage.removeItem('signup_current_session');
+                        router.setParams({ verified: '', check_verification: '' });
+                        setStep('verification');
+
+                        setTimeout(() => {
+                            if (mounted) {
+                                startNewVerificationSession({ forceNew: true }).catch((restartError) => {
+                                    logSignupFlowError('returnCheck.sessionValidationRestartFailed', restartError, {
+                                        previousSessionId: summarizeSessionRefForLog(refToCheck),
+                                    });
+                                });
+                            }
+                        }, 150);
                         return;
                     }
 
@@ -2717,6 +2745,18 @@ export default function SignupScreen() {
                     hasSessionNonce: Boolean(sessionNonce),
                 });
                 setLoading(false);
+                const errorMessage = String(e?.message || '').trim();
+                if (/verification session could not be validated|start verification again|session_validation_failed/i.test(errorMessage)) {
+                    setVerificationUrl('');
+                    setSessionId('');
+                    setSessionNonce('');
+                    setTempSessionRef('');
+                    await AsyncStorage.removeItem('signup_current_session');
+                    router.setParams({ verified: '', check_verification: '' });
+                    setStep('verification');
+                    void startNewVerificationSession({ forceNew: true });
+                    return;
+                }
                 // More helpful error message for FunctionsHttpError
                 const isFunctionError = e?.name === 'FunctionsHttpError' || e?.message?.includes('FunctionsHttpError');
                 Alert.alert(
@@ -2985,7 +3025,16 @@ export default function SignupScreen() {
                 <View style={{ flex: 1, backgroundColor: colors.background }}>
                     <View style={[{ padding: 16, flexDirection: 'row', alignItems: 'center' }, safeVerificationHeaderPadding]}>
                         <Text style={[themeStyles.text, { fontSize: 18, fontWeight: 'bold' }]}>Identity Verification</Text>
-                        <TouchableOpacity activeOpacity={1} onPress={() => router.push('/')} style={{ marginLeft: 'auto' }}>
+                        <TouchableOpacity
+                            activeOpacity={1}
+                            onPress={() => {
+                                void startNewVerificationSession({ forceNew: true });
+                            }}
+                            style={{ marginLeft: 'auto', marginRight: 18 }}
+                        >
+                            <Text style={{ color: colors.primary }}>New link</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity activeOpacity={1} onPress={() => router.push('/')}>
                             <Text style={{ color: colors.primary }}>Cancel</Text>
                         </TouchableOpacity>
                     </View>

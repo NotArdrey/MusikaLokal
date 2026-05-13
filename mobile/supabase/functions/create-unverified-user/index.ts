@@ -405,7 +405,7 @@ serve(async (req) => {
                             } else if (idStatus === 'Approved' && !faceMatch) {
                                 const sourceStatus = normalizeVerificationStatus(decisionPayload?.status || decision?.status)
                                 sessionData = {
-                                    status: sourceStatus === 'APPROVED' || sourceStatus === 'PENDING_REVIEW'
+                                    status: sourceStatus === 'PENDING_REVIEW'
                                         ? 'PENDING_REVIEW'
                                         : 'PENDING',
                                     verification_data: { email: normalizedEmail },
@@ -420,7 +420,7 @@ serve(async (req) => {
                 }
             }
 
-            const resolvedDiditStatus = String(sessionData?.status || '').toUpperCase()
+            const resolvedDiditStatus = normalizeVerificationStatus(sessionData?.status)
             const hasApprovedFaceMatch =
                 sessionData?.verification_data?.face_matches?.[0]?.status === 'Approved' ||
                 sessionData?.verification_data?.face_matches?.[0]?.status === 'APPROVED'
@@ -438,7 +438,7 @@ serve(async (req) => {
                 })
             }
 
-            if (pendingByDidit && !['PENDING_REVIEW', 'PENDING REVIEW', 'IN REVIEW'].includes(resolvedDiditStatus)) {
+            if (pendingByDidit && !['PENDING_REVIEW', 'IN_REVIEW'].includes(resolvedDiditStatus)) {
                 return new Response(JSON.stringify({ error: 'Didit verification is not pending review. Please try again.' }), {
                     headers: { ...corsHeaders, 'Content-Type': 'application/json' },
                     status: 400,

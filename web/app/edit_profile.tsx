@@ -978,7 +978,8 @@ export default function EditProfileScreen() {
             placeholderTextColor={colors.textSecondary}
             multiline
             numberOfLines={4}
-            textAlignVertical="center"
+            textAlign="left"
+            textAlignVertical="top"
           />
         </View>
 
@@ -1140,8 +1141,12 @@ const styles = StyleSheet.create({
   input: {
     borderWidth: 1,
     borderRadius: 10,
-    padding: 14,
+    height: 52,
+    paddingHorizontal: 14,
+    paddingVertical: 0,
     fontSize: 15,
+    lineHeight: 20,
+    includeFontPadding: false,
     fontFamily: "Poppins_400Regular",
     textAlignVertical: "center",
   },
@@ -1151,11 +1156,15 @@ const styles = StyleSheet.create({
   textArea: {
     borderWidth: 1,
     borderRadius: 10,
-    padding: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
     fontSize: 15,
+    lineHeight: 20,
+    includeFontPadding: false,
     fontFamily: "Poppins_400Regular",
     minHeight: 100,
-    textAlignVertical: "center",
+    textAlign: "left",
+    textAlignVertical: "top",
   },
   chips: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   chip: {
@@ -1189,8 +1198,12 @@ const styles = StyleSheet.create({
   searchInput: {
     borderWidth: 1,
     borderRadius: 8,
-    padding: 10,
+    height: 48,
+    paddingHorizontal: 10,
+    paddingVertical: 0,
     fontSize: 14,
+    lineHeight: 18,
+    includeFontPadding: false,
     fontFamily: "Poppins_400Regular",
     textAlign: "left",
     textAlignVertical: "center",

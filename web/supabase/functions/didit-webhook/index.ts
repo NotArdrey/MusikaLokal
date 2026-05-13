@@ -626,13 +626,20 @@ serve(async (req) => {
             }
             // 3b. Missing Face Match: ID-only approval is not enough for MusikaLokal identity verification.
             else if (idStatus === 'Approved' && !faceMatch) {
-                console.warn('ID was approved but Didit did not return a face match result. Sending to review instead of approving.', {
+                console.warn('ID was approved but Didit did not return a face match result. Keeping session pending.', {
                     sessionId,
                     finalUserReference,
                     idStatus,
                     decisionKeys: Object.keys(decision || {}),
                 });
-                await handleInReview(supabaseAdmin, finalUserReference, sessionId);
+                if (sessionId) {
+                    await upsertVerificationSession(supabaseAdmin, sessionId, 'PENDING', {
+                        status: 'PENDING',
+                        raw_data: sanitizeIdentityVerificationData(decision),
+                        missing_face_match: true,
+                        missing_face_match_at: new Date().toISOString(),
+                    });
+                }
             }
             // 4. APPROVED: Both must be effectively approved
             else if (isDiditApprovedStatus(idStatus) && isDiditApprovedStatus(faceStatus) && livenessPassed) {

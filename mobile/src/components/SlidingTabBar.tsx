@@ -188,7 +188,7 @@ export default function SlidingTabBar<T extends SlidingTabKey>({
 
         return (
           <TouchableOpacity
-            activeOpacity={0.76}
+            activeOpacity={isActive ? 1 : 0.76}
             accessibilityLabel={item.accessibilityLabel ?? item.testID ?? item.label}
             accessibilityRole="button"
             accessibilityState={{ selected: isActive, disabled: item.disabled }}

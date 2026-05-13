@@ -675,6 +675,19 @@ type FeedQuickInfoItem = {
   label: string;
 };
 
+const getFeedQuickInfoIconMetrics = (icon: FeedQuickInfoItem["icon"]) => {
+  switch (icon) {
+    case "star":
+      return { size: 16, offsetY: 0 };
+    case "location":
+      return { size: 18, offsetY: 0 };
+    case "chatbubble-ellipses":
+      return { size: 17, offsetY: 1 };
+    default:
+      return { size: 17, offsetY: 0 };
+  }
+};
+
 const getFeedQuickInfoItems = (item: any): FeedQuickInfoItem[] => {
   const rating = Number(item?.rating || 0);
   const reviewCount = Number(item?.review_count || 0);
@@ -1495,21 +1508,35 @@ const SocialFeedCard = React.memo(function SocialFeedCard({
 
       {isSuggestion ? (
         <View style={[styles.socialQuickInfoRow, { borderTopColor: borderColor }]}>
-          {quickInfoItems.map((info) => (
-            <View key={`${info.icon}-${info.label}`} style={styles.socialQuickInfoItem}>
-              <View style={styles.socialQuickInfoIconBox}>
-                <Ionicons
-                  name={info.icon}
-                  size={15}
-                  color={info.icon === "star" ? "#F59E0B" : colors.primary}
-                  style={styles.socialQuickInfoIcon}
-                />
+          {quickInfoItems.map((info, index) => {
+            const iconMetrics = getFeedQuickInfoIconMetrics(info.icon);
+
+            return (
+              <View
+                key={`${info.icon}-${info.label}`}
+                style={[
+                  styles.socialQuickInfoItem,
+                  index === 0 && styles.socialQuickInfoItemStart,
+                  index === quickInfoItems.length - 1 && styles.socialQuickInfoItemEnd,
+                ]}
+              >
+                <View style={styles.socialQuickInfoIconBox}>
+                  <Ionicons
+                    name={info.icon}
+                    size={iconMetrics.size}
+                    color={info.icon === "star" ? "#F59E0B" : colors.primary}
+                    style={[
+                      styles.socialQuickInfoIcon,
+                      iconMetrics.offsetY !== 0 && { transform: [{ translateY: iconMetrics.offsetY }] },
+                    ]}
+                  />
+                </View>
+                <Text style={[styles.socialQuickInfoText, { color: colors.textSecondary }]} numberOfLines={1}>
+                  {info.label}
+                </Text>
               </View>
-              <Text style={[styles.socialQuickInfoText, { color: colors.textSecondary }]} numberOfLines={1}>
-                {info.label}
-              </Text>
-            </View>
-          ))}
+            );
+          })}
         </View>
       ) : null}
 
@@ -3776,22 +3803,28 @@ const styles = StyleSheet.create({
   socialQuickInfoItem: {
     flex: 1,
     minWidth: 0,
-    height: 20,
+    height: 24,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
     gap: 4,
   },
+  socialQuickInfoItemStart: {
+    justifyContent: "flex-start",
+  },
+  socialQuickInfoItemEnd: {
+    justifyContent: "flex-end",
+  },
   socialQuickInfoIconBox: {
-    width: 18,
-    height: 18,
+    width: 22,
+    height: 22,
     alignItems: "center",
     justifyContent: "center",
   },
   socialQuickInfoIcon: {
-    width: 18,
-    height: 18,
-    lineHeight: 18,
+    width: 22,
+    height: 22,
+    lineHeight: 22,
     includeFontPadding: false,
     textAlign: "center",
     textAlignVertical: "center",
@@ -3799,10 +3832,12 @@ const styles = StyleSheet.create({
   socialQuickInfoText: {
     flexShrink: 1,
     fontSize: moderateScale(10.5),
-    lineHeight: 16,
+    height: 22,
+    lineHeight: 22,
     fontFamily: "Poppins_700Bold",
     includeFontPadding: false,
     textAlignVertical: "center",
+    transform: [{ translateY: 1 }],
   },
   socialActionRow: {
     flexDirection: "row",

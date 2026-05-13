@@ -6,6 +6,7 @@ import {
   ActivityIndicator,
   Dimensions,
   Linking,
+  Modal,
   Platform,
   ScrollView,
   StyleSheet,
@@ -196,6 +197,7 @@ export default function PlaylistDetailsScreen() {
   const [newTrackDurationSeconds, setNewTrackDurationSeconds] = useState("");
   const [newTrackAudioFile, setNewTrackAudioFile] = useState<PlaylistAudioFile | null>(null);
   const [addingTrack, setAddingTrack] = useState(false);
+  const [audioUploadMessage, setAudioUploadMessage] = useState<string | null>(null);
   const [showReportModal, setShowReportModal] = useState(false);
   const previewSoundRef = useRef<Audio.Sound | null>(null);
   const [resolvedCoverUrl, setResolvedCoverUrl] = useState<string | null>(null);
@@ -603,6 +605,7 @@ export default function PlaylistDetailsScreen() {
           sizeBytes: newTrackAudioFile.sizeBytes,
         });
 
+        setAudioUploadMessage(`Uploading ${newTrackAudioFile.name}...`);
         const upload = await uploadPlaylistAudioFile(newTrackAudioFile, playlist.id);
         sourceUrl = upload.publicUrl;
         durationSeconds = upload.durationSeconds;
@@ -707,12 +710,14 @@ export default function PlaylistDetailsScreen() {
       });
     } finally {
       logAddTrackModal("save_finished");
+      setAudioUploadMessage(null);
       setAddingTrack(false);
     }
   };
 
   const handlePickTrackAudio = useCallback(async () => {
     try {
+      setAudioUploadMessage("Preparing MP3...");
       console.log("[PlaylistDetails][AddTrackModal] audio_picker_open", {
         playlistId: playlist?.id || null,
         editingTrackId,
@@ -727,6 +732,7 @@ export default function PlaylistDetailsScreen() {
         return;
       }
 
+      setAudioUploadMessage("Checking MP3...");
       console.log("[PlaylistDetails][AddTrackModal] audio_picker_selected", {
         playlistId: playlist?.id || null,
         editingTrackId,
@@ -766,8 +772,12 @@ export default function PlaylistDetailsScreen() {
         message: displayMessage || "Only MP3 audio files up to 5 minutes are allowed.",
         forceModal: true,
       });
+    } finally {
+      if (!addingTrack) {
+        setAudioUploadMessage(null);
+      }
     }
-  }, [editingTrackId, logAddTrackModal, playlist?.id]);
+  }, [addingTrack, editingTrackId, logAddTrackModal, playlist?.id]);
 
   const openReportModal = () => {
     if (!playlist?.id) {
@@ -910,7 +920,7 @@ export default function PlaylistDetailsScreen() {
           ) : (
             <Ionicons name={previewPlaying ? "pause" : "play"} size={22} color="#fff" />
           )}
-          <Text style={styles.playBtnText}>{previewLoading ? "Loading..." : previewPlaying ? "Pause Teaser" : "Play Teaser"}</Text>
+          <Text style={styles.playBtnText}>{previewLoading ? "Loading..." : previewPlaying ? "Pause Playlist" : "Play Playlist"}</Text>
         </TouchableOpacity>
 
         {/* Tracks */}
@@ -1078,13 +1088,26 @@ export default function PlaylistDetailsScreen() {
             />
 
             <TouchableOpacity
-              activeOpacity={1}
-              style={[styles.uploadAudioBtn, { borderColor: colors.border, backgroundColor: colors.background }]}
+              activeOpacity={audioUploadMessage || addingTrack ? 1 : 0.78}
+              style={[
+                styles.uploadAudioBtn,
+                {
+                  borderColor: colors.border,
+                  backgroundColor: colors.background,
+                  opacity: audioUploadMessage || addingTrack ? 0.65 : 1,
+                },
+              ]}
               onPress={() => void handlePickTrackAudio()}
-              disabled={addingTrack}
+              disabled={Boolean(audioUploadMessage) || addingTrack}
             >
-              <Ionicons name="cloud-upload-outline" size={16} color={colors.primary} />
-              <Text style={[styles.uploadAudioBtnText, { color: colors.primary }]}>Upload MP3</Text>
+              {audioUploadMessage && !addingTrack ? (
+                <ActivityIndicator size="small" color={colors.primary} />
+              ) : (
+                <Ionicons name="cloud-upload-outline" size={16} color={colors.primary} />
+              )}
+              <Text style={[styles.uploadAudioBtnText, { color: colors.primary }]}>
+                {audioUploadMessage && !addingTrack ? "Working..." : "Upload MP3"}
+              </Text>
             </TouchableOpacity>
             <Text style={[styles.audioHelperText, { color: colors.textSecondary }]}>Uploaded MP3 files must be 5 minutes or less.</Text>
 
@@ -1120,6 +1143,18 @@ export default function PlaylistDetailsScreen() {
             </View>
           </View>
       </BottomModal>
+
+      <Modal visible={Boolean(audioUploadMessage)} transparent animationType="fade" statusBarTranslucent>
+        <View style={styles.loadingOverlay}>
+          <View style={[styles.loadingCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+            <ActivityIndicator size="large" color={colors.primary} />
+            <Text style={[styles.loadingTitle, { color: colors.text }]}>{audioUploadMessage}</Text>
+            <Text style={[styles.loadingSubtitle, { color: colors.textSecondary }]}>
+              Please wait while your MP3 is prepared for the playlist.
+            </Text>
+          </View>
+        </View>
+      </Modal>
 
       <Navbar />
     </View>
@@ -1169,5 +1204,9 @@ const styles = StyleSheet.create({
   audioHelperText: { fontSize: moderateScale(11), lineHeight: 16, marginTop: -2, marginBottom: 12 },
   audioFileChip: { flexDirection: "row", alignItems: "center", gap: 8, borderWidth: 1, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 8, marginBottom: 12 },
   audioFileChipText: { flex: 1, fontSize: moderateScale(12), fontWeight: "500" },
+  loadingOverlay: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(0,0,0,0.35)", padding: 24 },
+  loadingCard: { width: "100%", maxWidth: 320, borderWidth: 1, borderRadius: 16, padding: 22, alignItems: "center" },
+  loadingTitle: { fontSize: moderateScale(16), fontWeight: "800", marginTop: 14, textAlign: "center" },
+  loadingSubtitle: { fontSize: moderateScale(12), lineHeight: 18, marginTop: 6, textAlign: "center" },
   modalBtn: { paddingVertical: 12, borderRadius: 10, alignItems: "center", justifyContent: "center" },
 });

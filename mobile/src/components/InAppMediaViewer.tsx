@@ -6,6 +6,7 @@ import {
   Image,
   Modal,
   Pressable,
+  Platform,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -46,12 +47,24 @@ const getExtension = (url: string) => {
   return match?.[1]?.toLowerCase() || "";
 };
 
-const isPreviewableDocumentUrl = (url: string | null | undefined) => {
+const canUseGoogleDocsPreview = (url: string | null | undefined, mediaType: InAppMediaType | null) => {
+  const normalizedUrl = String(url || "").trim();
+  if (mediaType !== "document" || !/^https?:\/\//i.test(normalizedUrl)) return false;
+
+  const extension = getExtension(normalizedUrl);
+  return Platform.OS === "android" || !PREVIEWABLE_DOCUMENT_EXTENSIONS.includes(extension);
+};
+
+const isPreviewableDocumentUrl = (url: string | null | undefined, mediaType: InAppMediaType | null = getInAppMediaType(url)) => {
   const extension = getExtension(String(url || ""));
-  return PREVIEWABLE_DOCUMENT_EXTENSIONS.includes(extension);
+  return PREVIEWABLE_DOCUMENT_EXTENSIONS.includes(extension) || canUseGoogleDocsPreview(url, mediaType);
 };
 
 const getPreviewUri = (url: string, mediaType: InAppMediaType | null) => {
+  if (canUseGoogleDocsPreview(url, mediaType)) {
+    return `https://docs.google.com/gview?embedded=1&url=${encodeURIComponent(url)}`;
+  }
+
   if (mediaType !== "document" || getExtension(url) !== "pdf") return url;
 
   const [baseUrl] = url.split("#");
@@ -84,7 +97,7 @@ interface InAppMediaViewerProps {
 const InAppMediaViewer = ({ visible, uri, title, onClose }: InAppMediaViewerProps) => {
   const [loading, setLoading] = useState(false);
   const mediaType = useMemo(() => getInAppMediaType(uri), [uri]);
-  const canPreviewDocument = useMemo(() => isPreviewableDocumentUrl(uri), [uri]);
+  const canPreviewDocument = useMemo(() => isPreviewableDocumentUrl(uri, mediaType), [mediaType, uri]);
   const previewUri = useMemo(() => (uri ? getPreviewUri(uri, mediaType) : null), [mediaType, uri]);
 
   useEffect(() => {
@@ -137,30 +150,42 @@ const InAppMediaViewer = ({ visible, uri, title, onClose }: InAppMediaViewerProp
               onError={() => setLoading(false)}
             />
           ) : previewUri && mediaType === "document" && canPreviewDocument ? (
-            <WebView
-              source={{ uri: previewUri }}
-              style={styles.webView}
-              startInLoadingState
-              onFileDownload={() => setLoading(false)}
-              onShouldStartLoadWithRequest={(request) => isPreviewableDocumentUrl(request.url)}
-              onLoadStart={() => setLoading(true)}
-              onLoadEnd={() => setLoading(false)}
-              onError={() => setLoading(false)}
-            />
+            <View style={styles.documentFrame}>
+              <WebView
+                source={{ uri: previewUri }}
+                style={styles.webView}
+                startInLoadingState
+                javaScriptEnabled
+                domStorageEnabled
+                nestedScrollEnabled
+                setSupportMultipleWindows={false}
+                onFileDownload={() => setLoading(false)}
+                onShouldStartLoadWithRequest={(request) => /^https?:\/\//i.test(request.url)}
+                onLoadStart={() => setLoading(true)}
+                onLoadEnd={() => setLoading(false)}
+                onError={() => setLoading(false)}
+              />
+            </View>
           ) : uri && mediaType === "document" ? (
             <Text style={styles.unsupportedText}>
               This document type cannot be previewed in-app.
             </Text>
           ) : uri && mediaType === "web" ? (
-            <WebView
-              source={{ uri }}
-              style={styles.webView}
-              startInLoadingState
-              onFileDownload={() => setLoading(false)}
-              onLoadStart={() => setLoading(true)}
-              onLoadEnd={() => setLoading(false)}
-              onError={() => setLoading(false)}
-            />
+            <View style={styles.documentFrame}>
+              <WebView
+                source={{ uri }}
+                style={styles.webView}
+                startInLoadingState
+                javaScriptEnabled
+                domStorageEnabled
+                nestedScrollEnabled
+                setSupportMultipleWindows={false}
+                onFileDownload={() => setLoading(false)}
+                onLoadStart={() => setLoading(true)}
+                onLoadEnd={() => setLoading(false)}
+                onError={() => setLoading(false)}
+              />
+            </View>
           ) : (
             <Text style={styles.unsupportedText}>This file cannot be previewed in-app.</Text>
           )}
@@ -210,12 +235,16 @@ const styles = StyleSheet.create({
     width: "100%",
     height: "78%",
   },
-  webView: {
+  documentFrame: {
     width: "100%",
     height: "78%",
     backgroundColor: "#FFFFFF",
     borderRadius: 12,
     overflow: "hidden",
+  },
+  webView: {
+    flex: 1,
+    backgroundColor: "#FFFFFF",
   },
   loadingOverlay: {
     position: "absolute",

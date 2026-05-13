@@ -280,7 +280,12 @@ const CustomModal: React.FC<CustomModalProps> = ({
               <Text style={[styles.message, { color: colors.textSecondary, marginBottom: 0 }]}>{loadingMessage}</Text>
             </>
           ) : (
-            <>
+            <ScrollView
+              keyboardShouldPersistTaps="handled"
+              showsVerticalScrollIndicator={false}
+              style={styles.modalScroll}
+              contentContainerStyle={styles.modalScrollContent}
+            >
               {title && <Text style={[styles.title, { color: colors.text }]}>{title}</Text>}
               <Text style={[styles.message, { color: colors.textSecondary }]}>{message}</Text>
 
@@ -437,7 +442,7 @@ const CustomModal: React.FC<CustomModalProps> = ({
                   <Text style={[styles.cancelButtonText, { color: colors.textSecondary }]}>Cancel</Text>
                 </TouchableOpacity>
               </View>
-            </>
+            </ScrollView>
           )}
         </Animated.View>
       </Animated.View>
@@ -513,23 +518,30 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(15,23,42,0.62)',
   },
   modalContainer: {
-    width: '86%',
+    width: '100%',
     maxWidth: 560,
+    maxHeight: '88%',
     borderRadius: 24,
-    padding: 24,
+    padding: 20,
+    alignItems: 'center',
+  },
+  modalScroll: {
+    width: '100%',
+  },
+  modalScrollContent: {
     alignItems: 'center',
   },
   title: {
-    fontSize: 20,
-    marginBottom: 12,
+    fontSize: 19,
+    marginBottom: 10,
     textAlign: 'center',
     fontFamily: 'Poppins_600SemiBold',
   },
   message: {
     fontSize: 14,
     textAlign: 'center',
-    marginBottom: 24,
-    lineHeight: 24,
+    marginBottom: 18,
+    lineHeight: 22,
     fontFamily: 'Poppins_400Regular',
   },
   buttonContainer: {
@@ -605,8 +617,9 @@ const styles = StyleSheet.create({
     width: '100%',
     borderWidth: 1,
     borderRadius: 14,
-    padding: 12,
-    marginBottom: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 11,
+    marginBottom: 10,
   },
   agreementPressable: {
     width: '100%',
@@ -628,21 +641,22 @@ const styles = StyleSheet.create({
   },
   termsText: {
     flex: 1,
-    fontSize: 13,
-    lineHeight: 20,
+    fontSize: 12.5,
+    lineHeight: 19,
     fontFamily: 'Poppins_400Regular',
   },
   inlineLinkButton: {
-    alignSelf: 'flex-start',
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
     marginLeft: 32,
     marginTop: 8,
     paddingVertical: 2,
+    maxWidth: '86%',
   },
   termsLinkText: {
-    fontSize: 13,
+    flexShrink: 1,
+    fontSize: 12.5,
     lineHeight: 18,
     fontFamily: 'Poppins_500Medium',
     textDecorationLine: 'underline',

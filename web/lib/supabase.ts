@@ -570,7 +570,7 @@ const withSessionAuthorization = async (
             error: any;
         };
 
-        if (result.error && firstAttemptHadAuthorization && isAuthUnauthorizedError(result.error)) {
+        if (result.error && !skipSessionAuthorization && isAuthUnauthorizedError(result.error)) {
             const firstAttemptToken = getAuthorizationToken(invokeOptions);
             const errorStatus = getFunctionsErrorStatus(result.error);
             console.warn('[supabase.functions.invoke] Authorization failed, retrying once with refreshed session', {
@@ -579,6 +579,7 @@ const withSessionAuthorization = async (
                 status: errorStatus,
                 code: result.error?.code,
                 contextUrl: result.error?.context?.url,
+                hadUserAuthorizationHeader: firstAttemptHadAuthorization,
                 tokenExpiresInSeconds: getJwtExpiresInSeconds(firstAttemptToken),
             });
 

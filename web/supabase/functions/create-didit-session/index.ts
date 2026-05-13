@@ -154,8 +154,8 @@ function normalizeDiditStatus(value: unknown) {
   if (normalized === "APPROVED") return "APPROVED";
   if (["DECLINED", "REJECTED", "DENIED"].includes(normalized)) return "DECLINED";
   if (["ABANDONED", "EXPIRED", "CANCELLED", "CANCELED"].includes(normalized)) return "ABANDONED";
+  if (normalized === "IN_REVIEW") return "PENDING";
   if ([
-    "IN_REVIEW",
     "PENDING_REVIEW",
     "PENDING_REVIEW_REQUIRED",
     "REVIEW",
@@ -203,7 +203,7 @@ function resolveSourceStatus(source: any) {
 
 function shouldReviewMissingFaceMatch(sourceStatus: unknown) {
   const normalized = normalizeDiditStatus(sourceStatus);
-  return normalized === "APPROVED" || normalized === "PENDING_REVIEW";
+  return normalized === "PENDING_REVIEW";
 }
 
 function resolveDecisionStatus(decision: any, sourceStatus: unknown = "") {
@@ -232,7 +232,7 @@ function resolveDiditStatusFromSource(source: any) {
   const decisionStatus = resolveDecisionStatus(findDecisionObject(source), fallbackStatus);
   if (decisionStatus) return decisionStatus;
 
-  return fallbackStatus === "APPROVED" ? "PENDING_REVIEW" : fallbackStatus;
+  return fallbackStatus === "APPROVED" ? "PENDING" : fallbackStatus;
 }
 
 function resolveDiditSessionStatus(...sources: any[]) {
@@ -261,8 +261,15 @@ async function sha256Hex(value: string) {
     .join("");
 }
 
-async function resolveDiditVendorData(userId: unknown, normalizedEmail: string) {
+async function resolveDiditVendorData(
+  userId: unknown,
+  normalizedEmail: string,
+  options: { forceNew?: boolean } = {},
+) {
   const rawUserId = String(userId || "").trim();
+  if (options.forceNew && rawUserId.startsWith("TEMP_")) {
+    return rawUserId;
+  }
   if (rawUserId.startsWith("TEMP_") && normalizedEmail) {
     const emailHash = await sha256Hex(normalizedEmail);
     return `TEMP_SIGNUP_${emailHash.slice(0, 32)}`;
@@ -609,7 +616,24 @@ serve(async (req) => {
     if (action === 'get_session' && session_id) {
       console.log(`Fetching Didit session: ${session_id}`);
 
-      const localSessionData = await assertSessionNonce(supabaseAdmin, String(session_id), providedSessionNonce);
+      let localSessionData = null;
+      try {
+        localSessionData = await assertSessionNonce(supabaseAdmin, String(session_id), providedSessionNonce);
+      } catch (validationError: any) {
+        const message = validationError?.message || "Verification session could not be validated. Please start verification again.";
+        console.warn("didit_get_session_validation_failed", {
+          sessionId: String(session_id),
+          hasSessionNonce: Boolean(providedSessionNonce),
+          message,
+        });
+        return jsonResponse({
+          error: message,
+          code: "SESSION_VALIDATION_FAILED",
+          status: "SUPERSEDED",
+          verification_data: { status: "SUPERSEDED" },
+          success: false,
+        });
+      }
       let sessionData = {};
       let rawDecisionData = null;
       let rawBaseData = null;
@@ -662,10 +686,13 @@ serve(async (req) => {
         const rawBaseStatus = resolveSourceStatus(rawBaseData);
         const diditResolvedStatus = resolveDiditSessionStatus(rawDecisionData, rawBaseData, sessionData);
         const diditRequiresReview = diditResolvedStatus === 'PENDING_REVIEW' && storedStatus === 'APPROVED';
+        const storedPendingReviewStillInProgress = storedStatus === 'PENDING_REVIEW' && diditResolvedStatus === 'PENDING';
         const localStatusIsFinal = isFinalSessionStatus(storedStatus);
         const diditStatusIsFinal = isFinalSessionStatus(diditResolvedStatus);
         let syncedVerificationData = null;
-        const effectiveStatus = diditRequiresReview
+        const effectiveStatus = storedPendingReviewStillInProgress
+          ? diditResolvedStatus
+          : diditRequiresReview
           ? diditResolvedStatus
           : localStatusIsFinal
           ? storedStatus
@@ -681,7 +708,18 @@ serve(async (req) => {
           diditResolvedStatus: diditResolvedStatus || null,
           effectiveStatus,
           diditRequiresReview,
+          storedPendingReviewStillInProgress,
         });
+
+        if (storedPendingReviewStillInProgress) {
+          const { error: pendingSyncError } = await supabaseAdmin
+            .from('verification_sessions')
+            .update({ status: 'PENDING' })
+            .eq('session_ref', String(session_id));
+          if (pendingSyncError) {
+            console.error('Failed to restore in-progress Didit session status:', pendingSyncError.message);
+          }
+        }
 
         if ((!localStatusIsFinal || diditRequiresReview) && diditStatusIsFinal && diditResolvedStatus !== storedStatus) {
           syncedVerificationData = await buildDiditSessionSyncData(
@@ -793,10 +831,12 @@ serve(async (req) => {
       });
     }
 
-    const signupAttemptRef = String(userId || "").trim();
-    const diditVendorData = await resolveDiditVendorData(signupAttemptRef, normalizedEmail);
-    const isPreAuthSignup = signupAttemptRef.startsWith("TEMP_");
     const shouldForceNewSession = force_new === true || force_new === "true";
+    const signupAttemptRef = String(userId || "").trim();
+    const diditVendorData = await resolveDiditVendorData(signupAttemptRef, normalizedEmail, {
+      forceNew: shouldForceNewSession,
+    });
+    const isPreAuthSignup = signupAttemptRef.startsWith("TEMP_");
 
     console.log("[didit] creating session", {
       workflowId: DIDIT_WORKFLOW_ID,

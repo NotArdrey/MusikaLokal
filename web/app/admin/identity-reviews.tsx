@@ -175,6 +175,7 @@ interface ManualIdentityReviewEntry {
     review_reason?: string | null;
     matched_on?: string | null;
     matched_accounts?: IdentityMatchAccount[];
+    stale_matched_accounts?: IdentityMatchAccount[];
   } | null;
   created_at: string;
   expected_decision_by?: string | null;
@@ -324,187 +325,32 @@ const formatIdentityReviewReason = (value?: string | null) => {
   return String(value || '').trim() || 'Pending manual identity review';
 };
 
-const normalizeIdentityMatchTypeValue = (value?: string | null, fallback = 'DOCUMENT_FINGERPRINT') => {
-  const normalized = String(value || fallback || '').trim().toUpperCase();
-  return normalized || fallback;
-};
-
-const normalizeDateOnly = (value: unknown) => {
-  const match = String(value || '').trim().match(/^(\d{4}-\d{2}-\d{2})/);
-  return match ? match[1] : null;
-};
-
-const getMetadataMatchArrays = (metadata: Record<string, unknown>) => {
-  const approvalClaimResult = metadata['approval_claim_result'] && typeof metadata['approval_claim_result'] === 'object'
-    ? metadata['approval_claim_result'] as Record<string, unknown>
-    : {};
-  const claimResult = metadata['claim_result'] && typeof metadata['claim_result'] === 'object'
-    ? metadata['claim_result'] as Record<string, unknown>
-    : {};
-
-  return [
-    metadata['duplicate_matches'],
-    metadata['matches'],
-    approvalClaimResult['matches'],
-    claimResult['matches'],
-  ].filter(Array.isArray) as Record<string, unknown>[][];
-};
-
-const mapMetadataMatchAccount = (rawMatch: Record<string, unknown>, fallbackMatchedOn: string): IdentityMatchAccount | null => {
-  const rawProfile = rawMatch['profiles'] && typeof rawMatch['profiles'] === 'object'
-    ? rawMatch['profiles'] as Record<string, unknown>
-    : {};
-  const userId = String(rawMatch['user_id'] || rawMatch['original_user_id'] || rawMatch['matched_existing_user_id'] || '').trim();
-  const originalUserId = String(rawMatch['original_user_id'] || '').trim();
-  const email = String(rawMatch['email'] || rawMatch['normalized_email'] || rawProfile['email'] || '').trim().toLowerCase();
-
-  if (!userId && !email) return null;
-
-  const matchedOn = normalizeIdentityMatchTypeValue(
-    String(rawMatch['matched_on'] || rawMatch['match_type'] || fallbackMatchedOn || ''),
-  );
-
-  return {
-    claim_id: String(rawMatch['claim_id'] || rawMatch['identity_document_claim_id'] || rawMatch['id'] || '').trim() || null,
-    didit_session_id: String(rawMatch['didit_session_id'] || rawMatch['diditSessionId'] || rawMatch['session_id'] || '').trim() || null,
-    manual_review_id: String(rawMatch['manual_review_id'] || rawMatch['manualReviewId'] || '').trim() || null,
-    user_id: userId || null,
-    original_user_id: originalUserId || null,
-    email: email || null,
-    full_name: String(rawMatch['full_name'] || rawMatch['verified_full_legal_name'] || rawProfile['full_name'] || '').trim() || null,
-    role: String(rawMatch['role'] || '').trim() || null,
-    source: String(rawMatch['source'] || '').trim() || null,
-    claim_status: String(rawMatch['claim_status'] || rawMatch['status'] || 'APPROVED').trim() || null,
-    verified_at: String(rawMatch['verified_at'] || rawMatch['created_at'] || '').trim() || null,
-    birth_date: normalizeDateOnly(rawMatch['birth_date']),
-    matched_on: matchedOn,
-    match_type: matchedOn,
-    match_label: formatIdentityMatchType(matchedOn),
-    front_image_url: String(rawMatch['front_image_url'] || '').trim() || null,
-    back_image_url: String(rawMatch['back_image_url'] || '').trim() || null,
-    selfie_image_url: String(rawMatch['selfie_image_url'] || '').trim() || null,
-  };
-};
-
-const getMetadataMatchAccounts = (review: ManualIdentityReviewEntry, fallbackMatchedOn: string) => {
-  const metadata = review.metadata || {};
-  const reviewEmail = String(review.profile?.email || review.submitted_by_email || '').trim().toLowerCase();
-  const accounts: IdentityMatchAccount[] = [];
-
-  for (const source of getMetadataMatchArrays(metadata)) {
-    for (const rawMatch of source) {
-      const account = mapMetadataMatchAccount(rawMatch, fallbackMatchedOn);
-      if (!account) continue;
-
-      const matchUserId = String(account.user_id || '').trim();
-      const matchEmail = String(account.email || '').trim().toLowerCase();
-      if (matchUserId === String(review.user_id || '').trim()) continue;
-      if (reviewEmail && matchEmail && matchEmail === reviewEmail) continue;
-
-      const existingIndex = accounts.findIndex((existing) => (
-        String(existing.user_id || existing.email || '') === String(account.user_id || account.email || '') &&
-        String(existing.matched_on || existing.match_type || '') === String(account.matched_on || account.match_type || '')
-      ));
-      if (existingIndex < 0) {
-        accounts.push(account);
-      }
-    }
-  }
-
-  return accounts;
-};
-
-const findIdentityAccountFallback = (account: IdentityMatchAccount, fallbacks: IdentityMatchAccount[]) => {
-  const accountUserId = String(account.user_id || account.original_user_id || '').trim();
-  const accountEmail = String(account.email || '').trim().toLowerCase();
-  const accountMatchType = String(account.matched_on || account.match_type || '').trim();
-
-  return fallbacks.find((candidate) => {
-    const candidateUserId = String(candidate.user_id || candidate.original_user_id || '').trim();
-    const candidateEmail = String(candidate.email || '').trim().toLowerCase();
-    const candidateMatchType = String(candidate.matched_on || candidate.match_type || '').trim();
-    const sameIdentity = Boolean(accountUserId && candidateUserId && accountUserId === candidateUserId) ||
-      Boolean(accountEmail && candidateEmail && accountEmail === candidateEmail);
-
-    return sameIdentity && (!accountMatchType || !candidateMatchType || accountMatchType === candidateMatchType);
-  }) || null;
-};
-
-const mergeIdentityMatchAccounts = (accounts: IdentityMatchAccount[], fallbacks: IdentityMatchAccount[]) => {
-  const merged = accounts.map((account) => {
-    const fallback = findIdentityAccountFallback(account, fallbacks);
-    if (!fallback) return account;
-
-    return {
-      ...fallback,
-      ...account,
-      claim_id: account.claim_id || fallback.claim_id || null,
-      didit_session_id: account.didit_session_id || fallback.didit_session_id || null,
-      manual_review_id: account.manual_review_id || fallback.manual_review_id || null,
-      original_user_id: account.original_user_id || fallback.original_user_id || null,
-      front_image_url: account.front_image_url || fallback.front_image_url || null,
-      back_image_url: account.back_image_url || fallback.back_image_url || null,
-      selfie_image_url: account.selfie_image_url || fallback.selfie_image_url || null,
-    };
-  });
-
-  const fallbackOnly = fallbacks.filter((fallback) => !findIdentityAccountFallback(fallback, merged));
-  return [...merged, ...fallbackOnly];
-};
-
 const getIdentityMatchWarning = (review?: ManualIdentityReviewEntry | null) => {
   if (!review) return null;
-  const metadata = review.metadata || {};
-  const metadataMatchedOn = String(metadata['matched_on'] || '').trim();
-  const metadataReviewReason = String(metadata['review_reason'] || '').trim();
-  const fallbackMatchCount = Number(review.duplicate_match_count || 0);
-  const fallbackMatchedOn = review.matched_on || metadataMatchedOn || 'DOCUMENT_FINGERPRINT';
-  const metadataAccounts = getMetadataMatchAccounts(review, fallbackMatchedOn);
 
   if (review.identity_match_warning) {
     const existingAccounts = review.identity_match_warning.matched_accounts || [];
-    const mergedAccounts = mergeIdentityMatchAccounts(existingAccounts, metadataAccounts);
     return {
       ...review.identity_match_warning,
-      match_count: Math.max(
-        Number(review.identity_match_warning.match_count || 0),
-        fallbackMatchCount,
-        mergedAccounts.length,
-      ),
-      matched_accounts: mergedAccounts,
+      match_count: Math.max(Number(review.identity_match_warning.match_count || 0), existingAccounts.length),
+      matched_accounts: existingAccounts,
     };
   }
 
-  if (!review.duplicate_verified_identity_warning) {
-    if (!fallbackMatchCount && !review.duplicate_reason && !review.review_reason && !metadataReviewReason) return null;
-
-    return {
-      same_role: true,
-      match_count: Math.max(fallbackMatchCount, metadataAccounts.length),
-      match_types: [fallbackMatchedOn].filter(Boolean) as string[],
-      has_document_match: fallbackMatchedOn === 'DOCUMENT_FINGERPRINT',
-      has_name_birthdate_match: fallbackMatchedOn === 'NAME_BIRTHDATE',
-      review_reason: review.review_reason || metadataReviewReason || review.duplicate_reason || null,
-      matched_on: fallbackMatchedOn,
-      matched_accounts: metadataAccounts,
-    };
-  }
+  if (!review.duplicate_verified_identity_warning) return null;
 
   const duplicateAccounts = review.duplicate_verified_identity_warning.matched_accounts || [];
-  const mergedDuplicateAccounts = mergeIdentityMatchAccounts(duplicateAccounts, metadataAccounts);
+  if (duplicateAccounts.length === 0) return null;
+
   return {
     same_role: review.duplicate_verified_identity_warning.same_role,
-    match_count: Math.max(
-      Number(review.duplicate_verified_identity_warning.match_count || 0),
-      fallbackMatchCount,
-      mergedDuplicateAccounts.length,
-    ),
+    match_count: Math.max(Number(review.duplicate_verified_identity_warning.match_count || 0), duplicateAccounts.length),
     match_types: ['DOCUMENT_FINGERPRINT'],
     has_document_match: true,
     has_name_birthdate_match: false,
-    review_reason: review.review_reason || metadataReviewReason || review.duplicate_reason || null,
+    review_reason: review.review_reason || review.duplicate_reason || null,
     matched_on: 'DOCUMENT_FINGERPRINT',
-    matched_accounts: mergedDuplicateAccounts,
+    matched_accounts: duplicateAccounts,
   };
 };
 
@@ -1219,6 +1065,7 @@ export default function AdminIdentityReviewsPage() {
   const manualReviewMatchWarning = getIdentityMatchWarning(manualReviewTarget);
   const identityPreviewWarning = getIdentityMatchWarning(identityMatchPreview);
   const identityPreviewAccounts = identityPreviewWarning?.matched_accounts || [];
+  const identityPreviewStaleAccounts = identityPreviewWarning?.stale_matched_accounts || [];
   const identityPreviewLoadingAsset = identityMatchPreview && manualReviewAssetLoading?.reviewId === identityMatchPreview.id
     ? manualReviewAssetLoading.asset
     : null;
@@ -1345,6 +1192,7 @@ export default function AdminIdentityReviewsPage() {
                 const loadingAsset = manualReviewAssetLoading?.reviewId === review.id ? manualReviewAssetLoading.asset : null;
                 const identityMatchWarning = getIdentityMatchWarning(review);
                 const matchedAccounts = identityMatchWarning?.matched_accounts || [];
+                const staleMatchedAccounts = identityMatchWarning?.stale_matched_accounts || [];
                 const reviewReason = review.review_reason || String(review.metadata?.['review_reason'] || '') || review.duplicate_reason || null;
                 const matchTypeLabels = (identityMatchWarning?.match_types || [identityMatchWarning?.matched_on])
                   .filter(Boolean)
@@ -1368,9 +1216,9 @@ export default function AdminIdentityReviewsPage() {
                         Review reason: {formatIdentityReviewReason(reviewReason)}
                       </Text>
                     ) : null}
-                    {(identityMatchWarning?.match_count || review.duplicate_match_count) ? (
+                    {identityMatchWarning?.match_count ? (
                       <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>
-                        Matching same-role account(s): {Number(identityMatchWarning?.match_count || review.duplicate_match_count || 0)}
+                        Matching same-role account(s): {Number(identityMatchWarning.match_count || 0)}
                       </Text>
                     ) : null}
                     {identityMatchWarning ? (
@@ -1382,15 +1230,21 @@ export default function AdminIdentityReviewsPage() {
                         <Text style={[styles.duplicateWarningText, { color: isDark ? '#F8FAFC' : '#92400E' }]}>
                           Match type: {matchTypeLabels.length > 0 ? matchTypeLabels.join(', ') : 'Possible identity match'}
                         </Text>
-                        <Text style={[styles.duplicateWarningText, { color: isDark ? '#F8FAFC' : '#92400E' }]}>
-                          Matched account{Number(identityMatchWarning.match_count || 0) === 1 ? '' : 's'}: {Number(identityMatchWarning.match_count || matchedAccounts.length)}
-                        </Text>
+                        {matchedAccounts.length > 0 ? (
+                          <Text style={[styles.duplicateWarningText, { color: isDark ? '#F8FAFC' : '#92400E' }]}>
+                            Matched account{Number(identityMatchWarning.match_count || 0) === 1 ? '' : 's'}: {Number(identityMatchWarning.match_count || matchedAccounts.length)}
+                          </Text>
+                        ) : (
+                          <Text style={[styles.duplicateWarningText, { color: isDark ? '#F8FAFC' : '#92400E' }]}>
+                            No active matched user account details found{staleMatchedAccounts.length > 0 ? ` (${staleMatchedAccounts.length} removed stale ${staleMatchedAccounts.length === 1 ? 'match' : 'matches'} available in View Match).` : '.'}
+                          </Text>
+                        )}
                         {matchedAccounts.slice(0, 3).map((account) => (
                           <Text key={String(account.user_id || account.email)} style={[styles.duplicateWarningText, { color: isDark ? '#F8FAFC' : '#92400E' }]}>
                             {account.email || account.user_id || 'Unknown account'} · {account.role || 'same role'}
                           </Text>
                         ))}
-                        {identityMatchWarning.match_count || matchedAccounts.length > 0 ? (
+                        {identityMatchWarning ? (
                           <TouchableOpacity
                             testID={`admin-identity-review-match-${review.id}`}
                             accessibilityLabel={`admin-identity-review-match-${review.id}`}
@@ -1724,7 +1578,7 @@ export default function AdminIdentityReviewsPage() {
               <View style={styles.sectionGap}>
                 {identityPreviewAccounts.length === 0 ? (
                   <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
-                    This review only has a saved match count. The matched account details were not stored with the original duplicate signal.
+                    No active matched user accounts were found in profiles.
                   </Text>
                 ) : identityPreviewAccounts.map((account, index) => {
                   const accountKey = getIdentityMatchAccountKey(account, index);
@@ -1803,6 +1657,89 @@ export default function AdminIdentityReviewsPage() {
                     </View>
                   );
                 })}
+                {identityPreviewStaleAccounts.length > 0 ? (
+                  <>
+                    <Text style={[styles.duplicateWarningTitle, { color: colors.text }]}>Removed stale matches</Text>
+                    {identityPreviewStaleAccounts.map((account, index) => {
+                      const accountKey = getIdentityMatchAccountKey(account, index);
+                      const displayAccount = { ...account, ...(identityMatchAssetCache[accountKey] || {}) };
+                      const loadingMatchAsset = identityMatchAssetLoading?.key === accountKey ? identityMatchAssetLoading.asset : null;
+                      const canLoadMatchAssets = Boolean(
+                        displayAccount.claim_id ||
+                          displayAccount.didit_session_id ||
+                          displayAccount.manual_review_id ||
+                          getIdentityMatchAccountAssetUrl(displayAccount, 'front') ||
+                          getIdentityMatchAccountAssetUrl(displayAccount, 'back') ||
+                          getIdentityMatchAccountAssetUrl(displayAccount, 'selfie'),
+                      );
+
+                      return (
+                        <View key={accountKey} style={[styles.duplicateWarningBox, { backgroundColor: isDark ? '#1E293B' : '#F8FAFC', borderColor: colors.border }]}>
+                          <Text style={[styles.duplicateWarningTitle, { color: colors.text }]}>
+                            {displayAccount.full_name || displayAccount.email || 'Removed account'}
+                          </Text>
+                          <Text style={[styles.duplicateWarningText, { color: colors.textSecondary }]}>Email: {displayAccount.email || '-'}</Text>
+                          <Text style={[styles.duplicateWarningText, { color: colors.textSecondary }]}>Role: {displayAccount.role || '-'}</Text>
+                          <Text style={[styles.duplicateWarningText, { color: colors.textSecondary }]}>Claim status: {String(displayAccount.claim_status || 'APPROVED').replace(/_/g, ' ')}</Text>
+                          <Text style={[styles.duplicateWarningText, { color: colors.textSecondary }]}>Verified: {formatDateTime(displayAccount.verified_at)}</Text>
+                          <Text style={[styles.duplicateWarningText, { color: colors.textSecondary }]}>Source: {String(displayAccount.source || '-').replace(/_/g, ' ')}</Text>
+                          <Text style={[styles.duplicateWarningText, { color: colors.textSecondary }]}>Match: {displayAccount.match_label || formatIdentityMatchType(displayAccount.matched_on || displayAccount.match_type)}</Text>
+                          {displayAccount.birth_date ? (
+                            <Text style={[styles.duplicateWarningText, { color: colors.textSecondary }]}>Birthdate: {displayAccount.birth_date}</Text>
+                          ) : null}
+                          <Text style={[styles.duplicateWarningText, { color: colors.textSecondary }]}>Original user ID: {displayAccount.original_user_id || '-'}</Text>
+                          <Text style={[styles.duplicateWarningText, { color: isDark ? '#FBBF24' : '#B45309' }]}>This claim no longer has an active user/profile.</Text>
+
+                          {canLoadMatchAssets ? (
+                            <View style={styles.cardActionsRow}>
+                              <TouchableOpacity
+                                activeOpacity={1}
+                                disabled={Boolean(loadingMatchAsset)}
+                                onPress={() => void openIdentityMatchAccountAsset(displayAccount as IdentityMatchAccount, index, 'front')}
+                                style={[styles.smallActionButton, { borderColor: colors.border, opacity: loadingMatchAsset ? 0.65 : 1 }]}
+                              >
+                                {loadingMatchAsset === 'front' ? (
+                                  <ActivityIndicator size="small" color={colors.text} />
+                                ) : (
+                                  <Ionicons name="image-outline" size={14} color={colors.text} />
+                                )}
+                                <Text style={[styles.smallActionText, { color: colors.text }]}>Front</Text>
+                              </TouchableOpacity>
+
+                              <TouchableOpacity
+                                activeOpacity={1}
+                                disabled={Boolean(loadingMatchAsset)}
+                                onPress={() => void openIdentityMatchAccountAsset(displayAccount as IdentityMatchAccount, index, 'back')}
+                                style={[styles.smallActionButton, { borderColor: colors.border, opacity: loadingMatchAsset ? 0.65 : 1 }]}
+                              >
+                                {loadingMatchAsset === 'back' ? (
+                                  <ActivityIndicator size="small" color={colors.text} />
+                                ) : (
+                                  <Ionicons name="images-outline" size={14} color={colors.text} />
+                                )}
+                                <Text style={[styles.smallActionText, { color: colors.text }]}>Back</Text>
+                              </TouchableOpacity>
+
+                              <TouchableOpacity
+                                activeOpacity={1}
+                                disabled={Boolean(loadingMatchAsset)}
+                                onPress={() => void openIdentityMatchAccountAsset(displayAccount as IdentityMatchAccount, index, 'selfie')}
+                                style={[styles.smallActionButton, { borderColor: colors.border, opacity: loadingMatchAsset ? 0.65 : 1 }]}
+                              >
+                                {loadingMatchAsset === 'selfie' ? (
+                                  <ActivityIndicator size="small" color={colors.text} />
+                                ) : (
+                                  <Ionicons name="person-circle-outline" size={14} color={colors.text} />
+                                )}
+                                <Text style={[styles.smallActionText, { color: colors.text }]}>Selfie</Text>
+                              </TouchableOpacity>
+                            </View>
+                          ) : null}
+                        </View>
+                      );
+                    })}
+                  </>
+                ) : null}
               </View>
             </ScrollView>
 

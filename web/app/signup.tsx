@@ -2293,7 +2293,16 @@ export default function SignupScreen() {
                 <View style={{ flex: 1, backgroundColor: colors.background }}>
                     <View style={{ padding: 16, flexDirection: 'row', alignItems: 'center' }}>
                         <Text style={[themeStyles.text, { fontSize: 18, fontWeight: 'bold' }]}>Identity Verification</Text>
-                        <TouchableOpacity activeOpacity={1} onPress={() => router.push('/')} style={{ marginLeft: 'auto' }}>
+                        <TouchableOpacity
+                            activeOpacity={1}
+                            onPress={() => {
+                                void startNewVerificationSession({ forceNew: true });
+                            }}
+                            style={{ marginLeft: 'auto', marginRight: 18 }}
+                        >
+                            <Text style={{ color: colors.primary }}>New link</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity activeOpacity={1} onPress={() => router.push('/')}>
                             <Text style={{ color: colors.primary }}>Cancel</Text>
                         </TouchableOpacity>
                     </View>

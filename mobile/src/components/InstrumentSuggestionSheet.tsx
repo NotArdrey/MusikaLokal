@@ -50,7 +50,6 @@ export default function InstrumentSuggestionSheet({
     const [error, setError] = useState<string | null>(null);
     const [step, setStep] = useState<'preferences' | 'results'>('preferences');
     const [isAIPowered, setIsAIPowered] = useState(false);
-    const [aiProvider, setAIProvider] = useState('');
 
     // Track previous visible state to detect when modal opens
     const prevVisibleRef = useRef(visible);
@@ -66,7 +65,6 @@ export default function InstrumentSuggestionSheet({
             setSuggestions([]);
             setError(null);
             setIsAIPowered(false);
-            setAIProvider('');
         }
     }, [visible, initialGenres]);
 
@@ -101,7 +99,6 @@ export default function InstrumentSuggestionSheet({
             if (data?.suggestions) {
                 setSuggestions(data.suggestions);
                 setIsAIPowered(Boolean(data.aiPowered));
-                setAIProvider(data.aiProvider || '');
                 setStep('results');
             } else {
                 setError(data?.message || 'No suggestions found. Try different preferences.');
@@ -420,8 +417,8 @@ export default function InstrumentSuggestionSheet({
             </Text>
             <Text style={[styles.resultsSubtitle, { color: colors.textSecondary }]}>
                 {isAIPowered
-                    ? `Powered by ${aiProvider || 'AI'} based on your music preferences`
-                    : `Using ${aiProvider || 'local matching'} based on your music preferences`}
+                    ? 'AI-assisted suggestions based on your music preferences'
+                    : 'Smart suggestions based on your music preferences'}
             </Text>
             
             {/* Suggestion Cards */}

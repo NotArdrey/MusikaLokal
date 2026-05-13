@@ -616,12 +616,13 @@ const unregisterCurrentPushDevice = async () => {
             error: any;
         };
 
-        if (result.error && firstAttemptHadAuthorization && isAuthUnauthorizedError(result.error)) {
+        if (result.error && !skipSessionAuthorization && isAuthUnauthorizedError(result.error)) {
             console.warn('[supabase.functions.invoke] Authorization failed, retrying once with refreshed session', {
                 functionName,
                 message: result.error?.message,
                 status: result.error?.status,
                 code: result.error?.code,
+                hadUserAuthorizationHeader: firstAttemptHadAuthorization,
             });
 
             invalidateTokenCache();

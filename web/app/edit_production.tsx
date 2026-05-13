@@ -211,6 +211,18 @@ export default function EditProductionScreen() {
           : `${inviteSummary.sentCount} invite(s) sent.`
         : null;
 
+      if (inviteSummary?.sentCount === 0 && inviteSummary.failedCount > 0) {
+        const failureMessage =
+          inviteSummary.failures.map((failure) => failure.error).find(Boolean) ||
+          'No invites were sent. Please try again.';
+        setAlert({
+          type: 'warning',
+          title: 'Team Saved, Invite Not Sent',
+          message: failureMessage,
+        });
+        return;
+      }
+
       emitToast({
         type: 'success',
         title: 'Production Team Updated',

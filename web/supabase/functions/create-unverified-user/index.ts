@@ -126,7 +126,7 @@ function resolveSourceVerificationStatus(source: any) {
 
 function shouldReviewMissingFaceMatch(sourceStatus: unknown) {
     const normalized = normalizeVerificationStatus(sourceStatus)
-    return normalized === 'APPROVED' || normalized === 'PENDING_REVIEW'
+    return normalized === 'PENDING_REVIEW'
 }
 
 function resolveDiditFaceRequiredStatus(source: any) {
@@ -557,6 +557,7 @@ serve(async (req) => {
         const effectiveVerificationStatus = approvedByDidit && !requiresDuplicateIdentityReview
             ? 'APPROVED'
             : (pendingByDidit || requiresDuplicateIdentityReview) ? 'PENDING_REVIEW' : 'PENDING'
+        const effectiveIsVerified = effectiveVerificationStatus === 'APPROVED'
         // 1. Check if user already exists in Auth
         let existingUser = await findAuthUserByEmail(supabaseAdmin, normalizedEmail)
 
@@ -577,12 +578,9 @@ serve(async (req) => {
             // If they are NOT confirmed, this is a stalled/failed signup.
             // DELETE them to allow a fresh start.
             const { error: deleteError } = await supabaseAdmin.auth.admin.deleteUser(existingUser.id)
-
-            const existingRole = String(existingProfile?.role || existingUser.user_metadata?.role || '').trim().toLowerCase()
-            const existingStatus = String(existingProfile?.verification_status || existingUser.user_metadata?.verification_status || '').trim().toUpperCase()
-
-            if (existingRole && existingRole !== normalizedRole) {
-                return new Response(JSON.stringify({ error: 'This email is already registered with another account type. Please log in to continue.' }), {
+            if (deleteError) {
+                console.error('Failed to delete unverified user:', deleteError)
+                return new Response(JSON.stringify({ error: 'Failed to reset existing account. Please contact support.' }), {
                     headers: { ...corsHeaders, 'Content-Type': 'application/json' },
                     status: 400,
                 })
@@ -601,79 +599,33 @@ serve(async (req) => {
             password,
             email_confirm: false,
             user_metadata: {
-                is_verified: approvedByDidit,
+                is_verified: effectiveIsVerified,
                 role: normalizedRole,
-                verification_status: approvedByDidit ? 'APPROVED' : pendingByDidit ? 'PENDING_REVIEW' : 'PENDING',
+                verification_status: effectiveVerificationStatus,
                 didit_session_id: diditSessionId || null,
                 selected_document_type: selectedDocumentType || null,
+                selected_document_type_key: selectedDocumentTypeKey || null,
                 verification_mode: verificationMode || null,
                 full_name: fallbackName,
                 display_name: fallbackName,
                 name: fallbackName,
             }
+        })
 
-            const { data: updatedUser, error: updateError } = await supabaseAdmin.auth.admin.updateUserById(existingUser.id, {
-                password,
-                user_metadata: {
-                    ...(existingUser.user_metadata || {}),
-                    is_verified: effectiveVerificationStatus === 'APPROVED',
-                    role: normalizedRole,
-                    verification_status: effectiveVerificationStatus,
-                    didit_session_id: diditSessionId || null,
-                    selected_document_type: selectedDocumentType || null,
-                    selected_document_type_key: selectedDocumentTypeKey || null,
-                    verification_mode: verificationMode || null,
-                    full_name: fallbackName,
-                    display_name: fallbackName,
-                    name: fallbackName,
-                },
+        if (createError) {
+            return new Response(JSON.stringify({ error: createError.message }), {
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                status: 400,
             })
-
-            if (updateError || !updatedUser?.user) {
-                return new Response(JSON.stringify({ error: updateError?.message || 'Unable to update existing signup.' }), {
-                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-                    status: 400,
-                })
-            }
-
-            authUserForResponse = updatedUser.user
-            userId = updatedUser.user.id
-        } else {
-            // Didit approval verifies identity only. The Supabase auth email must
-            // still be confirmed before password login is allowed.
-            const { data: user, error: createError } = await supabaseAdmin.auth.admin.createUser({
-                email: normalizedEmail,
-                password,
-                email_confirm: false,
-                user_metadata: {
-                    is_verified: effectiveVerificationStatus === 'APPROVED',
-                    role: normalizedRole,
-                    verification_status: effectiveVerificationStatus,
-                    didit_session_id: diditSessionId || null,
-                    selected_document_type: selectedDocumentType || null,
-                    selected_document_type_key: selectedDocumentTypeKey || null,
-                    verification_mode: verificationMode || null,
-                    full_name: fallbackName,
-                    display_name: fallbackName,
-                    name: fallbackName,
-                }
-            })
-
-            if (createError) {
-                return new Response(JSON.stringify({ error: createError.message }), {
-                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-                    status: 400,
-                })
-            }
-
-            if (!user.user) {
-                throw new Error('User creation failed');
-            }
-
-            authUserForResponse = user.user
-            userId = user.user.id
-            createdNewUser = true
         }
+
+        if (!user.user) {
+            throw new Error('User creation failed');
+        }
+
+        authUserForResponse = user.user
+        userId = user.user.id
+        createdNewUser = true
 
         const { error: profileError } = await supabaseAdmin
             .from('profiles')

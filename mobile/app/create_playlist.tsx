@@ -4,6 +4,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Dimensions,
+  Modal,
   ScrollView,
   StyleSheet,
   Text,
@@ -51,6 +52,7 @@ const createTrackDraft = (): PlaylistDraftTrack => ({
 });
 
 type DraftTrackPayload = {
+  id: string;
   title: string;
   artist_name: string | null;
   duration_seconds: number | null;
@@ -114,6 +116,8 @@ export default function CreatePlaylistScreen() {
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(isEditing);
   const [alert, setAlert] = useState<PlaylistAlert | null>(null);
+  const [uploadingTrackAudioId, setUploadingTrackAudioId] = useState<string | null>(null);
+  const [audioUploadMessage, setAudioUploadMessage] = useState<string | null>(null);
 
   const logPlaylistInvokeError = useCallback((context: string, error: any, body: Record<string, unknown>) => {
     console.error(`manage-playlists ${context} failed`, {
@@ -224,9 +228,12 @@ export default function CreatePlaylistScreen() {
         return;
       }
 
+      setUploadingTrackAudioId(trackId);
+      setAudioUploadMessage("Preparing MP3...");
       const audioFile = await pickPlaylistAudioFile();
       if (!audioFile) return;
 
+      setAudioUploadMessage("Checking MP3...");
       await ensurePlaylistAudioPassesCopyrightScreening(audioFile);
       setTrackAudioFile(trackId, audioFile);
     } catch (error: any) {
@@ -236,6 +243,9 @@ export default function CreatePlaylistScreen() {
         message: getFriendlyUploadErrorMessage(error),
         forceModal: true,
       });
+    } finally {
+      setUploadingTrackAudioId(null);
+      setAudioUploadMessage(null);
     }
   }, [setTrackAudioFile]);
 
@@ -255,6 +265,7 @@ export default function CreatePlaylistScreen() {
 
     return Promise.all(items.map(async (track) => {
       return {
+        id: track.id,
         title: track.title,
         artist_name: track.artist_name,
         duration_seconds: track.audio_file?.durationSeconds || null,
@@ -310,11 +321,17 @@ export default function CreatePlaylistScreen() {
 
           for (const track of draftItems) {
             try {
-              const sourceUrl = track.audio_file
-                ? isE2EFixtureMode()
-                  ? track.audio_file.uri
-                  : (await uploadPlaylistAudioFile(track.audio_file, playlistId)).publicUrl
-                : null;
+              let sourceUrl: string | null = null;
+              if (track.audio_file) {
+                if (isE2EFixtureMode()) {
+                  sourceUrl = track.audio_file.uri;
+                } else {
+                  setUploadingTrackAudioId(track.id);
+                  setAudioUploadMessage(`Uploading ${track.title}...`);
+                  const upload = await uploadPlaylistAudioFile(track.audio_file, playlistId);
+                  sourceUrl = upload.publicUrl;
+                }
+              }
 
               const itemBody = {
                 action: "add_playlist_item",
@@ -386,6 +403,8 @@ export default function CreatePlaylistScreen() {
     } catch (e: any) {
       setAlert({ type: "error", title: "Error", message: e.message });
     } finally {
+      setUploadingTrackAudioId(null);
+      setAudioUploadMessage(null);
       setSaving(false);
     }
   };
@@ -557,12 +576,26 @@ export default function CreatePlaylistScreen() {
                   <TouchableOpacity
                     testID={`mobile-playlist-track-audio-${index}`}
                     accessibilityLabel={`mobile-playlist-track-audio-${index}`}
-                    activeOpacity={1}
-                    style={[styles.audioPickerBtn, { borderColor: colors.border, backgroundColor: colors.background }]}
+                    activeOpacity={uploadingTrackAudioId === track.id || saving ? 1 : 0.78}
+                    style={[
+                      styles.audioPickerBtn,
+                      {
+                        borderColor: colors.border,
+                        backgroundColor: colors.background,
+                        opacity: uploadingTrackAudioId === track.id || saving ? 0.65 : 1,
+                      },
+                    ]}
                     onPress={() => void handlePickTrackAudio(track.id)}
+                    disabled={Boolean(uploadingTrackAudioId) || saving}
                   >
-                    <Ionicons name="cloud-upload-outline" size={16} color={colors.primary} />
-                    <Text style={[styles.audioPickerBtnText, { color: colors.primary }]}>Upload MP3</Text>
+                    {uploadingTrackAudioId === track.id ? (
+                      <ActivityIndicator size="small" color={colors.primary} />
+                    ) : (
+                      <Ionicons name="cloud-upload-outline" size={16} color={colors.primary} />
+                    )}
+                    <Text style={[styles.audioPickerBtnText, { color: colors.primary }]}>
+                      {uploadingTrackAudioId === track.id ? "Working..." : "Upload MP3"}
+                    </Text>
                   </TouchableOpacity>
                   <Text style={[styles.audioHelperText, { color: colors.textSecondary }]}>
                     Uploaded MP3 files must be 5 minutes or less.
@@ -618,6 +651,18 @@ export default function CreatePlaylistScreen() {
         />
       )}
 
+      <Modal visible={Boolean(audioUploadMessage)} transparent animationType="fade" statusBarTranslucent>
+        <View style={styles.loadingOverlay}>
+          <View style={[styles.loadingCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+            <ActivityIndicator size="large" color={colors.primary} />
+            <Text style={[styles.loadingTitle, { color: colors.text }]}>{audioUploadMessage}</Text>
+            <Text style={[styles.loadingSubtitle, { color: colors.textSecondary }]}>
+              Please wait while your MP3 is prepared for the playlist.
+            </Text>
+          </View>
+        </View>
+      </Modal>
+
       <Navbar />
     </View>
   );
@@ -652,6 +697,10 @@ const styles = StyleSheet.create({
   audioFileChipText: { flex: 1, fontSize: moderateScale(12), fontWeight: "500" },
   editHintCard: { flexDirection: "row", alignItems: "center", gap: 10, borderWidth: 1, borderRadius: 14, padding: 14, marginTop: 18 },
   editHintText: { flex: 1, fontSize: moderateScale(12), lineHeight: 18 },
+  loadingOverlay: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(0,0,0,0.35)", padding: 24 },
+  loadingCard: { width: "100%", maxWidth: 320, borderWidth: 1, borderRadius: 16, padding: 22, alignItems: "center" },
+  loadingTitle: { fontSize: moderateScale(16), fontWeight: "800", marginTop: 14, textAlign: "center" },
+  loadingSubtitle: { fontSize: moderateScale(12), lineHeight: 18, marginTop: 6, textAlign: "center" },
   saveBtn: { alignItems: "center", justifyContent: "center", paddingVertical: 16, borderRadius: 12, marginTop: 32 },
   saveBtnText: { color: "#fff", fontSize: moderateScale(16), fontWeight: "700" },
 });

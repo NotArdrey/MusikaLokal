@@ -128,7 +128,7 @@ export default function PaymentResultScreen() {
         <View style={styles.buttonContainer}>
           {bookingId ? (
             <TouchableOpacity
-              activeOpacity={isCheckingBookingPayment ? 1 : 0.78}
+              activeOpacity={1}
               disabled={isCheckingBookingPayment}
               style={[
                 styles.primaryButton,

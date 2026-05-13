@@ -25,6 +25,7 @@ import {
 import { SafeAreaView, useSafeAreaInsets, type Edge } from 'react-native-safe-area-context';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../context/AuthContext';
+import { useBottomOverlayVisibility } from '../context/BottomOverlayContext';
 import { useTheme } from '../context/ThemeContext';
 import { emitToast } from '../events/toastBus';
 import {
@@ -86,6 +87,7 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
     const { colors, isDark } = useTheme();
     const { isGuest } = useAuth();
     const insets = useSafeAreaInsets();
+    useBottomOverlayVisibility(true, 'ChatConversationDetail');
     const { messages, loading, sendMessage, retryMessage, markAsRead, addReaction, removeReaction } = useChat(conversationId, currentUserId);
     const { participants } = useGroupParticipants(isGroupChat ? conversationId : null);
     const [text, setText] = useState('');

@@ -449,7 +449,10 @@ export default function ProductionTeamScreen() {
       });
 
       if (inviteSummary.sentCount === 0 && inviteSummary.failedCount > 0) {
-        throw new Error("No invites were sent. Please try again.");
+        const failureMessage =
+          inviteSummary.failures.map((failure) => failure.error).find(Boolean) ||
+          "No invites were sent. Please try again.";
+        throw new Error(failureMessage);
       }
 
       setInviteModalVisible(false);

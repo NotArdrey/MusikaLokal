@@ -5,6 +5,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Animated as RNAnimated, Easing, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../context/AuthContext';
+import { useBottomOverlay } from '../context/BottomOverlayContext';
 import { useTheme } from '../context/ThemeContext';
 import { isE2EFixtureMode } from '../utils/e2eFixtures';
 import { isFanUserRole, resolveRoleManageRoute } from '../utils/roleRouting';
@@ -209,7 +210,7 @@ function NavTab({ active, colors, compact = false, isDark, item, onPress }: NavT
 
     return (
         <AnimatedTouchableOpacity
-            activeOpacity={0.82}
+            activeOpacity={active ? 1 : 0.82}
             key={item.id}
             testID={`nav-${item.id}`}
             accessibilityRole="button"
@@ -255,6 +256,7 @@ export function Navbar(_props: NavbarProps) {
 export function GlobalNavbar({ forceVisible = false }: Pick<NavbarProps, 'forceVisible'>) {
     const { colors, isDark } = useTheme();
     const { isGuest, roleResolved, session, userRole } = useAuth();
+    const { isBottomOverlayActive } = useBottomOverlay();
     const insets = useSafeAreaInsets();
     const pathname = usePathname();
     const [manageRoute, setManageRoute] = useState('/manage'); // Fallback
@@ -263,11 +265,11 @@ export function GlobalNavbar({ forceVisible = false }: Pick<NavbarProps, 'forceV
     const isFan = isFanUserRole(userRole);
     const routeName = pathname.replace(/^\/+/, '').split('/')[0] || '';
     const hideForE2EForm = isE2EFixtureMode() && E2E_NAVBAR_HIDDEN_ROUTES.has(pathname);
-    const shouldRenderGlobalNavbar = forceVisible
+    const shouldRenderGlobalNavbar = !isBottomOverlayActive && (forceVisible
         || (!hideForE2EForm && (
             GLOBAL_NAVBAR_ROUTES.has(pathname)
             || GLOBAL_NAVBAR_ROUTE_NAMES.has(routeName)
-        ));
+        )));
 
     useEffect(() => {
         if (isGuest || isFan || !session?.user?.id) {
@@ -387,13 +389,14 @@ export function GlobalNavbar({ forceVisible = false }: Pick<NavbarProps, 'forceV
             displayedActiveTab,
             forceVisible,
             global: true,
+            isBottomOverlayActive,
             manageRoute,
             optimisticActiveTab,
             pathname,
             pointerEvents: 'auto',
             visible: shouldRenderGlobalNavbar,
         });
-    }, [activeTab, displayedActiveTab, forceVisible, insets.bottom, manageRoute, optimisticActiveTab, pathname, shouldRenderGlobalNavbar]);
+    }, [activeTab, displayedActiveTab, forceVisible, insets.bottom, isBottomOverlayActive, manageRoute, optimisticActiveTab, pathname, shouldRenderGlobalNavbar]);
 
     if (isGuest || !shouldRenderGlobalNavbar) {
         return null;

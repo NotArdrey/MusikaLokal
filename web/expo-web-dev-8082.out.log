@@ -1,0 +1,40 @@
+
+> musika-lokal@1.0.0 dev
+> expo start --web --port 8082 --clear
+
+env: load .env
+env: export EXPO_PUBLIC_SUPABASE_URL EXPO_PUBLIC_SUPABASE_ANON_KEY VITE_SUPABASE_URL VITE_SUPABASE_ANON_KEY EXPO_PUBLIC_GROQ_API_KEY GROQ_API_KEY SUPABASE_ACCESS_TOKEN SUPABASE_PROJECT_REF
+Starting project at C:\Users\Neila\MusikaLokal\web
+React Compiler enabled
+Starting Metro Bundler
+warning: Bundler cache is empty, rebuilding (this may take a minute)
+Waiting on http://localhost:8082
+Logs for your project will appear below.
+Web node_modules\expo-router\entry.js ▓▓▓▓░░░░░░░░░░░░ 30.4% (16/29)
+Web node_modules\expo-router\entry.js ▓▓▓▓▓░░░░░░░░░░░ 31.5% (121/320)
+Web node_modules\expo-router\entry.js ▓▓▓▓▓░░░░░░░░░░░ 31.5% (146/351)
+Web node_modules\expo-router\entry.js ▓▓▓▓▓▓░░░░░░░░░░ 41.2% (275/458)
+Web node_modules\expo-router\entry.js ▓▓▓▓▓▓░░░░░░░░░░ 41.2% (514/851)
+Web node_modules\expo-router\entry.js ▓▓▓▓▓▓▓▓░░░░░░░░ 52.8% ( 903/1243)
+Web node_modules\expo-router\entry.js ▓▓▓▓▓▓▓▓▓▓▓░░░░░ 69.3% (1265/1533)
+Web node_modules\expo-router\entry.js ░░░░░░░░░░░░░░░░  0.0% (0/1)
+Web node_modules\expo-router\entry.js ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓░ 94.7% (1936/1989)
+Web node_modules\expo-router\entry.js ░░░░░░░░░░░░░░░░  0.0% (0/1)
+Web Bundled 27740ms node_modules\expo-router\entry.js (2055 modules)
+Web Bundled 7735ms node_modules\expo-router\entry.js (1 module)
+ LOG  [web] Logs will appear in the browser console
+ LOG  [web] Logs will appear in the browser console
+Web node_modules\expo-router\entry.js ░░░░░░░░░░░░░░░░  0.0% (0/1)
+Web Bundled 138ms node_modules\expo-router\entry.js (1 module)
+ LOG  [web] Logs will appear in the browser console
+Web node_modules\expo-router\entry.js ░░░░░░░░░░░░░░░░  0.0% (0/1)
+Web Bundled 337ms node_modules\expo-router\entry.js (1 module)
+ LOG  [web] Logs will appear in the browser console
+Web node_modules\expo-router\entry.js ░░░░░░░░░░░░░░░░  0.0% (0/1)
+Web Bundled 170ms node_modules\expo-router\entry.js (1 module)
+ LOG  [web] Logs will appear in the browser console
+Web node_modules\expo-router\entry.js ░░░░░░░░░░░░░░░░  0.0% (0/1)
+Web Bundled 131ms node_modules\expo-router\entry.js (1 module)
+ LOG  [web] Logs will appear in the browser console
+Web Bundled 123ms node_modules\expo-router\entry.js (1 module)
+ LOG  [web] Logs will appear in the browser console
