@@ -43,6 +43,7 @@ import { formatFriendlyDateTime } from "../src/utils/friendlyDateTime";
 import { isE2EFixtureMode } from "../src/utils/e2eFixtures";
 import { usePageLoadLogger } from "../src/utils/loadTimeLogger";
 import { setSmoothTab } from "../src/utils/smoothTabs";
+import { resolveSupabaseMediaUrl } from "../src/utils/supabaseMedia";
 import {
   formatRecordingHours,
   formatRecordingRuleShort,
@@ -555,7 +556,7 @@ const getGigApplicationStatusLabel = (
   const normalizedStatus = String(status || "").trim().toLowerCase();
 
   if (normalizedStatus === "pending") return "Applied";
-  if (normalizedStatus === "accepted") return "Accepted";
+  if (normalizedStatus === "accepted" || normalizedStatus === "approved") return "Accepted";
   if (normalizedStatus === "completed") return "Completed";
   if (normalizedStatus === "rejected") return "Declined";
   if (normalizedStatus === "cancelled") return "Cancelled";
@@ -615,6 +616,224 @@ const normalizeBookingTestId = (value: unknown) =>
 
 const bookingActionTestId = (item: any, action: string) =>
   `mobile-bookings-${normalizeBookingTestId(item?.type_id || "item")}-${action}-${item?.id}`;
+
+type ConnectionRequestMediaMaps = {
+  gigImages: Map<string, string>;
+  groupImages: Map<string, string>;
+  productionTeamLogos: Map<string, string>;
+};
+
+const createEmptyConnectionRequestMediaMaps = (): ConnectionRequestMediaMaps => ({
+  gigImages: new Map<string, string>(),
+  groupImages: new Map<string, string>(),
+  productionTeamLogos: new Map<string, string>(),
+});
+
+const getEventObject = (value: unknown): Record<string, any> =>
+  value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, any>)
+    : {};
+
+const getEventString = (eventDetails: Record<string, any>, key: string) =>
+  toNonEmptyString(eventDetails?.[key]) ||
+  toNonEmptyString(getEventObject(eventDetails?.request_details)?.[key]);
+
+const normalizeConnectionEntityType = (value: unknown) =>
+  String(value || "").trim().toLowerCase();
+
+const firstResolvedImageUrl = (...candidates: unknown[]) => {
+  for (const candidate of candidates) {
+    const resolved = resolveSupabaseMediaUrl(candidate);
+    if (resolved) return resolved;
+  }
+
+  return null;
+};
+
+const getConnectionRequestProductionTeamId = (eventDetails: Record<string, any>) => {
+  const senderType = normalizeConnectionEntityType(eventDetails.sender_entity_type);
+  const receiverType = normalizeConnectionEntityType(eventDetails.receiver_entity_type);
+
+  return (
+    getEventString(eventDetails, "production_team_id") ||
+    (senderType === "production_team" ? getEventString(eventDetails, "sender_entity_id") : null) ||
+    (receiverType === "production_team" ? getEventString(eventDetails, "receiver_entity_id") : null)
+  );
+};
+
+const getConnectionRequestGigId = (eventDetails: Record<string, any>) => {
+  const senderType = normalizeConnectionEntityType(eventDetails.sender_entity_type);
+  const listingType = normalizeConnectionEntityType(getEventString(eventDetails, "listing_type"));
+
+  return (
+    getEventString(eventDetails, "gig_id") ||
+    (listingType === "gig" ? getEventString(eventDetails, "listing_id") : null) ||
+    (senderType === "venue" ? getEventString(eventDetails, "sender_entity_id") : null)
+  );
+};
+
+const collectConnectionRequestMediaIds = (requestRows: any[]) => {
+  const gigIds = new Set<string>();
+  const groupIds = new Set<string>();
+  const productionTeamIds = new Set<string>();
+
+  requestRows.forEach((request) => {
+    const eventDetails = getEventObject(request?.event_details);
+    const senderType = normalizeConnectionEntityType(eventDetails.sender_entity_type);
+    const receiverType = normalizeConnectionEntityType(eventDetails.receiver_entity_type);
+    const productionTeamId = getConnectionRequestProductionTeamId(eventDetails);
+    const gigId = getConnectionRequestGigId(eventDetails);
+    const senderEntityId = getEventString(eventDetails, "sender_entity_id");
+    const receiverEntityId = getEventString(eventDetails, "receiver_entity_id");
+
+    if (productionTeamId) productionTeamIds.add(productionTeamId);
+    if (gigId) gigIds.add(gigId);
+    if (request?.group_id) groupIds.add(String(request.group_id));
+    if (senderType === "group" && senderEntityId) groupIds.add(senderEntityId);
+    if (receiverType === "group" && receiverEntityId) groupIds.add(receiverEntityId);
+  });
+
+  return {
+    gigIds: Array.from(gigIds),
+    groupIds: Array.from(groupIds),
+    productionTeamIds: Array.from(productionTeamIds),
+  };
+};
+
+const setFirstMediaByOwner = (
+  target: Map<string, string>,
+  rows: any[] | null | undefined,
+  ownerKey: string,
+) => {
+  (rows || [])
+    .slice()
+    .sort((a: any, b: any) => (a?.sort_order || 0) - (b?.sort_order || 0))
+    .forEach((row: any) => {
+      const ownerId = toNonEmptyString(row?.[ownerKey]);
+      const mediaUrl = resolveSupabaseMediaUrl(row?.media_url);
+      if (ownerId && mediaUrl && !target.has(ownerId)) {
+        target.set(ownerId, mediaUrl);
+      }
+    });
+};
+
+const loadConnectionRequestMediaMaps = async (
+  requestRows: any[],
+): Promise<ConnectionRequestMediaMaps> => {
+  const mediaMaps = createEmptyConnectionRequestMediaMaps();
+  const { gigIds, groupIds, productionTeamIds } =
+    collectConnectionRequestMediaIds(requestRows);
+
+  const [teamResult, gigMediaResult, groupMediaResult] = await Promise.all([
+    productionTeamIds.length > 0
+      ? supabase
+          .from("production_teams")
+          .select("id, logo_url")
+          .in("id", productionTeamIds)
+      : Promise.resolve({ data: [], error: null } as any),
+    gigIds.length > 0
+      ? supabase
+          .from("gig_media")
+          .select("gig_id, media_url, sort_order")
+          .in("gig_id", gigIds)
+          .eq("media_type", "image")
+          .order("sort_order", { ascending: true })
+      : Promise.resolve({ data: [], error: null } as any),
+    groupIds.length > 0
+      ? supabase
+          .from("group_media")
+          .select("group_id, media_url, sort_order")
+          .in("group_id", groupIds)
+          .eq("media_type", "image")
+          .order("sort_order", { ascending: true })
+      : Promise.resolve({ data: [], error: null } as any),
+  ]);
+
+  if (teamResult.error) {
+    debugLog("Error fetching connection request production team images:", teamResult.error);
+  } else {
+    (teamResult.data || []).forEach((team: any) => {
+      const teamId = toNonEmptyString(team?.id);
+      const logoUrl = resolveSupabaseMediaUrl(team?.logo_url);
+      if (teamId && logoUrl) {
+        mediaMaps.productionTeamLogos.set(teamId, logoUrl);
+      }
+    });
+  }
+
+  if (gigMediaResult.error) {
+    debugLog("Error fetching connection request gig images:", gigMediaResult.error);
+  } else {
+    setFirstMediaByOwner(mediaMaps.gigImages, gigMediaResult.data, "gig_id");
+  }
+
+  if (groupMediaResult.error) {
+    debugLog("Error fetching connection request group images:", groupMediaResult.error);
+  } else {
+    setFirstMediaByOwner(mediaMaps.groupImages, groupMediaResult.data, "group_id");
+  }
+
+  return mediaMaps;
+};
+
+const getConnectionRequestCardImage = (
+  request: any,
+  eventDetails: Record<string, any>,
+  counterpartyProfile: any,
+  mediaMaps: ConnectionRequestMediaMaps,
+) => {
+  const senderType = normalizeConnectionEntityType(eventDetails.sender_entity_type);
+  const receiverType = normalizeConnectionEntityType(eventDetails.receiver_entity_type);
+  const senderEntityId = getEventString(eventDetails, "sender_entity_id");
+  const receiverEntityId = getEventString(eventDetails, "receiver_entity_id");
+  const gigId = getConnectionRequestGigId(eventDetails);
+  const productionTeamId = getConnectionRequestProductionTeamId(eventDetails);
+  const groupId =
+    toNonEmptyString(request?.group_id) ||
+    (senderType === "group" ? senderEntityId : null) ||
+    (receiverType === "group" ? receiverEntityId : null);
+  const gigImage = gigId ? mediaMaps.gigImages.get(gigId) : null;
+  const productionLogo = productionTeamId
+    ? mediaMaps.productionTeamLogos.get(productionTeamId)
+    : null;
+  const groupImage = groupId ? mediaMaps.groupImages.get(groupId) : null;
+
+  if (senderType === "venue" || gigId) {
+    return firstResolvedImageUrl(
+      getEventString(eventDetails, "gig_image_url"),
+      getEventString(eventDetails, "listing_image_url"),
+      gigImage,
+      getEventString(eventDetails, "team_logo_url"),
+      productionLogo,
+      groupImage,
+      counterpartyProfile?.avatar_url,
+      REQUEST_PLACEHOLDER_IMAGE,
+    );
+  }
+
+  if (senderType === "production_team" || receiverType === "production_team") {
+    return firstResolvedImageUrl(
+      getEventString(eventDetails, "team_logo_url"),
+      getEventString(eventDetails, "production_team_logo_url"),
+      productionLogo,
+      getEventString(eventDetails, "listing_image_url"),
+      gigImage,
+      groupImage,
+      counterpartyProfile?.avatar_url,
+      REQUEST_PLACEHOLDER_IMAGE,
+    );
+  }
+
+  return firstResolvedImageUrl(
+    getEventString(eventDetails, "image_url"),
+    getEventString(eventDetails, "listing_image_url"),
+    groupImage,
+    gigImage,
+    productionLogo,
+    counterpartyProfile?.avatar_url,
+    REQUEST_PLACEHOLDER_IMAGE,
+  );
+};
 
 export default function BookingsScreen() {
   const { colors, isDark } = useTheme();
@@ -1389,7 +1608,7 @@ export default function BookingsScreen() {
         `,
       )
       .in("gig_id", gigIds)
-      .in("status", ["accepted", "pending", "rejected", "cancelled", "resigned", "completed", "fired"])
+      .in("status", ["accepted", "approved", "pending", "rejected", "cancelled", "resigned", "completed", "fired"])
       .or("leader_approval_status.is.null,leader_approval_status.eq.approved")
       .order("created_at", { ascending: false });
 
@@ -1442,7 +1661,7 @@ export default function BookingsScreen() {
         status:
           normalizedStatus === "pending"
             ? "Action Required"
-            : normalizedStatus === "accepted"
+            : normalizedStatus === "accepted" || normalizedStatus === "approved"
               ? "Confirmed"
               : getGigApplicationStatusLabel(normalizedStatus, app.status),
         raw_status: app.status,
@@ -1475,7 +1694,7 @@ export default function BookingsScreen() {
 
       if (normalizedStatus === "pending") {
         fallback.Pending.push(item);
-      } else if (normalizedStatus === "accepted") {
+      } else if (normalizedStatus === "accepted" || normalizedStatus === "approved") {
         if (eventDate) {
           const eventStart = new Date(gig.event_date);
           eventStart.setHours(0, 0, 0, 0);
@@ -1727,8 +1946,10 @@ export default function BookingsScreen() {
             }
           }
 
+          const mediaMaps = await loadConnectionRequestMediaMaps(requestRows);
+
           connectionRequestItems = requestRows.map((request: any) => {
-            const eventDetails = request.event_details || {};
+            const eventDetails = getEventObject(request.event_details);
             const requestDetails = extractConnectionRequestDetails(
               eventDetails,
               request.attachment_url,
@@ -1751,6 +1972,12 @@ export default function BookingsScreen() {
             const counterpartyId = isIncoming ? request.sender_id : request.receiver_id;
             const counterpartyProfile = counterpartyId ? profileMap.get(counterpartyId) : null;
             const counterpartyName = isIncoming ? senderEntityName : receiverEntityName;
+            const cardImage = getConnectionRequestCardImage(
+              request,
+              eventDetails,
+              counterpartyProfile,
+              mediaMaps,
+            );
 
             return {
               id: request.id,
@@ -1759,7 +1986,7 @@ export default function BookingsScreen() {
               raw_date: request.created_at,
               date: formatFriendlyDateTime(request.created_at),
               name: counterpartyName,
-              image: counterpartyProfile?.avatar_url || REQUEST_PLACEHOLDER_IMAGE,
+              image: cardImage || REQUEST_PLACEHOLDER_IMAGE,
               status: getConnectionRequestStatusLabel(request.status),
               raw_status: request.status,
               type: buildConnectionRequestTypeLabel(eventDetails),

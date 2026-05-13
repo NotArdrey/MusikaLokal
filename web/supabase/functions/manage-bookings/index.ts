@@ -549,7 +549,7 @@ function getGigApplicationStatusLabel(status: unknown, fallback: unknown = statu
   const normalizedStatus = String(status || "").trim().toLowerCase();
 
   if (normalizedStatus === "pending") return "Applied";
-  if (normalizedStatus === "accepted") return "Accepted";
+  if (normalizedStatus === "accepted" || normalizedStatus === "approved") return "Accepted";
   if (normalizedStatus === "completed") return "Completed";
   if (normalizedStatus === "rejected") return "Declined";
   if (normalizedStatus === "cancelled") return "Cancelled";
@@ -1548,7 +1548,7 @@ serve(async (req: Request) => {
                         `,
             )
             .in("gig_id", gigIds)
-            .in("status", ["accepted", "pending", "rejected", "cancelled", "resigned", "completed", "fired"])
+            .in("status", ["accepted", "approved", "pending", "rejected", "cancelled", "resigned", "completed", "fired"])
             .or("leader_approval_status.is.null,leader_approval_status.eq.approved")
             .order("created_at", { ascending: false });
 
@@ -1601,7 +1601,7 @@ serve(async (req: Request) => {
               status:
                 app.status === "pending"
                   ? "Action Required"
-                  : app.status === "accepted"
+                  : app.status === "accepted" || app.status === "approved"
                     ? "Confirmed"
                     : getGigApplicationStatusLabel(app.status),
               type: getProductionApplicationType(app),
@@ -1625,7 +1625,7 @@ serve(async (req: Request) => {
             if (app.status === "pending") {
               // @ts-ignore
               categorized.Pending.push(item);
-            } else if (app.status === "accepted") {
+            } else if (app.status === "accepted" || app.status === "approved") {
               // Accepted musicians always go to Active Musicians (Upcoming/Ongoing), never to Completed
               if (eventDate) {
                 const eventStart = new Date(gig.event_date);

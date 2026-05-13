@@ -459,7 +459,7 @@ const getGigApplicationStatusLabel = (
   const normalizedStatus = String(status || "").trim().toLowerCase();
 
   if (normalizedStatus === "pending") return "Applied";
-  if (normalizedStatus === "accepted") return "Accepted";
+  if (normalizedStatus === "accepted" || normalizedStatus === "approved") return "Accepted";
   if (normalizedStatus === "completed") return "Completed";
   if (normalizedStatus === "rejected") return "Declined";
   if (normalizedStatus === "cancelled") return "Cancelled";
@@ -1401,7 +1401,7 @@ export default function BookingsScreen() {
         `,
       )
       .in("gig_id", gigIds)
-      .in("status", ["accepted", "pending", "rejected", "cancelled", "resigned", "completed", "fired"])
+      .in("status", ["accepted", "approved", "pending", "rejected", "cancelled", "resigned", "completed", "fired"])
       .or("leader_approval_status.is.null,leader_approval_status.eq.approved")
       .order("created_at", { ascending: false });
 
@@ -1454,7 +1454,7 @@ export default function BookingsScreen() {
         status:
           normalizedStatus === "pending"
             ? "Action Required"
-            : normalizedStatus === "accepted"
+            : normalizedStatus === "accepted" || normalizedStatus === "approved"
               ? "Confirmed"
               : getGigApplicationStatusLabel(normalizedStatus, app.status),
         raw_status: app.status,
@@ -1487,7 +1487,7 @@ export default function BookingsScreen() {
 
       if (normalizedStatus === "pending") {
         fallback.Pending.push(item);
-      } else if (normalizedStatus === "accepted") {
+      } else if (normalizedStatus === "accepted" || normalizedStatus === "approved") {
         if (eventDate) {
           const eventStart = new Date(gig.event_date);
           eventStart.setHours(0, 0, 0, 0);

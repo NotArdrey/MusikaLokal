@@ -176,10 +176,13 @@ export async function sendProductionTeamInvites({
         extraMeta: {
           source: "production_team_editor",
           request_kind: "invite",
+          team_logo_url: teamLogoUrl || null,
+          production_team_logo_url: teamLogoUrl || null,
           request_details: {
             pitch_message: normalizedInviteMessage,
             context_label: "Invite Context",
             request_kind: "invite",
+            team_logo_url: teamLogoUrl || null,
             roster_entry_name: target.displayName,
             roster_entry_kind: target.kind,
           },

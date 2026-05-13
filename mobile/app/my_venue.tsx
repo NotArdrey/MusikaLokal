@@ -19,6 +19,27 @@ import { formatFriendlyDateTime } from '../src/utils/friendlyDateTime';
 import { invalidateListingCaches } from '../src/utils/listingCacheInvalidation';
 
 const DEFAULT_GIG_IMAGE = 'https://images.unsplash.com/photo-1501281668745-f7f57925c3b4?w=800&fit=crop';
+const JOINED_GIG_APPLICATION_STATUSES = ['accepted', 'approved', 'completed'];
+
+const normalizeStatus = (status: unknown) => String(status || '').trim().toLowerCase();
+
+const isJoinedGigApplicationStatus = (status: unknown) =>
+    JOINED_GIG_APPLICATION_STATUSES.includes(normalizeStatus(status));
+
+const collectJoinedGigIdsFromBookingsPayload = (payload: any) => {
+    const buckets = payload?.categorized || payload || {};
+    const rows = ['Upcoming', 'Ongoing', 'Review']
+        .flatMap((key) => Array.isArray(buckets?.[key]) ? buckets[key] : []);
+
+    return Array.from(
+        new Set(
+            rows
+                .filter((item: any) => item?.type_id === 'gig_application' && isJoinedGigApplicationStatus(item?.raw_status))
+                .map((item: any) => item?.gig_id)
+                .filter((value: any): value is string => typeof value === 'string' && value.length > 0),
+        ),
+    );
+};
 
 const looksLikeDisplayImage = (uri: string) => {
     if (!uri) return false;
@@ -100,12 +121,29 @@ export default function MyVenueScreen() {
             let baseGigs: any[] = [];
 
             if (isMusicianView) {
-                const acceptedStatuses = ['accepted', 'approved', 'completed'];
+                const { data: bookingPayload, error: bookingPayloadError } = await supabase.functions.invoke('manage-bookings', {
+                    body: { action: 'fetch', userId },
+                });
 
-                const { data: groupMembershipRows, error: membershipError } = await supabase
-                    .from('group_members')
-                    .select('group_id')
-                    .eq('user_id', userId);
+                if (bookingPayloadError) {
+                    logActionError('MyVenue', 'fetch manage-bookings joined gig applications', bookingPayloadError, { userId });
+                }
+
+                let joinedGigIds = bookingPayloadError ? [] : collectJoinedGigIdsFromBookingsPayload(bookingPayload);
+
+                const [
+                    { data: groupMembershipRows, error: membershipError },
+                    { data: ownedGroupRows, error: ownedGroupsError },
+                ] = await Promise.all([
+                    supabase
+                        .from('group_members')
+                        .select('group_id')
+                        .eq('user_id', userId),
+                    supabase
+                        .from('groups')
+                        .select('id')
+                        .eq('owner_id', userId),
+                ]);
 
                 if (membershipError) {
                     const message = getActionErrorMessage(membershipError, 'Group memberships could not be loaded.');
@@ -116,11 +154,21 @@ export default function MyVenueScreen() {
                     }
                 }
 
+                if (ownedGroupsError) {
+                    const message = getActionErrorMessage(ownedGroupsError, 'Owned groups could not be loaded.');
+                    logActionError('MyVenue', 'fetch owned groups', ownedGroupsError, { userId });
+                    setLoadError(`Solo gigs loaded, but owned group gigs could not be checked: ${message}`);
+                    if (options?.showAlertOnError) {
+                        showAlert('error', 'Could Not Load Group Gigs', message);
+                    }
+                }
+
                 const joinedGroupIds = Array.from(
                     new Set(
-                        (groupMembershipRows || [])
-                            .map((row: any) => row?.group_id)
-                            .filter((value: any): value is string => typeof value === 'string' && value.length > 0),
+                        [
+                            ...(groupMembershipRows || []).map((row: any) => row?.group_id),
+                            ...(ownedGroupRows || []).map((row: any) => row?.id),
+                        ].filter((value: any): value is string => typeof value === 'string' && value.length > 0),
                     ),
                 );
 
@@ -130,24 +178,26 @@ export default function MyVenueScreen() {
                         .select('gig_id')
                         .eq('applicant_id', userId)
                         .is('group_id', null)
-                        .in('status', acceptedStatuses),
+                        .in('status', JOINED_GIG_APPLICATION_STATUSES),
                     joinedGroupIds.length > 0
                         ? supabase
                             .from('gig_applications')
                             .select('gig_id')
                             .in('group_id', joinedGroupIds)
-                            .in('status', acceptedStatuses)
+                            .in('status', JOINED_GIG_APPLICATION_STATUSES)
                         : Promise.resolve({ data: [] as any[], error: null }),
                 ]);
 
                 if (soloAppsResult.error) throw soloAppsResult.error;
                 if (groupAppsResult.error) throw groupAppsResult.error;
 
-                const joinedGigIds = Array.from(
+                joinedGigIds = Array.from(
                     new Set(
-                        [...(soloAppsResult.data || []), ...(groupAppsResult.data || [])]
-                            .map((row: any) => row?.gig_id)
-                            .filter((value: any): value is string => typeof value === 'string' && value.length > 0),
+                        [
+                            ...joinedGigIds,
+                            ...(soloAppsResult.data || []).map((row: any) => row?.gig_id),
+                            ...(groupAppsResult.data || []).map((row: any) => row?.gig_id),
+                        ].filter((value: any): value is string => typeof value === 'string' && value.length > 0),
                     ),
                 );
 
