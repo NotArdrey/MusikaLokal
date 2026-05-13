@@ -1526,7 +1526,7 @@ export default function BookingsScreen() {
               ? "Production Group Application"
               : "Production Musician Application",
         isCancelled: ["cancelled", "rejected", "fired"].includes(normalizedStatus),
-        action: normalizedStatus === "accepted" ? "View Details" : "Details",
+        action: normalizedStatus === "accepted" || normalizedStatus === "approved" ? "View Details" : "Details",
         location: gig?.location,
         pitch_message: app.pitch_message,
         video_url: app.video_url,
@@ -1537,17 +1537,15 @@ export default function BookingsScreen() {
 
       if (normalizedStatus === "pending") {
         fallback.Pending.push(item);
-      } else if (normalizedStatus === "accepted") {
+      } else if (normalizedStatus === "accepted" || normalizedStatus === "approved") {
         if (eventDate) {
           const eventStart = new Date(gig.event_date);
           eventStart.setHours(0, 0, 0, 0);
 
           if (now >= eventStart && now <= eventDate) {
             fallback.Ongoing.push({ ...item, status: "Happening Now" });
-          } else if (now > eventDate) {
-            if (!app.reviewed_by_applicant) {
-              fallback.Review.push({ ...item, status: "Completed" });
-            }
+        } else if (now > eventDate) {
+          fallback.Review.push({ ...item, status: "Completed" });
           } else {
             fallback.Upcoming.push(item);
           }
@@ -2032,7 +2030,7 @@ export default function BookingsScreen() {
 
       if (!effectiveBookings) throw error || new Error("Failed to fetch bookings");
 
-      if (isProducerActivityRole(role)) {
+      if (role === "musician" || isProducerActivityRole(role)) {
         const producerFallbackBookings =
           await buildLocalProducerGigApplicationsFallback(targetUserId);
 
@@ -2408,7 +2406,7 @@ export default function BookingsScreen() {
         const acceptedApps = allGigApps.filter(
           (app: any) => {
             const status = normalizeStatus(app.status);
-            return status === "accepted" || status === "happening now" || status === "confirmed";
+            return status === "accepted" || status === "approved" || status === "happening now" || status === "confirmed";
           },
         );
         const completedApps = allGigApps.filter(

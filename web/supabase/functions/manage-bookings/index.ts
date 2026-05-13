@@ -1254,7 +1254,7 @@ serve(async (req: Request) => {
               normalizedStatus === "rejected" ||
               normalizedStatus === "fired",
             action:
-              viewer.viewer_can_act === false || normalizedStatus === "accepted"
+              viewer.viewer_can_act === false || normalizedStatus === "accepted" || normalizedStatus === "approved"
                 ? "View Details"
                 : "Details",
             location: gig?.location,
@@ -1268,7 +1268,7 @@ serve(async (req: Request) => {
           if (normalizedStatus === "pending") {
             // @ts-ignore
             categorized.Pending.push(item);
-          } else if (normalizedStatus === "accepted") {
+          } else if (normalizedStatus === "accepted" || normalizedStatus === "approved") {
             // Time-based categorization for accepted gigs
             if (eventDate) {
               const eventStart = new Date(gig.event_date);
@@ -1279,11 +1279,9 @@ serve(async (req: Request) => {
                 // @ts-ignore
                 categorized.Ongoing.push({ ...item, status: "Happening Now" });
               } else if (now > eventDate) {
-                // Gig has ended - show in Review if not yet reviewed
-                if (!g.reviewed_by_applicant) {
-                  // @ts-ignore
-                  categorized.Review.push({ ...item, status: "Completed" });
-                }
+                // Keep completed accepted gigs visible for My Venue and history.
+                // @ts-ignore
+                categorized.Review.push({ ...item, status: "Completed" });
               } else {
                 // Gig is in the future
                 // @ts-ignore
@@ -1464,10 +1462,10 @@ serve(async (req: Request) => {
                 normalizedStatus === "cancelled" ||
                 normalizedStatus === "rejected" ||
                 normalizedStatus === "fired",
-              action:
-                !canManageApplication || normalizedStatus === "accepted"
-                  ? "View Details"
-                  : "Details",
+            action:
+              !canManageApplication || normalizedStatus === "accepted" || normalizedStatus === "approved"
+                ? "View Details"
+                : "Details",
               location: gig?.location,
               pitch_message: app.pitch_message,
               video_url: app.video_url,
@@ -1479,7 +1477,7 @@ serve(async (req: Request) => {
             if (normalizedStatus === "pending") {
               // @ts-ignore
               categorized.Pending.push(item);
-            } else if (normalizedStatus === "accepted") {
+            } else if (normalizedStatus === "accepted" || normalizedStatus === "approved") {
               if (eventDate) {
                 const eventStart = new Date(gig.event_date);
                 eventStart.setHours(0, 0, 0, 0);
@@ -1488,10 +1486,9 @@ serve(async (req: Request) => {
                   // @ts-ignore
                   categorized.Ongoing.push({ ...item, status: "Happening Now" });
                 } else if (now > eventDate) {
-                  if (!app.reviewed_by_applicant) {
-                    // @ts-ignore
-                    categorized.Review.push({ ...item, status: "Completed" });
-                  }
+                  // Keep completed accepted gigs visible for My Venue and history.
+                  // @ts-ignore
+                  categorized.Review.push({ ...item, status: "Completed" });
                 } else {
                   // @ts-ignore
                   categorized.Upcoming.push(item);
