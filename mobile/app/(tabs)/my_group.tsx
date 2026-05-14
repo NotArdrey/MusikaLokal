@@ -461,7 +461,7 @@ export default function MyGroupScreen() {
                                                     })}
                                                     style={[styles.editBtn, { borderColor: colors.border }]}
                                                 >
-                                                    <Ionicons name="chatbubbles-outline" size={20} color={colors.text} />
+                                                    <Ionicons name="chatbubbles-outline" size={20} color={colors.text} style={styles.editBtnIcon} />
                                                 </TouchableOpacity>
 
                                                 {canManageGroup ? (
@@ -472,7 +472,7 @@ export default function MyGroupScreen() {
                                                         onPress={() => router.push({ pathname: '/edit_group', params: { id: group.id } })}
                                                         style={[styles.editBtn, { borderColor: colors.border }]}
                                                     >
-                                                        <Ionicons name="pencil-outline" size={20} color={colors.text} />
+                                                        <Ionicons name="pencil-outline" size={20} color={colors.text} style={styles.editBtnIcon} />
                                                     </TouchableOpacity>
                                                 ) : null}
                                             </View>
@@ -651,9 +651,20 @@ const styles = StyleSheet.create({
         color: '#FFF',
     },
     editBtn: {
-        padding: 8,
+        width: 38,
+        height: 38,
+        alignItems: 'center',
+        justifyContent: 'center',
         borderRadius: 12,
         borderWidth: 1,
+    },
+    editBtnIcon: {
+        width: 20,
+        height: 20,
+        lineHeight: 20,
+        includeFontPadding: false,
+        textAlign: 'center',
+        textAlignVertical: 'center',
     },
     deleteBtn: {
         padding: 8,

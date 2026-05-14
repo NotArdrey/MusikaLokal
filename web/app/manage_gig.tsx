@@ -1,17 +1,12 @@
 import { Ionicons } from "@expo/vector-icons";
-import { router } from "expo-router";
-import {
-    BottomSheetBackdrop,
-    BottomSheetModal,
-    BottomSheetScrollView,
-    useBottomSheetTimingConfigs,
-} from "@gorhom/bottom-sheet";
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { router, useLocalSearchParams } from "expo-router";
+import React, { useEffect, useState } from "react";
 import {
     ActivityIndicator,
     Dimensions,
     Image,
     Linking,
+    Modal as RNModal,
     Platform,
     ScrollView,
     StyleSheet,
@@ -20,7 +15,6 @@ import {
     useWindowDimensions,
     View,
 } from "react-native";
-import { Easing } from "react-native-reanimated";
 import { supabase } from "../lib/supabase";
 import CustomAlert, { AlertType } from "../src/components/CustomAlert";
 import Header from "../src/components/header";
@@ -52,8 +46,6 @@ const HIDDEN_APPLICANT_STATUSES = new Set([
   "rejected",
   "resigned",
 ]);
-
-import { useLocalSearchParams } from "expo-router";
 
 export default function GigDetailsScreen() {
   const { colors, isDark } = useTheme();
@@ -100,30 +92,9 @@ export default function GigDetailsScreen() {
   const [inviteMessage, setInviteMessage] = useState("");
   const [selectedInviteTargets, setSelectedInviteTargets] = useState<ProductionInviteTarget[]>([]);
   const [sendingInvites, setSendingInvites] = useState(false);
-  const inviteSheetRef = useRef<BottomSheetModal>(null);
-  const inviteSnapPoints = useMemo(() => ["90%"], []);
-  const inviteAnimationConfigs = useBottomSheetTimingConfigs({
-    duration: 320,
-    easing: Easing.inOut(Easing.cubic),
-  });
-  const renderInviteBackdrop = useCallback(
-    (props: any) => (
-      <BottomSheetBackdrop
-        {...props}
-        appearsOnIndex={0}
-        disappearsOnIndex={-1}
-        opacity={0.5}
-      />
-    ),
-    [],
-  );
-  const handleInviteSheetDismiss = useCallback(() => {
-    setInviteModalVisible(false);
-    if (!sendingInvites) {
-      setInviteMessage("");
-      setSelectedInviteTargets([]);
-    }
-  }, [sendingInvites]);
+  const [groupPreviewVisible, setGroupPreviewVisible] = useState(false);
+  const [groupPreview, setGroupPreview] = useState<any>(null);
+  const [groupPreviewLoading, setGroupPreviewLoading] = useState(false);
 
   useEffect(() => {
     const availableTabs = canManageGig ? OWNER_GIG_TABS : VIEWER_GIG_TABS;
@@ -135,13 +106,6 @@ export default function GigDetailsScreen() {
       setActiveTab("About");
     }
   }, [activeTab, canManageGig, requestedTab]);
-  useEffect(() => {
-    if (inviteModalVisible) {
-      inviteSheetRef.current?.present();
-    } else {
-      inviteSheetRef.current?.dismiss();
-    }
-  }, [inviteModalVisible]);
   const [alertVisible, setAlertVisible] = useState(false);
   const [alertConfig, setAlertConfig] = useState<{
     type: AlertType;
@@ -620,6 +584,41 @@ export default function GigDetailsScreen() {
     const type = requirements?.musician_type;
     if (!type) return "Not specified";
     return String(type).charAt(0).toUpperCase() + String(type).slice(1);
+  };
+
+  const closeGroupPreview = () => {
+    setGroupPreviewVisible(false);
+    setGroupPreview(null);
+    setGroupPreviewLoading(false);
+  };
+
+  const openGroupPreview = async (app: any) => {
+    const fallbackGroup = app?.group;
+    const groupId = fallbackGroup?.id || app?.group_id;
+
+    if (!groupId) {
+      Alert.alert("Error", "Unable to view group details");
+      return;
+    }
+
+    setGroupPreview(fallbackGroup || { id: groupId });
+    setGroupPreviewVisible(true);
+    setGroupPreviewLoading(true);
+
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      const { data, error } = await supabase.functions.invoke("manage-details", {
+        body: { action: "fetch", type: "group", id: groupId, userId: user?.id },
+      });
+
+      if (error) throw error;
+      setGroupPreview({ ...(fallbackGroup || {}), ...(data || {}) });
+    } catch (error) {
+      console.log("[manage_gig] Failed to load group preview:", error);
+      setGroupPreview(fallbackGroup || { id: groupId });
+    } finally {
+      setGroupPreviewLoading(false);
+    }
   };
 
   // Show loading while checking authorization
@@ -1709,14 +1708,7 @@ export default function GigDetailsScreen() {
                           console.log("?? app.applicant_id:", app.applicant_id);
 
                           if (app.group?.id) {
-                            console.log(
-                              "?? Navigating to group:",
-                              app.group.id,
-                            );
-                            router.push({
-                              pathname: "/group_details",
-                              params: { id: app.group.id },
-                            });
+                            openGroupPreview(app);
                           } else if (app.applicant?.id) {
                             console.log(
                               "?? Navigating to profile with applicant.id:",
@@ -1919,92 +1911,221 @@ export default function GigDetailsScreen() {
         buttonText={modalButtonText}
         danger={modalButtonText === "Decline"}
       />
-      <BottomSheetModal
-        ref={inviteSheetRef}
-        index={0}
-        snapPoints={inviteSnapPoints}
-        animationConfigs={inviteAnimationConfigs}
-        animateOnMount
-        enableDynamicSizing={false}
-        enableContentPanningGesture={false}
-        enableOverDrag={false}
-        enablePanDownToClose={!sendingInvites}
-        backdropComponent={renderInviteBackdrop}
-        backgroundStyle={{ backgroundColor: colors.background }}
-        handleIndicatorStyle={{
-          backgroundColor: isDark ? "#4B5563" : "#E5E7EB",
-          width: 40,
-        }}
-        onDismiss={handleInviteSheetDismiss}
+      <RNModal
+        transparent
+        visible={inviteModalVisible}
+        animationType="fade"
+        onRequestClose={closeInviteModal}
       >
-        <BottomSheetScrollView
-          contentContainerStyle={styles.inviteSheetContent}
-          showsVerticalScrollIndicator={false}
-          showsHorizontalScrollIndicator={false}
-          nestedScrollEnabled
-          keyboardShouldPersistTaps="handled"
-        >
-          <View style={[styles.inviteSheetHeader, { borderBottomColor: colors.border }]}>
-            <View style={styles.sheetHeaderCopy}>
-              <Text style={[styles.sheetEyebrow, { color: colors.textSecondary }]}>{gig?.name || "Gig"}</Text>
-              <Text style={[styles.sheetTitle, { color: colors.text }]}>Invite Performers</Text>
+        <View style={styles.invitePopupOverlay}>
+          <TouchableOpacity
+            activeOpacity={1}
+            onPress={closeInviteModal}
+            style={styles.invitePopupBackdrop}
+          />
+          <View
+            style={[
+              styles.invitePopupContainer,
+              { backgroundColor: colors.background, borderColor: colors.border },
+            ]}
+          >
+            <View style={[styles.invitePopupHeader, { borderBottomColor: colors.border }]}>
+              <View style={styles.invitePopupHeaderCopy}>
+                <Text style={[styles.invitePopupEyebrow, { color: colors.textSecondary }]} numberOfLines={1}>
+                  {gig?.name || "Gig"}
+                </Text>
+                <Text style={[styles.invitePopupTitle, { color: colors.text }]}>Invite Performers</Text>
+              </View>
+              <TouchableOpacity
+                activeOpacity={1}
+                onPress={closeInviteModal}
+                style={[
+                  styles.invitePopupCloseButton,
+                  { backgroundColor: colors.card, borderColor: colors.border },
+                ]}
+              >
+                <Ionicons name="close" size={18} color={colors.text} />
+              </TouchableOpacity>
             </View>
-            <TouchableOpacity
-              activeOpacity={1}
-              onPress={closeInviteModal}
-              style={[styles.sheetCloseButton, { backgroundColor: colors.card, borderColor: colors.border }]}
-            >
-              <Ionicons name="close" size={18} color={colors.text} />
-            </TouchableOpacity>
-          </View>
-          <View style={styles.modalContent}>
-            <ProductionInviteSection
-              currentUserId={currentUserId}
-              selectedTargets={selectedInviteTargets}
-              onSelectedTargetsChange={setSelectedInviteTargets}
-              inviteMessage={inviteMessage}
-              onInviteMessageChange={setInviteMessage}
-              disabled={sendingInvites}
-              title="Invite Musicians, Duo, or Group"
-              description="Search performers to invite to this gig. Recipients can respond from Bookings > Pending."
-              searchPlaceholder="Search musician, duo, or group"
-              messagePlaceholder="Add optional gig details for the invite"
-            />
 
-            <TouchableOpacity
-              activeOpacity={isInviteSubmitDisabled ? 1 : 0.78}
-              onPress={handleSendVenueInvites}
-              disabled={isInviteSubmitDisabled}
-              style={[
-                styles.submitBtn,
-                {
-                  backgroundColor:
-                    selectedInviteTargets.length > 0 ? colors.primary : colors.border,
-                  opacity: isInviteSubmitDisabled ? 0.6 : 1,
-                },
-              ]}
+            <ScrollView
+              style={styles.invitePopupBody}
+              contentContainerStyle={styles.invitePopupBodyContent}
+              showsVerticalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
             >
-              {sendingInvites ? (
-                <ActivityIndicator size="small" color="#fff" />
-              ) : (
-                <Text
+              <View style={styles.modalContent}>
+                <ProductionInviteSection
+                  currentUserId={currentUserId}
+                  selectedTargets={selectedInviteTargets}
+                  onSelectedTargetsChange={setSelectedInviteTargets}
+                  inviteMessage={inviteMessage}
+                  onInviteMessageChange={setInviteMessage}
+                  disabled={sendingInvites}
+                  searchPlaceholder="Search musician, duo, or group"
+                  messagePlaceholder="Add optional gig details for the invite"
+                  compact
+                />
+
+                <TouchableOpacity
+                  activeOpacity={isInviteSubmitDisabled ? 1 : 0.78}
+                  onPress={handleSendVenueInvites}
+                  disabled={isInviteSubmitDisabled}
                   style={[
-                    styles.submitBtnText,
+                    styles.submitBtn,
                     {
-                      color:
-                        selectedInviteTargets.length > 0
-                          ? "#FFFFFF"
-                          : colors.textSecondary,
+                      backgroundColor:
+                        selectedInviteTargets.length > 0 ? colors.primary : colors.border,
+                      opacity: isInviteSubmitDisabled ? 0.6 : 1,
                     },
                   ]}
                 >
-                  Send Invites
-                </Text>
-              )}
-            </TouchableOpacity>
+                  {sendingInvites ? (
+                    <ActivityIndicator size="small" color="#fff" />
+                  ) : (
+                    <Text
+                      style={[
+                        styles.submitBtnText,
+                        {
+                          color:
+                            selectedInviteTargets.length > 0
+                              ? "#FFFFFF"
+                              : colors.textSecondary,
+                        },
+                      ]}
+                    >
+                      Send Invite{selectedInviteTargets.length === 1 ? "" : "s"}
+                    </Text>
+                  )}
+                </TouchableOpacity>
+              </View>
+            </ScrollView>
           </View>
-        </BottomSheetScrollView>
-      </BottomSheetModal>
+        </View>
+      </RNModal>
+      <RNModal
+        transparent
+        visible={groupPreviewVisible}
+        animationType="fade"
+        onRequestClose={closeGroupPreview}
+      >
+        <View style={styles.groupPreviewOverlay}>
+          <TouchableOpacity
+            activeOpacity={1}
+            onPress={closeGroupPreview}
+            style={StyleSheet.absoluteFillObject}
+          />
+          <View
+            style={[
+              styles.groupPreviewModal,
+              { backgroundColor: colors.background, borderColor: borderSoft },
+            ]}
+          >
+            <View style={[styles.groupPreviewHeader, { borderBottomColor: borderSoft }]}>
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.groupPreviewEyebrow, { color: colors.textSecondary }]}>
+                  Group Applicant
+                </Text>
+                <Text style={[styles.groupPreviewTitle, { color: colors.text }]} numberOfLines={1}>
+                  {groupPreview?.name || "Group Details"}
+                </Text>
+              </View>
+              <TouchableOpacity
+                activeOpacity={1}
+                onPress={closeGroupPreview}
+                style={[styles.groupPreviewClose, { backgroundColor: colors.surface, borderColor: colors.border }]}
+              >
+                <Ionicons name="close" size={18} color={colors.text} />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView
+              contentContainerStyle={styles.groupPreviewBody}
+              showsVerticalScrollIndicator={false}
+            >
+              {groupPreviewLoading && !groupPreview?.name ? (
+                <View style={styles.groupPreviewLoading}>
+                  <ActivityIndicator size="small" color={colors.primary} />
+                  <Text style={{ color: colors.textSecondary, marginTop: 8 }}>
+                    Loading group...
+                  </Text>
+                </View>
+              ) : (
+                <>
+                  <Image
+                    source={{
+                      uri:
+                        groupPreview?.images?.[0] ||
+                        groupPreview?.image ||
+                        "https://images.unsplash.com/photo-1516280440614-37939bbacd81?w=800&h=400&fit=crop",
+                    }}
+                    style={[styles.groupPreviewImage, { backgroundColor: colors.border }]}
+                    resizeMode="cover"
+                  />
+
+                  <View style={styles.groupPreviewMetaGrid}>
+                    <View style={[styles.groupPreviewMetaItem, { backgroundColor: colors.surface }]}>
+                      <Ionicons name="musical-notes-outline" size={16} color={colors.primary} />
+                      <Text style={[styles.groupPreviewMetaText, { color: colors.text }]} numberOfLines={1}>
+                        {groupPreview?.genre || "Genre not listed"}
+                      </Text>
+                    </View>
+                    <View style={[styles.groupPreviewMetaItem, { backgroundColor: colors.surface }]}>
+                      <Ionicons name="location-outline" size={16} color={colors.primary} />
+                      <Text style={[styles.groupPreviewMetaText, { color: colors.text }]} numberOfLines={1}>
+                        {groupPreview?.location || "Location not listed"}
+                      </Text>
+                    </View>
+                  </View>
+
+                  <View style={styles.groupPreviewSection}>
+                    <Text style={[styles.groupPreviewSectionTitle, { color: colors.text }]}>
+                      About
+                    </Text>
+                    <Text style={[styles.groupPreviewText, { color: colors.textSecondary }]}>
+                      {groupPreview?.description || "No group description provided."}
+                    </Text>
+                  </View>
+
+                  {Array.isArray(groupPreview?.members) && groupPreview.members.length > 0 ? (
+                    <View style={styles.groupPreviewSection}>
+                      <Text style={[styles.groupPreviewSectionTitle, { color: colors.text }]}>
+                        Members ({groupPreview.members.length})
+                      </Text>
+                      <View style={{ gap: 10 }}>
+                        {groupPreview.members.map((member: any, index: number) => {
+                          const memberName = typeof member === "string" ? member : member?.name || "Member";
+                          const memberInstrument = typeof member === "string" ? "" : member?.instrument || "";
+
+                          return (
+                            <View key={`${memberName}-${index}`} style={styles.groupPreviewMemberRow}>
+                              <View style={[styles.groupPreviewMemberAvatar, { backgroundColor: colors.primary + "22" }]}>
+                                <Text style={{ color: colors.primary, fontFamily: "Poppins_700Bold" }}>
+                                  {memberName.charAt(0).toUpperCase()}
+                                </Text>
+                              </View>
+                              <View style={{ flex: 1 }}>
+                                <Text style={[styles.groupPreviewMemberName, { color: colors.text }]}>
+                                  {memberName}
+                                </Text>
+                                {memberInstrument ? (
+                                  <Text style={[styles.groupPreviewMemberInstrument, { color: colors.textSecondary }]}>
+                                    {memberInstrument}
+                                  </Text>
+                                ) : null}
+                              </View>
+                            </View>
+                          );
+                        })}
+                      </View>
+                    </View>
+                  ) : null}
+                </>
+              )}
+            </ScrollView>
+          </View>
+        </View>
+      </RNModal>
       <CustomAlert
         visible={alertVisible}
         type={alertConfig.type}
@@ -2352,41 +2473,66 @@ const styles = StyleSheet.create({
     paddingVertical: 2,
     borderRadius: 6,
   },
-  sheetHeaderCopy: {
+  invitePopupOverlay: {
     flex: 1,
-    paddingRight: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 20,
+    paddingVertical: 28,
+    backgroundColor: "rgba(2,6,23,0.72)",
   },
-  sheetEyebrow: {
+  invitePopupBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  invitePopupContainer: {
+    width: Platform.OS === "web" ? 460 : "100%",
+    maxWidth: "100%",
+    maxHeight: Platform.OS === "web" ? 620 : "86%",
+    borderRadius: 18,
+    borderWidth: 1,
+    overflow: "hidden",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 18 },
+    shadowOpacity: 0.28,
+    shadowRadius: 32,
+    elevation: 20,
+  },
+  invitePopupHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 18,
+    paddingVertical: 14,
+    borderBottomWidth: 1,
+  },
+  invitePopupHeaderCopy: {
+    flex: 1,
+    paddingRight: 14,
+  },
+  invitePopupEyebrow: {
+    fontFamily: "Poppins_500Medium",
     fontSize: 11,
-    letterSpacing: 1.4,
     textTransform: "uppercase",
-    fontFamily: "Poppins_700Bold",
+    marginBottom: 2,
   },
-  sheetTitle: {
-    marginTop: 2,
-    fontSize: 20,
-    fontFamily: "Poppins_700Bold",
+  invitePopupTitle: {
+    fontFamily: "Poppins_600SemiBold",
+    fontSize: 18,
   },
-  sheetCloseButton: {
+  invitePopupCloseButton: {
     width: 36,
     height: 36,
     borderRadius: 18,
-    borderWidth: 1,
     alignItems: "center",
     justifyContent: "center",
+    borderWidth: 1,
   },
-  inviteSheetContent: {
-    paddingHorizontal: 20,
-    paddingTop: 10,
-    paddingBottom: 28,
+  invitePopupBody: {
+    flexGrow: 0,
   },
-  inviteSheetHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    borderBottomWidth: 1,
-    paddingBottom: 14,
-    marginBottom: 14,
+  invitePopupBodyContent: {
+    paddingHorizontal: 18,
+    paddingTop: 16,
+    paddingBottom: 18,
   },
   modalContent: {
     paddingHorizontal: 4,
@@ -2438,6 +2584,122 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     borderRadius: 10,
     borderWidth: 1,
+  },
+  groupPreviewOverlay: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 20,
+    paddingVertical: 28,
+    backgroundColor: "rgba(2,6,23,0.72)",
+  },
+  groupPreviewModal: {
+    width: Platform.OS === "web" ? 520 : "100%",
+    maxWidth: "100%",
+    maxHeight: "84%",
+    borderRadius: 18,
+    borderWidth: 1,
+    overflow: "hidden",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 18 },
+    shadowOpacity: 0.28,
+    shadowRadius: 32,
+    elevation: 20,
+  },
+  groupPreviewHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 18,
+    paddingVertical: 14,
+    borderBottomWidth: 1,
+  },
+  groupPreviewEyebrow: {
+    fontFamily: "Poppins_500Medium",
+    fontSize: 11,
+    textTransform: "uppercase",
+    marginBottom: 2,
+  },
+  groupPreviewTitle: {
+    fontFamily: "Poppins_600SemiBold",
+    fontSize: 18,
+  },
+  groupPreviewClose: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    marginLeft: 12,
+  },
+  groupPreviewBody: {
+    padding: 18,
+    paddingBottom: 22,
+  },
+  groupPreviewLoading: {
+    minHeight: 180,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  groupPreviewImage: {
+    width: "100%",
+    height: 180,
+    borderRadius: 14,
+    marginBottom: 14,
+  },
+  groupPreviewMetaGrid: {
+    flexDirection: "row",
+    gap: 10,
+    marginBottom: 16,
+  },
+  groupPreviewMetaItem: {
+    flex: 1,
+    minHeight: 42,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  groupPreviewMetaText: {
+    flex: 1,
+    fontFamily: "Poppins_500Medium",
+    fontSize: 12,
+  },
+  groupPreviewSection: {
+    marginTop: 4,
+    marginBottom: 14,
+  },
+  groupPreviewSectionTitle: {
+    fontFamily: "Poppins_600SemiBold",
+    fontSize: 14,
+    marginBottom: 8,
+  },
+  groupPreviewText: {
+    fontFamily: "Poppins_400Regular",
+    fontSize: 13,
+    lineHeight: 20,
+  },
+  groupPreviewMemberRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  groupPreviewMemberAvatar: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  groupPreviewMemberName: {
+    fontFamily: "Poppins_600SemiBold",
+    fontSize: 13,
+  },
+  groupPreviewMemberInstrument: {
+    fontFamily: "Poppins_400Regular",
+    fontSize: 12,
+    marginTop: 1,
   },
   // CV/Resume Button Style
   cvButton: {

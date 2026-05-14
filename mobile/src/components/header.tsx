@@ -404,7 +404,7 @@ function Header({ title, transparent, onBackPress, showBack, leftComponent, righ
                             rightComponent
                         ) : rightIconName ? (
                             <AnimatedTouchableOpacity activeOpacity={1} onPress={rightIconOnPress} style={[styles.iconButton, buttonAnimatedStyle]}>
-                                <AnimatedIcon name={rightIconName as any} size={20} animatedProps={iconAnimatedProps} />
+                                <AnimatedIcon name={rightIconName as any} size={20} animatedProps={iconAnimatedProps} style={styles.rightIconGlyph} />
                             </AnimatedTouchableOpacity>
                         ) : isGuest ? (
                             <AnimatedTouchableOpacity
@@ -570,6 +570,14 @@ const styles = StyleSheet.create({
         borderWidth: 1,
         alignItems: 'center',
         justifyContent: 'center',
+    },
+    rightIconGlyph: {
+        width: 20,
+        height: 20,
+        lineHeight: 20,
+        includeFontPadding: false,
+        textAlign: 'center',
+        textAlignVertical: 'center',
     },
     badge: {
         position: 'absolute',

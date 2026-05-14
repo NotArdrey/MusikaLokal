@@ -211,6 +211,25 @@ const formatApplicationReceivedDateTime = (item: any) => {
   });
 };
 
+const formatActivityAddedDateTime = (item: any) => {
+  const raw =
+    toNonEmptyString(item?.created_at) ||
+    toNonEmptyString(item?.submitted_at) ||
+    toNonEmptyString(item?.received_at);
+
+  if (!raw) return null;
+
+  return formatFriendlyDateTime(raw, {
+    fallback: raw,
+    forceIncludeTime: true,
+  });
+};
+
+const buildActivityAddedLine = (item: any) => {
+  const addedAt = formatActivityAddedDateTime(item);
+  return addedAt ? `Added ${addedAt}` : null;
+};
+
 const extractConnectionRequestDetails = (eventDetails: any, attachmentUrl: unknown) => {
   const requestDetails =
     eventDetails?.request_details && typeof eventDetails.request_details === "object"
@@ -511,6 +530,54 @@ const isProductionTeamInviteRequest = (item: any) =>
   item?.sender_entity_type === "production_team" &&
   item?.request_kind === "invite" &&
   Boolean(item?.production_team_id);
+
+const isProductionTeamInviteEvent = (eventDetails: any, requestKind: unknown) =>
+  String(eventDetails?.sender_entity_type || "").trim().toLowerCase() === "production_team" &&
+  String(requestKind || eventDetails?.request_kind || "").trim().toLowerCase() === "invite" &&
+  Boolean(eventDetails?.production_team_id || eventDetails?.sender_entity_id);
+
+const getProductionInviteStatusLabel = (status: unknown) => {
+  const normalized = String(status || "").trim().toLowerCase();
+
+  if (normalized === "cancelled") return "Fired";
+  return getConnectionRequestStatusLabel(status);
+};
+
+const buildProductionInviteHistoryLine = (item: any) => {
+  if (!isProductionTeamInviteRequest(item)) return null;
+
+  const status = String(item?.raw_status || item?.status || "").trim().toLowerCase();
+  const teamName =
+    toNonEmptyString(item?.production_team_name) ||
+    toNonEmptyString(item?.sender_entity_name) ||
+    "the production team";
+  const recipientName =
+    toNonEmptyString(item?.receiver_entity_name) ||
+    toNonEmptyString(item?.counterparty_name) ||
+    toNonEmptyString(item?.name) ||
+    "The musician";
+  const isOutgoing = item?.request_direction === "outgoing";
+
+  if (status === "declined" || status === "rejected") {
+    return isOutgoing
+      ? `${recipientName} declined the invite to join ${teamName}.`
+      : `You declined ${teamName}'s invite.`;
+  }
+
+  if (status === "cancelled" || status === "fired") {
+    return isOutgoing
+      ? `${recipientName} was fired from ${teamName}.`
+      : `You were removed from ${teamName}.`;
+  }
+
+  if (status === "accepted" || status === "approved" || status === "connected") {
+    return isOutgoing
+      ? `${recipientName} accepted the invite to join ${teamName}.`
+      : `You accepted ${teamName}'s invite.`;
+  }
+
+  return null;
+};
 
 const mergeUniqueActivityItems = (...groups: any[][]) => {
   const seen = new Set<string>();
@@ -1822,6 +1889,10 @@ export default function BookingsScreen() {
               eventDetails,
               request.attachment_url,
             );
+            const isProductionInvite = isProductionTeamInviteEvent(
+              eventDetails,
+              requestDetails.requestKind,
+            );
             const senderEntityName =
               eventDetails.sender_entity_name ||
               profileMap.get(request.sender_id)?.full_name ||
@@ -1849,7 +1920,9 @@ export default function BookingsScreen() {
               date: formatDashedNumericDate(request.created_at),
               name: counterpartyName,
               image: counterpartyProfile?.avatar_url || REQUEST_PLACEHOLDER_IMAGE,
-              status: getConnectionRequestStatusLabel(request.status),
+              status: isProductionInvite
+                ? getProductionInviteStatusLabel(request.status)
+                : getConnectionRequestStatusLabel(request.status),
               raw_status: request.status,
               type: buildConnectionRequestTypeLabel(eventDetails),
               message: requestDetails.pitchMessage || request.message || "",
@@ -1868,6 +1941,7 @@ export default function BookingsScreen() {
               group_id: request.group_id || null,
               studio_id: request.studio_id || null,
               production_team_id: eventDetails.production_team_id || null,
+              production_team_name: isProductionInvite ? senderEntityName : null,
               listing_id: eventDetails.listing_id || null,
               listing_type: eventDetails.listing_type || null,
               request_kind: requestDetails.requestKind,
@@ -4102,6 +4176,7 @@ export default function BookingsScreen() {
                   const listingType = listing?.entity_type === "gig" ? "gig" : "studio";
                   const listingName = listing?.name || (listingType === "gig" ? "Gig" : "Studio");
                   const rejectionReason = String(listing?.permit_rejection_reason || "").trim();
+                  const permitAddedLine = buildActivityAddedLine(listing);
 
                   return (
                     <View
@@ -4136,6 +4211,18 @@ export default function BookingsScreen() {
                                 {listingType === "gig" ? "Venue Listing Permit" : "Studio Listing Permit"}
                               </Text>
                             </View>
+                            {permitAddedLine ? (
+                              <View style={styles.cardDetailRow}>
+                                <Ionicons
+                                  name="time-outline"
+                                  size={moderateScale(14)}
+                                  color={colors.textSecondary}
+                                />
+                                <Text style={[styles.cardDetailText, { color: colors.textSecondary }]}>
+                                  {permitAddedLine}
+                                </Text>
+                              </View>
+                            ) : null}
                           </View>
                           <View
                             style={[
@@ -4343,7 +4430,14 @@ export default function BookingsScreen() {
                 const requestStatusColors = getConnectionRequestStatusColors(
                   item.raw_status || item.status,
                 );
+                const productionInviteHistoryLine = isHistoryTabView
+                  ? buildProductionInviteHistoryLine(item)
+                  : null;
+                const requestAddedLine = buildActivityAddedLine(item);
                 const connectionMetaLine = [
+                  isProductionTeamInviteRequest(item) && item.production_team_name
+                    ? `Production: ${item.production_team_name}`
+                    : null,
                   item.request_slot_type
                     ? `Slot: ${formatConnectionEntityType(item.request_slot_type)}`
                     : null,
@@ -4394,7 +4488,7 @@ export default function BookingsScreen() {
                               backgroundColor:
                                 item.status === "Accepted"
                                   ? "rgba(16, 185, 129, 0.85)"
-                                  : item.status === "Declined" || item.status === "Cancelled"
+                                  : item.status === "Declined" || item.status === "Cancelled" || item.status === "Fired"
                                     ? "rgba(239, 68, 68, 0.85)"
                                     : "rgba(0,0,0,0.6)",
                             },
@@ -4436,6 +4530,11 @@ export default function BookingsScreen() {
                           {connectionMetaLine}
                         </Text>
                       ) : null}
+                      {productionInviteHistoryLine ? (
+                        <Text style={{ fontSize: moderateScale(12), color: colors.text, marginBottom: moderateScale(4), fontFamily: "Poppins_500Medium" }} numberOfLines={2}>
+                          {productionInviteHistoryLine}
+                        </Text>
+                      ) : null}
                       {item.message ? (
                         <Text style={{ fontSize: moderateScale(12), color: colors.textSecondary, fontStyle: "italic" }} numberOfLines={3}>
                           {`"${item.message}"`}
@@ -4446,9 +4545,21 @@ export default function BookingsScreen() {
                           {item.request_context_title || "Application Context"}: {item.request_application_context}
                         </Text>
                       ) : null}
-                      <Text style={{ fontSize: moderateScale(11), color: colors.textSecondary, marginTop: moderateScale(6) }}>
-                        {formatDashedNumericDate(item.created_at || item.raw_date)}
-                      </Text>
+                      {requestAddedLine ? (
+                        <View style={[styles.cardDetailRow, { marginTop: moderateScale(6) }]}>
+                          <Ionicons
+                            name="time-outline"
+                            size={14}
+                            color={colors.textSecondary}
+                          />
+                          <Text
+                            style={[styles.cardDetailText, { color: colors.textSecondary }]}
+                            numberOfLines={1}
+                          >
+                            {requestAddedLine}
+                          </Text>
+                        </View>
+                      ) : null}
 
                       {!isHistoryTabView && (item.request_contract_url || item.request_cv_url || item.request_video_url) && (
                         <View style={{ flexDirection: "row", gap: scale(8), marginTop: moderateScale(8) }}>
@@ -4650,6 +4761,18 @@ export default function BookingsScreen() {
                 const applicationTypeBadge = `${applicationLabel} Application`;
                 const applicationReceivedAt = formatApplicationReceivedDateTime(item);
                 const applicationReceivedLabel = isMusicianView ? "Submitted" : "Received";
+                const applicationAddedLine = buildActivityAddedLine(item);
+                const isFiredApplication = item.status === "Fired";
+                const isNegativeApplicationStatus =
+                  item.status === "Declined" ||
+                  item.status === "Cancelled" ||
+                  item.status === "Fired" ||
+                  item.status === "Resigned";
+                const isPositiveApplicationStatus =
+                  item.status === "Accepted" ||
+                  item.status === "Happening Now" ||
+                  item.status === "Confirmed" ||
+                  item.status === "Completed";
 
                 return (
                   <View
@@ -4674,7 +4797,7 @@ export default function BookingsScreen() {
                         }
                         style={[
                           styles.cardImage,
-                          { opacity: item.isCancelled ? 0.6 : 1 },
+                          { opacity: isFiredApplication ? 0.78 : item.isCancelled ? 0.6 : 1 },
                         ]}
                         width={800}
                         height={400}
@@ -4693,11 +4816,9 @@ export default function BookingsScreen() {
                             styles.stackedImageBadge,
                             {
                               backgroundColor:
-                                item.status === "Accepted" ||
-                                  item.status === "Happening Now" ||
-                                  item.status === "Confirmed"
+                                isPositiveApplicationStatus
                                   ? "rgba(16, 185, 129, 0.85)"
-                                  : item.status === "Declined" || item.status === "Cancelled"
+                                  : isNegativeApplicationStatus
                                     ? "rgba(239, 68, 68, 0.85)"
                                     : "rgba(0,0,0,0.6)",
                             },
@@ -4799,6 +4920,22 @@ export default function BookingsScreen() {
                                 </Text>
                               </View>
                             )}
+
+                            {applicationAddedLine && !applicationReceivedAt ? (
+                              <View style={styles.cardDetailRow}>
+                                <Ionicons
+                                  name="time-outline"
+                                  size={14}
+                                  color={colors.textSecondary}
+                                />
+                                <Text
+                                  style={[styles.cardDetailText, { color: colors.textSecondary }]}
+                                  numberOfLines={1}
+                                >
+                                  {applicationAddedLine}
+                                </Text>
+                              </View>
+                            ) : null}
                           </View>
                         </View>
                       </View>
@@ -4933,10 +5070,10 @@ export default function BookingsScreen() {
                           }}
                         >
                           <View style={styles.statusContainer}>
-                            {item.status === "Happening Now" || item.status === "Accepted" || item.status === "Confirmed" || item.status === "Completed" ? (
+                            {isPositiveApplicationStatus ? (
                               <Ionicons name="checkmark-circle" size={16} color="#10B981" />
-                            ) : item.status === "Declined" || item.status === "Cancelled" || item.status === "Fired" || item.status === "Resigned" ? (
-                              <Ionicons name="close-circle" size={16} color="#EF4444" />
+                            ) : isNegativeApplicationStatus ? (
+                              <Ionicons name={isFiredApplication ? "remove-circle" : "close-circle"} size={16} color="#EF4444" />
                             ) : (
                               <Ionicons name="time-outline" size={16} color="#F59E0B" />
                             )}
@@ -4945,12 +5082,9 @@ export default function BookingsScreen() {
                                 styles.statusText,
                                 {
                                   color:
-                                    item.status === "Happening Now" ||
-                                      item.status === "Accepted" ||
-                                      item.status === "Confirmed" ||
-                                      item.status === "Completed"
+                                    isPositiveApplicationStatus
                                       ? "#10B981"
-                                      : item.status === "Declined" || item.status === "Cancelled" || item.status === "Fired" || item.status === "Resigned"
+                                      : isNegativeApplicationStatus
                                         ? "#EF4444"
                                         : "#F59E0B",
                                 },
@@ -4980,6 +5114,14 @@ export default function BookingsScreen() {
                             </TouchableOpacity>
                           )}
                         </View>
+                        {isHistoryTabView && isFiredApplication ? (
+                          <View style={[styles.terminalStatusNotice, { backgroundColor: isDark ? "rgba(239,68,68,0.10)" : "#FEF2F2", borderColor: "rgba(239,68,68,0.35)" }]}>
+                            <Ionicons name="remove-circle-outline" size={16} color="#EF4444" />
+                            <Text style={styles.terminalStatusNoticeText}>
+                              This applicant was fired from the gig.
+                            </Text>
+                          </View>
+                        ) : null}
                         {!isHistoryTabView && (
                           <View
                             style={[
@@ -5416,6 +5558,8 @@ export default function BookingsScreen() {
               // ==========================================
               // 2. STUDIO BOOKING CARD (Standard View)
               // ==========================================
+              const bookingAddedLine = buildActivityAddedLine(item);
+
               return (
                 <View
                   key={item.id}
@@ -5845,6 +5989,14 @@ export default function BookingsScreen() {
                                     <Ionicons name="time-outline" size={14} color={colors.textSecondary} />
                                     <Text style={[styles.cardDetailText, { color: colors.textSecondary }]}>
                                       {timeStr}
+                                    </Text>
+                                  </View>
+                                ) : null}
+                                {bookingAddedLine ? (
+                                  <View style={styles.cardDetailRow}>
+                                    <Ionicons name="add-circle-outline" size={14} color={colors.textSecondary} />
+                                    <Text style={[styles.cardDetailText, { color: colors.textSecondary }]} numberOfLines={1}>
+                                      {bookingAddedLine}
                                     </Text>
                                   </View>
                                 ) : null}
@@ -7389,11 +7541,14 @@ const styles = StyleSheet.create({
     position: "absolute",
     top: moderateScale(10),
     left: scale(10),
+    minHeight: moderateScale(28),
     paddingHorizontal: scale(12),
     paddingVertical: moderateScale(5),
     borderRadius: moderateScale(9999),
     backgroundColor: "rgba(0,0,0,0.65)",
     backdropFilter: "blur(4px)",
+    alignItems: "center",
+    justifyContent: "center",
   },
   topLeftImageBadge: {
     maxWidth: "56%",
@@ -7408,14 +7563,15 @@ const styles = StyleSheet.create({
   },
   stackedImageBadge: {
     position: "relative",
-    top: undefined,
-    left: undefined,
-    right: undefined,
+    top: 0,
+    left: 0,
+    right: 0,
     maxWidth: "100%",
   },
   typeBadgeText: {
     color: "white",
     fontSize: moderateScale(10),
+    lineHeight: moderateScale(14),
     fontFamily: "Poppins_600SemiBold",
   },
   liveBadge: {
@@ -7463,6 +7619,23 @@ const styles = StyleSheet.create({
     fontSize: moderateScale(12),
     fontWeight: "bold",
     textTransform: "uppercase",
+  },
+  terminalStatusNotice: {
+    width: "100%",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: scale(8),
+    borderWidth: 1,
+    borderRadius: moderateScale(12),
+    paddingHorizontal: scale(10),
+    paddingVertical: moderateScale(8),
+  },
+  terminalStatusNoticeText: {
+    flex: 1,
+    color: "#EF4444",
+    fontFamily: "Poppins_500Medium",
+    fontSize: moderateScale(12),
+    lineHeight: moderateScale(17),
   },
   cardContent: {
     padding: SCREEN_HEIGHT < 700 ? moderateScale(10) : moderateScale(14),

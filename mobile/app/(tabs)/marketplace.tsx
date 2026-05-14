@@ -837,7 +837,7 @@ export default function MarketplaceScreen() {
                     onPress={() => openEditListing(product.id)}
                     style={[styles.iconActionBtn, { borderColor: colors.border }]}
                   >
-                    <Ionicons name="pencil-outline" size={16} color={colors.text} />
+                    <Ionicons name="pencil-outline" size={16} color={colors.text} style={styles.iconActionIcon} />
                   </TouchableOpacity>
                   <TouchableOpacity
                     testID={`mobile-marketplace-product-delete-${product.id}`}
@@ -847,7 +847,7 @@ export default function MarketplaceScreen() {
                     onPress={() => promptDeleteProduct(product)}
                     style={[styles.iconActionBtn, { borderColor: "#FCA5A5", backgroundColor: "#FEE2E2" }]}
                   >
-                    <Ionicons name="trash-outline" size={16} color="#DC2626" />
+                    <Ionicons name="trash-outline" size={16} color="#DC2626" style={styles.iconActionIcon} />
                   </TouchableOpacity>
                 </View>
               </View>
@@ -1087,9 +1087,9 @@ const styles = StyleSheet.create({
   productTitle: { fontSize: moderateScale(13), fontFamily: "Poppins_600SemiBold" },
   productSeller: { fontSize: moderateScale(11), marginTop: 2 },
   productPrice: { fontSize: moderateScale(14), fontFamily: "Poppins_700Bold", marginTop: 4 },
-  variantCount: { fontSize: moderateScale(10), marginTop: 2 },
-  cardFooterRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: 6, gap: 8 },
-  chatHint: { flexDirection: "row", alignItems: "center", gap: 4, borderRadius: 999, paddingHorizontal: 8, paddingVertical: 4 },
+  variantCount: { flex: 1, minWidth: 0, fontSize: moderateScale(10) },
+  cardFooterRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: 6, gap: 6 },
+  chatHint: { flexShrink: 0, flexDirection: "row", alignItems: "center", gap: 3, borderRadius: 999, paddingHorizontal: 7, paddingVertical: 4 },
   chatHintText: { fontSize: moderateScale(10), fontFamily: "Poppins_600SemiBold" },
   loadMoreButton: { minHeight: 46, borderWidth: 1, borderRadius: 14, marginTop: 4, marginBottom: 14, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8 },
   loadMoreText: { fontSize: moderateScale(13), fontFamily: "Poppins_700Bold" },
@@ -1114,6 +1114,7 @@ const styles = StyleSheet.create({
   sellerProductMeta: { fontSize: moderateScale(11), marginTop: 4 },
   sellerActionButtons: { flexDirection: "row", gap: 8 },
   iconActionBtn: { width: 34, height: 34, borderRadius: 10, borderWidth: 1, alignItems: "center", justifyContent: "center" },
+  iconActionIcon: { width: 16, height: 16, lineHeight: 16, includeFontPadding: false, textAlign: "center", textAlignVertical: "center" },
   emptyContainer: { flex: 1, alignItems: "center", justifyContent: "center", minHeight: 400 },
   emptyText: { textAlign: "center", marginTop: 12, fontSize: moderateScale(15), fontFamily: "Poppins_500Medium" },
   modalOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "flex-end" },

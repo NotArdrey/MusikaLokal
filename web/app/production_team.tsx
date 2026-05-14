@@ -1,4 +1,4 @@
-﻿import { Ionicons } from "@expo/vector-icons";
+import { Ionicons } from "@expo/vector-icons";
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import React, { useCallback, useState } from "react";
 import {
@@ -220,6 +220,71 @@ export default function ProductionTeamScreen() {
           ) : (
             <View style={styles.sheetBodyContent}>{children}</View>
           )}
+        </View>
+      </View>
+    </RNModal>
+  );
+
+  const renderPopupModal = ({
+    visible,
+    onClose,
+    title,
+    subtitle,
+    children,
+  }: {
+    visible: boolean;
+    onClose: () => void;
+    title: string;
+    subtitle?: string;
+    children: React.ReactNode;
+  }) => (
+    <RNModal
+      visible={visible}
+      transparent
+      animationType="fade"
+      onRequestClose={onClose}
+    >
+      <View style={styles.popupOverlay}>
+        <TouchableOpacity
+          activeOpacity={1}
+          onPress={onClose}
+          style={styles.popupBackdrop}
+        />
+        <View
+          style={[
+            styles.popupContainer,
+            { backgroundColor: colors.background, borderColor: colors.border },
+          ]}
+        >
+          <View style={[styles.popupHeader, { borderBottomColor: colors.border }]}>
+            <View style={styles.popupHeaderCopy}>
+              {subtitle ? (
+                <Text style={[styles.popupEyebrow, { color: colors.textSecondary }]} numberOfLines={1}>
+                  {subtitle}
+                </Text>
+              ) : null}
+              <Text style={[styles.popupTitle, { color: colors.text }]}>{title}</Text>
+            </View>
+            <TouchableOpacity
+              activeOpacity={1}
+              onPress={onClose}
+              style={[
+                styles.popupCloseButton,
+                { backgroundColor: colors.card, borderColor: colors.border },
+              ]}
+            >
+              <Ionicons name="close" size={18} color={colors.text} />
+            </TouchableOpacity>
+          </View>
+
+          <ScrollView
+            style={styles.popupBody}
+            contentContainerStyle={styles.popupBodyContent}
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+          >
+            {children}
+          </ScrollView>
         </View>
       </View>
     </RNModal>
@@ -872,12 +937,11 @@ export default function ProductionTeamScreen() {
           loadingMessage="Removing member and sending notification..."
         />
 
-        {renderSheetModal({
+        {renderPopupModal({
           visible: inviteModalVisible,
           onClose: closeInviteMemberModal,
           title: "Invite Members",
           subtitle: selectedTeam.name,
-          scrollable: true,
           children: (
             <View style={styles.modalContent}>
               <ProductionInviteSection
@@ -887,6 +951,7 @@ export default function ProductionTeamScreen() {
                 inviteMessage={inviteMessage}
                 onInviteMessageChange={setInviteMessage}
                 disabled={sendingInvites}
+                compact
               />
 
               <TouchableOpacity
@@ -1317,6 +1382,67 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingTop: 16,
     paddingBottom: 24,
+  },
+  popupOverlay: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 20,
+    paddingVertical: 28,
+    backgroundColor: "rgba(2,6,23,0.72)",
+  },
+  popupBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  popupContainer: {
+    width: IS_WEB ? 460 : "100%",
+    maxWidth: "100%",
+    maxHeight: IS_WEB ? 620 : "86%",
+    borderRadius: 18,
+    borderWidth: 1,
+    overflow: "hidden",
+    elevation: 20,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 18 },
+    shadowOpacity: 0.28,
+    shadowRadius: 32,
+  },
+  popupHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 18,
+    paddingVertical: 14,
+    borderBottomWidth: 1,
+  },
+  popupHeaderCopy: {
+    flex: 1,
+    paddingRight: 14,
+  },
+  popupEyebrow: {
+    fontFamily: "Poppins_500Medium",
+    fontSize: 11,
+    textTransform: "uppercase",
+    marginBottom: 2,
+  },
+  popupTitle: {
+    fontFamily: "Poppins_600SemiBold",
+    fontSize: 18,
+  },
+  popupCloseButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+  },
+  popupBody: {
+    flexGrow: 0,
+  },
+  popupBodyContent: {
+    paddingHorizontal: 18,
+    paddingTop: 16,
+    paddingBottom: 18,
   },
   modalContent: { paddingHorizontal: 4 },
   inputLabel: { fontFamily: "Poppins_500Medium", fontSize: 13, marginBottom: 6 },

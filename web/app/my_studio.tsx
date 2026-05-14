@@ -381,7 +381,7 @@ export default function MyStudioScreen() {
                                                             onPress={() => router.push({ pathname: '/edit_studio', params: { id: studio.id } })}
                                                             style={[styles.editBtn, { borderColor: colors.border }]}
                                                         >
-                                                            <Ionicons name="pencil-outline" size={18} color={colors.text} />
+                                                            <Ionicons name="pencil-outline" size={18} color={colors.text} style={styles.editBtnIcon} />
                                                         </TouchableOpacity>
                                                     </View>
 
@@ -578,9 +578,20 @@ const styles = StyleSheet.create({
         color: '#FFF',
     },
     editBtn: {
-        padding: 7,
+        width: 34,
+        height: 34,
+        alignItems: 'center',
+        justifyContent: 'center',
         borderRadius: 10,
         borderWidth: 1,
+    },
+    editBtnIcon: {
+        width: 18,
+        height: 18,
+        lineHeight: 18,
+        includeFontPadding: false,
+        textAlign: 'center',
+        textAlignVertical: 'center',
     },
     reapplyBtn: {
         flexDirection: 'row',

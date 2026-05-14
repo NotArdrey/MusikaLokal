@@ -27,6 +27,7 @@ type ProductionInviteSectionProps = {
   description?: string;
   searchPlaceholder?: string;
   messagePlaceholder?: string;
+  compact?: boolean;
 };
 
 const FILTER_OPTIONS: { value: ProductionInviteFilter; label: string }[] = [
@@ -47,6 +48,7 @@ export default function ProductionInviteSection({
   description = "Search for performers to invite after you save this production team. Accepted invites will add them to your production roster, and recipients can respond from Bookings > Pending.",
   searchPlaceholder = "Search musician, duo, or group",
   messagePlaceholder = "Add optional context for the invite",
+  compact = false,
 }: ProductionInviteSectionProps) {
   const { colors, isDark } = useTheme();
   const [searchQuery, setSearchQuery] = useState("");
@@ -121,11 +123,21 @@ export default function ProductionInviteSection({
   };
 
   return (
-    <View style={[styles.sectionCard, { borderColor: isDark ? "#334155" : "#E2E8F0", backgroundColor: colors.surface }]}>
-      <Text style={[styles.sectionTitle, { color: colors.text }]}>{title}</Text>
-      <Text style={[styles.sectionText, { color: colors.textSecondary }]}>{description}</Text>
+    <View
+      style={[
+        styles.sectionCard,
+        { borderColor: isDark ? "#334155" : "#E2E8F0", backgroundColor: colors.surface },
+        compact && styles.sectionPlain,
+      ]}
+    >
+      {!compact ? (
+        <>
+          <Text style={[styles.sectionTitle, { color: colors.text }]}>{title}</Text>
+          <Text style={[styles.sectionText, { color: colors.textSecondary }]}>{description}</Text>
+        </>
+      ) : null}
 
-      <Text style={[styles.label, { color: colors.text }]}>Search Talent</Text>
+      <Text style={[styles.label, compact && styles.firstCompactLabel, { color: colors.text }]}>Search Talent</Text>
       <View style={[styles.searchInputWrap, { borderColor: colors.border, backgroundColor: colors.background }]}>
         <Ionicons name="search-outline" size={18} color={colors.textSecondary} />
         <TextInput
@@ -242,7 +254,11 @@ export default function ProductionInviteSection({
 
       <Text style={[styles.label, { color: colors.text }]}>Invite Message</Text>
       <TextInput
-        style={[styles.messageInput, { color: colors.text, borderColor: colors.border, backgroundColor: colors.background }]}
+        style={[
+          styles.messageInput,
+          compact && styles.compactMessageInput,
+          { color: colors.text, borderColor: colors.border, backgroundColor: colors.background },
+        ]}
         value={inviteMessage}
         onChangeText={onInviteMessageChange}
         placeholder={messagePlaceholder}
@@ -261,6 +277,13 @@ const styles = StyleSheet.create({
     padding: 18,
     marginTop: 14,
   },
+  sectionPlain: {
+    borderWidth: 0,
+    borderRadius: 0,
+    padding: 0,
+    marginTop: 0,
+    backgroundColor: "transparent",
+  },
   sectionTitle: {
     fontSize: 16,
     fontFamily: "Poppins_700Bold",
@@ -276,6 +299,9 @@ const styles = StyleSheet.create({
     marginBottom: 8,
     fontSize: 13,
     fontFamily: "Poppins_600SemiBold",
+  },
+  firstCompactLabel: {
+    marginTop: 0,
   },
   searchInputWrap: {
     flexDirection: "row",
@@ -400,5 +426,8 @@ const styles = StyleSheet.create({
     textAlignVertical: "top",
     fontSize: 14,
     fontFamily: "Poppins_400Regular",
+  },
+  compactMessageInput: {
+    minHeight: 78,
   },
 });

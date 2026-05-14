@@ -432,7 +432,7 @@ export const useApplicationSubmissionAction = ({
         try {
           if (group.organizer_id !== userId) {
             const organizerNotificationMeta = listingId
-              ? buildNotificationRouteMeta("/manage_gig", { id: listingId }, {
+              ? buildNotificationRouteMeta("/manage_gig", { id: listingId, tab: "Applicants" }, {
                   gig_id: listingId,
                   application_id: data.id,
                   applicant_id: userId,

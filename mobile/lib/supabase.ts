@@ -5,8 +5,33 @@ import { Platform } from 'react-native';
 import 'react-native-url-polyfill/auto';
 import { getStoredPushInstallationId } from '../src/notifications/pushInstallation';
 
-export const supabaseUrl = Constants.expoConfig?.extra?.supabaseUrl || process.env.EXPO_PUBLIC_SUPABASE_URL || '';
-export const supabaseAnonKey = Constants.expoConfig?.extra?.supabaseAnonKey || process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || '';
+const readEnv = (...candidates: (string | undefined)[]): string => {
+    for (const candidate of candidates) {
+        if (typeof candidate === 'string' && candidate.trim().length > 0) {
+            return candidate.trim();
+        }
+    }
+
+    return '';
+};
+
+const configuredSupabaseUrl = readEnv(
+    Constants.expoConfig?.extra?.supabaseUrl,
+    process.env.EXPO_PUBLIC_SUPABASE_URL,
+    process.env.SUPABASE_URL,
+);
+
+const configuredSupabaseAnonKey = readEnv(
+    Constants.expoConfig?.extra?.supabaseAnonKey,
+    process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY,
+    process.env.SUPABASE_ANON_KEY,
+);
+
+const hasSupabaseConfig = Boolean(configuredSupabaseUrl && configuredSupabaseAnonKey);
+
+// Avoid hard crashes on import when local environment variables are missing.
+export const supabaseUrl = configuredSupabaseUrl || 'https://placeholder.supabase.co';
+export const supabaseAnonKey = configuredSupabaseAnonKey || 'missing-anon-key';
 
 const projectRef = (() => {
     try {
@@ -18,8 +43,8 @@ const projectRef = (() => {
 
 export const SUPABASE_AUTH_STORAGE_KEY = `sb-${projectRef}-auth-token`;
 
-if (!supabaseUrl || !supabaseAnonKey) {
-    console.warn('Supabase URL or Anon Key is missing! Please set EXPO_PUBLIC_SUPABASE_URL and EXPO_PUBLIC_SUPABASE_ANON_KEY in your .env file.');
+if (!hasSupabaseConfig) {
+    console.warn('Supabase URL or Anon Key is missing! Please set EXPO_PUBLIC_SUPABASE_URL and EXPO_PUBLIC_SUPABASE_ANON_KEY in the repository root .env file, then restart Expo.');
 }
 
 // Custom storage adapter that works on both web and native
@@ -318,6 +343,10 @@ const getFreshAccessToken = async (): Promise<string | null> => {
 
 // Ensure Realtime subscriptions use a current user JWT before connecting.
 export const prepareRealtimeAuth = async (): Promise<boolean> => {
+    if (!hasSupabaseConfig) {
+        return false;
+    }
+
     try {
         const token = await getFreshAccessToken();
         if (!token) {
@@ -535,6 +564,10 @@ const getInvokeBodySummary = (options?: InvokeOptions) => {
 const withSessionAuthorization = async (
     options?: InvokeOptions,
 ): Promise<InvokeOptions | undefined> => {
+    if (!hasSupabaseConfig) {
+        return options;
+    }
+
     const mergedHeaders: Record<string, string> = {
         ...(options?.headers || {}),
     };
@@ -578,7 +611,7 @@ const withoutAuthorizationHeader = (options?: InvokeOptions): InvokeOptions | un
 };
 
 const unregisterCurrentPushDevice = async () => {
-    if (Platform.OS === 'web') {
+    if (Platform.OS === 'web' || !hasSupabaseConfig) {
         return;
     }
 
@@ -607,6 +640,13 @@ const unregisterCurrentPushDevice = async () => {
     functionName: string,
     options?: InvokeOptions,
 ): Promise<{ data: T | null; error: Error | null }> {
+    if (!hasSupabaseConfig) {
+        return {
+            data: null,
+            error: new Error('Supabase is not configured. Set EXPO_PUBLIC_SUPABASE_URL and EXPO_PUBLIC_SUPABASE_ANON_KEY in the repository root .env file, then restart Expo.'),
+        };
+    }
+
     try {
         const skipSessionAuthorization = shouldSkipSessionAuthorization(functionName, options);
         let invokeOptions = skipSessionAuthorization ? options : await withSessionAuthorization(options);

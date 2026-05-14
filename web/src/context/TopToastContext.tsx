@@ -112,9 +112,10 @@ const MAX_VISIBLE_TOASTS = 4;
 const ENTRY_OFFSET = -28;
 const SWIPE_DISMISS_DISTANCE = 88;
 const OFFSCREEN_DISTANCE = 420;
+const IS_WEB = Platform.OS === "web";
 
 const triggerToastHaptic = (type: TopToastType) => {
-  if (Platform.OS === "web") {
+  if (IS_WEB) {
     return;
   }
 
@@ -349,7 +350,7 @@ function ToastCard({
             },
           ]}
         >
-          <Ionicons name={config.icon as any} size={18} color={config.accent} />
+          <Ionicons name={config.icon as any} size={IS_WEB ? 15 : 18} color={config.accent} />
         </View>
 
         <View style={styles.textContainer}>
@@ -359,7 +360,7 @@ function ToastCard({
           {toast.message ? (
             <Text
               style={[styles.message, { color: colors.textSecondary }]}
-              numberOfLines={3}
+              numberOfLines={IS_WEB ? 2 : 3}
             >
               {toast.message}
             </Text>
@@ -401,14 +402,16 @@ export function useTopToast() {
 const styles = StyleSheet.create({
   toastStack: {
     position: "absolute",
-    left: 14,
-    right: 14,
-    gap: 8,
+    left: IS_WEB ? undefined : 14,
+    right: IS_WEB ? 16 : 14,
+    width: IS_WEB ? 390 : undefined,
+    maxWidth: IS_WEB ? "calc(100% - 32px)" as any : undefined,
+    gap: IS_WEB ? 6 : 8,
     zIndex: 99999,
   },
   toast: {
-    minHeight: 72,
-    borderRadius: 18,
+    minHeight: IS_WEB ? 54 : 72,
+    borderRadius: IS_WEB ? 12 : 18,
     borderWidth: 1,
     overflow: "hidden",
     shadowColor: "#000",
@@ -419,45 +422,45 @@ const styles = StyleSheet.create({
   },
   toastBackdrop: {
     borderWidth: 1,
-    borderRadius: 18,
+    borderRadius: IS_WEB ? 12 : 18,
   },
   touchableArea: {
-    paddingHorizontal: 14,
-    paddingBottom: 13,
-    paddingTop: 12,
+    paddingHorizontal: IS_WEB ? 12 : 14,
+    paddingBottom: IS_WEB ? 10 : 13,
+    paddingTop: IS_WEB ? 10 : 12,
     flexDirection: "row",
-    alignItems: "flex-start",
+    alignItems: IS_WEB ? "center" : "flex-start",
   },
   iconWrap: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
+    width: IS_WEB ? 24 : 30,
+    height: IS_WEB ? 24 : 30,
+    borderRadius: IS_WEB ? 12 : 15,
     alignItems: "center",
     justifyContent: "center",
     marginTop: 1,
   },
   textContainer: {
     flex: 1,
-    marginLeft: 12,
+    marginLeft: IS_WEB ? 10 : 12,
     marginRight: 8,
   },
   title: {
-    fontSize: 14,
+    fontSize: IS_WEB ? 13 : 14,
     fontFamily: "Poppins_600SemiBold",
   },
   message: {
-    marginTop: 3,
-    fontSize: 12,
-    lineHeight: 18,
+    marginTop: IS_WEB ? 1 : 3,
+    fontSize: IS_WEB ? 11 : 12,
+    lineHeight: IS_WEB ? 15 : 18,
     fontFamily: "Poppins_400Regular",
   },
   closeIcon: {
     opacity: 0.85,
-    marginTop: 4,
+    marginTop: IS_WEB ? 0 : 4,
   },
   progressTrack: {
     bottom: 0,
-    height: 2,
+    height: IS_WEB ? 1 : 2,
     left: 0,
     position: "absolute",
     right: 0,

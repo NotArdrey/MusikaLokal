@@ -131,6 +131,32 @@ const resolveBookingRequestNotificationTarget = (
   };
 };
 
+const isGigApplicationNotification = (
+  notificationType: string | undefined,
+  record: Record<string, unknown>,
+  meta: Record<string, unknown>,
+) => {
+  const title = readStringId(record.title, meta.title)?.toLowerCase() || "";
+  const hasApplicationId = Boolean(readStringId(
+    record.application_id,
+    record.applicationId,
+    meta.application_id,
+    meta.applicationId,
+  ));
+  const hasGigId = Boolean(readStringId(
+    record.gig_id,
+    record.gigId,
+    meta.gig_id,
+    meta.gigId,
+  ));
+
+  return (
+    notificationType === "gig_application" ||
+    title.includes("new gig application") ||
+    (hasApplicationId && hasGigId)
+  );
+};
+
 export const normalizeNotificationRouteParams = (value: unknown) => {
   if (!isRecord(value)) {
     return undefined;
@@ -189,6 +215,23 @@ export const resolveNotificationNavigationTarget = (
   const bookingRequestTarget = resolveBookingRequestNotificationTarget(notificationType, record, meta);
   if (bookingRequestTarget) {
     return bookingRequestTarget;
+  }
+
+  if (isGigApplicationNotification(notificationType, record, meta)) {
+    const gigId = readStringId(
+      record.gig_id,
+      record.gigId,
+      meta.gig_id,
+      meta.gigId,
+      explicitParams?.id,
+    );
+    const params = {
+      ...(explicitParams || {}),
+      ...(gigId ? { id: gigId } : {}),
+      tab: "Applicants",
+    };
+
+    return { pathname: "/manage_gig", params };
   }
 
   if (explicitPath) {

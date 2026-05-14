@@ -13,12 +13,14 @@ import { PersistQueryClientProvider } from "@tanstack/react-query-persist-client
 import * as Linking from "expo-linking";
 import { router, Stack, useSegments } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { AppState, LogBox, Platform, View } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import "../global.css";
 import { clearSupabaseAuthStorage, prepareRealtimeAuth, supabase } from "../lib/supabase";
 import { AuthProvider, useAuth } from "../src/context/AuthContext";
+import CustomAlert from "../src/components/CustomAlert";
+import { GlobalNavbar } from "../src/components/navbar";
 import { BottomOverlayProvider, useBottomOverlay } from "../src/context/BottomOverlayContext";
 import { usePushNotifications } from "../src/hooks/usePushNotifications";
 import {
@@ -45,11 +47,37 @@ SplashScreen.preventAutoHideAsync();
 
 LogBox.ignoreLogs([
   "AuthApiError: Invalid Refresh Token: Refresh Token Not Found",
+  "Network request failed",
+  "TypeError: Network request failed",
   "SafeAreaView has been deprecated and will be removed in a future release.",
   "setLayoutAnimationEnabledExperimental is currently a no-op in the New Architecture.",
   "[expo-av]: Expo AV has been deprecated and will be removed in SDK 54.",
   "Unable to activate keep awake",
 ]);
+
+const originalConsoleError = console.error;
+console.error = (...args: unknown[]) => {
+  const message = args
+    .map((arg) => {
+      if (arg instanceof Error) {
+        return `${arg.name}: ${arg.message}`;
+      }
+      if (typeof arg === "string") {
+        return arg;
+      }
+      return "";
+    })
+    .join(" ");
+
+  if (
+    message.includes("Network request failed") ||
+    message.includes("TypeError: Network request failed")
+  ) {
+    return;
+  }
+
+  originalConsoleError(...args);
+};
 
 if (isE2EFixtureMode()) {
   LogBox.ignoreAllLogs(true);
@@ -65,6 +93,7 @@ const NOTIFICATION_TOAST_RECOVERY_POLL_INTERVAL_MS = isE2EFixtureMode()
   : 30_000;
 const NOTIFICATION_TOAST_SEEN_LIMIT = 240;
 const NOTIFICATION_TOAST_DEBUG_LOGS = __DEV__;
+const NETWORK_FALLBACK_MODAL_DEDUPE_MS = 20_000;
 
 type IncomingNotificationToastRecord = {
   id?: string | null;
@@ -99,6 +128,47 @@ const decodeE2EBase64Url = (value: unknown) => {
     );
   } catch {
     return "";
+  }
+};
+
+type NetworkFallbackAlertState = {
+  targetLabel?: string;
+};
+
+const isNetworkRequestFailedError = (error: unknown) => {
+  const message =
+    error instanceof Error
+      ? error.message
+      : String((error as { message?: unknown })?.message || error || "");
+
+  const normalizedMessage = message.toLowerCase();
+  return (
+    normalizedMessage.includes("network request failed") ||
+    normalizedMessage.includes("failed to fetch") ||
+    normalizedMessage.includes("networkerror")
+  );
+};
+
+const getFetchTargetLabel = (input: unknown) => {
+  const rawUrl =
+    typeof input === "string"
+      ? input
+      : input && typeof input === "object" && "url" in input
+        ? String((input as { url?: unknown }).url || "")
+        : "";
+
+  if (!rawUrl) {
+    return undefined;
+  }
+
+  try {
+    const hostname = new URL(rawUrl).hostname;
+    if (hostname.endsWith(".supabase.co")) {
+      return "Supabase";
+    }
+    return hostname;
+  } catch {
+    return undefined;
   }
 };
 
@@ -198,6 +268,55 @@ function RootContent() {
   const notificationAppStateRef = useRef(AppState.currentState);
   const notificationBackgroundedAtRef = useRef<number | null>(null);
   const displayedNotificationToastIdsRef = useRef<Set<string>>(new Set());
+  const [networkFallbackAlert, setNetworkFallbackAlert] =
+    useState<NetworkFallbackAlertState | null>(null);
+  const networkFallbackVisibleRef = useRef(false);
+  const lastNetworkFallbackShownAtRef = useRef(0);
+
+  const hideNetworkFallbackAlert = useCallback(() => {
+    networkFallbackVisibleRef.current = false;
+    setNetworkFallbackAlert(null);
+  }, []);
+
+  const showNetworkFallbackAlert = useCallback((targetLabel?: string) => {
+    const now = Date.now();
+    if (
+      networkFallbackVisibleRef.current ||
+      now - lastNetworkFallbackShownAtRef.current < NETWORK_FALLBACK_MODAL_DEDUPE_MS
+    ) {
+      return;
+    }
+
+    networkFallbackVisibleRef.current = true;
+    lastNetworkFallbackShownAtRef.current = now;
+    setNetworkFallbackAlert({ targetLabel });
+  }, []);
+
+  useEffect(() => {
+    const originalFetch = globalThis.fetch;
+    if (typeof originalFetch !== "function") {
+      return;
+    }
+
+    const patchedFetch = (async (...args: Parameters<typeof fetch>) => {
+      try {
+        return await originalFetch(...args);
+      } catch (error) {
+        if (isNetworkRequestFailedError(error)) {
+          showNetworkFallbackAlert(getFetchTargetLabel(args[0]));
+        }
+        throw error;
+      }
+    }) as typeof fetch;
+
+    globalThis.fetch = patchedFetch;
+
+    return () => {
+      if (globalThis.fetch === patchedFetch) {
+        globalThis.fetch = originalFetch;
+      }
+    };
+  }, [showNetworkFallbackAlert]);
 
   useEffect(() => {
     const startedAt = Date.now();
@@ -839,6 +958,19 @@ function RootContent() {
       </Stack>
 
       <GlobalRadioMiniPlayer />
+      <GlobalNavbar />
+      <CustomAlert
+        visible={Boolean(networkFallbackAlert)}
+        type="error"
+        title="Connection Problem"
+        message={
+          networkFallbackAlert?.targetLabel
+            ? `MusikaLokal could not reach ${networkFallbackAlert.targetLabel}. Check your internet connection, then try again.`
+            : "MusikaLokal could not reach the server. Check your internet connection, then try again."
+        }
+        forceModal
+        onClose={hideNetworkFallbackAlert}
+      />
     </View>
   );
 }

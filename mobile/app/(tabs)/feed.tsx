@@ -991,13 +991,13 @@ type FeedQuickInfoItem = {
 const getFeedQuickInfoIconMetrics = (icon: FeedQuickInfoItem["icon"]) => {
   switch (icon) {
     case "star":
-      return { size: 16, offsetY: 0 };
+      return { size: 16 };
     case "location":
-      return { size: 18, offsetY: 0 };
+      return { size: 18 };
     case "chatbubble-ellipses":
-      return { size: 17, offsetY: 1 };
+      return { size: 17 };
     default:
-      return { size: 17, offsetY: 0 };
+      return { size: 17 };
   }
 };
 
@@ -2111,10 +2111,7 @@ const SocialFeedCard = React.memo(function SocialFeedCard({
                     name={info.icon}
                     size={iconMetrics.size}
                     color={info.icon === "star" ? "#F59E0B" : colors.primary}
-                    style={[
-                      styles.socialQuickInfoIcon,
-                      iconMetrics.offsetY !== 0 && { transform: [{ translateY: iconMetrics.offsetY }] },
-                    ]}
+                    style={styles.socialQuickInfoIcon}
                   />
                 </View>
                 <Text style={[styles.socialQuickInfoText, { color: colors.textSecondary }]} numberOfLines={1}>
@@ -5686,7 +5683,7 @@ const styles = StyleSheet.create({
   socialQuickInfoItem: {
     flex: 1,
     minWidth: 0,
-    height: 24,
+    height: 20,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
@@ -5699,15 +5696,15 @@ const styles = StyleSheet.create({
     justifyContent: "flex-end",
   },
   socialQuickInfoIconBox: {
-    width: 22,
-    height: 22,
+    width: 20,
+    height: 20,
     alignItems: "center",
     justifyContent: "center",
   },
   socialQuickInfoIcon: {
-    width: 22,
-    height: 22,
-    lineHeight: 22,
+    width: 20,
+    height: 20,
+    lineHeight: 20,
     includeFontPadding: false,
     textAlign: "center",
     textAlignVertical: "center",
@@ -5715,12 +5712,11 @@ const styles = StyleSheet.create({
   socialQuickInfoText: {
     flexShrink: 1,
     fontSize: moderateScale(10.5),
-    height: 22,
-    lineHeight: 22,
+    height: 20,
+    lineHeight: 20,
     fontFamily: "Poppins_700Bold",
     includeFontPadding: false,
     textAlignVertical: "center",
-    transform: [{ translateY: 1 }],
   },
   socialActionRow: {
     flexDirection: "row",

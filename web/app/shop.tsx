@@ -647,10 +647,10 @@ export default function ShopScreen() {
                 )}
                 <View style={styles.sellerActionButtons}>
                   <TouchableOpacity activeOpacity={0.85} disabled={isBusy} onPress={() => openEditListing(product.id)} style={[styles.iconActionBtn, { borderColor: borderSoft }]}>
-                    <Ionicons name="pencil-outline" size={16} color={colors.text} />
+                    <Ionicons name="pencil-outline" size={16} color={colors.text} style={styles.iconActionIcon} />
                   </TouchableOpacity>
                   <TouchableOpacity activeOpacity={0.85} disabled={isBusy} onPress={() => promptDeleteProduct(product)} style={[styles.iconActionBtn, { borderColor: "#FCA5A5", backgroundColor: "#FEE2E2" }]}>
-                    <Ionicons name="trash-outline" size={16} color="#DC2626" />
+                    <Ionicons name="trash-outline" size={16} color="#DC2626" style={styles.iconActionIcon} />
                   </TouchableOpacity>
                 </View>
               </View>
@@ -892,9 +892,9 @@ const styles = StyleSheet.create({
   productTitle: { fontSize: 13, fontFamily: "Poppins_600SemiBold" },
   productSeller: { fontSize: 11, marginTop: 2 },
   productPrice: { fontSize: 14, fontFamily: "Poppins_700Bold", marginTop: 4 },
-  variantCount: { fontSize: 10, marginTop: 2 },
-  cardFooterRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: 6, gap: 8 },
-  chatHint: { flexDirection: "row", alignItems: "center", gap: 4, borderRadius: 999, paddingHorizontal: 8, paddingVertical: 4 },
+  variantCount: { flex: 1, minWidth: 0, fontSize: 10 },
+  cardFooterRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: 6, gap: 6 },
+  chatHint: { flexShrink: 0, flexDirection: "row", alignItems: "center", gap: 3, borderRadius: 999, paddingHorizontal: 7, paddingVertical: 4 },
   chatHintText: { fontSize: 10, fontFamily: "Poppins_600SemiBold" },
 
   statusBadge: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6 },
@@ -912,6 +912,7 @@ const styles = StyleSheet.create({
   sellerProductMeta: { fontSize: 11, marginTop: 4 },
   sellerActionButtons: { flexDirection: "row", gap: 8 },
   iconActionBtn: { width: 34, height: 34, borderRadius: 10, borderWidth: 1, alignItems: "center", justifyContent: "center" },
+  iconActionIcon: { width: 16, height: 16, lineHeight: 16, includeFontPadding: false, textAlign: "center", textAlignVertical: "center" },
 
   emptyContainer: { alignItems: "center", justifyContent: "center", minHeight: 300, paddingVertical: 40 },
   emptyText: { textAlign: "center", marginTop: 12, fontSize: 15, fontFamily: "Poppins_500Medium" },
