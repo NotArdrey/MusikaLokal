@@ -118,11 +118,11 @@ insert into auth.identities (id, user_id, provider_id, identity_data, provider, 
 on conflict (provider_id, provider) do nothing;
 
 insert into public.profiles (id, email, full_name, avatar_url, role, bio, location, is_verified, verification_status, contact_number, address) values
-  ('10000000-0000-4000-8000-000000000001','juan.delacruz.20260514@musikalokal.app','Juan Dela Cruz','https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=600&q=80','musician','Quezon City guitarist and arranger who plays OPM, funk, and wedding reception sets with a tight trio or full band.','Quezon City, Metro Manila',true,'APPROVED','+63 917 555 0101','Sikatuna Village, Quezon City'),
-  ('10000000-0000-4000-8000-000000000002','mara.reyes.20260514@musikalokal.app','Mara Reyes','https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=600&q=80','musician','Soul and jazz vocalist from Makati with a polished live-band set for weddings, launches, and lounge nights.','Makati City, Metro Manila',true,'APPROVED','+63 917 555 0102','Poblacion, Makati City'),
-  ('10000000-0000-4000-8000-000000000003','joel.santos.20260514@musikalokal.app','Joel Santos','https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&w=600&q=80','studio-owner','Owner and engineer for rehearsal, recording, and voice-over rooms serving independent artists.','Mandaluyong City, Metro Manila',true,'APPROVED','+63 917 555 0103','Highway Hills, Mandaluyong City'),
-  ('10000000-0000-4000-8000-000000000004','anya.cruz.20260514@musikalokal.app','Anya Cruz','https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=600&q=80','venue-owner','Curator for mid-size live rooms, brand showcases, listening parties, and community music nights.','Taguig City, Metro Manila',true,'APPROVED','+63 917 555 0104','BGC, Taguig City'),
-  ('10000000-0000-4000-8000-000000000005','lio.ramos.20260514@musikalokal.app','Lio Ramos','https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?auto=format&fit=crop&w=600&q=80','producer','Producer, merch seller, and release coordinator for indie pop and alternative acts.','Pasig City, Metro Manila',true,'APPROVED','+63 917 555 0105','Kapitolyo, Pasig City')
+  ('10000000-0000-4000-8000-000000000001','juan.delacruz.20260514@musikalokal.app','Juan Dela Cruz','https://images.pexels.com/photos/92080/pexels-photo-92080.jpeg?auto=compress&cs=tinysrgb&w=600','musician','Quezon City guitarist and arranger who plays OPM, funk, and wedding reception sets with a tight trio or full band.','Quezon City, Metro Manila',true,'APPROVED','+63 917 555 0101','Sikatuna Village, Quezon City'),
+  ('10000000-0000-4000-8000-000000000002','mara.reyes.20260514@musikalokal.app','Mara Reyes','https://images.pexels.com/photos/1699161/pexels-photo-1699161.jpeg?auto=compress&cs=tinysrgb&w=600','musician','Soul and jazz vocalist from Makati with a polished live-band set for weddings, launches, and lounge nights.','Makati City, Metro Manila',true,'APPROVED','+63 917 555 0102','Poblacion, Makati City'),
+  ('10000000-0000-4000-8000-000000000003','joel.santos.20260514@musikalokal.app','Joel Santos','https://images.pexels.com/photos/7586137/pexels-photo-7586137.jpeg?auto=compress&cs=tinysrgb&w=600','studio-owner','Owner and engineer for rehearsal, recording, and voice-over rooms serving independent artists.','Mandaluyong City, Metro Manila',true,'APPROVED','+63 917 555 0103','Highway Hills, Mandaluyong City'),
+  ('10000000-0000-4000-8000-000000000004','anya.cruz.20260514@musikalokal.app','Anya Cruz','https://images.pexels.com/photos/1105666/pexels-photo-1105666.jpeg?auto=compress&cs=tinysrgb&w=600','venue-owner','Curator for mid-size live rooms, brand showcases, listening parties, and community music nights.','Taguig City, Metro Manila',true,'APPROVED','+63 917 555 0104','BGC, Taguig City'),
+  ('10000000-0000-4000-8000-000000000005','lio.ramos.20260514@musikalokal.app','Lio Ramos','https://images.pexels.com/photos/29990037/pexels-photo-29990037.jpeg?auto=compress&cs=tinysrgb&w=600','producer','Producer, merch seller, and release coordinator for indie pop and alternative acts.','Pasig City, Metro Manila',true,'APPROVED','+63 917 555 0105','Kapitolyo, Pasig City')
 on conflict (id) do update set
   email=excluded.email, full_name=excluded.full_name, avatar_url=excluded.avatar_url, role=excluded.role,
   bio=excluded.bio, location=excluded.location, is_verified=excluded.is_verified,
@@ -153,11 +153,11 @@ insert into public.studios (id, owner_id, name, address, hourly_rate, descriptio
 on conflict (id) do nothing;
 
 insert into public.studio_media (studio_id, media_type, media_url, sort_order) values
-  ('20000000-0000-4000-8000-000000000001','image','https://images.unsplash.com/photo-1598488035139-bdbb2231ce04?auto=format&fit=crop&w=1200&q=80',0),
-  ('20000000-0000-4000-8000-000000000002','image','https://images.unsplash.com/photo-1511379938547-c1f69419868d?auto=format&fit=crop&w=1200&q=80',0),
+  ('20000000-0000-4000-8000-000000000001','image','https://images.pexels.com/photos/7586137/pexels-photo-7586137.jpeg?auto=compress&cs=tinysrgb&w=1200',0),
+  ('20000000-0000-4000-8000-000000000002','image','https://images.pexels.com/photos/995301/pexels-photo-995301.jpeg?auto=compress&cs=tinysrgb&w=1200',0),
   ('20000000-0000-4000-8000-000000000003','image','https://images.unsplash.com/photo-1520523839897-bd0b52f945a0?auto=format&fit=crop&w=1200&q=80',0),
-  ('20000000-0000-4000-8000-000000000004','image','https://images.unsplash.com/photo-1524368535928-5b5e00ddc76b?auto=format&fit=crop&w=1200&q=80',0),
-  ('20000000-0000-4000-8000-000000000005','image','https://images.unsplash.com/photo-1516924962500-2b4b3b99ea02?auto=format&fit=crop&w=1200&q=80',0);
+  ('20000000-0000-4000-8000-000000000004','image','https://images.pexels.com/photos/164745/pexels-photo-164745.jpeg?auto=compress&cs=tinysrgb&w=1200',0),
+  ('20000000-0000-4000-8000-000000000005','image','https://images.pexels.com/photos/164829/pexels-photo-164829.jpeg?auto=compress&cs=tinysrgb&w=1200',0);
 
 insert into public.studio_amenities (studio_id, amenity) values
   ('20000000-0000-4000-8000-000000000001','Vocal booth'),
@@ -175,10 +175,10 @@ insert into public.studio_types (studio_id, studio_type) values
 
 insert into public.studio_instruments (studio_id, instrument_name, image_url) values
   ('20000000-0000-4000-8000-000000000001','Weighted stage keys','https://images.unsplash.com/photo-1520523839897-bd0b52f945a0?auto=format&fit=crop&w=900&q=80'),
-  ('20000000-0000-4000-8000-000000000002','Five-piece drum kit','https://images.unsplash.com/photo-1519892300165-cb5542fb47c7?auto=format&fit=crop&w=900&q=80'),
-  ('20000000-0000-4000-8000-000000000003','Acoustic guitar pair','https://images.unsplash.com/photo-1516924962500-2b4b3b99ea02?auto=format&fit=crop&w=900&q=80'),
-  ('20000000-0000-4000-8000-000000000004','Tube guitar amplifiers','https://images.unsplash.com/photo-1516924962500-2b4b3b99ea02?auto=format&fit=crop&w=900&q=80'),
-  ('20000000-0000-4000-8000-000000000005','Compact percussion kit','https://images.unsplash.com/photo-1519892300165-cb5542fb47c7?auto=format&fit=crop&w=900&q=80');
+  ('20000000-0000-4000-8000-000000000002','Five-piece drum kit','https://images.pexels.com/photos/995301/pexels-photo-995301.jpeg?auto=compress&cs=tinysrgb&w=900'),
+  ('20000000-0000-4000-8000-000000000003','Acoustic guitar pair','https://images.pexels.com/photos/92080/pexels-photo-92080.jpeg?auto=compress&cs=tinysrgb&w=900'),
+  ('20000000-0000-4000-8000-000000000004','Tube guitar amplifiers','https://images.pexels.com/photos/164745/pexels-photo-164745.jpeg?auto=compress&cs=tinysrgb&w=900'),
+  ('20000000-0000-4000-8000-000000000005','Compact percussion kit','https://images.pexels.com/photos/995301/pexels-photo-995301.jpeg?auto=compress&cs=tinysrgb&w=900');
 
 insert into public.studio_settings (studio_id, min_booking_duration_hours, max_booking_duration_hours, lead_time_hours, weekend_multiplier, recording_songs_per_block, recording_hours_per_block, recording_rate_negotiable) values
   ('20000000-0000-4000-8000-000000000001',2,8,12,1.15,1,3,false),
@@ -203,11 +203,11 @@ insert into public.groups (id, owner_id, name, genre, description, location, lat
 on conflict (id) do nothing;
 
 insert into public.group_media (group_id, media_type, media_url, sort_order) values
-  ('30000000-0000-4000-8000-000000000001','image','https://images.unsplash.com/photo-1501386761578-eac5c94b800a?auto=format&fit=crop&w=1200&q=80',0),
-  ('30000000-0000-4000-8000-000000000002','image','https://images.unsplash.com/photo-1516280440614-37939bbacd81?auto=format&fit=crop&w=1200&q=80',0),
-  ('30000000-0000-4000-8000-000000000003','image','https://images.unsplash.com/photo-1540039155733-5bb30b53aa14?auto=format&fit=crop&w=1200&q=80',0),
-  ('30000000-0000-4000-8000-000000000004','image','https://images.unsplash.com/photo-1521337581100-8ca9a73a5f79?auto=format&fit=crop&w=1200&q=80',0),
-  ('30000000-0000-4000-8000-000000000005','image','https://images.unsplash.com/photo-1516450360452-9312f5e86fc7?auto=format&fit=crop&w=1200&q=80',0);
+  ('30000000-0000-4000-8000-000000000001','image','https://images.pexels.com/photos/33284931/pexels-photo-33284931.jpeg?auto=compress&cs=tinysrgb&w=1200',0),
+  ('30000000-0000-4000-8000-000000000002','image','https://images.pexels.com/photos/1699161/pexels-photo-1699161.jpeg?auto=compress&cs=tinysrgb&w=1200',0),
+  ('30000000-0000-4000-8000-000000000003','image','https://images.pexels.com/photos/164745/pexels-photo-164745.jpeg?auto=compress&cs=tinysrgb&w=1200',0),
+  ('30000000-0000-4000-8000-000000000004','image','https://images.pexels.com/photos/32527855/pexels-photo-32527855.jpeg?auto=compress&cs=tinysrgb&w=1200',0),
+  ('30000000-0000-4000-8000-000000000005','image','https://images.pexels.com/photos/1105666/pexels-photo-1105666.jpeg?auto=compress&cs=tinysrgb&w=1200',0);
 
 insert into public.group_members (group_id, user_id, role) values
   ('30000000-0000-4000-8000-000000000001','10000000-0000-4000-8000-000000000001','owner'),
@@ -218,11 +218,11 @@ insert into public.group_members (group_id, user_id, role) values
 on conflict do nothing;
 
 insert into public.group_roster_members (group_id, user_id, member_name, member_role, instrument, avatar_url, sort_order) values
-  ('30000000-0000-4000-8000-000000000001','10000000-0000-4000-8000-000000000001','Juan Dela Cruz','Band lead','Guitar','https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=600&q=80',0),
-  ('30000000-0000-4000-8000-000000000002','10000000-0000-4000-8000-000000000002','Mara Reyes','Band lead','Vocals','https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=600&q=80',0),
-  ('30000000-0000-4000-8000-000000000003','10000000-0000-4000-8000-000000000001','Juan Dela Cruz','Lead guitar','Guitar','https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=600&q=80',0),
-  ('30000000-0000-4000-8000-000000000004','10000000-0000-4000-8000-000000000002','Mara Reyes','Vocal lead','Vocals','https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=600&q=80',0),
-  ('30000000-0000-4000-8000-000000000005','10000000-0000-4000-8000-000000000001','Juan Dela Cruz','Rhythm director','Guitar','https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=600&q=80',0);
+  ('30000000-0000-4000-8000-000000000001','10000000-0000-4000-8000-000000000001','Juan Dela Cruz','Band lead','Guitar','https://images.pexels.com/photos/92080/pexels-photo-92080.jpeg?auto=compress&cs=tinysrgb&w=600',0),
+  ('30000000-0000-4000-8000-000000000002','10000000-0000-4000-8000-000000000002','Mara Reyes','Band lead','Vocals','https://images.pexels.com/photos/1699161/pexels-photo-1699161.jpeg?auto=compress&cs=tinysrgb&w=600',0),
+  ('30000000-0000-4000-8000-000000000003','10000000-0000-4000-8000-000000000001','Juan Dela Cruz','Lead guitar','Guitar','https://images.pexels.com/photos/92080/pexels-photo-92080.jpeg?auto=compress&cs=tinysrgb&w=600',0),
+  ('30000000-0000-4000-8000-000000000004','10000000-0000-4000-8000-000000000002','Mara Reyes','Vocal lead','Vocals','https://images.pexels.com/photos/1699161/pexels-photo-1699161.jpeg?auto=compress&cs=tinysrgb&w=600',0),
+  ('30000000-0000-4000-8000-000000000005','10000000-0000-4000-8000-000000000001','Juan Dela Cruz','Rhythm director','Guitar','https://images.pexels.com/photos/92080/pexels-photo-92080.jpeg?auto=compress&cs=tinysrgb&w=600',0);
 
 insert into public.group_availability_slots (group_id, slot_date, start_time, end_time, is_available) values
   ('30000000-0000-4000-8000-000000000001', current_date + 7, '18:00', '22:00', true),
@@ -240,11 +240,11 @@ insert into public.gigs (id, organizer_id, name, location, budget, description, 
 on conflict (id) do nothing;
 
 insert into public.gig_media (gig_id, media_type, media_url, sort_order) values
-  ('40000000-0000-4000-8000-000000000001','image','https://images.unsplash.com/photo-1492684223066-81342ee5ff30?auto=format&fit=crop&w=1200&q=80',0),
-  ('40000000-0000-4000-8000-000000000002','image','https://images.unsplash.com/photo-1470229722913-7c0e2dbbafd3?auto=format&fit=crop&w=1200&q=80',0),
-  ('40000000-0000-4000-8000-000000000003','image','https://images.unsplash.com/photo-1524368535928-5b5e00ddc76b?auto=format&fit=crop&w=1200&q=80',0),
-  ('40000000-0000-4000-8000-000000000004','image','https://images.unsplash.com/photo-1519741497674-611481863552?auto=format&fit=crop&w=1200&q=80',0),
-  ('40000000-0000-4000-8000-000000000005','image','https://images.unsplash.com/photo-1505236858219-8359eb29e329?auto=format&fit=crop&w=1200&q=80',0);
+  ('40000000-0000-4000-8000-000000000001','image','https://images.pexels.com/photos/29990037/pexels-photo-29990037.jpeg?auto=compress&cs=tinysrgb&w=1200',0),
+  ('40000000-0000-4000-8000-000000000002','image','https://images.pexels.com/photos/1699161/pexels-photo-1699161.jpeg?auto=compress&cs=tinysrgb&w=1200',0),
+  ('40000000-0000-4000-8000-000000000003','image','https://images.pexels.com/photos/1105666/pexels-photo-1105666.jpeg?auto=compress&cs=tinysrgb&w=1200',0),
+  ('40000000-0000-4000-8000-000000000004','image','https://images.pexels.com/photos/32527855/pexels-photo-32527855.jpeg?auto=compress&cs=tinysrgb&w=1200',0),
+  ('40000000-0000-4000-8000-000000000005','image','https://images.pexels.com/photos/164829/pexels-photo-164829.jpeg?auto=compress&cs=tinysrgb&w=1200',0);
 
 insert into public.gig_requirements (gig_id, requirement_key, requirement_value) values
   ('40000000-0000-4000-8000-000000000001','lineup','{"slots":2,"preferred_genres":["soul","funk","indie pop"]}'::jsonb),
@@ -277,11 +277,11 @@ insert into public.products (id, seller_id, group_id, title, description, produc
 on conflict (id) do nothing;
 
 insert into public.product_media (product_id, media_type, storage_path, mime_type, display_order, is_primary) values
-  ('60000000-0000-4000-8000-000000000001','image','https://images.unsplash.com/photo-1521572163474-6864f9cf17ab?auto=format&fit=crop&w=1200&q=80','image/jpeg',0,true),
-  ('60000000-0000-4000-8000-000000000002','image','https://images.unsplash.com/photo-1516280440614-37939bbacd81?auto=format&fit=crop&w=1200&q=80','image/jpeg',0,true),
+  ('60000000-0000-4000-8000-000000000001','image','https://images.pexels.com/photos/996329/pexels-photo-996329.jpeg?auto=compress&cs=tinysrgb&w=1200','image/jpeg',0,true),
+  ('60000000-0000-4000-8000-000000000002','image','https://images.pexels.com/photos/164821/pexels-photo-164821.jpeg?auto=compress&cs=tinysrgb&w=1200','image/jpeg',0,true),
   ('60000000-0000-4000-8000-000000000003','image','https://images.unsplash.com/photo-1541961017774-22349e4a1262?auto=format&fit=crop&w=1200&q=80','image/jpeg',0,true),
-  ('60000000-0000-4000-8000-000000000004','image','https://images.unsplash.com/photo-1519682337058-a94d519337bc?auto=format&fit=crop&w=1200&q=80','image/jpeg',0,true),
-  ('60000000-0000-4000-8000-000000000005','image','https://images.unsplash.com/photo-1503342217505-b0a15ec3261c?auto=format&fit=crop&w=1200&q=80','image/jpeg',0,true);
+  ('60000000-0000-4000-8000-000000000004','image','https://images.pexels.com/photos/159711/books-bookstore-book-reading-159711.jpeg?auto=compress&cs=tinysrgb&w=1200','image/jpeg',0,true),
+  ('60000000-0000-4000-8000-000000000005','image','https://images.pexels.com/photos/1152077/pexels-photo-1152077.jpeg?auto=compress&cs=tinysrgb&w=1200','image/jpeg',0,true);
 
 insert into public.product_variants (product_id, variant_label, variant_type, price_override, sku, stock_quantity, is_available) values
   ('60000000-0000-4000-8000-000000000001','Medium','size',850,'SD-TEE-M',24,true),
@@ -291,11 +291,11 @@ insert into public.product_variants (product_id, variant_label, variant_type, pr
   ('60000000-0000-4000-8000-000000000005','Patch bundle','format',390,'PBC-PATCH-SET',120,true);
 
 insert into public.playlists (id, creator_id, title, description, cover_image_url, visibility, genre, is_featured) values
-  ('a0000000-0000-4000-8000-000000000001','10000000-0000-4000-8000-000000000001','Sikatuna Sunset Set','Warm OPM and indie-funk tracks Juan uses before small-room shows.','https://images.unsplash.com/photo-1516280440614-37939bbacd81?auto=format&fit=crop&w=1200&q=80','public','Indie Funk',true),
-  ('a0000000-0000-4000-8000-000000000002','10000000-0000-4000-8000-000000000002','Poblacion After Hours','Soul, jazz, and bossa picks for late lounge sets.','https://images.unsplash.com/photo-1511379938547-c1f69419868d?auto=format&fit=crop&w=1200&q=80','public','Soul / Jazz',true),
-  ('a0000000-0000-4000-8000-000000000003','10000000-0000-4000-8000-000000000005','Stagecraft Call Time','Producer playlist for walk-in music, soundcheck references, and quick changeovers.','https://images.unsplash.com/photo-1506157786151-b8491531f063?auto=format&fit=crop&w=1200&q=80','public','Event Pop',false),
-  ('a0000000-0000-4000-8000-000000000004','10000000-0000-4000-8000-000000000001','Cubao Guitar Notes','Alt-rock riffs and rehearsal references from the Cubao room circuit.','https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?auto=format&fit=crop&w=1200&q=80','public','Alt Rock',false),
-  ('a0000000-0000-4000-8000-000000000005','10000000-0000-4000-8000-000000000002','Garden Reception Warmup','Acoustic OPM and first-dance references for outdoor receptions.','https://images.unsplash.com/photo-1519741497674-611481863552?auto=format&fit=crop&w=1200&q=80','promotional','Acoustic OPM',false)
+  ('a0000000-0000-4000-8000-000000000001','10000000-0000-4000-8000-000000000001','Sikatuna Sunset Set','Warm OPM and indie-funk tracks Juan uses before small-room shows.','https://images.pexels.com/photos/92080/pexels-photo-92080.jpeg?auto=compress&cs=tinysrgb&w=1200','public','Indie Funk',true),
+  ('a0000000-0000-4000-8000-000000000002','10000000-0000-4000-8000-000000000002','Poblacion After Hours','Soul, jazz, and bossa picks for late lounge sets.','https://images.pexels.com/photos/1699161/pexels-photo-1699161.jpeg?auto=compress&cs=tinysrgb&w=1200','public','Soul / Jazz',true),
+  ('a0000000-0000-4000-8000-000000000003','10000000-0000-4000-8000-000000000005','Stagecraft Call Time','Producer playlist for walk-in music, soundcheck references, and quick changeovers.','https://images.pexels.com/photos/7586137/pexels-photo-7586137.jpeg?auto=compress&cs=tinysrgb&w=1200','public','Event Pop',false),
+  ('a0000000-0000-4000-8000-000000000004','10000000-0000-4000-8000-000000000001','Cubao Guitar Notes','Alt-rock riffs and rehearsal references from the Cubao room circuit.','https://images.pexels.com/photos/164745/pexels-photo-164745.jpeg?auto=compress&cs=tinysrgb&w=1200','public','Alt Rock',false),
+  ('a0000000-0000-4000-8000-000000000005','10000000-0000-4000-8000-000000000002','Garden Reception Warmup','Acoustic OPM and first-dance references for outdoor receptions.','https://images.pexels.com/photos/32527855/pexels-photo-32527855.jpeg?auto=compress&cs=tinysrgb&w=1200','promotional','Acoustic OPM',false)
 on conflict (id) do nothing;
 
 insert into public.playlist_items (id, playlist_id, title, artist_name, duration_seconds, "position", audio_url) values
@@ -307,11 +307,11 @@ insert into public.playlist_items (id, playlist_id, title, artist_name, duration
 on conflict (id) do nothing;
 
 insert into public.playlist_teaser_assets (id, playlist_id, uploader_id, asset_type, storage_path, mime_type, duration_seconds, file_size_bytes, screen_result) values
-  ('a2000000-0000-4000-8000-000000000001','a0000000-0000-4000-8000-000000000001','10000000-0000-4000-8000-000000000001','cover_art','https://images.unsplash.com/photo-1516280440614-37939bbacd81?auto=format&fit=crop&w=1200&q=80','image/jpeg',null,null,'passed'),
-  ('a2000000-0000-4000-8000-000000000002','a0000000-0000-4000-8000-000000000002','10000000-0000-4000-8000-000000000002','cover_art','https://images.unsplash.com/photo-1511379938547-c1f69419868d?auto=format&fit=crop&w=1200&q=80','image/jpeg',null,null,'passed'),
-  ('a2000000-0000-4000-8000-000000000003','a0000000-0000-4000-8000-000000000003','10000000-0000-4000-8000-000000000005','cover_art','https://images.unsplash.com/photo-1506157786151-b8491531f063?auto=format&fit=crop&w=1200&q=80','image/jpeg',null,null,'passed'),
-  ('a2000000-0000-4000-8000-000000000004','a0000000-0000-4000-8000-000000000004','10000000-0000-4000-8000-000000000001','cover_art','https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?auto=format&fit=crop&w=1200&q=80','image/jpeg',null,null,'passed'),
-  ('a2000000-0000-4000-8000-000000000005','a0000000-0000-4000-8000-000000000005','10000000-0000-4000-8000-000000000002','cover_art','https://images.unsplash.com/photo-1519741497674-611481863552?auto=format&fit=crop&w=1200&q=80','image/jpeg',null,null,'passed')
+  ('a2000000-0000-4000-8000-000000000001','a0000000-0000-4000-8000-000000000001','10000000-0000-4000-8000-000000000001','cover_art','https://images.pexels.com/photos/92080/pexels-photo-92080.jpeg?auto=compress&cs=tinysrgb&w=1200','image/jpeg',null,null,'passed'),
+  ('a2000000-0000-4000-8000-000000000002','a0000000-0000-4000-8000-000000000002','10000000-0000-4000-8000-000000000002','cover_art','https://images.pexels.com/photos/1699161/pexels-photo-1699161.jpeg?auto=compress&cs=tinysrgb&w=1200','image/jpeg',null,null,'passed'),
+  ('a2000000-0000-4000-8000-000000000003','a0000000-0000-4000-8000-000000000003','10000000-0000-4000-8000-000000000005','cover_art','https://images.pexels.com/photos/7586137/pexels-photo-7586137.jpeg?auto=compress&cs=tinysrgb&w=1200','image/jpeg',null,null,'passed'),
+  ('a2000000-0000-4000-8000-000000000004','a0000000-0000-4000-8000-000000000004','10000000-0000-4000-8000-000000000001','cover_art','https://images.pexels.com/photos/164745/pexels-photo-164745.jpeg?auto=compress&cs=tinysrgb&w=1200','image/jpeg',null,null,'passed'),
+  ('a2000000-0000-4000-8000-000000000005','a0000000-0000-4000-8000-000000000005','10000000-0000-4000-8000-000000000002','cover_art','https://images.pexels.com/photos/32527855/pexels-photo-32527855.jpeg?auto=compress&cs=tinysrgb&w=1200','image/jpeg',null,null,'passed')
 on conflict (id) do nothing;
 
 insert into public.group_playlists (id, group_id, playlist_id, "position") values
@@ -330,11 +330,11 @@ insert into public.playlist_play_events (playlist_id, item_id, user_id, event_ty
   ('a0000000-0000-4000-8000-000000000005','a1000000-0000-4000-8000-000000000005','10000000-0000-4000-8000-000000000001','teaser_play','mobile');
 
 insert into public.production_teams (id, owner_id, name, description, logo_url) values
-  ('90000000-0000-4000-8000-000000000001','10000000-0000-4000-8000-000000000005','Poblacion Stagecraft','Producer-led crew handling live session lineups, backline coordination, release shoots, and small venue takeovers around Metro Manila.','https://images.unsplash.com/photo-1516280440614-37939bbacd81?auto=format&fit=crop&w=1200&q=80'),
-  ('90000000-0000-4000-8000-000000000002','10000000-0000-4000-8000-000000000005','Escolta Audio Bureau','Production desk for heritage-building shows, record fairs, and street-level listening parties.','https://images.unsplash.com/photo-1492684223066-81342ee5ff30?auto=format&fit=crop&w=1200&q=80'),
-  ('90000000-0000-4000-8000-000000000003','10000000-0000-4000-8000-000000000005','South Signal Crew','Lean crew for launch events, acoustic livestreams, and brand pop-ups south of Manila.','https://images.unsplash.com/photo-1506157786151-b8491531f063?auto=format&fit=crop&w=1200&q=80'),
-  ('90000000-0000-4000-8000-000000000004','10000000-0000-4000-8000-000000000005','Northbank Sessions','Marikina-focused production team for full-band rehearsals, riverfront shows, and campus events.','https://images.unsplash.com/photo-1540039155733-5bb30b53aa14?auto=format&fit=crop&w=1200&q=80'),
-  ('90000000-0000-4000-8000-000000000005','10000000-0000-4000-8000-000000000005','Garden Set Collective','Wedding and garden-party production team handling acoustic stages, call sheets, and reception cues.','https://images.unsplash.com/photo-1519741497674-611481863552?auto=format&fit=crop&w=1200&q=80')
+  ('90000000-0000-4000-8000-000000000001','10000000-0000-4000-8000-000000000005','Poblacion Stagecraft','Producer-led crew handling live session lineups, backline coordination, release shoots, and small venue takeovers around Metro Manila.','https://images.pexels.com/photos/7586137/pexels-photo-7586137.jpeg?auto=compress&cs=tinysrgb&w=1200'),
+  ('90000000-0000-4000-8000-000000000002','10000000-0000-4000-8000-000000000005','Escolta Audio Bureau','Production desk for heritage-building shows, record fairs, and street-level listening parties.','https://images.pexels.com/photos/29990037/pexels-photo-29990037.jpeg?auto=compress&cs=tinysrgb&w=1200'),
+  ('90000000-0000-4000-8000-000000000003','10000000-0000-4000-8000-000000000005','South Signal Crew','Lean crew for launch events, acoustic livestreams, and brand pop-ups south of Manila.','https://images.pexels.com/photos/164745/pexels-photo-164745.jpeg?auto=compress&cs=tinysrgb&w=1200'),
+  ('90000000-0000-4000-8000-000000000004','10000000-0000-4000-8000-000000000005','Northbank Sessions','Marikina-focused production team for full-band rehearsals, riverfront shows, and campus events.','https://images.pexels.com/photos/33284931/pexels-photo-33284931.jpeg?auto=compress&cs=tinysrgb&w=1200'),
+  ('90000000-0000-4000-8000-000000000005','10000000-0000-4000-8000-000000000005','Garden Set Collective','Wedding and garden-party production team handling acoustic stages, call sheets, and reception cues.','https://images.pexels.com/photos/32527855/pexels-photo-32527855.jpeg?auto=compress&cs=tinysrgb&w=1200')
 on conflict (id) do update set
   owner_id = excluded.owner_id,
   name = excluded.name,
@@ -417,11 +417,11 @@ insert into public.studio_booking_slots (booking_id, start_time, end_time, sort_
   ('70000000-0000-4000-8000-000000000005','11:00','12:00',2);
 
 insert into public.notifications (id, user_id, type, title, message, read, image, meta) values
-  ('93000000-0000-4000-8000-000000000001','10000000-0000-4000-8000-000000000004','info','New group application','Sampaguita Drive applied to Escolta Courtyard Vinyl Fair.',false,'https://images.unsplash.com/photo-1501386761578-eac5c94b800a?auto=format&fit=crop&w=800&q=80','{"source":"seed_20260514","type":"gig_application","application_id":"92000000-0000-4000-8000-000000000001","route":"/bookings"}'::jsonb),
-  ('93000000-0000-4000-8000-000000000002','10000000-0000-4000-8000-000000000004','info','New production application','Poblacion Stagecraft applied to Warehouse 42 Live Sessions.',false,'https://images.unsplash.com/photo-1516280440614-37939bbacd81?auto=format&fit=crop&w=800&q=80','{"source":"seed_20260514","type":"gig_application","application_id":"92000000-0000-4000-8000-000000000003","route":"/bookings"}'::jsonb),
-  ('93000000-0000-4000-8000-000000000003','10000000-0000-4000-8000-000000000001','info','Production roster connected','Juan Dela Cruz is now on the Poblacion Stagecraft roster.',true,'https://images.unsplash.com/photo-1516280440614-37939bbacd81?auto=format&fit=crop&w=800&q=80','{"source":"seed_20260514","type":"listing_connection_request","request_id":"92500000-0000-4000-8000-000000000001","route":"/bookings"}'::jsonb),
-  ('93000000-0000-4000-8000-000000000004','10000000-0000-4000-8000-000000000002','info','Production roster invite','Escolta Audio Bureau invited Mara Reyes for listening room dates.',false,'https://images.unsplash.com/photo-1492684223066-81342ee5ff30?auto=format&fit=crop&w=800&q=80','{"source":"seed_20260514","type":"listing_connection_request","request_id":"92500000-0000-4000-8000-000000000002","route":"/bookings"}'::jsonb),
-  ('93000000-0000-4000-8000-000000000005','10000000-0000-4000-8000-000000000005','info','Venue invite accepted','Garden Set Collective is approved for Tagaytay Garden Reception.',true,'https://images.unsplash.com/photo-1519741497674-611481863552?auto=format&fit=crop&w=800&q=80','{"source":"seed_20260514","type":"listing_connection_request","request_id":"92500000-0000-4000-8000-000000000004","route":"/bookings"}'::jsonb);
+  ('93000000-0000-4000-8000-000000000001','10000000-0000-4000-8000-000000000004','info','New group application','Sampaguita Drive applied to Escolta Courtyard Vinyl Fair.',false,'https://images.pexels.com/photos/33284931/pexels-photo-33284931.jpeg?auto=compress&cs=tinysrgb&w=800','{"source":"seed_20260514","type":"gig_application","application_id":"92000000-0000-4000-8000-000000000001","route":"/bookings"}'::jsonb),
+  ('93000000-0000-4000-8000-000000000002','10000000-0000-4000-8000-000000000004','info','New production application','Poblacion Stagecraft applied to Warehouse 42 Live Sessions.',false,'https://images.pexels.com/photos/7586137/pexels-photo-7586137.jpeg?auto=compress&cs=tinysrgb&w=800','{"source":"seed_20260514","type":"gig_application","application_id":"92000000-0000-4000-8000-000000000003","route":"/bookings"}'::jsonb),
+  ('93000000-0000-4000-8000-000000000003','10000000-0000-4000-8000-000000000001','info','Production roster connected','Juan Dela Cruz is now on the Poblacion Stagecraft roster.',true,'https://images.pexels.com/photos/92080/pexels-photo-92080.jpeg?auto=compress&cs=tinysrgb&w=800','{"source":"seed_20260514","type":"listing_connection_request","request_id":"92500000-0000-4000-8000-000000000001","route":"/bookings"}'::jsonb),
+  ('93000000-0000-4000-8000-000000000004','10000000-0000-4000-8000-000000000002','info','Production roster invite','Escolta Audio Bureau invited Mara Reyes for listening room dates.',false,'https://images.pexels.com/photos/29990037/pexels-photo-29990037.jpeg?auto=compress&cs=tinysrgb&w=800','{"source":"seed_20260514","type":"listing_connection_request","request_id":"92500000-0000-4000-8000-000000000002","route":"/bookings"}'::jsonb),
+  ('93000000-0000-4000-8000-000000000005','10000000-0000-4000-8000-000000000005','info','Venue invite accepted','Garden Set Collective is approved for Tagaytay Garden Reception.',true,'https://images.pexels.com/photos/32527855/pexels-photo-32527855.jpeg?auto=compress&cs=tinysrgb&w=800','{"source":"seed_20260514","type":"listing_connection_request","request_id":"92500000-0000-4000-8000-000000000004","route":"/bookings"}'::jsonb);
 
 insert into public.reviews (id, author_id, studio_id, rating, content, created_at, studio_booking_id) values
   ('80000000-0000-4000-8000-000000000001','10000000-0000-4000-8000-000000000001','20000000-0000-4000-8000-000000000001',5,'Clean vocal chain and quick file handoff after the session.',now(),'70000000-0000-4000-8000-000000000001'),
