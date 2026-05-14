@@ -18,6 +18,7 @@ import { useTheme } from "../context/ThemeContext";
 import { emitToast } from "../events/toastBus";
 import CachedImage from "./CachedImage";
 import CustomAlert, { AlertType } from "./CustomAlert";
+import ProfileAvatar from "./ProfileAvatar";
 
 const KNOWN_FEED_MEDIA_BUCKETS = ["post-media", "feed-media", "media", "public", "user-uploads"];
 
@@ -279,15 +280,12 @@ export default function PostDetailsModal({
               showsVerticalScrollIndicator={false}
             >
               <View style={styles.authorRow}>
-                {post.author_avatar ? (
-                  <CachedImage uri={post.author_avatar} style={styles.avatar} width={40} height={40} />
-                ) : (
-                  <View style={[styles.avatarFallback, { backgroundColor: colors.primary + "22" }]}>
-                    <Text style={[styles.avatarInitials, { color: colors.primary }]}>
-                      {initialsOf(post.author_name)}
-                    </Text>
-                  </View>
-                )}
+                <ProfileAvatar
+                  uri={post.author_avatar}
+                  style={styles.avatar}
+                  backgroundColor={isDark ? "#374151" : "#E5E7EB"}
+                  iconColor={colors.textSecondary}
+                />
                 <View style={{ flex: 1, marginLeft: 10 }}>
                   <Text style={[styles.authorName, { color: colors.text }]} numberOfLines={1}>
                     {post.author_name}
@@ -388,25 +386,12 @@ export default function PostDetailsModal({
                 {comments.length > 0 ? (
                   comments.map((c: any) => (
                     <View key={c.id} style={styles.commentRow}>
-                      {c.author_avatar ? (
-                        <CachedImage
-                          uri={c.author_avatar}
-                          style={styles.commentAvatar}
-                          width={32}
-                          height={32}
-                        />
-                      ) : (
-                        <View
-                          style={[
-                            styles.commentAvatarFallback,
-                            { backgroundColor: colors.primary + "22" },
-                          ]}
-                        >
-                          <Text style={[styles.commentAvatarInitials, { color: colors.primary }]}>
-                            {initialsOf(c.author_name)}
-                          </Text>
-                        </View>
-                      )}
+                      <ProfileAvatar
+                        uri={c.author_avatar}
+                        style={styles.commentAvatar}
+                        backgroundColor={isDark ? "#374151" : "#E5E7EB"}
+                        iconColor={colors.textSecondary}
+                      />
                       <View style={{ flex: 1, marginLeft: 8 }}>
                         <View style={[styles.commentBubble, { backgroundColor: bubbleBg }]}>
                           <Text style={[styles.commentAuthor, { color: colors.text }]} numberOfLines={1}>
@@ -440,18 +425,12 @@ export default function PostDetailsModal({
           )}
 
           <View style={[styles.footer, { borderTopColor: borderCol, backgroundColor: cardBg }]}>
-            {session?.user?.user_metadata?.avatar_url ? (
-              <CachedImage
-                uri={(session.user.user_metadata as any).avatar_url}
-                style={styles.footerAvatar}
-                width={32}
-                height={32}
-              />
-            ) : (
-              <View style={[styles.footerAvatarFallback, { backgroundColor: colors.primary + "22" }]}>
-                <Ionicons name="person" size={16} color={colors.primary} />
-              </View>
-            )}
+            <ProfileAvatar
+              uri={(session?.user?.user_metadata as any)?.avatar_url}
+              style={styles.footerAvatar}
+              backgroundColor={isDark ? "#374151" : "#E5E7EB"}
+              iconColor={colors.textSecondary}
+            />
             <View style={[styles.footerInputWrap, { backgroundColor: bubbleBg }]}>
               <TextInput
                 style={[styles.footerInput, { color: colors.text }]}

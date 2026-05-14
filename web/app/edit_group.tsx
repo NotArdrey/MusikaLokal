@@ -22,6 +22,7 @@ import ImageUploader from "../src/components/ImageUploader";
 import LocationPicker from "../src/components/LocationPicker";
 import Modal, { normalizeVisibleInput } from "../src/components/modal";
 import Navbar from "../src/components/navbar";
+import ProfileAvatar from "../src/components/ProfileAvatar";
 import {
     isDuoGroupType,
     mapDbGroupTypeToUiGroupType,
@@ -1666,13 +1667,11 @@ export default function EditGroupScreen() {
                     ]}
                     onPress={() => selectMember(musician)}
                   >
-                    <Image
-                      source={
-                        musician.avatar_url
-                          ? { uri: musician.avatar_url }
-                          : require("../assets/images/default_avatar.png")
-                      }
+                    <ProfileAvatar
+                      uri={musician.avatar_url}
                       style={styles.resultAvatar}
+                      backgroundColor={isDark ? "#374151" : "#E5E7EB"}
+                      iconColor={colors.textSecondary}
                     />
                     <View>
                       <Text
@@ -1723,13 +1722,11 @@ export default function EditGroupScreen() {
                     marginBottom: 16,
                   }}
                 >
-                  <Image
-                    source={
-                      pendingMember.avatar_url
-                        ? { uri: pendingMember.avatar_url }
-                        : require("../assets/images/default_avatar.png")
-                    }
+                  <ProfileAvatar
+                    uri={pendingMember.avatar_url}
                     style={{ width: 40, height: 40, borderRadius: 20 }}
+                    backgroundColor={isDark ? "#374151" : "#E5E7EB"}
+                    iconColor={colors.textSecondary}
                   />
                   <Text
                     style={{
@@ -1831,32 +1828,12 @@ export default function EditGroupScreen() {
                   ]}
                 >
                   <View style={styles.memberInfo}>
-                    <View
-                      style={[
-                        styles.avatarPlaceholder,
-                        {
-                          backgroundColor: isLeader
-                            ? colors.primary
-                            : "#E0E7FF",
-                        },
-                      ]}
-                    >
-                      {member.avatar_url ? (
-                        <Image
-                          source={{ uri: member.avatar_url }}
-                          style={{ width: 32, height: 32, borderRadius: 16 }}
-                        />
-                      ) : (
-                        <Text
-                          style={[
-                            styles.avatarText,
-                            { color: isLeader ? "#fff" : "#4F46E5" },
-                          ]}
-                        >
-                          {member.name?.charAt(0)}
-                        </Text>
-                      )}
-                    </View>
+                    <ProfileAvatar
+                      uri={member.avatar_url}
+                      style={styles.avatarPlaceholder}
+                      backgroundColor={isLeader ? colors.primary : (isDark ? "#374151" : "#E5E7EB")}
+                      iconColor={isLeader ? "#FFF" : colors.textSecondary}
+                    />
                     <View style={{ flex: 1 }}>
                       <Text
                         style={[
@@ -2291,15 +2268,14 @@ export default function EditGroupScreen() {
                     ]}
                     onPress={() => setSelectedNewLeader(member)}
                   >
-                    <Image
-                      source={{
-                        uri:
-                          member.avatar_url || "https://via.placeholder.com/44",
-                      }}
+                    <ProfileAvatar
+                      uri={member.avatar_url}
                       style={[
                         styles.memberAvatar,
                         { backgroundColor: colors.border },
                       ]}
+                      backgroundColor={isDark ? "#374151" : "#E5E7EB"}
+                      iconColor={colors.textSecondary}
                     />
                     <View style={{ flex: 1 }}>
                       <Text style={[styles.memberName, { color: colors.text }]}>

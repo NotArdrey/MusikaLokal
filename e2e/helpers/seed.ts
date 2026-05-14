@@ -12,21 +12,27 @@ export async function seedE2EAdmin() {
   });
 }
 
-export async function seedE2EMobileUser(suffix = 'mobile-musician') {
+type E2ERole = 'admin' | 'musician' | 'studio-owner' | 'venue-owner' | 'producer' | 'fan';
+
+export async function seedE2EMobileUser(
+  suffix = 'mobile-musician',
+  role: E2ERole = 'musician',
+  fullName = role === 'fan' ? 'E2E Mobile Fan' : 'E2E Mobile Musician',
+) {
   const runId = makeRunId(suffix);
   const shortToken = `m${Date.now().toString(36)}-${suffix.replace(/[^a-zA-Z0-9]+/g, '').slice(0, 8).toLowerCase()}`;
   return upsertE2EAuthUser({
     email: `e2e+${shortToken}@musikalokal.test`,
     password: 'E2E-password-123',
-    fullName: `E2E Mobile Musician ${runId}`,
-    role: 'musician',
+    fullName: `${fullName} ${runId}`,
+    role,
     verified: true,
   });
 }
 
 export async function seedE2EUser(input: {
   suffix: string;
-  role: 'admin' | 'musician' | 'studio-owner' | 'venue-owner' | 'producer' | 'fan';
+  role: E2ERole;
   fullName: string;
   password?: string;
   verified?: boolean;

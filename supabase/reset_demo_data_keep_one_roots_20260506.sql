@@ -194,6 +194,45 @@ insert into public.studio_open_dates (studio_id, open_date, is_open) values
   ('20000000-0000-4000-8000-000000000004', current_date + 4, true),
   ('20000000-0000-4000-8000-000000000005', current_date + 5, true);
 
+insert into public.studio_operating_hours (studio_id, day_of_week, is_open, open_time, close_time, slot_order, reason) values
+  ('20000000-0000-4000-8000-000000000001',1,true,'10:00','18:00',0,'Recording hours'),
+  ('20000000-0000-4000-8000-000000000001',2,true,'10:00','18:00',0,'Recording hours'),
+  ('20000000-0000-4000-8000-000000000001',3,true,'10:00','18:00',0,'Recording hours'),
+  ('20000000-0000-4000-8000-000000000001',4,true,'10:00','18:00',0,'Recording hours'),
+  ('20000000-0000-4000-8000-000000000001',5,true,'10:00','18:00',0,'Recording hours'),
+  ('20000000-0000-4000-8000-000000000002',1,true,'12:00','22:00',0,'Rehearsal hours'),
+  ('20000000-0000-4000-8000-000000000002',2,true,'12:00','22:00',0,'Rehearsal hours'),
+  ('20000000-0000-4000-8000-000000000002',3,true,'12:00','22:00',0,'Rehearsal hours'),
+  ('20000000-0000-4000-8000-000000000002',4,true,'12:00','22:00',0,'Rehearsal hours'),
+  ('20000000-0000-4000-8000-000000000002',5,true,'12:00','22:00',0,'Rehearsal hours'),
+  ('20000000-0000-4000-8000-000000000003',1,true,'10:00','18:00',0,'Recording hours'),
+  ('20000000-0000-4000-8000-000000000003',2,true,'10:00','18:00',0,'Recording hours'),
+  ('20000000-0000-4000-8000-000000000003',3,true,'10:00','18:00',0,'Recording hours'),
+  ('20000000-0000-4000-8000-000000000003',4,true,'10:00','18:00',0,'Recording hours'),
+  ('20000000-0000-4000-8000-000000000003',5,true,'10:00','18:00',0,'Recording hours'),
+  ('20000000-0000-4000-8000-000000000004',1,true,'12:00','22:00',0,'Rehearsal hours'),
+  ('20000000-0000-4000-8000-000000000004',2,true,'12:00','22:00',0,'Rehearsal hours'),
+  ('20000000-0000-4000-8000-000000000004',3,true,'12:00','22:00',0,'Rehearsal hours'),
+  ('20000000-0000-4000-8000-000000000004',4,true,'12:00','22:00',0,'Rehearsal hours'),
+  ('20000000-0000-4000-8000-000000000004',5,true,'12:00','22:00',0,'Rehearsal hours'),
+  ('20000000-0000-4000-8000-000000000005',1,true,'10:00','18:00',0,'Recording hours'),
+  ('20000000-0000-4000-8000-000000000005',2,true,'10:00','18:00',0,'Recording hours'),
+  ('20000000-0000-4000-8000-000000000005',3,true,'10:00','18:00',0,'Recording hours'),
+  ('20000000-0000-4000-8000-000000000005',4,true,'10:00','18:00',0,'Recording hours'),
+  ('20000000-0000-4000-8000-000000000005',5,true,'10:00','18:00',0,'Recording hours');
+
+insert into public.studio_date_overrides (studio_id, override_date, is_open, open_time, close_time, slot_order, reason) values
+  ('20000000-0000-4000-8000-000000000001', current_date + 1, true, '10:00', '18:00', 0, 'Recording date'),
+  ('20000000-0000-4000-8000-000000000002', current_date + 2, true, '12:00', '22:00', 0, 'Rehearsal date'),
+  ('20000000-0000-4000-8000-000000000003', current_date + 3, true, '10:00', '18:00', 0, 'Recording date'),
+  ('20000000-0000-4000-8000-000000000004', current_date + 4, true, '12:00', '22:00', 0, 'Rehearsal date'),
+  ('20000000-0000-4000-8000-000000000005', current_date + 5, true, '10:00', '18:00', 0, 'Recording date')
+on conflict (studio_id, override_date, slot_order) do update set
+  is_open = excluded.is_open,
+  open_time = excluded.open_time,
+  close_time = excluded.close_time,
+  reason = excluded.reason;
+
 insert into public.groups (id, owner_id, name, genre, description, location, latitude, longitude, rate, group_type, open_group_applications) values
   ('30000000-0000-4000-8000-000000000001','10000000-0000-4000-8000-000000000001','Sampaguita Drive','Indie Funk','Four-piece Quezon City band playing guitar-led OPM, funk grooves, and wedding reception medleys.','Quezon City, Metro Manila',14.6337,121.0352,24000,'band',true),
   ('30000000-0000-4000-8000-000000000002','10000000-0000-4000-8000-000000000002','Mara Reyes Quartet','Soul / Jazz','Lounge-ready soul and jazz quartet with Tagalog standards, bossa sets, and quiet-dinner arrangements.','Makati City, Metro Manila',14.5657,121.0310,18000,'band',true),
@@ -264,15 +303,15 @@ insert into public.shipping_profiles (id, seller_id, name, shipping_type, base_f
   ('50000000-0000-4000-8000-000000000001','10000000-0000-4000-8000-000000000005','Metro Manila standard courier','standard',120,'PHP',2,4,array['PH-NCR','PH-III','PH-IVA'],true),
   ('50000000-0000-4000-8000-000000000002','10000000-0000-4000-8000-000000000005','Digital delivery','digital',0,'PHP',0,1,array['PH'],false),
   ('50000000-0000-4000-8000-000000000003','10000000-0000-4000-8000-000000000005','Luzon merch courier','standard',180,'PHP',3,6,array['PH-I','PH-II','PH-III','PH-CAR'],false),
-  ('50000000-0000-4000-8000-000000000004','10000000-0000-4000-8000-000000000001','Gig pickup table','pickup',0,'PHP',0,1,array['PH-NCR'],false),
-  ('50000000-0000-4000-8000-000000000005','10000000-0000-4000-8000-000000000002','Signed goods courier','standard',150,'PHP',2,5,array['PH-NCR','PH-IVA'],false)
+  ('50000000-0000-4000-8000-000000000004','10000000-0000-4000-8000-000000000005','Gig pickup table','pickup',0,'PHP',0,1,array['PH-NCR'],false),
+  ('50000000-0000-4000-8000-000000000005','10000000-0000-4000-8000-000000000005','Signed goods courier','standard',150,'PHP',2,5,array['PH-NCR','PH-IVA'],false)
 on conflict (id) do nothing;
 
 insert into public.products (id, seller_id, group_id, title, description, product_type, category, base_price, currency, status, is_featured, is_limited_edition, limited_quantity) values
   ('60000000-0000-4000-8000-000000000001','10000000-0000-4000-8000-000000000005','30000000-0000-4000-8000-000000000001','Sampaguita Drive Tour Shirt','Heavy cotton black shirt with cream Sampaguita Drive front print and Quezon City back hit.','merch','apparel',850,'PHP','active',true,false,null),
   ('60000000-0000-4000-8000-000000000002','10000000-0000-4000-8000-000000000005','30000000-0000-4000-8000-000000000002','Mara Reyes Quartet Stem Pack','Downloadable stems, lyric sheets, and two unreleased live-room cuts from the quartet.','digital_drop','digital',350,'PHP','active',false,true,200),
-  ('60000000-0000-4000-8000-000000000003','10000000-0000-4000-8000-000000000001','30000000-0000-4000-8000-000000000001','Sampaguita Drive Gig Poster','Signed A3 risograph-style poster from the Escolta courtyard set.','merch','poster',450,'PHP','active',false,true,75),
-  ('60000000-0000-4000-8000-000000000004','10000000-0000-4000-8000-000000000002','30000000-0000-4000-8000-000000000002','Mara Reyes Lyric Zine','Sixteen-page risograph zine with lyric notes, set photos, and chord sketches.','merch','poster',520,'PHP','active',false,true,60),
+  ('60000000-0000-4000-8000-000000000003','10000000-0000-4000-8000-000000000005','30000000-0000-4000-8000-000000000001','Sampaguita Drive Gig Poster','Signed A3 risograph-style poster from the Escolta courtyard set.','merch','poster',450,'PHP','active',false,true,75),
+  ('60000000-0000-4000-8000-000000000004','10000000-0000-4000-8000-000000000005','30000000-0000-4000-8000-000000000002','Mara Reyes Lyric Zine','Sixteen-page risograph zine with lyric notes, set photos, and chord sketches.','merch','poster',520,'PHP','active',false,true,60),
   ('60000000-0000-4000-8000-000000000005','10000000-0000-4000-8000-000000000005','30000000-0000-4000-8000-000000000005','Pasig Brass Club Patch Set','Five embroidered patches for jackets, cases, and pedalboard bags.','merch','accessories',390,'PHP','active',true,false,null)
 on conflict (id) do nothing;
 
@@ -429,5 +468,87 @@ insert into public.reviews (id, author_id, studio_id, rating, content, created_a
   ('80000000-0000-4000-8000-000000000003','10000000-0000-4000-8000-000000000001','20000000-0000-4000-8000-000000000003',4,'Warm room tone for acoustic guitar and fast setup.',now(),'70000000-0000-4000-8000-000000000003'),
   ('80000000-0000-4000-8000-000000000004','10000000-0000-4000-8000-000000000002','20000000-0000-4000-8000-000000000004',5,'Enough space for the full ensemble and clean monitor mixes.',now(),'70000000-0000-4000-8000-000000000004'),
   ('80000000-0000-4000-8000-000000000005','10000000-0000-4000-8000-000000000001','20000000-0000-4000-8000-000000000005',4,'Quiet room and helpful lighting for content capture.',now(),'70000000-0000-4000-8000-000000000005');
+
+create temp table non_one_roots_role_profiles on commit drop as
+select id
+from public.profiles
+where role in ('producer', 'studio-owner', 'venue-owner')
+  and id not in (select id from root_profiles);
+
+update public.gigs
+set permit_reviewed_by = null
+where permit_reviewed_by in (select id from non_one_roots_role_profiles);
+
+update public.studios
+set permit_reviewed_by = null
+where permit_reviewed_by in (select id from non_one_roots_role_profiles);
+
+update public.withdrawal_requests
+set processed_by = null
+where processed_by in (select id from non_one_roots_role_profiles);
+
+delete from public.permit_audit_log
+where performed_by in (select id from non_one_roots_role_profiles);
+
+delete from public.booking_requests
+where sender_id in (select id from non_one_roots_role_profiles)
+   or receiver_id in (select id from non_one_roots_role_profiles)
+   or studio_id in (
+     select id from public.studios
+     where owner_id in (select id from non_one_roots_role_profiles)
+   );
+
+delete from public.gig_applications
+where gig_id in (
+     select id from public.gigs
+     where organizer_id in (select id from non_one_roots_role_profiles)
+   )
+   or production_team_id in (
+     select id from public.production_teams
+     where owner_id in (select id from non_one_roots_role_profiles)
+   );
+
+delete from public.notifications
+where user_id in (select id from non_one_roots_role_profiles);
+
+delete from public.notifications
+where meta ->> 'source' = 'seed_20260514'
+  and meta ->> 'type' in ('gig_application', 'listing_connection_request');
+
+delete from public.products
+where seller_id in (select id from non_one_roots_role_profiles);
+
+delete from public.shipping_profiles
+where seller_id in (select id from non_one_roots_role_profiles);
+
+delete from public.studios
+where owner_id in (select id from non_one_roots_role_profiles);
+
+delete from public.gigs
+where organizer_id in (select id from non_one_roots_role_profiles);
+
+delete from public.production_teams
+where owner_id in (select id from non_one_roots_role_profiles);
+
+delete from public.profiles
+where id in (select id from non_one_roots_role_profiles);
+
+delete from auth.identities
+where user_id in (select id from non_one_roots_role_profiles);
+
+delete from auth.users
+where id in (select id from non_one_roots_role_profiles);
+
+delete from public.studios
+where owner_id = '4ac24041-ff7e-4482-b775-dc0cc5d3aac9'
+  and name not in ('One Roots Studio A', 'One Roots Studio B');
+
+delete from public.production_teams
+where owner_id = 'bbfd86e2-3a7b-4a1b-94fe-9e6715d5a69b'
+  and name <> 'Production ni Jared';
+
+delete from public.gigs
+where organizer_id = '77508736-9566-4538-96cb-4ae34be56a56'
+  and name <> 'Gig Ni red';
 
 commit;

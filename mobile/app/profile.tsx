@@ -6,7 +6,7 @@ import {
   BottomSheetScrollView,
   useBottomSheetSpringConfigs,
 } from "@gorhom/bottom-sheet";
-import { ResizeMode, Video } from "expo-av";
+import * as DocumentPicker from "expo-document-picker";
 import * as FileSystem from "expo-file-system/legacy";
 import * as ImagePicker from "expo-image-picker";
 import * as VideoThumbnails from "expo-video-thumbnails";
@@ -38,6 +38,7 @@ import Animated, {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { supabase, supabaseAnonKey, supabaseUrl } from "../lib/supabase";
 import CustomAlert, { AlertType } from "../src/components/CustomAlert";
+import InAppMediaViewer, { getInAppMediaType } from "../src/components/InAppMediaViewer";
 import ReportModal from "../src/components/ReportModal";
 import GuestSignInGate from "../src/components/GuestSignInGate";
 import Header from "../src/components/header";
@@ -103,7 +104,35 @@ const MAX_INLINE_SCREEN_BYTES = 4 * 1024 * 1024;
 const SAFETY_CHECK_TIMEOUT_MS = 45000;
 const VIDEO_SAFETY_FRAME_INTERVAL_MS = 2000;
 const MAX_VIDEO_SAFETY_FRAMES = 10;
+type PortfolioUploadAsset = ImagePicker.ImagePickerAsset | DocumentPicker.DocumentPickerAsset;
+type PortfolioUploadKind = "photo" | "video" | "document";
+const IMAGE_MEDIA_EXTENSIONS = new Set(["jpg", "jpeg", "png", "webp", "gif", "heic", "heif"]);
 const VIDEO_MEDIA_EXTENSIONS = new Set(["mp4", "mov", "avi", "mkv", "webm", "m4v"]);
+const DOCUMENT_MEDIA_EXTENSIONS = new Set([
+  "pdf",
+  "doc",
+  "docx",
+  "ppt",
+  "pptx",
+  "xls",
+  "xlsx",
+  "csv",
+  "txt",
+  "rtf",
+]);
+const PORTFOLIO_DOCUMENT_PICKER_MIME_TYPES = [
+  "application/pdf",
+  "application/msword",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/vnd.ms-powerpoint",
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  "application/vnd.ms-excel",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "text/csv",
+  "text/plain",
+  "application/rtf",
+  "text/rtf",
+];
 const PORTFOLIO_EXTENSION_BY_MIME: Record<string, string> = {
   "image/jpeg": "jpg",
   "image/jpg": "jpg",
@@ -115,6 +144,18 @@ const PORTFOLIO_EXTENSION_BY_MIME: Record<string, string> = {
   "video/webm": "webm",
   "video/x-msvideo": "avi",
   "video/x-m4v": "m4v",
+  "application/pdf": "pdf",
+  "application/msword": "doc",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
+  "application/vnd.ms-powerpoint": "ppt",
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation": "pptx",
+  "application/vnd.ms-excel": "xls",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "xlsx",
+  "text/csv": "csv",
+  "application/csv": "csv",
+  "text/plain": "txt",
+  "application/rtf": "rtf",
+  "text/rtf": "rtf",
 };
 const PORTFOLIO_MIME_BY_EXTENSION: Record<string, string> = {
   jpg: "image/jpeg",
@@ -127,6 +168,16 @@ const PORTFOLIO_MIME_BY_EXTENSION: Record<string, string> = {
   webm: "video/webm",
   avi: "video/x-msvideo",
   m4v: "video/x-m4v",
+  pdf: "application/pdf",
+  doc: "application/msword",
+  docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  ppt: "application/vnd.ms-powerpoint",
+  pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  xls: "application/vnd.ms-excel",
+  xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  csv: "text/csv",
+  txt: "text/plain",
+  rtf: "application/rtf",
 };
 
 const TIKTOK_ITEM_SIZE = Math.floor(
@@ -398,9 +449,11 @@ const sanitizeAvatarUrl = (value: unknown): string | null => {
   if (directParts.length > 1) {
     const directBucket = directParts[0];
     const directPath = directParts.slice(1).join("/");
-    const { data } = supabase.storage.from(directBucket).getPublicUrl(directPath);
-    if (data?.publicUrl) {
-      return data.publicUrl;
+    if (KNOWN_PROFILE_MEDIA_BUCKETS.includes(directBucket)) {
+      const { data } = supabase.storage.from(directBucket).getPublicUrl(directPath);
+      if (data?.publicUrl) {
+        return data.publicUrl;
+      }
     }
   }
 
@@ -442,12 +495,37 @@ const sanitizePortfolioExtension = (value?: string | null): string => {
   return cleaned;
 };
 
-const resolvePortfolioFileExtension = (file: ImagePicker.ImagePickerAsset): string => {
+const getPortfolioOriginalName = (
+  file: PortfolioUploadAsset,
+  fallbackExt = "media",
+): string => {
+  const explicitName =
+    typeof (file as any)?.fileName === "string"
+      ? (file as any).fileName
+      : typeof (file as any)?.name === "string"
+        ? (file as any).name
+        : "";
+  const uriName = file.uri?.split("?")[0]?.split("/").pop() || "";
+  return explicitName || uriName || `profile-media.${fallbackExt}`;
+};
+
+const getPortfolioUrlExtension = (url: string): string => {
+  try {
+    const parsed = new URL(url);
+    const match = decodeURIComponent(parsed.pathname).match(/\.([a-z0-9]+)$/i);
+    return match?.[1]?.toUpperCase() || "FILE";
+  } catch {
+    const match = url.split("?")[0]?.split("#")[0]?.match(/\.([a-z0-9]+)$/i);
+    return match?.[1]?.toUpperCase() || "FILE";
+  }
+};
+
+const resolvePortfolioFileExtension = (file: PortfolioUploadAsset): string => {
   const mimeExt =
     typeof file.mimeType === "string"
       ? PORTFOLIO_EXTENSION_BY_MIME[file.mimeType.trim().toLowerCase()]
       : "";
-  const fileName = typeof (file as any)?.fileName === "string" ? (file as any).fileName : "";
+  const fileName = getPortfolioOriginalName(file, mimeExt || "media");
   const nameExt = fileName.includes(".") ? fileName.split(".").pop() : "";
   const uri = file.uri || "";
   const uriExt = !uri.startsWith("blob:") && uri.includes(".") ? uri.split("?")[0].split(".").pop() : "";
@@ -461,14 +539,15 @@ const resolvePortfolioFileExtension = (file: ImagePicker.ImagePickerAsset): stri
 };
 
 const resolvePortfolioMimeType = (
-  file: ImagePicker.ImagePickerAsset,
+  file: PortfolioUploadAsset,
   fileExt: string,
 ): string => {
   const pickedMimeType = typeof file.mimeType === "string" ? file.mimeType.trim().toLowerCase() : "";
-  if (/^(image|video)\/[a-z0-9.+-]+$/.test(pickedMimeType)) {
+  const mappedMimeType = PORTFOLIO_MIME_BY_EXTENSION[fileExt.toLowerCase()];
+  if (pickedMimeType && pickedMimeType !== "application/octet-stream") {
     return pickedMimeType;
   }
-  return PORTFOLIO_MIME_BY_EXTENSION[fileExt] || "image/jpeg";
+  return mappedMimeType || pickedMimeType || "application/octet-stream";
 };
 
 const estimateBase64Bytes = (base64: string): number => {
@@ -487,7 +566,7 @@ const ensureScreenableDataUrl = (dataUrl: string, message: string): string => {
 };
 
 const isPortfolioVideoAsset = (
-  file: ImagePicker.ImagePickerAsset,
+  file: PortfolioUploadAsset,
   mimeType: string,
   fileExt: string,
 ): boolean => {
@@ -499,8 +578,48 @@ const isPortfolioVideoAsset = (
   );
 };
 
-const getPortfolioFileSize = async (file: ImagePicker.ImagePickerAsset): Promise<number> => {
-  const pickerSize = Number((file as any)?.fileSize);
+const isPortfolioImageAsset = (
+  file: PortfolioUploadAsset,
+  mimeType: string,
+  fileExt: string,
+): boolean => {
+  const pickerType = String((file as any)?.type || "").toLowerCase();
+  return (
+    pickerType === "image" ||
+    mimeType.toLowerCase().startsWith("image/") ||
+    IMAGE_MEDIA_EXTENSIONS.has(fileExt.toLowerCase())
+  );
+};
+
+const resolvePortfolioUploadKind = (
+  file: PortfolioUploadAsset,
+  mimeType: string,
+  fileExt: string,
+): PortfolioUploadKind => {
+  const normalizedExt = fileExt.toLowerCase();
+  const normalizedMimeType = mimeType.toLowerCase();
+  if (isPortfolioVideoAsset(file, normalizedMimeType, normalizedExt)) return "video";
+  if (isPortfolioImageAsset(file, normalizedMimeType, normalizedExt)) return "photo";
+  if (
+    DOCUMENT_MEDIA_EXTENSIONS.has(normalizedExt) ||
+    normalizedMimeType === "application/pdf" ||
+    normalizedMimeType.startsWith("text/") ||
+    normalizedMimeType.includes("wordprocessingml") ||
+    normalizedMimeType.includes("presentationml") ||
+    normalizedMimeType.includes("spreadsheetml") ||
+    normalizedMimeType === "application/msword" ||
+    normalizedMimeType === "application/vnd.ms-powerpoint" ||
+    normalizedMimeType === "application/vnd.ms-excel" ||
+    normalizedMimeType === "application/rtf"
+  ) {
+    return "document";
+  }
+
+  throw new Error("This file type is not supported. Please upload a photo, video, PDF, Office document, CSV, TXT, or RTF file.");
+};
+
+const getPortfolioFileSize = async (file: PortfolioUploadAsset): Promise<number> => {
+  const pickerSize = Number((file as any)?.fileSize ?? (file as any)?.size);
   if (Number.isFinite(pickerSize) && pickerSize > 0) {
     return Math.floor(pickerSize);
   }
@@ -538,7 +657,7 @@ const buildVideoSafetyFrameTimes = (duration?: number | null): number[] => {
 };
 
 const buildPortfolioVideoFrameDataUrls = async (
-  file: ImagePicker.ImagePickerAsset,
+  file: PortfolioUploadAsset,
 ): Promise<string[]> => {
   const frameTimes = buildVideoSafetyFrameTimes((file as any)?.duration);
   const attempts = await Promise.allSettled(
@@ -578,19 +697,40 @@ const buildPortfolioVideoFrameDataUrls = async (
 };
 
 const screenProfilePortfolioMedia = async (
-  file: ImagePicker.ImagePickerAsset,
+  file: PortfolioUploadAsset,
   options: {
     fileExt: string;
     mimeType: string;
+    uploadKind: PortfolioUploadKind;
     size: number;
     base64?: string;
   },
 ) => {
-  const originalName =
-    typeof (file as any)?.fileName === "string"
-      ? (file as any).fileName
-      : `profile-media.${options.fileExt}`;
-  const isVideoUpload = isPortfolioVideoAsset(file, options.mimeType, options.fileExt);
+  const originalName = getPortfolioOriginalName(file, options.fileExt);
+  const isVideoUpload = options.uploadKind === "video";
+  const isDocumentUpload = options.uploadKind === "document";
+
+  if (isDocumentUpload) {
+    const screeningSummary = await screenUploadsWithAi(
+      [
+        {
+          name: originalName,
+          mimeType: options.mimeType,
+          size: options.size,
+          uri: file.uri,
+          kind: "document" as const,
+        },
+      ],
+      "profile_portfolio_media",
+    );
+
+    if (!screeningSummary.allowed) {
+      throw new Error(
+        screeningSummary.reason || "This document did not pass safety screening.",
+      );
+    }
+    return;
+  }
   const videoFrameDataUrls = isVideoUpload ? await buildPortfolioVideoFrameDataUrls(file) : [];
 
   const screeningSummary = await screenUploadsWithAi(
@@ -627,15 +767,15 @@ const screenProfilePortfolioMedia = async (
 };
 
 const uploadPortfolioMediaFile = async (
-  file: ImagePicker.ImagePickerAsset,
+  file: PortfolioUploadAsset,
   options: {
     fileName: string;
     mimeType: string;
     bytes?: Uint8Array;
-    isVideoUpload: boolean;
+    streamFile: boolean;
   },
 ) => {
-  if (!options.isVideoUpload && options.bytes) {
+  if (!options.streamFile && options.bytes) {
     return supabase.storage
       .from("portfolio")
       .upload(options.fileName, options.bytes, {
@@ -752,11 +892,11 @@ type SkippedProfileMediaFeedback = {
 };
 
 const getPortfolioAssetDisplayName = (
-  asset: ImagePicker.ImagePickerAsset,
+  asset: PortfolioUploadAsset,
   index: number,
 ): string => {
-  const fallbackName = asset.uri.split("/").pop() || `Selected media ${index + 1}`;
-  return typeof (asset as any)?.fileName === "string" ? (asset as any).fileName : fallbackName;
+  const name = getPortfolioOriginalName(asset, "media");
+  return name === "profile-media.media" ? `Selected media ${index + 1}` : name;
 };
 
 const formatSkippedProfileMediaFeedback = (items: SkippedProfileMediaFeedback[]): string => {
@@ -804,6 +944,8 @@ export default function ProfileScreen() {
   const [profile, setProfile] = useState<any>(null);
   const isFan = isFanUserRole(userRole || profile?.role);
   const [loading, setLoading] = useState(true);
+  const [profilePosts, setProfilePosts] = useState<any[]>([]);
+  const [loadingProfilePosts, setLoadingProfilePosts] = useState(false);
   const [isOwner, setIsOwner] = useState(false);
   const [, setGigStats] = useState({ active: 0, upcoming: 0, done: 0 });
   const [gigTimeline, setGigTimeline] = useState<{
@@ -1786,6 +1928,54 @@ export default function ProfileScreen() {
     message: "",
   });
 
+  const fetchProfilePosts = useCallback(async (targetId: string) => {
+    if (!targetId || isGuest) {
+      setProfilePosts([]);
+      return;
+    }
+
+    setLoadingProfilePosts(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("manage-social-feed", {
+        body: { action: "get_user_posts", target_user_id: targetId, limit: 12 },
+      });
+
+      if (error) throw error;
+
+      const rows = Array.isArray(data?.data) ? data.data : [];
+      setProfilePosts(rows.map((post: any) => {
+        const media = Array.isArray(post?.media)
+          ? post.media.map((item: any) => ({
+              ...item,
+              preview_url: sanitizeAvatarUrl(item?.thumbnail_url || item?.thumbnail_path || item?.url || item?.storage_path || item?.public_url) || "",
+            }))
+          : [];
+        const cover = media.find((item: any) => item?.is_cover) || media[0] || null;
+
+        return {
+          ...post,
+          body: post?.body ?? post?.content ?? "",
+          media,
+          preview_url: cover?.preview_url || "",
+        };
+      }));
+    } catch (error) {
+      console.warn("Profile posts fetch failed", error);
+      setProfilePosts([]);
+    } finally {
+      setLoadingProfilePosts(false);
+    }
+  }, [isGuest]);
+
+  useEffect(() => {
+    const targetId = profile?.id || normalizedParamUserId || currentUserId || "";
+    if (!targetId) {
+      setProfilePosts([]);
+      return;
+    }
+    void fetchProfilePosts(targetId);
+  }, [currentUserId, fetchProfilePosts, normalizedParamUserId, profile?.id]);
+
   const showAlert = (
     type: AlertType,
     title: string,
@@ -1962,11 +2152,7 @@ export default function ProfileScreen() {
     setShowReportModal(true);
   };
 
-  // Check if URL is a video
-  const isVideo = (url: string) => {
-    const videoExtensions = [".mp4", ".mov", ".avi", ".mkv", ".webm"];
-    return videoExtensions.some((ext) => url.toLowerCase().includes(ext));
-  };
+  const getProfileMediaType = (url: string) => getInAppMediaType(url);
 
   const openMediaViewer = (url: string) => {
     setSelectedMedia(url);
@@ -2042,7 +2228,7 @@ export default function ProfileScreen() {
     showAlert(
       "warning",
       "Remove Media",
-      "Remove this photo or video from your profile?",
+      "Remove this photo, video, or document from your profile?",
       [
         { text: "Cancel", style: "cancel" },
         {
@@ -2054,41 +2240,11 @@ export default function ProfileScreen() {
     );
   };
 
-  const addMediaToPortfolio = async () => {
+  const uploadSelectedPortfolioAssets = async (
+    selectedAssets: PortfolioUploadAsset[],
+    userId: string,
+  ) => {
     try {
-      logProfileMedia("upload_started");
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-      if (!user) {
-        logProfileMedia("upload_blocked_no_user");
-        showAlert("warning", "Not Logged In", "You must be logged in.");
-        return;
-      }
-
-      logProfileMedia("upload_user_resolved", { userId: user.id });
-
-      const permissionResult =
-        await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (!permissionResult.granted) {
-        logProfileMedia("upload_permission_denied");
-        showAlert("warning", "Permission needed", "Please allow access to your photos.");
-        return;
-      }
-
-      logProfileMedia("picker_opening");
-      const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ["images", "videos"],
-        allowsMultipleSelection: true,
-        quality: 0.5,
-      });
-
-      if (result.canceled || !result.assets || result.assets.length === 0) {
-        logProfileMedia("picker_cancelled");
-        return;
-      }
-
-      const selectedAssets = result.assets;
       const uploadedUrls: string[] = [];
       const skippedMedia: SkippedProfileMediaFeedback[] = [];
       uploadingRef.current = true;
@@ -2098,7 +2254,7 @@ export default function ProfileScreen() {
       const { data: lastPortfolioRow, error: portfolioFetchError } = await supabase
         .from("profile_portfolio_urls")
         .select("sort_order")
-        .eq("profile_id", user.id)
+        .eq("profile_id", userId)
         .order("sort_order", { ascending: false })
         .limit(1)
         .maybeSingle();
@@ -2120,9 +2276,9 @@ export default function ProfileScreen() {
           setUploadMessage(`Preparing media ${index + 1}/${selectedAssets.length}...`);
 
       const fileExt = resolvePortfolioFileExtension(file);
-      const fileName = `${user.id}/portfolio/${Date.now()}_${index}.${fileExt}`;
+      const fileName = `${userId}/portfolio/${Date.now()}_${index}.${fileExt}`;
       const mimeType = resolvePortfolioMimeType(file, fileExt);
-      const isVideoUpload = isPortfolioVideoAsset(file, mimeType, fileExt);
+      const uploadKind = resolvePortfolioUploadKind(file, mimeType, fileExt);
       const fileSize = await getPortfolioFileSize(file);
 
       logProfileMedia("file_selected", {
@@ -2130,7 +2286,7 @@ export default function ProfileScreen() {
         fileName,
         fileExt,
         mimeType,
-        isVideoUpload,
+        uploadKind,
         pickerMimeType: file.mimeType,
         pickerType: (file as any)?.type,
         fileSize: (file as any)?.fileSize,
@@ -2139,7 +2295,7 @@ export default function ProfileScreen() {
 
       let base64: string | undefined;
       let bytes: Uint8Array | undefined;
-      if (!isVideoUpload) {
+      if (uploadKind === "photo") {
         base64 = await FileSystem.readAsStringAsync(file.uri, { encoding: "base64" });
         bytes = base64ToUint8Array(base64);
       }
@@ -2147,7 +2303,7 @@ export default function ProfileScreen() {
       logProfileMedia("file_prepared", {
         byteLength: bytes?.byteLength || fileSize,
         base64Length: base64?.length || 0,
-        uploadMode: isVideoUpload ? "streamed_file" : "inline_bytes",
+        uploadMode: uploadKind === "photo" ? "inline_bytes" : "streamed_file",
       });
       setUploadMessage(`Checking media ${index + 1}/${selectedAssets.length}...`);
       logProfileMedia("safety_check_started", {
@@ -2158,6 +2314,7 @@ export default function ProfileScreen() {
       await withSafetyTimeout(screenProfilePortfolioMedia(file, {
         fileExt,
         mimeType,
+        uploadKind,
         size: bytes?.byteLength || fileSize,
         base64,
       }));
@@ -2173,7 +2330,7 @@ export default function ProfileScreen() {
         fileName,
         mimeType,
         bytes,
-        isVideoUpload,
+        streamFile: uploadKind !== "photo",
       });
 
       if (uploadError) {
@@ -2197,7 +2354,7 @@ export default function ProfileScreen() {
         .from("profile_portfolio_urls")
         .upsert(
           {
-            profile_id: user.id,
+            profile_id: userId,
             portfolio_url: urlData.publicUrl,
             sort_order: sortOrder,
           },
@@ -2264,6 +2421,96 @@ export default function ProfileScreen() {
       uploadingRef.current = false;
       setUploading(false);
     }
+  };
+
+  const getPortfolioUploadUser = async () => {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) {
+      logProfileMedia("upload_blocked_no_user");
+      showAlert("warning", "Not Logged In", "You must be logged in.");
+      return null;
+    }
+
+    logProfileMedia("upload_user_resolved", { userId: user.id });
+    return user;
+  };
+
+  const pickPhotosAndVideosForPortfolio = async () => {
+    try {
+      logProfileMedia("upload_started", { source: "media_library" });
+      const user = await getPortfolioUploadUser();
+      if (!user) return;
+
+      const permissionResult =
+        await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!permissionResult.granted) {
+        logProfileMedia("upload_permission_denied");
+        showAlert("warning", "Permission needed", "Please allow access to your photos.");
+        return;
+      }
+
+      logProfileMedia("picker_opening", { source: "media_library" });
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ["images", "videos"],
+        allowsMultipleSelection: true,
+        quality: 0.5,
+      });
+
+      if (result.canceled || !result.assets || result.assets.length === 0) {
+        logProfileMedia("picker_cancelled", { source: "media_library" });
+        return;
+      }
+
+      await uploadSelectedPortfolioAssets(result.assets, user.id);
+    } catch (e: any) {
+      logProfileMedia("picker_failed", { source: "media_library", message: e?.message || String(e) });
+      showUploadFeedbackAlert(e);
+    }
+  };
+
+  const pickDocumentsForPortfolio = async () => {
+    try {
+      logProfileMedia("upload_started", { source: "document_picker" });
+      const user = await getPortfolioUploadUser();
+      if (!user) return;
+
+      logProfileMedia("picker_opening", { source: "document_picker" });
+      const result = await DocumentPicker.getDocumentAsync({
+        type: PORTFOLIO_DOCUMENT_PICKER_MIME_TYPES,
+        copyToCacheDirectory: true,
+        multiple: true,
+      });
+
+      if (result.canceled || !result.assets || result.assets.length === 0) {
+        logProfileMedia("picker_cancelled", { source: "document_picker" });
+        return;
+      }
+
+      await uploadSelectedPortfolioAssets(result.assets, user.id);
+    } catch (e: any) {
+      logProfileMedia("picker_failed", { source: "document_picker", message: e?.message || String(e) });
+      showUploadFeedbackAlert(e);
+    }
+  };
+
+  const addMediaToPortfolio = () => {
+    if (uploadingRef.current || uploading) {
+      return;
+    }
+
+    showAlert(
+      "info",
+      "Add Media",
+      "Choose what to add to your profile.",
+      [
+        { text: "Photos & Videos", onPress: () => void pickPhotosAndVideosForPortfolio() },
+        { text: "Documents", onPress: () => void pickDocumentsForPortfolio() },
+        { text: "Cancel", style: "cancel" },
+      ],
+      true,
+    );
   };
 
   const portfolioCount = profile?.portfolio_urls?.length ?? 0;
@@ -2419,7 +2666,7 @@ export default function ProfileScreen() {
     portfolioCount > 0
       ? `${portfolioCount} ${portfolioCount === 1 ? "item" : "items"} in ${isOwner ? "your" : "this"} portfolio`
       : isOwner
-        ? "Add photos and short clips that show your sound, setup, or stage presence."
+        ? "Add photos, videos, and documents that show your sound, setup, or stage presence."
         : "No portfolio uploads yet.";
   const stationSlotCount = Number(
     userStation?.slot_count ??
@@ -3639,59 +3886,123 @@ export default function ProfileScreen() {
                       </TouchableOpacity>
                     )}
 
-                    {(profile?.portfolio_urls || []).map((url: string, i: number) => (
-                      <TouchableOpacity
-                        key={i}
-                        style={[styles.gridItemTikTok, { borderColor: colors.border }]}
-                        onPress={() => openMediaViewer(url)}
-                        activeOpacity={1}
-                      >
-                        {isVideo(url) ? (
-                          <View
-                            style={[
-                              styles.gridVideoPlaceholder,
-                              { backgroundColor: isDark ? "#0F172A" : "#E2E8F0" },
-                            ]}
-                          >
-                            <Ionicons name="play-circle" size={30} color="#fff" />
-                            <Text style={styles.gridVideoPlaceholderText}>Tap to play</Text>
+                    {(profile?.portfolio_urls || []).map((url: string, i: number) => {
+                      const mediaType = getProfileMediaType(url);
+                      const isVideoItem = mediaType === "video";
+                      const isDocumentItem = mediaType === "document";
+
+                      return (
+                        <TouchableOpacity
+                          key={url}
+                          style={[styles.gridItemTikTok, { borderColor: colors.border }]}
+                          onPress={() => openMediaViewer(url)}
+                          activeOpacity={1}
+                        >
+                          {isVideoItem ? (
+                            <View
+                              style={[
+                                styles.gridVideoPlaceholder,
+                                { backgroundColor: isDark ? "#0F172A" : "#E2E8F0" },
+                              ]}
+                            >
+                              <Ionicons name="play-circle" size={30} color="#fff" />
+                              <Text style={styles.gridVideoPlaceholderText}>Tap to play</Text>
+                            </View>
+                          ) : isDocumentItem ? (
+                            <View
+                              style={[
+                                styles.gridDocumentPlaceholder,
+                                { backgroundColor: isDark ? "#0F172A" : "#E2E8F0" },
+                              ]}
+                            >
+                              <Ionicons name="document-text" size={30} color={colors.primary} />
+                              <Text style={[styles.gridDocumentExtension, { color: colors.text }]}>
+                                {getPortfolioUrlExtension(url)}
+                              </Text>
+                            </View>
+                          ) : (
+                            <Image
+                              source={{ uri: url }}
+                              style={styles.gridImage}
+                              resizeMode="cover"
+                            />
+                          )}
+
+                          <View style={styles.gridMeta}>
+                            <View style={styles.mediaTypePill}>
+                              <Ionicons
+                                name={isDocumentItem ? "document-text" : isVideoItem ? "videocam" : "image"}
+                                size={10}
+                                color="#fff"
+                              />
+                              <Text style={styles.mediaTypeText}>
+                                {isDocumentItem ? "Document" : isVideoItem ? "Video" : "Photo"}
+                              </Text>
+                            </View>
+                          </View>
+
+                          {isOwner && (
+                            <TouchableOpacity
+                              activeOpacity={1}
+                              onPress={(event: any) => {
+                                event?.stopPropagation?.();
+                                confirmRemoveMedia(url);
+                              }}
+                              style={styles.mediaRemoveBtn}
+                            >
+                              <Ionicons name="trash-outline" size={14} color="#fff" />
+                            </TouchableOpacity>
+                          )}
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+                </View>
+                <View style={[styles.profilePostsSection, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+                  <View style={styles.profilePostsHeader}>
+                    <Text style={[styles.profilePostsTitle, { color: colors.text }]}>Posts</Text>
+                    {loadingProfilePosts ? <ActivityIndicator size="small" color={colors.primary} /> : null}
+                  </View>
+                  {!loadingProfilePosts && profilePosts.length === 0 ? (
+                    <Text style={[styles.profilePostsEmpty, { color: colors.textSecondary }]}>
+                      {isOwner ? "Your posts will appear here." : "No posts to show yet."}
+                    </Text>
+                  ) : (
+                    profilePosts.map((post) => (
+                      <View key={post.id} style={[styles.profilePostCard, { borderColor: colors.border }]}>
+                        {post.preview_url ? (
+                          <View style={styles.profilePostPreviewWrap}>
+                            <CachedImage uri={post.preview_url} style={styles.profilePostPreview} width={84} height={84} />
+                            {post.media?.some((item: any) => item.media_type === "video") ? (
+                              <View style={styles.profilePostVideoBadge}>
+                                <Ionicons name="play" size={12} color="#FFFFFF" />
+                              </View>
+                            ) : null}
                           </View>
                         ) : (
-                          <Image
-                            source={{ uri: url }}
-                            style={styles.gridImage}
-                            resizeMode="cover"
-                          />
+                          <View style={[styles.profilePostPreviewFallback, { backgroundColor: isDark ? "#0F172A" : "#F1F5F9" }]}>
+                            <Ionicons name="newspaper-outline" size={24} color={colors.textSecondary} />
+                          </View>
                         )}
-
-                        <View style={styles.gridMeta}>
-                          <View style={styles.mediaTypePill}>
-                            <Ionicons
-                              name={isVideo(url) ? "videocam" : "image"}
-                              size={10}
-                              color="#fff"
-                            />
-                            <Text style={styles.mediaTypeText}>
-                              {isVideo(url) ? "Video" : "Photo"}
+                        <View style={styles.profilePostBody}>
+                          <Text style={[styles.profilePostText, { color: colors.text }]} numberOfLines={3}>
+                            {post.body || "Media post"}
+                          </Text>
+                          <View style={styles.profilePostMetaRow}>
+                            <Text style={[styles.profilePostMeta, { color: colors.textSecondary }]}>
+                              {new Date(post.created_at).toLocaleDateString()}
+                            </Text>
+                            <Text style={[styles.profilePostMeta, { color: colors.textSecondary }]}>
+                              {Number(post.reaction_count || 0)} likes
+                            </Text>
+                            <Text style={[styles.profilePostMeta, { color: colors.textSecondary }]}>
+                              {Number(post.comment_count || 0)} comments
                             </Text>
                           </View>
                         </View>
-
-                        {isOwner && (
-                          <TouchableOpacity
-                            activeOpacity={1}
-                            onPress={(event: any) => {
-                              event?.stopPropagation?.();
-                              confirmRemoveMedia(url);
-                            }}
-                            style={styles.mediaRemoveBtn}
-                          >
-                            <Ionicons name="trash-outline" size={14} color="#fff" />
-                          </TouchableOpacity>
-                        )}
-                      </TouchableOpacity>
-                    ))}
-                  </View>
+                      </View>
+                    ))
+                  )}
                 </View>
               </View>
               )}
@@ -3699,40 +4010,11 @@ export default function ProfileScreen() {
 
           </View>
 
-          {/* Media Viewer Modal */}
-          <Modal
+          <InAppMediaViewer
             visible={mediaModalVisible}
-            transparent={true}
-            animationType="fade"
-            hardwareAccelerated
-            onRequestClose={() => setMediaModalVisible(false)}
-          >
-            <View style={styles.modalContainer}>
-              <TouchableOpacity activeOpacity={1}
-                style={styles.modalCloseBtn}
-                onPress={() => setMediaModalVisible(false)}
-              >
-                <Ionicons name="close" size={28} color="#fff" />
-              </TouchableOpacity>
-
-              {selectedMedia &&
-                (isVideo(selectedMedia) ? (
-                  <Video
-                    source={{ uri: selectedMedia }}
-                    style={styles.modalMedia}
-                    useNativeControls
-                    resizeMode={ResizeMode.CONTAIN}
-                    shouldPlay
-                  />
-                ) : (
-                  <Image
-                    source={{ uri: selectedMedia }}
-                    style={styles.modalMedia}
-                    resizeMode="contain"
-                  />
-                ))}
-            </View>
-          </Modal>
+            uri={selectedMedia}
+            onClose={() => setMediaModalVisible(false)}
+          />
           <Modal
             visible={uploading}
             transparent={true}
@@ -3747,7 +4029,7 @@ export default function ProfileScreen() {
                   {uploadMessage}
                 </Text>
                 <Text style={[styles.uploadLoadingSubtitle, { color: colors.textSecondary }]}>
-                  Please wait while your photo or video is checked and uploaded.
+                  Please wait while your photo, video, or document is checked and uploaded.
                 </Text>
               </View>
             </View>
@@ -4678,6 +4960,18 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontFamily: "Poppins_500Medium",
   },
+  gridDocumentPlaceholder: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    padding: 12,
+  },
+  gridDocumentExtension: {
+    fontSize: 12,
+    fontFamily: "Poppins_700Bold",
+    textAlign: "center",
+  },
   gridMeta: {
     position: "absolute",
     left: 8,
@@ -4710,6 +5004,84 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "rgba(239,68,68,0.92)",
+  },
+  profilePostsSection: {
+    marginTop: 18,
+    marginHorizontal: 16,
+    borderRadius: 14,
+    borderWidth: 1,
+    padding: 14,
+  },
+  profilePostsHeader: {
+    minHeight: 28,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 8,
+  },
+  profilePostsTitle: {
+    fontSize: 16,
+    fontFamily: "Poppins_700Bold",
+  },
+  profilePostsEmpty: {
+    fontSize: 13,
+    fontFamily: "Poppins_400Regular",
+    paddingVertical: 10,
+  },
+  profilePostCard: {
+    borderTopWidth: 1,
+    paddingTop: 12,
+    marginTop: 12,
+    flexDirection: "row",
+    gap: 12,
+  },
+  profilePostPreviewWrap: {
+    width: 84,
+    height: 84,
+    borderRadius: 10,
+    overflow: "hidden",
+    backgroundColor: "#0F172A",
+  },
+  profilePostPreview: {
+    width: 84,
+    height: 84,
+  },
+  profilePostPreviewFallback: {
+    width: 84,
+    height: 84,
+    borderRadius: 10,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  profilePostVideoBadge: {
+    position: "absolute",
+    left: 6,
+    top: 6,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(15,23,42,0.76)",
+  },
+  profilePostBody: {
+    flex: 1,
+    minWidth: 0,
+  },
+  profilePostText: {
+    fontSize: 13,
+    lineHeight: 19,
+    fontFamily: "Poppins_500Medium",
+  },
+  profilePostMetaRow: {
+    marginTop: 8,
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 10,
+  },
+  profilePostMeta: {
+    fontSize: 11,
+    fontFamily: "Poppins_500Medium",
   },
   modalContainer: {
     flex: 1,

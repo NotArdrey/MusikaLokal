@@ -19,6 +19,7 @@ import GroupLinkedPlaylistsSection from "../src/components/GroupLinkedPlaylistsS
 import Header from "../src/components/header";
 import Modal from "../src/components/modal";
 import Navbar from "../src/components/navbar";
+import ProfileAvatar from "../src/components/ProfileAvatar";
 import SlidingTabBar from "../src/components/SlidingTabBar";
 import SmoothTabTransition from "../src/components/SmoothTabTransition";
 import { useBottomBarClearance } from "../src/hooks/useBottomBarClearance";
@@ -1398,12 +1399,14 @@ export default function GroupDetailsScreen() {
                     >
                       <View style={styles.reviewUserHeader}>
                         <View style={styles.userInfo}>
-                          <Image
-                            source={{ uri: review.author?.avatar_url || null }}
+                          <ProfileAvatar
+                            uri={review.author?.avatar_url}
                             style={[
                               styles.userAvatar,
                               { backgroundColor: colors.border },
                             ]}
+                            backgroundColor={isDark ? "#374151" : "#E5E7EB"}
+                            iconColor={colors.textSecondary}
                           />
                           <Text
                             style={{

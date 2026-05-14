@@ -97,6 +97,49 @@ const PUBLIC_ACTIONS = new Set([
   "get_product_details",
 ]);
 
+const MARKETPLACE_SELLER_ROLES = new Set([
+  "producer",
+  "venue-owner",
+  "studio-owner",
+]);
+
+const SELLER_ONLY_ACTIONS = new Set([
+  "create_product",
+  "update_product",
+  "publish_product",
+  "mark_product_sold",
+  "relist_product",
+  "delete_product",
+  "list_my_products",
+  "list_seller_orders",
+  "create_fulfillment",
+  "update_fulfillment",
+  "create_shipping_profile",
+  "list_shipping_profiles",
+  "get_seller_dashboard",
+]);
+
+async function requireMarketplaceSeller(supabaseAdmin: any, userId: string | null) {
+  if (!userId) {
+    return jsonResponse({ error: "Missing authenticated user" }, 401);
+  }
+
+  const { data: profile, error } = await supabaseAdmin
+    .from("profiles")
+    .select("role")
+    .eq("id", userId)
+    .single();
+
+  if (error || !profile || !MARKETPLACE_SELLER_ROLES.has(profile.role)) {
+    return jsonResponse(
+      { error: "Only producer, venue-owner, and studio-owner accounts can sell in marketplace." },
+      403,
+    );
+  }
+
+  return null;
+}
+
 async function insertNotification(
   supabaseAdmin: any,
   payload: {
@@ -166,6 +209,11 @@ Deno.serve(async (req: Request) => {
     }
 
     const uid = authUser?.id ?? null;
+
+    if (SELLER_ONLY_ACTIONS.has(action)) {
+      const sellerErrorResponse = await requireMarketplaceSeller(supabaseAdmin, uid);
+      if (sellerErrorResponse) return sellerErrorResponse;
+    }
 
     // ── create_product ──────────────────────────────────────────────
     if (action === "create_product") {

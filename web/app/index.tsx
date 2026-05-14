@@ -475,16 +475,13 @@ export default function LoginScreen() {
               {/* Logo Section (Mobile Only) */}
               {!isWebDesktop && (
                 <View style={styles.logoSection}>
-                  <View style={[styles.logoWrapper, styles.shadow]}>
+                  <View style={styles.logoWrapper}>
                     <Image
-                      source={require('../assets/images/Musika-lokal-logo.png')}
+                      source={require('../assets/images/Musika-lokal-logo-theme.png')}
                       style={styles.logoImage}
                       resizeMode="contain"
                     />
                   </View>
-                  <Text style={[styles.appName, themeStyles.text]}>
-                    MusikaLokal
-                  </Text>
                   <Text style={[styles.appTagline, themeStyles.textSecondary]}>
                     Connect with the local music scene
                   </Text>
@@ -495,7 +492,12 @@ export default function LoginScreen() {
               <View style={styles.formContainer}>
 
                 {isWebDesktop && (
-                  <View style={{ marginBottom: 32 }}>
+                  <View style={styles.webFormHeader}>
+                    <Image
+                      source={require('../assets/images/Musika-lokal-logo-theme.png')}
+                      style={styles.webFormLogo}
+                      resizeMode="contain"
+                    />
                     <Text style={[styles.appName, themeStyles.text, { textAlign: 'left', fontSize: 36, marginBottom: 8 }]}>Sign In</Text>
                     <Text style={[themeStyles.textSecondary, { fontFamily: 'Poppins_400Regular', fontSize: 18 }]}>Please enter your details to continue.</Text>
                   </View>
@@ -706,24 +708,32 @@ const styles = StyleSheet.create({
     width: '100%',
     maxWidth: 500,
   },
+  webFormHeader: {
+    alignItems: 'flex-start',
+    marginBottom: 32,
+  },
+  webFormLogo: {
+    width: 132,
+    height: 132,
+    marginBottom: 24,
+  },
   logoSection: {
     alignItems: 'center',
     marginBottom: 48, // mb-12
   },
   logoWrapper: {
-    width: 96, // w-24
-    height: 96, // h-24
+    width: 220,
+    height: 220,
     borderRadius: 24, // rounded-3xl
-    backgroundColor: '#4F46E5', // primary color fallback/base
+    backgroundColor: 'transparent',
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 24, // mb-6
     // Shadow props
   },
   logoImage: {
-    width: 100,
-    height: 100,
-    tintColor: 'white',
+    width: 196,
+    height: 196,
   },
   appName: {
     fontSize: 30, // text-3xl

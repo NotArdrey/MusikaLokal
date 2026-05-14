@@ -41,6 +41,7 @@ import BottomModal from './BottomModal';
 import CustomAlert, { AlertType } from './CustomAlert';
 import InAppMediaViewer, { isInAppMediaUrl } from './InAppMediaViewer';
 import { normalizeVisibleInput } from './modal';
+import ProfileAvatar from './ProfileAvatar';
 import ReportModal from './ReportModal';
 
 // Available reaction emojis
@@ -605,16 +606,12 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
                     { marginBottom: isLastInRun ? 8 : 2 },
                 ]}>
                     {!isMe && (
-                        senderAvatarUrl ? (
-                            <Image
-                                source={{ uri: senderAvatarUrl }}
-                                style={styles.avatar}
-                            />
-                        ) : (
-                            <View style={[styles.avatar, styles.avatarPlaceholder, { backgroundColor: colors.primary }]}>
-                                <Ionicons name="person" size={20} color="#FFF" />
-                            </View>
-                        )
+                        <ProfileAvatar
+                            uri={senderAvatarUrl}
+                            style={styles.avatar}
+                            backgroundColor={isDark ? '#374151' : '#E5E7EB'}
+                            iconColor={colors.textSecondary}
+                        />
                     )}
                     <View style={styles.messageContent}>
                         {showSenderName && senderProfile && (
@@ -751,20 +748,13 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
                 {/* Messenger-style seen indicator — avatar floats right below the last seen message */}
                 {isMe && index === lastSeenMessageIndex && otherUser && (
                     <View style={styles.seenContainer}>
-                        {resolvedOtherUserAvatar ? (
-                            <Image
-                                source={{ uri: resolvedOtherUserAvatar }}
-                                style={[styles.seenAvatar, { borderColor: colors.background }]}
-                            />
-                        ) : (
-                            <View style={[
-                                styles.seenAvatar,
-                                styles.avatarPlaceholder,
-                                { backgroundColor: colors.primary, borderColor: colors.background },
-                            ]}>
-                                <Ionicons name="person" size={9} color="#FFF" />
-                            </View>
-                        )}
+                        <ProfileAvatar
+                            uri={resolvedOtherUserAvatar}
+                            style={[styles.seenAvatar, { borderColor: colors.background }]}
+                            iconSize={9}
+                            backgroundColor={isDark ? '#374151' : '#E5E7EB'}
+                            iconColor={colors.textSecondary}
+                        />
                     </View>
                 )}
             </>
@@ -938,20 +928,22 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
                     <View style={styles.headerAvatarWrap}>
                         {isGroupChat ? (
                             <View style={[styles.groupAvatarContainer, { backgroundColor: colors.primary }]}>
-                                {displayAvatar ? (
-                                    <Image source={{ uri: displayAvatar }} style={styles.headerAvatar} />
-                                ) : (
-                                    <Ionicons name="people" size={22} color="#FFF" />
-                                )}
+                                <ProfileAvatar
+                                    uri={displayAvatar}
+                                    style={styles.headerAvatar}
+                                    iconName="people"
+                                    iconSize={22}
+                                    backgroundColor={colors.primary}
+                                    iconColor="#FFF"
+                                />
                             </View>
                         ) : (
-                            displayAvatar ? (
-                                <Image source={{ uri: displayAvatar }} style={styles.headerAvatar} />
-                            ) : (
-                                <View style={[styles.headerAvatar, styles.avatarPlaceholder, { backgroundColor: colors.primary }]}>
-                                    <Ionicons name="person" size={20} color="#FFF" />
-                                </View>
-                            )
+                            <ProfileAvatar
+                                uri={displayAvatar}
+                                style={styles.headerAvatar}
+                                backgroundColor={isDark ? '#374151' : '#E5E7EB'}
+                                iconColor={colors.textSecondary}
+                            />
                         )}
                         {!isGroupChat && otherUserOnline && (
                             <View style={[styles.onlineDot, { borderColor: colors.background }]} />

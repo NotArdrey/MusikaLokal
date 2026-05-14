@@ -4,7 +4,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ActivityIndicator, Animated, Image, LayoutAnimation, Modal, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, UIManager, View } from 'react-native';
 import { supabase } from '../../lib/supabase';
 import CustomAlert, { AlertType } from './CustomAlert';
-import { DEFAULT_AVATAR } from '../constants/Images';
+import ProfileAvatar from './ProfileAvatar';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 import { isFanUserRole, resolveRoleManageRoute } from '../utils/roleRouting';
@@ -679,11 +679,10 @@ export default function SidebarNav() {
                 <View style={[styles.sidebarContainer, { backgroundColor: isDark ? '#1F2937' : '#FFFFFF', borderRightColor: colors.border }]}>
                     <View style={styles.logoSection}>
                         <Image
-                            source={require('../../assets/images/Musika-lokal-logo.png')}
-                            style={[styles.logoImage, { tintColor: colors.primary }]}
+                            source={require('../../assets/images/Musika-lokal-logo-theme.png')}
+                            style={styles.logoImage}
                             resizeMode="contain"
                         />
-                        <Text style={[styles.brandName, { color: colors.text }]}>MusikaLokal</Text>
                     </View>
 
                     <View style={styles.navContainer} />
@@ -723,11 +722,10 @@ export default function SidebarNav() {
                     <View style={styles.topBarContent}>
                         <View style={[styles.logoSection, styles.logoSectionTop]}>
                             <Image
-                                source={require('../../assets/images/Musika-lokal-logo.png')}
-                                style={[styles.logoImage, { tintColor: colors.primary }]}
+                                source={require('../../assets/images/Musika-lokal-logo-theme.png')}
+                                style={styles.logoImage}
                                 resizeMode="contain"
                             />
-                            <Text style={[styles.brandName, { color: colors.text }]}>MusikaLokal</Text>
                         </View>
 
                         <ScrollView
@@ -813,9 +811,11 @@ export default function SidebarNav() {
                                 style={[styles.avatarButton, { borderColor: colors.border }]}
                                 onPress={() => router.replace('/profile')}
                             >
-                                <Image
-                                    source={avatarUrl ? { uri: avatarUrl } : DEFAULT_AVATAR}
+                                <ProfileAvatar
+                                    uri={avatarUrl}
                                     style={styles.avatarImage}
+                                    backgroundColor={isDark ? '#374151' : '#E5E7EB'}
+                                    iconColor={colors.textSecondary}
                                 />
                             </TouchableOpacity>
 
@@ -983,11 +983,10 @@ export default function SidebarNav() {
             <View style={[styles.sidebarContainer, { backgroundColor: isDark ? '#1F2937' : '#FFFFFF', borderRightColor: colors.border }]}>
                 <View style={styles.logoSection}>
                     <Image
-                        source={require('../../assets/images/Musika-lokal-logo.png')}
-                        style={[styles.logoImage, { tintColor: colors.primary }]}
+                        source={require('../../assets/images/Musika-lokal-logo-theme.png')}
+                        style={styles.logoImage}
                         resizeMode="contain"
                     />
-                    <Text style={[styles.brandName, { color: colors.text }]}>MusikaLokal</Text>
                 </View>
 
                 <ScrollView style={styles.navContainer}>
@@ -1572,20 +1571,16 @@ const styles = StyleSheet.create({
         padding: 28,
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 12,
+        gap: 0,
     },
     logoSectionTop: {
         padding: 0,
-        gap: 10,
-        minWidth: 190,
+        gap: 0,
+        minWidth: 74,
     },
     logoImage: {
-        width: 36,
-        height: 36,
-    },
-    brandName: {
-        fontSize: 20,
-        fontFamily: 'Poppins_700Bold',
+        width: 58,
+        height: 58,
     },
     navContainer: {
         flex: 1,

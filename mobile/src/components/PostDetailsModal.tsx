@@ -2,6 +2,7 @@ import { Ionicons } from "@expo/vector-icons";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
+  Share,
   ScrollView,
   StyleSheet,
   Text,
@@ -17,6 +18,7 @@ import { emitToast } from "../events/toastBus";
 import BottomModal from "./BottomModal";
 import CachedImage from "./CachedImage";
 import CustomAlert, { AlertType } from "./CustomAlert";
+import ProfileAvatar from "./ProfileAvatar";
 
 const KNOWN_FEED_MEDIA_BUCKETS = [
   "post-media",
@@ -54,8 +56,10 @@ const resolvePostMediaUrl = (value: unknown) => {
   if (directParts.length > 1) {
     const directBucket = directParts[0];
     const directPath = directParts.slice(1).join("/");
-    const { data } = supabase.storage.from(directBucket).getPublicUrl(directPath);
-    if (data?.publicUrl) return data.publicUrl;
+    if (KNOWN_FEED_MEDIA_BUCKETS.includes(directBucket)) {
+      const { data } = supabase.storage.from(directBucket).getPublicUrl(directPath);
+      if (data?.publicUrl) return data.publicUrl;
+    }
   }
 
   for (const bucket of KNOWN_FEED_MEDIA_BUCKETS) {
@@ -97,6 +101,7 @@ type Props = {
   onPostDeleted?: (postId: string) => void;
   onReactionChanged?: (postId: string, hasReaction: boolean, reactionCount: number) => void;
   onCommentChanged?: (postId: string, commentCount: number) => void;
+  onShareChanged?: (postId: string, shareCount: number) => void;
 };
 
 export default function PostDetailsModal({
@@ -106,6 +111,7 @@ export default function PostDetailsModal({
   onPostDeleted,
   onReactionChanged,
   onCommentChanged,
+  onShareChanged,
 }: Props) {
   const { colors, isDark } = useTheme();
   const { session, userId } = useAuth();
@@ -159,6 +165,7 @@ export default function PostDetailsModal({
             ? rawPost.media.map((item: any) => ({
                 ...item,
                 url: resolvePostMediaUrl(item?.url || item?.storage_path || item?.public_url),
+                thumbnail_url: resolvePostMediaUrl(item?.thumbnail_url || item?.thumbnail_path || item?.url || item?.storage_path || item?.public_url),
               }))
             : [],
           comments: normalizedComments,
@@ -226,6 +233,23 @@ export default function PostDetailsModal({
 
       if (error) throw error;
 
+      if (data?.blocked || data?.status === "blocked") {
+        setAlert({
+          type: "warning",
+          title: "Comment blocked",
+          message: data?.error || data?.moderation?.reason || "This comment did not pass moderation.",
+        });
+        return;
+      }
+
+      if (data?.pending_review || data?.status === "pending_review") {
+        setCommentText("");
+        emitToast({ type: "info", title: "Comment sent for review", message: "It will appear if approved." });
+        await fetchPost();
+        onCommentChanged?.(post.id, comments.length);
+        return;
+      }
+
       if (data?.success) {
         const nextCount = comments.length + 1;
         setCommentText("");
@@ -280,6 +304,29 @@ export default function PostDetailsModal({
     }
   };
 
+  const handleSharePost = async () => {
+    if (!post) return;
+    try {
+      const shareResult = await Share.share({
+        message: `${post.body || "Check out this post on MusikaLokal."}\n\nMusikaLokal post: ${post.id}`,
+      });
+      if (shareResult.action === Share.dismissedAction) return;
+
+      const { data, error } = await supabase.functions.invoke("manage-social-feed", {
+        body: { action: "share_post", post_id: post.id },
+      });
+
+      if (error) throw error;
+      if (data?.error) throw new Error(String(data.error));
+
+      const nextCount = Number(data?.data?.share_count || 0) || Number(post.share_count || 0) + 1;
+      setPost((current: any) => ({ ...current, share_count: nextCount }));
+      onShareChanged?.(post.id, nextCount);
+    } catch (e: any) {
+      setAlert({ type: "error", title: "Share Failed", message: e?.message || "Please try again." });
+    }
+  };
+
   const modalMaxHeight = useMemo(() => Math.min(height - 72, 760), [height]);
   const isOwner = post?.author_id === userId;
   const canSubmitComment = commentText.trim().length > 0;
@@ -317,15 +364,12 @@ export default function PostDetailsModal({
         <>
           <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
             <View style={styles.authorRow}>
-              {post.author_avatar ? (
-                <CachedImage uri={post.author_avatar} style={styles.avatar} width={40} height={40} />
-              ) : (
-                <View style={[styles.avatarFallback, { backgroundColor: colors.primary + "22" }]}>
-                  <Text style={[styles.avatarInitials, { color: colors.primary }]}>
-                    {initialsOf(post.author_name)}
-                  </Text>
-                </View>
-              )}
+              <ProfileAvatar
+                uri={post.author_avatar}
+                style={styles.avatar}
+                backgroundColor={isDark ? "#374151" : "#E5E7EB"}
+                iconColor={colors.textSecondary}
+              />
               <View style={styles.authorText}>
                 <Text style={[styles.authorName, { color: colors.text }]} numberOfLines={1}>
                   {post.author_name}
@@ -358,17 +402,24 @@ export default function PostDetailsModal({
 
             {post.media?.length > 0 ? (
               <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.mediaScroll}>
-                {post.media.map((media: any, index: number) =>
-                  media.url ? (
-                    <CachedImage
-                      key={`${media.id || index}`}
-                      uri={media.url}
-                      style={[styles.mediaImg, { width: mediaWidth }]}
-                      width={mediaWidth}
-                      height={220}
-                    />
-                  ) : null,
-                )}
+                {post.media.map((media: any, index: number) => {
+                  const previewUrl = media.thumbnail_url || media.url;
+                  return previewUrl ? (
+                    <View key={`${media.id || index}`} style={[styles.mediaFrame, { width: mediaWidth }]}>
+                      <CachedImage
+                        uri={previewUrl}
+                        style={styles.mediaImg}
+                        width={mediaWidth}
+                        height={220}
+                      />
+                      {media.media_type === "video" ? (
+                        <View style={styles.videoPlayBadge}>
+                          <Ionicons name="play" size={18} color="#FFFFFF" />
+                        </View>
+                      ) : null}
+                    </View>
+                  ) : null;
+                })}
               </ScrollView>
             ) : null}
 
@@ -388,6 +439,9 @@ export default function PostDetailsModal({
               <Text style={[styles.countText, { color: colors.textSecondary }]}>
                 {comments.length} {comments.length === 1 ? "comment" : "comments"}
               </Text>
+              <Text style={[styles.countText, { color: colors.textSecondary }]}>
+                {Number(post.share_count || 0)} shares
+              </Text>
             </View>
 
             <View style={[styles.actionRow, { borderTopColor: borderCol, borderBottomColor: borderCol }]}>
@@ -405,21 +459,22 @@ export default function PostDetailsModal({
                 <Ionicons name="chatbubble-outline" size={19} color={colors.textSecondary} />
                 <Text style={[styles.actionText, { color: colors.textSecondary }]}>Comment</Text>
               </View>
+              <TouchableOpacity activeOpacity={0.78} onPress={handleSharePost} style={styles.actionBtn}>
+                <Ionicons name="share-social-outline" size={19} color={colors.textSecondary} />
+                <Text style={[styles.actionText, { color: colors.textSecondary }]}>Share</Text>
+              </TouchableOpacity>
             </View>
 
             <View style={styles.commentsSection}>
               {comments.length > 0 ? (
                 comments.map((comment: any) => (
                   <View key={comment.id} style={styles.commentRow}>
-                    {comment.author_avatar ? (
-                      <CachedImage uri={comment.author_avatar} style={styles.commentAvatar} width={32} height={32} />
-                    ) : (
-                      <View style={[styles.commentAvatarFallback, { backgroundColor: colors.primary + "22" }]}>
-                        <Text style={[styles.commentAvatarInitials, { color: colors.primary }]}>
-                          {initialsOf(comment.author_name)}
-                        </Text>
-                      </View>
-                    )}
+                    <ProfileAvatar
+                      uri={comment.author_avatar}
+                      style={styles.commentAvatar}
+                      backgroundColor={isDark ? "#374151" : "#E5E7EB"}
+                      iconColor={colors.textSecondary}
+                    />
                     <View style={styles.commentBodyWrap}>
                       <View style={[styles.commentBubble, { backgroundColor: bubbleBg }]}>
                         <Text style={[styles.commentAuthor, { color: colors.text }]} numberOfLines={1}>
@@ -449,9 +504,12 @@ export default function PostDetailsModal({
           </ScrollView>
 
           <View style={[styles.footer, { borderTopColor: borderCol, backgroundColor: cardBg }]}>
-            <View style={[styles.footerAvatarFallback, { backgroundColor: colors.primary + "22" }]}>
-              <Ionicons name="person" size={16} color={colors.primary} />
-            </View>
+            <ProfileAvatar
+              uri={(session?.user?.user_metadata as any)?.avatar_url}
+              style={styles.footerAvatarFallback}
+              backgroundColor={isDark ? "#374151" : "#E5E7EB"}
+              iconColor={colors.textSecondary}
+            />
             <View style={[styles.footerInputWrap, { backgroundColor: bubbleBg }]}>
               <TextInput
                 style={[styles.footerInput, { color: colors.text }]}
@@ -560,7 +618,21 @@ const styles = StyleSheet.create({
     paddingBottom: 12,
   },
   mediaScroll: { paddingHorizontal: 16, gap: 8 },
-  mediaImg: { height: 220, borderRadius: 10, marginRight: 8 },
+  mediaFrame: { height: 220, borderRadius: 10, marginRight: 8, overflow: "hidden", backgroundColor: "#0F172A" },
+  mediaImg: { width: "100%", height: "100%" },
+  videoPlayBadge: {
+    position: "absolute",
+    left: "50%",
+    top: "50%",
+    width: 48,
+    height: 48,
+    marginLeft: -24,
+    marginTop: -24,
+    borderRadius: 24,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(15,23,42,0.76)",
+  },
   countsRow: {
     flexDirection: "row",
     alignItems: "center",

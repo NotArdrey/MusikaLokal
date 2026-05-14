@@ -4,17 +4,16 @@ import React, { useState } from 'react';
 import {
     ActivityIndicator,
     FlatList,
-    Image,
     StyleSheet,
     Text,
     TouchableOpacity,
     View
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { DEFAULT_AVATAR } from '../constants/Images';
 import { useTheme } from '../context/ThemeContext';
 import { emitToast } from '../events/toastBus';
 import { Conversation, isConversationMuted, useConversations } from '../hooks/useChat';
+import ProfileAvatar from './ProfileAvatar';
 import UserSearchModal from './UserSearchModal';
 
 interface ConversationsListProps {
@@ -146,16 +145,22 @@ const ConversationsList: React.FC<ConversationsListProps> = ({
                 <View style={styles.avatarContainer}>
                     {isGroup ? (
                         <View style={[styles.groupAvatar, { backgroundColor: colors.primary }]}>
-                            {displayAvatar ? (
-                                <Image source={{ uri: displayAvatar }} style={styles.avatar} />
-                            ) : (
-                                <Ionicons name="people" size={26} color="#FFF" />
-                            )}
+                            <ProfileAvatar
+                                uri={displayAvatar}
+                                style={styles.avatar}
+                                iconName="people"
+                                iconSize={26}
+                                backgroundColor={colors.primary}
+                                iconColor="#FFF"
+                            />
                         </View>
-                    ) : displayAvatar ? (
-                        <Image source={{ uri: displayAvatar }} style={styles.avatar} />
                     ) : (
-                        <Image source={DEFAULT_AVATAR} style={styles.avatar} />
+                        <ProfileAvatar
+                            uri={displayAvatar}
+                            style={styles.avatar}
+                            backgroundColor={isDark ? '#374151' : '#E5E7EB'}
+                            iconColor={colors.textSecondary}
+                        />
                     )}
                     {hasUnread && (
                         <View style={[styles.onlineDot, { backgroundColor: colors.primary, borderColor: colors.background }]} />
@@ -210,7 +215,13 @@ const ConversationsList: React.FC<ConversationsListProps> = ({
                         ) : showOutgoingStatus ? (
                             <View style={styles.outgoingStatusRow}>
                                 {isLastMessageSeen && otherUser?.avatar_url ? (
-                                    <Image source={{ uri: otherUser.avatar_url }} style={styles.seenAvatarIndicator} />
+                                    <ProfileAvatar
+                                        uri={otherUser.avatar_url}
+                                        style={styles.seenAvatarIndicator}
+                                        iconSize={8}
+                                        backgroundColor={isDark ? '#374151' : '#E5E7EB'}
+                                        iconColor={colors.textSecondary}
+                                    />
                                 ) : isLastMessageSeen ? (
                                     <Ionicons name="checkmark-done" size={15} color={colors.primary} />
                                 ) : (

@@ -2,7 +2,6 @@
 import {
     BottomSheetBackdrop,
     BottomSheetModal,
-    BottomSheetScrollView,
     useBottomSheetTimingConfigs,
 } from "@gorhom/bottom-sheet";
 import * as ExpoLinking from "expo-linking";
@@ -2695,6 +2694,7 @@ const ListingDetailsSheet = forwardRef<
       setDate={setDate}
       setEndTime={setEndTime}
       setSelectedSlot={setSelectedSlot}
+      setValidEndTimes={setValidEndTimes}
       showAddBooking={showAddBooking}
       bookingNotes={bookingNotes}
       setBookingNotes={setBookingNotes}
@@ -3613,14 +3613,14 @@ const ListingDetailsSheet = forwardRef<
           onChange={handleSheetChanges}
           onDismiss={onDismiss}
         >
-          <BottomSheetScrollView
+          <ScrollView
             contentContainerStyle={styles.scrollContent}
             showsVerticalScrollIndicator={false}
             showsHorizontalScrollIndicator={false}
             nestedScrollEnabled
           >
             {sheetContent}
-          </BottomSheetScrollView>
+          </ScrollView>
         </BottomSheetModal>
       )}
 

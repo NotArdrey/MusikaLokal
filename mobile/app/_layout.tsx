@@ -75,6 +75,33 @@ type IncomingNotificationToastRecord = {
   read?: boolean | null;
 };
 
+const getFirstQueryValue = (value: unknown) => {
+  if (Array.isArray(value)) {
+    return typeof value[0] === "string" ? value[0] : "";
+  }
+
+  return typeof value === "string" ? value : "";
+};
+
+const decodeE2EBase64Url = (value: unknown) => {
+  const raw = getFirstQueryValue(value).trim();
+  if (!raw) return "";
+
+  try {
+    const normalized = raw.replace(/-/g, "+").replace(/_/g, "/");
+    const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, "=");
+    const atob = (globalThis as any).atob;
+    if (typeof atob !== "function") return "";
+    return decodeURIComponent(
+      Array.from(atob(padded) as string, (char) => (
+        `%${char.charCodeAt(0).toString(16).padStart(2, "0")}`
+      )).join(""),
+    );
+  } catch {
+    return "";
+  }
+};
+
 const logNotificationToastDebug = (...args: unknown[]) => {
   if (__DEV__ && NOTIFICATION_TOAST_DEBUG_LOGS) {
     console.log("[notification-toast]", ...args);
@@ -697,6 +724,30 @@ function RootContent() {
 
     try {
       const { hostname, path, queryParams } = Linking.parse(url);
+      const linkPath = String(path || hostname || "").replace(/^\/+/, "");
+
+      if (isE2EFixtureMode() && linkPath === "e2e-login") {
+        const email = (
+          getFirstQueryValue(queryParams?.email) ||
+          decodeE2EBase64Url(queryParams?.email_b64)
+        ).trim();
+        const password = (
+          getFirstQueryValue(queryParams?.password) ||
+          decodeE2EBase64Url(queryParams?.password_b64)
+        );
+
+        if (email && password) {
+          void (async () => {
+            const { error } = await supabase.auth.signInWithPassword({ email, password });
+            if (!error) {
+              router.replace("/feed");
+            } else if (__DEV__) {
+              console.warn("[e2e-login] Failed to sign in", error.message);
+            }
+          })();
+        }
+        return;
+      }
 
       // Create a unique key for this deep link to prevent double processing
       const linkKey = `${path}-${queryParams?.booking_id}-${queryParams?.status}-${queryParams?.type}`;
@@ -728,31 +779,6 @@ function RootContent() {
         const status = queryParams?.status as string;
         const bookingId = queryParams?.booking_id as string;
         const type = queryParams?.type as string;
-
-        const normalizedStatus = String(status || "").toLowerCase();
-        if (normalizedStatus === "success" || normalizedStatus === "paid" || normalizedStatus === "completed") {
-          emitToast({
-            type: "success",
-            title: "Payment Successful",
-            message: "Your payment was confirmed.",
-            source: "deep-link",
-          });
-        } else if (normalizedStatus === "cancelled" || normalizedStatus === "canceled") {
-          emitToast({
-            type: "warning",
-            title: "Payment Cancelled",
-            message: "The payment was cancelled before completion.",
-            source: "deep-link",
-          });
-        } else if (normalizedStatus === "failed" || normalizedStatus === "error") {
-          emitToast({
-            type: "error",
-            title: "Payment Failed",
-            message: "The payment did not go through. Please try again.",
-            source: "deep-link",
-          });
-        }
-
 
         // Navigate to payment result screen
         router.replace({

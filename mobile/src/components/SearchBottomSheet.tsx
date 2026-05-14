@@ -862,8 +862,8 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
                     style={[styles.searchInput, { color: colors.text }]}
                     placeholder={
                       isOwner
-                        ? "Find musicians and teams..."
-                        : "Find musicians, studios, gigs, and teams..."
+                        ? "Search musicians and teams"
+                        : "Search artists, studios, gigs"
                     }
                     placeholderTextColor={colors.textSecondary}
                     value={searchQuery}

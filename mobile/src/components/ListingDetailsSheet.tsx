@@ -2,7 +2,6 @@
 import {
     BottomSheetBackdrop,
     BottomSheetModal,
-    BottomSheetScrollView,
     useBottomSheetSpringConfigs,
 } from "@gorhom/bottom-sheet";
 import * as ExpoLinking from "expo-linking";
@@ -22,6 +21,7 @@ import {
     InteractionManager,
     Linking,
     Modal as RNModal,
+    ScrollView,
     Share,
     StyleSheet,
     Text,
@@ -2861,6 +2861,7 @@ const ListingDetailsSheet = forwardRef<
       setDate={setDate}
       setEndTime={setEndTime}
       setSelectedSlot={setSelectedSlot}
+      setValidEndTimes={setValidEndTimes}
       showAddBooking={showAddBooking}
       bookingNotes={bookingNotes}
       setBookingNotes={setBookingNotes}
@@ -3683,7 +3684,7 @@ const ListingDetailsSheet = forwardRef<
             <ActivityIndicator size="large" color={colors.primary} />
           </View>
         ) : group ? (
-          <BottomSheetScrollView
+          <ScrollView
             contentContainerStyle={scrollContentStyle}
             showsVerticalScrollIndicator={false}
             showsHorizontalScrollIndicator={false}
@@ -3725,7 +3726,7 @@ const ListingDetailsSheet = forwardRef<
               renderGigInfo={renderGigInfo}
               renderGigApply={renderGigApply}
             />
-          </BottomSheetScrollView>
+          </ScrollView>
         ) : null}
       </TrackedBottomSheetModal>
 

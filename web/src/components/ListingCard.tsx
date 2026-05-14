@@ -281,6 +281,7 @@ const ListingCard: React.FC<ListingCardProps> = ({
     }
     return [];
   }, [item.image, item.images]);
+  const showProfileImagePlaceholder = item.type === "Artist";
   const hasMultipleImages = images.length > 1;
   const imageCacheVersion = useMemo(
     () => item.updated_at || item.created_at || item.id,
@@ -361,6 +362,15 @@ const ListingCard: React.FC<ListingCardProps> = ({
           ]}
         >
           {/* Full Background Image / Slideshow */}
+          {showProfileImagePlaceholder && (
+            <View style={[styles.profileImagePlaceholder, StyleSheet.absoluteFillObject]}>
+              <Ionicons
+                name="person"
+                size={84}
+                color={isDark ? "rgba(226,232,240,0.72)" : "rgba(71,85,105,0.5)"}
+              />
+            </View>
+          )}
           {hasMultipleImages ? (
             <View style={StyleSheet.absoluteFillObject}>
               {Platform.OS === "web" ? (
@@ -775,6 +785,15 @@ const ListingCard: React.FC<ListingCardProps> = ({
       >
         {/* Image Section */}
         <View style={[styles.imageContainer, { height: imageHeight }]}>
+          {showProfileImagePlaceholder && (
+            <View style={[styles.profileImagePlaceholder, StyleSheet.absoluteFillObject]}>
+              <Ionicons
+                name="person"
+                size={72}
+                color={isDark ? "rgba(226,232,240,0.72)" : "rgba(71,85,105,0.5)"}
+              />
+            </View>
+          )}
           {hasMultipleImages ? (
             <View style={{ flex: 1 }}>
               {Platform.OS === "web" ? (
@@ -1332,6 +1351,11 @@ const styles = StyleSheet.create({
     width: "100%",
     backgroundColor: "#f3f4f6",
     position: "relative",
+  },
+  profileImagePlaceholder: {
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#E5E7EB",
   },
   image: {
     width: "100%",

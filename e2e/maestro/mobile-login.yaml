@@ -2,7 +2,8 @@ appId: ${APP_ID}
 ---
 - launchApp
 - extendedWaitUntil:
-    visible: "MusikaLokal"
+    visible:
+      id: "auth-email-input"
     timeout: 120000
 - tapOn:
     id: "auth-email-input"
@@ -13,5 +14,6 @@ appId: ${APP_ID}
 - tapOn:
     id: "auth-sign-in-button"
 - extendedWaitUntil:
-    visible: "MusikaLokal"
+    visible:
+      id: "nav-profile"
     timeout: 120000

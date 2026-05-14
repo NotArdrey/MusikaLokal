@@ -29,6 +29,7 @@ import ImageUploader from "../src/components/ImageUploader";
 import LocationPicker from "../src/components/LocationPicker";
 import Modal, { normalizeVisibleInput } from "../src/components/modal";
 import Navbar, { NAVBAR_CLEARANCE } from "../src/components/navbar";
+import ProfileAvatar from "../src/components/ProfileAvatar";
 import {
     isDuoGroupType,
     mapDbGroupTypeToUiGroupType,
@@ -1592,35 +1593,12 @@ export default function AddGroupScreen() {
                               { borderBottomColor: colors.border },
                             ]}
                           >
-                            <View
-                              style={[
-                                styles.avatarPlaceholder,
-                                {
-                                  backgroundColor: colors.primary + "20",
-                                  marginRight: 12,
-                                },
-                              ]}
-                            >
-                              {musician.avatar_url ? (
-                                <Image
-                                  source={{ uri: musician.avatar_url }}
-                                  style={{
-                                    width: 32,
-                                    height: 32,
-                                    borderRadius: 16,
-                                  }}
-                                />
-                              ) : (
-                                <Text
-                                  style={{
-                                    color: colors.primary,
-                                    fontWeight: "bold",
-                                  }}
-                                >
-                                  {musician.full_name.charAt(0)}
-                                </Text>
-                              )}
-                            </View>
+                            <ProfileAvatar
+                              uri={musician.avatar_url}
+                              style={[styles.avatarPlaceholder, { marginRight: 12 }]}
+                              backgroundColor={isDark ? "#374151" : "#E5E7EB"}
+                              iconColor={colors.textSecondary}
+                            />
                             <View>
                               <Text
                                 style={{
@@ -1672,31 +1650,12 @@ export default function AddGroupScreen() {
                           marginBottom: 8,
                         }}
                       >
-                        <View
-                          style={[
-                            styles.avatarPlaceholder,
-                            {
-                              backgroundColor: colors.primary + "20",
-                              marginRight: 12,
-                            },
-                          ]}
-                        >
-                          {pendingMember.avatar_url ? (
-                            <Image
-                              source={{ uri: pendingMember.avatar_url }}
-                              style={{ width: 32, height: 32, borderRadius: 16 }}
-                            />
-                          ) : (
-                            <Text
-                              style={{
-                                color: colors.primary,
-                                fontWeight: "bold",
-                              }}
-                            >
-                              {pendingMember.full_name?.charAt(0)}
-                            </Text>
-                          )}
-                        </View>
+                        <ProfileAvatar
+                          uri={pendingMember.avatar_url}
+                          style={[styles.avatarPlaceholder, { marginRight: 12 }]}
+                          backgroundColor={isDark ? "#374151" : "#E5E7EB"}
+                          iconColor={colors.textSecondary}
+                        />
                         <Text
                           style={{
                             color: colors.text,
@@ -1800,36 +1759,12 @@ export default function AddGroupScreen() {
                           ]}
                         >
                           <View style={styles.memberInfo}>
-                            <View
-                              style={[
-                                styles.avatarPlaceholder,
-                                {
-                                  backgroundColor: isLeader
-                                    ? colors.primary
-                                    : "#E0E7FF",
-                                },
-                              ]}
-                            >
-                              {member.avatar_url ? (
-                                <Image
-                                  source={{ uri: member.avatar_url }}
-                                  style={{
-                                    width: 32,
-                                    height: 32,
-                                    borderRadius: 16,
-                                  }}
-                                />
-                              ) : (
-                                <Text
-                                  style={[
-                                    styles.avatarText,
-                                    { color: isLeader ? "#fff" : "#4F46E5" },
-                                  ]}
-                                >
-                                  {member.name?.charAt(0)}
-                                </Text>
-                              )}
-                            </View>
+                            <ProfileAvatar
+                              uri={member.avatar_url}
+                              style={styles.avatarPlaceholder}
+                              backgroundColor={isLeader ? colors.primary : (isDark ? "#374151" : "#E5E7EB")}
+                              iconColor={isLeader ? "#FFF" : colors.textSecondary}
+                            />
                             <View style={{ flex: 1 }}>
                               <Text
                                 style={[

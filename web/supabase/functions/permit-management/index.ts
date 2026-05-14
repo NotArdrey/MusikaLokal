@@ -138,6 +138,8 @@ function isMissingSchemaError(error: any) {
     code === "42P01" ||
     code === "42703" ||
     code === "PGRST116" ||
+    code === "PGRST204" ||
+    code === "PGRST205" ||
     message.includes("does not exist") ||
     message.includes("relation") ||
     message.includes("column") ||
@@ -457,6 +459,109 @@ async function insertNotificationWithFallback(
   }
 
   return noMetaError;
+}
+
+const paymentStatusFilters = new Set([
+  "all",
+  "paid",
+  "partial",
+  "pending",
+  "failed",
+  "cancelled",
+  "refunded",
+  "refund_pending",
+]);
+
+function normalizePaymentStatusFilter(rawValue: unknown) {
+  const value = String(rawValue || "all").trim().toLowerCase();
+  return paymentStatusFilters.has(value) ? value : "all";
+}
+
+function getPaymentAuditAction(booking: any, refundAmount: number) {
+  const paymentStatus = String(booking?.payment_status || "").trim().toLowerCase();
+  const bookingStatus = String(booking?.status || "").trim().toLowerCase();
+
+  if (paymentStatus === "refund_pending") return "payment_refund_pending";
+  if (
+    paymentStatus === "refunded" ||
+    refundAmount > 0 ||
+    booking?.refunded_at ||
+    booking?.refund_id
+  ) {
+    return "payment_refunded";
+  }
+  if (bookingStatus === "cancelled") return "payment_cancelled";
+  if (paymentStatus === "paid") return "payment_paid";
+  if (paymentStatus === "partial") return "payment_partial";
+  if (paymentStatus === "pending") return "payment_pending";
+  if (paymentStatus === "failed") return "payment_failed";
+
+  return "payment_unpaid";
+}
+
+function getPaymentEventAt(booking: any, action: string) {
+  if (action === "payment_refunded" || action === "payment_refund_pending") {
+    return booking?.refunded_at || booking?.updated_at || booking?.paid_at || booking?.created_at || null;
+  }
+
+  if (action === "payment_cancelled") {
+    return booking?.updated_at || booking?.created_at || null;
+  }
+
+  if (action === "payment_paid" || action === "payment_partial") {
+    return booking?.paid_at || booking?.updated_at || booking?.created_at || null;
+  }
+
+  return booking?.updated_at || booking?.created_at || null;
+}
+
+function matchesPaymentStatusFilter(transaction: any, statusFilter: string) {
+  if (statusFilter === "all") return true;
+
+  const action = String(transaction?.action || "").trim().toLowerCase();
+  const paymentStatus = String(transaction?.payment_status || "").trim().toLowerCase();
+  const bookingStatus = String(transaction?.booking_status || "").trim().toLowerCase();
+
+  if (statusFilter === "cancelled") {
+    return bookingStatus === "cancelled" || action === "payment_cancelled";
+  }
+
+  if (statusFilter === "refunded") {
+    return action === "payment_refunded" || paymentStatus === "refunded";
+  }
+
+  if (statusFilter === "refund_pending") {
+    return action === "payment_refund_pending" || paymentStatus === "refund_pending";
+  }
+
+  return paymentStatus === statusFilter || action === `payment_${statusFilter}`;
+}
+
+function paymentTransactionMatchesSearch(transaction: any, searchTerm: string) {
+  if (searchTerm.length < 2) return true;
+
+  const haystack = [
+    transaction?.booking_id,
+    transaction?.action,
+    transaction?.booking_status,
+    transaction?.payment_status,
+    transaction?.payment_type,
+    transaction?.payment_method,
+    transaction?.customer_name,
+    transaction?.customer_email,
+    transaction?.studio_name,
+    transaction?.owner_name,
+    transaction?.owner_email,
+    transaction?.checkout_session_id,
+    transaction?.payment_intent_id,
+    transaction?.refund_id,
+    transaction?.reference,
+    transaction?.cancellation_reason,
+  ]
+    .map((value) => String(value || "").toLowerCase())
+    .join(" ");
+
+  return haystack.includes(searchTerm);
 }
 
 serve(async (req: Request) => {
@@ -1530,6 +1635,262 @@ serve(async (req: Request) => {
         },
         count: (listResult.count || 0) + platformTotals.count,
         hasMore: offset + limit < ((listResult.count || 0) + platformTotals.count),
+      });
+    }
+
+    if (action === "admin_fetch_payment_transactions") {
+      const statusFilter = normalizePaymentStatusFilter(params.status);
+      const searchTerm = sanitizeSearchTerm(params.searchQuery);
+      const dateRange = normalizeMetricsDateRange(params.dateRange);
+      const rangeStartMs = getRangeStartMs(dateRange);
+      const limit = Math.max(1, Math.min(1000, Number(params.limit || 50)));
+      const offset = Math.max(0, Number(params.offset || 0));
+      const candidateLimit = Math.min(1000, Math.max(offset + limit * 4, limit, 200));
+
+      const { data: bookingRows, error: bookingError } = await client
+        .from("studio_bookings")
+        .select(
+          "id,user_id,studio_id,booking_date,start_time,end_time,status,cancellation_reason,payment_status,payment_amount,final_price,payment_type,remaining_balance,payment_method,payment_intent_id,checkout_session_id,paid_at,refund_amount,refund_id,refunded_at,created_at,updated_at",
+        )
+        .order("updated_at", { ascending: false })
+        .limit(candidateLimit);
+
+      if (bookingError) throw bookingError;
+
+      const bookings = Array.isArray(bookingRows) ? bookingRows : [];
+      const bookingIds = Array.from(new Set(
+        bookings.map((booking: any) => String(booking?.id || "")).filter(Boolean),
+      ));
+      const studioIds = Array.from(new Set(
+        bookings.map((booking: any) => String(booking?.studio_id || "")).filter(Boolean),
+      ));
+
+      const studioRows = studioIds.length > 0
+        ? await safeRows(
+          client
+            .from("studios")
+            .select("id,name,owner_id")
+            .in("id", studioIds),
+        )
+        : [];
+
+      const studioMap = (studioRows as any[]).reduce((acc: Record<string, any>, studio: any) => {
+        if (studio?.id) acc[String(studio.id)] = studio;
+        return acc;
+      }, {});
+
+      const profileIds = Array.from(new Set([
+        ...bookings.map((booking: any) => String(booking?.user_id || "")).filter(Boolean),
+        ...(studioRows as any[]).map((studio: any) => String(studio?.owner_id || "")).filter(Boolean),
+      ]));
+
+      const [profileRows, walletTransactionRows, penaltyRows] = await Promise.all([
+        profileIds.length > 0
+          ? safeRows(
+            client
+              .from("profiles")
+              .select("id,full_name,email")
+              .in("id", profileIds),
+          )
+          : Promise.resolve([]),
+        bookingIds.length > 0
+          ? safeRows(
+            client
+              .from("wallet_transactions")
+              .select("id,amount,type,description,reference_id,is_credit,status,created_at,reference_type")
+              .in("reference_id", bookingIds)
+              .order("created_at", { ascending: false })
+              .limit(3000),
+          )
+          : Promise.resolve([]),
+        bookingIds.length > 0
+          ? safeRows(
+            client
+              .from("booking_penalty_events")
+              .select("id,booking_id,penalty_amount,refund_amount,wallet_transaction_id,refund_transaction_id,notes,created_at")
+              .in("booking_id", bookingIds),
+          )
+          : Promise.resolve([]),
+      ]);
+
+      const profileMap = (profileRows as any[]).reduce((acc: Record<string, any>, profile: any) => {
+        if (profile?.id) acc[String(profile.id)] = profile;
+        return acc;
+      }, {});
+
+      const walletTransactionsByBooking = (walletTransactionRows as any[]).reduce(
+        (acc: Record<string, any[]>, transaction: any) => {
+          const referenceId = String(transaction?.reference_id || "");
+          if (!referenceId) return acc;
+          acc[referenceId] = [...(acc[referenceId] || []), transaction];
+          return acc;
+        },
+        {},
+      );
+
+      const penaltiesByBooking = (penaltyRows as any[]).reduce(
+        (acc: Record<string, any>, penalty: any) => {
+          const bookingId = String(penalty?.booking_id || "");
+          if (!bookingId) return acc;
+
+          const nextPenalty = acc[bookingId] || {
+            refundAmount: 0,
+            penaltyAmount: 0,
+            refundTransactionIds: [] as string[],
+            walletTransactionIds: [] as string[],
+          };
+
+          nextPenalty.refundAmount += toNumber(penalty?.refund_amount);
+          nextPenalty.penaltyAmount += toNumber(penalty?.penalty_amount);
+
+          if (penalty?.refund_transaction_id) {
+            nextPenalty.refundTransactionIds.push(String(penalty.refund_transaction_id));
+          }
+
+          if (penalty?.wallet_transaction_id) {
+            nextPenalty.walletTransactionIds.push(String(penalty.wallet_transaction_id));
+          }
+
+          acc[bookingId] = nextPenalty;
+          return acc;
+        },
+        {},
+      );
+
+      const transactions = bookings.map((booking: any) => {
+        const bookingId = String(booking?.id || "");
+        const studio = studioMap[String(booking?.studio_id || "")] || null;
+        const customer = profileMap[String(booking?.user_id || "")] || null;
+        const owner = studio?.owner_id ? profileMap[String(studio.owner_id)] : null;
+        const bookingWalletTransactions = walletTransactionsByBooking[bookingId] || [];
+        const penaltySummary = penaltiesByBooking[bookingId] || {
+          refundAmount: 0,
+          penaltyAmount: 0,
+          refundTransactionIds: [],
+          walletTransactionIds: [],
+        };
+
+        const amount = toNumber(booking?.payment_amount) || toNumber(booking?.final_price);
+        const refundAmount = toNumber(booking?.refund_amount) || toNumber(penaltySummary.refundAmount);
+        const providerEarningAmount = bookingWalletTransactions.reduce((sum: number, transaction: any) => {
+          const type = String(transaction?.type || "").trim().toLowerCase();
+          const status = String(transaction?.status || "").trim().toLowerCase();
+          if (type !== "earning" || status !== "completed" || transaction?.is_credit === false) {
+            return sum;
+          }
+          return sum + toNumber(transaction?.amount);
+        }, 0);
+        const actionName = getPaymentAuditAction(booking, refundAmount);
+        const eventAt = getPaymentEventAt(booking, actionName);
+        const reference = String(
+          booking?.payment_intent_id ||
+          booking?.checkout_session_id ||
+          booking?.refund_id ||
+          penaltySummary.refundTransactionIds[0] ||
+          bookingWalletTransactions[0]?.id ||
+          "",
+        ).trim() || null;
+
+        return {
+          id: bookingId,
+          booking_id: bookingId,
+          action: actionName,
+          event_at: eventAt,
+          booking_status: String(booking?.status || ""),
+          payment_status: String(booking?.payment_status || ""),
+          payment_type: booking?.payment_type || null,
+          payment_method: booking?.payment_method || null,
+          amount: roundTo(amount, 2),
+          refund_amount: roundTo(refundAmount, 2),
+          net_amount: roundTo(Math.max(amount - refundAmount, 0), 2),
+          remaining_balance: roundTo(toNumber(booking?.remaining_balance), 2),
+          provider_earning_amount: roundTo(providerEarningAmount, 2),
+          wallet_transaction_count: bookingWalletTransactions.length,
+          customer_name: customer?.full_name || null,
+          customer_email: customer?.email || null,
+          studio_name: studio?.name || null,
+          owner_name: owner?.full_name || null,
+          owner_email: owner?.email || null,
+          booking_date: booking?.booking_date || null,
+          start_time: booking?.start_time || null,
+          end_time: booking?.end_time || null,
+          paid_at: booking?.paid_at || null,
+          refunded_at: booking?.refunded_at || null,
+          created_at: booking?.created_at || null,
+          updated_at: booking?.updated_at || null,
+          checkout_session_id: booking?.checkout_session_id || null,
+          payment_intent_id: booking?.payment_intent_id || null,
+          refund_id: booking?.refund_id || null,
+          cancellation_reason: booking?.cancellation_reason || null,
+          reference,
+        };
+      });
+
+      const filteredTransactions = transactions
+        .filter((transaction: any) => String(transaction?.action || "").trim().toLowerCase() !== "payment_unpaid")
+        .filter((transaction: any) => matchesPaymentStatusFilter(transaction, statusFilter))
+        .filter((transaction: any) => isInRange(transaction?.event_at, rangeStartMs))
+        .filter((transaction: any) => paymentTransactionMatchesSearch(transaction, searchTerm))
+        .sort((a: any, b: any) =>
+          new Date(b.event_at || b.updated_at || b.created_at || 0).getTime() -
+          new Date(a.event_at || a.updated_at || a.created_at || 0).getTime(),
+        );
+
+      const totals = filteredTransactions.reduce(
+        (acc: any, transaction: any) => {
+          const paymentStatus = String(transaction?.payment_status || "").trim().toLowerCase();
+          const bookingStatus = String(transaction?.booking_status || "").trim().toLowerCase();
+          const actionName = String(transaction?.action || "").trim().toLowerCase();
+
+          acc.count += 1;
+
+          if (["paid", "partial", "refunded", "refund_pending"].includes(paymentStatus)) {
+            acc.grossAmount += toNumber(transaction?.amount);
+          }
+
+          acc.refundedAmount += toNumber(transaction?.refund_amount);
+          acc.netAmount += toNumber(transaction?.net_amount);
+
+          if (paymentStatus === "paid") acc.paidCount += 1;
+          if (paymentStatus === "partial") acc.partialCount += 1;
+          if (paymentStatus === "pending") acc.pendingCount += 1;
+          if (paymentStatus === "failed") acc.failedCount += 1;
+          if (bookingStatus === "cancelled" || actionName === "payment_cancelled") acc.cancelledCount += 1;
+          if (actionName === "payment_refunded" || actionName === "payment_refund_pending") acc.refundedCount += 1;
+
+          return acc;
+        },
+        {
+          count: 0,
+          grossAmount: 0,
+          refundedAmount: 0,
+          netAmount: 0,
+          paidCount: 0,
+          partialCount: 0,
+          pendingCount: 0,
+          failedCount: 0,
+          cancelledCount: 0,
+          refundedCount: 0,
+        },
+      );
+
+      return jsonResponse({
+        success: true,
+        transactions: filteredTransactions.slice(offset, offset + limit),
+        totals: {
+          count: totals.count,
+          grossAmount: roundTo(totals.grossAmount, 2),
+          refundedAmount: roundTo(totals.refundedAmount, 2),
+          netAmount: roundTo(totals.netAmount, 2),
+          paidCount: totals.paidCount,
+          partialCount: totals.partialCount,
+          pendingCount: totals.pendingCount,
+          failedCount: totals.failedCount,
+          cancelledCount: totals.cancelledCount,
+          refundedCount: totals.refundedCount,
+        },
+        count: filteredTransactions.length,
+        hasMore: offset + limit < filteredTransactions.length,
       });
     }
 

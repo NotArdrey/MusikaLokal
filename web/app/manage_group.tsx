@@ -18,6 +18,7 @@ import CustomAlert, { AlertType } from "../src/components/CustomAlert";
 import Header from "../src/components/header";
 import Modal from "../src/components/modal";
 import Navbar from "../src/components/navbar";
+import ProfileAvatar from "../src/components/ProfileAvatar";
 import SmoothTabTransition from "../src/components/SmoothTabTransition";
 import { useAuth } from "../src/context/AuthContext";
 import { useTheme } from "../src/context/ThemeContext";
@@ -1023,12 +1024,14 @@ export default function GroupDetailsScreen() {
                     >
                       <View style={styles.reviewUserHeader}>
                         <View style={styles.userInfo}>
-                          <Image
-                            source={{ uri: review.author?.avatar_url || null }}
+                          <ProfileAvatar
+                            uri={review.author?.avatar_url}
                             style={[
                               styles.userAvatar,
                               { backgroundColor: colors.border },
                             ]}
+                            backgroundColor={isDark ? "#374151" : "#E5E7EB"}
+                            iconColor={colors.textSecondary}
                           />
                           <Text
                             style={{

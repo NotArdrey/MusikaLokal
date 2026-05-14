@@ -77,6 +77,17 @@ const SAFE_PHOTO_MIMES = new Set([
 
 const SAFE_DOCUMENT_MIMES = new Set([
   "application/pdf",
+  "application/msword",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/vnd.ms-powerpoint",
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  "application/vnd.ms-excel",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "text/csv",
+  "application/csv",
+  "text/plain",
+  "application/rtf",
+  "text/rtf",
   "image/jpeg",
   "image/jpg",
   "image/png",
@@ -93,6 +104,22 @@ const SAFE_VIDEO_MIMES = new Set([
 ]);
 
 const SAFE_VIDEO_EXTENSIONS = new Set(["mp4", "mov", "m4v", "webm", "avi", "mpeg", "mpg"]);
+const SAFE_DOCUMENT_EXTENSIONS = new Set([
+  "pdf",
+  "doc",
+  "docx",
+  "ppt",
+  "pptx",
+  "xls",
+  "xlsx",
+  "csv",
+  "txt",
+  "rtf",
+  "jpg",
+  "jpeg",
+  "png",
+  "webp",
+]);
 const SAFE_AUDIO_MIMES = new Set([
   "audio/mpeg",
   "audio/mp3",
@@ -154,11 +181,18 @@ function ruleBasedScreen(file: FileCandidate): { allowed: boolean; reason?: stri
     };
   }
 
-  if (file.kind === "document" && mime && !SAFE_DOCUMENT_MIMES.has(mime)) {
-    if (!mime.startsWith("image/") && mime !== "application/pdf") {
+  if (file.kind === "document") {
+    if (ext && !SAFE_DOCUMENT_EXTENSIONS.has(ext)) {
       return {
         allowed: false,
-        reason: `Documents of type "${file.mimeType}" are not accepted. Please upload a PDF or image.`,
+        reason: `Documents of type .${ext} are not accepted. Please upload a PDF, Office document, CSV, TXT, RTF, or image.`,
+      };
+    }
+
+    if (mime && !SAFE_DOCUMENT_MIMES.has(mime) && !mime.startsWith("image/")) {
+      return {
+        allowed: false,
+        reason: `Documents of type "${file.mimeType}" are not accepted. Please upload a PDF, Office document, CSV, TXT, RTF, or image.`,
       };
     }
   }

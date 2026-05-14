@@ -26,6 +26,18 @@ import { useAuth } from '../../src/context/AuthContext';
 import { useTheme } from '../../src/context/ThemeContext';
 import { supabase } from '../../lib/supabase';
 import { getAdminPageCacheKey, readAdminPageCache, writeAdminPageCache } from './_cache';
+import type {
+  AdminPaymentStatusFilter,
+  AdminPaymentTransaction,
+  AdminPaymentTotals,
+} from './_payments';
+import {
+  downloadPaymentTransactionsExcel,
+  fetchAdminPaymentTransactions,
+  getPaymentStatusColor,
+  normalizePaymentActionLabel,
+  PAYMENT_STATUS_FILTERS,
+} from './_payments';
 
 const readErrorContextMessage = async (context: unknown): Promise<string | null> => {
   if (!context) return null;
@@ -284,6 +296,19 @@ const defaultWithdrawalTotals: WithdrawalTotals = {
   pendingAmount: 0,
   mockCount: 0,
   platformCount: 0,
+};
+
+const defaultPaymentTotals: AdminPaymentTotals = {
+  count: 0,
+  grossAmount: 0,
+  refundedAmount: 0,
+  netAmount: 0,
+  paidCount: 0,
+  partialCount: 0,
+  pendingCount: 0,
+  failedCount: 0,
+  cancelledCount: 0,
+  refundedCount: 0,
 };
 
 const ADMIN_WITHDRAW_QUICK_AMOUNTS = [100, 500, 1000];
@@ -1095,6 +1120,11 @@ export default function AdminDashboardPage() {
   const [dashboardSearchQuery, setDashboardSearchQuery] = useState('');
   const [revenueFilter, setRevenueFilter] = useState<RevenueFilter>('net');
   const [incidentTypeFilter, setIncidentTypeFilter] = useState<IncidentTypeFilter>('all');
+  const [paymentTransactions, setPaymentTransactions] = useState<AdminPaymentTransaction[]>([]);
+  const [paymentTotals, setPaymentTotals] = useState<AdminPaymentTotals>(defaultPaymentTotals);
+  const [paymentStatusFilter, setPaymentStatusFilter] = useState<AdminPaymentStatusFilter>('all');
+  const [paymentTransactionsLoading, setPaymentTransactionsLoading] = useState(false);
+  const [paymentExporting, setPaymentExporting] = useState(false);
   const [withdrawals, setWithdrawals] = useState<AdminWithdrawalEntry[]>([]);
   const [withdrawalTotals, setWithdrawalTotals] = useState<WithdrawalTotals>(defaultWithdrawalTotals);
   const [withdrawalStatusFilter, setWithdrawalStatusFilter] = useState<WithdrawalStatusFilter>('all');
@@ -1407,6 +1437,55 @@ export default function AdminDashboardPage() {
 
   useEffect(() => {
     if (loading || !roleResolved || !session || isGuest || !isAdmin) {
+      setPaymentTransactions([]);
+      setPaymentTotals(defaultPaymentTotals);
+      setPaymentTransactionsLoading(false);
+      return;
+    }
+
+    let isMounted = true;
+    setPaymentTransactionsLoading(true);
+
+    void (async () => {
+      try {
+        const result = await fetchAdminPaymentTransactions({
+          status: paymentStatusFilter,
+          searchQuery: dashboardSearchQuery,
+          dateRange: dashboardDateRange,
+          limit: 8,
+        });
+
+        if (!isMounted) return;
+        setPaymentTransactions(result.transactions);
+        setPaymentTotals(result.totals);
+      } catch (error) {
+        if (!isMounted) return;
+        const message = await getErrorMessage(error, 'Unable to load payment transactions.');
+        showAlert('error', 'Payment monitor unavailable', message);
+      } finally {
+        if (isMounted) {
+          setPaymentTransactionsLoading(false);
+        }
+      }
+    })();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [
+    loading,
+    roleResolved,
+    session,
+    isGuest,
+    isAdmin,
+    showAlert,
+    paymentStatusFilter,
+    dashboardDateRange,
+    dashboardSearchQuery,
+  ]);
+
+  useEffect(() => {
+    if (loading || !roleResolved || !session || isGuest || !isAdmin) {
       setWithdrawals([]);
       setWithdrawalTotals(defaultWithdrawalTotals);
       setWithdrawalsLoading(false);
@@ -1451,6 +1530,68 @@ export default function AdminDashboardPage() {
     withdrawalStatusFilter,
     dashboardSearchQuery,
   ]);
+
+  const handleShowAllPayments = useCallback(() => {
+    setPaymentStatusFilter('all');
+    setGlobalSearch('');
+  }, []);
+
+  const handleExportPaymentTransactions = useCallback(async () => {
+    if (paymentExporting) return;
+
+    try {
+      setPaymentExporting(true);
+
+      const result = await fetchAdminPaymentTransactions({
+        status: paymentStatusFilter,
+        searchQuery: dashboardSearchQuery,
+        dateRange: dashboardDateRange,
+        limit: 1000,
+      });
+
+      if (result.transactions.length === 0) {
+        showAlert('info', 'No Payments to Export', 'No payment transactions match the current filters.');
+        return;
+      }
+
+      const statusLabel = PAYMENT_STATUS_FILTERS.find((filter) => filter.key === paymentStatusFilter)?.label || 'All';
+      const downloaded = downloadPaymentTransactionsExcel(result.transactions, {
+        dateRangeLabel: DASHBOARD_DATE_RANGE_LABELS[dashboardDateRange],
+        statusLabel,
+      });
+
+      if (!downloaded) {
+        showAlert('info', 'Export Available on Web', 'Open the admin dashboard in a browser to download the Excel file.');
+        return;
+      }
+
+      showAlert('success', 'Excel Export Ready', `${result.transactions.length} payment transaction(s) exported.`);
+    } catch (error) {
+      void getErrorMessage(error, 'Unable to export payment transactions.').then((message) => {
+        showAlert('error', 'Export Failed', message);
+      });
+    } finally {
+      setPaymentExporting(false);
+    }
+  }, [
+    dashboardDateRange,
+    dashboardSearchQuery,
+    paymentExporting,
+    paymentStatusFilter,
+    showAlert,
+  ]);
+
+  const handlePaymentDetails = useCallback((transaction: AdminPaymentTransaction) => {
+    const customer = transaction.customer_name || transaction.customer_email || 'Unknown customer';
+    const studio = transaction.studio_name || 'Unknown studio';
+    const reference = transaction.reference || transaction.payment_intent_id || transaction.checkout_session_id || 'No reference';
+
+    showAlert(
+      'info',
+      'Payment Details',
+      `${studio}\nCustomer: ${customer}\nAction: ${normalizePaymentActionLabel(transaction.action)}\nAmount: ${formatCurrency(transaction.amount)}\nRefund: ${formatCurrency(transaction.refund_amount)}\nNet: ${formatCurrency(transaction.net_amount)}\nRef: ${reference}`,
+    );
+  }, [showAlert]);
 
   const handleShowAllWithdrawals = useCallback(() => {
     setWithdrawalStatusFilter('all');
@@ -1838,6 +1979,153 @@ export default function AdminDashboardPage() {
               </View>
               <Text style={[styles.pulseSubtitle, { color: colors.textSecondary, marginTop: 8 }]}>Avg report resolve: {formatHours(metrics.avgReportResolutionHours)}</Text>
             </View>
+          </View>
+
+          <View
+            testID="admin-payment-transactions-section"
+            accessibilityLabel="admin-payment-transactions-section"
+            style={[styles.dataEnginePanel, { backgroundColor: colors.card, borderColor: colors.border }]}
+          >
+            <View style={[styles.pulseHeader, { marginBottom: 16, flexWrap: 'wrap', gap: 10 }]}>
+              <View>
+                <Text style={[styles.panelTitle, { color: colors.text, marginBottom: 0 }]}>Payment Transactions</Text>
+                <Text style={[styles.panelSubtitle, { color: colors.textSecondary, marginBottom: 0 }]}>
+                  Gross: {formatCurrency(paymentTotals.grossAmount)} | Refunds: {formatCurrency(paymentTotals.refundedAmount)} | Net: {formatCurrency(paymentTotals.netAmount)}
+                </Text>
+              </View>
+              <View style={styles.withdrawalButtonRow}>
+                <TouchableOpacity
+                  testID="admin-payment-transactions-export-button"
+                  accessibilityLabel="admin-payment-transactions-export-button"
+                  activeOpacity={paymentExporting ? 1 : 0.88}
+                  disabled={paymentExporting}
+                  onPress={() => void handleExportPaymentTransactions()}
+                  style={[
+                    styles.dashboardActionButton,
+                    {
+                      backgroundColor: colors.primary,
+                      borderColor: colors.primary,
+                      opacity: paymentExporting ? 0.7 : 1,
+                    },
+                  ]}
+                >
+                  {paymentExporting ? (
+                    <ActivityIndicator size="small" color="#FFFFFF" />
+                  ) : (
+                    <Ionicons name="download-outline" size={15} color="#FFFFFF" />
+                  )}
+                  <Text style={[styles.dashboardActionText, { color: '#FFFFFF' }]}>Export Excel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  testID="admin-payment-transactions-view-all-button"
+                  accessibilityLabel="admin-payment-transactions-view-all-button"
+                  activeOpacity={0.88}
+                  onPress={handleShowAllPayments}
+                  style={[
+                    styles.dashboardActionButton,
+                    {
+                      backgroundColor: isDark ? '#0F172A' : '#FFFFFF',
+                      borderColor: colors.border,
+                    },
+                  ]}
+                >
+                  <Ionicons name="albums-outline" size={15} color={colors.primary} />
+                  <Text style={[styles.dashboardActionText, { color: colors.primary }]}>View All</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingBottom: 4 }}>
+              {PAYMENT_STATUS_FILTERS.map((filter) => (
+                <SmoothFilterChip
+                  key={filter.key}
+                  isActive={paymentStatusFilter === filter.key}
+                  label={filter.label}
+                  onPress={() => setPaymentStatusFilter(filter.key)}
+                  activeColor={colors.primary}
+                  inactiveBackground={colors.card}
+                  inactiveBorder={colors.border}
+                  inactiveText={colors.textSecondary}
+                />
+              ))}
+            </ScrollView>
+
+            <View style={{ flexDirection: 'row', gap: 12, flexWrap: 'wrap', marginBottom: 12 }}>
+              <View style={[styles.badgeGreen, styles.badgeInline, { backgroundColor: isDark ? '#064E3B' : '#ECFDF5' }]}>
+                <Text style={styles.badgeTextGreen}>{formatMetricCount(paymentTotals.count)} records</Text>
+              </View>
+              <View style={[styles.badgeGreen, styles.badgeInline, { backgroundColor: isDark ? '#172554' : '#EFF6FF' }]}>
+                <Text style={[styles.badgeTextGreen, { color: '#0ea5e9' }]}>{formatMetricCount(paymentTotals.refundedCount)} refund events</Text>
+              </View>
+              <View style={[styles.badgeGreen, styles.badgeInline, { backgroundColor: isDark ? '#450A0A' : '#FEF2F2' }]}>
+                <Text style={[styles.badgeTextGreen, { color: '#ef4444' }]}>{formatMetricCount(paymentTotals.cancelledCount)} cancelled</Text>
+              </View>
+            </View>
+
+            <View style={styles.tableHeader}>
+              <Text style={[styles.tableCell, styles.th, { color: colors.textSecondary, flex: 1.4 }]}>Customer</Text>
+              <Text style={[styles.tableCell, styles.th, { color: colors.textSecondary, flex: 1.4 }]}>Studio</Text>
+              <Text style={[styles.tableCell, styles.th, { color: colors.textSecondary }]}>Action</Text>
+              <Text style={[styles.tableCell, styles.th, { color: colors.textSecondary, textAlign: 'right' }]}>Net</Text>
+              <Text style={[styles.tableCell, styles.th, { color: colors.textSecondary, textAlign: 'right', flex: 1.1 }]}>Details</Text>
+            </View>
+
+            {paymentTransactionsLoading ? (
+              <ActivityIndicator size="small" color={colors.primary} style={{ paddingVertical: 18 }} />
+            ) : paymentTransactions.length === 0 ? (
+              <Text style={[styles.emptyText, { color: colors.textSecondary, textAlign: 'left', paddingVertical: 12 }]}>
+                No payment transactions match this filter.
+              </Text>
+            ) : (
+              paymentTransactions.map((transaction) => {
+                const statusColor = getPaymentStatusColor(transaction);
+                const customerLabel = transaction.customer_name || transaction.customer_email || 'Unknown customer';
+                const studioLabel = transaction.studio_name || 'Unknown studio';
+
+                return (
+                  <View
+                    key={transaction.id}
+                    testID={`admin-payment-transaction-row-${transaction.booking_id}`}
+                    accessibilityLabel={`admin-payment-transaction-row-${transaction.booking_id}`}
+                    style={[styles.tableRow, { borderBottomColor: colors.border }]}
+                  >
+                    <View style={[styles.tableCell, { flex: 1.4 }]}>
+                      <Text numberOfLines={1} style={{ color: colors.text, fontSize: 12, fontFamily: 'Poppins_500Medium' }}>{customerLabel}</Text>
+                      <Text numberOfLines={1} style={{ color: colors.textSecondary, fontSize: 11, fontFamily: 'Poppins_400Regular' }}>{formatDateTime(transaction.event_at)}</Text>
+                    </View>
+                    <View style={[styles.tableCell, { flex: 1.4 }]}>
+                      <Text numberOfLines={1} style={{ color: colors.text, fontSize: 12, fontFamily: 'Poppins_500Medium' }}>{studioLabel}</Text>
+                      <Text numberOfLines={1} style={{ color: colors.textSecondary, fontSize: 11, fontFamily: 'Poppins_400Regular' }}>{transaction.reference || 'No reference'}</Text>
+                    </View>
+                    <View style={[styles.tableCell, { justifyContent: 'center' }]}>
+                      <View style={[styles.badgeGreen, { alignSelf: 'flex-start', backgroundColor: `${statusColor}26` }]}>
+                        <Text style={[styles.badgeTextGreen, { color: statusColor }]}>{normalizePaymentActionLabel(transaction.action)}</Text>
+                      </View>
+                    </View>
+                    <View style={[styles.tableCell, { justifyContent: 'center' }]}>
+                      <Text style={{ color: colors.text, fontSize: 12, fontFamily: 'Poppins_600SemiBold', textAlign: 'right' }}>
+                        {formatCurrency(transaction.net_amount)}
+                      </Text>
+                      <Text style={{ color: colors.textSecondary, fontSize: 11, fontFamily: 'Poppins_400Regular', textAlign: 'right' }}>
+                        Refund {formatCurrency(transaction.refund_amount)}
+                      </Text>
+                    </View>
+                    <View style={[styles.tableCell, styles.withdrawalActionsCell, { flex: 1.1 }]}>
+                      <TouchableOpacity
+                        testID={`admin-payment-transaction-details-${transaction.booking_id}`}
+                        accessibilityLabel={`admin-payment-transaction-details-${transaction.booking_id}`}
+                        activeOpacity={0.88}
+                        onPress={() => handlePaymentDetails(transaction)}
+                        style={[styles.miniActionButton, { borderColor: colors.border, backgroundColor: isDark ? '#0F172A' : '#FFFFFF' }]}
+                      >
+                        <Ionicons name="document-text-outline" size={13} color={colors.primary} />
+                        <Text style={[styles.miniActionText, { color: colors.primary }]}>Details</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                );
+              })
+            )}
           </View>
 
           <View

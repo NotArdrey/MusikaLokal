@@ -1,14 +1,17 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect } from "@react-navigation/native";
-import { router } from "expo-router";
+import { router, useLocalSearchParams } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   Dimensions,
   FlatList,
+  Image,
   InteractionManager,
-  Modal,
+  Keyboard,
+  Share,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -17,9 +20,13 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import * as FileSystem from "expo-file-system/legacy";
+import * as ImagePicker from "expo-image-picker";
+import * as VideoThumbnails from "expo-video-thumbnails";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { supabase } from "../lib/supabase";
+import { supabase, supabaseAnonKey, supabaseUrl } from "../lib/supabase";
 import CachedImage from "../src/components/CachedImage";
+import BottomModal from "../src/components/BottomModal";
 import GuestSignInGate from "../src/components/GuestSignInGate";
 import Header from "../src/components/header";
 import ListingDetailsSheet from "../src/components/ListingDetailsSheet";
@@ -37,7 +44,7 @@ import SlidingTabBar from "../src/components/SlidingTabBar";
 import CustomAlert, { AlertType } from "../src/components/CustomAlert";
 import { useAuth } from "../src/context/AuthContext";
 import { formatDashedNumericDate } from "../src/utils/friendlyDateTime";
-import { useBottomOverlay, useBottomOverlayVisibility } from "../src/context/BottomOverlayContext";
+import { useBottomOverlay } from "../src/context/BottomOverlayContext";
 import {
   RADIO_MINI_PLAYER_HEIGHT,
   RADIO_MINI_PLAYER_STACK_GAP,
@@ -57,6 +64,7 @@ import {
   getGroqModelInfo,
   rerankHomeFeedWithGroq,
 } from "../src/services/groqModelRouter";
+import { screenUploadsWithAi } from "../src/services/uploadSafetyScreen";
 import { usePageLoadLogger } from "../src/utils/loadTimeLogger";
 import { setSmoothTab } from "../src/utils/smoothTabs";
 
@@ -131,6 +139,50 @@ const AI_CARD_LIMIT = 20;
 const FEED_FOCUS_REFRESH_COOLDOWN_MS = 30000;
 const SOCIAL_MEDIA_ASPECT_RATIO = 1.45;
 const PESO_SIGN = "\u20B1";
+const POST_MEDIA_BUCKET = "post-media";
+const MAX_POST_MEDIA_ITEMS = 10;
+const MAX_POST_MEDIA_BYTES = 50 * 1024 * 1024;
+const MAX_INLINE_SCREEN_BYTES = 4 * 1024 * 1024;
+const VIDEO_THUMBNAIL_OPTION_LIMIT = 4;
+const VIDEO_THUMBNAIL_INTERVAL_MS = 2500;
+const POST_IMAGE_EXTENSIONS = new Set(["jpg", "jpeg", "png", "gif", "webp", "heic", "heif"]);
+const POST_VIDEO_EXTENSIONS = new Set(["mp4", "mov", "webm"]);
+const POST_MIME_BY_EXTENSION: Record<string, string> = {
+  gif: "image/gif",
+  heic: "image/heic",
+  heif: "image/heif",
+  jpeg: "image/jpeg",
+  jpg: "image/jpeg",
+  mov: "video/quicktime",
+  mp4: "video/mp4",
+  png: "image/png",
+  webm: "video/webm",
+  webp: "image/webp",
+};
+
+type PostComposerThumbnail = {
+  uri: string;
+  dataUrl: string;
+};
+
+type PostComposerMedia = {
+  id: string;
+  uri: string;
+  name: string;
+  media_type: "image" | "video";
+  mime_type: string;
+  ext: string;
+  size: number;
+  width?: number | null;
+  height?: number | null;
+  duration_seconds?: number | null;
+  base64?: string;
+  is_cover: boolean;
+  thumbnailChoices: PostComposerThumbnail[];
+  selectedThumbnailIndex: number;
+  safetyMetadata: Record<string, any>;
+};
+
 const feedScreenCache = createFeedCache(getGroqModelInfo().modelLabel);
 const FEED_FALLBACK_IMAGES: Record<string, string[]> = {
   Artist: [
@@ -186,6 +238,282 @@ const feedLastFetchAt: Record<FeedTab, number> = {
   for_you: 0,
   following: 0,
 };
+
+const base64ToUint8Array = (base64: string): Uint8Array => {
+  const lookup = new Uint8Array(256);
+  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  for (let i = 0; i < chars.length; i += 1) lookup[chars.charCodeAt(i)] = i;
+  const normalized = base64.replace(/=/g, "");
+  const bytes = new Uint8Array(Math.floor(normalized.length * 0.75));
+  let byteIndex = 0;
+
+  for (let i = 0; i < normalized.length; i += 4) {
+    const enc1 = lookup[normalized.charCodeAt(i)];
+    const enc2 = lookup[normalized.charCodeAt(i + 1)];
+    const enc3 = lookup[normalized.charCodeAt(i + 2)];
+    const enc4 = lookup[normalized.charCodeAt(i + 3)];
+    const triplet = (enc1 << 18) | (enc2 << 12) | (enc3 << 6) | enc4;
+    if (byteIndex < bytes.length) bytes[byteIndex++] = (triplet >> 16) & 255;
+    if (byteIndex < bytes.length) bytes[byteIndex++] = (triplet >> 8) & 255;
+    if (byteIndex < bytes.length) bytes[byteIndex++] = triplet & 255;
+  }
+
+  return bytes;
+};
+
+const estimateBase64Bytes = (base64: string): number => {
+  let padding = 0;
+  if (base64.endsWith("==")) padding = 2;
+  else if (base64.endsWith("=")) padding = 1;
+  return Math.max(0, Math.floor((base64.length * 3) / 4) - padding);
+};
+
+const ensureScreenableDataUrl = (dataUrl: string, message: string) => {
+  const base64 = dataUrl.split(",")[1] || "";
+  if (!base64 || estimateBase64Bytes(base64) > MAX_INLINE_SCREEN_BYTES) {
+    throw new Error(message);
+  }
+  return dataUrl;
+};
+
+const sanitizePostMediaExtension = (value: unknown) => {
+  if (typeof value !== "string") return "";
+  return value.toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 8);
+};
+
+const getAssetFileName = (asset: any, fallbackExt: string) => {
+  const explicit = typeof asset?.fileName === "string" ? asset.fileName : "";
+  const uriName = typeof asset?.uri === "string" ? asset.uri.split("?")[0].split("/").pop() || "" : "";
+  return explicit || uriName || `post-media.${fallbackExt}`;
+};
+
+const resolvePostMediaExtension = (asset: any) => {
+  const mimeExt = Object.entries(POST_MIME_BY_EXTENSION)
+    .find(([, mime]) => mime === String(asset?.mimeType || "").toLowerCase())?.[0] || "";
+  const name = getAssetFileName(asset, mimeExt || "jpg");
+  const nameExt = name.includes(".") ? name.split(".").pop() : "";
+  const uriExt = typeof asset?.uri === "string" && asset.uri.includes(".")
+    ? asset.uri.split("?")[0].split(".").pop()
+    : "";
+  return sanitizePostMediaExtension(nameExt) || sanitizePostMediaExtension(uriExt) || sanitizePostMediaExtension(mimeExt) || "jpg";
+};
+
+const resolvePostMediaMimeType = (asset: any, ext: string) => {
+  const pickedMime = typeof asset?.mimeType === "string" ? asset.mimeType.trim().toLowerCase() : "";
+  return pickedMime && pickedMime !== "application/octet-stream"
+    ? pickedMime
+    : POST_MIME_BY_EXTENSION[ext] || "image/jpeg";
+};
+
+const resolvePostMediaType = (asset: any, mimeType: string, ext: string): "image" | "video" => {
+  const pickerType = String(asset?.type || "").toLowerCase();
+  if (pickerType === "video" || mimeType.startsWith("video/") || POST_VIDEO_EXTENSIONS.has(ext)) return "video";
+  return "image";
+};
+
+const getPostMediaFileSize = async (asset: any) => {
+  const pickerSize = Number(asset?.fileSize ?? asset?.size);
+  if (Number.isFinite(pickerSize) && pickerSize > 0) return Math.floor(pickerSize);
+  try {
+    const info = await FileSystem.getInfoAsync(asset.uri);
+    return info.exists && typeof info.size === "number" ? info.size : 0;
+  } catch {
+    return 0;
+  }
+};
+
+const buildVideoThumbnailTimes = (durationMs?: number | null) => {
+  const duration = Number.isFinite(Number(durationMs)) && Number(durationMs) > 0
+    ? Number(durationMs)
+    : VIDEO_THUMBNAIL_INTERVAL_MS * VIDEO_THUMBNAIL_OPTION_LIMIT;
+  const times: number[] = [0];
+  for (
+    let time = Math.min(VIDEO_THUMBNAIL_INTERVAL_MS, duration);
+    time <= duration && times.length < VIDEO_THUMBNAIL_OPTION_LIMIT;
+    time += VIDEO_THUMBNAIL_INTERVAL_MS
+  ) {
+    times.push(Math.floor(time));
+  }
+  return Array.from(new Set(times)).slice(0, VIDEO_THUMBNAIL_OPTION_LIMIT);
+};
+
+const buildVideoThumbnailChoices = async (asset: any): Promise<PostComposerThumbnail[]> => {
+  const attempts = await Promise.allSettled(
+    buildVideoThumbnailTimes(asset?.duration).map(async (time) => {
+      const thumbnail = await VideoThumbnails.getThumbnailAsync(asset.uri, {
+        time,
+        quality: 0.72,
+      });
+      const base64 = await FileSystem.readAsStringAsync(thumbnail.uri, { encoding: "base64" });
+      return {
+        uri: thumbnail.uri,
+        dataUrl: ensureScreenableDataUrl(
+          `data:image/jpeg;base64,${base64}`,
+          "Could not create a small enough video preview for safety screening.",
+        ),
+      };
+    }),
+  );
+
+  const choices = attempts
+    .filter((result): result is PromiseFulfilledResult<PostComposerThumbnail> => result.status === "fulfilled")
+    .map((result) => result.value);
+
+  if (choices.length === 0) {
+    throw new Error("Could not create a video thumbnail for safety screening.");
+  }
+
+  return choices;
+};
+
+const preparePostComposerMedia = async (asset: any): Promise<PostComposerMedia> => {
+  const ext = resolvePostMediaExtension(asset);
+  const mimeType = resolvePostMediaMimeType(asset, ext);
+  const mediaType = resolvePostMediaType(asset, mimeType, ext);
+
+  if (mediaType === "image" && !POST_IMAGE_EXTENSIONS.has(ext)) {
+    throw new Error("This image type is not supported for posts.");
+  }
+  if (mediaType === "video" && !POST_VIDEO_EXTENSIONS.has(ext)) {
+    throw new Error("This video type is not supported for posts.");
+  }
+
+  const size = await getPostMediaFileSize(asset);
+  if (size > MAX_POST_MEDIA_BYTES) {
+    throw new Error("Post media must be 50 MB or smaller.");
+  }
+
+  const name = getAssetFileName(asset, ext);
+  const width = Number.isFinite(Number(asset?.width)) ? Number(asset.width) : null;
+  const height = Number.isFinite(Number(asset?.height)) ? Number(asset.height) : null;
+  const durationSeconds = mediaType === "video" && Number.isFinite(Number(asset?.duration))
+    ? Math.max(0, Number(asset.duration) / 1000)
+    : null;
+
+  if (mediaType === "video") {
+    const thumbnailChoices = await buildVideoThumbnailChoices(asset);
+    const screeningSummary = await screenUploadsWithAi(
+      thumbnailChoices.map((choice, index) => ({
+        name: `${name} frame ${index + 1}`,
+        mimeType: "image/jpeg",
+        size,
+        uri: `${asset.uri}#frame-${index + 1}`,
+        contentDataUrl: choice.dataUrl,
+        kind: "video" as const,
+      })),
+      "social_post_media",
+    );
+
+    if (!screeningSummary.allowed) {
+      throw new Error(screeningSummary.reason || "This video did not pass safety screening.");
+    }
+
+    return {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      uri: asset.uri,
+      name,
+      media_type: "video",
+      mime_type: mimeType,
+      ext,
+      size,
+      width,
+      height,
+      duration_seconds: durationSeconds,
+      is_cover: false,
+      thumbnailChoices,
+      selectedThumbnailIndex: 0,
+      safetyMetadata: { reason: screeningSummary.reason || null },
+    };
+  }
+
+  const base64 = await FileSystem.readAsStringAsync(asset.uri, { encoding: "base64" });
+  const screeningSummary = await screenUploadsWithAi(
+    [{
+      name,
+      mimeType,
+      size,
+      uri: asset.uri,
+      contentDataUrl: ensureScreenableDataUrl(
+        `data:${mimeType};base64,${base64}`,
+        "This image is too large to safety screen. Please choose an image under 4 MB.",
+      ),
+      kind: "photo" as const,
+    }],
+    "social_post_media",
+  );
+
+  if (!screeningSummary.allowed) {
+    throw new Error(screeningSummary.reason || "This image did not pass safety screening.");
+  }
+
+  return {
+    id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    uri: asset.uri,
+    name,
+    media_type: "image",
+    mime_type: mimeType,
+    ext,
+    size,
+    width,
+    height,
+    is_cover: false,
+    thumbnailChoices: [],
+    selectedThumbnailIndex: 0,
+    base64,
+    safetyMetadata: { reason: screeningSummary.reason || null },
+  };
+};
+
+const uploadPostMediaFile = async (
+  uri: string,
+  storagePath: string,
+  mimeType: string,
+  bytes?: Uint8Array,
+) => {
+  if (bytes) {
+    return supabase.storage.from(POST_MEDIA_BUCKET).upload(storagePath, bytes, {
+      contentType: mimeType,
+      upsert: true,
+    });
+  }
+
+  const {
+    data: { session },
+    error: sessionError,
+  } = await supabase.auth.getSession();
+
+  if (sessionError || !session?.access_token) {
+    throw new Error("Your session expired. Please log in again before uploading media.");
+  }
+
+  const baseUrl = supabaseUrl.endsWith("/") ? supabaseUrl.slice(0, -1) : supabaseUrl;
+  const encodedPath = storagePath.split("/").map((part) => encodeURIComponent(part)).join("/");
+  const uploadUrl = `${baseUrl}/storage/v1/object/${POST_MEDIA_BUCKET}/${encodedPath}`;
+  const uploadResult = await FileSystem.uploadAsync(uploadUrl, uri, {
+    httpMethod: "POST",
+    uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT,
+    headers: {
+      Authorization: `Bearer ${session.access_token}`,
+      apikey: supabaseAnonKey,
+      "Content-Type": mimeType,
+      "x-upsert": "true",
+    },
+  });
+
+  if (uploadResult.status < 200 || uploadResult.status >= 300) {
+    let message = `Storage upload failed with status ${uploadResult.status}.`;
+    try {
+      const parsed = JSON.parse(uploadResult.body || "{}");
+      message = parsed?.message || parsed?.error || message;
+    } catch {
+      if (uploadResult.body) message = uploadResult.body;
+    }
+    return { data: null, error: new Error(message) };
+  }
+
+  return { data: { path: storagePath }, error: null };
+};
+
 const KNOWN_FEED_MEDIA_BUCKETS = [
   "post-media",
   "posts",
@@ -236,8 +564,10 @@ const resolveFeedMediaUrl = (value: unknown) => {
   if (directParts.length > 1) {
     const directBucket = directParts[0];
     const directPath = directParts.slice(1).join("/");
-    const { data } = supabase.storage.from(directBucket).getPublicUrl(directPath);
-    if (data?.publicUrl) return data.publicUrl;
+    if (KNOWN_FEED_MEDIA_BUCKETS.includes(directBucket)) {
+      const { data } = supabase.storage.from(directBucket).getPublicUrl(directPath);
+      if (data?.publicUrl) return data.publicUrl;
+    }
   }
 
   for (const bucket of KNOWN_FEED_MEDIA_BUCKETS) {
@@ -255,6 +585,7 @@ const normalizeFeedPost = (post: any) => {
     ? post.media.map((item: any) => ({
         ...item,
         url: resolveFeedMediaUrl(item?.url || item?.storage_path || item?.public_url),
+        thumbnail_url: resolveFeedMediaUrl(item?.thumbnail_url || item?.thumbnail_path || item?.url || item?.storage_path || item?.public_url),
       }))
     : [];
 
@@ -784,7 +1115,7 @@ const getFeedServiceBadges = (item: any) => {
 const getFeedMediaUrls = (item: any) => {
   const mediaUrls = Array.isArray(item?.media)
     ? item.media
-        .map((media: any) => resolveFeedMediaUrl(media?.url || media?.storage_path || media?.public_url))
+        .map((media: any) => resolveFeedMediaUrl(media?.thumbnail_url || media?.thumbnail_path || media?.url || media?.storage_path || media?.public_url))
         .filter((value: string) => value.length > 0)
     : [];
   if (mediaUrls.length > 0) return mediaUrls;
@@ -1286,11 +1617,14 @@ type SocialFeedCardProps = {
   borderColor: string;
   cardColor: string;
   colors: any;
+  currentUserId?: string | null;
   followBusy: boolean;
   followTarget: { id: string; type: SocialFollowTargetType } | null;
   isDark: boolean;
   isFollowing: boolean;
   mediaWidth: number;
+  onDeletePost?: (post: any) => void;
+  onEditPost?: (post: any) => void;
   onFollow: (id: string, targetType: SocialFollowTargetType, isFollowing: boolean) => void;
   onOpenListing: (listingId: string) => void;
   onOpenPost: (postId: string) => void;
@@ -1298,6 +1632,8 @@ type SocialFeedCardProps = {
   onOpenProfile: (profileId: string) => void;
   onOpenProductionTeam: (teamId: string) => void;
   onOpenPlaylist: (playlistId: string) => void;
+  onSharePost?: (post: any) => void;
+  onToggleReaction?: (post: any) => void;
   showAuthorFollow: boolean;
   timeAgo: (value: string) => string;
 };
@@ -1307,11 +1643,14 @@ const SocialFeedCard = React.memo(function SocialFeedCard({
   borderColor,
   cardColor,
   colors,
+  currentUserId,
   followBusy,
   followTarget,
   isDark,
   isFollowing,
   mediaWidth,
+  onDeletePost,
+  onEditPost,
   onFollow,
   onOpenListing,
   onOpenPost,
@@ -1319,6 +1658,8 @@ const SocialFeedCard = React.memo(function SocialFeedCard({
   onOpenProfile,
   onOpenProductionTeam,
   onOpenPlaylist,
+  onSharePost,
+  onToggleReaction,
   showAuthorFollow,
   timeAgo,
 }: SocialFeedCardProps) {
@@ -1369,6 +1710,26 @@ const SocialFeedCard = React.memo(function SocialFeedCard({
       onOpenProduct(item.linked_product.id);
     }
   }, [item?.linked_product?.id, onOpenProduct]);
+
+  const isOwnerPost = !isSuggestion && Boolean(currentUserId && item?.author_id === currentUserId);
+  const hasLiked = Boolean(item?.my_reaction || item?.user_reaction);
+
+  const handleMoreOptions = useCallback(() => {
+    if (!isOwnerPost) {
+      handleOpenPrimary();
+      return;
+    }
+
+    Alert.alert("Post options", "", [
+      { text: "Edit", onPress: () => onEditPost?.(item) },
+      { text: "Delete", style: "destructive", onPress: () => onDeletePost?.(item) },
+      { text: "Cancel", style: "cancel" },
+    ]);
+  }, [handleOpenPrimary, isOwnerPost, item, onDeletePost, onEditPost]);
+
+  const reactionCount = Number(item?.reaction_count || 0);
+  const commentCount = Number(item?.comment_count || 0);
+  const shareCount = Number(item?.share_count || 0);
 
   return (
     <View
@@ -1446,7 +1807,7 @@ const SocialFeedCard = React.memo(function SocialFeedCard({
             </View>
           ) : null}
 
-          <TouchableOpacity activeOpacity={0.78} accessibilityRole="button" accessibilityLabel="More options" style={styles.socialMenuButton}>
+          <TouchableOpacity activeOpacity={0.78} accessibilityRole="button" accessibilityLabel="More options" onPress={handleMoreOptions} style={styles.socialMenuButton}>
             <Ionicons name="ellipsis-horizontal" size={20} color={colors.textSecondary} />
           </TouchableOpacity>
         </View>
@@ -1543,38 +1904,72 @@ const SocialFeedCard = React.memo(function SocialFeedCard({
         </View>
       ) : null}
 
-      <View style={styles.socialCtaRow}>
-        <TouchableOpacity
-          activeOpacity={0.78}
-          onPress={handleOpenPrimary}
-          style={[styles.socialPrimaryCta, { backgroundColor: colors.primary }]}
-        >
-          <Text style={styles.socialPrimaryCtaText}>{primaryCtaLabel}</Text>
-        </TouchableOpacity>
-
-        {isSuggestion && followTarget ? (
+      {isSuggestion ? (
+        <View style={styles.socialCtaRow}>
           <TouchableOpacity
-            activeOpacity={followBusy ? 1 : 0.78}
-            disabled={followBusy}
-            onPress={handleFollow}
-            style={[
-              styles.socialSecondaryCta,
-              {
-                borderColor,
-                opacity: followBusy ? 0.7 : 1,
-              },
-            ]}
+            activeOpacity={0.78}
+            onPress={handleOpenPrimary}
+            style={[styles.socialPrimaryCta, { backgroundColor: colors.primary }]}
           >
-            {followBusy ? (
-              <ActivityIndicator size="small" color={colors.textSecondary} />
-            ) : (
-              <Text style={[styles.socialSecondaryCtaText, { color: colors.textSecondary }]}>
-                {isFollowing ? "Following" : "Follow"}
-              </Text>
-            )}
+            <Text style={styles.socialPrimaryCtaText}>{primaryCtaLabel}</Text>
           </TouchableOpacity>
-        ) : null}
-      </View>
+
+          {followTarget ? (
+            <TouchableOpacity
+              activeOpacity={followBusy ? 1 : 0.78}
+              disabled={followBusy}
+              onPress={handleFollow}
+              style={[
+                styles.socialSecondaryCta,
+                {
+                  borderColor,
+                  opacity: followBusy ? 0.7 : 1,
+                },
+              ]}
+            >
+              {followBusy ? (
+                <ActivityIndicator size="small" color={colors.textSecondary} />
+              ) : (
+                <Text style={[styles.socialSecondaryCtaText, { color: colors.textSecondary }]}>
+                  {isFollowing ? "Following" : "Follow"}
+                </Text>
+              )}
+            </TouchableOpacity>
+          ) : null}
+        </View>
+      ) : (
+        <>
+          <View style={styles.socialStatsRow}>
+            <Text style={[styles.socialStatsText, { color: colors.textSecondary }]}>
+              {reactionCount} likes
+            </Text>
+            <Text style={[styles.socialStatsText, { color: colors.textSecondary }]}>
+              {commentCount} comments
+            </Text>
+            <Text style={[styles.socialStatsText, { color: colors.textSecondary }]}>
+              {shareCount} shares
+            </Text>
+          </View>
+          <View style={[styles.socialActionRow, { borderTopColor: borderColor }]}>
+            <TouchableOpacity
+              activeOpacity={0.78}
+              style={styles.socialActionButton}
+              onPress={() => onToggleReaction?.(item)}
+            >
+              <Ionicons name={hasLiked ? "heart" : "heart-outline"} size={18} color={hasLiked ? "#EF4444" : colors.textSecondary} />
+              <Text style={[styles.socialActionText, { color: hasLiked ? "#EF4444" : colors.textSecondary }]}>Like</Text>
+            </TouchableOpacity>
+            <TouchableOpacity activeOpacity={0.78} style={styles.socialActionButton} onPress={handleOpenPrimary}>
+              <Ionicons name="chatbubble-outline" size={17} color={colors.textSecondary} />
+              <Text style={[styles.socialActionText, { color: colors.textSecondary }]}>Comment</Text>
+            </TouchableOpacity>
+            <TouchableOpacity activeOpacity={0.78} style={styles.socialActionButton} onPress={() => onSharePost?.(item)}>
+              <Ionicons name="share-social-outline" size={17} color={colors.textSecondary} />
+              <Text style={[styles.socialActionText, { color: colors.textSecondary }]}>Share</Text>
+            </TouchableOpacity>
+          </View>
+        </>
+      )}
     </View>
   );
 });
@@ -1582,6 +1977,7 @@ const SocialFeedCard = React.memo(function SocialFeedCard({
 export default function FeedScreen() {
   const { colors, isDark } = useTheme();
   const { session, userId, isGuest, loading: authLoading, roleResolved, userRole } = useAuth();
+  const params = useLocalSearchParams<{ reopenListingId?: string }>();
   const { clearBottomOverlays } = useBottomOverlay();
   const { activeStation } = useRadioPlayerPresence();
   const insets = useSafeAreaInsets();
@@ -1605,10 +2001,14 @@ export default function FeedScreen() {
   const [showCreate, setShowCreate] = useState(false);
   const [postBody, setPostBody] = useState("");
   const [postVisibility, setPostVisibility] = useState<"public" | "followers">("public");
+  const [postMedia, setPostMedia] = useState<PostComposerMedia[]>([]);
+  const [editingPost, setEditingPost] = useState<any | null>(null);
+  const [mediaBusy, setMediaBusy] = useState(false);
+  const [mediaStatus, setMediaStatus] = useState("");
   const [creating, setCreating] = useState(false);
-  useBottomOverlayVisibility(showCreate, "FeedCreatePostModal");
 
   const [alert, setAlert] = useState<{ type: AlertType; title: string; message: string } | null>(null);
+  const composerInputRef = React.useRef<TextInput>(null);
   const searchSheetRef = React.useRef<import("@gorhom/bottom-sheet").BottomSheetModal>(null);
   const bottomSheetRef = React.useRef<import("@gorhom/bottom-sheet").BottomSheetModal>(null);
   const productionTeamSheetRef = React.useRef<import("@gorhom/bottom-sheet").BottomSheetModal>(null);
@@ -1623,6 +2023,15 @@ export default function FeedScreen() {
   const [selectedPostId, setSelectedPostId] = useState<string | null>(null);
   const [selectedProductionTeamId, setSelectedProductionTeamId] = useState<string | null>(null);
   const [pendingReopenListingId, setPendingReopenListingId] = useState<string | null>(null);
+  const canCreatePosts = useMemo(() => {
+    const role = typeof userRole === "string" ? userRole.toLowerCase() : "";
+    return Boolean(session && userId && ["musician", "producer", "studio-owner", "venue-owner", "admin"].includes(role));
+  }, [session, userId, userRole]);
+  const composerCanSubmit = Boolean(
+    normalizeVisibleInput(postBody) ||
+    postMedia.length > 0 ||
+    (editingPost && !mediaBusy),
+  );
 
   const forYouFeedQuery = useFeedQuery({
     enabled: false,
@@ -1879,6 +2288,23 @@ export default function FeedScreen() {
       interactionTask.cancel();
     };
   }, [pendingReopenListingId, selectedListingId]);
+
+  useEffect(() => {
+    const reopenListingId = Array.isArray(params.reopenListingId)
+      ? params.reopenListingId[0]
+      : params.reopenListingId;
+
+    if (!reopenListingId || reopenListingId.length === 0) return;
+
+    setSelectedListingId(reopenListingId);
+    setPendingReopenListingId(reopenListingId);
+
+    try {
+      router.setParams({ reopenListingId: undefined as any });
+    } catch {
+      // Older router states may not accept clearing params here; the listing still opens.
+    }
+  }, [params.reopenListingId]);
 
   const fetchAiCardsForYou = useCallback(async (): Promise<FeedAiCardsResult> => {
     if (!session || !userId || !roleResolved) {
@@ -2645,16 +3071,185 @@ export default function FeedScreen() {
   }, [aiCards.length, authLoading, fetchFeed, hasMore, loading, loadingMore, posts.length, tab]);
 
   /* ── Actions ── */
+  const resetComposer = useCallback(() => {
+    setEditingPost(null);
+    setPostBody("");
+    setPostVisibility("public");
+    setPostMedia([]);
+    setMediaStatus("");
+  }, []);
+
+  const presentComposerSheet = useCallback(() => {
+    setShowCreate(true);
+    setTimeout(() => {
+      composerInputRef.current?.focus?.();
+    }, 180);
+  }, []);
+
+  const handleComposerClose = useCallback(() => {
+    if (creating || mediaBusy) return;
+    Keyboard.dismiss();
+    setShowCreate(false);
+    resetComposer();
+  }, [creating, mediaBusy, resetComposer]);
+
+  const openCreateComposer = useCallback(() => {
+    if (!canCreatePosts) {
+      setAlert({
+        type: "warning",
+        title: "Posting unavailable",
+        message: userRole === "fan" ? "Fan accounts can react, comment, and share, but cannot create posts." : "Please sign in with a creator account to post.",
+      });
+      return;
+    }
+    resetComposer();
+    presentComposerSheet();
+  }, [canCreatePosts, presentComposerSheet, resetComposer, userRole]);
+
+  const closeComposer = useCallback(() => {
+    handleComposerClose();
+  }, [handleComposerClose]);
+
+  const uploadComposerMedia = useCallback(async () => {
+    if (!userId || postMedia.length === 0) return [];
+
+    const uploadedMedia: any[] = [];
+    for (let index = 0; index < postMedia.length; index += 1) {
+      const item = postMedia[index];
+      const stamp = `${Date.now()}_${index}_${Math.random().toString(36).slice(2, 8)}`;
+      const storagePath = `${userId}/posts/${stamp}.${item.ext}`;
+      const bytes = item.media_type === "image"
+        ? base64ToUint8Array(item.base64 || await FileSystem.readAsStringAsync(item.uri, { encoding: "base64" }))
+        : undefined;
+
+      const uploadResult = await uploadPostMediaFile(item.uri, storagePath, item.mime_type, bytes);
+      if (uploadResult.error) throw uploadResult.error;
+
+      let thumbnailPath: string | null = null;
+      if (item.media_type === "video") {
+        const selectedThumbnail = item.thumbnailChoices[item.selectedThumbnailIndex] || item.thumbnailChoices[0];
+        const thumbnailBase64 = selectedThumbnail?.dataUrl?.split(",")[1] || "";
+        if (!thumbnailBase64) throw new Error("Selected video thumbnail is missing.");
+        thumbnailPath = `${userId}/posts/thumbnails/${stamp}.jpg`;
+        const thumbnailResult = await uploadPostMediaFile(
+          selectedThumbnail.uri,
+          thumbnailPath,
+          "image/jpeg",
+          base64ToUint8Array(thumbnailBase64),
+        );
+        if (thumbnailResult.error) throw thumbnailResult.error;
+      }
+
+      uploadedMedia.push({
+        media_type: item.media_type,
+        storage_path: storagePath,
+        thumbnail_path: thumbnailPath,
+        is_cover: item.is_cover,
+        mime_type: item.mime_type,
+        width: item.width || null,
+        height: item.height || null,
+        duration_seconds: item.duration_seconds || null,
+        safety_status: "passed",
+        safety_context: "social_post_media",
+        safety_checked_at: new Date().toISOString(),
+        safety_metadata: {
+          ...item.safetyMetadata,
+          client_screened: true,
+          selected_thumbnail: item.media_type === "video",
+        },
+      });
+    }
+
+    return uploadedMedia;
+  }, [postMedia, userId]);
+
+  const handlePickPostMedia = useCallback(async () => {
+    if (!canCreatePosts || mediaBusy || postMedia.length >= MAX_POST_MEDIA_ITEMS) return;
+
+    try {
+      const remaining = MAX_POST_MEDIA_ITEMS - postMedia.length;
+      const result = await ImagePicker.launchImageLibraryAsync({
+        allowsMultipleSelection: true,
+        base64: false,
+        mediaTypes: ["images", "videos"] as any,
+        quality: 0.9,
+        selectionLimit: remaining,
+      });
+
+      if (result.canceled) return;
+      const assets = (result.assets || []).slice(0, remaining);
+      if (assets.length === 0) return;
+
+      setMediaBusy(true);
+      setMediaStatus("Checking media...");
+      const prepared: PostComposerMedia[] = [];
+      for (const asset of assets) {
+        prepared.push(await preparePostComposerMedia(asset));
+      }
+
+      setPostMedia((current) => {
+        const merged = [...current, ...prepared].slice(0, MAX_POST_MEDIA_ITEMS);
+        const hasCover = merged.some((item) => item.is_cover);
+        return merged.map((item, index) => ({ ...item, is_cover: hasCover ? item.is_cover : index === 0 }));
+      });
+    } catch (error: any) {
+      setAlert({
+        type: "error",
+        title: "Media blocked",
+        message: error?.message || "This media could not be attached.",
+      });
+    } finally {
+      setMediaBusy(false);
+      setMediaStatus("");
+    }
+  }, [canCreatePosts, mediaBusy, postMedia.length]);
+
+  const removeComposerMedia = useCallback((mediaId: string) => {
+    setPostMedia((current) => {
+      const next = current.filter((item) => item.id !== mediaId);
+      const hasCover = next.some((item) => item.is_cover);
+      return next.map((item, index) => ({ ...item, is_cover: hasCover ? item.is_cover : index === 0 }));
+    });
+  }, []);
+
+  const setComposerCover = useCallback((mediaId: string) => {
+    setPostMedia((current) => current.map((item) => ({ ...item, is_cover: item.id === mediaId })));
+  }, []);
+
+  const setComposerThumbnail = useCallback((mediaId: string, selectedThumbnailIndex: number) => {
+    setPostMedia((current) =>
+      current.map((item) => (item.id === mediaId ? { ...item, selectedThumbnailIndex } : item)),
+    );
+  }, []);
+
   const handleCreatePost = async () => {
     const content = normalizeVisibleInput(postBody);
-    if (!content) {
-      setAlert({ type: "warning", title: "Empty Post", message: "Please write something." });
+    if (!canCreatePosts) {
+      setAlert({ type: "warning", title: "Posting unavailable", message: "Fan accounts cannot create posts." });
+      return;
+    }
+    if (!content && postMedia.length === 0 && !editingPost) {
+      setAlert({ type: "warning", title: "Empty Post", message: "Please write something or attach media." });
       return;
     }
     setCreating(true);
     try {
+      const uploadedMedia = postMedia.length > 0 ? await uploadComposerMedia() : undefined;
       const { data, error } = await supabase.functions.invoke("manage-social-feed", {
-        body: { action: "create_post", content, visibility: postVisibility },
+        body: editingPost
+          ? {
+              action: "update_post",
+              post_id: editingPost.id,
+              content,
+              visibility: postVisibility,
+              ...(uploadedMedia ? { media: uploadedMedia } : {}),
+            }
+          : {
+              action: "create_post",
+              content,
+              visibility: postVisibility,
+              media: uploadedMedia || [],
+            },
       });
 
       if (error) {
@@ -2662,9 +3257,12 @@ export default function FeedScreen() {
       }
 
       if (data?.success) {
-        emitToast({ type: "success", title: "Posted!", message: "Your post is live." });
-        setShowCreate(false);
-        setPostBody("");
+        emitToast({
+          type: "success",
+          title: editingPost ? "Post updated" : "Posted!",
+          message: editingPost ? "Your changes are live." : "Your post is live.",
+        });
+        handleComposerClose();
         void fetchFeed(activeTabRef.current);
       } else {
         setAlert({ type: "error", title: "Error", message: data?.error || "Failed to create post" });
@@ -2778,10 +3376,122 @@ export default function FeedScreen() {
     );
   }, []);
 
+  const handleModalShareChanged = useCallback((postId: string, shareCount: number) => {
+    setPosts((current) =>
+      current.map((post) => (post.id === postId ? { ...post, share_count: shareCount } : post)),
+    );
+  }, []);
+
   const handleModalPostDeleted = useCallback((postId: string) => {
     setPosts((current) => current.filter((post) => post.id !== postId));
     invalidateFeedCache("following");
   }, [invalidateFeedCache]);
+
+  const handleEditPost = useCallback((post: any) => {
+    if (!post?.id || post.author_id !== userId) return;
+    setEditingPost(post);
+    setPostBody(post.body || post.content || "");
+    setPostVisibility(post.visibility === "followers" ? "followers" : "public");
+    setPostMedia([]);
+    setMediaStatus("");
+    presentComposerSheet();
+  }, [presentComposerSheet, userId]);
+
+  const handleDeletePost = useCallback((post: any) => {
+    if (!post?.id || post.author_id !== userId) return;
+
+    Alert.alert("Delete post", "This post will be removed from the feed.", [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Delete",
+        style: "destructive",
+        onPress: async () => {
+          try {
+            const { data, error } = await supabase.functions.invoke("manage-social-feed", {
+              body: { action: "delete_post", post_id: post.id },
+            });
+            if (error) throw error;
+            if (data?.error) throw new Error(String(data.error));
+            setPosts((current) => current.filter((item) => item.id !== post.id));
+            invalidateFeedCache("following");
+            emitToast({ type: "success", title: "Post deleted", message: "" });
+          } catch (error: any) {
+            setAlert({ type: "error", title: "Delete failed", message: error?.message || "Please try again." });
+          }
+        },
+      },
+    ]);
+  }, [invalidateFeedCache, userId]);
+
+  const handleTogglePostReaction = useCallback(async (post: any) => {
+    if (!session || !post?.id) {
+      emitToast({ type: "info", title: "Sign in required", message: "Please sign in to react." });
+      return;
+    }
+
+    const hadReaction = Boolean(post.my_reaction || post.user_reaction);
+    setPosts((current) =>
+      current.map((item) =>
+        item.id === post.id
+          ? {
+              ...item,
+              my_reaction: hadReaction ? null : "like",
+              user_reaction: hadReaction ? null : "like",
+              reaction_count: Math.max(0, Number(item.reaction_count || 0) + (hadReaction ? -1 : 1)),
+            }
+          : item,
+      ),
+    );
+
+    try {
+      const { data, error } = await supabase.functions.invoke("manage-social-feed", {
+        body: { action: hadReaction ? "remove_reaction" : "react_to_post", post_id: post.id, reaction_type: "like" },
+      });
+      if (error) throw error;
+      if (data?.error) throw new Error(String(data.error));
+    } catch (error: any) {
+      setPosts((current) =>
+        current.map((item) =>
+          item.id === post.id
+            ? {
+                ...item,
+                my_reaction: hadReaction ? "like" : null,
+                user_reaction: hadReaction ? "like" : null,
+                reaction_count: Math.max(0, Number(item.reaction_count || 0) + (hadReaction ? 1 : -1)),
+              }
+            : item,
+        ),
+      );
+      emitToast({ type: "error", title: "Reaction failed", message: error?.message || "Please try again." });
+    }
+  }, [session]);
+
+  const handleSharePost = useCallback(async (post: any) => {
+    if (!post?.id) return;
+    try {
+      const shareResult = await Share.share({
+        message: `${post.body || post.content || "Check out this post on MusikaLokal."}\n\nMusikaLokal post: ${post.id}`,
+      });
+
+      if (shareResult.action === Share.dismissedAction) return;
+
+      const { data, error } = await supabase.functions.invoke("manage-social-feed", {
+        body: { action: "share_post", post_id: post.id },
+      });
+      if (error) throw error;
+      if (data?.error) throw new Error(String(data.error));
+      const nextCount = Number(data?.data?.share_count || 0);
+      setPosts((current) =>
+        current.map((item) =>
+          item.id === post.id
+            ? { ...item, share_count: nextCount || Number(item.share_count || 0) + 1 }
+            : item,
+        ),
+      );
+    } catch (error: any) {
+      emitToast({ type: "error", title: "Share failed", message: error?.message || "Please try again." });
+    }
+  }, []);
 
   const openProfileDetails = useCallback((profileId: string) => {
     if (!profileId) return;
@@ -2926,6 +3636,7 @@ export default function FeedScreen() {
           borderColor={isDark ? "#334155" : "#EEF0F4"}
           cardColor={isDark ? "#1E293B" : "#FFFFFF"}
           colors={colors}
+          currentUserId={userId}
           followBusy={isFollowBusy}
           followTarget={followTarget}
           isDark={isDark}
@@ -2938,6 +3649,8 @@ export default function FeedScreen() {
           onOpenProfile={openProfileDetails}
           onOpenProductionTeam={openProductionTeamDetails}
           onOpenPlaylist={openPlaylistDetails}
+          onSharePost={handleSharePost}
+          onToggleReaction={handleTogglePostReaction}
           showAuthorFollow={false}
           timeAgo={timeAgo}
         />
@@ -2963,6 +3676,9 @@ export default function FeedScreen() {
         borderColor={borderColor}
         cardColor={cardBg}
         colors={colors}
+        currentUserId={userId}
+        onDeletePost={handleDeletePost}
+        onEditPost={handleEditPost}
         followBusy={isAuthorFollowBusy}
         followTarget={authorFollowTarget}
         isDark={isDark}
@@ -2975,6 +3691,8 @@ export default function FeedScreen() {
         onOpenProfile={openProfileDetails}
         onOpenProductionTeam={openProductionTeamDetails}
         onOpenPlaylist={openPlaylistDetails}
+        onSharePost={handleSharePost}
+        onToggleReaction={handleTogglePostReaction}
         showAuthorFollow={Boolean(authorFollowTarget)}
         timeAgo={timeAgo}
       />
@@ -2986,7 +3704,11 @@ export default function FeedScreen() {
     colors.textSecondary,
     followBusyByKey,
     followingKeys,
+    handleDeletePost,
+    handleEditPost,
     handleFollow,
+    handleSharePost,
+    handleTogglePostReaction,
     isDark,
     openListingDetails,
     openPlaylistDetails,
@@ -3032,6 +3754,29 @@ export default function FeedScreen() {
           </TouchableOpacity>
         </View>
 
+        {canCreatePosts ? (
+          <TouchableOpacity
+            activeOpacity={0.78}
+            onPress={openCreateComposer}
+            accessibilityRole="button"
+            accessibilityLabel="Create post"
+            testID="mobile-feed-create-post-button"
+            style={[styles.createPostPrompt, { backgroundColor: cardBg, borderColor: colors.border }]}
+          >
+            <View style={[styles.composerAvatar, { backgroundColor: colors.primary + "30" }]}>
+              <Ionicons name="person" size={16} color={colors.primary} />
+            </View>
+            <View style={[styles.createPostInput, { backgroundColor: isDark ? "#374151" : "#F3F4F6" }]}>
+              <Text style={[styles.createPostInputText, { color: colors.textSecondary }]} numberOfLines={1}>
+                {"What's on your mind?"}
+              </Text>
+            </View>
+            <View style={[styles.createPostMediaButton, { backgroundColor: colors.primary + "14" }]}>
+              <Ionicons name="images-outline" size={20} color={colors.primary} />
+            </View>
+          </TouchableOpacity>
+        ) : null}
+
         <LiveRadioCard
           borderColor={colors.border}
           cardColor={isDark ? "#0F172A" : "#F8FAFC"}
@@ -3060,7 +3805,9 @@ export default function FeedScreen() {
     colors.primary,
     colors.text,
     colors.textSecondary,
+    canCreatePosts,
     isDark,
+    openCreateComposer,
     openSearchSheet,
     tab,
   ]);
@@ -3281,45 +4028,183 @@ export default function FeedScreen() {
       )}
 
       {/* Create Post Modal */}
-      <Modal visible={showCreate} transparent animationType="slide" hardwareAccelerated onRequestClose={() => setShowCreate(false)}>
-        <View style={styles.modalOverlay}>
-          <View style={[styles.modalBox, { backgroundColor: colors.surface }]}>
-            <View style={styles.modalHeader}>
-              <TouchableOpacity activeOpacity={1} onPress={() => setShowCreate(false)}><Ionicons name="close" size={24} color={colors.text} /></TouchableOpacity>
-              <Text style={[styles.modalTitle, { color: colors.text }]}>Create Post</Text>
-              <TouchableOpacity activeOpacity={creating || !normalizeVisibleInput(postBody) ? 1 : 0.78}
-                style={[styles.postBtn, { backgroundColor: normalizeVisibleInput(postBody) ? colors.primary : colors.border, opacity: creating || !normalizeVisibleInput(postBody) ? 0.6 : 1 }]}
-                onPress={handleCreatePost}
-                disabled={creating || !normalizeVisibleInput(postBody)}
+      <BottomModal
+        visible={showCreate}
+        onClose={handleComposerClose}
+        closeOnBackdropPress={!creating && !mediaBusy}
+        keyboardAvoiding
+        overlayLabel="FeedCreatePostModal"
+        contentContainerStyle={{
+          borderTopLeftRadius: 28,
+          borderTopRightRadius: 28,
+          overflow: "hidden",
+        }}
+      >
+        <View
+          testID="mobile-feed-create-post-modal"
+          style={[
+            styles.modalBox,
+            {
+              backgroundColor: colors.surface,
+              paddingBottom: Math.max(16, insets.bottom + 12),
+            },
+          ]}
+        >
+          <View style={[styles.modalHandle, { backgroundColor: isDark ? "#4B5563" : "#E5E7EB" }]} />
+          <View style={[styles.modalHeader, { borderBottomColor: colors.border }]}>
+            <View style={styles.modalHeaderSide}>
+              <TouchableOpacity
+                activeOpacity={creating || mediaBusy ? 1 : 0.78}
+                disabled={creating || mediaBusy}
+                onPress={closeComposer}
+                style={[styles.modalIconButton, { backgroundColor: isDark ? "#111827" : "#F1F5F9" }]}
+                accessibilityRole="button"
+                accessibilityLabel="Close composer"
               >
-                {creating ? <ActivityIndicator color="#fff" size="small" /> : <Text style={[styles.postBtnText, { color: normalizeVisibleInput(postBody) ? "#fff" : colors.textSecondary }]}>Post</Text>}
+                <Ionicons name="close" size={21} color={colors.text} />
               </TouchableOpacity>
             </View>
-            <View style={styles.composerAuthorRow}>
-              <View style={[styles.composerAvatar, { backgroundColor: colors.primary + "30" }]}>
-                <Ionicons name="person" size={16} color={colors.primary} />
-              </View>
-              <View>
-                <Text style={[styles.composerAuthorName, { color: colors.text }]}>You</Text>
-                <TouchableOpacity activeOpacity={1} style={[styles.visibilityChip, { backgroundColor: isDark ? "#334155" : "#E2E8F0" }]} onPress={() => setPostVisibility(postVisibility === "public" ? "followers" : "public")}>
-                  <Ionicons name={postVisibility === "public" ? "globe-outline" : "people-outline"} size={11} color={colors.textSecondary} />
-                  <Text style={{ color: colors.textSecondary, fontSize: 11, marginLeft: 3 }}>{postVisibility === "public" ? "Public" : "Followers"}</Text>
-                  <Ionicons name="caret-down" size={10} color={colors.textSecondary} style={{ marginLeft: 2 }} />
-                </TouchableOpacity>
-              </View>
+            <Text style={[styles.modalTitle, { color: colors.text }]} numberOfLines={1}>
+              {editingPost ? "Edit Post" : "Create Post"}
+            </Text>
+            <View style={[styles.modalHeaderSide, styles.modalHeaderSideRight]}>
+              <TouchableOpacity
+                activeOpacity={creating || mediaBusy || !composerCanSubmit ? 1 : 0.78}
+                style={[
+                  styles.postBtn,
+                  {
+                    backgroundColor: composerCanSubmit ? colors.primary : colors.border,
+                    opacity: creating || mediaBusy || !composerCanSubmit ? 0.6 : 1,
+                  },
+                ]}
+                onPress={handleCreatePost}
+                disabled={creating || mediaBusy || !composerCanSubmit}
+                accessibilityRole="button"
+                accessibilityLabel={editingPost ? "Save post" : "Post update"}
+                testID="mobile-feed-post-submit-button"
+              >
+                {creating ? (
+                  <ActivityIndicator color="#fff" size="small" />
+                ) : (
+                  <Text style={[styles.postBtnText, { color: composerCanSubmit ? "#fff" : colors.textSecondary }]}>
+                    {editingPost ? "Save" : "Post"}
+                  </Text>
+                )}
+              </TouchableOpacity>
             </View>
+          </View>
+
+          <View style={styles.composerAuthorRow}>
+            <View style={[styles.composerAvatar, { backgroundColor: colors.primary + "30" }]}>
+              <Ionicons name="person" size={16} color={colors.primary} />
+            </View>
+            <View style={styles.composerAuthorText}>
+              <Text style={[styles.composerAuthorName, { color: colors.text }]} numberOfLines={1}>
+                You
+              </Text>
+              <TouchableOpacity
+                activeOpacity={0.78}
+                style={[styles.visibilityChip, { backgroundColor: isDark ? "#334155" : "#E2E8F0" }]}
+                onPress={() => setPostVisibility(postVisibility === "public" ? "followers" : "public")}
+                accessibilityRole="button"
+                accessibilityLabel="Change post visibility"
+              >
+                <Ionicons name={postVisibility === "public" ? "globe-outline" : "people-outline"} size={11} color={colors.textSecondary} />
+                <Text style={[styles.visibilityChipText, { color: colors.textSecondary }]}>
+                  {postVisibility === "public" ? "Public" : "Followers"}
+                </Text>
+                <Ionicons name="caret-down" size={10} color={colors.textSecondary} />
+              </TouchableOpacity>
+            </View>
+          </View>
+
+          <ScrollView
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}
+            style={styles.modalContent}
+            contentContainerStyle={styles.modalScrollContent}
+          >
             <TextInput
+              ref={composerInputRef}
+              testID="mobile-feed-create-post-input"
               style={[styles.modalTextArea, { color: colors.text }]}
               placeholder="What's on your mind?"
               placeholderTextColor={colors.textSecondary}
               value={postBody}
               onChangeText={setPostBody}
               multiline
-              autoFocus
+              maxLength={5000}
+              editable={showCreate && !creating}
             />
-          </View>
+
+            <View style={[styles.composerToolRow, { borderTopColor: colors.border }]}>
+              <TouchableOpacity
+                activeOpacity={mediaBusy ? 1 : 0.78}
+                disabled={mediaBusy || postMedia.length >= MAX_POST_MEDIA_ITEMS}
+                onPress={handlePickPostMedia}
+                style={[styles.composerToolButton, { borderColor: colors.border, opacity: mediaBusy ? 0.7 : 1 }]}
+              >
+                {mediaBusy ? <ActivityIndicator size="small" color={colors.primary} /> : <Ionicons name="images-outline" size={18} color={colors.primary} />}
+                <Text style={[styles.composerToolText, { color: colors.text }]}>Media</Text>
+              </TouchableOpacity>
+              {mediaStatus ? <Text style={[styles.composerMediaStatus, { color: colors.textSecondary }]}>{mediaStatus}</Text> : null}
+            </View>
+
+            {postMedia.length > 0 ? (
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.composerMediaList}>
+                {postMedia.map((item) => {
+                  const previewUri = item.media_type === "video"
+                    ? item.thumbnailChoices[item.selectedThumbnailIndex]?.uri || item.thumbnailChoices[0]?.uri || item.uri
+                    : item.uri;
+                  return (
+                    <View key={item.id} style={[styles.composerMediaCard, { borderColor: item.is_cover ? colors.primary : colors.border }]}>
+                      <Image source={{ uri: previewUri }} style={styles.composerMediaPreview} />
+                      {item.media_type === "video" ? (
+                        <View style={styles.composerVideoBadge}>
+                          <Ionicons name="play" size={13} color="#FFFFFF" />
+                        </View>
+                      ) : null}
+                      <TouchableOpacity
+                        activeOpacity={0.78}
+                        onPress={() => removeComposerMedia(item.id)}
+                        style={styles.composerRemoveMedia}
+                        accessibilityRole="button"
+                        accessibilityLabel="Remove media"
+                      >
+                        <Ionicons name="close" size={14} color="#FFFFFF" />
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        activeOpacity={0.78}
+                        onPress={() => setComposerCover(item.id)}
+                        style={[styles.composerCoverButton, { backgroundColor: item.is_cover ? colors.primary : "rgba(15,23,42,0.78)" }]}
+                      >
+                        <Text style={styles.composerCoverText}>{item.is_cover ? "Cover" : "Set cover"}</Text>
+                      </TouchableOpacity>
+                      {item.media_type === "video" && item.thumbnailChoices.length > 1 ? (
+                        <View style={styles.composerThumbStrip}>
+                          {item.thumbnailChoices.map((choice, index) => (
+                            <TouchableOpacity
+                              key={`${choice.uri}-${index}`}
+                              activeOpacity={0.8}
+                              onPress={() => setComposerThumbnail(item.id, index)}
+                              style={[
+                                styles.composerThumbOption,
+                                { borderColor: index === item.selectedThumbnailIndex ? colors.primary : "transparent" },
+                              ]}
+                            >
+                              <Image source={{ uri: choice.uri }} style={styles.composerThumbImage} />
+                            </TouchableOpacity>
+                          ))}
+                        </View>
+                      ) : null}
+                    </View>
+                  );
+                })}
+              </ScrollView>
+              ) : null}
+          </ScrollView>
         </View>
-      </Modal>
+      </BottomModal>
 
       <SearchBottomSheet
         ref={searchSheetRef}
@@ -3350,6 +4235,7 @@ export default function FeedScreen() {
         onClose={closePostDetails}
         onReactionChanged={handleModalReactionChanged}
         onCommentChanged={handleModalCommentChanged}
+        onShareChanged={handleModalShareChanged}
         onPostDeleted={handleModalPostDeleted}
       />
 
@@ -3442,9 +4328,39 @@ const styles = StyleSheet.create({
   composerRow: { flexDirection: "row", alignItems: "center", paddingHorizontal: 14, paddingVertical: 12, gap: 10 },
   composerAvatar: { width: 36, height: 36, borderRadius: 18, alignItems: "center", justifyContent: "center" },
   composerInput: { flex: 1, height: 48, borderRadius: 16, paddingHorizontal: 16, justifyContent: "center", flexDirection: "row", alignItems: "center", gap: 10 },
-  composerSearchText: { flex: 1, fontSize: moderateScale(15), fontFamily: "Poppins_500Medium", lineHeight: 20, includeFontPadding: false },
+  composerSearchText: { flex: 1, fontSize: moderateScale(15), fontFamily: "Poppins_500Medium", marginTop: 2 },
   composerFilterButton: { width: 48, height: 48, borderRadius: 16, alignItems: "center", justifyContent: "center" },
   composerMediaBtn: { padding: 4 },
+  createPostPrompt: {
+    marginHorizontal: 14,
+    marginTop: 8,
+    marginBottom: 2,
+    borderRadius: 14,
+    borderWidth: 1,
+    padding: 10,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  createPostInput: {
+    flex: 1,
+    height: 40,
+    borderRadius: 20,
+    justifyContent: "center",
+    paddingHorizontal: 14,
+  },
+  createPostInputText: {
+    fontSize: moderateScale(13),
+    fontFamily: "Poppins_500Medium",
+    marginTop: 4,
+  },
+  createPostMediaButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: "center",
+    justifyContent: "center",
+  },
 
   liveRadioWrap: {
     paddingHorizontal: 14,
@@ -3847,6 +4763,9 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     paddingHorizontal: 6,
     paddingTop: 3,
+    borderTopWidth: 1,
+    marginHorizontal: 12,
+    marginTop: 8,
   },
   socialActionButton: {
     flex: 1,
@@ -3860,6 +4779,17 @@ const styles = StyleSheet.create({
   socialActionText: {
     fontSize: moderateScale(12),
     fontFamily: "Poppins_600SemiBold",
+  },
+  socialStatsRow: {
+    paddingHorizontal: 14,
+    paddingTop: 10,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    gap: 10,
+  },
+  socialStatsText: {
+    fontSize: moderateScale(11),
+    fontFamily: "Poppins_500Medium",
   },
   socialCtaRow: {
     flexDirection: "row",
@@ -3895,17 +4825,38 @@ const styles = StyleSheet.create({
     fontFamily: "Poppins_700Bold",
   },
 
-  /* Create-post modal (Facebook style) */
-  modalOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "flex-end" },
-  modalBox: { borderTopLeftRadius: 16, borderTopRightRadius: 16, paddingBottom: 30, maxHeight: "85%", minHeight: "50%" },
-  modalHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 14, paddingVertical: 12, borderBottomWidth: 0.5, borderBottomColor: "#334155" },
-  modalTitle: { fontSize: moderateScale(16), fontWeight: "700" },
-  postBtn: { borderRadius: 6, paddingHorizontal: 16, paddingVertical: 7 },
-  postBtnText: { color: "#fff", fontSize: moderateScale(13), fontWeight: "700" },
-  composerAuthorRow: { flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 14, paddingTop: 12, paddingBottom: 4 },
-  composerAuthorName: { fontSize: moderateScale(14), fontWeight: "700" },
-  visibilityChip: { flexDirection: "row", alignItems: "center", borderRadius: 4, paddingHorizontal: 6, paddingVertical: 2, marginTop: 2 },
-  modalTextArea: { flex: 1, fontSize: moderateScale(16), paddingHorizontal: 14, paddingTop: 10, textAlignVertical: "top" },
+  /* Create-post modal */
+  modalBox: { minHeight: "52%", maxHeight: "90%", overflow: "hidden" },
+  modalHandle: { alignSelf: "center", width: 40, height: 4, borderRadius: 999, marginTop: 10, marginBottom: 4 },
+  modalHeader: { minHeight: 58, flexDirection: "row", alignItems: "center", paddingHorizontal: 16, borderBottomWidth: StyleSheet.hairlineWidth },
+  modalHeaderSide: { width: 86, alignItems: "flex-start", justifyContent: "center" },
+  modalHeaderSideRight: { alignItems: "flex-end" },
+  modalIconButton: { width: 36, height: 36, borderRadius: 18, alignItems: "center", justifyContent: "center" },
+  modalTitle: { flex: 1, textAlign: "center", fontSize: moderateScale(17), fontFamily: "Poppins_700Bold", includeFontPadding: false, lineHeight: 24 },
+  postBtn: { minWidth: 70, minHeight: 38, borderRadius: 10, paddingHorizontal: 16, alignItems: "center", justifyContent: "center" },
+  postBtnText: { color: "#fff", fontSize: moderateScale(13), fontFamily: "Poppins_700Bold", includeFontPadding: false, lineHeight: 18 },
+  composerAuthorRow: { flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 18, paddingTop: 16, paddingBottom: 8 },
+  composerAuthorText: { flex: 1, minWidth: 0 },
+  composerAuthorName: { fontSize: moderateScale(15), fontFamily: "Poppins_700Bold", includeFontPadding: false, lineHeight: 20 },
+  visibilityChip: { alignSelf: "flex-start", flexDirection: "row", alignItems: "center", borderRadius: 6, paddingHorizontal: 8, paddingVertical: 4, marginTop: 4, gap: 4 },
+  visibilityChipText: { fontSize: moderateScale(11), fontFamily: "Poppins_500Medium", includeFontPadding: false, lineHeight: 14 },
+  modalContent: { flex: 1 },
+  modalScrollContent: { flexGrow: 1, paddingBottom: 10 },
+  modalTextArea: { minHeight: 168, fontSize: moderateScale(18), fontFamily: "Poppins_400Regular", lineHeight: 26, paddingHorizontal: 18, paddingTop: 14, paddingBottom: 12, textAlignVertical: "top", includeFontPadding: false },
+  composerToolRow: { flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 18, paddingVertical: 12, borderTopWidth: StyleSheet.hairlineWidth },
+  composerToolButton: { minHeight: 40, borderRadius: 12, borderWidth: 1, paddingHorizontal: 13, flexDirection: "row", alignItems: "center", gap: 8 },
+  composerToolText: { fontSize: moderateScale(12), fontFamily: "Poppins_700Bold", includeFontPadding: false, lineHeight: 16 },
+  composerMediaStatus: { flex: 1, fontSize: moderateScale(11), fontFamily: "Poppins_500Medium" },
+  composerMediaList: { paddingHorizontal: 18, paddingBottom: 18, gap: 10 },
+  composerMediaCard: { width: 176, minHeight: 212, borderWidth: 2, borderRadius: 12, overflow: "hidden", backgroundColor: "#0F172A" },
+  composerMediaPreview: { width: "100%", height: 132, backgroundColor: "#111827" },
+  composerVideoBadge: { position: "absolute", left: 8, top: 8, width: 26, height: 26, borderRadius: 13, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(15,23,42,0.78)" },
+  composerRemoveMedia: { position: "absolute", right: 8, top: 8, width: 24, height: 24, borderRadius: 12, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(15,23,42,0.78)" },
+  composerCoverButton: { margin: 8, minHeight: 28, borderRadius: 8, alignItems: "center", justifyContent: "center", paddingHorizontal: 8 },
+  composerCoverText: { color: "#FFFFFF", fontSize: moderateScale(11), fontFamily: "Poppins_700Bold" },
+  composerThumbStrip: { flexDirection: "row", gap: 5, paddingHorizontal: 8, paddingBottom: 8 },
+  composerThumbOption: { width: 34, height: 28, borderRadius: 6, borderWidth: 2, overflow: "hidden" },
+  composerThumbImage: { width: "100%", height: "100%" },
   emptyText: { textAlign: "center", marginTop: 60, fontSize: moderateScale(14) },
 
   /* Empty state redesign */

@@ -10,7 +10,8 @@ appId: ${APP_ID}
     text: "Wait"
     optional: true
 - extendedWaitUntil:
-    visible: "MusikaLokal"
+    visible:
+      id: "auth-email-input"
     timeout: 120000
 - tapOn:
     id: "auth-email-input"

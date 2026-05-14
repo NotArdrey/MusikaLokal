@@ -20,7 +20,7 @@ const commandName = (name: string) => {
 
 const isTransientAdbError = (error: any) => {
   const output = `${error?.message || ''}\n${error?.stdout || ''}\n${error?.stderr || ''}`;
-  return /adb server|daemon|cannot connect to daemon|failed to start daemon|could not read ok|device offline|closed|protocol fault|shell input (?:keyevent|text)/i.test(output);
+  return /adb server|daemon|cannot connect to daemon|failed to start daemon|could not read ok|device offline|closed|protocol fault|shell input (?:keyevent|text)|adb(?:\.exe)? shell pm clear|adb(?:\.exe)? shell am force-stop/i.test(output);
 };
 
 const execAdbFileWithRetry = async (
@@ -51,6 +51,13 @@ const execAdbFileWithRetry = async (
 };
 
 const quoteWindowsCmdArg = (value: string) => `"${value.replace(/%/g, '%%').replace(/"/g, '^"')}"`;
+
+const toBase64Url = (value: string) => Buffer
+  .from(value, 'utf8')
+  .toString('base64')
+  .replace(/\+/g, '-')
+  .replace(/\//g, '_')
+  .replace(/=+$/g, '');
 
 const getChildEnvWithAndroidTools = (extraEnv: Record<string, string> = {}) => {
   const pathKey = Object.keys(process.env).find((key) => key.toLowerCase() === 'path') || 'PATH';
@@ -170,7 +177,7 @@ const ensureMetroForDevBuild = async () => {
 const resetAndWarmLaunchApp = async (appId: string) => {
   const childEnv = getChildEnvWithAndroidTools();
   await execAdbFileWithRetry(['shell', 'am', 'force-stop', appId], {
-    timeout: 15_000,
+    timeout: 60_000,
     env: childEnv,
   });
   await execAdbFileWithRetry(['shell', 'pm', 'clear', appId], {
@@ -180,7 +187,7 @@ const resetAndWarmLaunchApp = async (appId: string) => {
   await launchAndroidApp(appId);
   await delay(105_000);
   await execAdbFileWithRetry(['shell', 'am', 'force-stop', appId], {
-    timeout: 15_000,
+    timeout: 60_000,
     env: childEnv,
   });
 };
@@ -239,12 +246,45 @@ const hideKeyboardWithAdb = async () => {
   await delay(1_000);
 };
 
+const getAndroidScreenSize = async () => {
+  const childEnv = getChildEnvWithAndroidTools();
+  const { stdout } = await execAdbFileWithRetry(['shell', 'wm', 'size'], {
+    timeout: 15_000,
+    env: childEnv,
+  });
+  const match = stdout.match(/Physical size:\s*(\d+)x(\d+)/i);
+  if (!match) {
+    return { width: 1080, height: 2400 };
+  }
+
+  return {
+    width: Number(match[1]),
+    height: Number(match[2]),
+  };
+};
+
+const tapScreenFractionWithAdb = async (xRatio: number, yRatio: number) => {
+  const childEnv = getChildEnvWithAndroidTools();
+  const { width, height } = await getAndroidScreenSize();
+  await execAdbFileWithRetry([
+    'shell',
+    'input',
+    'tap',
+    String(Math.round(width * xRatio)),
+    String(Math.round(height * yRatio)),
+  ], {
+    timeout: 15_000,
+    env: childEnv,
+  });
+  await delay(700);
+};
+
 const launchAndroidApp = async (appId: string) => {
   const childEnv = getChildEnvWithAndroidTools();
 
   try {
     await execAdbFileWithRetry(['shell', 'monkey', '-p', appId, '1'], {
-      timeout: 30_000,
+      timeout: 180_000,
       env: childEnv,
     });
     return;
@@ -262,7 +302,7 @@ const launchAndroidApp = async (appId: string) => {
         '-n',
         `${appId}/.MainActivity`,
       ], {
-        timeout: 30_000,
+        timeout: 180_000,
         env: childEnv,
       });
       return;
@@ -289,6 +329,11 @@ const runMaestroCliFlow = async (
   await runMaestroCliPath(flowName, flowPath, extraEnv, timeout);
 };
 
+const isTransientMaestroCliError = (error: any) => {
+  const output = `${error?.message || ''}\n${error?.stdout || ''}\n${error?.stderr || ''}`;
+  return /StatusRuntimeException:\s*(?:UNAVAILABLE|DEADLINE_EXCEEDED)|tcp:\d+\): closed|viewHierarchy|inputText/i.test(output);
+};
+
 const runMaestroCliPath = async (
   flowName: string,
   flowPath: string,
@@ -312,37 +357,52 @@ const runMaestroCliPath = async (
 
   args.push(flowPath);
 
-  try {
-    const childEnv = getChildEnvWithAndroidTools({
-      ...extraEnv,
-      APP_ID: env.E2E_MOBILE_APP_ID,
-    });
+  const childEnv = getChildEnvWithAndroidTools({
+    ...extraEnv,
+    APP_ID: env.E2E_MOBILE_APP_ID,
+  });
+  let lastError: any;
 
-    if (process.platform === 'win32') {
-      const commandLine = `call ${commandName('maestro')} ${args.map(quoteWindowsCmdArg).join(' ')}`;
-      await execAsync(commandLine, {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      if (process.platform === 'win32') {
+        const commandLine = `call ${commandName('maestro')} ${args.map(quoteWindowsCmdArg).join(' ')}`;
+        await execAsync(commandLine, {
+          timeout,
+          env: childEnv,
+        });
+        return;
+      }
+
+      await execFileAsync(commandName('maestro'), args, {
         timeout,
         env: childEnv,
       });
       return;
-    }
+    } catch (error: any) {
+      lastError = error;
+      if (!isTransientMaestroCliError(error) || attempt === 2) {
+        break;
+      }
 
-    await execFileAsync(commandName('maestro'), args, {
-      timeout,
-      env: childEnv,
-    });
-  } catch (error: any) {
-    const stdout = String(error?.stdout || '').trim();
-    const stderr = String(error?.stderr || '').trim();
-    throw new Error(
-      [
-        `Maestro flow failed: ${flowName}`,
-        stdout ? `stdout:\n${stdout}` : '',
-        stderr ? `stderr:\n${stderr}` : '',
-        error?.message || '',
-      ].filter(Boolean).join('\n\n'),
-    );
+      await execAdbFileWithRetry(['start-server'], {
+        timeout: 15_000,
+        env: childEnv,
+      }).catch(() => undefined);
+      await delay(2_000);
+    }
   }
+
+  const stdout = String(lastError?.stdout || '').trim();
+  const stderr = String(lastError?.stderr || '').trim();
+  throw new Error(
+    [
+      `Maestro flow failed: ${flowName}`,
+      stdout ? `stdout:\n${stdout}` : '',
+      stderr ? `stderr:\n${stderr}` : '',
+      lastError?.message || '',
+    ].filter(Boolean).join('\n\n'),
+  );
 };
 
 const getFlowParts = (content: string) => {
@@ -438,17 +498,18 @@ const runMaestroFlowWithAdbText = async (
 
 const runMobileLoginFlow = async (extraEnv: Record<string, string>) => {
   const env = loadE2EEnv();
+  const email = extraEnv.E2E_MOBILE_EMAIL;
+  const password = extraEnv.E2E_MOBILE_PASSWORD;
+  if (!email || !password) {
+    throw new Error('Mobile login flow requires E2E_MOBILE_EMAIL and E2E_MOBILE_PASSWORD.');
+  }
+
   await resetAndWarmLaunchApp(env.E2E_MOBILE_APP_ID);
   await ensureMetroForDevBuild();
-  await runMaestroCliFlow('mobile-login-focus-email.yaml', extraEnv, 180_000);
-  await replaceTextWithAdb(extraEnv.E2E_MOBILE_EMAIL);
-  await hideKeyboardWithAdb();
-  await runMaestroCliFlow('mobile-login-focus-password.yaml', extraEnv, 180_000);
-  await replaceTextWithAdb(extraEnv.E2E_MOBILE_PASSWORD);
-  await hideKeyboardWithAdb();
-  await runMaestroCliFlow('mobile-login-submit.yaml', extraEnv, 180_000);
-  await delay(8_000);
-  await runMaestroCliFlow('mobile-login-verify-auth.yaml', extraEnv, 180_000);
+  await runMaestroCliFlow('mobile-e2e-login.yaml', {
+    ...extraEnv,
+    E2E_MOBILE_LOGIN_URL: `musikalokal://e2e-login?email_b64=${toBase64Url(email)}&password_b64=${toBase64Url(password)}`,
+  }, 240_000);
 };
 
 export async function requireAndroidApp() {
@@ -481,7 +542,7 @@ export async function requireAndroidApp() {
   try {
     const { stdout } = await execAdbFileWithRetry(
       ['shell', 'pm', 'path', env.E2E_MOBILE_APP_ID],
-      { timeout: 15_000, env: childEnv },
+      { timeout: 180_000, env: childEnv },
     );
 
     if (!stdout.includes('package:')) {
@@ -496,13 +557,13 @@ export async function requireAndroidApp() {
     }
 
     await execAdbFileWithRetry(['install', '-r', debugApkPath], {
-      timeout: 180_000,
+      timeout: 300_000,
       env: childEnv,
     });
 
     const { stdout } = await execAdbFileWithRetry(
       ['shell', 'pm', 'path', env.E2E_MOBILE_APP_ID],
-      { timeout: 15_000, env: childEnv },
+      { timeout: 180_000, env: childEnv },
     );
 
     if (!stdout.includes('package:')) {

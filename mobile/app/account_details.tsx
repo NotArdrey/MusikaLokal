@@ -1,12 +1,13 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import React, { useEffect, useState } from 'react';
-import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { supabase } from '../lib/supabase';
 import GuestSignInGate from '../src/components/GuestSignInGate';
 import Header from '../src/components/header';
 import Modal from '../src/components/modal';
 import Navbar from '../src/components/navbar';
+import ProfileAvatar from '../src/components/ProfileAvatar';
 import Skeleton from '../src/components/Skeleton';
 import { useBottomBarClearance } from '../src/hooks/useBottomBarClearance';
 import { useAuth } from '../src/context/AuthContext';
@@ -172,10 +173,11 @@ export default function AccountDetailsScreen() {
 
           <View style={styles.profileHeader}>
             <View style={[styles.avatarContainer, { borderColor: colors.card }]}>
-              <Image
-                source={{ uri: profile?.avatar_url || 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=400&fit=crop' }}
+              <ProfileAvatar
+                uri={profile?.avatar_url}
                 style={styles.avatar}
-                resizeMode="cover"
+                backgroundColor={isDark ? '#374151' : '#E5E7EB'}
+                iconColor={colors.textSecondary}
               />
             </View>
             <Text style={[styles.nameText, { color: colors.text }]}>{profile?.full_name || 'User'}</Text>

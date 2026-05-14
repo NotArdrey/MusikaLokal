@@ -237,6 +237,42 @@ export const resolveNotificationNavigationTarget = (
     return { pathname: "/group_details", params: { id: groupId } };
   }
 
+  const gigId = readStringId(
+    record.gig_id,
+    record.gigId,
+    meta.gig_id,
+    meta.gigId,
+  );
+  if (gigId) {
+    return { pathname: "/feed", params: { reopenListingId: gigId } };
+  }
+
+  const studioId = readStringId(
+    record.studio_id,
+    record.studioId,
+    meta.studio_id,
+    meta.studioId,
+  );
+  if (studioId) {
+    return { pathname: "/feed", params: { reopenListingId: studioId } };
+  }
+
+  const listingId = readStringId(
+    record.listing_id,
+    record.listingId,
+    meta.listing_id,
+    meta.listingId,
+  );
+  const listingType = readStringId(
+    record.listing_type,
+    record.listingType,
+    meta.listing_type,
+    meta.listingType,
+  )?.toLowerCase();
+  if (listingId && (listingType === "gig" || listingType === "studio" || listingType === "venue")) {
+    return { pathname: "/feed", params: { reopenListingId: listingId } };
+  }
+
   if (notificationType === "follow") {
     const followerId = readStringId(
       record.follower_id,

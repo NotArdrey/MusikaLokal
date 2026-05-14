@@ -19,6 +19,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { supabase } from '../lib/supabase';
 import CustomAlert, { AlertType } from '../src/components/CustomAlert';
 import Modal from '../src/components/modal';
+import ProfileAvatar from '../src/components/ProfileAvatar';
 import ReportModal from '../src/components/ReportModal';
 import { useAuth } from '../src/context/AuthContext';
 import { useTheme } from '../src/context/ThemeContext';
@@ -322,9 +323,11 @@ export default function GroupDetailsScreen() {
               <Text style={[styles.hostedBy, { color: colors.text }]}>Hosted by {group.owner_name || 'Martin'}</Text>
               <Text style={[styles.hostSub, { color: colors.textSecondary }]}>Joined in 2021</Text>
             </View>
-            <Image
-              source={{ uri: group.owner_avatar || null }}
+            <ProfileAvatar
+              uri={group.owner_avatar}
               style={[styles.hostAvatar, { backgroundColor: colors.border }]}
+              backgroundColor={isDark ? '#374151' : '#E5E7EB'}
+              iconColor={colors.textSecondary}
             />
           </View>
 
@@ -371,17 +374,12 @@ export default function GroupDetailsScreen() {
                     const memberInstrument = typeof member === 'string' ? member : member.instrument;
                     return (
                       <View key={index} style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-                        <View style={{ 
-                          width: 44, height: 44, borderRadius: 22, 
-                          backgroundColor: isLeader ? colors.primary : '#E0E7FF',
-                          alignItems: 'center', justifyContent: 'center'
-                        }}>
-                          {member.avatar_url ? (
-                            <Image source={{ uri: member.avatar_url }} style={{ width: 44, height: 44, borderRadius: 22 }} />
-                          ) : (
-                            <Text style={{ color: isLeader ? '#fff' : '#4F46E5', fontWeight: 'bold', fontSize: 16 }}>{memberName?.charAt(0)}</Text>
-                          )}
-                        </View>
+                        <ProfileAvatar
+                          uri={typeof member === 'string' ? null : member.avatar_url}
+                          style={{ width: 44, height: 44, borderRadius: 22 }}
+                          backgroundColor={isLeader ? colors.primary : (isDark ? '#374151' : '#E5E7EB')}
+                          iconColor={isLeader ? '#FFF' : colors.textSecondary}
+                        />
                         <View style={{ flex: 1 }}>
                           <Text style={{ color: colors.text, fontFamily: 'Poppins_500Medium', fontSize: 15 }}>{memberName}</Text>
                           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>

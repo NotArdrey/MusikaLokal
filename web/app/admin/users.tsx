@@ -260,6 +260,89 @@ const isVisibleInUserManagement = (user: UserEntry) => {
   return !USER_MANAGEMENT_HIDDEN_VERIFICATION_STATUSES.has(verificationStatus);
 };
 
+const getUserDetailsRecord = (
+  data: any,
+  fallback: UserDetailsRequestTarget,
+): Record<string, unknown> => {
+  const candidates = [
+    data?.item,
+    data?.profile,
+    data?.user,
+    Array.isArray(data?.items) ? data.items[0] : null,
+  ];
+
+  const found = candidates.find((candidate) => candidate && typeof candidate === 'object');
+  if (found && typeof found === 'object') {
+    return found as Record<string, unknown>;
+  }
+
+  return {
+    id: fallback.id,
+    full_name: fallback.full_name || null,
+    email: fallback.email || null,
+  };
+};
+
+const getOptionalStringField = (
+  record: Record<string, unknown>,
+  key: string,
+  fallback?: string | null,
+): string | null => {
+  const value = record[key];
+  if (value === null || value === undefined) return fallback ?? null;
+  const normalized = String(value).trim();
+  return normalized || (fallback ?? null);
+};
+
+const getStringListField = (
+  record: Record<string, unknown>,
+  key: string,
+  fallback?: string[] | null,
+): string[] => {
+  const value = record[key];
+  if (Array.isArray(value)) {
+    return value.map((item) => String(item || '').trim()).filter(Boolean);
+  }
+  if (typeof value === 'string') {
+    return normalizeDelimitedList(value);
+  }
+  return Array.isArray(fallback) ? fallback : [];
+};
+
+const getBooleanField = (
+  record: Record<string, unknown>,
+  key: string,
+  fallback = false,
+): boolean => {
+  const value = record[key];
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase();
+    if (normalized === 'true' || normalized === 'yes') return true;
+    if (normalized === 'false' || normalized === 'no') return false;
+  }
+  return fallback;
+};
+
+const normalizeUserEntryFromDetails = (
+  record: Record<string, unknown>,
+  fallback: UserEntry,
+): UserEntry => ({
+  id: getOptionalStringField(record, 'id', fallback.id) || fallback.id,
+  full_name: getOptionalStringField(record, 'full_name', fallback.full_name) || '',
+  email: getOptionalStringField(record, 'email', fallback.email) || '',
+  role: getOptionalStringField(record, 'role', fallback.role) || fallback.role,
+  contact_number: getOptionalStringField(record, 'contact_number', fallback.contact_number),
+  address: getOptionalStringField(record, 'address', fallback.address),
+  location: getOptionalStringField(record, 'location', fallback.location),
+  bio: getOptionalStringField(record, 'bio', fallback.bio),
+  skills: getStringListField(record, 'skills', fallback.skills),
+  genres: getStringListField(record, 'genres', fallback.genres),
+  is_verified: getBooleanField(record, 'is_verified', Boolean(fallback.is_verified)),
+  verification_status: getOptionalStringField(record, 'verification_status', fallback.verification_status),
+  created_at: getOptionalStringField(record, 'created_at', fallback.created_at) || fallback.created_at,
+});
+
 const styles = StyleSheet.create({
   booleanToggleButton: {
     borderWidth: 1,
@@ -673,6 +756,7 @@ export default function AdminUsersPage() {
   const [userSearch, setUserSearch] = useState('');
   const [userFilter, setUserFilter] = useState<UserFilter>('all');
   const [userActionLoadingId, setUserActionLoadingId] = useState<string | null>(null);
+  const [userEditLoadingId, setUserEditLoadingId] = useState<string | null>(null);
   const [userDetailsLoadingKey, setUserDetailsLoadingKey] = useState<string | null>(null);
 
   const [userModalVisible, setUserModalVisible] = useState(false);
@@ -712,6 +796,7 @@ export default function AdminUsersPage() {
     const errors: Record<string, string> = {};
     const email = userFormEmail.trim();
     const password = userFormPassword.trim();
+    const passwordUpdateRequested = userFormPassword.length > 0 || userFormConfirmPassword.length > 0;
 
     if (!userFormFullName.trim()) {
       errors.fullName = 'Full name is required.';
@@ -723,9 +808,11 @@ export default function AdminUsersPage() {
       errors.email = 'Enter a valid email address.';
     }
 
-    if (userModalMode === 'create') {
+    if (userModalMode === 'create' || passwordUpdateRequested) {
       if (password.length < 6) {
-        errors.password = 'Password must be at least 6 characters.';
+        errors.password = userModalMode === 'create'
+          ? 'Password must be at least 6 characters.'
+          : 'New password must be at least 6 characters.';
       }
 
       if (userFormPassword !== userFormConfirmPassword) {
@@ -867,7 +954,7 @@ export default function AdminUsersPage() {
     setUserModalVisible(true);
   }, [resetUserForm]);
 
-  const openEditUserModal = useCallback((targetUser: UserEntry) => {
+  const populateUserForm = useCallback((targetUser: UserEntry) => {
     setUserModalMode('edit');
     setEditingUserId(targetUser.id);
     setUserFormFullName(targetUser.full_name || '');
@@ -884,6 +971,25 @@ export default function AdminUsersPage() {
     setUserFormEmailConfirmed(false);
     setUserModalVisible(true);
   }, []);
+
+  const openEditUserModal = useCallback(async (targetUser: UserEntry) => {
+    setUserEditLoadingId(targetUser.id);
+
+    try {
+      const data = await invokeAdminUsersManagement({
+        action: 'fetch_user_details',
+        userId: targetUser.id,
+      });
+      const details = getUserDetailsRecord(data, targetUser);
+      const hydratedUser = normalizeUserEntryFromDetails(details, targetUser);
+      populateUserForm(hydratedUser);
+    } catch (error) {
+      const message = await getErrorMessage(error, 'Unable to load this user for editing.');
+      showAlert('error', 'Failed to load user', message);
+    } finally {
+      setUserEditLoadingId((prev) => (prev === targetUser.id ? null : prev));
+    }
+  }, [invokeAdminUsersManagement, populateUserForm, showAlert]);
 
   const openUserDetailsModal = useCallback(async (targetUser: UserDetailsRequestTarget, loadingKey?: string) => {
     const requestLoadingKey = loadingKey || targetUser.id;
@@ -925,19 +1031,7 @@ export default function AdminUsersPage() {
         }
       }
 
-      const profile = data?.item && typeof data.item === 'object'
-        ? (data.item as Record<string, unknown>)
-        : data?.profile && typeof data.profile === 'object'
-          ? (data.profile as Record<string, unknown>)
-          : data?.user && typeof data.user === 'object'
-            ? (data.user as Record<string, unknown>)
-            : Array.isArray(data?.items) && data.items.length > 0 && typeof data.items[0] === 'object'
-              ? (data.items[0] as Record<string, unknown>)
-              : {
-                id: targetUser.id,
-                full_name: targetUser.full_name || null,
-                email: targetUser.email || null,
-              };
+      const profile = getUserDetailsRecord(data, targetUser);
 
       setUserDetailsTarget({
         profile,
@@ -979,6 +1073,7 @@ export default function AdminUsersPage() {
     const bio = userFormBio.trim();
     const skills = normalizeDelimitedList(userFormSkills);
     const genres = normalizeDelimitedList(userFormGenres);
+    const nextPassword = userFormPassword.trim();
 
     if (userFormHasErrors) {
       const missingFields = Object.values(userFormErrors);
@@ -1028,6 +1123,7 @@ export default function AdminUsersPage() {
           genres,
           bio,
           isVerified: userFormIsVerified,
+          ...(nextPassword ? { password: nextPassword } : {}),
         });
 
         showAlert('success', 'User updated', `${fullName}'s account and profile details were saved.`);
@@ -1367,6 +1463,7 @@ export default function AdminUsersPage() {
             <View style={styles.sectionGap}>
               {filteredUsers.map((user) => {
                 const userViewLoadingKey = `user-card-${user.id}`;
+                const userEditLoading = userEditLoadingId === user.id;
 
                 return (
                   <View
@@ -1405,11 +1502,18 @@ export default function AdminUsersPage() {
                         testID={`admin-user-edit-${user.id}`}
                         accessibilityLabel={`admin-user-edit-${user.id}`}
                         activeOpacity={1}
-                        onPress={() => openEditUserModal(user)}
+                        disabled={userEditLoading}
+                        onPress={() => void openEditUserModal(user)}
                         style={[styles.smallActionButton, { borderColor: colors.border }]}
                       >
-                        <Ionicons name="create-outline" size={14} color={colors.text} />
-                        <Text style={[styles.smallActionText, { color: colors.text }]}>Edit</Text>
+                        {userEditLoading ? (
+                          <ActivityIndicator size="small" color={colors.primary} />
+                        ) : (
+                          <>
+                            <Ionicons name="create-outline" size={14} color={colors.text} />
+                            <Text style={[styles.smallActionText, { color: colors.text }]}>Edit</Text>
+                          </>
+                        )}
                       </TouchableOpacity>
 
                       <TouchableOpacity
@@ -1666,7 +1770,6 @@ export default function AdminUsersPage() {
                 </View>
               </View>
 
-            {userModalMode === 'create' && (
               <View style={[styles.formSection, { borderColor: colors.border, backgroundColor: isDark ? '#0F172A' : '#F8FAFC' }]}>
                 <View style={styles.formSectionHeader}>
                   <View style={[styles.formSectionIcon, { backgroundColor: `${colors.primary}18` }]}>
@@ -1677,14 +1780,15 @@ export default function AdminUsersPage() {
 
                 <View style={styles.fieldGroup}>
                   <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>
-                    Password <Text style={styles.requiredMark}>*</Text>
+                    {userModalMode === 'create' ? 'Password' : 'New password'}
+                    {userModalMode === 'create' ? <Text style={styles.requiredMark}> *</Text> : null}
                   </Text>
                   <TextInput
                     testID="admin-user-password-input"
                     accessibilityLabel="admin-user-password-input"
                     value={userFormPassword}
                     onChangeText={setUserFormPassword}
-                    placeholder="Password"
+                    placeholder={userModalMode === 'create' ? 'Password' : 'New password'}
                     secureTextEntry
                     autoCapitalize="none"
                     placeholderTextColor={colors.textSecondary}
@@ -1705,14 +1809,15 @@ export default function AdminUsersPage() {
 
                 <View style={styles.fieldGroup}>
                   <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>
-                    Confirm password <Text style={styles.requiredMark}>*</Text>
+                    {userModalMode === 'create' ? 'Confirm password' : 'Confirm new password'}
+                    {userModalMode === 'create' ? <Text style={styles.requiredMark}> *</Text> : null}
                   </Text>
                   <TextInput
                     testID="admin-user-confirm-password-input"
                     accessibilityLabel="admin-user-confirm-password-input"
                     value={userFormConfirmPassword}
                     onChangeText={setUserFormConfirmPassword}
-                    placeholder="Confirm password"
+                    placeholder={userModalMode === 'create' ? 'Confirm password' : 'Confirm new password'}
                     secureTextEntry
                     autoCapitalize="none"
                     placeholderTextColor={colors.textSecondary}
@@ -1731,7 +1836,6 @@ export default function AdminUsersPage() {
                   ) : null}
                 </View>
               </View>
-            )}
 
               <View style={[styles.formSection, { borderColor: colors.border, backgroundColor: isDark ? '#0F172A' : '#F8FAFC' }]}>
                 <View style={styles.formSectionHeader}>
@@ -1856,7 +1960,11 @@ export default function AdminUsersPage() {
 
       <Modal visible={!!userDetailsTarget} transparent animationType="fade" onRequestClose={closeUserDetailsModal}>
         <View style={styles.modalBackdrop}>
-          <View style={[styles.modalCardLarge, { backgroundColor: colors.card, borderColor: colors.border }]}> 
+          <View
+            testID="admin-user-details-modal"
+            accessibilityLabel="admin-user-details-modal"
+            style={[styles.modalCardLarge, { backgroundColor: colors.card, borderColor: colors.border }]}
+          > 
             <View style={styles.detailsModalHeader}>
               <View style={[styles.detailsModalIcon, { backgroundColor: `${colors.primary}18` }]}>
                 <Ionicons name="person-circle-outline" size={24} color={colors.primary} />

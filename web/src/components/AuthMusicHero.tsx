@@ -1,4 +1,4 @@
-import { Animated, Image, ImageBackground, StyleSheet, Text, View } from 'react-native';
+import { Animated, ImageBackground, StyleSheet, Text, View } from 'react-native';
 import { useEffect, useRef, useState } from 'react';
 
 const HERO_IMAGES = [
@@ -78,14 +78,6 @@ export default function AuthMusicHero({ title, subtitle }: AuthMusicHeroProps) {
       <View style={styles.overlayAccent} />
 
       <View style={styles.content}>
-        <View style={styles.logoWrapper}>
-          <Image
-            source={require('../../assets/images/Musika-lokal-logo.png')}
-            style={styles.logoImage}
-            resizeMode="contain"
-          />
-        </View>
-
         <Text style={styles.title}>{title}</Text>
         <Text style={styles.subtitle}>{subtitle}</Text>
         <Text style={styles.caption}>Live bands. Studio nights. Local scenes.</Text>
@@ -117,22 +109,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: 52,
     paddingVertical: 64,
-  },
-  logoWrapper: {
-    width: 92,
-    height: 92,
-    borderRadius: 24,
-    backgroundColor: 'rgba(79, 70, 229, 0.9)',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.26)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 30,
-  },
-  logoImage: {
-    width: 98,
-    height: 98,
-    tintColor: '#FFFFFF',
   },
   title: {
     color: '#F8FAFC',

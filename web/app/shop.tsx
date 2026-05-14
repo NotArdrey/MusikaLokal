@@ -73,8 +73,10 @@ export default function ShopScreen() {
   const createListingSheetRef = useRef<BottomSheetModal>(null);
   const normalizedUserRole = (userRole || "").toLowerCase();
   const isFan = normalizedUserRole === "fan";
-  const isMusician = normalizedUserRole === "musician";
-  const canSell = Boolean(session) && roleResolved && !isMusician;
+  const canSell =
+    Boolean(session) &&
+    roleResolved &&
+    ["producer", "venue-owner", "studio-owner"].includes(normalizedUserRole);
 
   const pageBackground = isWebDesktop ? (isDark ? "#0A1224" : "#E9EEF8") : colors.background;
   const cardBg = isWebDesktop ? (isDark ? "#0F172A" : "#FFFFFF") : colors.surface;
@@ -335,7 +337,7 @@ export default function ShopScreen() {
   const handleSubmitProduct = async () => {
     if (adding) return;
     if (!canSell) {
-      setAlert({ type: "warning", title: "Selling Unavailable", message: "Only non-musician accounts can create listings." });
+      setAlert({ type: "warning", title: "Selling Unavailable", message: "Only producer, venue, and studio-owner accounts can create listings." });
       return;
     }
     if (!newTitle.trim()) {

@@ -2209,7 +2209,34 @@ serve(async (req: Request) => {
 
       if (profileError) throw profileError;
 
-      const [item] = await attachProfileLists(client, profile ? [profile] : []);
+      const { data: authUserData, error: authUserError } = await client.auth.admin.getUserById(userId);
+      if (authUserError && !profile) {
+        return jsonResponse({ error: "User not found" }, 404);
+      }
+
+      const authUser = authUserData?.user || null;
+      const authDetails = authUser
+        ? {
+            email: profile?.email || authUser.email || null,
+            auth_email: authUser.email || null,
+            phone: authUser.phone || null,
+            email_confirmed: Boolean(authUser.email_confirmed_at),
+            email_confirmed_at: authUser.email_confirmed_at || null,
+            last_sign_in_at: authUser.last_sign_in_at || null,
+            auth_created_at: authUser.created_at || null,
+            auth_updated_at: authUser.updated_at || null,
+            banned_until: authUser.banned_until || null,
+          }
+        : {};
+
+      const detailProfile = profile
+        ? { ...profile, ...authDetails }
+        : {
+            id: userId,
+            ...authDetails,
+          };
+
+      const [item] = await attachProfileLists(client, [detailProfile]);
 
       return jsonResponse({
         item: item || null,
@@ -2317,9 +2344,17 @@ serve(async (req: Request) => {
       const maybeBio = body?.bio;
       const maybeSkills = body?.skills;
       const maybeGenres = body?.genres;
+      const maybePassword = body?.password;
 
       if (!userId) {
         return jsonResponse({ error: "Missing userId" }, 400);
+      }
+
+      const nextPassword = String(maybePassword ?? "").trim();
+      const hasPasswordUpdate = maybePassword !== undefined && nextPassword.length > 0;
+
+      if (hasPasswordUpdate && nextPassword.length < 6) {
+        return jsonResponse({ error: "Password must be at least 6 characters" }, 400);
       }
 
       let existingProfileForUpdate: Record<string, unknown> | null = null;
@@ -2480,7 +2515,7 @@ serve(async (req: Request) => {
 
       const hasListUpdates = maybeSkills !== undefined || maybeGenres !== undefined;
 
-      if (Object.keys(profileUpdates).length === 0 && !hasListUpdates) {
+      if (Object.keys(profileUpdates).length === 0 && !hasListUpdates && !hasPasswordUpdate) {
         return jsonResponse({ error: "No updates provided" }, 400);
       }
 
@@ -2513,6 +2548,10 @@ serve(async (req: Request) => {
 
       if (profileUpdates.email !== undefined) {
         authUpdatePayload.email = String(profileUpdates.email);
+      }
+
+      if (hasPasswordUpdate) {
+        authUpdatePayload.password = nextPassword;
       }
 
       const { error: authUpdateError } = await client.auth.admin.updateUserById(userId, authUpdatePayload);

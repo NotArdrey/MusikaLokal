@@ -302,7 +302,7 @@ function ToastCard({
       Animated.timing(progress, {
         toValue: 0,
         duration,
-        useNativeDriver: false,
+        useNativeDriver: true,
       }),
     ]).start(({ finished }) => {
       if (finished) {
@@ -314,11 +314,6 @@ function ToastCard({
       progress.stopAnimation();
     };
   }, [duration, finishDismiss, isE2EToast, opacity, progress, translateY]);
-
-  const progressWidth = progress.interpolate({
-    inputRange: [0, 1],
-    outputRange: ["0%", "100%"],
-  });
 
   return (
     <Animated.View
@@ -342,17 +337,6 @@ function ToastCard({
       ]}
       {...panResponder.panHandlers}
     >
-      <View
-        style={[
-          StyleSheet.absoluteFillObject,
-          {
-            backgroundColor: isDark ? config.darkBackground : config.lightBackground,
-            borderColor: isDark ? config.darkBorder : config.lightBorder,
-          },
-          styles.toastBackdrop,
-        ]}
-      />
-
       <Pressable
         accessibilityLabel={toast.message ? `${title}. ${toast.message}` : title}
         accessibilityRole="alert"
@@ -398,7 +382,7 @@ function ToastCard({
             styles.progressFill,
             {
               backgroundColor: config.accent,
-              width: progressWidth,
+              transform: [{ scaleX: progress }],
             },
           ]}
         />
@@ -437,10 +421,6 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.18,
     shadowRadius: 20,
     elevation: 12,
-  },
-  toastBackdrop: {
-    borderWidth: 1,
-    borderRadius: 18,
   },
   touchableArea: {
     paddingHorizontal: 14,
@@ -485,5 +465,7 @@ const styles = StyleSheet.create({
   },
   progressFill: {
     height: "100%",
+    transformOrigin: "left center",
+    width: "100%",
   },
 });

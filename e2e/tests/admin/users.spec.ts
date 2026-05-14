@@ -3,7 +3,7 @@ import { cleanupE2ERecords } from '../../helpers/cleanup';
 import { assertE2EEmail, assertE2EName, makeRunId } from '../../helpers/env';
 import { expectDbRecord, expectNoDbRecord, expectVisible } from '../../helpers/assertions';
 import { seedE2EAdmin } from '../../helpers/seed';
-import { requireProfileByEmail } from '../../helpers/supabase';
+import { getSupabaseAnon, requireProfileByEmail } from '../../helpers/supabase';
 import { loginAsAdmin } from '../../helpers/web-auth';
 
 test.describe.configure({ mode: 'serial' });
@@ -28,6 +28,7 @@ test.describe('admin users CRUD', () => {
     const createdEmail = `e2e+${runId}@musikalokal.test`;
     const createdName = `E2E Admin User ${runId}`;
     const updatedName = `E2E Admin User Updated ${runId}`;
+    const updatedPassword = 'E2E-password-456';
 
     assertE2EEmail(createdEmail);
     assertE2EName(createdName);
@@ -62,10 +63,18 @@ test.describe('admin users CRUD', () => {
 
     await page.getByTestId('admin-users-search-input').fill(createdEmail);
     await expect(page.getByTestId(`admin-user-card-${createdProfile.id}`)).toBeVisible();
+    await page.getByTestId(`admin-user-view-${createdProfile.id}`).click();
+    await expectVisible(page.getByTestId('admin-user-details-close'));
+    await expect(page.getByTestId('admin-user-details-modal').getByText(createdName)).toBeVisible();
+    await page.getByTestId('admin-user-details-close').click();
+
     await page.getByTestId(`admin-user-edit-${createdProfile.id}`).click();
     await expectVisible(page.getByTestId('admin-user-form-modal'));
+    await expectVisible(page.getByTestId('admin-user-password-input'));
     await page.getByTestId('admin-user-full-name-input').fill(updatedName);
     await page.getByTestId('admin-user-bio-input').fill('E2E updated from admin CRUD.');
+    await page.getByTestId('admin-user-password-input').fill(updatedPassword);
+    await page.getByTestId('admin-user-confirm-password-input').fill(updatedPassword);
     await page.getByTestId('admin-user-form-submit').click();
 
     await expectDbRecord<any>('profiles', 'email', createdEmail, (record) => (
@@ -73,6 +82,14 @@ test.describe('admin users CRUD', () => {
       record.bio === 'E2E updated from admin CRUD.'
     ));
     await expect(page.getByTestId(`admin-user-card-${createdProfile.id}`).getByText(updatedName)).toBeVisible({ timeout: 45_000 });
+
+    const anonClient = getSupabaseAnon();
+    const { error: signInWithUpdatedPasswordError } = await anonClient.auth.signInWithPassword({
+      email: createdEmail,
+      password: updatedPassword,
+    });
+    expect(signInWithUpdatedPasswordError).toBeNull();
+    await anonClient.auth.signOut();
 
     const updatedProfile = await requireProfileByEmail(createdEmail);
     await page.getByTestId(`admin-user-delete-${updatedProfile.id}`).click();

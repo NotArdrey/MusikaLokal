@@ -48,7 +48,9 @@ export default function AdminPostsPage() {
   const { width } = useWindowDimensions();
 
   const [posts, setPosts] = useState<any[]>([]);
+  const [commentReviews, setCommentReviews] = useState<any[]>([]);
   const [loadingPosts, setLoadingPosts] = useState(true);
+  const [loadingComments, setLoadingComments] = useState(true);
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState<PostFilter>('all');
 
@@ -90,6 +92,21 @@ export default function AdminPostsPage() {
 
   useEffect(() => { fetchPosts(); }, [fetchPosts]);
 
+  const fetchCommentReviews = useCallback(async () => {
+    setLoadingComments(true);
+    try {
+      const data = await invokeSocialAdmin({ action: 'admin_list_comments', filter: 'review' });
+      setCommentReviews(data || []);
+    } catch (e) {
+      console.error(e);
+      setCommentReviews([]);
+    } finally {
+      setLoadingComments(false);
+    }
+  }, [invokeSocialAdmin]);
+
+  useEffect(() => { fetchCommentReviews(); }, [fetchCommentReviews]);
+
   const handleHidePost = async (postId: string) => {
     const target = posts.find((post) => post.id === postId);
     try {
@@ -112,6 +129,31 @@ export default function AdminPostsPage() {
     } catch (e) {
       console.error(e);
       Alert.alert('Unable to delete post', e instanceof Error ? e.message : 'Please try again.');
+    }
+  };
+
+  const handleModerateComment = async (commentId: string, status: 'approved' | 'blocked') => {
+    try {
+      await invokeSocialAdmin({
+        action: 'admin_update_comment_moderation',
+        comment_id: commentId,
+        status,
+        hidden: status !== 'approved',
+      });
+      fetchCommentReviews();
+    } catch (e) {
+      console.error(e);
+      Alert.alert('Unable to update comment', e instanceof Error ? e.message : 'Please try again.');
+    }
+  };
+
+  const handleDeleteComment = async (commentId: string) => {
+    try {
+      await invokeSocialAdmin({ action: 'admin_delete_comment', comment_id: commentId });
+      fetchCommentReviews();
+    } catch (e) {
+      console.error(e);
+      Alert.alert('Unable to delete comment', e instanceof Error ? e.message : 'Please try again.');
     }
   };
 
@@ -166,6 +208,40 @@ export default function AdminPostsPage() {
           data={posts}
           keyExtractor={(i) => i.id}
           contentContainerStyle={{ padding: 16, paddingBottom: 100 }}
+          ListHeaderComponent={(
+            <View style={[styles.reviewPanel, { backgroundColor: colors.card, borderColor: colors.border }]}>
+              <View style={styles.reviewHeader}>
+                <Text style={{ color: colors.text, fontSize: 16, fontWeight: '700' }}>AI Comment Review</Text>
+                {loadingComments && <ActivityIndicator size="small" color={colors.primary} />}
+              </View>
+              {!loadingComments && commentReviews.length === 0 ? (
+                <Text style={{ color: colors.textSecondary, fontSize: 13 }}>No hidden or flagged comments right now.</Text>
+              ) : (
+                commentReviews.slice(0, 6).map((comment) => (
+                  <View key={comment.id} style={[styles.commentReviewCard, { borderColor: colors.border }]}>
+                    <Text style={{ color: colors.text, fontSize: 13, fontWeight: '600' }} numberOfLines={3}>{comment.content}</Text>
+                    <Text style={{ color: colors.textSecondary, fontSize: 11, marginTop: 4 }}>
+                      {comment.author_name || comment.author_id?.slice(0, 8)} • {comment.moderation_status || 'review'}
+                    </Text>
+                    {!!comment.moderation_reason && (
+                      <Text style={{ color: colors.textSecondary, fontSize: 11, marginTop: 4 }} numberOfLines={2}>{comment.moderation_reason}</Text>
+                    )}
+                    <View style={styles.actionRow}>
+                      <TouchableOpacity activeOpacity={1} style={[styles.actionBtn, { backgroundColor: '#22c55e20' }]} onPress={() => handleModerateComment(comment.id, 'approved')}>
+                        <Text style={{ color: '#16a34a', fontSize: 12, fontWeight: '600' }}>Approve</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity activeOpacity={1} style={[styles.actionBtn, { backgroundColor: '#eab30820' }]} onPress={() => handleModerateComment(comment.id, 'blocked')}>
+                        <Text style={{ color: '#eab308', fontSize: 12, fontWeight: '600' }}>Hide</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity activeOpacity={1} style={[styles.actionBtn, { backgroundColor: '#ef444420' }]} onPress={() => handleDeleteComment(comment.id)}>
+                        <Text style={{ color: '#ef4444', fontSize: 12, fontWeight: '600' }}>Delete</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                ))
+              )}
+            </View>
+          )}
           renderItem={({ item }) => (
             <View
               testID={`admin-post-card-${item.id}`}
@@ -226,5 +302,8 @@ const styles = StyleSheet.create({
   badge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8, marginLeft: 8 },
   actionRow: { flexDirection: 'row', gap: 10, marginTop: 10 },
   actionBtn: { paddingHorizontal: 14, paddingVertical: 6, borderRadius: 6 },
+  reviewPanel: { padding: 14, borderRadius: 12, borderWidth: 1, marginBottom: 14 },
+  reviewHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 },
+  commentReviewCard: { borderTopWidth: 1, paddingTop: 10, marginTop: 10 },
 });
 

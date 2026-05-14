@@ -49,22 +49,40 @@ async function getE2EWalletIds(profileIds: string[]) {
   return (data || []).map((wallet: any) => String(wallet.id)).filter(Boolean);
 }
 
+async function getE2EFeedPostIds(profileIds: string[]) {
+  if (profileIds.length === 0) return [];
+
+  const { data, error } = await getSupabaseAdmin()
+    .from('feed_posts')
+    .select('id')
+    .in('author_id', profileIds);
+
+  if (error) throw error;
+  return (data || []).map((post: any) => String(post.id)).filter(Boolean);
+}
+
 export async function cleanupE2ERecords() {
   const client = getSupabaseAdmin();
   const profileIds = await getE2EProfileIds();
   const walletIds = await getE2EWalletIds(profileIds);
+  const feedPostIds = await getE2EFeedPostIds(profileIds);
 
   await deleteWhereIn('post_comments', 'author_id', profileIds);
   await deleteWhereIn('post_reactions', 'user_id', profileIds);
-  await deleteWhereIn('post_media', 'owner_id', profileIds);
+  await deleteWhereIn('post_media', 'post_id', feedPostIds);
   await deleteWhereIn('social_activity_events', 'actor_id', profileIds);
   await deleteWhereIn('social_activity_events', 'target_user_id', profileIds);
+  await deleteWhereIn('follows', 'follower_id', profileIds);
+  await deleteWhereIn('follows', 'followed_id', profileIds);
   await deleteWhereIn('feed_posts', 'author_id', profileIds);
   await deleteWhereIn('reports', 'reporter_id', profileIds);
   await deleteWhereIn('reports', 'reviewed_by', profileIds);
   await deleteWhereTextStarts('reports', 'reason', 'E2E ');
   await deleteWhereIn('manual_identity_reviews', 'user_id', profileIds);
   await deleteWhereIn('identity_document_claims', 'user_id', profileIds);
+  await deleteWhereIn('profile_portfolio_urls', 'profile_id', profileIds);
+  await deleteWhereIn('profile_genres', 'profile_id', profileIds);
+  await deleteWhereIn('profile_skills', 'profile_id', profileIds);
   await deleteWhereIn('payout_methods', 'user_id', profileIds);
   await deleteWhereIn('withdrawal_requests', 'user_id', profileIds);
   await deleteWhereIn('wallet_deposits', 'user_id', profileIds);

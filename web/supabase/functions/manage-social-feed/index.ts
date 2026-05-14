@@ -31,6 +31,330 @@ function normalizeFollowTargetType(value: unknown): FollowTargetType {
   return value === "group" ? "group" : "profile";
 }
 
+const POST_CREATOR_ROLES = new Set(["musician", "producer", "studio-owner", "venue-owner", "admin"]);
+const POST_VISIBILITIES = new Set(["public", "followers", "unlisted"]);
+const POST_MEDIA_TYPES = new Set(["image", "video"]);
+const SAFE_IMAGE_MIME_TYPES = new Set([
+  "image/jpeg",
+  "image/png",
+  "image/gif",
+  "image/webp",
+  "image/heic",
+  "image/heif",
+]);
+const SAFE_VIDEO_MIME_TYPES = new Set(["video/mp4", "video/quicktime", "video/webm"]);
+const GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions";
+const GROQ_COMMENT_MODEL = Deno.env.get("GROQ_COMMENT_MODERATION_MODEL")?.trim() ||
+  "openai/gpt-oss-safeguard-20b";
+
+type CommentModerationStatus = "approved" | "pending_review" | "blocked";
+
+type CommentModerationDecision = {
+  status: CommentModerationStatus;
+  reason: string;
+  categories: string[];
+  score: number | null;
+  provider: string;
+  metadata: Record<string, any>;
+};
+
+function normalizeRole(value: unknown) {
+  return typeof value === "string" ? value.trim().toLowerCase() : "";
+}
+
+function normalizeVisibility(value: unknown) {
+  const visibility = typeof value === "string" ? value.trim().toLowerCase() : "public";
+  return POST_VISIBILITIES.has(visibility) ? visibility : "public";
+}
+
+function normalizeContent(value: unknown) {
+  if (typeof value !== "string") return "";
+  return value.trim();
+}
+
+function normalizeStoragePath(value: unknown, ownerId: string) {
+  if (typeof value !== "string") return "";
+  const trimmed = value.trim().replace(/^\/+/, "");
+  if (!trimmed || /^https?:\/\//i.test(trimmed) || trimmed.includes("..")) return "";
+  if (!trimmed.startsWith(`${ownerId}/`)) return "";
+  return trimmed;
+}
+
+function parseFiniteNumber(value: unknown) {
+  const num = Number(value);
+  return Number.isFinite(num) && num >= 0 ? num : null;
+}
+
+function normalizeMetadata(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  return value as Record<string, any>;
+}
+
+function normalizeStringArray(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => (typeof item === "string" ? item.trim() : ""))
+    .filter((item) => item.length > 0)
+    .slice(0, 12);
+}
+
+function normalizePostMediaInput(media: unknown, ownerId: string) {
+  if (media === undefined || media === null) return { rows: [] as Record<string, any>[] };
+  if (!Array.isArray(media)) return { error: "media must be an array" };
+  if (media.length > 10) return { error: "A post can include up to 10 media items" };
+
+  const rows = media.map((item: any, index: number) => {
+    const mediaType = typeof item?.media_type === "string" ? item.media_type.trim().toLowerCase() : "image";
+    if (!POST_MEDIA_TYPES.has(mediaType)) {
+      return { error: "Unsupported media type" };
+    }
+
+    const storagePath = normalizeStoragePath(item?.storage_path, ownerId);
+    if (!storagePath) {
+      return { error: "Invalid media storage path" };
+    }
+
+    const mimeType = typeof item?.mime_type === "string" ? item.mime_type.trim().toLowerCase() : "";
+    const safeMimeSet = mediaType === "video" ? SAFE_VIDEO_MIME_TYPES : SAFE_IMAGE_MIME_TYPES;
+    if (!mimeType || !safeMimeSet.has(mimeType)) {
+      return { error: "Unsupported media MIME type" };
+    }
+
+    const thumbnailPath = item?.thumbnail_path ? normalizeStoragePath(item.thumbnail_path, ownerId) : null;
+    if (mediaType === "video" && !thumbnailPath) {
+      return { error: "Video posts require a selected thumbnail" };
+    }
+
+    const safetyStatus = typeof item?.safety_status === "string" ? item.safety_status.trim().toLowerCase() : "passed";
+    if (safetyStatus !== "passed") {
+      return { error: "Media must pass AI safety screening before posting" };
+    }
+
+    return {
+      media_type: mediaType,
+      storage_path: storagePath,
+      thumbnail_path: thumbnailPath,
+      is_cover: Boolean(item?.is_cover),
+      mime_type: mimeType,
+      width: parseFiniteNumber(item?.width),
+      height: parseFiniteNumber(item?.height),
+      duration_seconds: parseFiniteNumber(item?.duration_seconds),
+      display_order: index,
+      safety_context: typeof item?.safety_context === "string" ? item.safety_context.slice(0, 120) : "social_post_media",
+      safety_checked_at: item?.safety_checked_at || new Date().toISOString(),
+      safety_status: "passed",
+      safety_metadata: normalizeMetadata(item?.safety_metadata),
+    };
+  });
+
+  const failed = rows.find((row: any) => row?.error) as { error?: string } | undefined;
+  if (failed?.error) return { error: failed.error };
+
+  const normalizedRows = rows as Record<string, any>[];
+  if (normalizedRows.length > 0) {
+    const coverCount = normalizedRows.filter((row) => row.is_cover).length;
+    if (coverCount > 1) return { error: "Only one media item can be selected as the cover" };
+    if (coverCount === 0) normalizedRows[0].is_cover = true;
+  }
+
+  return { rows: normalizedRows };
+}
+
+async function canViewPost(supabaseAdmin: any, post: any, uid: string, role: string) {
+  if (!post) return false;
+  if (role === "admin") return true;
+  if (post.author_id === uid) return true;
+  if (post.is_hidden) return false;
+  if (post.visibility === "public") return true;
+  if (post.visibility !== "followers" || !uid) return false;
+
+  const { data: followRow } = await supabaseAdmin
+    .from("follows")
+    .select("id")
+    .eq("follower_id", uid)
+    .eq("followed_id", post.author_id)
+    .eq("followed_type", "profile")
+    .maybeSingle();
+
+  return Boolean(followRow?.id);
+}
+
+async function getVisiblePostOrResponse(supabaseAdmin: any, postId: string, uid: string, role: string) {
+  const { data: post, error } = await supabaseAdmin
+    .from("feed_posts")
+    .select("id, author_id, visibility, is_hidden, content, share_count")
+    .eq("id", postId)
+    .maybeSingle();
+
+  if (error || !post) return { response: jsonResponse({ error: "Post not found" }, 404) };
+  const visible = await canViewPost(supabaseAdmin, post, uid, role);
+  if (!visible) return { response: jsonResponse({ error: "Post not found" }, 404) };
+  return { post };
+}
+
+function parseJsonObject(text: string) {
+  try {
+    return JSON.parse(text);
+  } catch {
+    const match = text.match(/\{[\s\S]*\}/);
+    if (!match) return null;
+    try {
+      return JSON.parse(match[0]);
+    } catch {
+      return null;
+    }
+  }
+}
+
+function localCommentModeration(content: string): CommentModerationDecision | null {
+  const lower = content.toLowerCase();
+  const urlCount = (lower.match(/https?:\/\/|www\./g) || []).length;
+  const repeatedPhrases = lower.match(/\b(.{8,80})\b(?:\s+\1){2,}/);
+  const suspiciousRepeats = /(.)\1{12,}/.test(lower);
+  const severeHarm =
+    /\b(kill yourself|kys|go die|i will kill|death threat)\b/i.test(lower);
+  const abusive =
+    /\b(stupid idiot|worthless|trash person|shut up loser)\b/i.test(lower);
+
+  if (severeHarm) {
+    return {
+      status: "blocked",
+      reason: "Severe harmful or threatening language detected.",
+      categories: ["harmful", "abusive"],
+      score: 0.98,
+      provider: "local-comment-rules",
+      metadata: { rule: "severe_harm" },
+    };
+  }
+
+  if (urlCount >= 4 || repeatedPhrases || suspiciousRepeats) {
+    return {
+      status: "pending_review",
+      reason: "Possible spam or repeated content.",
+      categories: ["spam", "suspicious_repetition"],
+      score: 0.72,
+      provider: "local-comment-rules",
+      metadata: { rule: "spam_or_repetition", urlCount },
+    };
+  }
+
+  if (abusive) {
+    return {
+      status: "pending_review",
+      reason: "Potentially abusive language.",
+      categories: ["abusive"],
+      score: 0.62,
+      provider: "local-comment-rules",
+      metadata: { rule: "abusive_phrase" },
+    };
+  }
+
+  return null;
+}
+
+async function moderateCommentWithGroq(content: string, postContent?: string | null): Promise<CommentModerationDecision> {
+  const localDecision = localCommentModeration(content);
+  if (localDecision?.status === "blocked") return localDecision;
+
+  const apiKey = Deno.env.get("GROQ_API_KEY")?.trim();
+  if (!apiKey) {
+    return localDecision || {
+      status: "pending_review",
+      reason: "AI moderation is unavailable, so the comment needs review.",
+      categories: ["moderation_unavailable"],
+      score: null,
+      provider: "groq-unavailable",
+      metadata: { missingApiKey: true },
+    };
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 10000);
+
+  try {
+    const response = await fetch(GROQ_API_URL, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      signal: controller.signal,
+      body: JSON.stringify({
+        model: GROQ_COMMENT_MODEL,
+        temperature: 0,
+        max_tokens: 400,
+        response_format: { type: "json_object" },
+        messages: [
+          {
+            role: "system",
+            content:
+              "Moderate social feed comments for harmful content, abusive language, spam, misinformation, and suspicious repetition. Return JSON only with status approved, pending_review, or blocked; reason; categories array; score 0 to 1.",
+          },
+          {
+            role: "user",
+            content: JSON.stringify({
+              comment: content,
+              post_excerpt: (postContent || "").slice(0, 800),
+              policy:
+                "Block severe harmful, threatening, abusive, spam, or clearly false/misleading claims. Put uncertain cases in pending_review.",
+            }),
+          },
+        ],
+      }),
+    });
+
+    if (!response.ok) {
+      return localDecision || {
+        status: "pending_review",
+        reason: "AI moderation could not complete, so the comment needs review.",
+        categories: ["moderation_unavailable"],
+        score: null,
+        provider: "groq-error",
+        metadata: { status: response.status, body: await response.text().catch(() => "") },
+      };
+    }
+
+    const payload = await response.json();
+    const raw = payload?.choices?.[0]?.message?.content || "{}";
+    const parsed = parseJsonObject(raw) || {};
+    const rawStatus = typeof parsed.status === "string" ? parsed.status.trim().toLowerCase() : "pending_review";
+    const status: CommentModerationStatus =
+      rawStatus === "approved" || rawStatus === "allow" || rawStatus === "allowed"
+        ? "approved"
+        : rawStatus === "blocked" || rawStatus === "block"
+          ? "blocked"
+          : "pending_review";
+
+    if (localDecision && localDecision.status === "pending_review" && status === "approved") {
+      return localDecision;
+    }
+
+    return {
+      status,
+      reason: typeof parsed.reason === "string" && parsed.reason.trim()
+        ? parsed.reason.trim().slice(0, 500)
+        : status === "approved"
+          ? "Comment passed moderation."
+          : "Comment needs moderation review.",
+      categories: normalizeStringArray(parsed.categories),
+      score: Number.isFinite(Number(parsed.score)) ? Math.max(0, Math.min(1, Number(parsed.score))) : null,
+      provider: `groq:${GROQ_COMMENT_MODEL}`,
+      metadata: { model: GROQ_COMMENT_MODEL, raw_status: rawStatus },
+    };
+  } catch (error: any) {
+    return localDecision || {
+      status: "pending_review",
+      reason: "AI moderation timed out or failed, so the comment needs review.",
+      categories: ["moderation_unavailable"],
+      score: null,
+      provider: "groq-error",
+      metadata: { message: error?.message || "unknown" },
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 async function insertNotification(
   supabaseAdmin: any,
   payload: {
@@ -90,6 +414,20 @@ Deno.serve(async (req: Request) => {
 
       uid = authUser.id;
     }
+
+    let requesterProfile: any | null | undefined;
+    const getRequesterProfile = async () => {
+      if (!uid) return null;
+      if (requesterProfile !== undefined) return requesterProfile;
+      const { data } = await supabaseAdmin
+        .from("profiles")
+        .select("id, role, full_name, avatar_url")
+        .eq("id", uid)
+        .maybeSingle();
+      requesterProfile = data || null;
+      return requesterProfile;
+    };
+    const getRequesterRole = async () => normalizeRole((await getRequesterProfile())?.role);
 
     // ── follow ──────────────────────────────────────────────────────
     if (action === "follow") {
@@ -265,7 +603,16 @@ Deno.serve(async (req: Request) => {
     // ── create_post ─────────────────────────────────────────────────
     if (action === "create_post") {
       const { content, post_type, visibility, linked_playlist_id, linked_product_id, media } = params;
-      if (!content && (!media || media.length === 0)) {
+      const role = await getRequesterRole();
+      if (!POST_CREATOR_ROLES.has(role)) {
+        return jsonResponse({ error: "Fans cannot create posts" }, 403);
+      }
+
+      const trimmedContent = normalizeContent(content);
+      const normalizedMedia = normalizePostMediaInput(media, uid) as any;
+      if (normalizedMedia.error) return jsonResponse({ error: normalizedMedia.error }, 400);
+
+      if (!trimmedContent && normalizedMedia.rows.length === 0) {
         return jsonResponse({ error: "content or media is required" }, 400);
       }
 
@@ -273,9 +620,9 @@ Deno.serve(async (req: Request) => {
         .from("feed_posts")
         .insert({
           author_id: uid,
-          content: content || null,
+          content: trimmedContent || null,
           post_type: post_type || "text",
-          visibility: visibility || "public",
+          visibility: normalizeVisibility(visibility),
           linked_playlist_id: linked_playlist_id || null,
           linked_product_id: linked_product_id || null,
         })
@@ -284,19 +631,16 @@ Deno.serve(async (req: Request) => {
 
       if (postErr) return jsonResponse({ error: postErr.message }, 500);
 
-      // Insert media if provided
-      if (media && Array.isArray(media) && media.length > 0) {
-        const mediaRows = media.map((m: any, i: number) => ({
+      if (normalizedMedia.rows.length > 0) {
+        const mediaRows = normalizedMedia.rows.map((m: any) => ({
           post_id: post.id,
-          media_type: m.media_type || "image",
-          storage_path: m.storage_path,
-          mime_type: m.mime_type || null,
-          width: m.width || null,
-          height: m.height || null,
-          duration_seconds: m.duration_seconds || null,
-          display_order: i,
+          ...m,
         }));
-        await supabaseAdmin.from("post_media").insert(mediaRows);
+        const { error: mediaErr } = await supabaseAdmin.from("post_media").insert(mediaRows);
+        if (mediaErr) {
+          await supabaseAdmin.from("feed_posts").delete().eq("id", post.id);
+          return jsonResponse({ error: mediaErr.message }, 500);
+        }
       }
 
       await supabaseAdmin.from("social_activity_events").insert({
@@ -305,12 +649,18 @@ Deno.serve(async (req: Request) => {
         post_id: post.id,
       });
 
-      return jsonResponse({ success: true, data: post });
+      const { data: createdPost } = await supabaseAdmin
+        .from("feed_posts")
+        .select("*, author:profiles!author_id(id, full_name, avatar_url, role), media:post_media(*)")
+        .eq("id", post.id)
+        .single();
+
+      return jsonResponse({ success: true, data: createdPost || post });
     }
 
     // ── update_post ─────────────────────────────────────────────────
     if (action === "update_post") {
-      const { post_id, content, visibility, is_pinned } = params;
+      const { post_id, content, visibility, is_pinned, media } = params;
       if (!post_id) return jsonResponse({ error: "post_id is required" }, 400);
 
       const { data: existing } = await supabaseAdmin
@@ -322,9 +672,16 @@ Deno.serve(async (req: Request) => {
       if (!existing) return jsonResponse({ error: "Post not found" }, 404);
       if (existing.author_id !== uid) return jsonResponse({ error: "Forbidden" }, 403);
 
+      let mediaRows: Record<string, any>[] | null = null;
+      if (media !== undefined) {
+        const normalizedMedia = normalizePostMediaInput(media, uid) as any;
+        if (normalizedMedia.error) return jsonResponse({ error: normalizedMedia.error }, 400);
+        mediaRows = normalizedMedia.rows || [];
+      }
+
       const patch: Record<string, any> = {};
-      if (content !== undefined) patch.content = content;
-      if (visibility !== undefined) patch.visibility = visibility;
+      if (content !== undefined) patch.content = normalizeContent(content) || null;
+      if (visibility !== undefined) patch.visibility = normalizeVisibility(visibility);
       if (is_pinned !== undefined) patch.is_pinned = is_pinned;
 
       const { data, error } = await supabaseAdmin
@@ -335,7 +692,30 @@ Deno.serve(async (req: Request) => {
         .single();
 
       if (error) return jsonResponse({ error: error.message }, 500);
-      return jsonResponse({ success: true, data });
+      if (mediaRows) {
+        const { error: deleteMediaErr } = await supabaseAdmin.from("post_media").delete().eq("post_id", post_id);
+        if (deleteMediaErr) return jsonResponse({ error: deleteMediaErr.message }, 500);
+        if (mediaRows.length > 0) {
+          const { error: mediaErr } = await supabaseAdmin
+            .from("post_media")
+            .insert(mediaRows.map((row) => ({ post_id, ...row })));
+          if (mediaErr) return jsonResponse({ error: mediaErr.message }, 500);
+        }
+      }
+
+      await supabaseAdmin.from("social_activity_events").insert({
+        event_type: "post_updated",
+        actor_id: uid,
+        post_id,
+      });
+
+      const { data: updatedPost } = await supabaseAdmin
+        .from("feed_posts")
+        .select("*, author:profiles!author_id(id, full_name, avatar_url, role), media:post_media(*)")
+        .eq("id", post_id)
+        .single();
+
+      return jsonResponse({ success: true, data: updatedPost || data });
     }
 
     // ── delete_post ─────────────────────────────────────────────────
@@ -351,10 +731,14 @@ Deno.serve(async (req: Request) => {
 
       if (!existing) return jsonResponse({ error: "Post not found" }, 404);
       if (existing.author_id !== uid) {
-        // Check admin
-        const { data: profile } = await supabaseAdmin.from("profiles").select("role").eq("id", uid).single();
-        if (profile?.role !== "admin") return jsonResponse({ error: "Forbidden" }, 403);
+        if ((await getRequesterRole()) !== "admin") return jsonResponse({ error: "Forbidden" }, 403);
       }
+
+      await supabaseAdmin.from("social_activity_events").insert({
+        event_type: "post_deleted",
+        actor_id: uid,
+        post_id,
+      });
 
       const { error } = await supabaseAdmin.from("feed_posts").delete().eq("id", post_id);
       if (error) return jsonResponse({ error: error.message }, 500);
@@ -370,7 +754,7 @@ Deno.serve(async (req: Request) => {
       const pageOffset = Number(offset) || 0;
       const shouldPersonalize = params?.personalize !== false && Boolean(uid);
       const feedPostSelect =
-        "id, author_id, post_type, content, visibility, is_pinned, linked_playlist_id, linked_product_id, reaction_count, comment_count, share_count, created_at, updated_at, author:profiles!author_id(id, full_name, avatar_url, role), media:post_media(id, post_id, media_type, storage_path, mime_type, width, height, duration_seconds, display_order)";
+        "id, author_id, post_type, content, visibility, is_pinned, linked_playlist_id, linked_product_id, reaction_count, comment_count, share_count, created_at, updated_at, author:profiles!author_id(id, full_name, avatar_url, role), media:post_media(id, post_id, media_type, storage_path, thumbnail_path, is_cover, mime_type, width, height, duration_seconds, display_order, safety_status, safety_metadata)";
       const cursorCreatedAt =
         typeof cursor === "string" && cursor.trim().length > 0
           ? cursor.trim()
@@ -396,6 +780,7 @@ Deno.serve(async (req: Request) => {
           .select(feedPostSelect)
           .in("author_id", followedIds)
           .eq("is_hidden", false)
+          .or(`visibility.in.(public,followers),author_id.eq.${uid}`)
           .order("created_at", { ascending: false });
       } else {
         // Public feed
@@ -499,12 +884,17 @@ Deno.serve(async (req: Request) => {
         .single();
 
       if (postErr || !post) return jsonResponse({ error: "Post not found" }, 404);
+      const requesterRole = await getRequesterRole();
+      if (!(await canViewPost(supabaseAdmin, post, uid, requesterRole))) {
+        return jsonResponse({ error: "Post not found" }, 404);
+      }
 
       const { data: comments } = await supabaseAdmin
         .from("post_comments")
         .select("*, author:profiles!author_id(id, full_name, avatar_url)")
         .eq("post_id", post_id)
         .eq("is_hidden", false)
+        .eq("moderation_status", "approved")
         .order("created_at", { ascending: true });
 
       // User's reaction
@@ -530,6 +920,9 @@ Deno.serve(async (req: Request) => {
       const { post_id, reaction_type } = params;
       if (!post_id) return jsonResponse({ error: "post_id is required" }, 400);
 
+      const visiblePostResult: any = await getVisiblePostOrResponse(supabaseAdmin, post_id, uid, await getRequesterRole());
+      if (visiblePostResult.response) return visiblePostResult.response;
+      const visiblePost = visiblePostResult.post;
       const rType = reaction_type || "like";
 
       // Upsert: remove existing then insert
@@ -548,7 +941,7 @@ Deno.serve(async (req: Request) => {
       if (error) return jsonResponse({ error: error.message }, 500);
 
       // Notify post author
-      const { data: post } = await supabaseAdmin.from("feed_posts").select("author_id").eq("id", post_id).single();
+      const post = visiblePost;
       if (post && post.author_id !== uid) {
         const { data: reactor } = await supabaseAdmin.from("profiles").select("full_name, avatar_url").eq("id", uid).single();
         await insertNotification(supabaseAdmin, {
@@ -561,6 +954,14 @@ Deno.serve(async (req: Request) => {
         });
       }
 
+      await supabaseAdmin.from("social_activity_events").insert({
+        event_type: "reaction_added",
+        actor_id: uid,
+        target_user_id: post?.author_id || null,
+        post_id,
+        metadata: { reaction_type: rType },
+      });
+
       return jsonResponse({ success: true, data });
     }
 
@@ -569,6 +970,8 @@ Deno.serve(async (req: Request) => {
       const { post_id } = params;
       if (!post_id) return jsonResponse({ error: "post_id is required" }, 400);
 
+      const visiblePostResult: any = await getVisiblePostOrResponse(supabaseAdmin, post_id, uid, await getRequesterRole());
+      if (visiblePostResult.response) return visiblePostResult.response;
       const { error } = await supabaseAdmin
         .from("post_reactions")
         .delete()
@@ -576,29 +979,131 @@ Deno.serve(async (req: Request) => {
         .eq("user_id", uid);
 
       if (error) return jsonResponse({ error: error.message }, 500);
+      await supabaseAdmin.from("social_activity_events").insert({
+        event_type: "reaction_removed",
+        actor_id: uid,
+        post_id,
+      });
       return jsonResponse({ success: true });
     }
 
     // ── add_comment ─────────────────────────────────────────────────
+    if (action === "share_post") {
+      const { post_id } = params;
+      if (!post_id) return jsonResponse({ error: "post_id is required" }, 400);
+
+      const visiblePostResult: any = await getVisiblePostOrResponse(supabaseAdmin, post_id, uid, await getRequesterRole());
+      if (visiblePostResult.response) return visiblePostResult.response;
+      const post = visiblePostResult.post;
+
+      const { data: shareCount, error } = await supabaseAdmin.rpc("increment_post_share_count", {
+        p_post_id: post_id,
+      });
+
+      if (error) return jsonResponse({ error: error.message }, 500);
+
+      await supabaseAdmin.from("social_activity_events").insert({
+        event_type: "post_shared",
+        actor_id: uid,
+        target_user_id: post?.author_id || null,
+        post_id,
+      });
+
+      return jsonResponse({ success: true, data: { post_id, share_count: shareCount || 0 } });
+    }
+
     if (action === "add_comment") {
       const { post_id, content, parent_comment_id } = params;
-      if (!post_id || !content) return jsonResponse({ error: "post_id and content are required" }, 400);
+      const trimmedContent = normalizeContent(content);
+      if (!post_id || !trimmedContent) return jsonResponse({ error: "post_id and content are required" }, 400);
+
+      const visiblePostResult: any = await getVisiblePostOrResponse(supabaseAdmin, post_id, uid, await getRequesterRole());
+      if (visiblePostResult.response) return visiblePostResult.response;
+      const post = visiblePostResult.post;
+
+      if (parent_comment_id) {
+        const { data: parentComment } = await supabaseAdmin
+          .from("post_comments")
+          .select("id")
+          .eq("id", parent_comment_id)
+          .eq("post_id", post_id)
+          .eq("is_hidden", false)
+          .eq("moderation_status", "approved")
+          .maybeSingle();
+        if (!parentComment) return jsonResponse({ error: "Parent comment not found" }, 404);
+      }
+
+      const moderation = await moderateCommentWithGroq(trimmedContent, post?.content);
+      if (moderation.status === "blocked") {
+        await supabaseAdmin.from("social_activity_events").insert({
+          event_type: "comment_moderation_blocked",
+          actor_id: uid,
+          target_user_id: post?.author_id || null,
+          post_id,
+          metadata: {
+            moderation_reason: moderation.reason,
+            moderation_categories: moderation.categories,
+            moderation_provider: moderation.provider,
+          },
+        });
+
+        return jsonResponse({
+          success: false,
+          allowed: false,
+          blocked: true,
+          status: "blocked",
+          moderation,
+          error: "Comment blocked by safety moderation.",
+        });
+      }
+
+      const pendingReview = moderation.status === "pending_review";
 
       const { data: comment, error } = await supabaseAdmin
         .from("post_comments")
         .insert({
           post_id,
           author_id: uid,
-          content,
+          content: trimmedContent,
           parent_comment_id: parent_comment_id || null,
+          is_hidden: pendingReview,
+          moderation_status: moderation.status,
+          moderation_reason: moderation.reason,
+          moderation_categories: moderation.categories,
+          moderation_score: moderation.score,
+          moderation_provider: moderation.provider,
+          moderated_at: new Date().toISOString(),
+          moderation_metadata: moderation.metadata,
         })
         .select("*, author:profiles!author_id(id, full_name, avatar_url)")
         .single();
 
       if (error) return jsonResponse({ error: error.message }, 500);
 
-      // Notify post author
-      const { data: post } = await supabaseAdmin.from("feed_posts").select("author_id").eq("id", post_id).single();
+      if (pendingReview) {
+        await supabaseAdmin.from("social_activity_events").insert({
+          event_type: "comment_moderation_review",
+          actor_id: uid,
+          target_user_id: post?.author_id || null,
+          post_id,
+          comment_id: comment.id,
+          metadata: {
+            moderation_reason: moderation.reason,
+            moderation_categories: moderation.categories,
+            moderation_provider: moderation.provider,
+          },
+        });
+
+        return jsonResponse({
+          success: true,
+          allowed: false,
+          pending_review: true,
+          status: "pending_review",
+          data: comment,
+          moderation,
+        });
+      }
+
       if (post && post.author_id !== uid) {
         const { data: commenter } = await supabaseAdmin.from("profiles").select("full_name, avatar_url").eq("id", uid).single();
         await insertNotification(supabaseAdmin, {
@@ -611,7 +1116,21 @@ Deno.serve(async (req: Request) => {
         });
       }
 
-      return jsonResponse({ success: true, data: comment });
+      await supabaseAdmin.from("social_activity_events").insert({
+        event_type: "comment_added",
+        actor_id: uid,
+        target_user_id: post?.author_id || null,
+        post_id,
+        comment_id: comment.id,
+      });
+
+      return jsonResponse({
+        success: true,
+        allowed: true,
+        status: "approved",
+        data: comment,
+        moderation,
+      });
     }
 
     // ── delete_comment ──────────────────────────────────────────────
@@ -621,15 +1140,21 @@ Deno.serve(async (req: Request) => {
 
       const { data: existing } = await supabaseAdmin
         .from("post_comments")
-        .select("author_id")
+        .select("author_id, post_id")
         .eq("id", comment_id)
         .single();
 
       if (!existing) return jsonResponse({ error: "Comment not found" }, 404);
       if (existing.author_id !== uid) {
-        const { data: profile } = await supabaseAdmin.from("profiles").select("role").eq("id", uid).single();
-        if (profile?.role !== "admin") return jsonResponse({ error: "Forbidden" }, 403);
+        if ((await getRequesterRole()) !== "admin") return jsonResponse({ error: "Forbidden" }, 403);
       }
+
+      await supabaseAdmin.from("social_activity_events").insert({
+        event_type: "comment_deleted",
+        actor_id: uid,
+        post_id: existing.post_id || null,
+        comment_id,
+      });
 
       const { error } = await supabaseAdmin.from("post_comments").delete().eq("id", comment_id);
       if (error) return jsonResponse({ error: error.message }, 500);
@@ -672,17 +1197,54 @@ Deno.serve(async (req: Request) => {
 
       const pageSize = Math.min(Number(lim) || 20, 50);
       const pageOffset = Number(offset) || 0;
+      const requesterRole = await getRequesterRole();
+      const isOwnerOrAdmin = uid === target_user_id || requesterRole === "admin";
+      let canSeeFollowerPosts = isOwnerOrAdmin;
 
-      const { data, error } = await supabaseAdmin
+      if (!canSeeFollowerPosts && uid) {
+        const { data: followRow } = await supabaseAdmin
+          .from("follows")
+          .select("id")
+          .eq("follower_id", uid)
+          .eq("followed_id", target_user_id)
+          .eq("followed_type", "profile")
+          .maybeSingle();
+        canSeeFollowerPosts = Boolean(followRow?.id);
+      }
+
+      let query = supabaseAdmin
         .from("feed_posts")
         .select("*, author:profiles!author_id(id, full_name, avatar_url, role), media:post_media(*)")
         .eq("author_id", target_user_id)
         .eq("is_hidden", false)
-        .order("created_at", { ascending: false })
-        .range(pageOffset, pageOffset + pageSize - 1);
+        .order("created_at", { ascending: false });
+
+      if (!isOwnerOrAdmin) {
+        query = canSeeFollowerPosts
+          ? query.in("visibility", ["public", "followers"])
+          : query.eq("visibility", "public");
+      }
+
+      const { data, error } = await query.range(pageOffset, pageOffset + pageSize - 1);
 
       if (error) return jsonResponse({ error: error.message }, 500);
-      return jsonResponse({ success: true, data });
+
+      const postIds = (data || []).map((post: any) => post.id);
+      const { data: reactions } = uid && postIds.length > 0
+        ? await supabaseAdmin
+            .from("post_reactions")
+            .select("post_id, reaction_type")
+            .eq("user_id", uid)
+            .in("post_id", postIds)
+        : { data: [] };
+      const reactionMap = new Map((reactions || []).map((reaction: any) => [reaction.post_id, reaction.reaction_type]));
+
+      const enriched = (data || []).map((post: any) => ({
+        ...post,
+        user_reaction: reactionMap.get(post.id) || null,
+      }));
+
+      return jsonResponse({ success: true, data: enriched });
     }
 
     // ── get_followers / get_following ────────────────────────────────
