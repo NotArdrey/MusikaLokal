@@ -16,6 +16,7 @@ import Header from '../../src/components/header';
 import { useAuth } from '../../src/context/AuthContext';
 import { useTheme } from '../../src/context/ThemeContext';
 import { supabase } from '../../lib/supabase';
+import { getEdgeFunctionErrorMessage } from '../../src/utils/edgeFunctionErrors';
 
 type StationFilter = 'all' | 'live' | 'offline' | 'featured';
 
@@ -49,6 +50,17 @@ const getDefaultSelectedPlaylistIds = (source: any) => {
     : [];
 };
 
+const normalizeStationTestId = (value: unknown) => {
+  return String(value || 'item')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '') || 'item';
+};
+
+const getErrorMessage = (error: unknown, fallback: string) => {
+  return error instanceof Error && error.message ? error.message : fallback;
+};
+
 export default function AdminStationsPage() {
   const { colors, isDark } = useTheme();
   const { loading, isAdmin, roleResolved } = useAuth();
@@ -56,9 +68,12 @@ export default function AdminStationsPage() {
   const [stations, setStations] = useState<any[]>([]);
   const [sources, setSources] = useState<any[]>([]);
   const [loadingData, setLoadingData] = useState(true);
+  const [dataError, setDataError] = useState<string | null>(null);
+  const [stationActionMessage, setStationActionMessage] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [stationFilter, setStationFilter] = useState<StationFilter>('all');
   const [busyKey, setBusyKey] = useState<string | null>(null);
+  const [sourcePickerVisible, setSourcePickerVisible] = useState(false);
   const [editingSource, setEditingSource] = useState<any | null>(null);
   const [stationName, setStationName] = useState('');
   const [stationDescription, setStationDescription] = useState('');
@@ -69,7 +84,10 @@ export default function AdminStationsPage() {
   const invokePlaylistAction = useCallback(async (body: Record<string, unknown>) => {
     const { data, error } = await supabase.functions.invoke('manage-playlists', { body });
 
-    if (error) throw error;
+    if (error) {
+      throw new Error(await getEdgeFunctionErrorMessage(error, 'Unable to reach playlist admin tools.'));
+    }
+
     if (data?.error) throw new Error(String(data.error));
 
     return data?.data;
@@ -77,21 +95,35 @@ export default function AdminStationsPage() {
 
   const fetchData = useCallback(async () => {
     setLoadingData(true);
-    try {
-      const [stationRows, sourceRows] = await Promise.all([
-        invokePlaylistAction({ action: 'admin_list_stations' }),
-        invokePlaylistAction({ action: 'admin_list_station_sources' }),
-      ]);
+    setDataError(null);
+    setStationActionMessage(null);
+    const [stationResult, sourceResult] = await Promise.allSettled([
+      invokePlaylistAction({ action: 'admin_list_stations' }),
+      invokePlaylistAction({ action: 'admin_list_station_sources' }),
+    ]);
 
+    const nextErrors: string[] = [];
+
+    if (stationResult.status === 'fulfilled') {
+      const stationRows = stationResult.value;
       setStations(Array.isArray(stationRows) ? stationRows : []);
-      setSources(Array.isArray(sourceRows) ? sourceRows : []);
-    } catch (error) {
-      console.error('Admin stations fetch failed:', error);
+    } else {
+      console.error('Admin station list fetch failed:', stationResult.reason);
+      nextErrors.push(getErrorMessage(stationResult.reason, 'Unable to load station data.'));
       setStations([]);
-      setSources([]);
-    } finally {
-      setLoadingData(false);
     }
+
+    if (sourceResult.status === 'fulfilled') {
+      const sourceRows = sourceResult.value;
+      setSources(Array.isArray(sourceRows) ? sourceRows : []);
+    } else {
+      console.error('Admin station source fetch failed:', sourceResult.reason);
+      nextErrors.push(getErrorMessage(sourceResult.reason, 'Unable to load station source data.'));
+      setSources([]);
+    }
+
+    setDataError(nextErrors.length > 0 ? nextErrors.join(' ') : null);
+    setLoadingData(false);
   }, [invokePlaylistAction]);
 
   useEffect(() => {
@@ -130,9 +162,24 @@ export default function AdminStationsPage() {
     }
     return result;
   }, [sources]);
+
+  const manualStationSources = useMemo(() => {
+    return sources.filter((source) => (
+      !source?.station?.id &&
+      Array.isArray(source?.playlists) &&
+      source.playlists.length > 0
+    ));
+  }, [sources]);
+
+  const hasStations = stations.length > 0;
+  const hasEligibleStationSources = manualStationSources.length > 0;
   const isStationEditorReady = selectedPlaylistIds.length > 0;
+  const addStationDisabled = loadingData;
+  const autoCreateDisabled = loadingData || !!dataError || busyKey === 'auto-create';
 
   const openSourceEditor = useCallback((source: any) => {
+    setStationActionMessage(null);
+    setSourcePickerVisible(false);
     setEditingSource(source);
     setStationName(source?.station?.name || `${source?.name || 'Artist'} Radio`);
     setStationDescription(source?.station?.description || '');
@@ -140,6 +187,20 @@ export default function AdminStationsPage() {
     setRotationMinutes(String(source?.station?.rotation_interval_minutes || 15));
     setSelectedPlaylistIds(getDefaultSelectedPlaylistIds(source));
   }, []);
+
+  const openAddStation = useCallback(() => {
+    if (loadingData) {
+      return;
+    }
+
+    if (dataError) {
+      setStationActionMessage(dataError);
+      return;
+    }
+
+    setStationActionMessage(null);
+    setSourcePickerVisible(true);
+  }, [dataError, loadingData]);
 
   const closeEditor = useCallback(() => {
     setEditingSource(null);
@@ -243,13 +304,29 @@ export default function AdminStationsPage() {
   }, [performDeleteStation]);
 
   const autoCreateStations = useCallback(async () => {
+    if (loadingData) return;
+
+    if (dataError) {
+      setStationActionMessage(dataError);
+      return;
+    }
+
+    if (manualStationSources.length === 0) {
+      setStationActionMessage('All public playlist owners already have stations, or there are no public playlists to use.');
+      return;
+    }
+
+    setStationActionMessage(null);
     setBusyKey('auto-create');
     try {
       const result = await invokePlaylistAction({ action: 'admin_auto_create_stations' });
       await fetchData();
+      const createdCount = Number(result?.created_count || 0);
       Alert.alert(
-        'Auto stations created',
-        `${result?.created_count || 0} station${result?.created_count === 1 ? '' : 's'} created.`,
+        createdCount > 0 ? 'Auto stations created' : 'No stations created',
+        createdCount > 0
+          ? `${createdCount} station${createdCount === 1 ? '' : 's'} created.`
+          : 'No eligible playlist owners needed a new station.',
       );
     } catch (error) {
       console.error('Admin station auto-create failed:', error);
@@ -257,7 +334,7 @@ export default function AdminStationsPage() {
     } finally {
       setBusyKey(null);
     }
-  }, [fetchData, invokePlaylistAction]);
+  }, [dataError, fetchData, invokePlaylistAction, loadingData, manualStationSources.length]);
 
   if (loading || !roleResolved) {
     return (
@@ -290,75 +367,117 @@ export default function AdminStationsPage() {
       <Header title="Admin" hideBackButton />
 
       <ScrollView contentContainerStyle={styles.content}>
-        <View style={styles.topRow}>
-          <TextInput
-            testID="admin-stations-search-input"
-            accessibilityLabel="admin-stations-search-input"
-            value={search}
-            onChangeText={setSearch}
-            placeholder="Search stations..."
-            placeholderTextColor={colors.textSecondary}
-            style={[
-              styles.searchInput,
-              {
-                color: colors.text,
-                backgroundColor: colors.card,
-                borderColor: colors.border,
-              },
-            ]}
-          />
-
-          <TouchableOpacity
-            testID="admin-stations-auto-create-button"
-            accessibilityLabel="admin-stations-auto-create-button"
-            activeOpacity={1}
-            disabled={busyKey === 'auto-create'}
-            onPress={autoCreateStations}
-            style={[styles.primaryBtn, { backgroundColor: colors.primary, opacity: busyKey === 'auto-create' ? 0.7 : 1 }]}
-          >
-            {busyKey === 'auto-create' ? (
-              <ActivityIndicator size="small" color="#FFFFFF" />
-            ) : (
-              <Ionicons name="sparkles-outline" size={17} color="#FFFFFF" />
-            )}
-            <Text style={styles.primaryBtnText}>Auto Create</Text>
-          </TouchableOpacity>
-        </View>
-
         <View style={[styles.sectionHeader, { borderBottomColor: colors.border }]}>
-          <View>
+          <View style={{ flex: 1, minWidth: 0 }}>
             <Text style={[styles.sectionTitle, { color: colors.text }]}>Existing Stations</Text>
             <Text style={[styles.sectionSub, { color: colors.textSecondary }]}>
               Live stations appear in the user feed radio playlist.
             </Text>
           </View>
+          <View style={styles.headerActions}>
+            <TouchableOpacity
+              testID="admin-stations-add-button"
+              accessibilityLabel="admin-stations-add-button"
+              activeOpacity={1}
+              disabled={addStationDisabled}
+              onPress={openAddStation}
+              style={[styles.primaryBtn, { backgroundColor: colors.primary, opacity: addStationDisabled ? 0.6 : 1 }]}
+            >
+              <Ionicons name="add" size={18} color="#FFFFFF" />
+              <Text style={styles.primaryBtnText}>Add Station</Text>
+            </TouchableOpacity>
+
+            {hasEligibleStationSources ? (
+              <TouchableOpacity
+                testID="admin-stations-auto-create-button"
+                accessibilityLabel="admin-stations-auto-create-button"
+                activeOpacity={1}
+                disabled={autoCreateDisabled}
+                onPress={autoCreateStations}
+                style={[styles.secondaryBtn, { borderColor: colors.border, opacity: autoCreateDisabled ? 0.55 : 1 }]}
+              >
+                {busyKey === 'auto-create' ? (
+                  <ActivityIndicator size="small" color={colors.primary} />
+                ) : (
+                  <Ionicons name="sparkles-outline" size={17} color={colors.primary} />
+                )}
+                <Text style={{ color: colors.primary, fontSize: 13, fontWeight: '800' }}>Auto Create</Text>
+              </TouchableOpacity>
+            ) : null}
+          </View>
         </View>
 
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterRow}>
-          {(['all', 'live', 'offline', 'featured'] as StationFilter[]).map((nextFilter) => (
-            <TouchableOpacity
-              key={nextFilter}
-              activeOpacity={1}
-              onPress={() => setStationFilter(nextFilter)}
+        {hasStations ? (
+          <>
+            <TextInput
+              testID="admin-stations-search-input"
+              accessibilityLabel="admin-stations-search-input"
+              value={search}
+              onChangeText={setSearch}
+              placeholder="Search by station name, genre, or location..."
+              placeholderTextColor={colors.textSecondary}
               style={[
-                styles.filterChip,
+                styles.searchInput,
                 {
-                  backgroundColor: stationFilter === nextFilter ? colors.primary : colors.card,
-                  borderColor: stationFilter === nextFilter ? colors.primary : colors.border,
+                  color: colors.text,
+                  backgroundColor: colors.card,
+                  borderColor: colors.border,
                 },
               ]}
-            >
-              <Text style={{ color: stationFilter === nextFilter ? '#FFFFFF' : colors.text, fontSize: 13, textTransform: 'capitalize' }}>
-                {nextFilter}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </ScrollView>
+            />
+
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterRow}>
+              {(['all', 'live', 'offline', 'featured'] as StationFilter[]).map((nextFilter) => (
+                <TouchableOpacity
+                  key={nextFilter}
+                  activeOpacity={1}
+                  onPress={() => setStationFilter(nextFilter)}
+                  style={[
+                    styles.filterChip,
+                    {
+                      backgroundColor: stationFilter === nextFilter ? colors.primary : colors.card,
+                      borderColor: stationFilter === nextFilter ? colors.primary : colors.border,
+                    },
+                  ]}
+                >
+                  <Text style={{ color: stationFilter === nextFilter ? '#FFFFFF' : colors.text, fontSize: 13, textTransform: 'capitalize' }}>
+                    {nextFilter}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </>
+        ) : null}
 
         {loadingData ? (
           <ActivityIndicator size="large" color={colors.primary} style={{ marginTop: 40 }} />
         ) : (
           <>
+            {dataError ? (
+              <View
+                testID="admin-stations-load-error"
+                accessibilityLabel="admin-stations-load-error"
+                style={[styles.errorBanner, { borderColor: '#EF4444', backgroundColor: '#EF444420' }]}
+              >
+                <Text style={{ color: '#EF4444', fontSize: 13, fontWeight: '700' }}>
+                  {dataError}
+                </Text>
+              </View>
+            ) : null}
+
+            {stationActionMessage ? (
+              <View
+                testID="admin-stations-action-message"
+                accessibilityLabel="admin-stations-action-message"
+                style={[styles.infoBanner, { borderColor: colors.border, backgroundColor: colors.primary + '14' }]}
+              >
+                <Ionicons name="information-circle-outline" size={18} color={colors.primary} />
+                <Text style={{ color: colors.text, fontSize: 13, fontWeight: '700', flex: 1 }}>
+                  {stationActionMessage}
+                </Text>
+              </View>
+            ) : null}
+
             {visibleStations.map((item) => {
               const owner = getStationOwner(item);
               const isBusy = busyKey === item.id;
@@ -468,13 +587,144 @@ export default function AdminStationsPage() {
             })}
 
             {visibleStations.length === 0 ? (
-              <Text style={{ color: colors.textSecondary, textAlign: 'center', marginTop: 28 }}>
-                No stations found
-              </Text>
+              hasStations ? (
+                <Text style={{ color: colors.textSecondary, textAlign: 'center', marginTop: 28 }}>
+                  No stations match your filters.
+                </Text>
+              ) : (
+                <View
+                  testID="admin-stations-empty-state"
+                  accessibilityLabel="admin-stations-empty-state"
+                  style={[styles.emptyState, { borderColor: colors.border, backgroundColor: colors.card }]}
+                >
+                  <Ionicons name="radio-outline" size={34} color={colors.primary} />
+                  <Text
+                    testID="admin-stations-empty-title"
+                    accessibilityLabel="admin-stations-empty-title"
+                    style={[styles.emptyTitle, { color: colors.text }]}
+                  >
+                    No stations yet
+                  </Text>
+                  <Text
+                    testID="admin-stations-empty-description"
+                    accessibilityLabel="admin-stations-empty-description"
+                    style={[styles.emptyDescription, { color: colors.textSecondary }]}
+                  >
+                    {hasEligibleStationSources
+                      ? 'Create your first station manually or generate one automatically.'
+                      : 'Create a public musician or group playlist first, then add it as a station.'}
+                  </Text>
+                  <View style={styles.emptyActions}>
+                    <TouchableOpacity
+                      testID="admin-stations-empty-add-button"
+                      accessibilityLabel="admin-stations-empty-add-button"
+                      activeOpacity={1}
+                      disabled={addStationDisabled}
+                      onPress={openAddStation}
+                      style={[styles.primaryBtn, { backgroundColor: colors.primary, opacity: addStationDisabled ? 0.6 : 1 }]}
+                    >
+                      <Ionicons name="add" size={18} color="#FFFFFF" />
+                      <Text style={styles.primaryBtnText}>Add Station</Text>
+                    </TouchableOpacity>
+                    {hasEligibleStationSources ? (
+                      <TouchableOpacity
+                        testID="admin-stations-empty-auto-create-button"
+                        accessibilityLabel="admin-stations-empty-auto-create-button"
+                        activeOpacity={1}
+                        disabled={autoCreateDisabled}
+                        onPress={autoCreateStations}
+                        style={[styles.secondaryBtn, { borderColor: colors.border, opacity: autoCreateDisabled ? 0.55 : 1 }]}
+                      >
+                        {busyKey === 'auto-create' ? (
+                          <ActivityIndicator size="small" color={colors.primary} />
+                        ) : (
+                          <Ionicons name="sparkles-outline" size={17} color={colors.primary} />
+                        )}
+                        <Text style={{ color: colors.primary, fontSize: 13, fontWeight: '800' }}>Auto Create</Text>
+                      </TouchableOpacity>
+                    ) : null}
+                  </View>
+                </View>
+              )
             ) : null}
           </>
         )}
       </ScrollView>
+
+      <Modal visible={sourcePickerVisible} animationType="fade" transparent onRequestClose={() => setSourcePickerVisible(false)}>
+        <View style={styles.modalBackdrop}>
+          <View
+            testID="admin-station-source-picker-modal"
+            accessibilityLabel="admin-station-source-picker-modal"
+            style={[styles.modalCard, { backgroundColor: colors.card, borderColor: colors.border }]}
+          >
+            <View style={styles.modalHeader}>
+              <View style={{ flex: 1 }}>
+                <Text style={{ color: colors.text, fontSize: 17, fontWeight: '800' }}>
+                  Add Station
+                </Text>
+                <Text style={{ color: colors.textSecondary, fontSize: 12, marginTop: 2 }}>
+                  Choose a playlist owner to turn into a live station.
+                </Text>
+              </View>
+              <TouchableOpacity
+                testID="admin-station-source-picker-close-button"
+                accessibilityLabel="admin-station-source-picker-close-button"
+                activeOpacity={1}
+                onPress={() => setSourcePickerVisible(false)}
+                style={styles.iconButton}
+              >
+                <Ionicons name="close" size={22} color={colors.text} />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView style={styles.sourcePicker}>
+              {manualStationSources.length > 0 ? (
+                manualStationSources.map((source) => {
+                  const sourceKey = source?.key || `${source?.kind || 'source'}:${source?.id || ''}`;
+                  return (
+                    <TouchableOpacity
+                      key={sourceKey}
+                      testID={`admin-station-source-${normalizeStationTestId(sourceKey)}`}
+                      accessibilityLabel={`admin-station-source-${normalizeStationTestId(sourceKey)}`}
+                      activeOpacity={1}
+                      onPress={() => openSourceEditor(source)}
+                      style={[styles.sourceOption, { borderColor: colors.border }]}
+                    >
+                      <View style={[styles.iconWrap, { backgroundColor: colors.primary + '18' }]}>
+                        <Ionicons name={source?.kind === 'group' ? 'people-outline' : 'person-outline'} size={20} color={colors.primary} />
+                      </View>
+                      <View style={{ flex: 1, minWidth: 0 }}>
+                        <Text style={{ color: colors.text, fontSize: 14, fontWeight: '800' }} numberOfLines={1}>
+                          {source?.name || 'Untitled source'}
+                        </Text>
+                        <Text style={{ color: colors.textSecondary, fontSize: 12, marginTop: 2 }} numberOfLines={1}>
+                          {source?.genre || source?.kind || 'Music'} - {source?.playlist_count || 0} playlist{source?.playlist_count === 1 ? '' : 's'} - {source?.track_count || 0} track{source?.track_count === 1 ? '' : 's'}
+                        </Text>
+                      </View>
+                      <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
+                    </TouchableOpacity>
+                  );
+                })
+              ) : (
+                <View
+                  testID="admin-station-source-picker-empty"
+                  accessibilityLabel="admin-station-source-picker-empty"
+                  style={[styles.sourceEmpty, { borderColor: colors.border, backgroundColor: colors.primary + '10' }]}
+                >
+                  <Ionicons name="musical-notes-outline" size={28} color={colors.primary} />
+                  <Text style={{ color: colors.text, fontSize: 15, fontWeight: '800', marginTop: 8 }}>
+                    No eligible playlist sources
+                  </Text>
+                  <Text style={{ color: colors.textSecondary, fontSize: 13, textAlign: 'center', marginTop: 5, lineHeight: 19 }}>
+                    Create a public musician or group playlist first, then add it as a station.
+                  </Text>
+                </View>
+              )}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
 
       <Modal visible={!!editingSource} animationType="fade" transparent onRequestClose={closeEditor}>
         <View style={styles.modalBackdrop}>
@@ -503,45 +753,57 @@ export default function AdminStationsPage() {
               </TouchableOpacity>
             </View>
 
-            <TextInput
-              testID="admin-station-name-input"
-              accessibilityLabel="admin-station-name-input"
-              value={stationName}
-              onChangeText={setStationName}
-              placeholder="Station name"
-              placeholderTextColor={colors.textSecondary}
-              style={[styles.modalInput, { color: colors.text, borderColor: colors.border, backgroundColor: isDark ? '#0F172A' : '#F8FAFC' }]}
-            />
-            <TextInput
-              testID="admin-station-description-input"
-              accessibilityLabel="admin-station-description-input"
-              value={stationDescription}
-              onChangeText={setStationDescription}
-              placeholder="Description"
-              placeholderTextColor={colors.textSecondary}
-              multiline
-              style={[styles.modalInput, styles.descriptionInput, { color: colors.text, borderColor: colors.border, backgroundColor: isDark ? '#0F172A' : '#F8FAFC' }]}
-            />
+            <View style={styles.field}>
+              <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>Station name</Text>
+              <TextInput
+                testID="admin-station-name-input"
+                accessibilityLabel="admin-station-name-input"
+                value={stationName}
+                onChangeText={setStationName}
+                placeholder="Station name"
+                placeholderTextColor={colors.textSecondary}
+                style={[styles.modalInput, { color: colors.text, borderColor: colors.border, backgroundColor: isDark ? '#0F172A' : '#F8FAFC' }]}
+              />
+            </View>
+            <View style={styles.field}>
+              <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>Description</Text>
+              <TextInput
+                testID="admin-station-description-input"
+                accessibilityLabel="admin-station-description-input"
+                value={stationDescription}
+                onChangeText={setStationDescription}
+                placeholder="Description"
+                placeholderTextColor={colors.textSecondary}
+                multiline
+                style={[styles.modalInput, styles.descriptionInput, { color: colors.text, borderColor: colors.border, backgroundColor: isDark ? '#0F172A' : '#F8FAFC' }]}
+              />
+            </View>
             <View style={styles.modalInputRow}>
-              <TextInput
-                testID="admin-station-genre-input"
-                accessibilityLabel="admin-station-genre-input"
-                value={stationGenre}
-                onChangeText={setStationGenre}
-                placeholder="Genre"
-                placeholderTextColor={colors.textSecondary}
-                style={[styles.modalInput, styles.halfInput, { color: colors.text, borderColor: colors.border, backgroundColor: isDark ? '#0F172A' : '#F8FAFC' }]}
-              />
-              <TextInput
-                testID="admin-station-rotation-input"
-                accessibilityLabel="admin-station-rotation-input"
-                value={rotationMinutes}
-                onChangeText={setRotationMinutes}
-                placeholder="Minutes"
-                placeholderTextColor={colors.textSecondary}
-                keyboardType="number-pad"
-                style={[styles.modalInput, styles.halfInput, { color: colors.text, borderColor: colors.border, backgroundColor: isDark ? '#0F172A' : '#F8FAFC' }]}
-              />
+              <View style={styles.halfField}>
+                <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>Genre</Text>
+                <TextInput
+                  testID="admin-station-genre-input"
+                  accessibilityLabel="admin-station-genre-input"
+                  value={stationGenre}
+                  onChangeText={setStationGenre}
+                  placeholder="Genre"
+                  placeholderTextColor={colors.textSecondary}
+                  style={[styles.modalInput, { color: colors.text, borderColor: colors.border, backgroundColor: isDark ? '#0F172A' : '#F8FAFC' }]}
+                />
+              </View>
+              <View style={styles.halfField}>
+                <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>Rotation minutes</Text>
+                <TextInput
+                  testID="admin-station-rotation-input"
+                  accessibilityLabel="admin-station-rotation-input"
+                  value={rotationMinutes}
+                  onChangeText={setRotationMinutes}
+                  placeholder="Minutes"
+                  placeholderTextColor={colors.textSecondary}
+                  keyboardType="number-pad"
+                  style={[styles.modalInput, { color: colors.text, borderColor: colors.border, backgroundColor: isDark ? '#0F172A' : '#F8FAFC' }]}
+                />
+              </View>
             </View>
 
             <Text style={{ color: colors.text, fontSize: 13, fontWeight: '700', marginTop: 6, marginBottom: 8 }}>
@@ -606,14 +868,13 @@ const styles = StyleSheet.create({
   container: { flex: 1 },
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   content: { padding: 16, paddingBottom: 100 },
-  topRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   searchInput: {
-    flex: 1,
     borderWidth: 1,
     borderRadius: 8,
     paddingHorizontal: 14,
     paddingVertical: 10,
     fontSize: 14,
+    marginTop: 12,
   },
   primaryBtn: {
     minHeight: 40,
@@ -632,14 +893,20 @@ const styles = StyleSheet.create({
     paddingVertical: 9,
     borderRadius: 7,
     borderWidth: 1,
+    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
+    gap: 7,
   },
   sectionHeader: {
-    marginTop: 18,
     paddingBottom: 10,
     borderBottomWidth: 1,
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 12,
   },
+  headerActions: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'flex-end', gap: 8 },
   sectionTitle: { fontSize: 16, fontWeight: '800' },
   sectionSub: { fontSize: 12, marginTop: 3 },
   filterRow: { paddingVertical: 10, gap: 8 },
@@ -660,8 +927,45 @@ const styles = StyleSheet.create({
   },
   statusBadge: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 7 },
   metaRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 12, marginTop: 10 },
-  actionRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 12 },
-  actionBtn: { paddingHorizontal: 14, paddingVertical: 7, borderRadius: 7 },
+  actionRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 8, marginTop: 12 },
+  actionBtn: {
+    minHeight: 32,
+    minWidth: 72,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 7,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  errorBanner: {
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginTop: 12,
+    marginBottom: 10,
+  },
+  infoBanner: {
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginTop: 12,
+    marginBottom: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  emptyState: {
+    borderWidth: 1,
+    borderRadius: 8,
+    alignItems: 'center',
+    padding: 22,
+    marginTop: 18,
+  },
+  emptyTitle: { fontSize: 17, fontWeight: '800', marginTop: 10 },
+  emptyDescription: { fontSize: 13, textAlign: 'center', marginTop: 5, lineHeight: 19 },
+  emptyActions: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 10, marginTop: 16 },
   modalBackdrop: {
     flex: 1,
     backgroundColor: 'rgba(15, 23, 42, 0.56)',
@@ -679,6 +983,24 @@ const styles = StyleSheet.create({
   },
   modalHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 12 },
   iconButton: { width: 38, height: 38, alignItems: 'center', justifyContent: 'center' },
+  sourcePicker: { maxHeight: 420 },
+  sourceEmpty: {
+    borderWidth: 1,
+    borderRadius: 8,
+    padding: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 160,
+  },
+  sourceOption: {
+    borderWidth: 1,
+    borderRadius: 8,
+    padding: 10,
+    marginBottom: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
   modalInput: {
     borderWidth: 1,
     borderRadius: 8,
@@ -689,7 +1011,9 @@ const styles = StyleSheet.create({
   },
   descriptionInput: { minHeight: 70, textAlignVertical: 'top' },
   modalInputRow: { flexDirection: 'row', gap: 10 },
-  halfInput: { flex: 1 },
+  field: { marginBottom: 10 },
+  fieldLabel: { fontSize: 12, fontWeight: '700', marginBottom: 6 },
+  halfField: { flex: 1 },
   playlistPicker: { maxHeight: 260 },
   playlistOption: {
     borderWidth: 1,

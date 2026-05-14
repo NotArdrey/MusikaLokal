@@ -220,6 +220,7 @@ const reportTargetTableMap: Record<string, string> = {
   profile: "profiles",
   product: "products",
   playlist: "playlists",
+  feed_post: "feed_posts",
 };
 
 async function insertNotificationIfMissing(

@@ -45,6 +45,11 @@ async function assertSessionNonce(
   }
 
   const expectedHash = localData?.verification_data?.session_nonce_hash;
+  if (localData && !expectedHash) {
+    console.warn("didit_session_legacy_nonce_missing", { sessionRef });
+    return localData;
+  }
+
   const valid = await verifySessionNonce(sessionRef, sessionNonce, expectedHash);
   if (!localData || !valid) {
     throw new Error("Verification session could not be validated. Please start verification again.");

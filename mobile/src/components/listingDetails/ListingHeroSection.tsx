@@ -59,7 +59,13 @@ const ListingHeroSection = ({
 
       <View style={styles.rightActions}>
         {showReportButton && onReport ? (
-          <TouchableOpacity activeOpacity={1} onPress={onReport} style={styles.roundBtn}>
+          <TouchableOpacity
+            activeOpacity={1}
+            onPress={onReport}
+            testID="listing-report-button"
+            accessibilityLabel="listing-report-button"
+            style={styles.roundBtn}
+          >
             <Ionicons
               name="flag-outline"
               size={22}

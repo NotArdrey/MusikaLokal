@@ -125,6 +125,50 @@ const getRosterMemberName = (member: any, index: number): string => {
   return visibleName || roleName || instrumentName || `Member ${index + 1}`;
 };
 
+const buildRosterInviteTargets = (
+  members: Array<{ name?: string; instrument?: string; user_id?: string; avatar_url?: string }>,
+  ownerUserId: string,
+  activeMemberUserIds: string[],
+): GroupInviteTarget[] => {
+  const activeMemberIdSet = new Set(activeMemberUserIds);
+  const seen = new Set<string>();
+
+  return members
+    .filter((member) => {
+      const memberId = typeof member?.user_id === "string" ? member.user_id.trim() : "";
+      if (!memberId || memberId === ownerUserId || activeMemberIdSet.has(memberId) || seen.has(memberId)) {
+        return false;
+      }
+      seen.add(memberId);
+      return true;
+    })
+    .map((member) => {
+      const memberId = String(member.user_id);
+      const displayName = String(member.name || "Musician").trim() || "Musician";
+      const instrument = String(member.instrument || "").trim();
+
+      return {
+        key: `musician:${memberId}`,
+        id: memberId,
+        receiverUserId: memberId,
+        displayName,
+        subtitle: instrument ? `Invited ${instrument}` : "Invited musician",
+        image: member.avatar_url || null,
+      };
+    });
+};
+
+const mergeInviteTargets = (targets: GroupInviteTarget[]) => {
+  const byReceiver = new Map<string, GroupInviteTarget>();
+  targets.forEach((target) => {
+    if (!target?.receiverUserId || byReceiver.has(target.receiverUserId)) {
+      return;
+    }
+    byReceiver.set(target.receiverUserId, target);
+  });
+  return Array.from(byReceiver.values());
+};
+
 export default function EditGroupScreen() {
   const { colors, isDark } = useTheme();
   const insets = useSafeAreaInsets();
@@ -920,7 +964,9 @@ export default function EditGroupScreen() {
             ...(members || [])
               .map((member) => member?.user_id)
               .filter((memberId): memberId is string =>
-                typeof memberId === "string" && memberId.trim().length > 0,
+                typeof memberId === "string" &&
+                memberId.trim().length > 0 &&
+                initialMemberUserIds.includes(memberId),
               ),
           ],
         ),
@@ -976,14 +1022,18 @@ export default function EditGroupScreen() {
       }
 
       let inviteSummaryMessage = "";
-      if (selectedInviteTargets.length > 0) {
+      const inviteTargets = mergeInviteTargets([
+        ...buildRosterInviteTargets(payload.members || [], user.id, initialMemberUserIds),
+        ...selectedInviteTargets,
+      ]);
+      if (inviteTargets.length > 0) {
         const inviteSummary = await sendGroupMemberInvites({
           currentUserId: user.id,
           groupId,
           groupName,
           groupImageUrl: payload.images[0] || null,
           inviteMessage,
-          inviteTargets: selectedInviteTargets,
+          inviteTargets,
         });
 
         inviteSummaryMessage =

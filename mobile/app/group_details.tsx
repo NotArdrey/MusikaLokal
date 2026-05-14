@@ -390,7 +390,9 @@ export default function GroupDetailsScreen() {
                 <Ionicons name="share-outline" size={24} color="#000" />
               </TouchableOpacity>
               {!isOwner && userId && !isGuest ? (
-                <TouchableOpacity activeOpacity={1}
+              <TouchableOpacity activeOpacity={1}
+                  testID="group-report-button"
+                  accessibilityLabel="group-report-button"
                   onPress={openReportModal}
                   style={styles.roundBtn}
                 >

@@ -20,7 +20,7 @@ const commandName = (name: string) => {
 
 const isTransientAdbError = (error: any) => {
   const output = `${error?.message || ''}\n${error?.stdout || ''}\n${error?.stderr || ''}`;
-  return /adb server|daemon|cannot connect to daemon|failed to start daemon|could not read ok/i.test(output);
+  return /adb server|daemon|cannot connect to daemon|failed to start daemon|could not read ok|device offline|closed|protocol fault|shell input (?:keyevent|text)/i.test(output);
 };
 
 const execAdbFileWithRetry = async (
@@ -50,7 +50,7 @@ const execAdbFileWithRetry = async (
   throw lastError;
 };
 
-const quoteWindowsCmdArg = (value: string) => `"${value.replace(/%/g, '%%').replace(/(["^&|<>])/g, '^$1')}"`;
+const quoteWindowsCmdArg = (value: string) => `"${value.replace(/%/g, '%%').replace(/"/g, '^"')}"`;
 
 const getChildEnvWithAndroidTools = (extraEnv: Record<string, string> = {}) => {
   const pathKey = Object.keys(process.env).find((key) => key.toLowerCase() === 'path') || 'PATH';
@@ -204,6 +204,11 @@ const inputTextWithAdb = async (value: string) => {
   }
 };
 
+const replaceTextWithAdb = async (value: string) => {
+  await eraseTextWithAdb(120);
+  await inputTextWithAdb(value);
+};
+
 const eraseTextWithAdb = async (characters = 80) => {
   const childEnv = getChildEnvWithAndroidTools();
   await execAdbFileWithRetry(['shell', 'input', 'keyevent', '123'], {
@@ -211,15 +216,15 @@ const eraseTextWithAdb = async (characters = 80) => {
     env: childEnv,
   });
 
-  for (let remaining = characters; remaining > 0; remaining -= 20) {
-    const count = Math.min(20, remaining);
+  for (let remaining = characters; remaining > 0; remaining -= 5) {
+    const count = Math.min(5, remaining);
     await execAdbFileWithRetry([
       'shell',
       'input',
       'keyevent',
       ...Array.from({ length: count }, () => '67'),
     ], {
-      timeout: 15_000,
+      timeout: 30_000,
       env: childEnv,
     });
   }
@@ -436,12 +441,14 @@ const runMobileLoginFlow = async (extraEnv: Record<string, string>) => {
   await resetAndWarmLaunchApp(env.E2E_MOBILE_APP_ID);
   await ensureMetroForDevBuild();
   await runMaestroCliFlow('mobile-login-focus-email.yaml', extraEnv, 180_000);
-  await inputTextWithAdb(extraEnv.E2E_MOBILE_EMAIL);
+  await replaceTextWithAdb(extraEnv.E2E_MOBILE_EMAIL);
+  await hideKeyboardWithAdb();
   await runMaestroCliFlow('mobile-login-focus-password.yaml', extraEnv, 180_000);
-  await inputTextWithAdb(extraEnv.E2E_MOBILE_PASSWORD);
+  await replaceTextWithAdb(extraEnv.E2E_MOBILE_PASSWORD);
   await hideKeyboardWithAdb();
   await runMaestroCliFlow('mobile-login-submit.yaml', extraEnv, 180_000);
   await delay(8_000);
+  await runMaestroCliFlow('mobile-login-verify-auth.yaml', extraEnv, 180_000);
 };
 
 export async function requireAndroidApp() {

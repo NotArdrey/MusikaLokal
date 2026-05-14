@@ -123,6 +123,39 @@ export async function seedE2EGroup(ownerId: string, suffix = 'group') {
   return data;
 }
 
+export async function seedE2EPlaylistWithTrack(creatorId: string, suffix = 'playlist') {
+  const runId = makeRunId(suffix);
+  const { data: playlist, error: playlistError } = await getSupabaseAdmin()
+    .from('playlists')
+    .insert({
+      creator_id: creatorId,
+      title: `E2E Playlist ${runId}`,
+      description: `E2E seeded playlist ${runId}`,
+      genre: 'OPM',
+      visibility: 'public',
+    })
+    .select('*')
+    .single();
+
+  if (playlistError) throw playlistError;
+
+  const { data: item, error: itemError } = await getSupabaseAdmin()
+    .from('playlist_items')
+    .insert({
+      playlist_id: playlist.id,
+      title: `E2E Track ${runId}`,
+      artist_name: 'E2E Artist',
+      audio_url: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3',
+      duration_seconds: 30,
+      position: 0,
+    })
+    .select('*')
+    .single();
+
+  if (itemError) throw itemError;
+  return { playlist, item };
+}
+
 export async function seedE2EStation(creatorId: string, suffix = 'station') {
   const runId = makeRunId(suffix);
   const name = `E2E Station ${runId}`;
@@ -320,6 +353,115 @@ export async function seedE2EGigApplication(input: {
       is_solo_application: true,
       leader_approval_status: input.leaderApprovalStatus,
       slot_type: 'solo',
+    })
+    .select('*')
+    .single();
+
+  if (error) throw error;
+  return data;
+}
+
+export async function seedE2EVenueGigInviteRequest(input: {
+  venueOwnerId: string;
+  venueName: string;
+  receiverId: string;
+  receiverName: string;
+  gigId: string;
+  gigName: string;
+  groupId?: string | null;
+  receiverEntityType?: 'musician' | 'group';
+  suffix?: string;
+}) {
+  const runId = makeRunId(input.suffix || 'venue-gig-invite');
+  const receiverEntityType = input.receiverEntityType || (input.groupId ? 'group' : 'musician');
+  const receiverEntityId = input.groupId || input.receiverId;
+  const rosterEntryKind = receiverEntityType === 'group' ? 'group' : 'musician';
+
+  const { data, error } = await getSupabaseAdmin()
+    .from('booking_requests')
+    .insert({
+      sender_id: input.venueOwnerId,
+      receiver_id: input.receiverId,
+      group_id: input.groupId || null,
+      status: 'pending',
+      message: `E2E venue gig invite ${runId}`,
+      event_details: {
+        type: 'listing_connection_request',
+        source: 'manage_gig',
+        sender_entity_type: 'venue',
+        sender_entity_id: input.gigId,
+        sender_entity_name: input.gigName,
+        receiver_entity_type: receiverEntityType,
+        receiver_entity_id: receiverEntityId,
+        receiver_entity_name: input.receiverName,
+        route: '/bookings',
+        route_params: { tab: 'Pending' },
+        request_kind: 'invite',
+        listing_id: input.gigId,
+        listing_type: 'gig',
+        request_details: {
+          pitch_message: `E2E venue gig invite pitch ${runId}`,
+          context_label: 'Gig Invite',
+          request_kind: 'invite',
+          gig_id: input.gigId,
+          gig_name: input.gigName,
+          roster_entry_name: input.receiverName,
+          roster_entry_kind: rosterEntryKind,
+          slot_type: receiverEntityType === 'group' ? 'group' : 'solo',
+        },
+        sender_entity_owner_name: input.venueName,
+      },
+    })
+    .select('*')
+    .single();
+
+  if (error) throw error;
+  return data;
+}
+
+export async function seedE2EGroupMemberInviteRequest(input: {
+  groupOwnerId: string;
+  groupOwnerName: string;
+  receiverId: string;
+  receiverName: string;
+  groupId: string;
+  groupName: string;
+  suffix?: string;
+}) {
+  const runId = makeRunId(input.suffix || 'group-member-invite');
+
+  const { data, error } = await getSupabaseAdmin()
+    .from('booking_requests')
+    .insert({
+      sender_id: input.groupOwnerId,
+      receiver_id: input.receiverId,
+      group_id: input.groupId,
+      status: 'pending',
+      message: `E2E group member invite ${runId}`,
+      event_details: {
+        type: 'listing_connection_request',
+        source: 'group_editor',
+        sender_entity_type: 'group',
+        sender_entity_id: input.groupId,
+        sender_entity_name: input.groupName,
+        receiver_entity_type: 'musician',
+        receiver_entity_id: input.receiverId,
+        receiver_entity_name: input.receiverName,
+        route: '/bookings',
+        route_params: { tab: 'Pending' },
+        request_kind: 'invite',
+        application_scope: 'group_member',
+        group_id: input.groupId,
+        request_details: {
+          pitch_message: `E2E group invite pitch ${runId}`,
+          context_label: 'Invite Context',
+          request_kind: 'invite',
+          application_scope: 'group_member',
+          roster_entry_name: input.receiverName,
+          roster_entry_kind: 'musician',
+        },
+        sender_entity_owner_name: input.groupOwnerName,
+      },
     })
     .select('*')
     .single();

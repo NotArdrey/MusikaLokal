@@ -11,6 +11,7 @@ import {
     prepareIdentityNameBirthDateDuplicateInput,
     queueIdentityReview,
     recordIdentityDocumentClaim,
+    revokeOrphanSameRoleIdentityClaims,
 } from '../_shared/identityDuplicate.ts'
 import {
     enforceRegistrationRateLimit,
@@ -24,6 +25,49 @@ const corsHeaders = {
 }
 
 const allowedSignupRoles = new Set(['fan', 'musician'])
+
+async function deleteRowsByIds(client: any, table: string, column: string, ids: string[]) {
+    const uniqueIds = Array.from(new Set(ids.map((id) => String(id || '').trim()).filter(Boolean)))
+    if (uniqueIds.length === 0) return
+
+    const { error } = await client.from(table).delete().in(column, uniqueIds)
+    if (error) throw error
+}
+
+async function nullProfileReference(client: any, table: string, column: string, userId: string) {
+    const { error } = await client.from(table).update({ [column]: null }).eq(column, userId)
+    if (error) throw error
+}
+
+async function cleanupStaleSignupUserRelations(client: any, userId: string) {
+    const [
+        { data: ownedGroups, error: ownedGroupsError },
+        { data: ownedStudios, error: ownedStudiosError },
+    ] = await Promise.all([
+        client.from('groups').select('id').eq('owner_id', userId),
+        client.from('studios').select('id').eq('owner_id', userId),
+    ])
+
+    if (ownedGroupsError) throw ownedGroupsError
+    if (ownedStudiosError) throw ownedStudiosError
+
+    const ownedGroupIds = (ownedGroups || []).map((item: any) => String(item?.id || '')).filter(Boolean)
+    const ownedStudioIds = (ownedStudios || []).map((item: any) => String(item?.id || '')).filter(Boolean)
+
+    const cleanupResults = await Promise.all([
+        deleteRowsByIds(client, 'booking_requests', 'group_id', ownedGroupIds),
+        deleteRowsByIds(client, 'booking_requests', 'studio_id', ownedStudioIds),
+        client.from('booking_requests').delete().eq('sender_id', userId),
+        client.from('booking_requests').delete().eq('receiver_id', userId),
+        nullProfileReference(client, 'gigs', 'permit_reviewed_by', userId),
+        nullProfileReference(client, 'studios', 'permit_reviewed_by', userId),
+        nullProfileReference(client, 'withdrawal_requests', 'processed_by', userId),
+    ])
+
+    for (const result of cleanupResults.slice(2, 4)) {
+        if (result?.error) throw result.error
+    }
+}
 
 function getDefaultDisplayNameForRole(role: unknown) {
     return String(role || '').trim().toLowerCase() === 'fan' ? 'Fan' : 'Musician'
@@ -471,6 +515,17 @@ serve(async (req) => {
             )
 
             if (documentFingerprint) {
+                const revokedOrphanClaimCount = await revokeOrphanSameRoleIdentityClaims(supabaseAdmin, {
+                    documentFingerprint,
+                    role: normalizedRole,
+                })
+                if (revokedOrphanClaimCount > 0) {
+                    console.warn('identity_orphan_same_role_claims_revoked', {
+                        role: normalizedRole,
+                        count: revokedOrphanClaimCount,
+                    })
+                }
+
                 duplicateIdentityReview = await findSameRoleIdentityDuplicate(supabaseAdmin, {
                     documentFingerprint,
                     role: normalizedRole,
@@ -509,7 +564,17 @@ serve(async (req) => {
             }
 
             // If they are NOT confirmed, this is a stalled/failed signup.
-            // DELETE them to allow a fresh start.
+            // Clear FK blockers first, then delete them to allow a fresh start.
+            try {
+                await cleanupStaleSignupUserRelations(supabaseAdmin, existingUser.id)
+            } catch (cleanupError) {
+                console.error('Failed to clean stale unverified user relations:', cleanupError)
+                return new Response(JSON.stringify({ error: 'Failed to reset existing account. Please contact support.' }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 400,
+                })
+            }
+
             const { error: deleteError } = await supabaseAdmin.auth.admin.deleteUser(existingUser.id)
 
             if (deleteError) {

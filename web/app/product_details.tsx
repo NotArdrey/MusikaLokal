@@ -141,6 +141,8 @@ export default function ProductDetailsScreen() {
   const reportHeaderAction = canReportProduct ? (
     <TouchableOpacity
       activeOpacity={1}
+      testID="product-report-button"
+      accessibilityLabel="product-report-button"
       onPress={openReportModal}
       style={[
         styles.headerReportBtn,

@@ -38,10 +38,10 @@ interface TopToastContextValue {
 }
 
 const DEFAULT_DURATION_BY_TYPE: Record<TopToastType, number> = {
-  success: 2600,
-  info: 3200,
-  warning: 3800,
-  error: 4400,
+  success: 5000,
+  info: 5600,
+  warning: 6400,
+  error: 7200,
 };
 
 const defaultTitleByType: Record<TopToastType, string> = {

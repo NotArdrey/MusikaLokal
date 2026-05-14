@@ -66,11 +66,6 @@ export default function MyGroupScreen() {
         return error?.code === '42P01' && message.includes(relationName.toLowerCase());
     };
 
-    const isMissingFunctionError = (error: any, functionName: string) => {
-        const message = String(error?.message || '').toLowerCase();
-        return error?.code === '42883' && message.includes(functionName.toLowerCase());
-    };
-
     const fetchGroups = async () => {
         if (!userId) return;
         try {
@@ -275,22 +270,11 @@ export default function MyGroupScreen() {
                 p_reason: 'Deleted from My Group screen by owner',
             });
 
-            let result: any = data;
-
             if (error) {
-                if (isMissingFunctionError(error, 'delete_group_safely')) {
-                    const { error: fallbackDeleteError } = await supabase
-                        .from('groups')
-                        .delete()
-                        .eq('id', selectedId)
-                        .eq('owner_id', userId);
-
-                    if (fallbackDeleteError) throw fallbackDeleteError;
-                    result = { success: true };
-                } else {
-                    throw error;
-                }
+                throw error;
             }
+
+            const result: any = data;
 
             if (!result?.success) {
                 if (result?.code === 'ACTIVE_ACCEPTED_APPLICATIONS_EXIST') {

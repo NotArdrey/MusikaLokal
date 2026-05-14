@@ -404,6 +404,7 @@ export async function findSameRoleIdentityDuplicate(
     .eq("document_fingerprint", documentFingerprint)
     .eq("role", normalizeIdentityRole(role))
     .in("status", ["APPROVED", "PENDING_REVIEW"])
+    .not("user_id", "is", null)
     .limit(10);
 
   if (isUuid(userId)) {
@@ -423,6 +424,37 @@ export async function findSameRoleIdentityDuplicate(
     return (!matchEmail || matchEmail !== normalizedEmail) && (!claimEmail || claimEmail !== normalizedEmail);
   });
   return { hasDuplicate: matches.length > 0, matches };
+}
+
+export async function revokeOrphanSameRoleIdentityClaims(
+  client: any,
+  {
+    documentFingerprint,
+    role,
+  }: {
+    documentFingerprint?: string | null;
+    role: string;
+  },
+) {
+  if (!documentFingerprint) return 0;
+
+  const { data, error } = await client
+    .from("identity_document_claims")
+    .update({
+      status: "REVOKED",
+      updated_at: new Date().toISOString(),
+    })
+    .eq("document_fingerprint", documentFingerprint)
+    .eq("role", normalizeIdentityRole(role))
+    .eq("status", "APPROVED")
+    .is("user_id", null)
+    .select("id");
+
+  if (error) {
+    throw new Error(dbErrorMessage("orphan identity claim cleanup failed", error));
+  }
+
+  return Array.isArray(data) ? data.length : 0;
 }
 
 export function getDuplicateIdentityReviewReason(role: string) {

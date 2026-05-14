@@ -121,6 +121,48 @@ const getRosterMemberName = (member: any, index: number): string => {
   return visibleName || roleName || instrumentName || `Member ${index + 1}`;
 };
 
+const buildRosterInviteTargets = (
+  members: Array<{ name?: string; instrument?: string; user_id?: string; avatar_url?: string }>,
+  ownerUserId: string,
+): GroupInviteTarget[] => {
+  const seen = new Set<string>();
+
+  return members
+    .filter((member) => {
+      const memberId = typeof member?.user_id === "string" ? member.user_id.trim() : "";
+      if (!memberId || memberId === ownerUserId || seen.has(memberId)) {
+        return false;
+      }
+      seen.add(memberId);
+      return true;
+    })
+    .map((member) => {
+      const memberId = String(member.user_id);
+      const displayName = String(member.name || "Musician").trim() || "Musician";
+      const instrument = String(member.instrument || "").trim();
+
+      return {
+        key: `musician:${memberId}`,
+        id: memberId,
+        receiverUserId: memberId,
+        displayName,
+        subtitle: instrument ? `Invited ${instrument}` : "Invited musician",
+        image: member.avatar_url || null,
+      };
+    });
+};
+
+const mergeInviteTargets = (targets: GroupInviteTarget[]) => {
+  const byReceiver = new Map<string, GroupInviteTarget>();
+  targets.forEach((target) => {
+    if (!target?.receiverUserId || byReceiver.has(target.receiverUserId)) {
+      return;
+    }
+    byReceiver.set(target.receiverUserId, target);
+  });
+  return Array.from(byReceiver.values());
+};
+
 export default function AddGroupScreen() {
   const { colors, isDark } = useTheme();
   const insets = useSafeAreaInsets();
@@ -807,14 +849,7 @@ export default function AddGroupScreen() {
 
       const desiredMemberUserIds = Array.from(
         new Set(
-          [
-            session.user.id,
-            ...(payload.members || [])
-              .map((member: any) => member?.user_id)
-              .filter((memberId: any): memberId is string =>
-                typeof memberId === 'string' && memberId.trim().length > 0,
-              ),
-          ],
+          [session.user.id],
         ),
       );
 
@@ -853,14 +888,18 @@ export default function AddGroupScreen() {
       }
 
       let inviteSummaryMessage = "";
-      if (!isDuoGroupType(groupType) && selectedInviteTargets.length > 0) {
+      const inviteTargets = mergeInviteTargets([
+        ...buildRosterInviteTargets(payload.members || [], session.user.id),
+        ...(!isDuoGroupType(groupType) ? selectedInviteTargets : []),
+      ]);
+      if (inviteTargets.length > 0) {
         const inviteSummary = await sendGroupMemberInvites({
           currentUserId: session.user.id,
           groupId: data.id,
           groupName,
           groupImageUrl: orderedImages[0] || null,
           inviteMessage,
-          inviteTargets: selectedInviteTargets,
+          inviteTargets,
         });
 
         inviteSummaryMessage =

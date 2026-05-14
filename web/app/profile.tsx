@@ -1582,6 +1582,8 @@ export default function ProfileScreen() {
           ) : !isGuest ? (
             <TouchableOpacity
               activeOpacity={1}
+              testID="profile-report-button"
+              accessibilityLabel="profile-report-button"
               hitSlop={{ top: 10, right: 10, bottom: 10, left: 10 }}
               onPress={openReportModal}
               style={[

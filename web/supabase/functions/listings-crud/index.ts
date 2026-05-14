@@ -843,10 +843,61 @@ serve(async (req: Request) => {
         // DELETE ENTITY
         if (action === 'delete') {
             const { type, id } = params
+            const rpcClient = createClient(sbUrl, Deno.env.get('SUPABASE_ANON_KEY') ?? sbKey, {
+                global: {
+                    headers: {
+                        Authorization: authHeader,
+                    },
+                },
+            })
 
             if (type === 'gig') {
-                const { data: rpcData, error: rpcError } = await supabaseClient.rpc('delete_gig_safely', {
+                const { data: rpcData, error: rpcError } = await rpcClient.rpc('delete_gig_safely', {
                     p_gig_id: id,
+                    p_reason: 'Deleted via listings-crud edge function',
+                });
+
+                if (rpcError) throw rpcError;
+
+                const rpcResult: any = rpcData;
+                if (!rpcResult?.success) {
+                    return new Response(JSON.stringify(rpcResult), {
+                        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                        status: 409,
+                    });
+                }
+
+                return new Response(JSON.stringify({ success: true, ...rpcResult }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 200,
+                });
+            }
+
+            if (type === 'group') {
+                const { data: rpcData, error: rpcError } = await rpcClient.rpc('delete_group_safely', {
+                    p_group_id: id,
+                    p_reason: 'Deleted via listings-crud edge function',
+                });
+
+                if (rpcError) throw rpcError;
+
+                const rpcResult: any = rpcData;
+                if (!rpcResult?.success) {
+                    return new Response(JSON.stringify(rpcResult), {
+                        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                        status: 409,
+                    });
+                }
+
+                return new Response(JSON.stringify({ success: true, ...rpcResult }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 200,
+                });
+            }
+
+            if (type === 'studio') {
+                const { data: rpcData, error: rpcError } = await rpcClient.rpc('delete_studio_safely', {
+                    p_studio_id: id,
                     p_reason: 'Deleted via listings-crud edge function',
                 });
 

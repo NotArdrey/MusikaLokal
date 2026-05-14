@@ -403,6 +403,56 @@ async function replaceProfileList(
   if (insertError) throw insertError;
 }
 
+async function deleteRowsByIds(client: any, table: string, column: string, ids: string[]) {
+  const uniqueIds = Array.from(new Set(ids.map((id) => String(id || "").trim()).filter(Boolean)));
+  if (uniqueIds.length === 0) return;
+
+  const { error } = await client.from(table).delete().in(column, uniqueIds);
+  if (error) throw error;
+}
+
+async function nullProfileReference(client: any, table: string, column: string, userId: string) {
+  const { error } = await client.from(table).update({ [column]: null }).eq(column, userId);
+  if (error) throw error;
+}
+
+async function cleanupProfileDeleteBlockers(client: any, userId: string) {
+  const [
+    { data: ownedGroups, error: ownedGroupsError },
+    { data: ownedStudios, error: ownedStudiosError },
+  ] = await Promise.all([
+    client.from("groups").select("id").eq("owner_id", userId),
+    client.from("studios").select("id").eq("owner_id", userId),
+  ]);
+
+  if (ownedGroupsError) throw ownedGroupsError;
+  if (ownedStudiosError) throw ownedStudiosError;
+
+  const ownedGroupIds = (ownedGroups || []).map((item: any) => String(item?.id || "")).filter(Boolean);
+  const ownedStudioIds = (ownedStudios || []).map((item: any) => String(item?.id || "")).filter(Boolean);
+
+  await Promise.all([
+    deleteRowsByIds(client, "booking_requests", "group_id", ownedGroupIds),
+    deleteRowsByIds(client, "booking_requests", "studio_id", ownedStudioIds),
+  ]);
+
+  const bookingRequestDeletes = [
+    client.from("booking_requests").delete().eq("sender_id", userId),
+    client.from("booking_requests").delete().eq("receiver_id", userId),
+  ];
+
+  const cleanupUpdates = [
+    nullProfileReference(client, "gigs", "permit_reviewed_by", userId),
+    nullProfileReference(client, "studios", "permit_reviewed_by", userId),
+    nullProfileReference(client, "withdrawal_requests", "processed_by", userId),
+  ];
+
+  const results = await Promise.all([...bookingRequestDeletes, ...cleanupUpdates]);
+  for (const result of results.slice(0, bookingRequestDeletes.length)) {
+    if (result?.error) throw result.error;
+  }
+}
+
 function maskEmailForLog(email: string) {
   const [name, domain] = String(email || "").split("@");
   if (!name || !domain) return "missing";
@@ -2551,6 +2601,13 @@ serve(async (req: Request) => {
       }
 
       if (existingProfile) {
+        try {
+          await cleanupProfileDeleteBlockers(client, userId);
+        } catch (cleanupError) {
+          const message = cleanupError instanceof Error ? cleanupError.message : "Unable to prepare related records for deletion";
+          return jsonResponse({ error: message }, 400);
+        }
+
         const { error: profileDeleteError } = await client
           .from("profiles")
           .delete()

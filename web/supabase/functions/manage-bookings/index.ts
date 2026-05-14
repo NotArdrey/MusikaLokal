@@ -270,6 +270,135 @@ async function insertNotificationIfMissing(
   });
 }
 
+const toMoneyNumber = (value: unknown) => {
+  const amount = Number(value ?? 0);
+  return Number.isFinite(amount) ? amount : 0;
+};
+
+async function refundStudioOwnerCancelledBookingToWallet(
+  supabaseAdmin: any,
+  bookingId: string,
+  cancelledByUserId: string,
+) {
+  const { data: booking, error: bookingError } = await supabaseAdmin
+    .from("studio_bookings")
+    .select("id, user_id, status, payment_status, payment_amount, final_price, remaining_balance, refund_amount, studio:studios(id, name, owner_id)")
+    .eq("id", bookingId)
+    .maybeSingle();
+
+  if (bookingError) throw bookingError;
+  if (!booking || booking.studio?.owner_id !== cancelledByUserId) {
+    return null;
+  }
+
+  const paymentStatus = String(booking.payment_status || "").toLowerCase();
+  if (!["paid", "partial"].includes(paymentStatus)) {
+    return {
+      owner_cancelled: true,
+      refund_amount: 0,
+      skipped: "not_paid",
+    };
+  }
+
+  const paidAmount = toMoneyNumber(booking.payment_amount) ||
+    Math.max(toMoneyNumber(booking.final_price) - toMoneyNumber(booking.remaining_balance), 0);
+
+  if (paidAmount <= 0) {
+    return {
+      owner_cancelled: true,
+      refund_amount: 0,
+      skipped: "no_paid_amount",
+    };
+  }
+
+  let { data: wallet, error: walletError } = await supabaseAdmin
+    .from("wallets")
+    .select("id, balance")
+    .eq("user_id", booking.user_id)
+    .maybeSingle();
+
+  if (walletError) throw walletError;
+
+  if (!wallet) {
+    const { data: createdWallet, error: createWalletError } = await supabaseAdmin
+      .from("wallets")
+      .insert({ user_id: booking.user_id, balance: 0 })
+      .select("id, balance")
+      .single();
+
+    if (createWalletError) throw createWalletError;
+    wallet = createdWallet;
+  }
+
+  const { data: existingRefund, error: existingRefundError } = await supabaseAdmin
+    .from("wallet_transactions")
+    .select("id, amount")
+    .eq("wallet_id", wallet.id)
+    .eq("reference_id", booking.id)
+    .eq("reference_type", "refund")
+    .eq("type", "refund")
+    .limit(1);
+
+  if (existingRefundError) throw existingRefundError;
+
+  if (existingRefund && existingRefund.length > 0) {
+    await supabaseAdmin
+      .from("studio_bookings")
+      .update({
+        payment_status: "refunded",
+        refund_amount: toMoneyNumber(existingRefund[0].amount) || paidAmount,
+        refunded_at: new Date().toISOString(),
+      })
+      .eq("id", booking.id);
+
+    return {
+      owner_cancelled: true,
+      already_refunded: true,
+      refund_amount: toMoneyNumber(existingRefund[0].amount) || paidAmount,
+    };
+  }
+
+  const newBalance = toMoneyNumber(wallet.balance) + paidAmount;
+  const { error: walletUpdateError } = await supabaseAdmin
+    .from("wallets")
+    .update({ balance: newBalance, updated_at: new Date().toISOString() })
+    .eq("id", wallet.id);
+
+  if (walletUpdateError) throw walletUpdateError;
+
+  const { error: transactionError } = await supabaseAdmin
+    .from("wallet_transactions")
+    .insert({
+      wallet_id: wallet.id,
+      amount: paidAmount,
+      type: "refund",
+      description: `Studio owner cancelled booking at ${booking.studio?.name || "Studio"}`,
+      reference_id: booking.id,
+      reference_type: "refund",
+      is_credit: true,
+      status: "completed",
+    });
+
+  if (transactionError) throw transactionError;
+
+  const { error: bookingUpdateError } = await supabaseAdmin
+    .from("studio_bookings")
+    .update({
+      payment_status: "refunded",
+      refund_amount: paidAmount,
+      refunded_at: new Date().toISOString(),
+    })
+    .eq("id", booking.id);
+
+  if (bookingUpdateError) throw bookingUpdateError;
+
+  return {
+    owner_cancelled: true,
+    already_refunded: false,
+    refund_amount: paidAmount,
+  };
+}
+
 function isMissingTableError(error: any, tableName: string) {
   const code = String(error?.code || "");
   const message = String(error?.message || "").toLowerCase();
@@ -2824,8 +2953,26 @@ serve(async (req: Request) => {
         });
       }
 
+      let ownerCancellationRefundResult: any = null;
+      if (table === "studio_bookings" && new_status === "cancelled") {
+        try {
+          ownerCancellationRefundResult = await refundStudioOwnerCancelledBookingToWallet(
+            supabaseAdmin,
+            booking_id,
+            authUser.id,
+          );
+        } catch (refundError) {
+          console.error("Failed to refund studio owner cancelled booking:", refundError);
+        }
+      }
+
       // CANCELLATION PENALTY LOGIC for studio bookings
-      if (table === "studio_bookings" && new_status === "cancelled" && data.cancellation_policy_id) {
+      if (
+        table === "studio_bookings" &&
+        new_status === "cancelled" &&
+        data.cancellation_policy_id &&
+        !ownerCancellationRefundResult?.owner_cancelled
+      ) {
         try {
           const { data: penaltyResult, error: penaltyCalcErr } = await supabaseAdmin.rpc(
             "calculate_booking_cancellation_penalty",
@@ -2904,7 +3051,10 @@ serve(async (req: Request) => {
                 } else {
                   targetUserId = bookingInfoWithLegacy.user_id;
                   notificationTitle = "Booking Declined";
-                  notificationMessage = `Your booking at ${bookingInfoWithLegacy.studio.name} has been declined/cancelled.${reasonSuffix}`;
+                  const refundSuffix = ownerCancellationRefundResult?.refund_amount
+                    ? ` A full refund of ₱${Number(ownerCancellationRefundResult.refund_amount).toLocaleString()} has been credited to your wallet.`
+                    : "";
+                  notificationMessage = `Your booking at ${bookingInfoWithLegacy.studio.name} has been declined/cancelled.${reasonSuffix}${refundSuffix}`;
                   notificationType = "error";
                   cancellationActorRole = cancelledByOwner ? "studio_owner" : "unknown";
                 }

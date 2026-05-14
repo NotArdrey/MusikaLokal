@@ -594,6 +594,153 @@ function isProductionTeamApplicationEvent(eventDetails: any) {
   );
 }
 
+function normalizeConnectionEntityType(value: unknown) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function isVenueGigInviteEvent(eventDetails: any) {
+  const senderEntityType = normalizeConnectionEntityType(eventDetails?.sender_entity_type);
+  const listingType = normalizeConnectionEntityType(readEventString(eventDetails, "listing_type"));
+  const requestKind = getListingRequestKind(eventDetails);
+
+  return (
+    senderEntityType === "venue" &&
+    requestKind === "invite" &&
+    (listingType === "gig" || Boolean(getVenueGigInviteGigId(eventDetails)))
+  );
+}
+
+function getVenueGigInviteGigId(eventDetails: any) {
+  const senderEntityType = normalizeConnectionEntityType(eventDetails?.sender_entity_type);
+  const listingType = normalizeConnectionEntityType(readEventString(eventDetails, "listing_type"));
+
+  return (
+    readEventString(eventDetails, "gig_id") ||
+    (listingType === "gig" ? readEventString(eventDetails, "listing_id") : null) ||
+    (senderEntityType === "venue" ? readEventString(eventDetails, "sender_entity_id") : null)
+  );
+}
+
+function getVenueGigInviteSlotType(eventDetails: any, groupRecord: any) {
+  const rawSlotType =
+    readEventString(eventDetails, "slot_type") ||
+    readEventString(eventDetails, "roster_entry_kind") ||
+    (groupRecord?.group_type === "duo" ? "duo" : groupRecord?.id ? "band" : "solo");
+  const normalizedSlotType = String(rawSlotType || "").trim().toLowerCase();
+
+  if (normalizedSlotType === "duo") return "duo";
+  if (normalizedSlotType === "group" || normalizedSlotType === "band") return "band";
+  return "solo";
+}
+
+async function materializeAcceptedVenueGigInvite(
+  supabaseAdmin: any,
+  requestRow: any,
+  groupRecord: any,
+) {
+  const eventDetails =
+    requestRow?.event_details && typeof requestRow.event_details === "object"
+      ? requestRow.event_details
+      : {};
+
+  if (!isVenueGigInviteEvent(eventDetails)) {
+    return null;
+  }
+
+  const gigId = getVenueGigInviteGigId(eventDetails);
+  if (!gigId) {
+    throw new Error("Venue invite is missing a gig reference");
+  }
+
+  const receiverEntityType = normalizeConnectionEntityType(eventDetails.receiver_entity_type);
+  const receiverEntityId = readEventString(eventDetails, "receiver_entity_id");
+  const groupId =
+    requestRow.group_id ||
+    (receiverEntityType === "group" ? receiverEntityId : null);
+  const applicantId =
+    groupId
+      ? groupRecord?.owner_id || requestRow.receiver_id
+      : receiverEntityId || requestRow.receiver_id;
+
+  if (!applicantId) {
+    throw new Error("Venue invite is missing an invited performer");
+  }
+
+  const slotType = getVenueGigInviteSlotType(eventDetails, groupRecord);
+  const pitchMessage =
+    readEventString(eventDetails, "pitch_message") ||
+    toNonEmptyString(requestRow.message) ||
+    "Accepted venue gig invite.";
+
+  let existingQuery = supabaseAdmin
+    .from("gig_applications")
+    .select("id, status, group_id")
+    .eq("gig_id", gigId)
+    .is("production_team_id", null);
+
+  existingQuery = groupId
+    ? existingQuery.or(`group_id.eq.${groupId},applicant_id.eq.${applicantId}`)
+    : existingQuery.eq("applicant_id", applicantId);
+
+  const { data: existingApplication, error: existingError } = await existingQuery
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (existingError) {
+    throw existingError;
+  }
+
+  if (existingApplication?.id) {
+    if (existingApplication.status === "accepted" || existingApplication.status === "approved") {
+      return { application: existingApplication, created: false };
+    }
+
+    const { data: updatedApplication, error: updateError } = await supabaseAdmin
+      .from("gig_applications")
+      .update({
+        status: "accepted",
+        pitch_message: pitchMessage,
+        slot_type: slotType,
+        submitted_by_user_id: requestRow.receiver_id,
+        leader_approval_status: groupId || existingApplication.group_id ? "approved" : null,
+        is_solo_application: !(groupId || existingApplication.group_id),
+        ...(groupId && !existingApplication.group_id ? { group_id: groupId } : {}),
+      })
+      .eq("id", existingApplication.id)
+      .select("id, status")
+      .maybeSingle();
+
+    if (updateError) throw updateError;
+    return { application: updatedApplication || existingApplication, created: false };
+  }
+
+  const insertPayload: Record<string, unknown> = {
+    gig_id: gigId,
+    applicant_id: applicantId,
+    group_id: groupId,
+    status: "accepted",
+    pitch_message: pitchMessage,
+    slot_type: slotType,
+    submitted_by_user_id: requestRow.receiver_id,
+    leader_approval_status: groupId ? "approved" : null,
+    is_solo_application: !groupId,
+    show_on_profile: true,
+  };
+
+  const { data: insertedApplication, error: insertError } = await supabaseAdmin
+    .from("gig_applications")
+    .insert(insertPayload)
+    .select("id, status")
+    .maybeSingle();
+
+  if (insertError) {
+    throw insertError;
+  }
+
+  return { application: insertedApplication, created: true };
+}
+
 function isMissingOpenProductionApplicationsColumnError(error: any) {
   const message = String(error?.message || error?.details || "").toLowerCase();
   return (
@@ -1147,7 +1294,7 @@ serve(async (req: Request) => {
 
       const { data: requestRow, error: requestError } = await supabaseAdmin
         .from("booking_requests")
-        .select("id, sender_id, receiver_id, group_id, status, event_details")
+        .select("id, sender_id, receiver_id, group_id, message, status, event_details")
         .eq("id", requestId)
         .maybeSingle();
 
@@ -1217,6 +1364,7 @@ serve(async (req: Request) => {
         }
       }
 
+      let venueGigAcceptanceResult: any = null;
       const { data: updatedRequest, error: updateError } = await supabaseAdmin
         .from("booking_requests")
         .update({ status: decision })
@@ -1237,6 +1385,33 @@ serve(async (req: Request) => {
         requestRow.event_details && typeof requestRow.event_details === "object"
           ? requestRow.event_details
           : {};
+
+      if (decision === "accepted" && isVenueGigInviteEvent(eventDetails)) {
+        try {
+          venueGigAcceptanceResult = await materializeAcceptedVenueGigInvite(
+            supabaseAdmin,
+            requestRow,
+            groupRecord,
+          );
+        } catch (acceptanceError: any) {
+          console.error("Failed to create accepted gig application for venue invite:", acceptanceError);
+          await supabaseAdmin
+            .from("booking_requests")
+            .update({ status: "pending" })
+            .eq("id", requestId)
+            .eq("status", "accepted");
+
+          return jsonResponse(
+            {
+              error:
+                acceptanceError?.message ||
+                "Invite could not be accepted because the gig application could not be created.",
+            },
+            500,
+          );
+        }
+      }
+
       const responderName =
         toNonEmptyString(eventDetails.receiver_entity_name) ||
         groupRecord?.name ||
@@ -1284,6 +1459,12 @@ serve(async (req: Request) => {
               already_on_roster: productionAcceptanceResult.alreadyOnRoster,
               member_added: productionAcceptanceResult.memberAdded,
               already_member: productionAcceptanceResult.alreadyMember,
+            }
+          : {}),
+        ...(venueGigAcceptanceResult
+          ? {
+              gig_application: venueGigAcceptanceResult.application || null,
+              gig_application_created: venueGigAcceptanceResult.created === true,
             }
           : {}),
       });

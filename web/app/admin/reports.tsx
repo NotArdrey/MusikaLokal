@@ -2041,8 +2041,8 @@ export default function AdminReportsPage() {
       <Modal visible={!!userDetailsTarget} transparent animationType="fade" onRequestClose={closeUserDetailsModal}>
         <View style={styles.modalBackdrop}>
           <View
-            testID="admin-report-details-modal"
-            accessibilityLabel="admin-report-details-modal"
+            testID="admin-user-details-modal"
+            accessibilityLabel="admin-user-details-modal"
             style={[styles.modalCardLarge, { backgroundColor: colors.card, borderColor: colors.border }]}
           >
             <View style={styles.detailsModalHeader}>
@@ -2080,7 +2080,11 @@ export default function AdminReportsPage() {
 
       <Modal visible={!!reportDetailsTarget} transparent animationType="fade" onRequestClose={closeReportDetailsModal}>
         <View style={styles.modalBackdrop}>
-          <View style={[styles.modalCardLarge, { backgroundColor: colors.card, borderColor: colors.border }]}> 
+          <View
+            testID="admin-report-details-modal"
+            accessibilityLabel="admin-report-details-modal"
+            style={[styles.modalCardLarge, { backgroundColor: colors.card, borderColor: colors.border }]}
+          >
             <View style={styles.detailsModalHeader}>
               <View style={[styles.detailsModalIcon, { backgroundColor: `${colors.primary}18` }]}>
                 <Ionicons name="flag-outline" size={23} color={colors.primary} />

@@ -1,0 +1,15 @@
+appId: ${APP_ID}
+---
+- openLink: "musikalokal://wallet"
+- assertVisible:
+    id: "mobile-wallet-page"
+- assertVisible:
+    id: "mobile-wallet-balance-value"
+- scrollUntilVisible:
+    element:
+      id: ${E2E_WALLET_TRANSACTION_ID}
+    direction: DOWN
+- assertVisible:
+    id: ${E2E_WALLET_TRANSACTION_ID}
+- assertVisible:
+    id: ${E2E_WALLET_TRANSACTION_TYPE_ID}

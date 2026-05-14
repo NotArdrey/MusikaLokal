@@ -184,10 +184,13 @@ serve(async (req: Request) => {
       if (payoutMethodsResult.error) throw payoutMethodsResult.error;
       if (withdrawalsResult.error) throw withdrawalsResult.error;
 
-      const earningTransactions = (transactionsResult.data || []).filter((tx: any) =>
+      const walletActivityTransactions = (transactionsResult.data || []).filter((tx: any) => (
         tx?.type === 'earning' &&
         (BOOKING_EARNING_REFERENCE_TYPES.has(tx?.reference_type) || !tx?.reference_type)
-      );
+      ) || (
+        tx?.type === 'refund' &&
+        tx?.reference_type === 'refund'
+      ));
       const unpaidBookings = await hydrateStudioBookingLegacy(supabaseAdmin, unpaidBookingsResult.data || []);
 
       return new Response(JSON.stringify({
@@ -195,7 +198,7 @@ serve(async (req: Request) => {
         role: profile?.role || null,
         wallet,
         balance: wallet?.balance || 0,
-        transactions: earningTransactions,
+        transactions: walletActivityTransactions,
         unpaidBookings,
         payoutMethods: payoutMethodsResult.data || [],
         withdrawals: withdrawalsResult.data || [],

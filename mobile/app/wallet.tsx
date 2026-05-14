@@ -718,10 +718,11 @@ export default function WalletScreen() {
   }, [transactions, txFilter]);
 
   const txFilterOptions = [
-    { key: "all", label: "All earnings" },
+    { key: "all", label: "All activity" },
     { key: "booking_payment", label: "Full payment" },
     { key: "booking_downpayment", label: "Downpayment" },
     { key: "booking_balance", label: "Balance" },
+    { key: "refund", label: "Refunds" },
   ];
 
   if (isGuest) {
@@ -758,6 +759,8 @@ export default function WalletScreen() {
           {/* Balance Card */}
           <View style={styles.cardWrapper}>
             <View
+              testID="mobile-wallet-balance-value"
+              accessibilityLabel="mobile-wallet-balance-value"
               style={[
                 styles.balanceCard,
                 { backgroundColor: colors.primary }
@@ -930,7 +933,7 @@ export default function WalletScreen() {
 
           {/* Transaction History */}
           <View style={styles.historySection}>
-            <Text style={[styles.historyTitle, { color: colors.text }]}>Earnings Activity</Text>
+            <Text style={[styles.historyTitle, { color: colors.text }]}>Wallet Activity</Text>
 
             {/* Filter chips */}
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 10 }}>
@@ -961,12 +964,14 @@ export default function WalletScreen() {
                 </View>
               ) : filteredTransactions.length === 0 ? (
                 <View style={{ padding: 20, alignItems: 'center' }}>
-                  <Text style={{ color: colors.textSecondary, fontFamily: 'Poppins_400Regular' }}>No booking earnings yet</Text>
+                  <Text style={{ color: colors.textSecondary, fontFamily: 'Poppins_400Regular' }}>No wallet activity yet</Text>
                 </View>
               ) : (
                 filteredTransactions.map((tx, index) => (
                   <View
                     key={tx.id}
+                    testID={`mobile-wallet-transaction-${tx.id}`}
+                    accessibilityLabel={`mobile-wallet-transaction-${tx.id}`}
                     style={[
                       styles.transactionItem,
                       { borderBottomWidth: index === filteredTransactions.length - 1 ? 0 : 1, borderBottomColor: colors.border }
@@ -986,7 +991,13 @@ export default function WalletScreen() {
                         />
                       </View>
                       <View>
-                        <Text style={[styles.transactionType, { color: colors.text }]}>{tx.type.charAt(0).toUpperCase() + tx.type.slice(1)}</Text>
+                        <Text
+                          testID={`mobile-wallet-transaction-type-${tx.id}`}
+                          accessibilityLabel={`mobile-wallet-transaction-type-${tx.id}`}
+                          style={[styles.transactionType, { color: colors.text }]}
+                        >
+                          {tx.type.charAt(0).toUpperCase() + tx.type.slice(1)}
+                        </Text>
                         {tx.reference_type && tx.reference_type !== 'booking' && (
                           <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 11, color: colors.primary }}>
                             {tx.reference_type.replace(/_/g, ' ')}

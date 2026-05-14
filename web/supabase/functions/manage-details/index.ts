@@ -8,7 +8,7 @@ const corsHeaders = {
     'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-supabase-client-platform',
 }
 
-type NormalizedReportTargetType = 'group' | 'studio' | 'gig' | 'profile' | 'product' | 'playlist'
+type NormalizedReportTargetType = 'group' | 'studio' | 'gig' | 'profile' | 'product' | 'playlist' | 'feed_post'
 type FavoriteTargetType = 'group' | 'studio' | 'gig' | 'profile'
 
 const reportTargetTableMap: Record<NormalizedReportTargetType, string> = {
@@ -18,6 +18,7 @@ const reportTargetTableMap: Record<NormalizedReportTargetType, string> = {
     profile: 'profiles',
     product: 'products',
     playlist: 'playlists',
+    feed_post: 'feed_posts',
 }
 
 const favoriteTargetColumnMap: Record<FavoriteTargetType, string> = {
@@ -38,13 +39,15 @@ const normalizeReportTargetType = (rawType: unknown): NormalizedReportTargetType
     if (value === 'venue') return 'studio'
     if (value === 'artist' || value === 'user') return 'profile'
     if (value === 'music') return 'playlist'
+    if (value === 'post') return 'feed_post'
     if (
         value === 'group' ||
         value === 'studio' ||
         value === 'gig' ||
         value === 'profile' ||
         value === 'product' ||
-        value === 'playlist'
+        value === 'playlist' ||
+        value === 'feed_post'
     ) {
         return value
     }

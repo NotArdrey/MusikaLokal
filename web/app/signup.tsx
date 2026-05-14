@@ -6,7 +6,7 @@ import * as ImagePicker from 'expo-image-picker';
 import * as Linking from 'expo-linking';
 import { router, useLocalSearchParams } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Dimensions, Image, KeyboardAvoidingView, Modal as RNModal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { Calendar } from 'react-native-calendars';
 import type { DateData } from 'react-native-calendars';
@@ -370,7 +370,22 @@ export default function SignupScreen() {
         lastVerificationEmailRef.current = normalizedEmail;
     }, [email]);
 
+    const clearDiditSignupSession = useCallback(async () => {
+        setVerificationUrl('');
+        setSessionId('');
+        setSessionNonce('');
+        setTempSessionRef('');
+        try {
+            await AsyncStorage.removeItem('signup_current_session');
+        } catch (storageError) {
+            console.warn('Failed to clear signup verification session', storageError);
+        }
+    }, []);
+
     const handleRoleSelect = (nextRole: SignupRole) => {
+        if (nextRole !== selectedRole) {
+            void clearDiditSignupSession();
+        }
         setSelectedRole(nextRole);
         if (errors.role) {
             setErrors((prev) => ({ ...prev, role: undefined }));
@@ -706,6 +721,9 @@ export default function SignupScreen() {
     const authPlaceholderColor = colors.textSecondary;
 
     const handleDocumentSelect = (documentKey: string) => {
+        if (documentKey !== selectedDocumentKey) {
+            void clearDiditSignupSession();
+        }
         setSelectedDocumentKey(documentKey);
         setDocumentModalVisible(false);
         if (errors.document) {
@@ -728,7 +746,7 @@ export default function SignupScreen() {
      */
 
     // Helper to generate a fresh session URL
-    const startNewVerificationSession = async ({ forceNew = false }: { forceNew?: boolean } = {}) => {
+    const startNewVerificationSession = async ({ forceNew = true }: { forceNew?: boolean } = {}) => {
         if (creatingDiditSessionRef.current) {
             return verificationUrl;
         }
@@ -1170,6 +1188,7 @@ export default function SignupScreen() {
             }
 
             if (selectedDocumentOption.diditSupported) {
+                await clearDiditSignupSession();
                 setVerificationMode('didit');
                 setManualFrontImage(null);
                 setManualBackImage(null);

@@ -301,6 +301,12 @@ function getFirstImage(value: unknown) {
   return typeof first === "string" ? first.trim() : null;
 }
 
+function filterPublicVisiblePlaylists(query: any) {
+  return query
+    .eq("visibility", "public")
+    .or("is_hidden.is.false,is_hidden.is.null");
+}
+
 function getSourceStationSummary(stationsBySourceKey: Map<string, any>, sourceKey: string) {
   const station = stationsBySourceKey.get(sourceKey);
   if (!station) {
@@ -354,11 +360,11 @@ async function getStationPlaylistIdsByStationId(supabaseAdmin: any, stationIds: 
 }
 
 async function listAdminStationSources(supabaseAdmin: any) {
-  const { data: playlists, error: playlistError } = await supabaseAdmin
-    .from("playlists")
-    .select("id, creator_id, title, description, genre, cover_image_url, track_count, created_at, creator:profiles!creator_id(id, full_name, avatar_url, role)")
-    .eq("visibility", "public")
-    .eq("is_hidden", false)
+  const { data: playlists, error: playlistError } = await filterPublicVisiblePlaylists(
+    supabaseAdmin
+      .from("playlists")
+      .select("id, creator_id, title, description, genre, cover_image_url, track_count, created_at, creator:profiles!creator_id(id, full_name, avatar_url, role)"),
+  )
     .order("created_at", { ascending: false })
     .limit(ADMIN_STATION_SOURCE_PLAYLIST_LIMIT);
 
@@ -380,7 +386,7 @@ async function listAdminStationSources(supabaseAdmin: any) {
       : Promise.resolve({ data: [], error: null }),
     supabaseAdmin
       .from("stations")
-      .select("id, name, description, genre, cover_image_url, is_active, is_featured, rotation_interval_minutes, managed_profile_id, managed_group_id"),
+      .select("id, creator_id, name, description, genre, cover_image_url, is_active, is_featured, rotation_interval_minutes, managed_profile_id, managed_group_id"),
   ]);
 
   if (groupLinksError) {
@@ -410,8 +416,14 @@ async function listAdminStationSources(supabaseAdmin: any) {
       continue;
     }
 
-    if (typeof station?.managed_profile_id === "string" && station.managed_profile_id) {
-      stationsBySourceKey.set(`profile:${station.managed_profile_id}`, station);
+    const profileStationId = typeof station?.managed_profile_id === "string" && station.managed_profile_id
+      ? station.managed_profile_id
+      : typeof station?.creator_id === "string" && station.creator_id
+        ? station.creator_id
+        : "";
+
+    if (profileStationId) {
+      stationsBySourceKey.set(`profile:${profileStationId}`, station);
     }
   }
 
@@ -560,12 +572,12 @@ async function getEligibleStationSource(
       throw new Error("Artist not found");
     }
 
-    const { data: playlists, error: playlistError } = await supabaseAdmin
-      .from("playlists")
-      .select("id, title, description, genre, cover_image_url, track_count, creator_id")
-      .eq("creator_id", sourceId)
-      .eq("visibility", "public")
-      .eq("is_hidden", false)
+    const { data: playlists, error: playlistError } = await filterPublicVisiblePlaylists(
+      supabaseAdmin
+        .from("playlists")
+        .select("id, title, description, genre, cover_image_url, track_count, creator_id")
+        .eq("creator_id", sourceId),
+    )
       .order("created_at", { ascending: false });
 
     if (playlistError) {
@@ -636,12 +648,12 @@ async function getEligibleStationSource(
 
   let playlists: any[] = [];
   if (playlistIds.length > 0) {
-    const { data, error } = await supabaseAdmin
-      .from("playlists")
-      .select("id, title, description, genre, cover_image_url, track_count, creator_id")
-      .in("id", playlistIds)
-      .eq("visibility", "public")
-      .eq("is_hidden", false);
+    const { data, error } = await filterPublicVisiblePlaylists(
+      supabaseAdmin
+        .from("playlists")
+        .select("id, title, description, genre, cover_image_url, track_count, creator_id")
+        .in("id", playlistIds),
+    );
 
     if (error) {
       throw error;
@@ -1272,13 +1284,14 @@ Deno.serve(async (req: Request) => {
       let query = supabaseAdmin
         .from("playlists")
         .select("*")
-        .eq("creator_id", user_id)
-        .order("created_at", { ascending: false });
+        .eq("creator_id", user_id);
 
       // Non-owners only see public playlists
       if (!isOwnProfile) {
-        query = query.eq("visibility", "public");
+        query = filterPublicVisiblePlaylists(query);
       }
+
+      query = query.order("created_at", { ascending: false });
 
       const { data, error } = await query;
       if (error) return jsonResponse({ error: error.message }, 500);
@@ -1288,11 +1301,11 @@ Deno.serve(async (req: Request) => {
     // ── browse_playlists ────────────────────────────────────────────
     if (action === "browse_playlists") {
       const { genre, featured_only, limit: lim } = params;
-      let query = supabaseAdmin
-        .from("playlists")
-        .select("*, creator:profiles!creator_id(id, full_name, avatar_url)")
-        .eq("visibility", "public")
-        .eq("is_hidden", false)
+      let query = filterPublicVisiblePlaylists(
+        supabaseAdmin
+          .from("playlists")
+          .select("*, creator:profiles!creator_id(id, full_name, avatar_url)"),
+      )
         .order("created_at", { ascending: false });
 
       if (genre) query = query.eq("genre", genre);

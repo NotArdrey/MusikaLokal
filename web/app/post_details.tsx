@@ -206,6 +206,37 @@ export default function PostDetailsScreen() {
     }
   };
 
+  const handleReport = async () => {
+    if (!post) return;
+    if (!userId) {
+      setAlert({ type: "warning", title: "Sign In Required", message: "Sign in to report this post." });
+      return;
+    }
+
+    try {
+      const { data, error } = await supabase.functions.invoke("manage-details", {
+        body: {
+          action: "report",
+          type: "feed_post",
+          id: post.id,
+          userId,
+          reason: "Spam or scam",
+          details: null,
+        },
+      });
+
+      if (error) throw error;
+
+      if (data && !Array.isArray(data) && data.already_reported) {
+        setAlert({ type: "info", title: "Already Reported", message: "You already have a pending report for this post." });
+      } else {
+        emitToast({ type: "info", title: "Reported", message: "Post has been reported for review." });
+      }
+    } catch (e: any) {
+      setAlert({ type: "error", title: "Error", message: e.message });
+    }
+  };
+
   const handleClose = useCallback(() => {
     if (typeof window !== "undefined" && window.history.length > 1) {
       router.back();
@@ -315,7 +346,17 @@ export default function PostDetailsScreen() {
             >
               <Ionicons name="trash-outline" size={18} color="#ef4444" />
             </TouchableOpacity>
-          ) : null}
+          ) : (
+            <TouchableOpacity
+              activeOpacity={0.7}
+              onPress={handleReport}
+              style={[styles.iconCircle, { backgroundColor: subtleBg }]}
+              testID="post-report-button"
+              accessibilityLabel="post-report-button"
+            >
+              <Ionicons name="flag-outline" size={18} color={colors.textSecondary} />
+            </TouchableOpacity>
+          )}
         </View>
 
         {/* Body */}

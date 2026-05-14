@@ -85,6 +85,9 @@ export const REPORT_REASONS_BY_TYPE: Record<string, string[]> = {
 // Fallback list (generic)
 export const REPORT_REASONS = REPORT_REASONS_BY_TYPE.group;
 
+export const reportReasonTestId = (reason: string) =>
+    `report-reason-${String(reason || 'unknown').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')}`;
+
 interface ReportModalProps {
     visible: boolean;
     onClose: () => void;
@@ -160,6 +163,8 @@ export default function ReportModal({
         >
             <Pressable style={[styles.overlay, { backgroundColor: overlayBg }]} onPress={handleClose}>
                 <Pressable
+                    testID="report-modal"
+                    accessibilityLabel="report-modal"
                     style={[
                         styles.sheet,
                         {
@@ -185,6 +190,8 @@ export default function ReportModal({
                                 Thanks for letting us know. Our team will review this report shortly and take appropriate action.
                             </Text>
                             <TouchableOpacity
+                                testID="report-done-button"
+                                accessibilityLabel="report-done-button"
                                 style={[styles.doneBtn, { backgroundColor: accent }]}
                                 onPress={handleClose}
                                 activeOpacity={1}
@@ -224,6 +231,8 @@ export default function ReportModal({
                                     return (
                                         <TouchableOpacity
                                             key={reason}
+                                            testID={reportReasonTestId(reason)}
+                                            accessibilityLabel={reportReasonTestId(reason)}
                                             style={[
                                                 styles.reasonRow,
                                                 {
@@ -262,6 +271,8 @@ export default function ReportModal({
                                 {/* Additional details field – shown when "Other" is selected */}
                                 {selectedReason === 'Other' && (
                                     <TextInput
+                                        testID="report-details-input"
+                                        accessibilityLabel="report-details-input"
                                         style={[
                                             styles.detailsInput,
                                             {
@@ -288,6 +299,8 @@ export default function ReportModal({
                             {/* Submit + Cancel */}
                             <View style={styles.footer}>
                                 <TouchableOpacity
+                                    testID="report-submit-button"
+                                    accessibilityLabel="report-submit-button"
                                     style={[
                                         styles.submitBtn,
                                         {
@@ -313,6 +326,8 @@ export default function ReportModal({
                                     )}
                                 </TouchableOpacity>
                                 <TouchableOpacity
+                                    testID="report-cancel-button"
+                                    accessibilityLabel="report-cancel-button"
                                     style={[styles.cancelBtn, { borderColor: isDark ? '#374151' : '#E5E7EB' }]}
                                     onPress={handleClose}
                                     activeOpacity={1}

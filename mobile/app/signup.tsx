@@ -1117,7 +1117,29 @@ export default function SignupScreen() {
         Boolean(manualIdNumber.trim()) &&
         Boolean(manualIdExpiration.trim());
 
+    const clearDiditSignupSession = useCallback(async (reason: string) => {
+        setVerificationUrl('');
+        setSessionId('');
+        setSessionNonce('');
+        setTempSessionRef('');
+        try {
+            await AsyncStorage.removeItem('signup_current_session');
+            logSignupFlow('diditSession.cleared', {
+                reason,
+                storageKey: 'signup_current_session',
+            });
+        } catch (storageError) {
+            logSignupFlowError('diditSession.clearError', storageError, {
+                reason,
+                storageKey: 'signup_current_session',
+            });
+        }
+    }, []);
+
     const handleDocumentSelect = (documentKey: string) => {
+        if (documentKey !== selectedDocumentKey) {
+            void clearDiditSignupSession('document_changed');
+        }
         setSelectedDocumentKey(documentKey);
         setDocumentModalVisible(false);
         if (errors.document) {
@@ -1126,6 +1148,9 @@ export default function SignupScreen() {
     };
 
     const handleRoleSelect = (nextRole: SignupRole) => {
+        if (nextRole !== selectedRole) {
+            void clearDiditSignupSession('role_changed');
+        }
         setSelectedRole(nextRole);
         if (errors.role) {
             setErrors((prev) => ({ ...prev, role: undefined }));
@@ -1147,7 +1172,7 @@ export default function SignupScreen() {
      */
 
     // Helper to generate a fresh session URL
-    const startNewVerificationSession = async ({ forceNew = false }: { forceNew?: boolean } = {}) => {
+    const startNewVerificationSession = async ({ forceNew = true }: { forceNew?: boolean } = {}) => {
         if (creatingDiditSessionRef.current) {
             logSignupFlow('diditSession.startBlocked.inFlight', {
                 email: maskEmailForLog(email),
@@ -1925,6 +1950,7 @@ export default function SignupScreen() {
                     selectedDocumentLabel: selectedDocumentOption.label,
                     diditDocumentType: selectedDocumentOption.diditDocumentType,
                 });
+                await clearDiditSignupSession('enter_didit_verification');
                 setVerificationMode('didit');
                 setManualFrontImage(null);
                 setManualBackImage(null);

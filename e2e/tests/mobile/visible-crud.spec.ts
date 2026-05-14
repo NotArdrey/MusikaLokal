@@ -1,10 +1,10 @@
-import { test } from '@playwright/test';
+import { expect, test } from '@playwright/test';
 import { randomUUID } from 'node:crypto';
 import { cleanupE2ERecords } from '../../helpers/cleanup';
 import { expectDbRecord, expectNoDbRecord } from '../../helpers/assertions';
 import { makeRunId } from '../../helpers/env';
 import { requireAndroidApp, runMaestroFlow } from '../../helpers/maestro';
-import { getSupabaseAdmin } from '../../helpers/supabase';
+import { getSupabaseAdmin, getSupabaseAnon } from '../../helpers/supabase';
 import {
   seedE2EGig,
   seedE2EGigApplication,
@@ -53,10 +53,101 @@ const formatSameDayManilaWindow = (startDate: Date, endDate: Date) => {
   return { start, end };
 };
 
+const makeFutureManilaDate = (daysFromNow: number) => (
+  formatManilaDateTime(new Date(Date.now() + daysFromNow * 24 * 60 * 60 * 1000)).date
+);
+
+const configureStudioForDeterministicBooking = async (studioId: string, bookingDate: string) => {
+  const admin = getSupabaseAdmin();
+
+  const { error: settingsError } = await admin
+    .from('studio_settings')
+    .update({
+      lead_time_hours: 0,
+      booking_horizon_days: 180,
+      min_booking_duration_hours: 1,
+    })
+    .eq('studio_id', studioId);
+  if (settingsError) throw settingsError;
+
+  const { error: deleteOverrideError } = await admin
+    .from('studio_date_overrides')
+    .delete()
+    .eq('studio_id', studioId)
+    .eq('override_date', bookingDate);
+  if (deleteOverrideError) throw deleteOverrideError;
+
+  const { error: overrideError } = await admin
+    .from('studio_date_overrides')
+    .insert({
+      studio_id: studioId,
+      override_date: bookingDate,
+      is_open: true,
+      open_time: '10:00',
+      close_time: '12:00',
+      slot_order: 0,
+      reason: 'Custom schedule [session_type:rehearsal]',
+    });
+  if (overrideError) throw overrideError;
+};
+
+const createPaidStudioBookingAsMusician = async (input: {
+  customer: { id: string; email: string; password: string };
+  studioId: string;
+  bookingDate: string;
+  notes: string;
+}) => {
+  const client = getSupabaseAnon();
+  const { error: signInError } = await client.auth.signInWithPassword({
+    email: input.customer.email,
+    password: input.customer.password,
+  });
+  if (signInError) throw signInError;
+
+  const { data, error } = await client.functions.invoke('manage-bookings', {
+    body: {
+      action: 'create',
+      studio_id: input.studioId,
+      user_id: input.customer.id,
+      date: input.bookingDate,
+      time_slots: [{ start: '10:00', end: '12:00' }],
+      session_type: 'rehearsal',
+      notes: input.notes,
+    },
+  });
+  if (error) {
+    throw new Error(`manage-bookings create failed: ${JSON.stringify(error)}`);
+  }
+
+  const bookingId = data?.id;
+  if (!bookingId) {
+    throw new Error(`manage-bookings create returned no booking id: ${JSON.stringify(data)}`);
+  }
+
+  const paymentAmount = Number(data.final_price || 1000);
+  const { data: booking, error: updateError } = await getSupabaseAdmin()
+    .from('studio_bookings')
+    .update({
+      status: 'confirmed',
+      payment_status: 'paid',
+      payment_type: 'full',
+      payment_amount: paymentAmount,
+      remaining_balance: 0,
+      paid_at: new Date().toISOString(),
+    })
+    .eq('id', bookingId)
+    .select('*')
+    .single();
+  if (updateError) throw updateError;
+
+  return booking;
+};
+
 type NotificationToastFixture = {
   title: string;
-  message: string;
+  message?: string;
   type: 'success' | 'error' | 'warning' | 'info';
+  read?: boolean;
   meta?: Record<string, unknown>;
 };
 
@@ -70,8 +161,8 @@ const insertAndAssertVisibleNotificationToast = async (userId: string, fixture: 
       user_id: userId,
       type: fixture.type,
       title: fixture.title,
-      message: fixture.message,
-      read: false,
+      message: fixture.message ?? '',
+      read: fixture.read ?? false,
       meta: fixture.meta ?? {},
     });
 
@@ -86,7 +177,7 @@ const insertAndAssertVisibleNotificationToast = async (userId: string, fixture: 
     record.user_id === userId &&
     record.type === fixture.type &&
     record.title === fixture.title &&
-    record.read === false
+    record.read === (fixture.read ?? false)
   ));
 };
 
@@ -202,6 +293,122 @@ test.describe('mobile visible CRUD flows', () => {
       Number(record.rehearsal_rate) === 500 &&
       Number(record.recording_rate) === 1000
     ));
+  });
+
+  test('creates a studio, books it as a musician, then refunds the musician wallet when the owner cancels', async () => {
+    test.setTimeout(1_200_000);
+
+    const owner = await seedE2EUser({
+      suffix: 'mobile-studio-book-refund-owner',
+      role: 'studio-owner',
+      fullName: 'E2E Mobile Studio Refund Owner',
+    });
+    const customer = await seedE2EUser({
+      suffix: 'mobile-studio-book-refund-customer',
+      role: 'musician',
+      fullName: 'E2E Mobile Studio Refund Musician',
+    });
+    const customerWallet = await seedE2EWallet(customer.id, 75);
+    const ownerWallet = await seedE2EWallet(owner.id, 1250);
+    const studioName = `E2E Studio Refund ${makeRunId('studio-refund')}`;
+    const studioDescription = `E2E Studio refund description ${makeRunId('studio-refund')}`;
+    const bookingDate = makeFutureManilaDate(6);
+    const bookingNotes = `E2E musician booking ${makeRunId('studio-refund-booking')}`;
+    const reason = `E2E owner refund cancellation ${makeRunId('studio-refund-cancel')}`;
+
+    await runMaestroFlow('mobile-login.yaml', {
+      E2E_MOBILE_EMAIL: owner.email,
+      E2E_MOBILE_PASSWORD: owner.password,
+    });
+    await runMaestroFlow('mobile-studio-create.yaml', {
+      E2E_STUDIO_NAME: studioName,
+      E2E_STUDIO_DESCRIPTION: studioDescription,
+    });
+
+    const studio = await expectDbRecord<any>('studios', 'name', studioName, (record) => (
+      record.owner_id === owner.id &&
+      record.description === studioDescription &&
+      Number(record.rehearsal_rate) === 500 &&
+      Number(record.recording_rate) === 1000
+    ));
+
+    await configureStudioForDeterministicBooking(studio.id, bookingDate);
+    const booking = await createPaidStudioBookingAsMusician({
+      customer,
+      studioId: studio.id,
+      bookingDate,
+      notes: bookingNotes,
+    });
+    const paidAmount = Number(booking.payment_amount);
+
+    await runMaestroFlow('mobile-booking-cancel.yaml', {
+      E2E_BOOKING_TAB_ID: 'mobile-bookings-tab-upcoming',
+      E2E_BOOKING_CARD_ID: `mobile-bookings-studio-booking-card-${booking.id}`,
+      E2E_BOOKING_CANCEL_ID: `mobile-bookings-studio-booking-cancel-${booking.id}`,
+      E2E_BOOKING_CANCEL_REASON: reason,
+    });
+
+    await expectDbRecord<any>('studio_bookings', 'id', booking.id, (record) => (
+      record.status === 'cancelled' &&
+      record.cancellation_reason === reason &&
+      record.payment_status === 'refunded' &&
+      Number(record.payment_amount) === paidAmount &&
+      Number(record.refund_amount || 0) === paidAmount
+    ));
+    await expectDbRecord<any>('wallets', 'id', customerWallet.id, (record) => Number(record.balance) === 75 + paidAmount);
+    await expectDbRecord<any>('wallets', 'id', ownerWallet.id, (record) => Number(record.balance) === 1250);
+
+    await expect
+      .poll(async () => {
+        const { data, error } = await getSupabaseAdmin()
+          .from('wallet_transactions')
+          .select('id, amount, type, is_credit, status, reference_type')
+          .eq('wallet_id', customerWallet.id)
+          .eq('reference_id', booking.id)
+          .eq('reference_type', 'refund')
+          .eq('type', 'refund');
+
+        if (error) throw error;
+        return (data || []).map((transaction: any) => ({
+          amount: Number(transaction.amount),
+          is_credit: transaction.is_credit,
+          reference_type: transaction.reference_type,
+          status: transaction.status,
+          type: transaction.type,
+        }));
+      }, { timeout: 30_000 })
+      .toEqual([
+        expect.objectContaining({
+          amount: paidAmount,
+          is_credit: true,
+          reference_type: 'refund',
+          status: 'completed',
+          type: 'refund',
+        }),
+      ]);
+
+    const { data: refundTransaction, error: refundTransactionError } = await getSupabaseAdmin()
+      .from('wallet_transactions')
+      .select('id')
+      .eq('wallet_id', customerWallet.id)
+      .eq('reference_id', booking.id)
+      .eq('reference_type', 'refund')
+      .eq('type', 'refund')
+      .single();
+    if (refundTransactionError) throw refundTransactionError;
+
+    await runMaestroFlow('mobile-login.yaml', {
+      E2E_MOBILE_EMAIL: customer.email,
+      E2E_MOBILE_PASSWORD: customer.password,
+    });
+    await runMaestroFlow('mobile-booking-history-visible.yaml', {
+      E2E_BOOKING_TAB_ID: 'mobile-bookings-tab-history',
+      E2E_BOOKING_CARD_ID: `mobile-bookings-studio-booking-card-${booking.id}`,
+    });
+    await runMaestroFlow('mobile-wallet-refund-visible.yaml', {
+      E2E_WALLET_TRANSACTION_ID: `mobile-wallet-transaction-${refundTransaction.id}`,
+      E2E_WALLET_TRANSACTION_TYPE_ID: `mobile-wallet-transaction-type-${refundTransaction.id}`,
+    });
   });
 
   test('creates a gig through mobile UI and verifies database state', async () => {
@@ -438,6 +645,110 @@ test.describe('mobile visible CRUD flows', () => {
       record.status === 'cancelled' &&
       record.cancellation_reason === reason
     ));
+  });
+
+  test('cancels a paid studio booking as the studio owner, refunds the musician wallet, and notifies them', async () => {
+    const customer = await seedE2EUser({
+      suffix: 'mobile-booking-owner-paid-cancel-customer',
+      role: 'musician',
+      fullName: 'E2E Mobile Booking Paid Cancel Customer',
+    });
+    const owner = await seedE2EUser({
+      suffix: 'mobile-booking-owner-paid-cancel-owner',
+      role: 'studio-owner',
+      fullName: 'E2E Mobile Booking Paid Cancel Owner',
+    });
+    const studio = await seedE2EStudio(owner.id, 'mobile-booking-owner-paid-cancel');
+    const customerWallet = await seedE2EWallet(customer.id, 75);
+    const ownerWallet = await seedE2EWallet(owner.id, 1250);
+    const booking = await seedE2EStudioBooking({
+      userId: customer.id,
+      studioId: studio.id,
+      suffix: 'mobile-booking-owner-paid-cancel',
+      status: 'confirmed',
+      paymentStatus: 'paid',
+      paymentAmount: 1000,
+    });
+    const reason = `E2E owner paid cancellation ${makeRunId('booking-owner-paid-cancel')}`;
+
+    await runMaestroFlow('mobile-login.yaml', {
+      E2E_MOBILE_EMAIL: owner.email,
+      E2E_MOBILE_PASSWORD: owner.password,
+    });
+    await runMaestroFlow('mobile-booking-cancel.yaml', {
+      E2E_BOOKING_TAB_ID: 'mobile-bookings-tab-upcoming',
+      E2E_BOOKING_CARD_ID: `mobile-bookings-studio-booking-card-${booking.id}`,
+      E2E_BOOKING_CANCEL_ID: `mobile-bookings-studio-booking-cancel-${booking.id}`,
+      E2E_BOOKING_CANCEL_REASON: reason,
+    });
+
+    await expectDbRecord<any>('studio_bookings', 'id', booking.id, (record) => (
+      record.status === 'cancelled' &&
+      record.cancellation_reason === reason &&
+      record.payment_status === 'refunded' &&
+      Number(record.payment_amount) === 1000 &&
+      Number(record.refund_amount || 0) === 1000
+    ));
+    await expectDbRecord<any>('wallets', 'id', customerWallet.id, (record) => Number(record.balance) === 1075);
+    await expectDbRecord<any>('wallets', 'id', ownerWallet.id, (record) => Number(record.balance) === 1250);
+
+    await expect
+      .poll(async () => {
+        const { data, error } = await getSupabaseAdmin()
+          .from('wallet_transactions')
+          .select('id, amount, type, is_credit, status, reference_type')
+          .eq('wallet_id', customerWallet.id)
+          .eq('reference_id', booking.id)
+          .eq('reference_type', 'refund')
+          .eq('type', 'refund');
+
+        if (error) throw error;
+        return (data || []).map((transaction: any) => ({
+          amount: Number(transaction.amount),
+          is_credit: transaction.is_credit,
+          reference_type: transaction.reference_type,
+          status: transaction.status,
+          type: transaction.type,
+        }));
+      }, { timeout: 30_000 })
+      .toEqual([
+        expect.objectContaining({
+          amount: 1000,
+          is_credit: true,
+          reference_type: 'refund',
+          status: 'completed',
+          type: 'refund',
+        }),
+      ]);
+
+    await expect
+      .poll(async () => {
+        const { data, error } = await getSupabaseAdmin()
+          .from('notifications')
+          .select('id, title, type, message, meta')
+          .eq('user_id', customer.id);
+
+        if (error) throw error;
+        return (data || []).some((notification: any) => (
+          notification.title === 'Booking Declined' &&
+          notification.type === 'error' &&
+          notification.meta?.booking_id === booking.id &&
+          notification.meta?.cancelled_by_user_id === owner.id &&
+          notification.meta?.cancelled_by_role === 'studio_owner' &&
+          String(notification.message || '').includes(reason) &&
+          String(notification.message || '').includes('full refund')
+        ));
+      }, { timeout: 45_000 })
+      .toBe(true);
+
+    await runMaestroFlow('mobile-login.yaml', {
+      E2E_MOBILE_EMAIL: customer.email,
+      E2E_MOBILE_PASSWORD: customer.password,
+    });
+    await runMaestroFlow('mobile-booking-history-visible.yaml', {
+      E2E_BOOKING_TAB_ID: 'mobile-bookings-tab-history',
+      E2E_BOOKING_CARD_ID: `mobile-bookings-studio-booking-card-${booking.id}`,
+    });
   });
 
   test('reports late arrival for a near-term studio booking through mobile UI', async () => {
@@ -739,6 +1050,15 @@ test.describe('mobile visible CRUD flows', () => {
           route: '/groups',
           event_type: 'group_member_added',
           status: 'accepted',
+        },
+      },
+      {
+        type: 'info',
+        title: 'Title Only Notification',
+        read: true,
+        meta: {
+          route: '/notifications',
+          event_type: 'title_only_insert',
         },
       },
     ];

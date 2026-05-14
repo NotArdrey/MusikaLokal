@@ -37,9 +37,22 @@ async function getE2EProfileIds() {
   return (data || []).map((profile: any) => String(profile.id)).filter(Boolean);
 }
 
+async function getE2EWalletIds(profileIds: string[]) {
+  if (profileIds.length === 0) return [];
+
+  const { data, error } = await getSupabaseAdmin()
+    .from('wallets')
+    .select('id')
+    .in('user_id', profileIds);
+
+  if (error) throw error;
+  return (data || []).map((wallet: any) => String(wallet.id)).filter(Boolean);
+}
+
 export async function cleanupE2ERecords() {
   const client = getSupabaseAdmin();
   const profileIds = await getE2EProfileIds();
+  const walletIds = await getE2EWalletIds(profileIds);
 
   await deleteWhereIn('post_comments', 'author_id', profileIds);
   await deleteWhereIn('post_reactions', 'user_id', profileIds);
@@ -55,6 +68,7 @@ export async function cleanupE2ERecords() {
   await deleteWhereIn('payout_methods', 'user_id', profileIds);
   await deleteWhereIn('withdrawal_requests', 'user_id', profileIds);
   await deleteWhereIn('wallet_deposits', 'user_id', profileIds);
+  await deleteWhereIn('wallet_transactions', 'wallet_id', walletIds);
   await deleteWhereIn('wallets', 'user_id', profileIds);
   await deleteWhereIn('platform_withdrawals', 'processed_by', profileIds);
   await deleteWhereIn('booking_incidents', 'reporter_user_id', profileIds);
@@ -64,9 +78,12 @@ export async function cleanupE2ERecords() {
   await deleteWhereIn('studio_bookings', 'user_id', profileIds);
   await deleteWhereIn('gig_applications', 'applicant_id', profileIds);
   await deleteWhereIn('notifications', 'user_id', profileIds);
+  await deleteWhereIn('playlist_play_events', 'user_id', profileIds);
   await deleteWhereIn('stations', 'creator_id', profileIds);
   await deleteWhereIn('stations', 'managed_profile_id', profileIds);
   await deleteWhereTextStarts('stations', 'name', 'E2E ');
+  await deleteWhereIn('playlists', 'creator_id', profileIds);
+  await deleteWhereTextStarts('playlists', 'title', 'E2E ');
   await deleteWhereIn('products', 'seller_id', profileIds);
   await deleteWhereTextStarts('products', 'title', 'E2E ');
   await deleteWhereIn('production_team_roster', 'profile_id', profileIds);

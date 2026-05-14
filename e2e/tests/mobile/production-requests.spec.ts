@@ -1,9 +1,11 @@
-import { test } from '@playwright/test';
+import { expect, test } from '@playwright/test';
 import { cleanupE2ERecords } from '../../helpers/cleanup';
 import { expectDbRecord } from '../../helpers/assertions';
 import { requireAndroidApp, runMaestroFlow } from '../../helpers/maestro';
+import { getSupabaseAdmin } from '../../helpers/supabase';
 import {
   seedE2EGroup,
+  seedE2EGroupMemberInviteRequest,
   seedE2EProductionConnectionRequest,
   seedE2EProductionTeam,
   seedE2EUser,
@@ -197,6 +199,57 @@ test.describe('mobile production applications and invites', () => {
     ));
     await expectDbRecord<any>('production_team_members', 'user_id', groupOwner.id, (record) => (
       record.team_id === team.id &&
+      record.role === 'member'
+    ));
+  });
+
+  test('keeps a new group member invite pending until the invited musician accepts', async () => {
+    const groupOwner = await seedE2EUser({
+      suffix: 'mobile-group-member-invite-owner',
+      role: 'musician',
+      fullName: 'E2E Mobile Group Member Invite Owner',
+    });
+    const invitedMusician = await seedE2EUser({
+      suffix: 'mobile-group-member-invite-member',
+      role: 'musician',
+      fullName: 'E2E Mobile Group Member Invite Member',
+    });
+    const group = await seedE2EGroup(groupOwner.id, 'mobile-group-member-invite');
+    const request = await seedE2EGroupMemberInviteRequest({
+      groupOwnerId: groupOwner.id,
+      groupOwnerName: groupOwner.fullName,
+      receiverId: invitedMusician.id,
+      receiverName: invitedMusician.fullName,
+      groupId: group.id,
+      groupName: group.name,
+      suffix: 'mobile-group-member-invite',
+    });
+
+    await expect
+      .poll(async () => {
+        const { data, error } = await getSupabaseAdmin()
+          .from('group_members')
+          .select('id')
+          .eq('group_id', group.id)
+          .eq('user_id', invitedMusician.id);
+
+        if (error) throw error;
+        return data?.length || 0;
+      }, { timeout: 30_000 })
+      .toBe(0);
+
+    await runMaestroFlow('mobile-login.yaml', {
+      E2E_MOBILE_EMAIL: invitedMusician.email,
+      E2E_MOBILE_PASSWORD: invitedMusician.password,
+    });
+    await runMaestroFlow('mobile-production-request-accept.yaml', {
+      E2E_PRODUCTION_REQUEST_CARD_ID: `mobile-bookings-booking-request-card-${request.id}`,
+      E2E_PRODUCTION_REQUEST_ACCEPT_ID: `mobile-bookings-booking-request-accept-${request.id}`,
+    });
+
+    await expectDbRecord<any>('booking_requests', 'id', request.id, (record) => record.status === 'accepted');
+    await expectDbRecord<any>('group_members', 'user_id', invitedMusician.id, (record) => (
+      record.group_id === group.id &&
       record.role === 'member'
     ));
   });

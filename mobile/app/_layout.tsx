@@ -202,9 +202,11 @@ function RootContent() {
         return false;
       }
 
+      const rawTitle = String(nextNotification.title || "").trim();
+      const title = rawTitle || "Notification";
       const message = String(nextNotification.message || "").trim();
-      if (!message) {
-        logNotificationToastDebug("Skipping notification toast with empty message", {
+      if (!rawTitle && !message) {
+        logNotificationToastDebug("Skipping notification toast with empty content", {
           source,
           notificationId,
         });
@@ -234,7 +236,7 @@ function RootContent() {
         dedupeKey: `notification:${notificationId}`,
         id: notificationId,
         type: toastType,
-        title: String(nextNotification.title || "").trim() || "Notification",
+        title,
         message,
         source,
       });
@@ -320,7 +322,6 @@ function RootContent() {
         .from("notifications")
         .select("id, title, message, type, created_at, read")
         .eq("user_id", userId)
-        .eq("read", false)
         .gte("created_at", queryFloorIso)
         .order("created_at", { ascending: true })
         .limit(NOTIFICATION_TOAST_BACKFILL_LIMIT);

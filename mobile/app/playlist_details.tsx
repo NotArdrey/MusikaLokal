@@ -862,6 +862,8 @@ export default function PlaylistDetailsScreen() {
   const reportHeaderAction = canReportPlaylist ? (
     <TouchableOpacity
       activeOpacity={1}
+      testID="playlist-report-button"
+      accessibilityLabel="playlist-report-button"
       onPress={openReportModal}
       hitSlop={8}
       style={[

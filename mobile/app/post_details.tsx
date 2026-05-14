@@ -195,14 +195,29 @@ export default function PostDetailsScreen() {
   };
 
   const handleReport = async () => {
+    if (!userId) {
+      setAlert({ type: "warning", title: "Sign In Required", message: "Sign in to report this post." });
+      return;
+    }
+
     try {
-      const { data } = await supabase.functions.invoke("manage-social-feed", {
-        body: { action: "report_post", post_id: post.id, reason: "inappropriate" },
+      const { data, error } = await supabase.functions.invoke("manage-details", {
+        body: {
+          action: "report",
+          type: "feed_post",
+          id: post.id,
+          userId,
+          reason: "Inappropriate content",
+          details: null,
+        },
       });
-      if (data?.success) {
-        emitToast({ type: "info", title: "Reported", message: "Post has been reported for review." });
+
+      if (error) throw error;
+
+      if (data && !Array.isArray(data) && data.already_reported) {
+        setAlert({ type: "info", title: "Already Reported", message: "You already have a pending report for this post." });
       } else {
-        setAlert({ type: "warning", title: "Info", message: data?.error || "Already reported" });
+        emitToast({ type: "info", title: "Reported", message: "Post has been reported for review." });
       }
     } catch (e: any) {
       setAlert({ type: "error", title: "Error", message: e.message });
@@ -261,7 +276,12 @@ export default function PostDetailsScreen() {
               <Ionicons name="trash-outline" size={20} color="#ef4444" />
             </TouchableOpacity>
           ) : (
-            <TouchableOpacity activeOpacity={1} onPress={handleReport}>
+            <TouchableOpacity
+              activeOpacity={1}
+              testID="post-report-button"
+              accessibilityLabel="post-report-button"
+              onPress={handleReport}
+            >
               <Ionicons name="flag-outline" size={20} color={colors.textSecondary} />
             </TouchableOpacity>
           )}
