@@ -5,12 +5,12 @@ import { router, useLocalSearchParams } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   Dimensions,
   FlatList,
   Image,
   InteractionManager,
   Keyboard,
+  Platform,
   Share,
   RefreshControl,
   ScrollView,
@@ -115,6 +115,9 @@ const normalizeAiFeedProvider = (provider: string) =>
 const normalizeAiFeedMessage = (message: string) =>
   /loaded cached/i.test(message) ? "" : message;
 
+const formatCountLabel = (count: number, singular: string, plural = `${singular}s`) =>
+  `${count} ${count === 1 ? singular : plural}`;
+
 const logFeedInvokeError = (
   scope: string,
   error: any,
@@ -137,7 +140,6 @@ const logFeedInvokeError = (
 const FEED_PAGE_SIZE = 12;
 const AI_CARD_LIMIT = 20;
 const FEED_FOCUS_REFRESH_COOLDOWN_MS = 30000;
-const SOCIAL_MEDIA_ASPECT_RATIO = 1.45;
 const PESO_SIGN = "\u20B1";
 const POST_MEDIA_BUCKET = "post-media";
 const MAX_POST_MEDIA_ITEMS = 10;
@@ -1159,6 +1161,7 @@ const SocialMediaGallery = React.memo(function SocialMediaGallery({
         style={styles.socialGalleryImage}
         width={Math.round(imageWidth)}
         height={Math.round(imageHeight)}
+        contentFit="cover"
         priority={index === 0 ? "normal" : "low"}
       />
       {index === visibleMedia.length - 1 && remainingCount > 0 ? (
@@ -1171,7 +1174,7 @@ const SocialMediaGallery = React.memo(function SocialMediaGallery({
 
   if (visibleMedia.length === 0) return null;
 
-  const singleHeight = Math.round(mediaWidth / SOCIAL_MEDIA_ASPECT_RATIO);
+  const singleHeight = 230;
   const halfWidth = (mediaWidth - SOCIAL_GALLERY_GAP) / 2;
 
   let galleryContent: React.ReactNode;
@@ -1617,17 +1620,15 @@ type SocialFeedCardProps = {
   borderColor: string;
   cardColor: string;
   colors: any;
-  currentUserId?: string | null;
   followBusy: boolean;
   followTarget: { id: string; type: SocialFollowTargetType } | null;
   isDark: boolean;
   isFollowing: boolean;
   mediaWidth: number;
-  onDeletePost?: (post: any) => void;
-  onEditPost?: (post: any) => void;
   onFollow: (id: string, targetType: SocialFollowTargetType, isFollowing: boolean) => void;
   onOpenListing: (listingId: string) => void;
   onOpenPost: (postId: string) => void;
+  onOpenPostOptions?: (post: any) => void;
   onOpenProduct: (productId: string) => void;
   onOpenProfile: (profileId: string) => void;
   onOpenProductionTeam: (teamId: string) => void;
@@ -1643,17 +1644,15 @@ const SocialFeedCard = React.memo(function SocialFeedCard({
   borderColor,
   cardColor,
   colors,
-  currentUserId,
   followBusy,
   followTarget,
   isDark,
   isFollowing,
   mediaWidth,
-  onDeletePost,
-  onEditPost,
   onFollow,
   onOpenListing,
   onOpenPost,
+  onOpenPostOptions,
   onOpenProduct,
   onOpenProfile,
   onOpenProductionTeam,
@@ -1711,21 +1710,16 @@ const SocialFeedCard = React.memo(function SocialFeedCard({
     }
   }, [item?.linked_product?.id, onOpenProduct]);
 
-  const isOwnerPost = !isSuggestion && Boolean(currentUserId && item?.author_id === currentUserId);
   const hasLiked = Boolean(item?.my_reaction || item?.user_reaction);
 
   const handleMoreOptions = useCallback(() => {
-    if (!isOwnerPost) {
+    if (isSuggestion) {
       handleOpenPrimary();
       return;
     }
 
-    Alert.alert("Post options", "", [
-      { text: "Edit", onPress: () => onEditPost?.(item) },
-      { text: "Delete", style: "destructive", onPress: () => onDeletePost?.(item) },
-      { text: "Cancel", style: "cancel" },
-    ]);
-  }, [handleOpenPrimary, isOwnerPost, item, onDeletePost, onEditPost]);
+    onOpenPostOptions?.(item);
+  }, [handleOpenPrimary, isSuggestion, item, onOpenPostOptions]);
 
   const reactionCount = Number(item?.reaction_count || 0);
   const commentCount = Number(item?.comment_count || 0);
@@ -1941,13 +1935,13 @@ const SocialFeedCard = React.memo(function SocialFeedCard({
         <>
           <View style={styles.socialStatsRow}>
             <Text style={[styles.socialStatsText, { color: colors.textSecondary }]}>
-              {reactionCount} likes
+              {formatCountLabel(reactionCount, "like")}
             </Text>
             <Text style={[styles.socialStatsText, { color: colors.textSecondary }]}>
-              {commentCount} comments
+              {formatCountLabel(commentCount, "comment")}
             </Text>
             <Text style={[styles.socialStatsText, { color: colors.textSecondary }]}>
-              {shareCount} shares
+              {formatCountLabel(shareCount, "share")}
             </Text>
           </View>
           <View style={[styles.socialActionRow, { borderTopColor: borderColor }]}>
@@ -2005,9 +1999,12 @@ export default function FeedScreen() {
   const [editingPost, setEditingPost] = useState<any | null>(null);
   const [mediaBusy, setMediaBusy] = useState(false);
   const [mediaStatus, setMediaStatus] = useState("");
+  const [composerKeyboardVisible, setComposerKeyboardVisible] = useState(false);
   const [creating, setCreating] = useState(false);
 
   const [alert, setAlert] = useState<{ type: AlertType; title: string; message: string } | null>(null);
+  const [postOptionsTarget, setPostOptionsTarget] = useState<any | null>(null);
+  const [deletePostTarget, setDeletePostTarget] = useState<any | null>(null);
   const composerInputRef = React.useRef<TextInput>(null);
   const searchSheetRef = React.useRef<import("@gorhom/bottom-sheet").BottomSheetModal>(null);
   const bottomSheetRef = React.useRef<import("@gorhom/bottom-sheet").BottomSheetModal>(null);
@@ -2027,18 +2024,40 @@ export default function FeedScreen() {
     const role = typeof userRole === "string" ? userRole.toLowerCase() : "";
     return Boolean(session && userId && ["musician", "producer", "studio-owner", "venue-owner", "admin"].includes(role));
   }, [session, userId, userRole]);
+  const shouldPersonalizeForYouFeed = Boolean(userId && !isGuest);
+  const openPostOptions = useCallback((post: any) => {
+    if (!post?.id) return;
+    setPostOptionsTarget(post);
+  }, []);
   const composerCanSubmit = Boolean(
     normalizeVisibleInput(postBody) ||
     postMedia.length > 0 ||
     (editingPost && !mediaBusy),
   );
 
+  useEffect(() => {
+    if (!showCreate) {
+      setComposerKeyboardVisible(false);
+      return;
+    }
+
+    const showEvent = Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
+    const hideEvent = Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
+    const showSubscription = Keyboard.addListener(showEvent, () => setComposerKeyboardVisible(true));
+    const hideSubscription = Keyboard.addListener(hideEvent, () => setComposerKeyboardVisible(false));
+
+    return () => {
+      showSubscription.remove();
+      hideSubscription.remove();
+    };
+  }, [showCreate]);
+
   const forYouFeedQuery = useFeedQuery({
     enabled: false,
     feedTab: "for_you",
     feedType: "public",
     limit: FEED_PAGE_SIZE,
-    personalize: false,
+    personalize: shouldPersonalizeForYouFeed,
     userId,
   });
   const followingFeedQuery = useFeedQuery({
@@ -2125,17 +2144,19 @@ export default function FeedScreen() {
           post.is_following === true ||
           nextFollowingKeys.has(buildSocialFollowKey("profile", post.author_id)),
       }));
-    const nextPosts = feedTab === "for_you" || feedTab === "following" ? [] : fetchedPosts;
+    const nextPosts = fetchedPosts;
     const cachedEntry = feedCacheRef.current[feedTab];
+
+    const shouldKeepRecommendationCards = feedTab === "for_you";
 
     return {
       posts: nextPosts,
-      aiCards: nextPosts.length > 0 || feedTab !== "for_you" ? [] : cachedEntry.aiCards,
-      aiFeedMessage: nextPosts.length > 0 || feedTab !== "for_you" ? "" : normalizeAiFeedMessage(cachedEntry.aiFeedMessage || ""),
+      aiCards: shouldKeepRecommendationCards ? cachedEntry.aiCards : [],
+      aiFeedMessage: shouldKeepRecommendationCards ? normalizeAiFeedMessage(cachedEntry.aiFeedMessage || "") : "",
       aiFeedProvider:
-        nextPosts.length > 0 || feedTab !== "for_you"
-          ? groqModelLabel
-          : normalizeAiFeedProvider(cachedEntry.aiFeedProvider || groqModelLabel),
+        shouldKeepRecommendationCards
+          ? normalizeAiFeedProvider(cachedEntry.aiFeedProvider || groqModelLabel)
+          : groqModelLabel,
       hasMore: Boolean(latestPage?.nextCursor),
       loaded: true,
     };
@@ -2793,18 +2814,16 @@ export default function FeedScreen() {
             post.is_following === true ||
             nextFollowingKeys.has(buildSocialFollowKey("profile", post.author_id)),
         }));
-      const nextPosts = feedTab === "for_you" || feedTab === "following" ? [] : fetchedPosts;
+      const nextPosts = fetchedPosts;
       const cachedEntry = feedCacheRef.current[feedTab];
       let nextAiCards = cachedEntry.aiCards;
       let nextAiFeedMessage = normalizeAiFeedMessage(cachedEntry.aiFeedMessage || "");
       let nextAiFeedProvider = normalizeAiFeedProvider(cachedEntry.aiFeedProvider || groqModelLabel);
 
-      if (!append) {
-        if (nextPosts.length > 0 || feedTab !== "for_you") {
-          nextAiCards = [];
-          nextAiFeedMessage = "";
-          nextAiFeedProvider = groqModelLabel;
-        }
+      if (!append && feedTab !== "for_you") {
+        nextAiCards = [];
+        nextAiFeedMessage = "";
+        nextAiFeedProvider = groqModelLabel;
       }
 
       if (requestId !== feedRequestIdRef.current[feedTab]) {
@@ -2819,7 +2838,7 @@ export default function FeedScreen() {
         hasMore: Boolean(latestPage?.nextCursor),
         loaded: true,
       };
-      const shouldLoadForYouRecommendations = !append && feedTab === "for_you" && nextPosts.length === 0;
+      const shouldLoadForYouRecommendations = !append && feedTab === "for_you";
 
       feedCacheRef.current[feedTab] = nextSnapshot;
       feedLastFetchAt[feedTab] = Date.now();
@@ -3264,6 +3283,12 @@ export default function FeedScreen() {
         });
         handleComposerClose();
         void fetchFeed(activeTabRef.current);
+      } else if (data?.blocked || data?.pending_review || data?.status === "blocked" || data?.status === "pending_review") {
+        setAlert({
+          type: "warning",
+          title: data?.pending_review || data?.status === "pending_review" ? "Post needs review" : "Post blocked",
+          message: data?.moderation?.reason || data?.error || "This post did not pass AI moderation.",
+        });
       } else {
         setAlert({ type: "error", title: "Error", message: data?.error || "Failed to create post" });
       }
@@ -3357,17 +3382,35 @@ export default function FeedScreen() {
     setSelectedPostId(null);
   }, []);
 
+  const patchPostEverywhere = useCallback((postId: string, updater: (post: any) => any) => {
+    if (!postId) return;
+
+    const updatePosts = (items: any[]) =>
+      items.map((item) => (item?.id === postId ? updater(item) : item));
+
+    setPosts(updatePosts);
+    feedCacheRef.current = {
+      for_you: {
+        ...feedCacheRef.current.for_you,
+        posts: updatePosts(feedCacheRef.current.for_you.posts),
+      },
+      following: {
+        ...feedCacheRef.current.following,
+        posts: updatePosts(feedCacheRef.current.following.posts),
+      },
+    };
+  }, []);
+
   const handleModalReactionChanged = useCallback(
     (postId: string, hasReaction: boolean, reactionCount: number) => {
-      setPosts((current) =>
-        current.map((post) =>
-          post.id === postId
-            ? { ...post, my_reaction: hasReaction ? "like" : null, reaction_count: reactionCount }
-            : post,
-        ),
-      );
+      patchPostEverywhere(postId, (post) => ({
+        ...post,
+        my_reaction: hasReaction ? "like" : null,
+        user_reaction: hasReaction ? "like" : null,
+        reaction_count: reactionCount,
+      }));
     },
-    [],
+    [patchPostEverywhere],
   );
 
   const handleModalCommentChanged = useCallback((postId: string, commentCount: number) => {
@@ -3400,28 +3443,26 @@ export default function FeedScreen() {
   const handleDeletePost = useCallback((post: any) => {
     if (!post?.id || post.author_id !== userId) return;
 
-    Alert.alert("Delete post", "This post will be removed from the feed.", [
-      { text: "Cancel", style: "cancel" },
-      {
-        text: "Delete",
-        style: "destructive",
-        onPress: async () => {
-          try {
-            const { data, error } = await supabase.functions.invoke("manage-social-feed", {
-              body: { action: "delete_post", post_id: post.id },
-            });
-            if (error) throw error;
-            if (data?.error) throw new Error(String(data.error));
-            setPosts((current) => current.filter((item) => item.id !== post.id));
-            invalidateFeedCache("following");
-            emitToast({ type: "success", title: "Post deleted", message: "" });
-          } catch (error: any) {
-            setAlert({ type: "error", title: "Delete failed", message: error?.message || "Please try again." });
-          }
-        },
-      },
-    ]);
-  }, [invalidateFeedCache, userId]);
+    setDeletePostTarget(post);
+  }, [userId]);
+
+  const confirmDeletePost = useCallback(async () => {
+    const post = deletePostTarget;
+    if (!post?.id || post.author_id !== userId) return;
+
+    try {
+      const { data, error } = await supabase.functions.invoke("manage-social-feed", {
+        body: { action: "delete_post", post_id: post.id },
+      });
+      if (error) throw error;
+      if (data?.error) throw new Error(String(data.error));
+      setPosts((current) => current.filter((item) => item.id !== post.id));
+      invalidateFeedCache("following");
+      emitToast({ type: "success", title: "Post deleted", message: "" });
+    } catch (error: any) {
+      setAlert({ type: "error", title: "Delete failed", message: error?.message || "Please try again." });
+    }
+  }, [deletePostTarget, invalidateFeedCache, userId]);
 
   const handleTogglePostReaction = useCallback(async (post: any) => {
     if (!session || !post?.id) {
@@ -3430,18 +3471,12 @@ export default function FeedScreen() {
     }
 
     const hadReaction = Boolean(post.my_reaction || post.user_reaction);
-    setPosts((current) =>
-      current.map((item) =>
-        item.id === post.id
-          ? {
-              ...item,
-              my_reaction: hadReaction ? null : "like",
-              user_reaction: hadReaction ? null : "like",
-              reaction_count: Math.max(0, Number(item.reaction_count || 0) + (hadReaction ? -1 : 1)),
-            }
-          : item,
-      ),
-    );
+    patchPostEverywhere(post.id, (item) => ({
+      ...item,
+      my_reaction: hadReaction ? null : "like",
+      user_reaction: hadReaction ? null : "like",
+      reaction_count: Math.max(0, Number(item.reaction_count || 0) + (hadReaction ? -1 : 1)),
+    }));
 
     try {
       const { data, error } = await supabase.functions.invoke("manage-social-feed", {
@@ -3450,21 +3485,44 @@ export default function FeedScreen() {
       if (error) throw error;
       if (data?.error) throw new Error(String(data.error));
     } catch (error: any) {
-      setPosts((current) =>
-        current.map((item) =>
-          item.id === post.id
-            ? {
-                ...item,
-                my_reaction: hadReaction ? "like" : null,
-                user_reaction: hadReaction ? "like" : null,
-                reaction_count: Math.max(0, Number(item.reaction_count || 0) + (hadReaction ? 1 : -1)),
-              }
-            : item,
-        ),
-      );
+      patchPostEverywhere(post.id, (item) => ({
+        ...item,
+        my_reaction: hadReaction ? "like" : null,
+        user_reaction: hadReaction ? "like" : null,
+        reaction_count: Math.max(0, Number(item.reaction_count || 0) + (hadReaction ? 1 : -1)),
+      }));
       emitToast({ type: "error", title: "Reaction failed", message: error?.message || "Please try again." });
     }
-  }, [session]);
+  }, [patchPostEverywhere, session]);
+
+  const handleReportPost = useCallback(async (post: any) => {
+    if (!session || !post?.id) {
+      emitToast({ type: "info", title: "Sign in required", message: "Please sign in to report this post." });
+      return;
+    }
+
+    if (post.author_id === userId) {
+      emitToast({ type: "info", title: "Owner action", message: "You cannot report your own post." });
+      return;
+    }
+
+    try {
+      const { data, error } = await supabase.functions.invoke("manage-social-feed", {
+        body: {
+          action: "report_post",
+          post_id: post.id,
+          reason: "Inappropriate content",
+        },
+      });
+
+      if (error) throw error;
+      if (data?.error) throw new Error(String(data.error));
+
+      emitToast({ type: "info", title: "Reported", message: "Post has been reported for review." });
+    } catch (error: any) {
+      setAlert({ type: "error", title: "Report failed", message: error?.message || "Please try again." });
+    }
+  }, [session, userId]);
 
   const handleSharePost = useCallback(async (post: any) => {
     if (!post?.id) return;
@@ -3636,7 +3694,6 @@ export default function FeedScreen() {
           borderColor={isDark ? "#334155" : "#EEF0F4"}
           cardColor={isDark ? "#1E293B" : "#FFFFFF"}
           colors={colors}
-          currentUserId={userId}
           followBusy={isFollowBusy}
           followTarget={followTarget}
           isDark={isDark}
@@ -3676,9 +3733,6 @@ export default function FeedScreen() {
         borderColor={borderColor}
         cardColor={cardBg}
         colors={colors}
-        currentUserId={userId}
-        onDeletePost={handleDeletePost}
-        onEditPost={handleEditPost}
         followBusy={isAuthorFollowBusy}
         followTarget={authorFollowTarget}
         isDark={isDark}
@@ -3687,6 +3741,7 @@ export default function FeedScreen() {
         onFollow={handleFollow}
         onOpenListing={openListingDetails}
         onOpenPost={openPostDetails}
+        onOpenPostOptions={openPostOptions}
         onOpenProduct={openProductDetails}
         onOpenProfile={openProfileDetails}
         onOpenProductionTeam={openProductionTeamDetails}
@@ -3698,20 +3753,16 @@ export default function FeedScreen() {
       />
     );
   }, [
-    colors.border,
-    colors.primary,
-    colors.text,
-    colors.textSecondary,
+    colors,
     followBusyByKey,
     followingKeys,
-    handleDeletePost,
-    handleEditPost,
     handleFollow,
     handleSharePost,
     handleTogglePostReaction,
     isDark,
     openListingDetails,
     openPlaylistDetails,
+    openPostOptions,
     openPostDetails,
     openProductDetails,
     openProfileDetails,
@@ -3893,11 +3944,11 @@ export default function FeedScreen() {
 
   const feedItems = useMemo(() => {
     if (loading) return [];
-    if (tab === "for_you" && posts.length === 0 && aiCards.length > 0) {
-      return dedupeFeedItems(aiCards);
+    if (tab === "for_you") {
+      return dedupeFeedItems([...posts, ...aiCards]);
     }
     if (tab === "following") {
-      return dedupeFeedItems(followingEntities);
+      return dedupeFeedItems([...posts, ...followingEntities]);
     }
     return dedupeFeedItems(posts);
   }, [aiCards, followingEntities, loading, posts, tab]);
@@ -4044,9 +4095,9 @@ export default function FeedScreen() {
           testID="mobile-feed-create-post-modal"
           style={[
             styles.modalBox,
+            composerKeyboardVisible ? styles.modalBoxKeyboard : null,
             {
               backgroundColor: colors.surface,
-              paddingBottom: Math.max(16, insets.bottom + 12),
             },
           ]}
         >
@@ -4118,12 +4169,7 @@ export default function FeedScreen() {
             </View>
           </View>
 
-          <ScrollView
-            keyboardShouldPersistTaps="handled"
-            showsVerticalScrollIndicator={false}
-            style={styles.modalContent}
-            contentContainerStyle={styles.modalScrollContent}
-          >
+          <View style={styles.modalContent}>
             <TextInput
               ref={composerInputRef}
               testID="mobile-feed-create-post-input"
@@ -4135,23 +4181,16 @@ export default function FeedScreen() {
               multiline
               maxLength={5000}
               editable={showCreate && !creating}
+              scrollEnabled
             />
 
-            <View style={[styles.composerToolRow, { borderTopColor: colors.border }]}>
-              <TouchableOpacity
-                activeOpacity={mediaBusy ? 1 : 0.78}
-                disabled={mediaBusy || postMedia.length >= MAX_POST_MEDIA_ITEMS}
-                onPress={handlePickPostMedia}
-                style={[styles.composerToolButton, { borderColor: colors.border, opacity: mediaBusy ? 0.7 : 1 }]}
-              >
-                {mediaBusy ? <ActivityIndicator size="small" color={colors.primary} /> : <Ionicons name="images-outline" size={18} color={colors.primary} />}
-                <Text style={[styles.composerToolText, { color: colors.text }]}>Media</Text>
-              </TouchableOpacity>
-              {mediaStatus ? <Text style={[styles.composerMediaStatus, { color: colors.textSecondary }]}>{mediaStatus}</Text> : null}
-            </View>
-
             {postMedia.length > 0 ? (
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.composerMediaList}>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                style={styles.composerMediaScroller}
+                contentContainerStyle={styles.composerMediaList}
+              >
                 {postMedia.map((item) => {
                   const previewUri = item.media_type === "video"
                     ? item.thumbnailChoices[item.selectedThumbnailIndex]?.uri || item.thumbnailChoices[0]?.uri || item.uri
@@ -4202,7 +4241,29 @@ export default function FeedScreen() {
                 })}
               </ScrollView>
               ) : null}
-          </ScrollView>
+          </View>
+
+          <View
+            style={[
+              styles.composerToolRow,
+              {
+                backgroundColor: colors.surface,
+                borderTopColor: colors.border,
+                paddingBottom: Platform.OS === "android" ? 18 : Math.max(18, insets.bottom + 12),
+              },
+            ]}
+          >
+            <TouchableOpacity
+              activeOpacity={mediaBusy ? 1 : 0.78}
+              disabled={mediaBusy || postMedia.length >= MAX_POST_MEDIA_ITEMS}
+              onPress={handlePickPostMedia}
+              style={[styles.composerToolButton, { borderColor: colors.border, opacity: mediaBusy ? 0.7 : 1 }]}
+            >
+              {mediaBusy ? <ActivityIndicator size="small" color={colors.primary} /> : <Ionicons name="images-outline" size={18} color={colors.primary} />}
+              <Text style={[styles.composerToolText, { color: colors.text }]}>Media</Text>
+            </TouchableOpacity>
+            {mediaStatus ? <Text style={[styles.composerMediaStatus, { color: colors.textSecondary }]}>{mediaStatus}</Text> : null}
+          </View>
         </View>
       </BottomModal>
 
@@ -4236,8 +4297,51 @@ export default function FeedScreen() {
         onReactionChanged={handleModalReactionChanged}
         onCommentChanged={handleModalCommentChanged}
         onShareChanged={handleModalShareChanged}
+        onEditPost={handleEditPost}
         onPostDeleted={handleModalPostDeleted}
       />
+
+      {postOptionsTarget && (
+        <CustomAlert
+          visible
+          forceModal
+          type="info"
+          title="Post options"
+          message={
+            postOptionsTarget.author_id === userId
+              ? "Manage this post."
+              : "Choose an action for this post."
+          }
+          buttons={
+            postOptionsTarget.author_id === userId
+              ? [
+                  { text: "Edit Post", onPress: () => handleEditPost(postOptionsTarget) },
+                  { text: "Delete Post", style: "destructive", onPress: () => handleDeletePost(postOptionsTarget) },
+                  { text: "Cancel", style: "cancel" },
+                ]
+              : [
+                  { text: "Report Post", style: "destructive", onPress: () => handleReportPost(postOptionsTarget) },
+                  { text: "Cancel", style: "cancel" },
+                ]
+          }
+          onClose={() => setPostOptionsTarget(null)}
+        />
+      )}
+
+      {deletePostTarget && (
+        <CustomAlert
+          visible
+          forceModal
+          type="warning"
+          title="Delete post"
+          message="This post will be removed from the feed."
+          buttons={[
+            { text: "Cancel", style: "cancel" },
+            { text: "Delete", style: "destructive", onPress: confirmDeletePost },
+          ]}
+          onClose={() => setDeletePostTarget(null)}
+        />
+      )}
 
       {alert && <CustomAlert visible type={alert.type} title={alert.title} message={alert.message} onClose={() => setAlert(null)} />}
 
@@ -4592,14 +4696,15 @@ const styles = StyleSheet.create({
   socialCaption: {
     paddingHorizontal: 12,
     paddingTop: 10,
+    marginBottom: 10,
     fontSize: moderateScale(14),
     fontFamily: "Poppins_400Regular",
     lineHeight: 20,
   },
   socialMediaWrap: {
     marginHorizontal: 12,
-    marginTop: 10,
-    borderRadius: 14,
+    marginTop: 0,
+    borderRadius: 12,
     overflow: "hidden",
     backgroundColor: "#E2E8F0",
     position: "relative",
@@ -4624,6 +4729,7 @@ const styles = StyleSheet.create({
   socialGalleryImage: {
     width: "100%",
     height: "100%",
+    borderRadius: 12,
   },
   socialGalleryMoreOverlay: {
     ...StyleSheet.absoluteFillObject,
@@ -4784,12 +4890,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingTop: 10,
     flexDirection: "row",
-    justifyContent: "space-between",
-    gap: 10,
+    alignItems: "center",
   },
   socialStatsText: {
+    flex: 1,
     fontSize: moderateScale(11),
     fontFamily: "Poppins_500Medium",
+    textAlign: "center",
   },
   socialCtaRow: {
     flexDirection: "row",
@@ -4826,7 +4933,8 @@ const styles = StyleSheet.create({
   },
 
   /* Create-post modal */
-  modalBox: { minHeight: "52%", maxHeight: "90%", overflow: "hidden" },
+  modalBox: { minHeight: "52%", maxHeight: "88%", overflow: "hidden" },
+  modalBoxKeyboard: { height: "86%" },
   modalHandle: { alignSelf: "center", width: 40, height: 4, borderRadius: 999, marginTop: 10, marginBottom: 4 },
   modalHeader: { minHeight: 58, flexDirection: "row", alignItems: "center", paddingHorizontal: 16, borderBottomWidth: StyleSheet.hairlineWidth },
   modalHeaderSide: { width: 86, alignItems: "flex-start", justifyContent: "center" },
@@ -4840,13 +4948,13 @@ const styles = StyleSheet.create({
   composerAuthorName: { fontSize: moderateScale(15), fontFamily: "Poppins_700Bold", includeFontPadding: false, lineHeight: 20 },
   visibilityChip: { alignSelf: "flex-start", flexDirection: "row", alignItems: "center", borderRadius: 6, paddingHorizontal: 8, paddingVertical: 4, marginTop: 4, gap: 4 },
   visibilityChipText: { fontSize: moderateScale(11), fontFamily: "Poppins_500Medium", includeFontPadding: false, lineHeight: 14 },
-  modalContent: { flex: 1 },
-  modalScrollContent: { flexGrow: 1, paddingBottom: 10 },
-  modalTextArea: { minHeight: 168, fontSize: moderateScale(18), fontFamily: "Poppins_400Regular", lineHeight: 26, paddingHorizontal: 18, paddingTop: 14, paddingBottom: 12, textAlignVertical: "top", includeFontPadding: false },
-  composerToolRow: { flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 18, paddingVertical: 12, borderTopWidth: StyleSheet.hairlineWidth },
-  composerToolButton: { minHeight: 40, borderRadius: 12, borderWidth: 1, paddingHorizontal: 13, flexDirection: "row", alignItems: "center", gap: 8 },
+  modalContent: { flex: 1, minHeight: 0 },
+  modalTextArea: { flex: 1, minHeight: 132, fontSize: moderateScale(18), fontFamily: "Poppins_400Regular", lineHeight: 26, paddingHorizontal: 18, paddingTop: 12, paddingBottom: 12, textAlignVertical: "top", includeFontPadding: false },
+  composerToolRow: { flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 18, paddingTop: 12, borderTopWidth: StyleSheet.hairlineWidth },
+  composerToolButton: { minHeight: 44, borderRadius: 14, borderWidth: 1, paddingHorizontal: 16, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8 },
   composerToolText: { fontSize: moderateScale(12), fontFamily: "Poppins_700Bold", includeFontPadding: false, lineHeight: 16 },
   composerMediaStatus: { flex: 1, fontSize: moderateScale(11), fontFamily: "Poppins_500Medium" },
+  composerMediaScroller: { flexGrow: 0, maxHeight: 230 },
   composerMediaList: { paddingHorizontal: 18, paddingBottom: 18, gap: 10 },
   composerMediaCard: { width: 176, minHeight: 212, borderWidth: 2, borderRadius: 12, overflow: "hidden", backgroundColor: "#0F172A" },
   composerMediaPreview: { width: "100%", height: 132, backgroundColor: "#111827" },

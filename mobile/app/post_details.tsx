@@ -13,10 +13,10 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { supabase } from "../lib/supabase";
 import CachedImage from "../src/components/CachedImage";
 import Header from "../src/components/header";
-import Navbar from "../src/components/navbar";
 import Skeleton from "../src/components/Skeleton";
 import CustomAlert, { AlertType } from "../src/components/CustomAlert";
 import { useAuth } from "../src/context/AuthContext";
@@ -68,8 +68,9 @@ const resolvePostMediaUrl = (value: unknown) => {
 
 export default function PostDetailsScreen() {
   const { colors } = useTheme();
-  const { session, userId } = useAuth();
+  const { userId } = useAuth();
   const { post_id } = useLocalSearchParams();
+  const insets = useSafeAreaInsets();
 
   const [post, setPost] = useState<any>(null);
   const [comments, setComments] = useState<any[]>([]);
@@ -152,7 +153,17 @@ export default function PostDetailsScreen() {
       const { data } = await supabase.functions.invoke("manage-social-feed", {
         body: { action: "add_comment", post_id: post.id, content: commentText.trim() },
       });
-      if (data?.success) {
+      if (data?.blocked || data?.status === "blocked") {
+        setAlert({
+          type: "warning",
+          title: "Comment blocked",
+          message: data?.moderation?.reason || data?.error || "This comment did not pass AI moderation.",
+        });
+      } else if (data?.pending_review || data?.status === "pending_review") {
+        setCommentText("");
+        emitToast({ type: "info", title: "Comment sent for review", message: "It will appear if approved." });
+        fetchPost();
+      } else if (data?.success) {
         setCommentText("");
         fetchPost();
       } else {
@@ -232,7 +243,6 @@ export default function PostDetailsScreen() {
           <Skeleton width={SCREEN_WIDTH - 32} height={200} style={{ borderRadius: 12, marginBottom: 16 }} />
           <Skeleton width={SCREEN_WIDTH * 0.6} height={20} style={{ borderRadius: 6 }} />
         </View>
-        <Navbar />
       </View>
     );
   }
@@ -244,7 +254,6 @@ export default function PostDetailsScreen() {
         <View style={styles.centered}>
           <Text style={{ color: colors.textSecondary, fontSize: moderateScale(15) }}>Post not found</Text>
         </View>
-        <Navbar />
       </View>
     );
   }
@@ -258,7 +267,10 @@ export default function PostDetailsScreen() {
     >
       <Header title="Post" onBackPress={() => router.back()} />
 
-      <ScrollView style={styles.content}>
+      <ScrollView
+        style={styles.content}
+        contentContainerStyle={{ paddingBottom: insets.bottom + 20 }}
+      >
         {/* Author */}
         <View style={styles.authorRow}>
           <CachedImage
@@ -344,11 +356,19 @@ export default function PostDetailsScreen() {
           )}
         </View>
 
-        <View style={{ height: 120 }} />
       </ScrollView>
 
       {/* Comment input */}
-      <View style={[styles.commentInputRow, { backgroundColor: colors.surface, borderTopColor: colors.border }]}>
+      <View
+        style={[
+          styles.commentInputRow,
+          {
+            backgroundColor: colors.surface,
+            borderTopColor: colors.border,
+            paddingBottom: Math.max(insets.bottom, 20),
+          },
+        ]}
+      >
         <TextInput
           style={[styles.commentInput, { color: colors.text, borderColor: colors.border }]}
           placeholder="Add a comment..."
@@ -368,7 +388,6 @@ export default function PostDetailsScreen() {
       </View>
 
       {alert && <CustomAlert visible type={alert.type} title={alert.title} message={alert.message} onClose={() => setAlert(null)} />}
-      <Navbar />
     </KeyboardAvoidingView>
   );
 }

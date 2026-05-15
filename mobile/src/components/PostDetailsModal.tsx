@@ -11,6 +11,7 @@ import {
   useWindowDimensions,
   View,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { supabase } from "../../lib/supabase";
 import { useAuth } from "../context/AuthContext";
 import { useTheme } from "../context/ThemeContext";
@@ -85,19 +86,14 @@ const formatTimestamp = (raw: string | null | undefined) => {
   return date.toLocaleDateString();
 };
 
-const initialsOf = (name: string) =>
-  (name || "")
-    .split(" ")
-    .map((part) => part[0])
-    .filter(Boolean)
-    .slice(0, 2)
-    .join("")
-    .toUpperCase();
+const formatCountLabel = (count: number, singular: string, plural = `${singular}s`) =>
+  `${count} ${count === 1 ? singular : plural}`;
 
 type Props = {
   postId: string | null;
   visible: boolean;
   onClose: () => void;
+  onEditPost?: (post: any) => void;
   onPostDeleted?: (postId: string) => void;
   onReactionChanged?: (postId: string, hasReaction: boolean, reactionCount: number) => void;
   onCommentChanged?: (postId: string, commentCount: number) => void;
@@ -108,6 +104,7 @@ export default function PostDetailsModal({
   postId,
   visible,
   onClose,
+  onEditPost,
   onPostDeleted,
   onReactionChanged,
   onCommentChanged,
@@ -116,6 +113,7 @@ export default function PostDetailsModal({
   const { colors, isDark } = useTheme();
   const { session, userId } = useAuth();
   const { height, width } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
 
   const [post, setPost] = useState<any>(null);
   const [comments, setComments] = useState<any[]>([]);
@@ -123,12 +121,14 @@ export default function PostDetailsModal({
   const [commentText, setCommentText] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [alert, setAlert] = useState<{ type: AlertType; title: string; message: string } | null>(null);
+  const [postOptionsVisible, setPostOptionsVisible] = useState(false);
+  const [deleteConfirmVisible, setDeleteConfirmVisible] = useState(false);
 
   const cardBg = isDark ? "#1E293B" : "#FFFFFF";
   const borderCol = isDark ? "#334155" : "#E2E8F0";
   const subtleBg = isDark ? "#0F172A" : "#F1F5F9";
   const bubbleBg = isDark ? "#334155" : "#F1F5F9";
-  const mediaWidth = Math.min(Math.max(width - 56, 240), 360);
+  const mediaWidth = Math.min(Math.max(width - 32, 240), 420);
 
   const fetchPost = useCallback(async () => {
     if (!postId) return;
@@ -190,6 +190,8 @@ export default function PostDetailsModal({
     setComments([]);
     setCommentText("");
     setAlert(null);
+    setPostOptionsVisible(false);
+    setDeleteConfirmVisible(false);
     void fetchPost();
   }, [fetchPost, postId, visible]);
 
@@ -237,7 +239,7 @@ export default function PostDetailsModal({
         setAlert({
           type: "warning",
           title: "Comment blocked",
-          message: data?.error || data?.moderation?.reason || "This comment did not pass moderation.",
+          message: data?.moderation?.reason || data?.error || "This comment did not pass moderation.",
         });
         return;
       }
@@ -295,6 +297,7 @@ export default function PostDetailsModal({
       if (error) throw error;
 
       if (data?.success) {
+        setDeleteConfirmVisible(false);
         emitToast({ type: "info", title: "Deleted", message: "Post deleted." });
         onPostDeleted?.(post.id);
         onClose();
@@ -302,6 +305,49 @@ export default function PostDetailsModal({
     } catch (e: any) {
       setAlert({ type: "error", title: "Delete Failed", message: e?.message || "Please try again." });
     }
+  };
+
+  const handleEditPost = () => {
+    if (!post || !onEditPost) return;
+    setPostOptionsVisible(false);
+    onClose();
+    onEditPost(post);
+  };
+
+  const handleReportPost = async () => {
+    if (!post) return;
+
+    if (!session) {
+      setAlert({ type: "warning", title: "Sign In Required", message: "Sign in to report this post." });
+      return;
+    }
+
+    if (isOwner) {
+      setAlert({ type: "info", title: "Owner Action", message: "You cannot report your own post." });
+      return;
+    }
+
+    try {
+      const { data, error } = await supabase.functions.invoke("manage-social-feed", {
+        body: {
+          action: "report_post",
+          post_id: post.id,
+          reason: "Inappropriate content",
+        },
+      });
+
+      if (error) throw error;
+      if (data?.error) throw new Error(String(data.error));
+
+      emitToast({ type: "info", title: "Reported", message: "Post has been reported for review." });
+    } catch (e: any) {
+      setAlert({ type: "error", title: "Report Failed", message: e?.message || "Please try again." });
+    }
+  };
+
+  const handleMoreOptions = () => {
+    if (!post) return;
+    setPostOptionsVisible(true);
   };
 
   const handleSharePost = async () => {
@@ -386,16 +432,14 @@ export default function PostDetailsModal({
                   />
                 </View>
               </View>
-              {isOwner ? (
-                <TouchableOpacity
-                  activeOpacity={0.78}
-                  onPress={handleDeletePost}
-                  style={[styles.iconCircle, { backgroundColor: subtleBg }]}
-                  accessibilityLabel="Delete post"
-                >
-                  <Ionicons name="trash-outline" size={18} color="#ef4444" />
-                </TouchableOpacity>
-              ) : null}
+              <TouchableOpacity
+                activeOpacity={0.78}
+                onPress={handleMoreOptions}
+                style={[styles.iconCircle, { backgroundColor: subtleBg }]}
+                accessibilityLabel="Post actions"
+              >
+                <Ionicons name="ellipsis-horizontal" size={20} color={colors.textSecondary} />
+              </TouchableOpacity>
             </View>
 
             {post.body ? <Text style={[styles.postBody, { color: colors.text }]}>{post.body}</Text> : null}
@@ -410,7 +454,8 @@ export default function PostDetailsModal({
                         uri={previewUrl}
                         style={styles.mediaImg}
                         width={mediaWidth}
-                        height={220}
+                        height={230}
+                        contentFit="cover"
                       />
                       {media.media_type === "video" ? (
                         <View style={styles.videoPlayBadge}>
@@ -440,7 +485,7 @@ export default function PostDetailsModal({
                 {comments.length} {comments.length === 1 ? "comment" : "comments"}
               </Text>
               <Text style={[styles.countText, { color: colors.textSecondary }]}>
-                {Number(post.share_count || 0)} shares
+                {formatCountLabel(Number(post.share_count || 0), "share")}
               </Text>
             </View>
 
@@ -466,6 +511,7 @@ export default function PostDetailsModal({
             </View>
 
             <View style={styles.commentsSection}>
+              <Text style={[styles.commentsTitle, { color: colors.text }]}>Comments</Text>
               {comments.length > 0 ? (
                 comments.map((comment: any) => (
                   <View key={comment.id} style={styles.commentRow}>
@@ -496,14 +542,25 @@ export default function PostDetailsModal({
                   </View>
                 ))
               ) : (
-                <Text style={[styles.noComments, { color: colors.textSecondary }]}>
-                  No comments yet. Be the first to comment.
-                </Text>
+                <View style={styles.emptyComments}>
+                  <Text style={[styles.noComments, { color: colors.textSecondary }]}>
+                    No comments yet. Be the first to comment.
+                  </Text>
+                </View>
               )}
             </View>
           </ScrollView>
 
-          <View style={[styles.footer, { borderTopColor: borderCol, backgroundColor: cardBg }]}>
+          <View
+            style={[
+              styles.footer,
+              {
+                borderTopColor: borderCol,
+                backgroundColor: cardBg,
+                paddingBottom: Math.max(24, insets.bottom + 10),
+              },
+            ]}
+          >
             <ProfileAvatar
               uri={(session?.user?.user_metadata as any)?.avatar_url}
               style={styles.footerAvatarFallback}
@@ -541,6 +598,44 @@ export default function PostDetailsModal({
             </View>
           </View>
         </>
+      )}
+
+      {postOptionsVisible && post && (
+        <CustomAlert
+          visible
+          forceModal
+          type="info"
+          title="Post options"
+          message={isOwner ? "Manage this post." : "Choose an action for this post."}
+          buttons={
+            isOwner
+              ? [
+                  ...(onEditPost ? [{ text: "Edit Post", onPress: handleEditPost }] : []),
+                  { text: "Delete Post", style: "destructive", onPress: () => setDeleteConfirmVisible(true) },
+                  { text: "Cancel", style: "cancel" },
+                ]
+              : [
+                  { text: "Report Post", style: "destructive", onPress: handleReportPost },
+                  { text: "Cancel", style: "cancel" },
+                ]
+          }
+          onClose={() => setPostOptionsVisible(false)}
+        />
+      )}
+
+      {deleteConfirmVisible && post && (
+        <CustomAlert
+          visible
+          forceModal
+          type="warning"
+          title="Delete post"
+          message="This post will be removed from the feed."
+          buttons={[
+            { text: "Cancel", style: "cancel" },
+            { text: "Delete", style: "destructive", onPress: handleDeletePost },
+          ]}
+          onClose={() => setDeleteConfirmVisible(false)}
+        />
       )}
 
       {alert && (
@@ -588,11 +683,10 @@ const styles = StyleSheet.create({
   },
   centered: { paddingVertical: 72, alignItems: "center", justifyContent: "center" },
   scroll: { flexGrow: 0 },
-  scrollContent: { paddingBottom: 16 },
+  scrollContent: { paddingHorizontal: 16, paddingBottom: 20 },
   authorRow: {
     flexDirection: "row",
     alignItems: "center",
-    paddingHorizontal: 16,
     paddingTop: 14,
     paddingBottom: 8,
   },
@@ -613,13 +707,12 @@ const styles = StyleSheet.create({
   postBody: {
     fontSize: 15,
     lineHeight: 22,
-    paddingHorizontal: 16,
     paddingTop: 4,
-    paddingBottom: 12,
+    paddingBottom: 8,
   },
-  mediaScroll: { paddingHorizontal: 16, gap: 8 },
-  mediaFrame: { height: 220, borderRadius: 10, marginRight: 8, overflow: "hidden", backgroundColor: "#0F172A" },
-  mediaImg: { width: "100%", height: "100%" },
+  mediaScroll: { gap: 8, marginTop: 10 },
+  mediaFrame: { height: 230, borderRadius: 12, marginRight: 8, overflow: "hidden", backgroundColor: "#0F172A" },
+  mediaImg: { width: "100%", height: "100%", borderRadius: 12 },
   videoPlayBadge: {
     position: "absolute",
     left: "50%",
@@ -637,7 +730,6 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    paddingHorizontal: 16,
     paddingVertical: 10,
   },
   countItem: { minHeight: 18, flexDirection: "row", alignItems: "center", gap: 6 },
@@ -654,7 +746,6 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-around",
-    marginHorizontal: 16,
     paddingVertical: 6,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderBottomWidth: StyleSheet.hairlineWidth,
@@ -668,7 +759,8 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   actionText: { fontSize: 14, fontWeight: "600" },
-  commentsSection: { paddingHorizontal: 16, paddingTop: 8 },
+  commentsSection: { paddingTop: 16 },
+  commentsTitle: { fontSize: 15, fontWeight: "700", marginBottom: 8 },
   commentRow: { flexDirection: "row", alignItems: "flex-start", paddingVertical: 6 },
   commentAvatar: { width: 32, height: 32, borderRadius: 16 },
   commentAvatarFallback: {
@@ -697,12 +789,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
   },
   commentMeta: { fontSize: 12, fontWeight: "600" },
-  noComments: { fontSize: 13, textAlign: "center", paddingVertical: 16 },
+  emptyComments: { paddingVertical: 28, paddingHorizontal: 16 },
+  noComments: { fontSize: 13, textAlign: "center" },
   footer: {
     flexDirection: "row",
     alignItems: "center",
     paddingHorizontal: 12,
-    paddingVertical: 10,
+    paddingTop: 12,
+    paddingBottom: 12,
     borderTopWidth: StyleSheet.hairlineWidth,
     gap: 8,
   },
