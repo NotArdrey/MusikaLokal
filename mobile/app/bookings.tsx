@@ -1,4 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
+import { FlashList } from "@shopify/flash-list";
 import { useQueryClient } from "@tanstack/react-query";
 import { useFocusEffect } from "@react-navigation/native";
 import { CameraView, useCameraPermissions } from "expo-camera";
@@ -11,8 +12,6 @@ import {
     InteractionManager,
     Linking,
     Modal as RNModal,
-    NativeScrollEvent,
-    NativeSyntheticEvent,
     ScrollView,
     StyleSheet,
     Text,
@@ -55,8 +54,14 @@ import {
 const debugLog = (..._args: unknown[]) => { };
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
-const INITIAL_BOOKINGS_RENDER_COUNT = 8;
-const BOOKINGS_RENDER_CHUNK_SIZE = 8;
+const BOOKING_FLASHLIST_OVERRIDE_PROPS = { initialDrawBatchSize: 5 };
+const EMPTY_ACTIVITY_ITEMS: any[] = [];
+
+const bookingActivityKeyExtractor = (item: any, index: number) =>
+  `${item?.type_id || item?.type || "activity"}-${item?.id ?? index}`;
+
+const getBookingActivityItemType = (item: any) =>
+  String(item?.type_id || item?.type || "activity");
 
 // Responsive scaling utilities - optimized for iPhone SE and smaller devices
 const scale = (size: number) => {
@@ -4066,11 +4071,6 @@ export default function BookingsScreen() {
     return 0;
   };
 
-  const [bookingRenderWindow, setBookingRenderWindow] = useState({
-    key: "",
-    limit: INITIAL_BOOKINGS_RENDER_COUNT,
-  });
-
   // Determine items to show based on view mode without rebuilding the list during the tab press.
   const currentItems = React.useMemo(
     () =>
@@ -4188,55 +4188,8 @@ export default function BookingsScreen() {
     [sortedCurrentItemMeta, deferredActiveFilter, normalizedSearchQuery],
   );
   const bookingListKey = `${deferredActiveTab}|${deferredActiveAppTab}|${deferredActiveFilter}|${normalizedSearchQuery}`;
-
-  useEffect(() => {
-    setBookingRenderWindow({
-      key: bookingListKey,
-      limit: Math.min(INITIAL_BOOKINGS_RENDER_COUNT, filteredItems.length),
-    });
-  }, [bookingListKey, filteredItems.length]);
-
-  const handleBookingListScroll = useCallback(
-    (event: NativeSyntheticEvent<NativeScrollEvent>) => {
-      const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
-      const distanceFromEnd =
-        contentSize.height - (contentOffset.y + layoutMeasurement.height);
-
-      if (distanceFromEnd > 520) {
-        return;
-      }
-
-      React.startTransition(() => {
-        setBookingRenderWindow((currentWindow) => {
-          if (
-            currentWindow.key !== bookingListKey ||
-            currentWindow.limit >= filteredItems.length
-          ) {
-            return currentWindow;
-          }
-
-          return {
-            key: bookingListKey,
-            limit: Math.min(
-              currentWindow.limit + BOOKINGS_RENDER_CHUNK_SIZE,
-              filteredItems.length,
-            ),
-          };
-        });
-      });
-    },
-    [bookingListKey, filteredItems.length],
-  );
-
-  const effectiveBookingRenderLimit =
-    bookingRenderWindow.key === bookingListKey
-      ? bookingRenderWindow.limit
-      : INITIAL_BOOKINGS_RENDER_COUNT;
-  const visibleFilteredItems = React.useMemo(
-    () => filteredItems.slice(0, effectiveBookingRenderLimit),
-    [effectiveBookingRenderLimit, filteredItems],
-  );
-  const hasDeferredBookingItems = visibleFilteredItems.length < filteredItems.length;
+  const bookingListData =
+    loading || filteredItems.length === 0 ? EMPTY_ACTIVITY_ITEMS : filteredItems;
 
   useEffect(() => {
     if (activeFilter !== "All" && !availableFilters.includes(activeFilter)) {
@@ -4446,17 +4399,21 @@ export default function BookingsScreen() {
           ) : null}
         </View>
 
-        <ScrollView
+        <FlashList
+          key={bookingListKey}
+          data={bookingListData}
+          keyExtractor={bookingActivityKeyExtractor}
+          getItemType={getBookingActivityItemType}
           showsVerticalScrollIndicator={false}
           contentContainerStyle={styles.scrollContent}
-          onScroll={handleBookingListScroll}
-          scrollEventThrottle={120}
-        >
-          {!loading &&
+          drawDistance={880}
+          overrideProps={BOOKING_FLASHLIST_OVERRIDE_PROPS}
+          ListHeaderComponent={
+            !loading &&
             ((userRole === "studio-owner" && renderActiveTab === "Pending") ||
               (userRole === "venue-owner" && renderActiveTab === "Applicants")) &&
-            pendingPermitStudios.length > 0 && (
-              <View style={{ paddingHorizontal: scale(16), marginBottom: moderateScale(12), gap: moderateScale(8) }}>
+            pendingPermitStudios.length > 0 ? (
+              <View style={styles.permitReviewList}>
                 {pendingPermitStudios.map((listing: any) => {
                   const normalizedStatus = String(listing?.permit_status || "pending_review").toLowerCase();
                   const isRejected = normalizedStatus === "rejected";
@@ -4661,74 +4618,75 @@ export default function BookingsScreen() {
                   );
                 })}
               </View>
-            )}
-
-          {loading ? (
-            <View style={styles.bookingsSkeletonContainer}>
-              <Skeleton width="58%" height={18} style={{ marginBottom: 12 }} />
-              {[0, 1, 2].map((index) => (
-                <View
-                  key={`booking-skeleton-${index}`}
-                  style={[
-                    styles.bookingsSkeletonCard,
-                    { backgroundColor: colors.surface, borderColor: colors.border },
-                  ]}
+            ) : null
+          }
+          ListEmptyComponent={
+            loading ? (
+              <View style={styles.bookingsSkeletonContainer}>
+                <Skeleton width="58%" height={18} style={{ marginBottom: 12 }} />
+                {[0, 1, 2].map((index) => (
+                  <View
+                    key={`booking-skeleton-${index}`}
+                    style={[
+                      styles.bookingsSkeletonCard,
+                      { backgroundColor: colors.surface, borderColor: colors.border },
+                    ]}
+                  >
+                    <Skeleton width="100%" height={160} borderRadius={12} />
+                    <Skeleton width="72%" height={20} style={{ marginTop: 12 }} />
+                    <Skeleton width="52%" height={14} style={{ marginTop: 8 }} />
+                    <Skeleton width="100%" height={14} style={{ marginTop: 12 }} />
+                  </View>
+                ))}
+              </View>
+            ) : filteredItems.length === 0 ? (
+              <View style={styles.centerContainer}>
+                <Ionicons
+                  name={userRole === "venue-owner" ? "people-outline" : "calendar-outline"}
+                  size={48}
+                  color={colors.border}
+                />
+                <Text
+                  style={[styles.emptyTitle, { color: colors.textSecondary }]}
                 >
-                  <Skeleton width="100%" height={160} borderRadius={12} />
-                  <Skeleton width="72%" height={20} style={{ marginTop: 12 }} />
-                  <Skeleton width="52%" height={14} style={{ marginTop: 8 }} />
-                  <Skeleton width="100%" height={14} style={{ marginTop: 12 }} />
-                </View>
-              ))}
-            </View>
-          ) : filteredItems.length === 0 ? (
-            <View style={styles.centerContainer}>
-              <Ionicons
-                name={userRole === "venue-owner" ? "people-outline" : "calendar-outline"}
-                size={48}
-                color={colors.border}
-              />
-              <Text
-                style={[styles.emptyTitle, { color: colors.textSecondary }]}
-              >
-                {hasSearchOrFilter
-                  ? "No matches found for the selected search/filter."
-                  : userRole === "venue-owner"
-                  ? renderActiveTab === "Applicants"
-                    ? "No pending applications"
-                    : renderActiveTab === "Active Musicians"
-                      ? "No active musicians"
-                      : renderActiveTab === "Review"
-                        ? "No history yet"
-                        : "No items"
-                    : userRole === "studio-owner" && renderActiveTab === "Pending" && pendingPermitStudios.length > 0
-                      ? "No pending items below"
-                      : renderActiveTab === "Pending"
-                        ? "No pending items"
-                        : renderActiveTab === "History"
+                  {hasSearchOrFilter
+                    ? "No matches found for the selected search/filter."
+                    : userRole === "venue-owner"
+                    ? renderActiveTab === "Applicants"
+                      ? "No pending applications"
+                      : renderActiveTab === "Active Musicians"
+                        ? "No active musicians"
+                        : renderActiveTab === "Review"
                           ? "No history yet"
-                          : isProducerActivityRole(userRole)
-                            ? `No ${renderActiveTab.toLowerCase()} activity`
-                            : `No ${renderActiveTab.toLowerCase()} bookings`}
-              </Text>
-                {userRole === "studio-owner" && renderActiveTab === "Pending" && pendingPermitStudios.length > 0 && (
+                          : "No items"
+                      : userRole === "studio-owner" && renderActiveTab === "Pending" && pendingPermitStudios.length > 0
+                        ? "No pending items below"
+                        : renderActiveTab === "Pending"
+                          ? "No pending items"
+                          : renderActiveTab === "History"
+                            ? "No history yet"
+                            : isProducerActivityRole(userRole)
+                              ? `No ${renderActiveTab.toLowerCase()} activity`
+                              : `No ${renderActiveTab.toLowerCase()} bookings`}
+                </Text>
+                  {userRole === "studio-owner" && renderActiveTab === "Pending" && pendingPermitStudios.length > 0 && (
+                    <Text
+                      style={[styles.emptySubtitle, { color: colors.textSecondary, marginTop: 8, textAlign: "center", paddingHorizontal: 24 }]}
+                    >
+                      Permit review items are listed above. New pending items will appear here.
+                    </Text>
+                  )}
+                {userRole === "venue-owner" && renderActiveTab === "Applicants" && (
                   <Text
                     style={[styles.emptySubtitle, { color: colors.textSecondary, marginTop: 8, textAlign: "center", paddingHorizontal: 24 }]}
                   >
-                    Permit review items are listed above. New pending items will appear here.
+                    Gig applications and direct connection requests will appear here
                   </Text>
                 )}
-              {userRole === "venue-owner" && renderActiveTab === "Applicants" && (
-                <Text
-                  style={[styles.emptySubtitle, { color: colors.textSecondary, marginTop: 8, textAlign: "center", paddingHorizontal: 24 }]}
-                >
-                  Gig applications and direct connection requests will appear here
-                </Text>
-              )}
-            </View>
-          ) : (
-            <>
-              {visibleFilteredItems.map((item: any) => {
+              </View>
+            ) : null
+          }
+          renderItem={({ item }: { item: any }) => {
               // ==========================================
               // 0.75. CONNECTION REQUEST CARD
               // ==========================================
@@ -7233,15 +7191,8 @@ export default function BookingsScreen() {
                   </View>
                 </View>
               );
-              })}
-              {hasDeferredBookingItems ? (
-                <View style={styles.deferredBookingsFooter}>
-                  <Skeleton width="100%" height={96} borderRadius={14} />
-                </View>
-              ) : null}
-            </>
-          )}
-        </ScrollView>
+          }}
+        />
 
         {!shouldHideNavbar ? (
           <View style={styles.navbarPosition}>
@@ -7540,12 +7491,14 @@ export default function BookingsScreen() {
         onClose={() => setAlertVisible(false)}
       />
 
-      <InAppMediaViewer
-        visible={!!mediaViewerUrl}
-        uri={mediaViewerUrl}
-        title={mediaViewerTitle}
-        onClose={() => setMediaViewerUrl(null)}
-      />
+      {mediaViewerUrl ? (
+        <InAppMediaViewer
+          visible
+          uri={mediaViewerUrl}
+          title={mediaViewerTitle}
+          onClose={() => setMediaViewerUrl(null)}
+        />
+      ) : null}
 
       <BookingDetailsSheet
         ref={bookingDetailsRef}
@@ -7563,8 +7516,9 @@ export default function BookingsScreen() {
       />
 
       {/* Payment Option Modal */}
+      {showPaymentOptionModal ? (
       <RNModal
-        visible={showPaymentOptionModal}
+        visible
         transparent
         statusBarTranslucent
         navigationBarTranslucent
@@ -7734,10 +7688,12 @@ export default function BookingsScreen() {
           </View>
         </View>
       </RNModal>
+      ) : null}
 
       {/* Scanner Modal (Studio Owner) */}
+      {showScanModal ? (
       <RNModal
-        visible={showScanModal}
+        visible
         animationType="slide"
         hardwareAccelerated
         statusBarTranslucent
@@ -7761,6 +7717,7 @@ export default function BookingsScreen() {
           </View>
         </View>
       </RNModal>
+      ) : null}
     </>
   );
 }
@@ -7871,6 +7828,10 @@ const styles = StyleSheet.create({
       SCREEN_HEIGHT < 700 ? verticalScale(150) : verticalScale(180),
     paddingHorizontal: scale(24),
     paddingTop: moderateScale(16),
+  },
+  permitReviewList: {
+    gap: moderateScale(8),
+    marginBottom: moderateScale(12),
   },
   centerContainer: {
     alignItems: "center",

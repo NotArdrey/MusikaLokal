@@ -106,9 +106,13 @@ const InAppMediaViewer = ({ visible, uri, title, onClose }: InAppMediaViewerProp
     }
   }, [canPreviewDocument, mediaType, visible, uri]);
 
+  if (!visible || !uri) {
+    return null;
+  }
+
   return (
     <Modal
-      visible={visible}
+      visible
       transparent
       animationType="fade"
       statusBarTranslucent

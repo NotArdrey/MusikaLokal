@@ -1,9 +1,9 @@
 import { Ionicons } from "@expo/vector-icons";
+import { FlashList } from "@shopify/flash-list";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Share,
-  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -94,6 +94,60 @@ const initialsOf = (name: string) =>
     .join("")
     .toUpperCase();
 
+type CachedPostDetails = {
+  post: any;
+  comments: any[];
+  cachedAt: number;
+  inFlight?: Promise<{ post: any; comments: any[] }>;
+};
+
+const POST_DETAILS_CACHE_TTL_MS = 60_000;
+const postDetailsCache = new Map<string, CachedPostDetails>();
+
+const normalizePostDetailsPayload = (rawPost: any) => {
+  const normalizedComments = Array.isArray(rawPost?.comments)
+    ? rawPost.comments.map((comment: any) => ({
+        ...comment,
+        body: comment?.body ?? comment?.content ?? "",
+        author_name: comment?.author_name ?? comment?.author?.full_name ?? "User",
+        author_avatar: comment?.author_avatar ?? comment?.author?.avatar_url ?? "",
+      }))
+    : [];
+
+  return {
+    post: {
+      ...rawPost,
+      body: rawPost?.body ?? rawPost?.content ?? "",
+      author_name: rawPost?.author_name ?? rawPost?.author?.full_name ?? "User",
+      author_avatar: rawPost?.author_avatar ?? rawPost?.author?.avatar_url ?? "",
+      my_reaction: rawPost?.my_reaction ?? rawPost?.user_reaction ?? null,
+      visibility:
+        rawPost?.visibility === "followers_only"
+          ? "followers"
+          : rawPost?.visibility || "public",
+      media: Array.isArray(rawPost?.media)
+        ? rawPost.media.map((item: any) => ({
+            ...item,
+            url: resolvePostMediaUrl(item?.url || item?.storage_path || item?.public_url),
+            thumbnail_url: resolvePostMediaUrl(item?.thumbnail_url || item?.thumbnail_path || item?.url || item?.storage_path || item?.public_url),
+          }))
+        : [],
+      comments: normalizedComments,
+    },
+    comments: normalizedComments,
+  };
+};
+
+const fetchPostDetailsPayload = async (targetPostId: string) => {
+  const { data, error } = await supabase.functions.invoke("manage-social-feed", {
+    body: { action: "get_post_details", post_id: targetPostId },
+  });
+
+  if (error) throw error;
+  if (!data?.data) throw new Error("Post not found.");
+  return normalizePostDetailsPayload(data?.data || null);
+};
+
 type Props = {
   postId: string | null;
   visible: boolean;
@@ -132,47 +186,50 @@ export default function PostDetailsModal({
 
   const fetchPost = useCallback(async () => {
     if (!postId) return;
-    setLoading(true);
+    const cached = postDetailsCache.get(postId);
+    const cacheIsFresh =
+      cached?.post && Date.now() - cached.cachedAt < POST_DETAILS_CACHE_TTL_MS;
+
+    if (cached?.post) {
+      setPost(cached.post);
+      setComments(cached.comments);
+    }
+
+    if (cacheIsFresh) {
+      setLoading(false);
+      return;
+    }
+
+    setLoading(!cached?.post);
     try {
-      const { data, error } = await supabase.functions.invoke("manage-social-feed", {
-        body: { action: "get_post_details", post_id: postId },
+      const inFlight = cached?.inFlight || fetchPostDetailsPayload(postId);
+      postDetailsCache.set(postId, {
+        post: cached?.post,
+        comments: cached?.comments || [],
+        cachedAt: cached?.cachedAt || 0,
+        inFlight,
       });
 
-      if (error) throw error;
-
-      if (data?.data) {
-        const rawPost = data.data;
-        const normalizedComments = Array.isArray(rawPost?.comments)
-          ? rawPost.comments.map((comment: any) => ({
-              ...comment,
-              body: comment?.body ?? comment?.content ?? "",
-              author_name: comment?.author_name ?? comment?.author?.full_name ?? "User",
-              author_avatar: comment?.author_avatar ?? comment?.author?.avatar_url ?? "",
-            }))
-          : [];
-
-        setPost({
-          ...rawPost,
-          body: rawPost?.body ?? rawPost?.content ?? "",
-          author_name: rawPost?.author_name ?? rawPost?.author?.full_name ?? "User",
-          author_avatar: rawPost?.author_avatar ?? rawPost?.author?.avatar_url ?? "",
-          my_reaction: rawPost?.my_reaction ?? rawPost?.user_reaction ?? null,
-          visibility:
-            rawPost?.visibility === "followers_only"
-              ? "followers"
-              : rawPost?.visibility || "public",
-          media: Array.isArray(rawPost?.media)
-            ? rawPost.media.map((item: any) => ({
-                ...item,
-                url: resolvePostMediaUrl(item?.url || item?.storage_path || item?.public_url),
-                thumbnail_url: resolvePostMediaUrl(item?.thumbnail_url || item?.thumbnail_path || item?.url || item?.storage_path || item?.public_url),
-              }))
-            : [],
-          comments: normalizedComments,
-        });
-        setComments(normalizedComments);
-      }
+      const nextDetails = await inFlight;
+      postDetailsCache.set(postId, {
+        ...nextDetails,
+        cachedAt: Date.now(),
+      });
+      setPost(nextDetails.post);
+      setComments(nextDetails.comments);
     } catch (e: any) {
+      const currentCache = postDetailsCache.get(postId);
+      if (currentCache?.inFlight) {
+        if (currentCache.post) {
+          postDetailsCache.set(postId, {
+            post: currentCache.post,
+            comments: currentCache.comments,
+            cachedAt: currentCache.cachedAt,
+          });
+        } else {
+          postDetailsCache.delete(postId);
+        }
+      }
       console.error("PostDetailsModal fetch error:", e);
       setAlert({
         type: "error",
@@ -186,8 +243,9 @@ export default function PostDetailsModal({
 
   useEffect(() => {
     if (!visible || !postId) return;
-    setPost(null);
-    setComments([]);
+    const cached = postDetailsCache.get(postId);
+    setPost(cached?.post || null);
+    setComments(cached?.comments || []);
     setCommentText("");
     setAlert(null);
     void fetchPost();
@@ -211,11 +269,21 @@ export default function PostDetailsModal({
 
       if (error) throw error;
 
-      setPost((current: any) => ({
-        ...current,
+      const nextPost = {
+        ...post,
         my_reaction: hadReaction ? null : "like",
         reaction_count: nextCount,
+      };
+      setPost((current: any) => ({
+        ...current,
+        my_reaction: nextPost.my_reaction,
+        reaction_count: nextPost.reaction_count,
       }));
+      postDetailsCache.set(post.id, {
+        post: nextPost,
+        comments,
+        cachedAt: Date.now(),
+      });
       onReactionChanged?.(post.id, !hadReaction, nextCount);
     } catch (e: any) {
       setAlert({ type: "error", title: "Reaction Failed", message: e?.message || "Please try again." });
@@ -296,6 +364,7 @@ export default function PostDetailsModal({
 
       if (data?.success) {
         emitToast({ type: "info", title: "Deleted", message: "Post deleted." });
+        postDetailsCache.delete(post.id);
         onPostDeleted?.(post.id);
         onClose();
       }
@@ -320,7 +389,13 @@ export default function PostDetailsModal({
       if (data?.error) throw new Error(String(data.error));
 
       const nextCount = Number(data?.data?.share_count || 0) || Number(post.share_count || 0) + 1;
+      const nextPost = { ...post, share_count: nextCount };
       setPost((current: any) => ({ ...current, share_count: nextCount }));
+      postDetailsCache.set(post.id, {
+        post: nextPost,
+        comments,
+        cachedAt: Date.now(),
+      });
       onShareChanged?.(post.id, nextCount);
     } catch (e: any) {
       setAlert({ type: "error", title: "Share Failed", message: e?.message || "Please try again." });
@@ -362,146 +437,161 @@ export default function PostDetailsModal({
         </View>
       ) : (
         <>
-          <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-            <View style={styles.authorRow}>
-              <ProfileAvatar
-                uri={post.author_avatar}
-                style={styles.avatar}
-                backgroundColor={isDark ? "#374151" : "#E5E7EB"}
-                iconColor={colors.textSecondary}
-              />
-              <View style={styles.authorText}>
-                <Text style={[styles.authorName, { color: colors.text }]} numberOfLines={1}>
-                  {post.author_name}
-                </Text>
-                <View style={styles.authorMetaRow}>
-                  <Text style={[styles.authorMetaText, { color: colors.textSecondary }]}>
-                    {formatTimestamp(post.created_at)}
-                  </Text>
-                  <Text style={[styles.dot, { color: colors.textSecondary }]}>|</Text>
-                  <Ionicons
-                    name={post.visibility === "followers" ? "people" : "earth"}
-                    size={12}
-                    color={colors.textSecondary}
+          <FlashList
+            data={comments}
+            keyExtractor={(comment: any) => String(comment.id)}
+            style={styles.scroll}
+            contentContainerStyle={styles.scrollContent}
+            showsVerticalScrollIndicator={false}
+            drawDistance={520}
+            ListHeaderComponent={
+              <>
+                <View style={styles.authorRow}>
+                  <ProfileAvatar
+                    uri={post.author_avatar}
+                    style={styles.avatar}
+                    backgroundColor={isDark ? "#374151" : "#E5E7EB"}
+                    iconColor={colors.textSecondary}
                   />
-                </View>
-              </View>
-              {isOwner ? (
-                <TouchableOpacity
-                  activeOpacity={0.78}
-                  onPress={handleDeletePost}
-                  style={[styles.iconCircle, { backgroundColor: subtleBg }]}
-                  accessibilityLabel="Delete post"
-                >
-                  <Ionicons name="trash-outline" size={18} color="#ef4444" />
-                </TouchableOpacity>
-              ) : null}
-            </View>
-
-            {post.body ? <Text style={[styles.postBody, { color: colors.text }]}>{post.body}</Text> : null}
-
-            {post.media?.length > 0 ? (
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.mediaScroll}>
-                {post.media.map((media: any, index: number) => {
-                  const previewUrl = media.thumbnail_url || media.url;
-                  return previewUrl ? (
-                    <View key={`${media.id || index}`} style={[styles.mediaFrame, { width: mediaWidth }]}>
-                      <CachedImage
-                        uri={previewUrl}
-                        style={styles.mediaImg}
-                        width={mediaWidth}
-                        height={220}
-                      />
-                      {media.media_type === "video" ? (
-                        <View style={styles.videoPlayBadge}>
-                          <Ionicons name="play" size={18} color="#FFFFFF" />
-                        </View>
-                      ) : null}
-                    </View>
-                  ) : null;
-                })}
-              </ScrollView>
-            ) : null}
-
-            <View style={styles.countsRow}>
-              <View style={styles.countItem}>
-                {(post.reaction_count || 0) > 0 ? (
-                  <>
-                    <View style={styles.likeBadge}>
-                      <Ionicons name="heart" size={10} color="#FFFFFF" />
-                    </View>
-                    <Text style={[styles.countText, { color: colors.textSecondary }]}>
-                      {post.reaction_count}
+                  <View style={styles.authorText}>
+                    <Text style={[styles.authorName, { color: colors.text }]} numberOfLines={1}>
+                      {post.author_name}
                     </Text>
-                  </>
-                ) : null}
-              </View>
-              <Text style={[styles.countText, { color: colors.textSecondary }]}>
-                {comments.length} {comments.length === 1 ? "comment" : "comments"}
-              </Text>
-              <Text style={[styles.countText, { color: colors.textSecondary }]}>
-                {Number(post.share_count || 0)} shares
-              </Text>
-            </View>
-
-            <View style={[styles.actionRow, { borderTopColor: borderCol, borderBottomColor: borderCol }]}>
-              <TouchableOpacity activeOpacity={0.78} onPress={handleReaction} style={styles.actionBtn}>
-                <Ionicons
-                  name={post.my_reaction ? "heart" : "heart-outline"}
-                  size={20}
-                  color={post.my_reaction ? "#ef4444" : colors.textSecondary}
-                />
-                <Text style={[styles.actionText, { color: post.my_reaction ? "#ef4444" : colors.textSecondary }]}>
-                  Like
-                </Text>
-              </TouchableOpacity>
-              <View style={styles.actionBtn}>
-                <Ionicons name="chatbubble-outline" size={19} color={colors.textSecondary} />
-                <Text style={[styles.actionText, { color: colors.textSecondary }]}>Comment</Text>
-              </View>
-              <TouchableOpacity activeOpacity={0.78} onPress={handleSharePost} style={styles.actionBtn}>
-                <Ionicons name="share-social-outline" size={19} color={colors.textSecondary} />
-                <Text style={[styles.actionText, { color: colors.textSecondary }]}>Share</Text>
-              </TouchableOpacity>
-            </View>
-
-            <View style={styles.commentsSection}>
-              {comments.length > 0 ? (
-                comments.map((comment: any) => (
-                  <View key={comment.id} style={styles.commentRow}>
-                    <ProfileAvatar
-                      uri={comment.author_avatar}
-                      style={styles.commentAvatar}
-                      backgroundColor={isDark ? "#374151" : "#E5E7EB"}
-                      iconColor={colors.textSecondary}
-                    />
-                    <View style={styles.commentBodyWrap}>
-                      <View style={[styles.commentBubble, { backgroundColor: bubbleBg }]}>
-                        <Text style={[styles.commentAuthor, { color: colors.text }]} numberOfLines={1}>
-                          {comment.author_name}
-                        </Text>
-                        <Text style={[styles.commentBody, { color: colors.text }]}>{comment.body}</Text>
-                      </View>
-                      <View style={styles.commentMetaRow}>
-                        <Text style={[styles.commentMeta, { color: colors.textSecondary }]}>
-                          {formatTimestamp(comment.created_at)}
-                        </Text>
-                        {comment.author_id === userId ? (
-                          <TouchableOpacity activeOpacity={0.78} onPress={() => handleDeleteComment(comment.id)}>
-                            <Text style={[styles.commentMeta, { color: "#ef4444" }]}>Delete</Text>
-                          </TouchableOpacity>
-                        ) : null}
-                      </View>
+                    <View style={styles.authorMetaRow}>
+                      <Text style={[styles.authorMetaText, { color: colors.textSecondary }]}>
+                        {formatTimestamp(post.created_at)}
+                      </Text>
+                      <Text style={[styles.dot, { color: colors.textSecondary }]}>|</Text>
+                      <Ionicons
+                        name={post.visibility === "followers" ? "people" : "earth"}
+                        size={12}
+                        color={colors.textSecondary}
+                      />
                     </View>
                   </View>
-                ))
-              ) : (
+                  {isOwner ? (
+                    <TouchableOpacity
+                      activeOpacity={0.78}
+                      onPress={handleDeletePost}
+                      style={[styles.iconCircle, { backgroundColor: subtleBg }]}
+                      accessibilityLabel="Delete post"
+                    >
+                      <Ionicons name="trash-outline" size={18} color="#ef4444" />
+                    </TouchableOpacity>
+                  ) : null}
+                </View>
+
+                {post.body ? <Text style={[styles.postBody, { color: colors.text }]}>{post.body}</Text> : null}
+
+                {post.media?.length > 0 ? (
+                  <FlashList
+                    horizontal
+                    data={post.media}
+                    keyExtractor={(media: any, index: number) => String(media.id || index)}
+                    showsHorizontalScrollIndicator={false}
+                    contentContainerStyle={styles.mediaScroll}
+                    drawDistance={mediaWidth * 2}
+                    renderItem={({ item: media }: { item: any }) => {
+                      const previewUrl = media.thumbnail_url || media.url;
+                      return previewUrl ? (
+                        <View style={[styles.mediaFrame, { width: mediaWidth }]}>
+                          <CachedImage
+                            uri={previewUrl}
+                            style={styles.mediaImg}
+                            width={mediaWidth}
+                            height={220}
+                          />
+                          {media.media_type === "video" ? (
+                            <View style={styles.videoPlayBadge}>
+                              <Ionicons name="play" size={18} color="#FFFFFF" />
+                            </View>
+                          ) : null}
+                        </View>
+                      ) : null;
+                    }}
+                  />
+                ) : null}
+
+                <View style={styles.countsRow}>
+                  <View style={styles.countItem}>
+                    {(post.reaction_count || 0) > 0 ? (
+                      <>
+                        <View style={styles.likeBadge}>
+                          <Ionicons name="heart" size={10} color="#FFFFFF" />
+                        </View>
+                        <Text style={[styles.countText, { color: colors.textSecondary }]}>
+                          {post.reaction_count}
+                        </Text>
+                      </>
+                    ) : null}
+                  </View>
+                  <Text style={[styles.countText, { color: colors.textSecondary }]}>
+                    {comments.length} {comments.length === 1 ? "comment" : "comments"}
+                  </Text>
+                  <Text style={[styles.countText, { color: colors.textSecondary }]}>
+                    {Number(post.share_count || 0)} shares
+                  </Text>
+                </View>
+
+                <View style={[styles.actionRow, { borderTopColor: borderCol, borderBottomColor: borderCol }]}>
+                  <TouchableOpacity activeOpacity={0.78} onPress={handleReaction} style={styles.actionBtn}>
+                    <Ionicons
+                      name={post.my_reaction ? "heart" : "heart-outline"}
+                      size={20}
+                      color={post.my_reaction ? "#ef4444" : colors.textSecondary}
+                    />
+                    <Text style={[styles.actionText, { color: post.my_reaction ? "#ef4444" : colors.textSecondary }]}>
+                      Like
+                    </Text>
+                  </TouchableOpacity>
+                  <View style={styles.actionBtn}>
+                    <Ionicons name="chatbubble-outline" size={19} color={colors.textSecondary} />
+                    <Text style={[styles.actionText, { color: colors.textSecondary }]}>Comment</Text>
+                  </View>
+                  <TouchableOpacity activeOpacity={0.78} onPress={handleSharePost} style={styles.actionBtn}>
+                    <Ionicons name="share-social-outline" size={19} color={colors.textSecondary} />
+                    <Text style={[styles.actionText, { color: colors.textSecondary }]}>Share</Text>
+                  </TouchableOpacity>
+                </View>
+                <View style={styles.commentsListTopPadding} />
+              </>
+            }
+            ListEmptyComponent={
+              <View style={styles.commentsSection}>
                 <Text style={[styles.noComments, { color: colors.textSecondary }]}>
                   No comments yet. Be the first to comment.
                 </Text>
-              )}
-            </View>
-          </ScrollView>
+              </View>
+            }
+            renderItem={({ item: comment }: { item: any }) => (
+              <View style={[styles.commentRow, styles.commentListItem]}>
+                <ProfileAvatar
+                  uri={comment.author_avatar}
+                  style={styles.commentAvatar}
+                  backgroundColor={isDark ? "#374151" : "#E5E7EB"}
+                  iconColor={colors.textSecondary}
+                />
+                <View style={styles.commentBodyWrap}>
+                  <View style={[styles.commentBubble, { backgroundColor: bubbleBg }]}>
+                    <Text style={[styles.commentAuthor, { color: colors.text }]} numberOfLines={1}>
+                      {comment.author_name}
+                    </Text>
+                    <Text style={[styles.commentBody, { color: colors.text }]}>{comment.body}</Text>
+                  </View>
+                  <View style={styles.commentMetaRow}>
+                    <Text style={[styles.commentMeta, { color: colors.textSecondary }]}>
+                      {formatTimestamp(comment.created_at)}
+                    </Text>
+                    {comment.author_id === userId ? (
+                      <TouchableOpacity activeOpacity={0.78} onPress={() => handleDeleteComment(comment.id)}>
+                        <Text style={[styles.commentMeta, { color: "#ef4444" }]}>Delete</Text>
+                      </TouchableOpacity>
+                    ) : null}
+                  </View>
+                </View>
+              </View>
+            )}
+          />
 
           <View style={[styles.footer, { borderTopColor: borderCol, backgroundColor: cardBg }]}>
             <ProfileAvatar
@@ -669,7 +759,9 @@ const styles = StyleSheet.create({
   },
   actionText: { fontSize: 14, fontWeight: "600" },
   commentsSection: { paddingHorizontal: 16, paddingTop: 8 },
+  commentsListTopPadding: { paddingTop: 8 },
   commentRow: { flexDirection: "row", alignItems: "flex-start", paddingVertical: 6 },
+  commentListItem: { paddingHorizontal: 16 },
   commentAvatar: { width: 32, height: 32, borderRadius: 16 },
   commentAvatarFallback: {
     width: 32,

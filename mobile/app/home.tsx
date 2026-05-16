@@ -1,5 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { FlashList } from "@shopify/flash-list";
 import { BlurView } from "expo-blur";
 import { LinearGradient } from "expo-linear-gradient";
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
@@ -60,6 +61,7 @@ const moderateScale = (size: number, factor = 0.3) => {
 };
 
 const debugLog = (..._args: unknown[]) => { };
+const HOME_HORIZONTAL_FLASHLIST_OVERRIDE_PROPS = { initialDrawBatchSize: 4 };
 
 const clampValue = (value: number, min = 0, max = 1) => {
   return Math.max(min, Math.min(max, value));
@@ -307,7 +309,6 @@ const AutoCardImage = ({
   height,
   quality = 72,
   cacheVersion,
-  intervalMs = 3200,
 }: {
   image?: string | null;
   images?: string[];
@@ -316,7 +317,6 @@ const AutoCardImage = ({
   height?: number;
   quality?: number;
   cacheVersion?: string | number | Date;
-  intervalMs?: number;
 }) => {
   const imageList = useMemo(() => {
     const raw = [
@@ -327,26 +327,13 @@ const AutoCardImage = ({
     return Array.from(new Set(raw));
   }, [image, images]);
 
-  const [activeIndex, setActiveIndex] = useState(0);
-
-  useEffect(() => {
-    setActiveIndex(0);
-    if (imageList.length <= 1) return;
-
-    const timer = setInterval(() => {
-      setActiveIndex((prev) => (prev + 1) % imageList.length);
-    }, intervalMs);
-
-    return () => clearInterval(timer);
-  }, [imageList, intervalMs]);
-
   if (imageList.length === 0) {
     return null;
   }
 
   return (
     <CachedImage
-      uri={imageList[activeIndex]}
+      uri={imageList[0]}
       style={style}
       width={width}
       height={height}
@@ -1997,18 +1984,17 @@ export default function HomeScreen() {
           </TouchableOpacity>
         </View>
 
-        <ScrollView
+        <FlashList
           horizontal
+          data={topItems}
+          keyExtractor={(item) => `top-pick-${item.id}`}
           showsHorizontalScrollIndicator={false}
-          contentContainerStyle={{
-            paddingLeft: 24,
-            paddingRight: 24,
-            paddingVertical: 8,
-          }}
+          contentContainerStyle={styles.homeHorizontalContent}
           decelerationRate="fast"
           snapToInterval={280 + 16}
-        >
-          {topItems.map((item) => {
+          drawDistance={620}
+          overrideProps={HOME_HORIZONTAL_FLASHLIST_OVERRIDE_PROPS}
+          renderItem={({ item }) => {
             const priceLabel = getTopPickPrice(item);
             return (
               <TouchableOpacity
@@ -2147,8 +2133,8 @@ export default function HomeScreen() {
                 </View>
               </TouchableOpacity>
             );
-          })}
-        </ScrollView>
+          }}
+        />
       </View>
     );
   };
@@ -2274,18 +2260,17 @@ export default function HomeScreen() {
           </TouchableOpacity>
         </View>
 
-        <ScrollView
+        <FlashList
           horizontal
+          data={newArrivals}
+          keyExtractor={(item) => `new-arrival-${item.id}`}
           showsHorizontalScrollIndicator={false}
-          contentContainerStyle={{
-            paddingLeft: 24,
-            paddingRight: 24,
-            paddingVertical: 8,
-          }}
+          contentContainerStyle={styles.homeHorizontalContent}
           decelerationRate="fast"
           snapToInterval={280 + 16}
-        >
-          {newArrivals.map((item) => {
+          drawDistance={620}
+          overrideProps={HOME_HORIZONTAL_FLASHLIST_OVERRIDE_PROPS}
+          renderItem={({ item }) => {
             const priceLabel = getPriceLabel(item);
             return (
               <TouchableOpacity
@@ -2410,8 +2395,8 @@ export default function HomeScreen() {
                 </View>
               </TouchableOpacity>
             );
-          })}
-        </ScrollView>
+          }}
+        />
       </View>
     );
   };
@@ -2419,6 +2404,7 @@ export default function HomeScreen() {
   // 4. For You - Smart Feed (Merged Featured + Discover with variety)
   const renderSmartFeed = () => {
     const uniqueItems = uniqueSmartFeedItems;
+    const secondarySmartFeedItems = uniqueItems.slice(1, 11);
 
     if (uniqueItems.length === 0) {
       return (
@@ -2585,18 +2571,17 @@ export default function HomeScreen() {
         )}
 
         {/* Horizontal Scroll for Rest */}
-        <ScrollView
+        <FlashList
           horizontal
+          data={secondarySmartFeedItems}
+          keyExtractor={(item) => `for-you-${item.id}`}
           showsHorizontalScrollIndicator={false}
-          contentContainerStyle={{
-            paddingLeft: 24,
-            paddingRight: 24,
-            paddingVertical: 16,
-          }} // Added paddingVertical for shadows
+          contentContainerStyle={styles.smartFeedHorizontalContent}
           decelerationRate="fast"
           snapToInterval={280 + 16}
-        >
-          {uniqueItems.slice(1, 11).map((item, index) => (
+          drawDistance={620}
+          overrideProps={HOME_HORIZONTAL_FLASHLIST_OVERRIDE_PROPS}
+          renderItem={({ item }) => (
             <TouchableOpacity
               key={item.id}
               activeOpacity={1}
@@ -2789,8 +2774,8 @@ export default function HomeScreen() {
                 )}
               </View>
             </TouchableOpacity>
-          ))}
-        </ScrollView>
+          )}
+        />
       </View>
     );
   };
@@ -3198,18 +3183,17 @@ export default function HomeScreen() {
                 </Text>
               </TouchableOpacity>
             </View>
-            <ScrollView
+            <FlashList
               horizontal
+              data={recentlyViewed}
+              keyExtractor={(item) => `recently-viewed-${item.id}`}
               showsHorizontalScrollIndicator={false}
-              contentContainerStyle={{
-                paddingLeft: 24,
-                paddingRight: 24,
-                paddingVertical: 8,
-              }}
+              contentContainerStyle={styles.homeHorizontalContent}
               decelerationRate="fast"
               snapToInterval={240 + 16}
-            >
-              {recentlyViewed.map((item) => (
+              drawDistance={520}
+              overrideProps={HOME_HORIZONTAL_FLASHLIST_OVERRIDE_PROPS}
+              renderItem={({ item }) => (
                 <TouchableOpacity
                   key={item.id}
                   activeOpacity={1}
@@ -3313,8 +3297,8 @@ export default function HomeScreen() {
                     </View>
                   </View>
                 </TouchableOpacity>
-              ))}
-            </ScrollView>
+              )}
+            />
           </View>
         )}
       </ScrollView>
@@ -3480,6 +3464,16 @@ const styles = StyleSheet.create({
     fontSize: moderateScale(13),
     marginLeft: 0,
     marginTop: -2,
+  },
+  homeHorizontalContent: {
+    paddingLeft: 24,
+    paddingRight: 24,
+    paddingVertical: 8,
+  },
+  smartFeedHorizontalContent: {
+    paddingLeft: 24,
+    paddingRight: 24,
+    paddingVertical: 16,
   },
 
   // Bento Grid Styles

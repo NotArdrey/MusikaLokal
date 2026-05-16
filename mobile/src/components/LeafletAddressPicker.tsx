@@ -204,12 +204,13 @@ export default function LeafletAddressPicker({
                 <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
             </TouchableOpacity>
 
-            <Modal
-                visible={modalVisible}
-                animationType="slide"
-                onRequestClose={() => setModalVisible(false)}
-            >
-                <View style={[styles.modalContainer, { backgroundColor: colors.background }]}>
+            {modalVisible ? (
+                <Modal
+                    visible
+                    animationType="slide"
+                    onRequestClose={() => setModalVisible(false)}
+                >
+                    <View style={[styles.modalContainer, { backgroundColor: colors.background }]}>
                     {/* Header */}
                     <View style={[styles.modalHeader, { borderBottomColor: colors.border }]}>
                         <TouchableOpacity activeOpacity={1}
@@ -298,8 +299,9 @@ export default function LeafletAddressPicker({
                             Tap on the map or drag the marker to select your location
                         </Text>
                     </View>
-                </View>
-            </Modal>
+                    </View>
+                </Modal>
+            ) : null}
         </>
     );
 }

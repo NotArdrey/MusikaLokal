@@ -188,9 +188,11 @@ const UserSearchModal: React.FC<UserSearchModalProps> = ({
         </TouchableOpacity>
     );
 
+    if (!visible) return null;
+
     return (
         <Modal
-            visible={visible}
+            visible
             animationType="slide"
             presentationStyle="fullScreen"
             onRequestClose={onClose}

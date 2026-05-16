@@ -7,7 +7,6 @@ import {
   ActivityIndicator,
   Alert,
   Dimensions,
-  FlatList,
   Image,
   InteractionManager,
   Keyboard,
@@ -20,6 +19,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { FlashList } from "@shopify/flash-list";
 import * as FileSystem from "expo-file-system/legacy";
 import * as ImagePicker from "expo-image-picker";
 import * as VideoThumbnails from "expo-video-thumbnails";
@@ -1272,59 +1272,6 @@ const getFeedPrimaryCtaLabel = (item: any) => {
   return "View Details";
 };
 
-const DEMO_RADIO_STATION = {
-  id: "musikalokal-ncs-radio",
-  name: "MusikaLokal NCS Radio",
-  description: "NCS releases for the demo radio rotation",
-  genre: "NCS / EDM",
-  is_active: true,
-  __queueReady: true,
-  __isDemoStation: true,
-  created_at: "2026-01-01T00:00:00.000Z",
-  updated_at: "2026-01-01T00:00:00.000Z",
-  live_anchor_at: "2026-01-01T00:00:00.000Z",
-  rotation_interval_minutes: 15,
-  slot_count: 1,
-  creator: {
-    full_name: "NoCopyrightSounds",
-  },
-  live_slots: [
-    {
-      id: "musikalokal-ncs-slot",
-      station_id: "musikalokal-ncs-radio",
-      position: 0,
-      label: "NCS spotlight",
-      created_at: "2026-01-01T00:00:00.000Z",
-      updated_at: "2026-01-01T00:00:00.000Z",
-      playlist: {
-        id: "musikalokal-ncs-playlist",
-        title: "NCS spotlight",
-        track_count: 3,
-        items: [
-          {
-            id: "musikalokal-ncs-sky-high",
-            title: "Sky High",
-            artist_name: "Elektronomia",
-            audio_url: "https://ncsmusic.s3.eu-west-1.amazonaws.com/tracks/000/000/290/sky-high-1586948785-jGkCsW2xA9.mp3",
-          },
-          {
-            id: "musikalokal-ncs-nekozilla",
-            title: "Nekozilla",
-            artist_name: "Different Heaven",
-            audio_url: "https://ncsmusic.s3.eu-west-1.amazonaws.com/tracks/000/000/275/nekozilla-1586948469-wOdU2Fj3uG.mp3",
-          },
-          {
-            id: "musikalokal-ncs-on-and-on",
-            title: "On & On (feat. Daniel Levi)",
-            artist_name: "Cartoon, Jeja",
-            audio_url: "https://ncsmusic.s3.eu-west-1.amazonaws.com/tracks/000/000/152/1654766391_N6n9kRBaAr_Cartoon---On--On-feat.-Daniel-Levi-_NCS-Release_.mp3",
-          },
-        ],
-      },
-    },
-  ],
-};
-
 const getStationSlots = (station: any) => {
   if (Array.isArray(station?.live_slots) && station.live_slots.length > 0) {
     return station.live_slots;
@@ -1448,7 +1395,8 @@ const LiveRadioCard = React.memo(function LiveRadioCard({
   const liveFeaturedStation = featuredStation && getStationPlayableTrackCount(featuredStation) > 0
     ? featuredStation
     : null;
-  const displayStation = activeStation || liveFeaturedStation || DEMO_RADIO_STATION;
+  const displayStation = activeStation || liveFeaturedStation || null;
+  const hasDisplayStation = Boolean(displayStation?.id);
   const stationSlots = getStationSlots(displayStation);
   const stationSlotCount = getStationSlotCount(displayStation);
   const stationTrackCount = getStationTrackCount(displayStation);
@@ -1462,15 +1410,21 @@ const LiveRadioCard = React.memo(function LiveRadioCard({
   const stationName =
     typeof displayStation?.name === "string" && displayStation.name.trim().length > 0
       ? displayStation.name.trim()
-      : "MusikaLokal Radio";
-  const nowPlayingTitle = isCurrentStation
-    ? currentTrack?.title || getStationNowPlayingTitle(displayStation, currentSlotIndex)
-    : getStationNowPlayingTitle(displayStation, 0);
-  const rotationSummary = stationTrackCount > 0
-    ? `${stationTrackCount} track${stationTrackCount === 1 ? "" : "s"}`
-    : stationSlotCount > 0
-      ? `${stationSlotCount} playlist${stationSlotCount === 1 ? "" : "s"}`
-      : "No station";
+      : hasDisplayStation
+        ? "MusikaLokal Radio"
+        : "No live station";
+  const nowPlayingTitle = hasDisplayStation
+    ? isCurrentStation
+      ? currentTrack?.title || getStationNowPlayingTitle(displayStation, currentSlotIndex)
+      : getStationNowPlayingTitle(displayStation, 0)
+    : "Check back for live rotations";
+  const rotationSummary = hasDisplayStation
+    ? stationTrackCount > 0
+      ? `${stationTrackCount} track${stationTrackCount === 1 ? "" : "s"}`
+      : stationSlotCount > 0
+        ? `${stationSlotCount} playlist${stationSlotCount === 1 ? "" : "s"}`
+        : "No station"
+    : "Offline";
   const playButtonLabel = loadingStation || isTuneInLoading
     ? "Loading"
     : !canTuneIn
@@ -1488,7 +1442,7 @@ const LiveRadioCard = React.memo(function LiveRadioCard({
   const statusBadgeLabel = loadingStation ? "..." : canTuneIn ? "LIVE" : "OFF";
 
   const openStationDetails = useCallback(() => {
-    if (!displayStation?.id || displayStation?.__isDemoStation) return;
+    if (!displayStation?.id) return;
 
     router.push({
       pathname: "/station_details" as any,
@@ -4005,16 +3959,13 @@ export default function FeedScreen() {
       {showInitialFeedSkeleton ? (
         renderFeedSkeleton()
       ) : (
-        <FlatList
+        <FlashList
             style={[styles.feedViewport, feedViewportStyle]}
             data={feedItems}
-            initialNumToRender={4}
             keyExtractor={feedKeyExtractor}
-            maxToRenderPerBatch={4}
             renderItem={renderPost}
-            removeClippedSubviews
-            updateCellsBatchingPeriod={32}
-            windowSize={5}
+            drawDistance={760}
+            overrideProps={{ initialDrawBatchSize: 4 }}
             ListHeaderComponent={feedListHeader}
             ListEmptyComponent={feedEmpty}
             ListFooterComponent={feedFooter}
@@ -4151,13 +4102,19 @@ export default function FeedScreen() {
             </View>
 
             {postMedia.length > 0 ? (
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.composerMediaList}>
-                {postMedia.map((item) => {
+              <FlashList
+                horizontal
+                data={postMedia}
+                keyExtractor={(item) => item.id}
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.composerMediaList}
+                drawDistance={420}
+                renderItem={({ item }) => {
                   const previewUri = item.media_type === "video"
                     ? item.thumbnailChoices[item.selectedThumbnailIndex]?.uri || item.thumbnailChoices[0]?.uri || item.uri
                     : item.uri;
                   return (
-                    <View key={item.id} style={[styles.composerMediaCard, { borderColor: item.is_cover ? colors.primary : colors.border }]}>
+                    <View style={[styles.composerMediaCard, { borderColor: item.is_cover ? colors.primary : colors.border }]}>
                       <Image source={{ uri: previewUri }} style={styles.composerMediaPreview} />
                       {item.media_type === "video" ? (
                         <View style={styles.composerVideoBadge}>
@@ -4199,8 +4156,8 @@ export default function FeedScreen() {
                       ) : null}
                     </View>
                   );
-                })}
-              </ScrollView>
+                }}
+              />
               ) : null}
           </ScrollView>
         </View>

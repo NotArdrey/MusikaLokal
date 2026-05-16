@@ -32,6 +32,11 @@ import TrackedBottomSheetModal from "./TrackedBottomSheetModal";
 const debugLog = (..._args: unknown[]) => { };
 
 const { width, height } = Dimensions.get("window");
+const bookingStudioDetailsCache = new Map<
+  string,
+  { studioDetails: any; dateOverride: any; cachedAt: number }
+>();
+const BOOKING_DETAILS_CACHE_TTL_MS = 60_000;
 
 // Responsive scaling utilities - optimized for iPhone SE and smaller devices
 const scale = (size: number) => {
@@ -99,12 +104,37 @@ const BookingDetailsSheet = forwardRef<
       });
       fetchStudioDetails();
     }
-  }, [booking]);
+    // Keep this tied to stable booking fields so modal reopen does not refetch
+    // only because the parent recreated the booking object.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    booking?.date,
+    booking?.end_time,
+    booking?.raw_date,
+    booking?.start_time,
+    booking?.studio_id,
+    booking?.type_id,
+  ]);
 
   const fetchStudioDetails = async () => {
     if (!booking?.studio_id) return;
 
     try {
+      const bookingDate = booking.raw_date
+        ? booking.raw_date.split("T")[0]
+        : booking.start_time
+          ? new Date(booking.start_time).toISOString().split("T")[0]
+          : "";
+      const cacheKey = `${booking.studio_id}:${bookingDate || booking.id || "no-date"}`;
+      const cached = bookingStudioDetailsCache.get(cacheKey);
+
+      if (cached && Date.now() - cached.cachedAt < BOOKING_DETAILS_CACHE_TTL_MS) {
+        setStudioDetails(cached.studioDetails);
+        setDateOverride(cached.dateOverride);
+        setLoading(false);
+        return;
+      }
+
       setLoading(true);
       const { data, error } = await supabase
         .from("studios_with_stats")
@@ -127,17 +157,17 @@ const BookingDetailsSheet = forwardRef<
         }
       }
 
-      setStudioDetails({
+      const nextStudioDetails = {
         ...data,
         owner,
-      });
+      };
+      let nextDateOverride: any = null;
+
+      setStudioDetails(nextStudioDetails);
+      setDateOverride(null);
 
       // Check if this booking date has a specific date override
-      if (booking.start_time || booking.raw_date) {
-        const bookingDate = booking.raw_date
-          ? booking.raw_date.split("T")[0]
-          : new Date(booking.start_time).toISOString().split("T")[0];
-
+      if (bookingDate) {
         const { data: override, error: overrideError } = await supabase
           .from("studio_date_overrides")
           .select("*")
@@ -146,10 +176,17 @@ const BookingDetailsSheet = forwardRef<
           .maybeSingle();
 
         if (!overrideError && override) {
-          setDateOverride(override);
+          nextDateOverride = override;
+          setDateOverride(nextDateOverride);
           debugLog("📅 Found date override for booking date:", override);
         }
       }
+
+      bookingStudioDetailsCache.set(cacheKey, {
+        studioDetails: nextStudioDetails,
+        dateOverride: nextDateOverride,
+        cachedAt: Date.now(),
+      });
     } catch (e) {
       debugLog("Error fetching studio details:", e);
     } finally {
@@ -553,12 +590,14 @@ const BookingDetailsSheet = forwardRef<
           </View>
         </BottomSheetScrollView>
         </TrackedBottomSheetModal>
-        <InAppMediaViewer
-          visible={!!mediaViewerUrl}
-          uri={mediaViewerUrl}
-          title={mediaViewerTitle}
-          onClose={() => setMediaViewerUrl(null)}
-        />
+        {mediaViewerUrl ? (
+          <InAppMediaViewer
+            visible
+            uri={mediaViewerUrl}
+            title={mediaViewerTitle}
+            onClose={() => setMediaViewerUrl(null)}
+          />
+        ) : null}
       </>
     );
   }
@@ -1796,12 +1835,14 @@ const BookingDetailsSheet = forwardRef<
         </View>
       </BottomSheetScrollView>
       </TrackedBottomSheetModal>
-      <InAppMediaViewer
-        visible={!!mediaViewerUrl}
-        uri={mediaViewerUrl}
-        title={mediaViewerTitle}
-        onClose={() => setMediaViewerUrl(null)}
-      />
+      {mediaViewerUrl ? (
+        <InAppMediaViewer
+          visible
+          uri={mediaViewerUrl}
+          title={mediaViewerTitle}
+          onClose={() => setMediaViewerUrl(null)}
+        />
+      ) : null}
     </>
   );
 });

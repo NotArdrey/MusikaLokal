@@ -252,9 +252,22 @@ export default function LocationPicker({ visible, onClose, onSelect, initialLoca
 
     const [currentSelection, setCurrentSelection] = useState<{ address: string; lat: number; lng: number } | null>(null);
 
+    if (!visible) {
+        return alertVisible ? (
+            <CustomAlert
+                visible
+                type={alertConfig.type}
+                title={alertConfig.title}
+                message={alertConfig.message}
+                buttons={alertConfig.buttons}
+                onClose={() => setAlertVisible(false)}
+            />
+        ) : null;
+    }
+
     return (
         <>
-        <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
+        <Modal visible animationType="slide" onRequestClose={onClose}>
             <View style={styles.container}>
                 {/* Header */}
                 <View style={styles.header}>

@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
-import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { memo, useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
     Platform,
@@ -10,6 +10,7 @@ import {
     StyleSheet,
     Text,
     TouchableOpacity,
+    type DimensionValue,
     View,
 } from "react-native";
 import { PH_MUSIC_GROUP_TYPES } from "../constants/groupTypes";
@@ -47,6 +48,19 @@ interface ListingCardProps {
   showGigSummary?: boolean;
   actionSlot?: React.ReactNode;
 }
+
+type OptimizedListingImageStripProps = {
+  images: string[];
+  pageIndex: number;
+  onPageIndexChange: (index: number) => void;
+  fallbackUri?: string | null;
+  cacheVersion?: string | number | null;
+  pagerStyle: any;
+  imageStyle: any;
+  pageWidth: DimensionValue;
+  imageWidth: number;
+  imageHeight: number;
+};
 
 type PriceDisplayItem = {
   key: string;
@@ -124,6 +138,116 @@ const getListingFallbackImage = (type?: string, id?: string | number | null) => 
   return images[seed % images.length];
 };
 
+const shouldMountListingImagePage = (
+  index: number,
+  activeIndex: number,
+  total: number,
+) => {
+  if (Math.abs(index - activeIndex) <= 1) return true;
+
+  return (
+    (activeIndex === 0 && index === total - 1) ||
+    (activeIndex === total - 1 && index === 0)
+  );
+};
+
+const OptimizedListingImageStrip = memo(
+  function OptimizedListingImageStrip({
+    images,
+    pageIndex,
+    onPageIndexChange,
+    fallbackUri,
+    cacheVersion,
+    pagerStyle,
+    imageStyle,
+    pageWidth,
+    imageWidth,
+    imageHeight,
+  }: OptimizedListingImageStripProps) {
+    const safePageIndex = Math.min(Math.max(pageIndex, 0), images.length - 1);
+
+    if (images.length <= 1) {
+      return (
+        <CachedImage
+          uri={images.length > 0 ? images[0] : undefined}
+          fallbackUri={fallbackUri}
+          style={imageStyle}
+          width={imageWidth}
+          height={imageHeight}
+          cacheVersion={cacheVersion}
+        />
+      );
+    }
+
+    if (Platform.OS === "web") {
+      return (
+        <ScrollView
+          horizontal
+          pagingEnabled
+          showsHorizontalScrollIndicator={false}
+          style={pagerStyle}
+          nestedScrollEnabled
+          directionalLockEnabled
+          scrollEnabled
+          onStartShouldSetResponder={() => true}
+          onMoveShouldSetResponder={() => true}
+          onMomentumScrollEnd={(e) => {
+            const containerWidth =
+              typeof pageWidth === "number"
+                ? pageWidth
+                : e.nativeEvent.layoutMeasurement.width;
+            const nextIndex = Math.round(
+              e.nativeEvent.contentOffset.x / Math.max(containerWidth, 1),
+            );
+            onPageIndexChange(Math.min(Math.max(nextIndex, 0), images.length - 1));
+          }}
+        >
+          {images.map((img: string, index: number) => (
+            <View key={`${img}-${index}`} style={[styles.pagerPage, { width: pageWidth }]}>
+              {shouldMountListingImagePage(index, safePageIndex, images.length) ? (
+                <CachedImage
+                  uri={img}
+                  fallbackUri={fallbackUri}
+                  style={imageStyle}
+                  width={imageWidth}
+                  height={imageHeight}
+                  cacheVersion={cacheVersion}
+                />
+              ) : null}
+            </View>
+          ))}
+        </ScrollView>
+      );
+    }
+
+    return (
+      <PagerView
+        style={pagerStyle}
+        initialPage={safePageIndex}
+        scrollEnabled
+        onPageSelected={(e: any) => {
+          onPageIndexChange(e.nativeEvent.position);
+        }}
+      >
+        {images.map((img: string, index: number) => (
+          <View key={`${img}-${index}`} style={styles.pagerPage}>
+            {shouldMountListingImagePage(index, safePageIndex, images.length) ? (
+              <CachedImage
+                uri={img}
+                fallbackUri={fallbackUri}
+                style={imageStyle}
+                width={imageWidth}
+                height={imageHeight}
+                cacheVersion={cacheVersion}
+              />
+            ) : null}
+          </View>
+        ))}
+      </PagerView>
+    );
+  },
+);
+
 const ListingCard: React.FC<ListingCardProps> = ({
   item,
   onPress,
@@ -141,10 +265,6 @@ const ListingCard: React.FC<ListingCardProps> = ({
   const [isBookmarked, setIsBookmarked] = useState(false);
   const [bookmarkBusy, setBookmarkBusy] = useState(false);
   const [pageIndex, setPageIndex] = useState(0);
-  const horizontalWebScrollRef = useRef<ScrollView | null>(null);
-  const verticalWebScrollRef = useRef<ScrollView | null>(null);
-  const horizontalPagerRef = useRef<any>(null);
-  const verticalPagerRef = useRef<any>(null);
   const isFeedVariant = variant === "feed";
 
   // Check if current user can invite (ONLY venue-owner viewing a musician/Group)
@@ -195,7 +315,7 @@ const ListingCard: React.FC<ListingCardProps> = ({
   // Gig Application Deadline Logic (24hrs before event)
   const gigDeadlineInfo = useMemo(() => {
     return getGigApplicationDeadlineInfo(item);
-  }, [item.event_date, item.requirements?.event_start_time, item.type]);
+  }, [item]);
 
   const getPreferenceTagText = useCallback((label: string, values: unknown) => {
     if (!Array.isArray(values) || values.length === 0) return null;
@@ -639,45 +759,21 @@ const ListingCard: React.FC<ListingCardProps> = ({
     () => item.updated_at || item.created_at || item.id,
     [item.created_at, item.id, item.updated_at],
   );
+  const imageStripKey = useMemo(
+    () =>
+      [
+        item?.type || "listing",
+        item?.id || item?.name || "unknown",
+        images.length,
+        images[0] || "",
+        images[images.length - 1] || "",
+      ].join(":"),
+    [images, item?.id, item?.name, item?.type],
+  );
 
   useEffect(() => {
-    if (!hasMultipleImages) {
-      setPageIndex(0);
-      return;
-    }
-
-    const interval = setInterval(() => {
-      setPageIndex((prev) => {
-        const next = (prev + 1) % images.length;
-
-        if (variant === "horizontal") {
-          if (Platform.OS === "web") {
-            horizontalWebScrollRef.current?.scrollTo({
-              x: next * 280,
-              y: 0,
-              animated: true,
-            });
-          } else {
-            horizontalPagerRef.current?.setPage?.(next);
-          }
-        } else {
-          if (Platform.OS === "web") {
-            verticalWebScrollRef.current?.scrollTo({
-              x: next * 320,
-              y: 0,
-              animated: true,
-            });
-          } else {
-            verticalPagerRef.current?.setPage?.(next);
-          }
-        }
-
-        return next;
-      });
-    }, 3200);
-
-    return () => clearInterval(interval);
-  }, [hasMultipleImages, images.length, variant]);
+    setPageIndex(0);
+  }, [imageStripKey]);
 
   // --- RENDER VARIANTS ---
 
@@ -715,78 +811,19 @@ const ListingCard: React.FC<ListingCardProps> = ({
               />
             </View>
           )}
-          {hasMultipleImages ? (
-            <View style={StyleSheet.absoluteFillObject}>
-              {Platform.OS === "web" ? (
-                <ScrollView
-                  ref={horizontalWebScrollRef}
-                  horizontal
-                  pagingEnabled
-                  showsHorizontalScrollIndicator={false}
-                  style={StyleSheet.absoluteFillObject}
-                  nestedScrollEnabled
-                  directionalLockEnabled
-                  scrollEnabled
-                  onStartShouldSetResponder={() => true}
-                  onMoveShouldSetResponder={() => true}
-                  onMomentumScrollEnd={(e) => {
-                    const newIndex = Math.round(
-                      e.nativeEvent.contentOffset.x / cardWidth,
-                    );
-                    setPageIndex(newIndex);
-                  }}
-                >
-                  {images.map((img: string, index: number) => (
-                    <View
-                      key={index}
-                      style={[styles.pagerPage, { width: cardWidth }]}
-                    >
-                      <CachedImage
-                        uri={img}
-                        fallbackUri={fallbackImageUri}
-                        style={StyleSheet.absoluteFillObject}
-                        width={cardWidth}
-                        height={cardHeight}
-                        cacheVersion={imageCacheVersion}
-                      />
-                    </View>
-                  ))}
-                </ScrollView>
-              ) : (
-                <PagerView
-                  ref={horizontalPagerRef}
-                  style={StyleSheet.absoluteFillObject}
-                  initialPage={0}
-                  scrollEnabled
-                  onPageSelected={(e: any) =>
-                    setPageIndex(e.nativeEvent.position)
-                  }
-                >
-                  {images.map((img: string, index: number) => (
-                    <View key={index} style={styles.pagerPage}>
-                      <CachedImage
-                        uri={img}
-                        fallbackUri={fallbackImageUri}
-                        style={StyleSheet.absoluteFillObject}
-                        width={cardWidth}
-                        height={cardHeight}
-                        cacheVersion={imageCacheVersion}
-                      />
-                    </View>
-                  ))}
-                </PagerView>
-              )}
-            </View>
-          ) : (
-            <CachedImage
-              uri={images.length > 0 ? images[0] : undefined}
-              fallbackUri={fallbackImageUri}
-              style={StyleSheet.absoluteFillObject}
-              width={cardWidth}
-              height={cardHeight}
-              cacheVersion={imageCacheVersion}
-            />
-          )}
+          <OptimizedListingImageStrip
+            key={imageStripKey}
+            images={images}
+            pageIndex={pageIndex}
+            onPageIndexChange={setPageIndex}
+            fallbackUri={fallbackImageUri}
+            pagerStyle={StyleSheet.absoluteFillObject}
+            imageStyle={StyleSheet.absoluteFillObject}
+            pageWidth={cardWidth}
+            imageWidth={cardWidth}
+            imageHeight={cardHeight}
+            cacheVersion={imageCacheVersion}
+          />
 
           {/* Gradient Overlay */}
           <LinearGradient
@@ -1203,67 +1240,19 @@ const ListingCard: React.FC<ListingCardProps> = ({
           )}
           {hasMultipleImages ? (
             <View style={{ flex: 1 }}>
-              {Platform.OS === "web" ? (
-                <ScrollView
-                  ref={verticalWebScrollRef}
-                  horizontal
-                  pagingEnabled
-                  showsHorizontalScrollIndicator={false}
-                  style={{ flex: 1 }}
-                  nestedScrollEnabled
-                  directionalLockEnabled
-                  scrollEnabled
-                  onStartShouldSetResponder={() => true}
-                  onMoveShouldSetResponder={() => true}
-                  onMomentumScrollEnd={(e) => {
-                    const containerWidth =
-                      e.nativeEvent.layoutMeasurement.width;
-                    const newIndex = Math.round(
-                      e.nativeEvent.contentOffset.x / containerWidth,
-                    );
-                    setPageIndex(newIndex);
-                  }}
-                >
-                  {images.map((img: string, index: number) => (
-                    <View
-                      key={index}
-                      style={[styles.pagerPage, { width: "100%" }]}
-                    >
-                      <CachedImage
-                        uri={img}
-                        fallbackUri={fallbackImageUri}
-                        style={styles.image}
-                        width={640}
-                        height={360}
-                        cacheVersion={imageCacheVersion}
-                      />
-                    </View>
-                  ))}
-                </ScrollView>
-              ) : (
-                <PagerView
-                  ref={verticalPagerRef}
-                  style={{ flex: 1 }}
-                  initialPage={0}
-                  scrollEnabled
-                  onPageSelected={(e: any) =>
-                    setPageIndex(e.nativeEvent.position)
-                  }
-                >
-                  {images.map((img: string, index: number) => (
-                    <View key={index} style={styles.pagerPage}>
-                      <CachedImage
-                        uri={img}
-                        fallbackUri={fallbackImageUri}
-                        style={styles.image}
-                        width={640}
-                        height={360}
-                        cacheVersion={imageCacheVersion}
-                      />
-                    </View>
-                  ))}
-                </PagerView>
-              )}
+              <OptimizedListingImageStrip
+                key={imageStripKey}
+                images={images}
+                pageIndex={pageIndex}
+                onPageIndexChange={setPageIndex}
+                fallbackUri={fallbackImageUri}
+                pagerStyle={{ flex: 1 }}
+                imageStyle={styles.image}
+                pageWidth="100%"
+                imageWidth={640}
+                imageHeight={360}
+                cacheVersion={imageCacheVersion}
+              />
               {/* Pagination Dots for Vertical Card */}
               <View style={[styles.paginationContainer, { bottom: 10 }]}>
                 {images.map((_: any, i: number) => (

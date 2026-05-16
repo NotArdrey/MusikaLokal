@@ -89,6 +89,21 @@ type SheetAlertButton = {
 
 type ProductionTeamTab = "About" | "Connect" | "Review";
 
+type ProductionTeamBaseDetails = {
+  team: ProductionTeamRecord;
+  members: ProductionTeamMember[];
+  membershipRole: string | null;
+};
+
+type ProductionTeamBaseCacheEntry = {
+  payload?: ProductionTeamBaseDetails;
+  cachedAt: number;
+  inFlight?: Promise<ProductionTeamBaseDetails>;
+};
+
+const PRODUCTION_TEAM_DETAILS_CACHE_TTL_MS = 60_000;
+const productionTeamBaseCache = new Map<string, ProductionTeamBaseCacheEntry>();
+
 const formatRoleLabel = (value: string | null | undefined) => {
   if (!value) return "Member";
   return value.charAt(0).toUpperCase() + value.slice(1);
@@ -103,6 +118,63 @@ const formatCreatedLabel = (value: string | null | undefined) => {
     day: "numeric",
     year: "numeric",
   });
+};
+
+const loadProductionTeamBaseDetails = async (
+  targetTeamId: string,
+  targetUserId?: string | null,
+): Promise<ProductionTeamBaseDetails> => {
+  const membershipRequest = targetUserId
+    ? supabase
+        .from("production_team_members")
+        .select("role")
+        .eq("team_id", targetTeamId)
+        .eq("user_id", targetUserId)
+        .maybeSingle()
+    : Promise.resolve({ data: null, error: null } as any);
+
+  const [teamResponse, membersResponse, membershipResponse] = await Promise.all([
+    supabase
+      .from("production_teams")
+      .select("*")
+      .eq("id", targetTeamId)
+      .maybeSingle(),
+    supabase
+      .from("production_team_members")
+      .select("user_id, role, profiles(id, full_name, avatar_url)")
+      .eq("team_id", targetTeamId),
+    membershipRequest,
+  ]);
+
+  if (teamResponse.error) throw teamResponse.error;
+  if (!teamResponse.data) throw new Error("Production team not found.");
+  if (membersResponse.error) throw membersResponse.error;
+
+  const mappedMembers: ProductionTeamMember[] = (membersResponse.data || []).map(
+    (member: any) => ({
+      user_id: member.user_id,
+      role: member.role,
+      full_name: member.profiles?.full_name || "Unknown member",
+      avatar_url: member.profiles?.avatar_url || null,
+    }),
+  );
+
+  mappedMembers.sort((left, right) => {
+    const leftPriority = left.role === "owner" ? 0 : left.role === "manager" ? 1 : 2;
+    const rightPriority = right.role === "owner" ? 0 : right.role === "manager" ? 1 : 2;
+    if (leftPriority !== rightPriority) return leftPriority - rightPriority;
+    return left.full_name.localeCompare(right.full_name);
+  });
+
+  const team = teamResponse.data as ProductionTeamRecord;
+
+  return {
+    team,
+    members: mappedMembers,
+    membershipRole:
+      membershipResponse?.data?.role ||
+      (team.owner_id === targetUserId ? "owner" : null),
+  };
 };
 
 const ProductionTeamDetailsSheet = forwardRef<
@@ -194,7 +266,27 @@ const ProductionTeamDetailsSheet = forwardRef<
       };
     }
 
-    setLoading(true);
+    const cacheKey = `${teamId}:${userId || "guest"}`;
+    const cached = productionTeamBaseCache.get(cacheKey);
+    const cacheIsFresh =
+      cached?.payload &&
+      Date.now() - cached.cachedAt < PRODUCTION_TEAM_DETAILS_CACHE_TTL_MS;
+
+    if (cached?.payload) {
+      setTeam(cached.payload.team);
+      setMembers(cached.payload.members);
+      setMembershipRole(cached.payload.membershipRole);
+    }
+
+    if (cacheIsFresh) {
+      setLoading(false);
+      setErrorMessage("");
+      return () => {
+        active = false;
+      };
+    }
+
+    setLoading(!cached?.payload);
     setErrorMessage("");
     setRequestMessage("");
     setRequestApplicationContext("");
@@ -204,62 +296,50 @@ const ProductionTeamDetailsSheet = forwardRef<
 
     void (async () => {
       try {
-        const membershipRequest = userId
-          ? supabase
-              .from("production_team_members")
-              .select("role")
-              .eq("team_id", teamId)
-              .eq("user_id", userId)
-              .maybeSingle()
-          : Promise.resolve({ data: null, error: null } as any);
+        const inFlight =
+          cached?.inFlight || loadProductionTeamBaseDetails(teamId, userId);
 
-        const [teamResponse, membersResponse, membershipResponse] = await Promise.all([
-          supabase
-            .from("production_teams")
-            .select("*")
-            .eq("id", teamId)
-            .maybeSingle(),
-          supabase
-            .from("production_team_members")
-            .select("user_id, role, profiles(id, full_name, avatar_url)")
-            .eq("team_id", teamId),
-          membershipRequest,
-        ]);
-
-        if (teamResponse.error) throw teamResponse.error;
-        if (!teamResponse.data) throw new Error("Production team not found.");
-        if (membersResponse.error) throw membersResponse.error;
-
-        if (!active) return;
-
-        const mappedMembers: ProductionTeamMember[] = (membersResponse.data || []).map(
-          (member: any) => ({
-            user_id: member.user_id,
-            role: member.role,
-            full_name: member.profiles?.full_name || "Unknown member",
-            avatar_url: member.profiles?.avatar_url || null,
-          }),
-        );
-
-        mappedMembers.sort((left, right) => {
-          const leftPriority = left.role === "owner" ? 0 : left.role === "manager" ? 1 : 2;
-          const rightPriority = right.role === "owner" ? 0 : right.role === "manager" ? 1 : 2;
-          if (leftPriority !== rightPriority) return leftPriority - rightPriority;
-          return left.full_name.localeCompare(right.full_name);
+        productionTeamBaseCache.set(cacheKey, {
+          payload: cached?.payload,
+          cachedAt: cached?.cachedAt || 0,
+          inFlight,
         });
 
-        setTeam(teamResponse.data as ProductionTeamRecord);
-        setMembers(mappedMembers);
-        setMembershipRole(
-          membershipResponse?.data?.role ||
-            (teamResponse.data.owner_id === userId ? "owner" : null),
-        );
+        const payload = await inFlight;
+        productionTeamBaseCache.set(cacheKey, {
+          payload,
+          cachedAt: Date.now(),
+        });
+
+        if (!active) return;
+
+        setTeam(payload.team);
+        setMembers(payload.members);
+        setMembershipRole(payload.membershipRole);
       } catch (error: any) {
         if (!active) return;
-        setTeam(null);
-        setMembers([]);
-        setMembershipRole(null);
-        setErrorMessage(error?.message || "Failed to load production team.");
+        const currentCache = productionTeamBaseCache.get(cacheKey);
+        if (currentCache?.inFlight) {
+          if (currentCache.payload) {
+            productionTeamBaseCache.set(cacheKey, {
+              payload: currentCache.payload,
+              cachedAt: currentCache.cachedAt,
+            });
+          } else {
+            productionTeamBaseCache.delete(cacheKey);
+          }
+        }
+        if (cached?.payload) {
+          setTeam(cached.payload.team);
+          setMembers(cached.payload.members);
+          setMembershipRole(cached.payload.membershipRole);
+          setErrorMessage("");
+        } else {
+          setTeam(null);
+          setMembers([]);
+          setMembershipRole(null);
+          setErrorMessage(error?.message || "Failed to load production team.");
+        }
       } finally {
         if (active) {
           setLoading(false);
@@ -811,7 +891,7 @@ const ProductionTeamDetailsSheet = forwardRef<
       <View style={styles.sectionBlock}>
         <Text style={[styles.sectionTitle, { color: colors.text }]}>About</Text>
         <Text style={[styles.aboutDescription, { color: colors.textSecondary }]}> 
-          {team?.description?.trim() || "Production crew, management, and venue-ready coordination in one team."}
+          {team?.description?.trim() || "No description provided."}
         </Text>
       </View>
 

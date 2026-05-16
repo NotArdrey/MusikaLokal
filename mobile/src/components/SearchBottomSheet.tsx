@@ -15,7 +15,6 @@ import React, {
 } from "react";
 import {
     ActivityIndicator,
-    FlatList,
   InteractionManager,
     Keyboard,
     LayoutAnimation,
@@ -26,8 +25,10 @@ import {
     TextInput,
     TouchableOpacity,
     UIManager,
+    useWindowDimensions,
     View,
 } from "react-native";
+import { FlashList } from "@shopify/flash-list";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { supabase } from "../../lib/supabase";
 import { useAuth } from "../context/AuthContext";
@@ -123,9 +124,14 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
     const { colors, isDark } = useTheme();
     const { userRole, isGuest, userId } = useAuth();
     const insets = useSafeAreaInsets();
+    const { height: windowHeight } = useWindowDimensions();
     const { activeStation } = useRadioPlayerPresence();
     const snapPoints = useMemo(() => ["90%"], []);
     const animationConfigs = useBottomSheetSpringConfigs(bottomSheetSpringConfig);
+    const filterPanelMaxHeight = useMemo(
+      () => Math.max(160, Math.min(240, windowHeight * 0.32)),
+      [windowHeight],
+    );
 
     // Filter Chips - safely handle null userRole
     const isOwner = userRole === "venue-owner" || userRole === "studio-owner";
@@ -505,7 +511,7 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
               onChat={onChat ? handleChatPress : undefined}
               showGigSummary={false}
               variant="feed"
-              style={{ width: "100%" }}
+              style={styles.resultListingCard}
               actionSlot={
                 canFollow ? (
                   <TouchableOpacity
@@ -560,7 +566,7 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
       [],
     );
 
-    const itemSeparator = useCallback(() => <View style={{ height: 10 }} />, []);
+    const itemSeparator = useCallback(() => <View style={styles.resultSeparator} />, []);
 
     const handleLoadMore = useCallback(() => {
       if (loading || loadingMore || !hasMoreResults) return;
@@ -610,209 +616,217 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
               backgroundColor: isDark ? "#1F2937" : "#FFFFFF",
               borderColor: isDark ? "#374151" : "#E5E7EB",
             },
+            { maxHeight: filterPanelMaxHeight },
           ]}
         >
-          {TYPE_FILTERS.length > 0 && (
+          <ScrollView
+            nestedScrollEnabled
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+            contentContainerStyle={styles.filterPanelContent}
+          >
+            {TYPE_FILTERS.length > 0 && (
+              <View style={styles.filterSection}>
+                <Text style={[styles.filterLabel, { color: colors.text }]}>
+                  Type
+                </Text>
+                <View style={styles.filterRow}>
+                  {TYPE_FILTERS.map((filter) => (
+                    <TouchableOpacity activeOpacity={1}
+                      key={filter}
+                      style={[
+                        styles.filterChip,
+                        activeFilter === filter
+                          ? { backgroundColor: colors.primary }
+                          : { backgroundColor: isDark ? "#374151" : "#F3F4F6" },
+                      ]}
+                      onPress={() => setActiveFilter(filter)}
+                    >
+                      <Text
+                        style={[
+                          styles.filterChipText,
+                          activeFilter === filter
+                            ? { color: "#FFF" }
+                            : { color: isDark ? "#D1D5DB" : "#4B5563" },
+                        ]}
+                      >
+                        {filter}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+            )}
+
+            {/* Genre Filter */}
             <View style={styles.filterSection}>
               <Text style={[styles.filterLabel, { color: colors.text }]}>
-                Type
+                Genre
               </Text>
-              <View style={styles.filterRow}>
-                {TYPE_FILTERS.map((filter) => (
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.filterChipsScroll}
+              >
+                {GENRE_OPTIONS.map((genre) => (
                   <TouchableOpacity activeOpacity={1}
-                    key={filter}
+                    key={genre}
                     style={[
                       styles.filterChip,
-                      activeFilter === filter
+                      selectedGenre === genre
                         ? { backgroundColor: colors.primary }
                         : { backgroundColor: isDark ? "#374151" : "#F3F4F6" },
                     ]}
-                    onPress={() => setActiveFilter(filter)}
+                    onPress={() => setSelectedGenre(genre)}
                   >
                     <Text
                       style={[
                         styles.filterChipText,
-                        activeFilter === filter
+                        selectedGenre === genre
                           ? { color: "#FFF" }
                           : { color: isDark ? "#D1D5DB" : "#4B5563" },
                       ]}
                     >
-                      {filter}
+                      {genre}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            </View>
+
+            {/* Rating Filter */}
+            <View style={styles.filterSection}>
+              <Text style={[styles.filterLabel, { color: colors.text }]}>
+                Min Rating
+              </Text>
+              <View style={styles.filterRow}>
+                {RATING_OPTIONS.map((option) => (
+                  <TouchableOpacity activeOpacity={1}
+                    key={option.value}
+                    style={[
+                      styles.filterChip,
+                      minRating === option.value
+                        ? { backgroundColor: colors.primary }
+                        : { backgroundColor: isDark ? "#374151" : "#F3F4F6" },
+                    ]}
+                    onPress={() => setMinRating(option.value)}
+                  >
+                    {option.value > 0 && (
+                      <Ionicons
+                        name="star"
+                        size={12}
+                        color={minRating === option.value ? "#FFF" : "#FBBF24"}
+                        style={{ marginRight: 4 }}
+                      />
+                    )}
+                    <Text
+                      style={[
+                        styles.filterChipText,
+                        minRating === option.value
+                          ? { color: "#FFF" }
+                          : { color: isDark ? "#D1D5DB" : "#4B5563" },
+                      ]}
+                    >
+                      {option.label}
                     </Text>
                   </TouchableOpacity>
                 ))}
               </View>
             </View>
-          )}
 
-          {/* Genre Filter */}
-          <View style={styles.filterSection}>
-            <Text style={[styles.filterLabel, { color: colors.text }]}>
-              Genre
-            </Text>
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.filterChipsScroll}
-            >
-              {GENRE_OPTIONS.map((genre) => (
-                <TouchableOpacity activeOpacity={1}
-                  key={genre}
-                  style={[
-                    styles.filterChip,
-                    selectedGenre === genre
-                      ? { backgroundColor: colors.primary }
-                      : { backgroundColor: isDark ? "#374151" : "#F3F4F6" },
-                  ]}
-                  onPress={() => setSelectedGenre(genre)}
-                >
-                  <Text
+            {/* Price Range Filter */}
+            <View style={styles.filterSection}>
+              <Text style={[styles.filterLabel, { color: colors.text }]}>
+                Price Range
+              </Text>
+              <View style={styles.filterRow}>
+                {PRICE_OPTIONS.map((option) => (
+                  <TouchableOpacity activeOpacity={1}
+                    key={option.value}
                     style={[
-                      styles.filterChipText,
-                      selectedGenre === genre
-                        ? { color: "#FFF" }
-                        : { color: isDark ? "#D1D5DB" : "#4B5563" },
+                      styles.filterChip,
+                      priceRange === option.value
+                        ? { backgroundColor: colors.primary }
+                        : { backgroundColor: isDark ? "#374151" : "#F3F4F6" },
                     ]}
+                    onPress={() => setPriceRange(option.value as any)}
                   >
-                    {genre}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-          </View>
+                    <Text
+                      style={[
+                        styles.filterChipText,
+                        priceRange === option.value
+                          ? { color: "#FFF" }
+                          : { color: isDark ? "#D1D5DB" : "#4B5563" },
+                      ]}
+                    >
+                      {option.label}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
 
-          {/* Rating Filter */}
-          <View style={styles.filterSection}>
-            <Text style={[styles.filterLabel, { color: colors.text }]}>
-              Min Rating
-            </Text>
-            <View style={styles.filterRow}>
-              {RATING_OPTIONS.map((option) => (
-                <TouchableOpacity activeOpacity={1}
-                  key={option.value}
-                  style={[
-                    styles.filterChip,
-                    minRating === option.value
-                      ? { backgroundColor: colors.primary }
-                      : { backgroundColor: isDark ? "#374151" : "#F3F4F6" },
-                  ]}
-                  onPress={() => setMinRating(option.value)}
-                >
-                  {option.value > 0 && (
+            {/* Sort By */}
+            <View style={styles.filterSection}>
+              <Text style={[styles.filterLabel, { color: colors.text }]}>
+                Sort By
+              </Text>
+              <View style={styles.filterRow}>
+                {SORT_OPTIONS.map((option) => (
+                  <TouchableOpacity activeOpacity={1}
+                    key={option.value}
+                    style={[
+                      styles.filterChip,
+                      sortBy === option.value
+                        ? { backgroundColor: colors.primary }
+                        : { backgroundColor: isDark ? "#374151" : "#F3F4F6" },
+                    ]}
+                    onPress={() => setSortBy(option.value as any)}
+                  >
                     <Ionicons
-                      name="star"
-                      size={12}
-                      color={minRating === option.value ? "#FFF" : "#FBBF24"}
+                      name={option.icon as any}
+                      size={14}
+                      color={
+                        sortBy === option.value
+                          ? "#FFF"
+                          : isDark
+                            ? "#D1D5DB"
+                            : "#4B5563"
+                      }
                       style={{ marginRight: 4 }}
                     />
-                  )}
-                  <Text
-                    style={[
-                      styles.filterChipText,
-                      minRating === option.value
-                        ? { color: "#FFF" }
-                        : { color: isDark ? "#D1D5DB" : "#4B5563" },
-                    ]}
-                  >
-                    {option.label}
-                  </Text>
-                </TouchableOpacity>
-              ))}
+                    <Text
+                      style={[
+                        styles.filterChipText,
+                        sortBy === option.value
+                          ? { color: "#FFF" }
+                          : { color: isDark ? "#D1D5DB" : "#4B5563" },
+                      ]}
+                    >
+                      {option.label}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
             </View>
-          </View>
 
-          {/* Price Range Filter */}
-          <View style={styles.filterSection}>
-            <Text style={[styles.filterLabel, { color: colors.text }]}>
-              Price Range
-            </Text>
-            <View style={styles.filterRow}>
-              {PRICE_OPTIONS.map((option) => (
-                <TouchableOpacity activeOpacity={1}
-                  key={option.value}
-                  style={[
-                    styles.filterChip,
-                    priceRange === option.value
-                      ? { backgroundColor: colors.primary }
-                      : { backgroundColor: isDark ? "#374151" : "#F3F4F6" },
-                  ]}
-                  onPress={() => setPriceRange(option.value as any)}
-                >
-                  <Text
-                    style={[
-                      styles.filterChipText,
-                      priceRange === option.value
-                        ? { color: "#FFF" }
-                        : { color: isDark ? "#D1D5DB" : "#4B5563" },
-                    ]}
-                  >
-                    {option.label}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-          </View>
-
-          {/* Sort By */}
-          <View style={styles.filterSection}>
-            <Text style={[styles.filterLabel, { color: colors.text }]}>
-              Sort By
-            </Text>
-            <View style={styles.filterRow}>
-              {SORT_OPTIONS.map((option) => (
-                <TouchableOpacity activeOpacity={1}
-                  key={option.value}
-                  style={[
-                    styles.filterChip,
-                    sortBy === option.value
-                      ? { backgroundColor: colors.primary }
-                      : { backgroundColor: isDark ? "#374151" : "#F3F4F6" },
-                  ]}
-                  onPress={() => setSortBy(option.value as any)}
-                >
-                  <Ionicons
-                    name={option.icon as any}
-                    size={14}
-                    color={
-                      sortBy === option.value
-                        ? "#FFF"
-                        : isDark
-                          ? "#D1D5DB"
-                          : "#4B5563"
-                    }
-                    style={{ marginRight: 4 }}
-                  />
-                  <Text
-                    style={[
-                      styles.filterChipText,
-                      sortBy === option.value
-                        ? { color: "#FFF" }
-                        : { color: isDark ? "#D1D5DB" : "#4B5563" },
-                    ]}
-                  >
-                    {option.label}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-          </View>
-
-          {/* Reset Button */}
-          {activeFilterCount > 0 && (
-            <TouchableOpacity activeOpacity={1}
-              style={[styles.resetButton, { borderColor: colors.primary }]}
-              onPress={resetFilters}
-            >
-              <Ionicons
-                name="refresh-outline"
-                size={16}
-                color={colors.primary}
-              />
-              <Text style={[styles.resetButtonText, { color: colors.primary }]}>
-                Reset Filters
-              </Text>
-            </TouchableOpacity>
-          )}
+            {/* Reset Button */}
+            {activeFilterCount > 0 && (
+              <TouchableOpacity activeOpacity={1}
+                style={[styles.resetButton, { borderColor: colors.primary }]}
+                onPress={resetFilters}
+              >
+                <Ionicons
+                  name="refresh-outline"
+                  size={16}
+                  color={colors.primary}
+                />
+                <Text style={[styles.resetButtonText, { color: colors.primary }]}>
+                  Reset Filters
+                </Text>
+              </TouchableOpacity>
+            )}
+          </ScrollView>
         </View>
       );
     }, [
@@ -828,6 +842,7 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
       sortBy,
       activeFilterCount,
       resetFilters,
+      filterPanelMaxHeight,
     ]);
 
     // Header Component
@@ -945,6 +960,8 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
               styles.resultsLabel,
               { color: colors.textSecondary },
               !showFilters && activeFilterCount === 0 && styles.resultsLabelCompact,
+              !showFilters && activeFilterCount > 0 && styles.resultsLabelWithAppliedFilters,
+              showFilters && styles.resultsLabelWithFilters,
             ]}
           >
             {resultsLabelText}
@@ -1040,7 +1057,7 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
             <ActivityIndicator size="large" color={colors.primary} />
           </View>
         ) : (
-          <FlatList
+          <FlashList
             data={visibleData}
             renderItem={renderItem}
             keyExtractor={keyExtractor}
@@ -1053,14 +1070,11 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
             ]}
             keyboardShouldPersistTaps="handled"
             showsVerticalScrollIndicator={false}
-            initialNumToRender={6}
-            maxToRenderPerBatch={6}
-            updateCellsBatchingPeriod={40}
-            windowSize={5}
+            drawDistance={720}
+            overrideProps={{ initialDrawBatchSize: 6 }}
             nestedScrollEnabled
             onEndReached={handleLoadMore}
             onEndReachedThreshold={0.35}
-            removeClippedSubviews={Platform.OS === "android"}
           />
         )}
       </TrackedBottomSheetModal>
@@ -1074,6 +1088,12 @@ const styles = StyleSheet.create({
     paddingBottom: 16,
     paddingHorizontal: 24,
     gap: 16,
+  },
+  resultListingCard: {
+    width: "100%",
+  },
+  resultSeparator: {
+    height: 10,
   },
   headerTitle: {
     fontSize: 24,
@@ -1122,52 +1142,60 @@ const styles = StyleSheet.create({
     fontFamily: "Poppins_600SemiBold",
   },
   filterPanel: {
-    marginHorizontal: 24,
-    marginBottom: 16,
-    padding: 16,
-    borderRadius: 16,
+    marginHorizontal: 16,
+    marginBottom: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 14,
     borderWidth: 1,
+    overflow: "hidden",
+  },
+  filterPanelContent: {
+    paddingBottom: 2,
   },
   filterSection: {
-    marginBottom: 16,
+    marginBottom: 10,
   },
   filterLabel: {
     fontFamily: "Poppins_600SemiBold",
-    fontSize: 13,
-    marginBottom: 10,
+    fontSize: 12,
+    marginBottom: 6,
   },
   filterRow: {
     flexDirection: "row",
     flexWrap: "wrap",
-    gap: 8,
+    gap: 6,
   },
   filterChipsScroll: {
-    gap: 8,
+    gap: 6,
+    paddingRight: 4,
   },
   filterChip: {
     flexDirection: "row",
     alignItems: "center",
-    paddingHorizontal: 14,
-    paddingVertical: 8,
+    minHeight: 32,
+    paddingHorizontal: 11,
+    paddingVertical: 6,
     borderRadius: 100,
   },
   filterChipText: {
     fontFamily: "Poppins_500Medium",
-    fontSize: 13,
+    fontSize: 12,
+    lineHeight: 16,
   },
   resetButton: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    paddingVertical: 10,
+    paddingVertical: 8,
     borderRadius: 12,
     borderWidth: 1,
     gap: 6,
-    marginTop: 4,
+    marginTop: 0,
   },
   resetButtonText: {
     fontFamily: "Poppins_500Medium",
-    fontSize: 13,
+    fontSize: 12,
   },
   chipsRow: {
     flexDirection: "row",
@@ -1264,6 +1292,14 @@ const styles = StyleSheet.create({
   },
   resultsLabelCompact: {
     marginTop: 2,
+    marginBottom: 8,
+  },
+  resultsLabelWithAppliedFilters: {
+    marginTop: 8,
+    marginBottom: 8,
+  },
+  resultsLabelWithFilters: {
+    marginTop: 10,
     marginBottom: 8,
   },
   paginationFooter: {

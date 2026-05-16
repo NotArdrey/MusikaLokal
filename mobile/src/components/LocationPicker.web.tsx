@@ -132,9 +132,22 @@ export default function LocationPicker({ visible, onClose, onSelect, initialLoca
         }
     };
 
+    if (!visible) {
+        return alertVisible ? (
+            <CustomAlert
+                visible
+                type={alertConfig.type}
+                title={alertConfig.title}
+                message={alertConfig.message}
+                buttons={alertConfig.buttons}
+                onClose={() => setAlertVisible(false)}
+            />
+        ) : null;
+    }
+
     return (
         <>
-        <Modal visible={visible} animationType="fade" transparent={true} onRequestClose={onClose}>
+        <Modal visible animationType="fade" transparent={true} onRequestClose={onClose}>
             <View style={styles.overlay}>
                 <View style={styles.container}>
                     {/* Header */}

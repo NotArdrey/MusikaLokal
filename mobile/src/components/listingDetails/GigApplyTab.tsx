@@ -907,17 +907,20 @@ const GigApplyTab = ({
           </Text>
         )}
       </TouchableOpacity>
-      <InAppMediaViewer
-        visible={!!mediaViewerUrl}
-        uri={mediaViewerUrl}
-        title="Custom Contract"
-        onClose={() => setMediaViewerUrl(null)}
-      />
+      {mediaViewerUrl ? (
+        <InAppMediaViewer
+          visible
+          uri={mediaViewerUrl}
+          title="Custom Contract"
+          onClose={() => setMediaViewerUrl(null)}
+        />
+      ) : null}
 
+      {termsVisible ? (
       <RNModal
         animationType="slide"
         transparent
-        visible={termsVisible}
+        visible
         onRequestClose={() => setTermsVisible(false)}
       >
         <View style={gigApplyStyles.termsOverlay}>
@@ -947,6 +950,7 @@ const GigApplyTab = ({
           </View>
         </View>
       </RNModal>
+      ) : null}
     </View>
   );
 };

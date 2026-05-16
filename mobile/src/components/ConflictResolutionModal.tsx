@@ -1,10 +1,10 @@
 import { Ionicons } from '@expo/vector-icons';
+import { FlashList } from '@shopify/flash-list';
 import React, { useState } from 'react';
 import {
     ActivityIndicator,
     Modal,
     Platform,
-    ScrollView,
     StyleSheet,
     Text,
     TouchableOpacity,
@@ -134,9 +134,11 @@ export default function ConflictResolutionModal({
   const allResolved = conflicts.every((c) => resolutions[c.id]);
   const moveableCount = conflicts.filter((c) => c.newAvailableSlot).length;
 
+  if (!visible) return null;
+
   return (
     <Modal
-      visible={visible}
+      visible
       animationType="slide"
       transparent={true}
       statusBarTranslucent
@@ -198,8 +200,14 @@ export default function ConflictResolutionModal({
           </View>
 
           {/* Conflict List */}
-          <ScrollView style={styles.conflictList} showsVerticalScrollIndicator={false}>
-            {conflicts.map((conflict, index) => (
+          <FlashList
+            data={conflicts}
+            keyExtractor={(conflict) => conflict.id}
+            style={styles.conflictList}
+            contentContainerStyle={styles.conflictListContent}
+            showsVerticalScrollIndicator={false}
+            drawDistance={360}
+            renderItem={({ item: conflict }) => (
               <View
                 key={conflict.id}
                 style={[
@@ -363,8 +371,8 @@ export default function ConflictResolutionModal({
                   </TouchableOpacity>
                 </View>
               </View>
-            ))}
-          </ScrollView>
+            )}
+          />
 
           {/* Footer Actions */}
           <View style={[styles.footer, { borderTopColor: colors.border }]}>
@@ -479,6 +487,8 @@ const styles = StyleSheet.create({
   },
   conflictList: {
     maxHeight: 350,
+  },
+  conflictListContent: {
     paddingHorizontal: 16,
   },
   conflictCard: {

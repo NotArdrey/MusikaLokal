@@ -72,6 +72,16 @@ const debugLog = (..._args: unknown[]) => { };
 
 const { width, height } = Dimensions.get("window");
 const IMG_HEIGHT = height < 700 ? height * 0.3 : height * 0.35;
+const LISTING_DETAILS_CACHE_TTL_MS = 60_000;
+
+type ListingDetailsCacheEntry = {
+  data: any;
+  existingBookings: any[];
+  fetchedAt: number;
+};
+
+const listingDetailsCache = new Map<string, ListingDetailsCacheEntry>();
+const listingDetailsInFlight = new Set<string>();
 
 // Responsive scaling utilities - optimized for iPhone SE and smaller devices
 const scale = (size: number) => {
@@ -206,6 +216,7 @@ const ListingDetailsSheet = forwardRef<
   const { isProfileComplete } = useProfileCompletion();
   const [loading, setLoading] = useState(false);
   const [group, setGroup] = useState<any>(null);
+  const latestListingIdRef = useRef(listingId);
   const [isFavorited, setIsFavorited] = useState(false);
   const [favoriteCount, setFavoriteCount] = useState(0);
   const [modalVisible, setModalVisible] = useState(false);
@@ -1500,6 +1511,10 @@ const ListingDetailsSheet = forwardRef<
   );
 
   useEffect(() => {
+    latestListingIdRef.current = listingId;
+  }, [listingId]);
+
+  useEffect(() => {
     debugLog("=== ListingDetailsSheet useEffect triggered ===");
     debugLog("listingId:", listingId);
     if (listingId) {
@@ -1666,7 +1681,37 @@ const ListingDetailsSheet = forwardRef<
 
   const fetchGroupDetails = async () => {
     debugLog("=== fetchGroupDetails called ===");
-    setLoading(true);
+    const activeListingId = listingId;
+    if (!activeListingId) return;
+
+    const cachedDetails = listingDetailsCache.get(activeListingId);
+    if (cachedDetails?.data) {
+      setGroup(cachedDetails.data);
+      setExistingBookings(cachedDetails.existingBookings || []);
+      if (
+        cachedDetails.data.availability &&
+        latestListingIdRef.current === activeListingId
+      ) {
+        processAvailability(
+          cachedDetails.data.availability,
+          cachedDetails.existingBookings || [],
+          cachedDetails.data.dateOverrides,
+        );
+      }
+
+      if (Date.now() - cachedDetails.fetchedAt < LISTING_DETAILS_CACHE_TTL_MS) {
+        setLoading(false);
+        return;
+      }
+    }
+
+    if (listingDetailsInFlight.has(activeListingId)) {
+      setLoading(!cachedDetails);
+      return;
+    }
+
+    listingDetailsInFlight.add(activeListingId);
+    setLoading(!cachedDetails);
     try {
       const {
         data: { user },
@@ -1681,7 +1726,7 @@ const ListingDetailsSheet = forwardRef<
       const { data: groupData } = await supabase
         .from("groups_with_stats")
         .select("*")
-        .eq("id", listingId)
+        .eq("id", activeListingId)
         .single();
 
       if (groupData) {
@@ -1693,7 +1738,7 @@ const ListingDetailsSheet = forwardRef<
         const { data: studioData } = await supabase
           .from("studios_with_stats")
           .select("*")
-          .eq("id", listingId)
+          .eq("id", activeListingId)
           .single();
 
         if (studioData) {
@@ -1706,7 +1751,7 @@ const ListingDetailsSheet = forwardRef<
           const { data: gigData } = await supabase
             .from("gigs_with_stats")
             .select("*")
-            .eq("id", listingId)
+            .eq("id", activeListingId)
             .single();
 
           if (gigData) {
@@ -1718,7 +1763,7 @@ const ListingDetailsSheet = forwardRef<
             const { data: profileData } = await supabase
               .from("profiles_with_stats")
               .select("*")
-              .eq("id", listingId)
+              .eq("id", activeListingId)
               .single();
 
             if (profileData && profileData.role === "musician") {
@@ -1729,7 +1774,7 @@ const ListingDetailsSheet = forwardRef<
               const { data: productionTeamData } = await supabase
                 .from("production_teams")
                 .select("id")
-                .eq("id", listingId)
+                .eq("id", activeListingId)
                 .maybeSingle();
 
               if (productionTeamData?.id) {
@@ -2032,6 +2077,16 @@ const ListingDetailsSheet = forwardRef<
           }
         }
 
+        listingDetailsCache.set(activeListingId, {
+          data: normalizedData,
+          existingBookings: cachedDetails?.existingBookings || [],
+          fetchedAt: Date.now(),
+        });
+
+        if (latestListingIdRef.current !== activeListingId) {
+          return;
+        }
+
         debugLog("Setting group data:", normalizedData);
         setGroup(normalizedData);
 
@@ -2050,6 +2105,17 @@ const ListingDetailsSheet = forwardRef<
         if (type === "Studio" || type === "Venue") {
           // Fetch existing bookings for availability calculation
           const fetchedBookings = await fetchStudioBookings(data.id);
+
+          listingDetailsCache.set(activeListingId, {
+            data: normalizedData,
+            existingBookings: fetchedBookings,
+            fetchedAt: Date.now(),
+          });
+
+          if (latestListingIdRef.current !== activeListingId) {
+            return;
+          }
+
           setExistingBookings(fetchedBookings);
 
           // Process availability (Availability + Bookings + Date Overrides)
@@ -2064,6 +2130,11 @@ const ListingDetailsSheet = forwardRef<
             debugLog("⚠️ No availability data to process");
           }
         } else {
+          listingDetailsCache.set(activeListingId, {
+            data: normalizedData,
+            existingBookings: [],
+            fetchedAt: Date.now(),
+          });
           setExistingBookings([]);
         }
       } else {
@@ -2072,6 +2143,7 @@ const ListingDetailsSheet = forwardRef<
     } catch (e) {
       debugLog("Error fetching details:", e);
     } finally {
+      listingDetailsInFlight.delete(activeListingId);
       setLoading(false);
       debugLog("fetchGroupDetails complete, loading:", false);
     }
@@ -3756,59 +3828,64 @@ const ListingDetailsSheet = forwardRef<
         }
       />
 
-      <ReportModal
-        visible={showListingReportModal}
-        onClose={() => setShowListingReportModal(false)}
-        onSubmit={submitReport}
-        targetName={group?.name || 'this listing'}
-        title={group?.type ? `Report ${group.type}` : 'Report Listing'}
-        reportType={group?.type?.toLowerCase()}
-      />
+      {showListingReportModal ? (
+        <ReportModal
+          visible
+          onClose={() => setShowListingReportModal(false)}
+          onSubmit={submitReport}
+          targetName={group?.name || 'this listing'}
+          title={group?.type ? `Report ${group.type}` : 'Report Listing'}
+          reportType={group?.type?.toLowerCase()}
+        />
+      ) : null}
 
-      <Modal
-        visible={modalVisible}
-        onClose={() => {
-          debugLog("🔴 Modal closed without confirmation");
-          setConfirmRequireTerms(false);
-          setConfirmContractUrl(null);
-          setConfirmContractName(undefined);
-          setConfirmSummaryItems([]);
-          setConfirmAction(() => () => { });
-          setConfirmTitle("");
-          setConfirmMessage("");
-          setModalVisible(false);
-        }}
-        onConfirm={() => {
-          debugLog("🟢 Modal CONFIRMED - executing action");
-          debugLog("confirmAction:", confirmAction);
-          const actionToRun = confirmAction;
-          setConfirmRequireTerms(false);
-          setConfirmContractUrl(null);
-          setConfirmContractName(undefined);
-          setConfirmSummaryItems([]);
-          setConfirmAction(() => () => { });
-          setConfirmTitle("");
-          setConfirmMessage("");
-          setModalVisible(false);
-          try {
-            actionToRun();
-            debugLog("✅ confirmAction executed successfully");
-          } catch (error) {
-            console.error("❌ Error executing confirmAction:", error);
-          }
-        }}
-        title={confirmTitle}
-        message={confirmMessage}
-        buttonText="Confirm"
-        requireTermsAcceptance={confirmRequireTerms}
-        contractUrl={confirmContractUrl}
-        contractName={confirmContractName}
-        summaryItems={confirmSummaryItems}
-      />
+      {modalVisible ? (
+        <Modal
+          visible
+          onClose={() => {
+            debugLog("🔴 Modal closed without confirmation");
+            setConfirmRequireTerms(false);
+            setConfirmContractUrl(null);
+            setConfirmContractName(undefined);
+            setConfirmSummaryItems([]);
+            setConfirmAction(() => () => { });
+            setConfirmTitle("");
+            setConfirmMessage("");
+            setModalVisible(false);
+          }}
+          onConfirm={() => {
+            debugLog("🟢 Modal CONFIRMED - executing action");
+            debugLog("confirmAction:", confirmAction);
+            const actionToRun = confirmAction;
+            setConfirmRequireTerms(false);
+            setConfirmContractUrl(null);
+            setConfirmContractName(undefined);
+            setConfirmSummaryItems([]);
+            setConfirmAction(() => () => { });
+            setConfirmTitle("");
+            setConfirmMessage("");
+            setModalVisible(false);
+            try {
+              actionToRun();
+              debugLog("✅ confirmAction executed successfully");
+            } catch (error) {
+              console.error("❌ Error executing confirmAction:", error);
+            }
+          }}
+          title={confirmTitle}
+          message={confirmMessage}
+          buttonText="Confirm"
+          requireTermsAcceptance={confirmRequireTerms}
+          contractUrl={confirmContractUrl}
+          contractName={confirmContractName}
+          summaryItems={confirmSummaryItems}
+        />
+      ) : null}
 
       {/* Payment Option Modal */}
+      {showPaymentOptionModal ? (
       <RNModal
-        visible={showPaymentOptionModal}
+        visible
         transparent
         statusBarTranslucent
         navigationBarTranslucent
@@ -4017,6 +4094,7 @@ const ListingDetailsSheet = forwardRef<
           )}
         </View>
       </RNModal>
+      ) : null}
     </>
   );
 });
