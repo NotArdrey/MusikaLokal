@@ -195,6 +195,8 @@ const createEmptyBookmarks = () => ({
   musicians: [] as any[],
 });
 
+type ProfileTabKey = "about" | "posts" | "gigs" | "bookmarks" | "playlists";
+
 const logProfileMedia = (event: string, details?: Record<string, unknown>) => {
   console.log(`[ProfileMedia] ${event}`, {
     timestamp: new Date().toISOString(),
@@ -958,7 +960,7 @@ export default function ProfileScreen() {
   const [gigSearchQuery, setGigSearchQuery] = useState("");
   const [updatingGigVisibility, setUpdatingGigVisibility] = useState(false);
   const [supportsGigVisibilityPreference, setSupportsGigVisibilityPreference] = useState(true);
-  const [activeTab, setActiveTab] = useState<"about" | "gigs" | "bookmarks" | "playlists">("about");
+  const [activeTab, setActiveTab] = useState<ProfileTabKey>("about");
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isDrawerMounted, setIsDrawerMounted] = useState(false);
   const [isDrawerTouchable, setIsDrawerTouchable] = useState(false);
@@ -1967,14 +1969,26 @@ export default function ProfileScreen() {
     }
   }, [isGuest]);
 
-  useEffect(() => {
+  useFocusEffect(useCallback(() => {
     const targetId = profile?.id || normalizedParamUserId || currentUserId || "";
     if (!targetId) {
       setProfilePosts([]);
-      return;
+      return undefined;
     }
     void fetchProfilePosts(targetId);
-  }, [currentUserId, fetchProfilePosts, normalizedParamUserId, profile?.id]);
+    return undefined;
+  }, [currentUserId, fetchProfilePosts, normalizedParamUserId, profile?.id]));
+
+  const openProfilePost = useCallback((post: any) => {
+    if (!post?.id) {
+      return;
+    }
+
+    router.push({
+      pathname: "/post_details" as any,
+      params: { post_id: String(post.id) },
+    });
+  }, []);
 
   const showAlert = (
     type: AlertType,
@@ -2860,13 +2874,14 @@ export default function ProfileScreen() {
   const profileTabOrder = useMemo(
     () => [
       "about",
+      "posts",
       ...(profile?.role === "musician" && profile?.show_gig_statuses !== false ? ["gigs"] : []),
       ...(isOwner && !isGuest ? ["bookmarks"] : []),
       "playlists",
-    ] as ("about" | "gigs" | "bookmarks" | "playlists")[],
+    ] as ProfileTabKey[],
     [isGuest, isOwner, profile?.role, profile?.show_gig_statuses],
   );
-  const profileTabs = useMemo<SlidingTabItem<"about" | "gigs" | "bookmarks" | "playlists">[]>(
+  const profileTabs = useMemo<SlidingTabItem<ProfileTabKey>[]>(
     () =>
       profileTabOrder.map((key) => {
         if (key === "gigs") {
@@ -2884,6 +2899,15 @@ export default function ProfileScreen() {
             icon: "bookmark-outline",
             activeIcon: "bookmark",
             accessibilityLabel: "Bookmarks",
+          };
+        }
+
+        if (key === "posts") {
+          return {
+            key,
+            icon: "newspaper-outline",
+            activeIcon: "newspaper",
+            accessibilityLabel: "Posts",
           };
         }
 
@@ -3851,6 +3875,69 @@ export default function ProfileScreen() {
               </View>
               )}
 
+              {/* TAB CONTENT: POSTS */}
+              {activeTab === "posts" && (
+                <View style={styles.profileTabContent}>
+                  <View style={[styles.profilePostsSection, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+                    <View style={styles.profilePostsHeader}>
+                      <Text style={[styles.profilePostsTitle, { color: colors.text }]}>Posts</Text>
+                      {loadingProfilePosts ? <ActivityIndicator size="small" color={colors.primary} /> : null}
+                    </View>
+                    {!loadingProfilePosts && profilePosts.length === 0 ? (
+                      <Text style={[styles.profilePostsEmpty, { color: colors.textSecondary }]}>
+                        {isOwner ? "Your posts will appear here." : "No posts to show yet."}
+                      </Text>
+                    ) : (
+                      profilePosts.map((post) => {
+                        const hasVideoMedia = post.media?.some((item: any) => ["video", "teaser_clip"].includes(item.media_type));
+
+                        return (
+                          <TouchableOpacity
+                            key={post.id}
+                            activeOpacity={0.78}
+                            accessibilityRole="button"
+                            onPress={() => openProfilePost(post)}
+                            style={[styles.profilePostCard, { borderColor: colors.border }]}
+                          >
+                            {post.preview_url ? (
+                              <View style={styles.profilePostPreviewWrap}>
+                                <CachedImage uri={post.preview_url} style={styles.profilePostPreview} width={84} height={84} />
+                                {hasVideoMedia ? (
+                                  <View style={styles.profilePostVideoBadge}>
+                                    <Ionicons name="play" size={12} color="#FFFFFF" />
+                                  </View>
+                                ) : null}
+                              </View>
+                            ) : (
+                              <View style={[styles.profilePostPreviewFallback, { backgroundColor: isDark ? "#0F172A" : "#F1F5F9" }]}>
+                                <Ionicons name="newspaper-outline" size={24} color={colors.textSecondary} />
+                              </View>
+                            )}
+                            <View style={styles.profilePostBody}>
+                              <Text style={[styles.profilePostText, { color: colors.text }]} numberOfLines={3}>
+                                {post.body || "Media post"}
+                              </Text>
+                              <View style={styles.profilePostMetaRow}>
+                                <Text style={[styles.profilePostMeta, { color: colors.textSecondary }]}>
+                                  {new Date(post.created_at).toLocaleDateString()}
+                                </Text>
+                                <Text style={[styles.profilePostMeta, { color: colors.textSecondary }]}>
+                                  {Number(post.reaction_count || 0)} likes
+                                </Text>
+                                <Text style={[styles.profilePostMeta, { color: colors.textSecondary }]}>
+                                  {Number(post.comment_count || 0)} comments
+                                </Text>
+                              </View>
+                            </View>
+                            <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} style={styles.profilePostOpenIcon} />
+                          </TouchableOpacity>
+                        );
+                      })
+                    )}
+                  </View>
+                </View>
+              )}
+
               {/* TAB CONTENT: ABOUT/MEDIA */}
               {activeTab === "about" && (
                 <View style={styles.profileTabContent}>
@@ -3957,52 +4044,6 @@ export default function ProfileScreen() {
                       );
                     })}
                   </View>
-                </View>
-                <View style={[styles.profilePostsSection, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-                  <View style={styles.profilePostsHeader}>
-                    <Text style={[styles.profilePostsTitle, { color: colors.text }]}>Posts</Text>
-                    {loadingProfilePosts ? <ActivityIndicator size="small" color={colors.primary} /> : null}
-                  </View>
-                  {!loadingProfilePosts && profilePosts.length === 0 ? (
-                    <Text style={[styles.profilePostsEmpty, { color: colors.textSecondary }]}>
-                      {isOwner ? "Your posts will appear here." : "No posts to show yet."}
-                    </Text>
-                  ) : (
-                    profilePosts.map((post) => (
-                      <View key={post.id} style={[styles.profilePostCard, { borderColor: colors.border }]}>
-                        {post.preview_url ? (
-                          <View style={styles.profilePostPreviewWrap}>
-                            <CachedImage uri={post.preview_url} style={styles.profilePostPreview} width={84} height={84} />
-                            {post.media?.some((item: any) => item.media_type === "video") ? (
-                              <View style={styles.profilePostVideoBadge}>
-                                <Ionicons name="play" size={12} color="#FFFFFF" />
-                              </View>
-                            ) : null}
-                          </View>
-                        ) : (
-                          <View style={[styles.profilePostPreviewFallback, { backgroundColor: isDark ? "#0F172A" : "#F1F5F9" }]}>
-                            <Ionicons name="newspaper-outline" size={24} color={colors.textSecondary} />
-                          </View>
-                        )}
-                        <View style={styles.profilePostBody}>
-                          <Text style={[styles.profilePostText, { color: colors.text }]} numberOfLines={3}>
-                            {post.body || "Media post"}
-                          </Text>
-                          <View style={styles.profilePostMetaRow}>
-                            <Text style={[styles.profilePostMeta, { color: colors.textSecondary }]}>
-                              {new Date(post.created_at).toLocaleDateString()}
-                            </Text>
-                            <Text style={[styles.profilePostMeta, { color: colors.textSecondary }]}>
-                              {Number(post.reaction_count || 0)} likes
-                            </Text>
-                            <Text style={[styles.profilePostMeta, { color: colors.textSecondary }]}>
-                              {Number(post.comment_count || 0)} comments
-                            </Text>
-                          </View>
-                        </View>
-                      </View>
-                    ))
-                  )}
                 </View>
               </View>
               )}
@@ -5033,6 +5074,7 @@ const styles = StyleSheet.create({
     paddingTop: 12,
     marginTop: 12,
     flexDirection: "row",
+    alignItems: "center",
     gap: 12,
   },
   profilePostPreviewWrap: {
@@ -5082,6 +5124,9 @@ const styles = StyleSheet.create({
   profilePostMeta: {
     fontSize: 11,
     fontFamily: "Poppins_500Medium",
+  },
+  profilePostOpenIcon: {
+    marginLeft: "auto",
   },
   modalContainer: {
     flex: 1,

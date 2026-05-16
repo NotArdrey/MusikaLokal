@@ -61,15 +61,6 @@ const formatTimestamp = (raw: string | null | undefined) => {
   return date.toLocaleDateString();
 };
 
-const initialsOf = (name: string) =>
-  (name || "")
-    .split(" ")
-    .map((p) => p[0])
-    .filter(Boolean)
-    .slice(0, 2)
-    .join("")
-    .toUpperCase();
-
 type Props = {
   postId: string | null;
   visible: boolean;
@@ -195,7 +186,18 @@ export default function PostDetailsModal({
       const { data } = await supabase.functions.invoke("manage-social-feed", {
         body: { action: "add_comment", post_id: post.id, content: commentText.trim() },
       });
-      if (data?.success) {
+      if (data?.blocked || data?.status === "blocked") {
+        setAlert({
+          type: "warning",
+          title: "Comment blocked",
+          message: data?.moderation?.reason || data?.error || "This comment did not pass AI moderation.",
+        });
+      } else if (data?.pending_review || data?.status === "pending_review") {
+        setCommentText("");
+        emitToast({ type: "info", title: "Comment sent for review", message: "It will appear if approved." });
+        await fetchPost();
+        onCommentChanged?.(post.id, comments.length);
+      } else if (data?.success) {
         setCommentText("");
         await fetchPost();
         onCommentChanged?.(post.id, comments.length + 1);

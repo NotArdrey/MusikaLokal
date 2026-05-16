@@ -44,13 +44,15 @@ const SAFE_IMAGE_MIME_TYPES = new Set([
 ]);
 const SAFE_VIDEO_MIME_TYPES = new Set(["video/mp4", "video/quicktime", "video/webm"]);
 const GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions";
-const GROQ_COMMENT_MODEL = Deno.env.get("GROQ_COMMENT_MODERATION_MODEL")?.trim() ||
+const GROQ_TEXT_MODERATION_MODEL = Deno.env.get("GROQ_TEXT_MODERATION_MODEL")?.trim() ||
+  Deno.env.get("GROQ_COMMENT_MODERATION_MODEL")?.trim() ||
   "openai/gpt-oss-safeguard-20b";
 
-type CommentModerationStatus = "approved" | "pending_review" | "blocked";
+type TextModerationTarget = "post" | "comment";
+type TextModerationStatus = "approved" | "pending_review" | "blocked";
 
-type CommentModerationDecision = {
-  status: CommentModerationStatus;
+type TextModerationDecision = {
+  status: TextModerationStatus;
   reason: string;
   categories: string[];
   score: number | null;
@@ -206,15 +208,23 @@ function parseJsonObject(text: string) {
   }
 }
 
-function localCommentModeration(content: string): CommentModerationDecision | null {
+function moderationTargetLabel(target: TextModerationTarget) {
+  return target === "post" ? "Post" : "Comment";
+}
+
+function localTextModeration(target: TextModerationTarget, content: string): TextModerationDecision | null {
   const lower = content.toLowerCase();
   const urlCount = (lower.match(/https?:\/\/|www\./g) || []).length;
   const repeatedPhrases = lower.match(/\b(.{8,80})\b(?:\s+\1){2,}/);
   const suspiciousRepeats = /(.)\1{12,}/.test(lower);
   const severeHarm =
-    /\b(kill yourself|kys|go die|i will kill|death threat)\b/i.test(lower);
+    /\b(kill yourself|kys|go die|i will kill|death threat|bomb threat|shoot up)\b/i.test(lower);
+  const hateOrThreat =
+    /\b(exterminate|genocide|wipe out|gas all|lynch)\b/i.test(lower);
   const abusive =
-    /\b(stupid idiot|worthless|trash person|shut up loser)\b/i.test(lower);
+    /\b(stupid idiot|worthless|trash person|shut up loser|go hurt yourself)\b/i.test(lower);
+  const scamOrMisinformation =
+    /\b(guaranteed profit|double your money|free money now|miracle cure|send me your password|send your otp|fake charity|official giveaway)\b/i.test(lower);
 
   if (severeHarm) {
     return {
@@ -222,8 +232,19 @@ function localCommentModeration(content: string): CommentModerationDecision | nu
       reason: "Severe harmful or threatening language detected.",
       categories: ["harmful", "abusive"],
       score: 0.98,
-      provider: "local-comment-rules",
-      metadata: { rule: "severe_harm" },
+      provider: "local-text-rules",
+      metadata: { rule: "severe_harm", target },
+    };
+  }
+
+  if (hateOrThreat) {
+    return {
+      status: "blocked",
+      reason: "Hateful or violent targeting language detected.",
+      categories: ["hate", "violence"],
+      score: 0.92,
+      provider: "local-text-rules",
+      metadata: { rule: "hate_or_threat", target },
     };
   }
 
@@ -233,8 +254,8 @@ function localCommentModeration(content: string): CommentModerationDecision | nu
       reason: "Possible spam or repeated content.",
       categories: ["spam", "suspicious_repetition"],
       score: 0.72,
-      provider: "local-comment-rules",
-      metadata: { rule: "spam_or_repetition", urlCount },
+      provider: "local-text-rules",
+      metadata: { rule: "spam_or_repetition", target, urlCount },
     };
   }
 
@@ -244,32 +265,67 @@ function localCommentModeration(content: string): CommentModerationDecision | nu
       reason: "Potentially abusive language.",
       categories: ["abusive"],
       score: 0.62,
-      provider: "local-comment-rules",
-      metadata: { rule: "abusive_phrase" },
+      provider: "local-text-rules",
+      metadata: { rule: "abusive_phrase", target },
+    };
+  }
+
+  if (scamOrMisinformation) {
+    return {
+      status: "pending_review",
+      reason: "Possible scam, fake information, or misleading claim.",
+      categories: ["spam", "misinformation"],
+      score: 0.68,
+      provider: "local-text-rules",
+      metadata: { rule: "scam_or_misinformation", target },
     };
   }
 
   return null;
 }
 
-async function moderateCommentWithGroq(content: string, postContent?: string | null): Promise<CommentModerationDecision> {
-  const localDecision = localCommentModeration(content);
+function moderationUnavailableDecision(
+  target: TextModerationTarget,
+  metadata: Record<string, any>,
+): TextModerationDecision {
+  const label = moderationTargetLabel(target);
+  return {
+    status: "pending_review",
+    reason: `${label} needs review because AI moderation is temporarily unavailable.`,
+    categories: ["ai_moderation_unavailable"],
+    score: null,
+    provider: "groq-unavailable",
+    metadata,
+  };
+}
+
+function normalizeModerationStatus(value: unknown): TextModerationStatus {
+  const rawStatus = typeof value === "string" ? value.trim().toLowerCase() : "";
+  if (rawStatus === "approved" || rawStatus === "allow" || rawStatus === "allowed" || rawStatus === "safe") {
+    return "approved";
+  }
+  if (rawStatus === "blocked" || rawStatus === "block" || rawStatus === "unsafe") {
+    return "blocked";
+  }
+  return "pending_review";
+}
+
+async function moderateTextWithGroq(
+  target: TextModerationTarget,
+  content: string,
+  context: Record<string, unknown> = {},
+): Promise<TextModerationDecision> {
+  const localDecision = localTextModeration(target, content);
   if (localDecision?.status === "blocked") return localDecision;
 
   const apiKey = Deno.env.get("GROQ_API_KEY")?.trim();
   if (!apiKey) {
-    return localDecision || {
-      status: "pending_review",
-      reason: "AI moderation is unavailable, so the comment needs review.",
-      categories: ["moderation_unavailable"],
-      score: null,
-      provider: "groq-unavailable",
-      metadata: { missingApiKey: true },
-    };
+    return localDecision || moderationUnavailableDecision(target, { missingApiKey: true });
   }
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 10000);
+  const label = moderationTargetLabel(target).toLowerCase();
 
   try {
     const response = await fetch(GROQ_API_URL, {
@@ -280,7 +336,7 @@ async function moderateCommentWithGroq(content: string, postContent?: string | n
       },
       signal: controller.signal,
       body: JSON.stringify({
-        model: GROQ_COMMENT_MODEL,
+        model: GROQ_TEXT_MODERATION_MODEL,
         temperature: 0,
         max_tokens: 400,
         response_format: { type: "json_object" },
@@ -288,15 +344,16 @@ async function moderateCommentWithGroq(content: string, postContent?: string | n
           {
             role: "system",
             content:
-              "Moderate social feed comments for harmful content, abusive language, spam, misinformation, and suspicious repetition. Return JSON only with status approved, pending_review, or blocked; reason; categories array; score 0 to 1.",
+              "Moderate MusikaLokal social feed posts and comments. Check whether the content is safe, respectful, truthful enough to publish, and valid community content. Block violence, threats, self-harm encouragement, hate speech, harassment, inappropriate sexual content, spam, scams, impersonation, and clearly fake or harmful misinformation. Put uncertain cases in pending_review. Return JSON only with status approved, pending_review, or blocked; reason; categories array; score 0 to 1.",
           },
           {
             role: "user",
             content: JSON.stringify({
-              comment: content,
-              post_excerpt: (postContent || "").slice(0, 800),
+              target,
+              [label]: content,
+              context,
               policy:
-                "Block severe harmful, threatening, abusive, spam, or clearly false/misleading claims. Put uncertain cases in pending_review.",
+                "Approve normal music, booking, community, and casual conversation. Block unsafe or abusive content. Do not block mild criticism or harmless opinions. Treat repeated links, scams, fake urgent claims, and impersonation as spam or misinformation.",
             }),
           },
         ],
@@ -304,26 +361,17 @@ async function moderateCommentWithGroq(content: string, postContent?: string | n
     });
 
     if (!response.ok) {
-      return localDecision || {
-        status: "pending_review",
-        reason: "AI moderation could not complete, so the comment needs review.",
-        categories: ["moderation_unavailable"],
-        score: null,
-        provider: "groq-error",
-        metadata: { status: response.status, body: await response.text().catch(() => "") },
-      };
+      return localDecision || moderationUnavailableDecision(target, {
+        groqStatus: response.status,
+        groqBody: await response.text().catch(() => ""),
+      });
     }
 
     const payload = await response.json();
     const raw = payload?.choices?.[0]?.message?.content || "{}";
     const parsed = parseJsonObject(raw) || {};
     const rawStatus = typeof parsed.status === "string" ? parsed.status.trim().toLowerCase() : "pending_review";
-    const status: CommentModerationStatus =
-      rawStatus === "approved" || rawStatus === "allow" || rawStatus === "allowed"
-        ? "approved"
-        : rawStatus === "blocked" || rawStatus === "block"
-          ? "blocked"
-          : "pending_review";
+    const status = normalizeModerationStatus(rawStatus);
 
     if (localDecision && localDecision.status === "pending_review" && status === "approved") {
       return localDecision;
@@ -334,25 +382,44 @@ async function moderateCommentWithGroq(content: string, postContent?: string | n
       reason: typeof parsed.reason === "string" && parsed.reason.trim()
         ? parsed.reason.trim().slice(0, 500)
         : status === "approved"
-          ? "Comment passed moderation."
-          : "Comment needs moderation review.",
+          ? `${moderationTargetLabel(target)} passed moderation.`
+          : `${moderationTargetLabel(target)} needs moderation review.`,
       categories: normalizeStringArray(parsed.categories),
       score: Number.isFinite(Number(parsed.score)) ? Math.max(0, Math.min(1, Number(parsed.score))) : null,
-      provider: `groq:${GROQ_COMMENT_MODEL}`,
-      metadata: { model: GROQ_COMMENT_MODEL, raw_status: rawStatus },
+      provider: `groq:${GROQ_TEXT_MODERATION_MODEL}`,
+      metadata: { model: GROQ_TEXT_MODERATION_MODEL, raw_status: rawStatus, target },
     };
   } catch (error: any) {
-    return localDecision || {
-      status: "pending_review",
-      reason: "AI moderation timed out or failed, so the comment needs review.",
-      categories: ["moderation_unavailable"],
-      score: null,
-      provider: "groq-error",
-      metadata: { message: error?.message || "unknown" },
-    };
+    return localDecision || moderationUnavailableDecision(target, { groqError: error?.message || "unknown" });
   } finally {
     clearTimeout(timeout);
   }
+}
+
+async function moderateCommentWithGroq(content: string, postContent?: string | null): Promise<TextModerationDecision> {
+  return moderateTextWithGroq("comment", content, {
+    post_excerpt: (postContent || "").slice(0, 800),
+  });
+}
+
+async function moderatePostWithGroq(content: string): Promise<TextModerationDecision> {
+  return moderateTextWithGroq("post", content);
+}
+
+function textModerationResponse(target: TextModerationTarget, moderation: TextModerationDecision) {
+  const label = moderationTargetLabel(target);
+  const pendingReview = moderation.status === "pending_review";
+  return jsonResponse({
+    success: false,
+    allowed: false,
+    blocked: moderation.status === "blocked",
+    pending_review: pendingReview,
+    status: moderation.status,
+    moderation,
+    error: pendingReview
+      ? `${label} needs moderation review before it can be published.`
+      : `${label} blocked by safety moderation.`,
+  });
 }
 
 async function insertNotification(
@@ -616,6 +683,13 @@ Deno.serve(async (req: Request) => {
         return jsonResponse({ error: "content or media is required" }, 400);
       }
 
+      if (trimmedContent) {
+        const moderation = await moderatePostWithGroq(trimmedContent);
+        if (moderation.status !== "approved") {
+          return textModerationResponse("post", moderation);
+        }
+      }
+
       const { data: post, error: postErr } = await supabaseAdmin
         .from("feed_posts")
         .insert({
@@ -679,8 +753,16 @@ Deno.serve(async (req: Request) => {
         mediaRows = normalizedMedia.rows || [];
       }
 
+      const nextContent = content !== undefined ? normalizeContent(content) : undefined;
+      if (nextContent) {
+        const moderation = await moderatePostWithGroq(nextContent);
+        if (moderation.status !== "approved") {
+          return textModerationResponse("post", moderation);
+        }
+      }
+
       const patch: Record<string, any> = {};
-      if (content !== undefined) patch.content = normalizeContent(content) || null;
+      if (content !== undefined) patch.content = nextContent || null;
       if (visibility !== undefined) patch.visibility = normalizeVisibility(visibility);
       if (is_pinned !== undefined) patch.is_pinned = is_pinned;
 

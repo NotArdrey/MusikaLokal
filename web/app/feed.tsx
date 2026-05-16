@@ -1002,6 +1002,15 @@ export default function FeedScreen() {
         return;
       }
 
+      if (data?.blocked || data?.pending_review || data?.status === "blocked" || data?.status === "pending_review") {
+        setAlert({
+          type: "warning",
+          title: data?.pending_review || data?.status === "pending_review" ? "Post needs review" : "Post blocked",
+          message: data?.moderation?.reason || data?.error || "This post did not pass AI moderation.",
+        });
+        return;
+      }
+
       setAlert({ type: "error", title: "Error", message: data?.error || "Failed to create post." });
     } catch (e: any) {
       setAlert({ type: "error", title: "Error", message: e?.message || "Failed to create post." });
