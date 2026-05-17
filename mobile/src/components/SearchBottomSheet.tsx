@@ -405,8 +405,9 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
     }, [isGuest, userId]);
 
     useEffect(() => {
+      if (!isSheetOpen) return;
       loadFollowingKeys();
-    }, [loadFollowingKeys]);
+    }, [isSheetOpen, loadFollowingKeys]);
 
     const handleChatPress = useCallback(
       (item: any) => {
@@ -1071,7 +1072,7 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
             keyboardShouldPersistTaps="handled"
             showsVerticalScrollIndicator={false}
             drawDistance={720}
-            overrideProps={{ initialDrawBatchSize: 6 }}
+            maintainVisibleContentPosition={{ disabled: true }}
             nestedScrollEnabled
             onEndReached={handleLoadMore}
             onEndReachedThreshold={0.35}

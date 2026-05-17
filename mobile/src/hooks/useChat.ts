@@ -533,14 +533,20 @@ export function useConversations(currentUserId: string | null) {
             ]);
 
             if (conversationsResponse.error) throw conversationsResponse.error;
-            if (displayResponse.error) throw displayResponse.error;
-            if (participantsResponse.error) throw participantsResponse.error;
-            if (unreadResponse.error) throw unreadResponse.error;
+            if (displayResponse.error) {
+                console.warn('Chat display projection fetch failed:', displayResponse.error.message);
+            }
+            if (participantsResponse.error) {
+                console.warn('Chat participants fetch failed:', participantsResponse.error.message);
+            }
+            if (unreadResponse.error) {
+                console.warn('Chat unread count fetch failed:', unreadResponse.error.message);
+            }
 
             const rawConversations = conversationsResponse.data || [];
-            const displayRows = displayResponse.data || [];
-            const allParticipants = participantsResponse.data || [];
-            const unreadRows = unreadResponse.data || [];
+            const displayRows = displayResponse.error ? [] : displayResponse.data || [];
+            const allParticipants = participantsResponse.error ? [] : participantsResponse.data || [];
+            const unreadRows = unreadResponse.error ? [] : unreadResponse.data || [];
 
             const oldestConversationActivity = rawConversations.reduce<string | null>((oldest, conversation: any) => {
                 const candidate = String(conversation.updated_at || conversation.created_at || '').trim();
@@ -564,14 +570,16 @@ export function useConversations(currentUserId: string | null) {
                     .gte('created_at', oldestConversationActivity)
                     .order('created_at', { ascending: false });
 
-                if (recentMessagesError) throw recentMessagesError;
-
-                (recentMessages || []).forEach((message: Message) => {
-                    if (!latestMessageByConversationId.has(message.conversation_id)) {
-                        latestMessageByConversationId.set(message.conversation_id, message);
-                        cacheSenderProfile(message.sender);
-                    }
-                });
+                if (recentMessagesError) {
+                    console.warn('Chat recent messages fetch failed:', recentMessagesError.message);
+                } else {
+                    (recentMessages || []).forEach((message: Message) => {
+                        if (!latestMessageByConversationId.has(message.conversation_id)) {
+                            latestMessageByConversationId.set(message.conversation_id, message);
+                            cacheSenderProfile(message.sender);
+                        }
+                    });
+                }
             }
 
             const missingLatestMessageConversationIds = conversationIds.filter((conversationId) => {
@@ -592,7 +600,10 @@ export function useConversations(currentUserId: string | null) {
                             .limit(1)
                             .maybeSingle();
 
-                        if (messageError) throw messageError;
+                        if (messageError) {
+                            console.warn('Chat latest message fetch failed:', messageError.message);
+                            return null;
+                        }
                         return message;
                     }),
                 );

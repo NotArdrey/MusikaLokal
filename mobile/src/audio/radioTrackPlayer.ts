@@ -144,6 +144,10 @@ const normalizeDurationSeconds = (value: unknown) => {
   return Math.round(parsed);
 };
 
+const readTrimmedString = (value: unknown) => (
+  typeof value === "string" ? value.trim() : ""
+);
+
 const readTimestampMs = (value: unknown) => {
   if (typeof value !== "string") {
     return null;
@@ -188,9 +192,13 @@ const getStationAnchorTimestampMs = (stationData: any) => {
 };
 
 const resolveAudioUri = async (item: any) => {
-  const storagePath = typeof item?.teaser?.storage_path === "string"
-    ? item.teaser.storage_path.trim()
-    : "";
+  const storagePath = [
+    item?.teaser?.storage_path,
+    item?.teaser?.file_path,
+    item?.storage_path,
+  ]
+    .map(readTrimmedString)
+    .find(Boolean) || "";
 
   if (storagePath) {
     const { data, error } = await supabase.storage
@@ -206,7 +214,31 @@ const resolveAudioUri = async (item: any) => {
     }
   }
 
-  return resolveRadioMediaUrl(typeof item?.audio_url === "string" ? item.audio_url.trim() : "");
+  const directCandidates = [
+    item?.audio_url,
+    item?.audioUrl,
+    item?.public_url,
+    item?.publicUrl,
+    item?.signed_url,
+    item?.signedUrl,
+    item?.url,
+    item?.teaser?.audio_url,
+    item?.teaser?.audioUrl,
+    item?.teaser?.public_url,
+    item?.teaser?.publicUrl,
+    item?.teaser?.signed_url,
+    item?.teaser?.signedUrl,
+    item?.teaser?.url,
+  ];
+
+  for (const candidate of directCandidates) {
+    const resolved = resolveRadioMediaUrl(candidate);
+    if (resolved) {
+      return resolved;
+    }
+  }
+
+  return storagePath ? resolveRadioMediaUrl(`playlist-assets/${storagePath}`) : "";
 };
 
 const buildStationQueueEntries = (stationData: any): RadioQueueEntry[] => {

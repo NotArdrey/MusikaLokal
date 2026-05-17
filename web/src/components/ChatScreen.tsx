@@ -1,6 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import * as DocumentPicker from 'expo-document-picker';
 import * as Haptics from 'expo-haptics';
+import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
 import React, { useEffect, useRef, useState } from 'react';
 import {
@@ -946,8 +947,21 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
                                 <Ionicons name="send" size={19} color="#FFF" style={{ marginLeft: 2 }} />
                             </TouchableOpacity>
                         ) : (
-                            <TouchableOpacity style={styles.thumbsUpButton} onPress={handleQuickLike} activeOpacity={0.78}>
-                                <Ionicons name="thumbs-up" size={28} color={messengerBlue} />
+                            <TouchableOpacity
+                                style={styles.thumbsUpButton}
+                                onPress={handleQuickLike}
+                                activeOpacity={0.82}
+                                accessibilityRole="button"
+                                accessibilityLabel="Send quick like"
+                            >
+                                <LinearGradient
+                                    colors={[messengerBlue, '#5865F2']}
+                                    start={{ x: 0, y: 0 }}
+                                    end={{ x: 1, y: 1 }}
+                                    style={styles.thumbsUpGradient}
+                                >
+                                    <Ionicons name="thumbs-up" size={18} color="#FFF" />
+                                </LinearGradient>
                             </TouchableOpacity>
                         )}
                     </Animated.View>
@@ -1221,13 +1235,16 @@ const styles = StyleSheet.create({
     },
     inputContainer: {
         flexDirection: 'row',
-        alignItems: 'flex-end',
+        alignItems: 'center',
         paddingHorizontal: 12,
         paddingTop: 8,
         gap: 6,
     },
     inputAction: {
-        paddingBottom: 6,
+        width: 40,
+        height: 40,
+        justifyContent: 'center',
+        alignItems: 'center',
     },
     inputActionDisabled: {
         opacity: 0.7,
@@ -1235,18 +1252,22 @@ const styles = StyleSheet.create({
     textInputWrapper: {
         flex: 1,
         flexDirection: 'row',
-        alignItems: 'flex-end',
-        borderRadius: 20,
+        alignItems: 'center',
+        borderRadius: 22,
         paddingHorizontal: 14,
-        paddingVertical: 6,
-        minHeight: 40,
+        paddingVertical: 0,
+        minHeight: 44,
     },
     input: {
         flex: 1,
         fontSize: 15,
+        minHeight: 44,
         maxHeight: 120,
-        paddingVertical: Platform.OS === 'ios' ? 4 : 2,
+        paddingTop: Platform.OS === 'android' ? 0 : 11,
+        paddingBottom: Platform.OS === 'android' ? 0 : 11,
         lineHeight: 20,
+        textAlignVertical: 'center',
+        includeFontPadding: false,
     },
     sendButton: {
         width: 40,
@@ -1265,8 +1286,19 @@ const styles = StyleSheet.create({
     thumbsUpButton: {
         width: 40,
         height: 40,
+        borderRadius: 20,
         justifyContent: 'center',
         alignItems: 'center',
+        boxShadow: '0px 4px 8px rgba(88,101,242,0.24)',
+    },
+    thumbsUpGradient: {
+        width: 36,
+        height: 36,
+        borderRadius: 18,
+        justifyContent: 'center',
+        alignItems: 'center',
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.26)',
     },
     // Reaction styles
     reactionsContainer: {

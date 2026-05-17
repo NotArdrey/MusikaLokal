@@ -16,20 +16,20 @@ import {
     TouchableOpacity,
     View,
 } from 'react-native';
-import { supabase } from '../lib/supabase';
-import GuestSignInGate from '../src/components/GuestSignInGate';
-import Header from '../src/components/header';
-import { normalizeVisibleInput } from '../src/components/modal';
-import Navbar from '../src/components/navbar';
-import { useBottomBarClearance } from '../src/hooks/useBottomBarClearance';
-import { useAuth } from '../src/context/AuthContext';
-import { useTheme } from '../src/context/ThemeContext';
+import { supabase } from '../../lib/supabase';
+import GuestSignInGate from '../../src/components/GuestSignInGate';
+import Header from '../../src/components/header';
+import { normalizeVisibleInput } from '../../src/components/modal';
+import Navbar from '../../src/components/navbar';
+import { useBottomBarClearance } from '../../src/hooks/useBottomBarClearance';
+import { useAuth } from '../../src/context/AuthContext';
+import { useTheme } from '../../src/context/ThemeContext';
 import {
     askInstrumentSuggestionFollowupWithGroq,
     generateInstrumentSuggestionsWithGroq,
     getGroqModelInfo,
-} from '../src/services/groqModelRouter';
-import { getOfflineInstrumentSuggestions } from '../src/utils/offlineInstrumentRecommender';
+} from '../../src/services/groqModelRouter';
+import { getOfflineInstrumentSuggestions } from '../../src/utils/offlineInstrumentRecommender';
 import {
     EXPERIENCE_OPTIONS,
     ExperienceLevel,
@@ -37,7 +37,7 @@ import {
     MUSIC_GENRES,
     PURPOSE_OPTIONS,
     SuggestionPurpose,
-} from '../src/types/instruments';
+} from '../../src/types/instruments';
 
 const OFFLINE_PROFILE_CACHE_KEY = 'offline_instrument_profile_v1';
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');

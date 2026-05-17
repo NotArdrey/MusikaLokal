@@ -1,11 +1,13 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Ionicons } from "@expo/vector-icons";
+import { BottomSheetBackdrop, BottomSheetView, useBottomSheetSpringConfigs } from "@gorhom/bottom-sheet";
 import { useFocusEffect } from "@react-navigation/native";
 import { router, useLocalSearchParams } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Dimensions,
+  FlatList,
   Image,
   InteractionManager,
   Keyboard,
@@ -19,54 +21,55 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import { FlashList } from "@shopify/flash-list";
 import * as FileSystem from "expo-file-system/legacy";
 import * as ImagePicker from "expo-image-picker";
 import * as VideoThumbnails from "expo-video-thumbnails";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { supabase, supabaseAnonKey, supabaseUrl } from "../lib/supabase";
-import CachedImage from "../src/components/CachedImage";
-import BottomModal from "../src/components/BottomModal";
-import GuestSignInGate from "../src/components/GuestSignInGate";
-import Header from "../src/components/header";
-import ListingDetailsSheet from "../src/components/ListingDetailsSheet";
-import { normalizeVisibleInput } from "../src/components/modal";
+import { supabase, supabaseAnonKey, supabaseUrl } from "../../lib/supabase";
+import CachedImage from "../../src/components/CachedImage";
+import GuestSignInGate from "../../src/components/GuestSignInGate";
+import Header from "../../src/components/header";
+import ListingDetailsSheet from "../../src/components/ListingDetailsSheet";
+import { normalizeVisibleInput } from "../../src/components/modal";
 import Navbar, {
   NAVBAR_BOTTOM_OFFSET,
   NAVBAR_CLEARANCE,
   NAVBAR_HEIGHT,
-} from "../src/components/navbar";
-import PostDetailsModal from "../src/components/PostDetailsModal";
-import ProductionTeamDetailsSheet from "../src/components/ProductionTeamDetailsSheet";
-import SearchBottomSheet from "../src/components/SearchBottomSheet";
-import Skeleton from "../src/components/Skeleton";
-import SlidingTabBar from "../src/components/SlidingTabBar";
-import CustomAlert, { AlertType } from "../src/components/CustomAlert";
-import { useAuth } from "../src/context/AuthContext";
-import { formatDashedNumericDate } from "../src/utils/friendlyDateTime";
-import { useBottomOverlay } from "../src/context/BottomOverlayContext";
+} from "../../src/components/navbar";
+import PostDetailsModal from "../../src/components/PostDetailsModal";
+import ProductionTeamDetailsSheet from "../../src/components/ProductionTeamDetailsSheet";
+import SearchBottomSheet from "../../src/components/SearchBottomSheet";
+import Skeleton from "../../src/components/Skeleton";
+import SlidingTabBar from "../../src/components/SlidingTabBar";
+import TrackedBottomSheetModal from "../../src/components/TrackedBottomSheetModal";
+import CustomAlert, { AlertType } from "../../src/components/CustomAlert";
+import { useAuth } from "../../src/context/AuthContext";
+import { formatDashedNumericDate } from "../../src/utils/friendlyDateTime";
+import { useBottomOverlay } from "../../src/context/BottomOverlayContext";
 import {
   RADIO_MINI_PLAYER_HEIGHT,
   RADIO_MINI_PLAYER_STACK_GAP,
   useRadioPlayer,
   useRadioPlayerPresence,
-} from "../src/context/RadioPlayerContext";
-import { emitToast } from "../src/events/toastBus";
-import { useFeedQuery } from "../src/data/hooks";
-import { useTheme } from "../src/context/ThemeContext";
+} from "../../src/context/RadioPlayerContext";
+import { emitToast } from "../../src/events/toastBus";
+import { useFeedQuery } from "../../src/data/hooks";
+import { useTheme } from "../../src/context/ThemeContext";
+import { resolveRadioMediaUrl } from "../../src/audio/radioTrackPlayer";
 import {
   buildSocialFollowKey,
   getListingSocialFollowTarget,
   normalizeSocialFollowTargetType,
-} from "../src/utils/socialFollow";
-import type { SocialFollowTargetType } from "../src/utils/socialFollow";
+} from "../../src/utils/socialFollow";
+import type { SocialFollowTargetType } from "../../src/utils/socialFollow";
 import {
   getGroqModelInfo,
   rerankHomeFeedWithGroq,
-} from "../src/services/groqModelRouter";
-import { screenUploadsWithAi } from "../src/services/uploadSafetyScreen";
-import { usePageLoadLogger } from "../src/utils/loadTimeLogger";
-import { setSmoothTab } from "../src/utils/smoothTabs";
+} from "../../src/services/groqModelRouter";
+import { screenUploadsWithAi } from "../../src/services/uploadSafetyScreen";
+import { logLoadTime, usePageLoadLogger } from "../../src/utils/loadTimeLogger";
+import { bottomSheetSpringConfig } from "../../src/utils/motion";
+import { setSmoothTab } from "../../src/utils/smoothTabs";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const moderateScale = (size: number, factor = 0.3) => {
@@ -186,6 +189,7 @@ type PostComposerMedia = {
 };
 
 const feedScreenCache = createFeedCache(getGroqModelInfo().modelLabel);
+let feedScreenCacheIdentity = "guest";
 const FEED_FALLBACK_IMAGES: Record<string, string[]> = {
   Artist: [
     "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=900&q=75",
@@ -239,6 +243,16 @@ const ensureFeedCardImage = <T extends { id?: string | null; type?: string; imag
 const feedLastFetchAt: Record<FeedTab, number> = {
   for_you: 0,
   following: 0,
+};
+
+const resetFeedScreenCacheForIdentity = (provider: string, identity: string) => {
+  const nextCache = createFeedCache(provider);
+  feedScreenCache.for_you = nextCache.for_you;
+  feedScreenCache.following = nextCache.following;
+  feedLastFetchAt.for_you = 0;
+  feedLastFetchAt.following = 0;
+  feedScreenCacheIdentity = identity;
+  return feedScreenCache;
 };
 
 const base64ToUint8Array = (base64: string): Uint8Array => {
@@ -599,6 +613,83 @@ const normalizeFeedPost = (post: any) => {
     my_reaction: post?.my_reaction ?? post?.user_reaction ?? null,
     visibility: visibility || "public",
     media,
+  };
+};
+
+const fetchPublicFeedPostsFallback = async (
+  limit = FEED_PAGE_SIZE,
+  cursor?: string | null,
+  userId?: string | null,
+) => {
+  const startedAt = Date.now();
+  logLoadTime("Feed", "public-fallback-start", {
+    cursor: cursor ? "present" : undefined,
+    userId,
+  });
+
+  const { data, error } = await supabase.functions.invoke("manage-social-feed", {
+    body: {
+      action: "get_feed",
+      cursor: cursor ?? null,
+      feed_type: "public",
+      limit,
+      personalize: false,
+      ...(userId ? { userId } : {}),
+    },
+  });
+  if (error) throw error;
+
+  let rows = Array.isArray(data?.items)
+    ? data.items
+    : Array.isArray(data?.data)
+      ? data.data
+      : [];
+  let nextCursor = data?.nextCursor || null;
+
+  logLoadTime("Feed", "public-fallback-edge-complete", {
+    durationMs: Date.now() - startedAt,
+    posts: rows.length,
+  });
+
+  if (rows.length === 0 && !cursor) {
+    const directStartedAt = Date.now();
+    let query = supabase
+      .from("feed_posts")
+      .select(
+        "id, author_id, post_type, content, visibility, is_pinned, linked_playlist_id, linked_product_id, reaction_count, comment_count, share_count, created_at, updated_at, author:profiles!author_id(id, full_name, avatar_url, role), media:post_media(id, post_id, media_type, storage_path, thumbnail_path, is_cover, mime_type, width, height, duration_seconds, display_order, safety_status, safety_metadata)",
+      )
+      .eq("visibility", "public")
+      .eq("is_hidden", false)
+      .order("created_at", { ascending: false })
+      .limit(limit + 1);
+
+    const { data: directRows, error: directError } = await query;
+    if (directError) {
+      logLoadTime("Feed", "public-fallback-direct-failed", {
+        durationMs: Date.now() - directStartedAt,
+        message: directError.message,
+      });
+    } else {
+      const directPage = directRows || [];
+      rows = directPage.slice(0, limit);
+      nextCursor =
+        directPage.length > limit
+          ? rows[rows.length - 1]?.created_at || null
+          : null;
+      logLoadTime("Feed", "public-fallback-direct-complete", {
+        durationMs: Date.now() - directStartedAt,
+        posts: rows.length,
+      });
+    }
+  }
+
+  logLoadTime("Feed", "public-fallback-complete", {
+    posts: rows.length,
+  });
+
+  return {
+    posts: rows.map(normalizeFeedPost),
+    nextCursor,
   };
 };
 
@@ -1294,14 +1385,39 @@ const getStationTrackCount = (station: any) =>
     return total + Math.max(items.length, playlistCount);
   }, 0);
 
+const hasStationPlayableItem = (item: any) => {
+  const storagePath = typeof item?.teaser?.storage_path === "string" && item.teaser.storage_path.trim().length > 0;
+  const teaserFilePath = typeof item?.teaser?.file_path === "string" && item.teaser.file_path.trim().length > 0;
+  const itemStoragePath = typeof item?.storage_path === "string" && item.storage_path.trim().length > 0;
+
+  if (storagePath || teaserFilePath || itemStoragePath) {
+    return true;
+  }
+
+  const directCandidates = [
+    item?.audio_url,
+    item?.audioUrl,
+    item?.public_url,
+    item?.publicUrl,
+    item?.signed_url,
+    item?.signedUrl,
+    item?.url,
+    item?.teaser?.audio_url,
+    item?.teaser?.audioUrl,
+    item?.teaser?.public_url,
+    item?.teaser?.publicUrl,
+    item?.teaser?.signed_url,
+    item?.teaser?.signedUrl,
+    item?.teaser?.url,
+  ];
+
+  return directCandidates.some((candidate) => Boolean(resolveRadioMediaUrl(candidate)));
+};
+
 const getStationPlayableTrackCount = (station: any) =>
   getStationSlots(station).reduce((total: number, slot: any) => {
     const items = Array.isArray(slot?.playlist?.items) ? slot.playlist.items : [];
-    return total + items.filter((item: any) => (
-      typeof item?.audio_url === "string" && item.audio_url.trim().length > 0
-    ) || (
-      typeof item?.teaser?.storage_path === "string" && item.teaser.storage_path.trim().length > 0
-    )).length;
+    return total + items.filter(hasStationPlayableItem).length;
   }, 0);
 
 const getStationNowPlayingTitle = (station: any, slotIndex = 0) => {
@@ -1315,6 +1431,213 @@ const getStationNowPlayingTitle = (station: any, slotIndex = 0) => {
     slot?.label ||
     "Local artist spotlight"
   );
+};
+
+const FEED_RADIO_CACHE_TTL_MS = 60_000;
+const FEED_RADIO_DEFER_MS = 250;
+let feedRadioStationCache: { fetchedAt: number; station: any | null } = {
+  fetchedAt: 0,
+  station: null,
+};
+let feedRadioStationPromise: Promise<any | null> | null = null;
+
+const getFreshFeedRadioStationCache = () => {
+  if (Date.now() - feedRadioStationCache.fetchedAt >= FEED_RADIO_CACHE_TTL_MS) {
+    return null;
+  }
+
+  return feedRadioStationCache;
+};
+
+const fetchFeedLiveRadioStation = async () => {
+  const freshCache = getFreshFeedRadioStationCache();
+  if (freshCache) {
+    logLoadTime("FeedRadio", "cache-hit", {
+      details: {
+        playableStations: freshCache.station && getStationPlayableTrackCount(freshCache.station) > 0 ? 1 : 0,
+        stations: freshCache.station ? 1 : 0,
+      },
+    });
+    return freshCache.station;
+  }
+
+  if (feedRadioStationPromise) {
+    logLoadTime("FeedRadio", "dedupe-hit", {
+      details: { includeItems: true },
+    });
+    return feedRadioStationPromise;
+  }
+
+  feedRadioStationPromise = (async () => {
+    const fetchStations = async (featuredOnly: boolean) => {
+      const startedAt = Date.now();
+      const { data, error } = await supabase.functions.invoke("manage-playlists", {
+        body: {
+          action: "browse_stations",
+          featured_only: featuredOnly,
+          include_items: true,
+          limit: 1,
+        },
+      });
+
+      if (error) {
+        throw error;
+      }
+
+      const rows = Array.isArray(data?.data)
+        ? data.data
+        : Array.isArray(data?.stations)
+          ? data.stations
+          : [];
+
+      logLoadTime("FeedRadio", "edge-complete", {
+        details: {
+          featuredOnly,
+          playableStations: rows.filter((station: any) => getStationPlayableTrackCount(station) > 0).length,
+          stations: rows.length,
+        },
+        durationMs: Date.now() - startedAt,
+      });
+
+      return rows;
+    };
+
+    const fetchPlaylistStationFallback = async () => {
+      const startedAt = Date.now();
+      const { data, error } = await supabase.functions.invoke("manage-playlists", {
+        body: {
+          action: "browse_playlists",
+          limit: 3,
+        },
+      });
+
+      if (error) {
+        throw error;
+      }
+
+      const playlists = Array.isArray(data?.data) ? data.data : [];
+      logLoadTime("FeedRadio", "playlist-fallback-start", {
+        details: { playlists: playlists.length },
+        durationMs: Date.now() - startedAt,
+      });
+
+      for (const playlist of playlists) {
+        if (!playlist?.id) {
+          continue;
+        }
+
+        const detailsStartedAt = Date.now();
+        const { data: detailsData, error: detailsError } = await supabase.functions.invoke("manage-playlists", {
+          body: {
+            action: "get_playlist_details",
+            playlist_id: playlist.id,
+          },
+        });
+
+        if (detailsError) {
+          console.warn("Live radio playlist fallback details error:", detailsError);
+          continue;
+        }
+
+        const detailedPlaylist = detailsData?.data || playlist;
+        const items = Array.isArray(detailedPlaylist?.items) ? detailedPlaylist.items : [];
+        const playableItems = items.filter(hasStationPlayableItem);
+        logLoadTime("FeedRadio", "playlist-fallback-detail-complete", {
+          details: {
+            items: items.length,
+            playableItems: playableItems.length,
+            playlistId: playlist.id,
+          },
+          durationMs: Date.now() - detailsStartedAt,
+        });
+
+        if (playableItems.length === 0) {
+          continue;
+        }
+
+        const stationName = typeof detailedPlaylist?.title === "string" && detailedPlaylist.title.trim().length > 0
+          ? `${detailedPlaylist.title.trim()} Radio`
+          : "MusikaLokal Radio";
+
+        return {
+          __playlistFallback: true,
+          __queueReady: true,
+          cover_image_url: detailedPlaylist?.cover_image_url || null,
+          created_at: detailedPlaylist?.created_at,
+          creator: detailedPlaylist?.creator || null,
+          description: detailedPlaylist?.description || null,
+          genre: detailedPlaylist?.genre || null,
+          id: `playlist-radio:${playlist.id}`,
+          is_active: true,
+          live_slots: [
+            {
+              id: `playlist-slot:${playlist.id}`,
+              label: detailedPlaylist?.title || "Now Playing",
+              playlist: {
+                ...detailedPlaylist,
+                items,
+                track_count: items.length,
+              },
+              position: 0,
+            },
+          ],
+          name: stationName,
+          slot_count: 1,
+          slots: [
+            {
+              id: `playlist-slot:${playlist.id}`,
+              label: detailedPlaylist?.title || "Now Playing",
+              playlist: {
+                ...detailedPlaylist,
+                items,
+                track_count: items.length,
+              },
+              position: 0,
+            },
+          ],
+          updated_at: detailedPlaylist?.updated_at,
+        };
+      }
+
+      return null;
+    };
+
+    const startedAt = Date.now();
+    logLoadTime("FeedRadio", "fetch-start", {
+      details: { includeItems: true },
+    });
+
+    const featuredStations = await fetchStations(true);
+    let stations = featuredStations.some((station: any) => getStationPlayableTrackCount(station) > 0)
+      ? featuredStations
+      : await fetchStations(false);
+    if (!stations.some((station: any) => getStationPlayableTrackCount(station) > 0)) {
+      const playlistStation = await fetchPlaylistStationFallback();
+      stations = playlistStation ? [playlistStation] : stations;
+    }
+
+    const station = stations[0] || null;
+    feedRadioStationCache = {
+      fetchedAt: Date.now(),
+      station,
+    };
+
+    logLoadTime("FeedRadio", "fetch-complete", {
+      details: {
+        playableStations: stations.filter((nextStation: any) => getStationPlayableTrackCount(nextStation) > 0).length,
+        stations: stations.length,
+      },
+      durationMs: Date.now() - startedAt,
+    });
+
+    return station;
+  })();
+
+  try {
+    return await feedRadioStationPromise;
+  } finally {
+    feedRadioStationPromise = null;
+  }
 };
 
 type LiveRadioCardProps = {
@@ -1343,57 +1666,59 @@ const LiveRadioCard = React.memo(function LiveRadioCard({
     togglePlayPause,
     tuneIn,
   } = useRadioPlayer();
-  const [featuredStation, setFeaturedStation] = useState<any | null>(null);
-  const [loadingStation, setLoadingStation] = useState(true);
+  const cachedRadioStation = getFreshFeedRadioStationCache()?.station ?? null;
+  const [featuredStation, setFeaturedStation] = useState<any | null>(cachedRadioStation);
+  const [loadingStation, setLoadingStation] = useState(!cachedRadioStation);
 
   useEffect(() => {
     let cancelled = false;
+    const cachedStation = getFreshFeedRadioStationCache()?.station ?? null;
 
-    const fetchLiveStation = async () => {
-      setLoadingStation(true);
+    if (cachedStation) {
+      setFeaturedStation(cachedStation);
+      setLoadingStation(false);
+      return () => {
+        cancelled = true;
+      };
+    }
 
-      try {
-        const fetchStations = async (featuredOnly: boolean) => {
-          const { data, error } = await supabase.functions.invoke("manage-playlists", {
-            body: {
-              action: "browse_stations",
-              featured_only: featuredOnly,
-              include_items: true,
-              limit: 1,
-            },
-          });
-
-          if (error) {
-            throw error;
+    setLoadingStation(true);
+    const deferTimer = setTimeout(() => {
+      void fetchFeedLiveRadioStation()
+        .then((station) => {
+          if (!cancelled) {
+            setFeaturedStation(station);
           }
-
-          return Array.isArray(data?.data) ? data.data : [];
-        };
-
-        const featuredStations = await fetchStations(true);
-        const stations = featuredStations.length > 0 ? featuredStations : await fetchStations(false);
-
-        if (!cancelled) {
-          setFeaturedStation(stations[0] || null);
-        }
-      } catch (error) {
-        if (!cancelled) {
-          console.warn("Live radio station fetch error:", error);
-          setFeaturedStation(null);
-        }
-      } finally {
-        if (!cancelled) {
-          setLoadingStation(false);
-        }
-      }
-    };
-
-    void fetchLiveStation();
+        })
+        .catch((error) => {
+          if (!cancelled) {
+            console.warn("Live radio station fetch error:", error);
+            logLoadTime("FeedRadio", "fetch-failed", {
+              error: error instanceof Error ? error.message : String(error),
+            });
+            setFeaturedStation(null);
+          }
+        })
+        .finally(() => {
+          if (!cancelled) {
+            setLoadingStation(false);
+          }
+        });
+    }, FEED_RADIO_DEFER_MS);
 
     return () => {
       cancelled = true;
+      clearTimeout(deferTimer);
     };
   }, []);
+
+  useEffect(() => {
+    if (!activeStation?.id) {
+      return;
+    }
+
+    setLoadingStation(false);
+  }, [activeStation?.id]);
 
   const liveFeaturedStation = featuredStation && getStationPlayableTrackCount(featuredStation) > 0
     ? featuredStation
@@ -1443,6 +1768,15 @@ const LiveRadioCard = React.memo(function LiveRadioCard({
       ? "pause"
       : "play";
   const statusBadgeLabel = loadingStation ? "..." : canTuneIn ? "LIVE" : "OFF";
+  const primaryTrackTitle = hasDisplayStation
+    ? currentTrack?.title || getStationNowPlayingTitle(displayStation, currentSlotIndex)
+    : nowPlayingTitle;
+  const primaryArtistName =
+    currentTrack?.artist ||
+    displayStation?.creator?.full_name ||
+    displayStation?.creator?.stage_name ||
+    "MusikaLokal artists";
+  const stationArtworkUrl = displayStation?.cover_image_url || displayStation?.creator?.avatar_url || null;
 
   const openStationDetails = useCallback(() => {
     if (!displayStation?.id) return;
@@ -1493,79 +1827,50 @@ const LiveRadioCard = React.memo(function LiveRadioCard({
     togglePlayPause,
     tuneIn,
   ]);
+  const handleTuneIn = handlePlayPress;
 
   return (
-    <View style={styles.liveRadioWrap}>
-      <View
-        style={[
-          styles.liveRadioCard,
-          {
-            backgroundColor: cardColor,
-            borderColor,
-            shadowOpacity: isDark ? 0 : 0.06,
-          },
-        ]}
-      >
-        <View style={[styles.liveRadioThumbnail, { backgroundColor: primaryColor + (isDark ? "24" : "14") }]}>
-          <View style={[styles.liveRadioArtworkInner, { borderColor: primaryColor + "55" }]}>
-            <Ionicons name={isCurrentStation && isPlaying ? "volume-high" : "radio"} size={20} color={primaryColor} />
-          </View>
-        </View>
-
-        <TouchableOpacity
-          activeOpacity={displayStation?.id ? 0.78 : 1}
-          disabled={!displayStation?.id}
-          onPress={openStationDetails}
-          style={styles.liveRadioContent}
-        >
-          <Text style={[styles.liveRadioStation, { color: textColor }]} numberOfLines={1}>
-            {loadingStation ? "Finding live stations..." : stationName}
-          </Text>
-          <Text style={[styles.liveRadioNowPlayingLine, { color: mutedTextColor }]} numberOfLines={1}>
-            {loadingStation ? "Now playing: Loading rotation" : `Now playing: ${nowPlayingTitle}`}
-          </Text>
-          <View style={styles.liveRadioMetaRow}>
-            <Text style={[styles.liveRadioMetaLabel, { color: mutedTextColor }]} numberOfLines={1}>
-              Live Radio
-            </Text>
-            <Text style={[styles.liveRadioMetaDot, { color: mutedTextColor }]}>|</Text>
-            <View style={styles.liveRadioTrackCount}>
-              <Ionicons name={stationSlots.length > 0 ? "musical-notes-outline" : "cloud-offline-outline"} size={12} color={mutedTextColor} />
-              <Text style={[styles.liveRadioListenerText, { color: mutedTextColor }]} numberOfLines={1}>
-                {rotationSummary}
-              </Text>
-            </View>
-          </View>
-        </TouchableOpacity>
-
-        <View style={styles.liveRadioActions}>
-          <View style={[styles.liveRadioBadge, !canTuneIn && styles.liveRadioBadgeMuted]}>
-            <View style={styles.liveRadioBadgeDot} />
-            <Text style={styles.liveRadioBadgeText}>{statusBadgeLabel}</Text>
-          </View>
-          <TouchableOpacity
-            activeOpacity={0.78}
-            accessibilityRole="button"
-            accessibilityLabel={`${playButtonLabel} Live Radio`}
-            disabled={loadingStation || isTuneInLoading}
-            onPress={handlePlayPress}
-            style={[
-              styles.liveRadioPlayButton,
-              {
-                backgroundColor: canTuneIn ? primaryColor : (isDark ? "#334155" : "#CBD5E1"),
-                opacity: loadingStation || isTuneInLoading ? 0.8 : 1,
-              },
-            ]}
-          >
-            {loadingStation || isTuneInLoading ? (
-              <ActivityIndicator size="small" color="#FFFFFF" />
-            ) : (
-              <Ionicons name={playIcon as any} size={17} color="#FFFFFF" />
-            )}
-          </TouchableOpacity>
-        </View>
+    <TouchableOpacity
+      activeOpacity={0.9}
+      onPress={handleTuneIn}
+      style={[styles.liveRadioCard, { backgroundColor: cardColor, borderColor }]}
+      accessibilityRole="button"
+      accessibilityLabel={isCurrentStation ? "Toggle live radio playback" : "Tune in to live radio"}
+    >
+      <View style={[styles.liveRadioIcon, { backgroundColor: primaryColor + "18" }]}>
+        {stationArtworkUrl ? (
+          <CachedImage uri={stationArtworkUrl} style={styles.liveRadioArtwork} />
+        ) : (
+          <Ionicons name={isCurrentStation && isPlaying ? "volume-high" : "radio"} size={20} color={primaryColor} />
+        )}
       </View>
-    </View>
+      <View style={styles.liveRadioContent}>
+        <View style={styles.liveRadioEyebrowRow}>
+          <View style={[styles.liveDot, { backgroundColor: isPlaying && isCurrentStation ? "#22C55E" : primaryColor }]} />
+          <Text style={[styles.liveRadioEyebrow, { color: primaryColor }]}>Live Radio</Text>
+        </View>
+        <Text style={[styles.liveRadioTitle, { color: textColor }]} numberOfLines={1}>
+          {stationName}
+        </Text>
+        <Text style={[styles.liveRadioSubtitle, { color: mutedTextColor }]} numberOfLines={1}>
+          {primaryTrackTitle} | {primaryArtistName}
+        </Text>
+        <Text style={[styles.liveRadioMeta, { color: mutedTextColor }]} numberOfLines={1}>
+          {stationSlotCount} {stationSlotCount === 1 ? "slot" : "slots"} | {stationTrackCount} playable tracks
+        </Text>
+      </View>
+      <View style={[styles.liveRadioPlayButton, { backgroundColor: isDark ? "rgba(255,255,255,0.08)" : "#FFFFFF" }]}>
+        {isTuneInLoading ? (
+          <ActivityIndicator size="small" color={primaryColor} />
+        ) : (
+          <Ionicons
+            name={isCurrentStation && isPlaying ? "pause" : "play"}
+            size={18}
+            color={primaryColor}
+          />
+        )}
+      </View>
+    </TouchableOpacity>
   );
 });
 
@@ -1925,11 +2230,13 @@ const SocialFeedCard = React.memo(function SocialFeedCard({
 export default function FeedScreen() {
   const { colors, isDark } = useTheme();
   const { session, userId, isGuest, loading: authLoading, roleResolved, userRole } = useAuth();
+  const resolvedUserId = session?.user?.id ?? userId ?? null;
   const params = useLocalSearchParams<{ reopenListingId?: string }>();
   const { clearBottomOverlays } = useBottomOverlay();
   const { activeStation } = useRadioPlayerPresence();
   const insets = useSafeAreaInsets();
   const groqModelLabel = getGroqModelInfo().modelLabel;
+  const feedIdentityKey = resolvedUserId ?? "guest";
 
   const [tab, setTab] = useState<FeedTab>("for_you");
   const [posts, setPosts] = useState<any[]>([]);
@@ -1953,13 +2260,14 @@ export default function FeedScreen() {
   const [editingPost, setEditingPost] = useState<any | null>(null);
   const [mediaBusy, setMediaBusy] = useState(false);
   const [mediaStatus, setMediaStatus] = useState("");
-  const [composerKeyboardVisible, setComposerKeyboardVisible] = useState(false);
   const [creating, setCreating] = useState(false);
 
   const [alert, setAlert] = useState<{ type: AlertType; title: string; message: string } | null>(null);
   const [postOptionsTarget, setPostOptionsTarget] = useState<any | null>(null);
   const [deletePostTarget, setDeletePostTarget] = useState<any | null>(null);
   const composerInputRef = React.useRef<TextInput>(null);
+  const composerFocusTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const createPostSheetRef = React.useRef<import("@gorhom/bottom-sheet").BottomSheetModal>(null);
   const searchSheetRef = React.useRef<import("@gorhom/bottom-sheet").BottomSheetModal>(null);
   const bottomSheetRef = React.useRef<import("@gorhom/bottom-sheet").BottomSheetModal>(null);
   const productionTeamSheetRef = React.useRef<import("@gorhom/bottom-sheet").BottomSheetModal>(null);
@@ -1967,6 +2275,8 @@ export default function FeedScreen() {
   const feedCacheRef = React.useRef<Record<FeedTab, FeedCacheEntry>>(feedScreenCache);
   const feedInFlightRef = React.useRef<Record<FeedTab, boolean>>({ for_you: false, following: false });
   const feedRequestIdRef = React.useRef<Record<FeedTab, number>>({ for_you: 0, following: 0 });
+  const feedPublicFallbackCursorRef = React.useRef<string | null>(null);
+  const feedCacheIdentityRef = React.useRef(feedScreenCacheIdentity);
   const followingKeysRef = React.useRef<Set<string>>(new Set());
   const hasFocusedFeedRef = React.useRef(false);
   const previousTabRef = React.useRef<FeedTab>(tab);
@@ -1976,9 +2286,9 @@ export default function FeedScreen() {
   const [pendingReopenListingId, setPendingReopenListingId] = useState<string | null>(null);
   const canCreatePosts = useMemo(() => {
     const role = typeof userRole === "string" ? userRole.toLowerCase() : "";
-    return Boolean(session && userId && ["musician", "producer", "studio-owner", "venue-owner", "admin"].includes(role));
-  }, [session, userId, userRole]);
-  const shouldPersonalizeForYouFeed = Boolean(userId && !isGuest);
+    return Boolean(session && resolvedUserId && ["musician", "producer", "studio-owner", "venue-owner", "admin"].includes(role));
+  }, [resolvedUserId, session, userRole]);
+  const shouldPersonalizeForYouFeed = Boolean(resolvedUserId && !isGuest);
   const openPostOptions = useCallback((post: any) => {
     if (!post?.id) return;
     setPostOptionsTarget(post);
@@ -1988,38 +2298,51 @@ export default function FeedScreen() {
     postMedia.length > 0 ||
     (editingPost && !mediaBusy),
   );
-
-  useEffect(() => {
-    if (!showCreate) {
-      setComposerKeyboardVisible(false);
-      return;
-    }
-
-    const showEvent = Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
-    const hideEvent = Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
-    const showSubscription = Keyboard.addListener(showEvent, () => setComposerKeyboardVisible(true));
-    const hideSubscription = Keyboard.addListener(hideEvent, () => setComposerKeyboardVisible(false));
-
-    return () => {
-      showSubscription.remove();
-      hideSubscription.remove();
-    };
-  }, [showCreate]);
+  const composerSheetSnapPoints = useMemo(() => ["88%"], []);
+  const composerSheetAnimationConfigs = useBottomSheetSpringConfigs(bottomSheetSpringConfig);
+  const composerSheetBackgroundStyle = useMemo(
+    () => ({
+      backgroundColor: colors.surface,
+      borderTopLeftRadius: 28,
+      borderTopRightRadius: 28,
+    }),
+    [colors.surface],
+  );
+  const composerSheetHandleIndicatorStyle = useMemo(
+    () => ({
+      backgroundColor: isDark ? "#4B5563" : "#E5E7EB",
+      width: 40,
+    }),
+    [isDark],
+  );
+  const renderComposerBackdrop = useCallback(
+    (props: any) => (
+      <BottomSheetBackdrop
+        {...props}
+        disappearsOnIndex={-1}
+        appearsOnIndex={0}
+        opacity={0.5}
+        pressBehavior={creating || mediaBusy ? "none" : "close"}
+        onPress={Keyboard.dismiss}
+      />
+    ),
+    [creating, mediaBusy],
+  );
 
   const forYouFeedQuery = useFeedQuery({
     enabled: false,
     feedTab: "for_you",
-    feedType: "public",
+    feedType: shouldPersonalizeForYouFeed ? "for_you" : "public",
     limit: FEED_PAGE_SIZE,
     personalize: shouldPersonalizeForYouFeed,
-    userId,
+    userId: resolvedUserId,
   });
   const followingFeedQuery = useFeedQuery({
     enabled: false,
     feedTab: "following",
     feedType: "following",
     limit: FEED_PAGE_SIZE,
-    userId,
+    userId: resolvedUserId,
   });
   const forYouFeedQueryRef = React.useRef(forYouFeedQuery);
   const followingFeedQueryRef = React.useRef(followingFeedQuery);
@@ -2042,7 +2365,7 @@ export default function FeedScreen() {
     details: {
       hasMore,
       tab,
-      user: userId ? "signed-in" : "guest",
+      user: resolvedUserId ? "signed-in" : "guest",
     },
     loading: loading || authLoading,
     page: "Feed",
@@ -2058,17 +2381,41 @@ export default function FeedScreen() {
     activeTabRef.current = tab;
   }, [tab]);
 
+  useEffect(() => {
+    if (feedCacheIdentityRef.current === feedIdentityKey && feedScreenCacheIdentity === feedIdentityKey) {
+      return;
+    }
+
+    feedCacheIdentityRef.current = feedIdentityKey;
+    feedCacheRef.current = resetFeedScreenCacheForIdentity(groqModelLabel, feedIdentityKey);
+    feedPublicFallbackCursorRef.current = null;
+    feedInFlightRef.current = { for_you: false, following: false };
+    feedRequestIdRef.current = {
+      for_you: feedRequestIdRef.current.for_you + 1,
+      following: feedRequestIdRef.current.following + 1,
+    };
+    setFollowingKeys(new Set());
+    setFollowingEntities([]);
+    setFollowBusyByKey({});
+    setPosts([]);
+    setAiCards([]);
+    setAiFeedMessage("");
+    setAiFeedProvider(groqModelLabel);
+    setHasMore(false);
+    setLoading(Boolean(session && !isGuest && !authLoading));
+    setRefreshing(false);
+    setLoadingMore(false);
+  }, [authLoading, feedIdentityKey, groqModelLabel, isGuest, session]);
+
   const applyFeedSnapshot = useCallback((snapshot: FeedCacheEntry) => {
-    React.startTransition(() => {
-      setPosts(snapshot.posts);
-      setAiCards(snapshot.aiCards);
-      setAiFeedMessage(normalizeAiFeedMessage(snapshot.aiFeedMessage || ""));
-      setAiFeedProvider(normalizeAiFeedProvider(snapshot.aiFeedProvider || groqModelLabel));
-      setHasMore(snapshot.hasMore);
-      setLoading(false);
-      setRefreshing(false);
-      setLoadingMore(false);
-    });
+    setPosts(snapshot.posts);
+    setAiCards(snapshot.aiCards);
+    setAiFeedMessage(normalizeAiFeedMessage(snapshot.aiFeedMessage || ""));
+    setAiFeedProvider(normalizeAiFeedProvider(snapshot.aiFeedProvider || groqModelLabel));
+    setHasMore(snapshot.hasMore);
+    setLoading(false);
+    setRefreshing(false);
+    setLoadingMore(false);
   }, [groqModelLabel]);
 
   const isEmptyForYouSnapshot = useCallback((snapshot: FeedCacheEntry) => (
@@ -2282,7 +2629,7 @@ export default function FeedScreen() {
   }, [params.reopenListingId]);
 
   const fetchAiCardsForYou = useCallback(async (): Promise<FeedAiCardsResult> => {
-    if (!session || !userId || !roleResolved) {
+    if (!session || !resolvedUserId || !roleResolved) {
       return { cards: [], provider: groqModelLabel, message: "" };
     }
 
@@ -2313,7 +2660,7 @@ export default function FeedScreen() {
           .from("profiles")
           .select("id, full_name, avatar_url, address, role, created_at")
           .eq("role", "musician")
-          .neq("id", userId)
+          .neq("id", resolvedUserId)
           .order("created_at", { ascending: false })
           .limit(24),
         supabase
@@ -2324,7 +2671,7 @@ export default function FeedScreen() {
         supabase
           .from("profiles")
           .select("address, location")
-          .eq("id", userId)
+          .eq("id", resolvedUserId)
           .maybeSingle(),
       ]);
 
@@ -2352,7 +2699,7 @@ export default function FeedScreen() {
           supabase
             .from("profiles")
             .select("id, full_name, avatar_url, address, role, created_at")
-            .neq("id", userId)
+          .neq("id", resolvedUserId)
             .order("created_at", { ascending: false })
             .limit(24),
         ]);
@@ -2575,8 +2922,8 @@ export default function FeedScreen() {
       }
 
       const [skillsResult, genresResult] = await Promise.all([
-        supabase.from("profile_skills").select("skill").eq("profile_id", userId),
-        supabase.from("profile_genres").select("genre").eq("profile_id", userId),
+        supabase.from("profile_skills").select("skill").eq("profile_id", resolvedUserId),
+        supabase.from("profile_genres").select("genre").eq("profile_id", resolvedUserId),
       ]);
 
       const profileSignals = {
@@ -2641,7 +2988,7 @@ export default function FeedScreen() {
         message: error?.message || "Unable to load recommendation cards right now.",
       };
     }
-  }, [groqModelLabel, roleResolved, session, userId, userRole]);
+  }, [groqModelLabel, resolvedUserId, roleResolved, session, userRole]);
 
   const loadFollowingGraph = useCallback(async () => {
     if (!session) {
@@ -2701,12 +3048,18 @@ export default function FeedScreen() {
 
   /* ── Data fetching ── */
   const fetchFeed = useCallback(async (feedTab: FeedTab, append = false, currentLength = 0) => {
-    if (authLoading || (feedTab === "for_you" && Boolean(userId) && !isGuest && !roleResolved)) {
+    if (authLoading || (feedTab === "for_you" && Boolean(resolvedUserId) && !isGuest && !roleResolved)) {
+      return;
+    }
+
+    if (feedTab === "for_you" && session && !isGuest && !resolvedUserId) {
       return;
     }
 
     if (!session) {
-      feedCacheRef.current = createFeedCache(groqModelLabel);
+      feedCacheRef.current = resetFeedScreenCacheForIdentity(groqModelLabel, "guest");
+      feedCacheIdentityRef.current = "guest";
+      feedPublicFallbackCursorRef.current = null;
       setFollowingKeys(new Set());
       setFollowingEntities([]);
       setFollowBusyByKey({});
@@ -2726,6 +3079,41 @@ export default function FeedScreen() {
     const requestId = ++feedRequestIdRef.current[feedTab];
 
     try {
+      if (
+        append &&
+        feedTab === "for_you" &&
+        shouldPersonalizeForYouFeed &&
+        feedPublicFallbackCursorRef.current
+      ) {
+        const publicFallback = await fetchPublicFeedPostsFallback(
+          FEED_PAGE_SIZE,
+          feedPublicFallbackCursorRef.current,
+          resolvedUserId,
+        );
+
+        if (requestId !== feedRequestIdRef.current[feedTab]) {
+          return;
+        }
+
+        const cachedEntry = feedCacheRef.current[feedTab];
+        const nextSnapshot: FeedCacheEntry = {
+          ...cachedEntry,
+          posts: dedupeFeedItems([...cachedEntry.posts, ...publicFallback.posts]),
+          hasMore: Boolean(publicFallback.nextCursor),
+          loaded: true,
+        };
+
+        feedPublicFallbackCursorRef.current = publicFallback.nextCursor;
+        feedCacheRef.current[feedTab] = nextSnapshot;
+        feedLastFetchAt[feedTab] = Date.now();
+
+        if (activeTabRef.current === feedTab) {
+          applyFeedSnapshot(nextSnapshot);
+        }
+
+        return;
+      }
+
       const currentForYouQuery = forYouFeedQueryRef.current;
       const currentFollowingQuery = followingFeedQueryRef.current;
       const refetchFeedPage =
@@ -2753,7 +3141,8 @@ export default function FeedScreen() {
 
       const pages = queryResult.data?.pages || [];
       const latestPage = pages[pages.length - 1] as any;
-      const fetchedPosts = pages
+      let nextCursor = latestPage?.nextCursor || null;
+      let fetchedPosts = pages
         .flatMap((page: any) =>
           Array.isArray(page?.items)
             ? page.items
@@ -2768,6 +3157,28 @@ export default function FeedScreen() {
             post.is_following === true ||
             nextFollowingKeys.has(buildSocialFollowKey("profile", post.author_id)),
         }));
+
+      logLoadTime("Feed", "primary-page-parsed", {
+        append,
+        feedTab,
+        pages: pages.length,
+        posts: fetchedPosts.length,
+      });
+
+      if (!append && feedTab === "for_you" && shouldPersonalizeForYouFeed && fetchedPosts.length === 0) {
+        const publicFallback = await fetchPublicFeedPostsFallback(FEED_PAGE_SIZE, null, resolvedUserId);
+        fetchedPosts = publicFallback.posts.map((post: any) => ({
+          ...post,
+          is_following:
+            post.is_following === true ||
+            nextFollowingKeys.has(buildSocialFollowKey("profile", post.author_id)),
+        }));
+        nextCursor = publicFallback.nextCursor;
+        feedPublicFallbackCursorRef.current = publicFallback.nextCursor;
+      } else if (!append && feedTab === "for_you") {
+        feedPublicFallbackCursorRef.current = null;
+      }
+
       const nextPosts = fetchedPosts;
       const cachedEntry = feedCacheRef.current[feedTab];
       let nextAiCards = cachedEntry.aiCards;
@@ -2789,9 +3200,15 @@ export default function FeedScreen() {
         aiCards: nextAiCards,
         aiFeedMessage: nextAiFeedMessage,
         aiFeedProvider: nextAiFeedProvider,
-        hasMore: Boolean(latestPage?.nextCursor),
+        hasMore: Boolean(nextCursor),
         loaded: true,
       };
+      logLoadTime("Feed", "snapshot-ready", {
+        aiCards: nextAiCards.length,
+        feedTab,
+        hasMore: Boolean(nextCursor),
+        posts: nextPosts.length,
+      });
       const shouldLoadForYouRecommendations = !append && feedTab === "for_you";
 
       feedCacheRef.current[feedTab] = nextSnapshot;
@@ -2911,12 +3328,17 @@ export default function FeedScreen() {
     loadFollowingGraph,
     roleResolved,
     session,
-    userId,
+    shouldPersonalizeForYouFeed,
+    resolvedUserId,
   ]);
 
   useFocusEffect(useCallback(() => {
     const currentTab = activeTabRef.current;
-    if (authLoading || (currentTab === "for_you" && Boolean(userId) && !isGuest && !roleResolved)) {
+    if (authLoading || (currentTab === "for_you" && Boolean(resolvedUserId) && !isGuest && !roleResolved)) {
+      return;
+    }
+
+    if (currentTab === "for_you" && session && !isGuest && !resolvedUserId) {
       return;
     }
 
@@ -2950,11 +3372,25 @@ export default function FeedScreen() {
       setRefreshing(false);
     }
 
-    const focusRefreshTask = InteractionManager.runAfterInteractions(() => {
-      if (shouldRefreshFeed) {
-        void fetchFeed(currentTab);
+    let isActive = true;
+    let focusRefreshTask: ReturnType<typeof InteractionManager.runAfterInteractions> | null = null;
+    let refreshFallbackTimer: ReturnType<typeof setTimeout> | null = null;
+    let refreshStarted = false;
+
+    const startRefresh = () => {
+      if (!isActive || refreshStarted || !shouldRefreshFeed) return;
+      refreshStarted = true;
+      void fetchFeed(currentTab);
+    };
+
+    if (shouldRefreshFeed) {
+      if (!hydrated || isHydratedEmptyForYou) {
+        startRefresh();
+      } else {
+        focusRefreshTask = InteractionManager.runAfterInteractions(startRefresh);
+        refreshFallbackTimer = setTimeout(startRefresh, 800);
       }
-    });
+    }
 
     const restorePendingReopen = async () => {
       const storedListingId = await AsyncStorage.getItem("pending_reopen_listing_id");
@@ -2969,12 +3405,18 @@ export default function FeedScreen() {
     void restorePendingReopen();
 
     return () => {
-      focusRefreshTask.cancel();
+      isActive = false;
+      focusRefreshTask?.cancel();
+      if (refreshFallbackTimer) clearTimeout(refreshFallbackTimer);
     };
-  }, [authLoading, clearBottomOverlays, fetchFeed, hydrateCachedFeed, isEmptyForYouSnapshot, isGuest, roleResolved, userId]));
+  }, [authLoading, clearBottomOverlays, fetchFeed, hydrateCachedFeed, isEmptyForYouSnapshot, isGuest, resolvedUserId, roleResolved, session]));
 
   useEffect(() => {
-    if (authLoading || !hasFocusedFeedRef.current || (tab === "for_you" && Boolean(userId) && !isGuest && !roleResolved)) {
+    if (authLoading || !hasFocusedFeedRef.current || (tab === "for_you" && Boolean(resolvedUserId) && !isGuest && !roleResolved)) {
+      return;
+    }
+
+    if (tab === "for_you" && session && !isGuest && !resolvedUserId) {
       return;
     }
 
@@ -2984,39 +3426,59 @@ export default function FeedScreen() {
 
     previousTabRef.current = tab;
 
-    const tabSwitchTask = InteractionManager.runAfterInteractions(() => {
-      const hydrated = hydrateCachedFeed(tab);
-      const hydratedSnapshot = feedCacheRef.current[tab];
-      const isHydratedEmptyForYou =
-        tab === "for_you" &&
-        hydrated &&
-        isEmptyForYouSnapshot(hydratedSnapshot);
-      const shouldRefreshTabFeed =
-        !hydrated ||
-        isHydratedEmptyForYou ||
-        Date.now() - feedLastFetchAt[tab] >= FEED_FOCUS_REFRESH_COOLDOWN_MS;
+    const hydrated = hydrateCachedFeed(tab);
+    const hydratedSnapshot = feedCacheRef.current[tab];
+    const isHydratedEmptyForYou =
+      tab === "for_you" &&
+      hydrated &&
+      isEmptyForYouSnapshot(hydratedSnapshot);
+    const shouldRefreshTabFeed =
+      !hydrated ||
+      isHydratedEmptyForYou ||
+      Date.now() - feedLastFetchAt[tab] >= FEED_FOCUS_REFRESH_COOLDOWN_MS;
 
-      if (tab === "for_you" && shouldRefreshTabFeed && (!hydrated || isEmptyForYouSnapshot(hydratedSnapshot))) {
-        setIsAiCardsLoading(true);
-      }
+    if (tab === "for_you" && shouldRefreshTabFeed && (!hydrated || isEmptyForYouSnapshot(hydratedSnapshot))) {
+      setIsAiCardsLoading(true);
+    }
 
-      if (!hydrated) {
-        setLoading(true);
-      }
+    if (!hydrated) {
+      setLoading(true);
+    }
 
-      if (shouldRefreshTabFeed) {
-        void fetchFeed(tab);
-      } else {
-        setLoading(false);
-        setRefreshing(false);
-      }
-    });
+    if (!shouldRefreshTabFeed) {
+      setLoading(false);
+      setRefreshing(false);
+      return;
+    }
 
-    return () => tabSwitchTask.cancel();
-  }, [authLoading, fetchFeed, hydrateCachedFeed, isEmptyForYouSnapshot, isGuest, roleResolved, tab, userId]);
+    if (!hydrated || isHydratedEmptyForYou) {
+      void fetchFeed(tab);
+      return;
+    }
+
+    let isActive = true;
+    let refreshStarted = false;
+    const startTabRefresh = () => {
+      if (!isActive || refreshStarted) return;
+      refreshStarted = true;
+      void fetchFeed(tab);
+    };
+    const tabSwitchTask = InteractionManager.runAfterInteractions(startTabRefresh);
+    const tabRefreshFallbackTimer = setTimeout(startTabRefresh, 800);
+
+    return () => {
+      isActive = false;
+      tabSwitchTask.cancel();
+      clearTimeout(tabRefreshFallbackTimer);
+    };
+  }, [authLoading, fetchFeed, hydrateCachedFeed, isEmptyForYouSnapshot, isGuest, resolvedUserId, roleResolved, session, tab]);
 
   const onRefresh = useCallback(() => {
-    if (authLoading || (tab === "for_you" && Boolean(userId) && !isGuest && !roleResolved)) {
+    if (authLoading || (tab === "for_you" && Boolean(resolvedUserId) && !isGuest && !roleResolved)) {
+      return;
+    }
+
+    if (tab === "for_you" && session && !isGuest && !resolvedUserId) {
       return;
     }
 
@@ -3025,7 +3487,7 @@ export default function FeedScreen() {
       setIsAiCardsLoading(true);
     }
     void fetchFeed(tab);
-  }, [aiCards.length, authLoading, fetchFeed, isGuest, posts.length, roleResolved, tab, userId]);
+  }, [aiCards.length, authLoading, fetchFeed, isGuest, posts.length, resolvedUserId, roleResolved, session, tab]);
 
   const loadMore = useCallback(() => {
     if (
@@ -3044,6 +3506,15 @@ export default function FeedScreen() {
   }, [aiCards.length, authLoading, fetchFeed, hasMore, loading, loadingMore, posts.length, tab]);
 
   /* ── Actions ── */
+  const clearComposerFocusTimer = useCallback(() => {
+    if (!composerFocusTimerRef.current) {
+      return;
+    }
+
+    clearTimeout(composerFocusTimerRef.current);
+    composerFocusTimerRef.current = null;
+  }, []);
+
   const resetComposer = useCallback(() => {
     setEditingPost(null);
     setPostBody("");
@@ -3053,18 +3524,38 @@ export default function FeedScreen() {
   }, []);
 
   const presentComposerSheet = useCallback(() => {
+    clearComposerFocusTimer();
     setShowCreate(true);
-    setTimeout(() => {
+    composerFocusTimerRef.current = setTimeout(() => {
+      composerFocusTimerRef.current = null;
       composerInputRef.current?.focus?.();
-    }, 180);
-  }, []);
+    }, 320);
+  }, [clearComposerFocusTimer]);
 
   const handleComposerClose = useCallback(() => {
     if (creating || mediaBusy) return;
+    clearComposerFocusTimer();
     Keyboard.dismiss();
     setShowCreate(false);
     resetComposer();
-  }, [creating, mediaBusy, resetComposer]);
+  }, [clearComposerFocusTimer, creating, mediaBusy, resetComposer]);
+
+  const handleComposerSheetDismiss = useCallback(() => {
+    clearComposerFocusTimer();
+    Keyboard.dismiss();
+    setShowCreate(false);
+    resetComposer();
+  }, [clearComposerFocusTimer, resetComposer]);
+
+  useEffect(() => {
+    if (showCreate) {
+      createPostSheetRef.current?.present();
+    } else {
+      createPostSheetRef.current?.dismiss();
+    }
+  }, [showCreate]);
+
+  useEffect(() => clearComposerFocusTimer, [clearComposerFocusTimer]);
 
   const openCreateComposer = useCallback(() => {
     if (!canCreatePosts) {
@@ -4009,14 +4500,24 @@ export default function FeedScreen() {
       <Header title="MusikaLokal" />
       {showInitialFeedSkeleton ? (
         renderFeedSkeleton()
+      ) : feedItems.length === 0 ? (
+        <ScrollView
+          style={[styles.feedViewport, feedViewportStyle]}
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={feedContentContainerStyle}
+          scrollIndicatorInsets={{ bottom: feedBottomSpacer }}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
+        >
+          {feedListHeader}
+          {feedEmpty}
+          {feedFooter}
+        </ScrollView>
       ) : (
-        <FlashList
+        <FlatList
             style={[styles.feedViewport, feedViewportStyle]}
             data={feedItems}
             keyExtractor={feedKeyExtractor}
             renderItem={renderPost}
-            drawDistance={760}
-            overrideProps={{ initialDrawBatchSize: 4 }}
             ListHeaderComponent={feedListHeader}
             ListEmptyComponent={feedEmpty}
             ListFooterComponent={feedFooter}
@@ -4030,29 +4531,34 @@ export default function FeedScreen() {
       )}
 
       {/* Create Post Modal */}
-      <BottomModal
-        visible={showCreate}
-        onClose={handleComposerClose}
-        closeOnBackdropPress={!creating && !mediaBusy}
-        keyboardAvoiding
+      <TrackedBottomSheetModal
+        ref={createPostSheetRef}
         overlayLabel="FeedCreatePostModal"
-        contentContainerStyle={{
-          borderTopLeftRadius: 28,
-          borderTopRightRadius: 28,
-          overflow: "hidden",
-        }}
+        index={0}
+        snapPoints={composerSheetSnapPoints}
+        animationConfigs={composerSheetAnimationConfigs}
+        animateOnMount={true}
+        enableDynamicSizing={false}
+        enableContentPanningGesture={false}
+        enableOverDrag={false}
+        backdropComponent={renderComposerBackdrop}
+        backgroundStyle={composerSheetBackgroundStyle}
+        handleIndicatorStyle={composerSheetHandleIndicatorStyle}
+        enablePanDownToClose={!creating && !mediaBusy}
+        keyboardBehavior="interactive"
+        keyboardBlurBehavior="restore"
+        android_keyboardInputMode="adjustResize"
+        onDismiss={handleComposerSheetDismiss}
       >
-        <View
+        <BottomSheetView
           testID="mobile-feed-create-post-modal"
           style={[
             styles.modalBox,
-            composerKeyboardVisible ? styles.modalBoxKeyboard : null,
             {
               backgroundColor: colors.surface,
             },
           ]}
         >
-          <View style={[styles.modalHandle, { backgroundColor: isDark ? "#4B5563" : "#E5E7EB" }]} />
           <View style={[styles.modalHeader, { borderBottomColor: colors.border }]}>
             <View style={styles.modalHeaderSide}>
               <TouchableOpacity
@@ -4136,14 +4642,13 @@ export default function FeedScreen() {
             />
 
             {postMedia.length > 0 ? (
-              <FlashList
+              <FlatList
                 horizontal
                 data={postMedia}
                 keyExtractor={(item) => item.id}
                 showsHorizontalScrollIndicator={false}
                 style={styles.composerMediaScroller}
                 contentContainerStyle={styles.composerMediaList}
-                drawDistance={420}
                 renderItem={({ item }) => {
                   const previewUri = item.media_type === "video"
                     ? item.thumbnailChoices[item.selectedThumbnailIndex]?.uri || item.thumbnailChoices[0]?.uri || item.uri
@@ -4217,8 +4722,8 @@ export default function FeedScreen() {
             </TouchableOpacity>
             {mediaStatus ? <Text style={[styles.composerMediaStatus, { color: colors.textSecondary }]}>{mediaStatus}</Text> : null}
           </View>
-        </View>
-      </BottomModal>
+        </BottomSheetView>
+      </TrackedBottomSheetModal>
 
       <SearchBottomSheet
         ref={searchSheetRef}
@@ -4426,6 +4931,9 @@ const styles = StyleSheet.create({
   },
   liveRadioCard: {
     minHeight: 88,
+    marginHorizontal: 14,
+    marginTop: 10,
+    marginBottom: 14,
     borderRadius: 14,
     borderWidth: 1,
     padding: 10,
@@ -4436,6 +4944,53 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 5 },
     shadowRadius: 12,
     elevation: 2,
+  },
+  liveRadioIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    overflow: "hidden",
+  },
+  liveRadioArtwork: {
+    width: 48,
+    height: 48,
+    borderRadius: 12,
+  },
+  liveRadioEyebrowRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    marginBottom: 2,
+  },
+  liveDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+  },
+  liveRadioEyebrow: {
+    fontSize: moderateScale(9),
+    fontFamily: "Poppins_700Bold",
+    textTransform: "uppercase",
+    letterSpacing: 0,
+  },
+  liveRadioTitle: {
+    fontSize: moderateScale(15),
+    fontFamily: "Poppins_700Bold",
+    lineHeight: 20,
+  },
+  liveRadioSubtitle: {
+    fontSize: moderateScale(11),
+    fontFamily: "Poppins_400Regular",
+    lineHeight: 16,
+    marginTop: 2,
+  },
+  liveRadioMeta: {
+    fontSize: moderateScale(9),
+    fontFamily: "Poppins_500Medium",
+    lineHeight: 13,
+    marginTop: 4,
   },
   liveRadioThumbnail: {
     width: 48,
@@ -4886,9 +5441,7 @@ const styles = StyleSheet.create({
   },
 
   /* Create-post modal */
-  modalBox: { minHeight: "52%", maxHeight: "88%", overflow: "hidden" },
-  modalBoxKeyboard: { height: "86%" },
-  modalHandle: { alignSelf: "center", width: 40, height: 4, borderRadius: 999, marginTop: 10, marginBottom: 4 },
+  modalBox: { flex: 1, overflow: "hidden" },
   modalHeader: { minHeight: 58, flexDirection: "row", alignItems: "center", paddingHorizontal: 16, borderBottomWidth: StyleSheet.hairlineWidth },
   modalHeaderSide: { width: 86, alignItems: "flex-start", justifyContent: "center" },
   modalHeaderSideRight: { alignItems: "flex-end" },

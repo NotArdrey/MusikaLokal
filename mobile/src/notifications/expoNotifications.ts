@@ -20,7 +20,7 @@ try {
   nativeNotifications = dynamicRequire("expo-notifications");
 } catch {
   if (__DEV__) {
-    console.warn(
+    console.info(
       "[push] expo-notifications unavailable; native push registration is disabled until dependencies are installed and Metro is restarted.",
     );
   }

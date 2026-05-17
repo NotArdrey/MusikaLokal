@@ -72,8 +72,20 @@ const BookingDetailsSheet = forwardRef<
   const [dateOverride, setDateOverride] = useState<any>(null);
   const [mediaViewerUrl, setMediaViewerUrl] = useState<string | null>(null);
   const [mediaViewerTitle, setMediaViewerTitle] = useState("Media");
+  const [isSheetOpen, setIsSheetOpen] = useState(false);
 
   const snapPoints = useMemo(() => ["85%"], []);
+  const handleSheetChange = useCallback((index: number) => {
+    const nextOpen = index >= 0;
+    setIsSheetOpen(nextOpen);
+    if (!nextOpen) {
+      setMediaViewerUrl(null);
+    }
+  }, []);
+  const handleSheetDismiss = useCallback(() => {
+    setIsSheetOpen(false);
+    setMediaViewerUrl(null);
+  }, []);
   const renderBackdrop = useCallback(
     (props: any) => (
       <BottomSheetBackdrop
@@ -88,6 +100,11 @@ const BookingDetailsSheet = forwardRef<
   );
 
   useEffect(() => {
+    if (!isSheetOpen) {
+      setLoading(false);
+      return;
+    }
+
     if (booking?.type_id === "booking_request") {
       setStudioDetails(null);
       setDateOverride(null);
@@ -114,6 +131,7 @@ const BookingDetailsSheet = forwardRef<
     booking?.start_time,
     booking?.studio_id,
     booking?.type_id,
+    isSheetOpen,
   ]);
 
   const fetchStudioDetails = async () => {
@@ -402,6 +420,8 @@ const BookingDetailsSheet = forwardRef<
           backdropComponent={renderBackdrop}
           backgroundStyle={{ backgroundColor: colors.background }}
           handleIndicatorStyle={{ backgroundColor: isDark ? "#4B5563" : "#E5E7EB" }}
+          onChange={handleSheetChange}
+          onDismiss={handleSheetDismiss}
         >
         <BottomSheetScrollView
           style={{ flex: 1 }}
@@ -772,6 +792,8 @@ const BookingDetailsSheet = forwardRef<
         backdropComponent={renderBackdrop}
         backgroundStyle={{ backgroundColor: colors.background }}
         handleIndicatorStyle={{ backgroundColor: isDark ? "#4B5563" : "#E5E7EB" }}
+        onChange={handleSheetChange}
+        onDismiss={handleSheetDismiss}
       >
       <BottomSheetScrollView
         style={{ flex: 1 }}

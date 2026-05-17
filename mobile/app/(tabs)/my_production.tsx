@@ -1,21 +1,21 @@
-﻿import { Ionicons } from '@expo/vector-icons';
+import { Ionicons } from '@expo/vector-icons';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import React, { useCallback, useState } from 'react';
 import { InteractionManager, RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { supabase } from '../lib/supabase';
-import CachedImage from '../src/components/CachedImage';
-import CustomAlert, { AlertType } from '../src/components/CustomAlert';
-import Header from '../src/components/header';
-import InlineErrorBanner from '../src/components/InlineErrorBanner';
-import Modal, { normalizeConfirmationInput } from '../src/components/modal';
-import MusicianWorkspaceTabs from '../src/components/MusicianWorkspaceTabs';
-import Navbar from '../src/components/navbar';
-import Skeleton from '../src/components/Skeleton';
-import { useBottomBarClearance } from '../src/hooks/useBottomBarClearance';
-import { useAuth, useRequireAuth } from '../src/context/AuthContext';
-import { useTheme } from '../src/context/ThemeContext';
-import { getActionErrorMessage, getResultErrorMessage, logActionError } from '../src/utils/actionError';
-import { invalidateListingCaches } from '../src/utils/listingCacheInvalidation';
+import { supabase } from '../../lib/supabase';
+import CachedImage from '../../src/components/CachedImage';
+import CustomAlert, { AlertType } from '../../src/components/CustomAlert';
+import Header from '../../src/components/header';
+import InlineErrorBanner from '../../src/components/InlineErrorBanner';
+import Modal, { normalizeConfirmationInput } from '../../src/components/modal';
+import MusicianWorkspaceTabs from '../../src/components/MusicianWorkspaceTabs';
+import Navbar from '../../src/components/navbar';
+import Skeleton from '../../src/components/Skeleton';
+import { useBottomBarClearance } from '../../src/hooks/useBottomBarClearance';
+import { useAuth, useRequireAuth } from '../../src/context/AuthContext';
+import { useTheme } from '../../src/context/ThemeContext';
+import { getActionErrorMessage, getResultErrorMessage, logActionError } from '../../src/utils/actionError';
+import { invalidateListingCaches } from '../../src/utils/listingCacheInvalidation';
 
 type TeamRecord = {
   id: string;
@@ -30,7 +30,7 @@ type TeamRecord = {
 export default function MyProductionScreen() {
   const { colors } = useTheme();
   const { contentBottomPadding } = useBottomBarClearance(24);
-  const { isAuthenticated, userId } = useRequireAuth();
+  const { isAuthenticated, loading: authLoading, userId } = useRequireAuth();
   const { userRole } = useAuth();
   const isMusicianView = userRole === 'musician';
   const params = useLocalSearchParams<{ refresh?: string }>();
@@ -96,21 +96,27 @@ export default function MyProductionScreen() {
 
   useFocusEffect(
     useCallback(() => {
-      if (!isAuthenticated || !userId) return;
+      if (authLoading || !isAuthenticated || !userId) return;
 
       let isActive = true;
-      const focusTask = InteractionManager.runAfterInteractions(() => {
-        if (isActive) {
-          setLoading(true);
-          void fetchTeams();
-        }
-      });
+      let fetchStarted = false;
+      const startFetch = () => {
+        if (!isActive || fetchStarted) return;
+        fetchStarted = true;
+        setLoading(true);
+        void fetchTeams();
+      };
+
+      startFetch();
+      const focusTask = InteractionManager.runAfterInteractions(startFetch);
+      const fallbackTimer = setTimeout(startFetch, 800);
 
       return () => {
         isActive = false;
         focusTask.cancel();
+        clearTimeout(fallbackTimer);
       };
-    }, [fetchTeams, isAuthenticated, refreshKey, userId]),
+    }, [authLoading, fetchTeams, isAuthenticated, refreshKey, userId]),
   );
 
   const closeDeleteModal = () => {

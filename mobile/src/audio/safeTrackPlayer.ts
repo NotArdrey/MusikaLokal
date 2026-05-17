@@ -79,7 +79,7 @@ try {
   nativeModule = dynamicRequire("react-native-track-player");
 } catch (error) {
   if (__DEV__) {
-    console.warn(
+    console.info(
       "[radio] react-native-track-player unavailable; radio playback is disabled until you run a native dev build.",
     );
   }

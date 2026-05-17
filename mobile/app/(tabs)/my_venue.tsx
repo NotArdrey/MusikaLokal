@@ -2,21 +2,21 @@ import { Ionicons } from '@expo/vector-icons';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import React, { useCallback, useEffect, useState } from 'react';
 import { InteractionManager, RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { supabase } from '../lib/supabase';
-import CachedImage from '../src/components/CachedImage';
-import CustomAlert, { AlertType } from '../src/components/CustomAlert';
-import Header from '../src/components/header';
-import InlineErrorBanner from '../src/components/InlineErrorBanner';
-import Modal, { normalizeVisibleInput } from '../src/components/modal';
-import MusicianWorkspaceTabs from '../src/components/MusicianWorkspaceTabs';
-import Navbar from '../src/components/navbar';
-import Skeleton from '../src/components/Skeleton';
-import { useBottomBarClearance } from '../src/hooks/useBottomBarClearance';
-import { useAuth, useRequireAuth } from '../src/context/AuthContext';
-import { useTheme } from '../src/context/ThemeContext';
-import { getActionErrorMessage, getResultErrorMessage, logActionError } from '../src/utils/actionError';
-import { formatFriendlyDateTime } from '../src/utils/friendlyDateTime';
-import { invalidateListingCaches } from '../src/utils/listingCacheInvalidation';
+import { supabase } from '../../lib/supabase';
+import CachedImage from '../../src/components/CachedImage';
+import CustomAlert, { AlertType } from '../../src/components/CustomAlert';
+import Header from '../../src/components/header';
+import InlineErrorBanner from '../../src/components/InlineErrorBanner';
+import Modal, { normalizeVisibleInput } from '../../src/components/modal';
+import MusicianWorkspaceTabs from '../../src/components/MusicianWorkspaceTabs';
+import Navbar from '../../src/components/navbar';
+import Skeleton from '../../src/components/Skeleton';
+import { useBottomBarClearance } from '../../src/hooks/useBottomBarClearance';
+import { useAuth, useRequireAuth } from '../../src/context/AuthContext';
+import { useTheme } from '../../src/context/ThemeContext';
+import { getActionErrorMessage, getResultErrorMessage, logActionError } from '../../src/utils/actionError';
+import { formatFriendlyDateTime } from '../../src/utils/friendlyDateTime';
+import { invalidateListingCaches } from '../../src/utils/listingCacheInvalidation';
 
 const DEFAULT_GIG_IMAGE = 'https://images.unsplash.com/photo-1501281668745-f7f57925c3b4?w=800&fit=crop';
 const JOINED_GIG_APPLICATION_STATUSES = ['accepted', 'approved', 'completed'];
@@ -317,18 +317,24 @@ export default function MyVenueScreen() {
             if (!isAuthenticated || !userId) return;
 
             let isActive = true;
-            const focusTask = InteractionManager.runAfterInteractions(() => {
-                if (isActive) {
-                    void fetchGigs();
-                }
-            });
+            let fetchStarted = false;
+            const startFetch = () => {
+                if (!isActive || fetchStarted) return;
+                fetchStarted = true;
+                void fetchGigs();
+            };
+
+            startFetch();
+            const focusTask = InteractionManager.runAfterInteractions(startFetch);
+            const fallbackTimer = setTimeout(startFetch, 800);
             const refreshInterval = setInterval(() => {
                 void fetchGigs();
-            }, 30000);
+            }, 60000);
 
             return () => {
                 isActive = false;
                 focusTask.cancel();
+                clearTimeout(fallbackTimer);
                 clearInterval(refreshInterval);
             };
         }, [isAuthenticated, userId, refreshKey, fetchGigs])

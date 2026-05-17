@@ -355,7 +355,7 @@ const ProductionTeamDetailsSheet = forwardRef<
   useEffect(() => {
     let active = true;
 
-    if (!userId) {
+    if (!teamId || !userId) {
       setCurrentUserRole(null);
       setCurrentUserName("Musician");
       setUserGroups([]);
@@ -391,12 +391,12 @@ const ProductionTeamDetailsSheet = forwardRef<
     return () => {
       active = false;
     };
-  }, [userId]);
+  }, [teamId, userId]);
 
   useEffect(() => {
     let active = true;
 
-    if (!userId || currentUserRole !== "musician") {
+    if (!teamId || !userId || currentUserRole !== "musician") {
       setUserGroups([]);
       setSelectedGroupId(null);
       setLoadingGroups(false);
@@ -468,7 +468,7 @@ const ProductionTeamDetailsSheet = forwardRef<
     return () => {
       active = false;
     };
-  }, [currentUserRole, userId]);
+  }, [currentUserRole, teamId, userId]);
 
   useEffect(() => {
     let active = true;

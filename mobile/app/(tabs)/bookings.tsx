@@ -1,5 +1,4 @@
 import { Ionicons } from "@expo/vector-icons";
-import { FlashList } from "@shopify/flash-list";
 import { useQueryClient } from "@tanstack/react-query";
 import { useFocusEffect } from "@react-navigation/native";
 import { CameraView, useCameraPermissions } from "expo-camera";
@@ -9,6 +8,7 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
     AppState,
     Dimensions,
+    FlatList,
     InteractionManager,
     Linking,
     Modal as RNModal,
@@ -19,49 +19,42 @@ import {
     TouchableOpacity,
     View,
 } from "react-native";
-import { supabase } from "../lib/supabase";
-import BookingDetailsSheet from "../src/components/BookingDetailsSheet";
-import CachedImage from "../src/components/CachedImage";
-import CustomAlert, { AlertType } from "../src/components/CustomAlert";
-import GuestSignInGate from "../src/components/GuestSignInGate";
-import Header from "../src/components/header";
-import InAppMediaViewer, { isInAppMediaUrl } from "../src/components/InAppMediaViewer";
-import BookingActionModal, { normalizeVisibleInput } from "../src/components/modal";
-import Navbar from "../src/components/navbar";
-import Skeleton from "../src/components/Skeleton";
-import SlidingTabBar from "../src/components/SlidingTabBar";
-import { useAuth } from "../src/context/AuthContext";
-import { useBottomOverlay, useBottomOverlayVisibility } from "../src/context/BottomOverlayContext";
-import { emitToast } from "../src/events/toastBus";
-import { useTheme } from "../src/context/ThemeContext";
-import { useBookingsSummaryQuery } from "../src/data/hooks";
-import { queryKeys } from "../src/data/queryKeys";
-import { createBookingCheckout } from "../src/services/paymongo";
-import { buildNotificationRouteMeta } from "../src/utils/notificationNavigation";
-import { formatFriendlyDateTime } from "../src/utils/friendlyDateTime";
-import { isE2EFixtureMode } from "../src/utils/e2eFixtures";
-import { usePageLoadLogger } from "../src/utils/loadTimeLogger";
-import { setSmoothTab } from "../src/utils/smoothTabs";
-import { resolveSupabaseMediaUrl } from "../src/utils/supabaseMedia";
+import { supabase } from "../../lib/supabase";
+import BookingDetailsSheet from "../../src/components/BookingDetailsSheet";
+import CachedImage from "../../src/components/CachedImage";
+import CustomAlert, { AlertType } from "../../src/components/CustomAlert";
+import GuestSignInGate from "../../src/components/GuestSignInGate";
+import Header from "../../src/components/header";
+import InAppMediaViewer, { isInAppMediaUrl } from "../../src/components/InAppMediaViewer";
+import BookingActionModal, { normalizeVisibleInput } from "../../src/components/modal";
+import Navbar from "../../src/components/navbar";
+import Skeleton from "../../src/components/Skeleton";
+import SlidingTabBar from "../../src/components/SlidingTabBar";
+import { useAuth } from "../../src/context/AuthContext";
+import { useBottomOverlay, useBottomOverlayVisibility } from "../../src/context/BottomOverlayContext";
+import { emitToast } from "../../src/events/toastBus";
+import { useTheme } from "../../src/context/ThemeContext";
+import { useBookingsSummaryQuery } from "../../src/data/hooks";
+import { queryKeys } from "../../src/data/queryKeys";
+import { createBookingCheckout } from "../../src/services/paymongo";
+import { buildNotificationRouteMeta } from "../../src/utils/notificationNavigation";
+import { formatFriendlyDateTime } from "../../src/utils/friendlyDateTime";
+import { isE2EFixtureMode } from "../../src/utils/e2eFixtures";
+import { usePageLoadLogger } from "../../src/utils/loadTimeLogger";
+import { setSmoothTab } from "../../src/utils/smoothTabs";
+import { resolveSupabaseMediaUrl } from "../../src/utils/supabaseMedia";
 import {
   formatRecordingHours,
   formatRecordingRuleShort,
   getRecordingRequiredBlocks,
   getRecordingRequiredHours,
   resolveRecordingRule,
-} from "../src/utils/recordingRule";
+} from "../../src/utils/recordingRule";
 
 const debugLog = (..._args: unknown[]) => { };
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
-const BOOKING_FLASHLIST_OVERRIDE_PROPS = { initialDrawBatchSize: 5 };
 const EMPTY_ACTIVITY_ITEMS: any[] = [];
-
-const bookingActivityKeyExtractor = (item: any, index: number) =>
-  `${item?.type_id || item?.type || "activity"}-${item?.id ?? index}`;
-
-const getBookingActivityItemType = (item: any) =>
-  String(item?.type_id || item?.type || "activity");
 
 // Responsive scaling utilities - optimized for iPhone SE and smaller devices
 const scale = (size: number) => {
@@ -510,6 +503,7 @@ type BookingsScreenCachePayload = {
 };
 
 const BOOKINGS_FOCUS_REFRESH_COOLDOWN_MS = 30000;
+const BOOKINGS_BACKGROUND_REFRESH_INTERVAL_MS = 60000;
 const bookingsScreenCache = new Map<string, BookingsScreenCachePayload>();
 
 const createEmptyBookingsData = (): BookingsTabData => ({
@@ -527,6 +521,24 @@ const createEmptyApplicationData = (): ApplicationTabData => ({
   Accepted: [],
   Completed: [],
 });
+
+const getBookingsSummarySignature = (payload: any) => {
+  if (!payload) return "";
+
+  const source = payload?.categorized || payload;
+  const counts = ["Pending", "Upcoming", "Ongoing", "Review"]
+    .map((key) => (Array.isArray(source?.[key]) ? source[key].length : 0))
+    .join("|");
+
+  return [
+    payload?.fetchedAt || "",
+    payload?.role || "",
+    counts,
+    Array.isArray(payload?.pendingPermitListings) ? payload.pendingPermitListings.length : 0,
+    Array.isArray(payload?.connectionRequests) ? payload.connectionRequests.length : 0,
+    Array.isArray(payload?.lateAttendanceEvents) ? payload.lateAttendanceEvents.length : 0,
+  ].join(":");
+};
 
 const mergeUniqueActivityItems = (...groups: any[][]) => {
   const seen = new Set<string>();
@@ -934,6 +946,37 @@ export default function BookingsScreen() {
   const bookingsSummaryQuery = useBookingsSummaryQuery(userId, {
     enabled: isAuthenticated && Boolean(userId),
   });
+  const bookingsQueryStateRef = useRef({
+    isFetching: bookingsSummaryQuery.isFetching,
+    isLoading: bookingsSummaryQuery.isLoading,
+  });
+  const lastProcessedBookingsSummaryRef = useRef<string | null>(null);
+  const bookingsRefetchInFlightRef = useRef<Promise<unknown> | null>(null);
+
+  useEffect(() => {
+    bookingsQueryStateRef.current = {
+      isFetching: bookingsSummaryQuery.isFetching,
+      isLoading: bookingsSummaryQuery.isLoading,
+    };
+  }, [bookingsSummaryQuery.isFetching, bookingsSummaryQuery.isLoading]);
+
+  const refetchBookingsSummary = useCallback((options: { force?: boolean } = {}) => {
+    const queryState = bookingsQueryStateRef.current;
+
+    if (!options.force && (queryState.isFetching || queryState.isLoading)) {
+      return Promise.resolve(null);
+    }
+
+    if (bookingsRefetchInFlightRef.current) {
+      return bookingsRefetchInFlightRef.current;
+    }
+
+    const task = bookingsSummaryQuery.refetch().finally(() => {
+      bookingsRefetchInFlightRef.current = null;
+    });
+    bookingsRefetchInFlightRef.current = task;
+    return task;
+  }, [bookingsSummaryQuery.refetch]);
 
   usePageLoadLogger({
     counts: {
@@ -1025,10 +1068,18 @@ export default function BookingsScreen() {
   useEffect(() => {
     setLocallyReportedLateBookings({});
     setLocallyReportedAccessIssueBookings({});
+    lastProcessedBookingsSummaryRef.current = null;
   }, [userId]);
 
   useEffect(() => {
     if (!isAuthenticated || !userId || !bookingsSummaryQuery.data) return;
+    const summarySignature = getBookingsSummarySignature(bookingsSummaryQuery.data);
+
+    if (summarySignature && lastProcessedBookingsSummaryRef.current === summarySignature) {
+      return;
+    }
+
+    lastProcessedBookingsSummaryRef.current = summarySignature;
 
     void fetchBookings(userId, {
       showLoading: false,
@@ -1145,7 +1196,7 @@ export default function BookingsScreen() {
             pendingPaymentBookingId.current = null;
 
             // Refresh bookings
-            await bookingsSummaryQuery.refetch();
+            await refetchBookingsSummary({ force: true });
 
             if (paymentConfirmed) {
               // Downpayment ? stay on Pending (balance still due); full payment ? go to Upcoming
@@ -1153,7 +1204,7 @@ export default function BookingsScreen() {
             }
           } else if (userId) {
             // Even if not in payment flow, refresh when returning to app
-            void bookingsSummaryQuery.refetch();
+            void refetchBookingsSummary();
           }
         }
         appState.current = nextAppState;
@@ -1163,7 +1214,7 @@ export default function BookingsScreen() {
     return () => {
       subscription.remove();
     };
-  }, [bookingsSummaryQuery.refetch, userId]);
+  }, [refetchBookingsSummary, userId]);
 
   // Bookings realtime is centralized in RootLayout and invalidates this query key.
 
@@ -1172,6 +1223,7 @@ export default function BookingsScreen() {
       let isActive = true;
       let intervalId: ReturnType<typeof setInterval> | null = null;
       let focusRefreshTask: ReturnType<typeof InteractionManager.runAfterInteractions> | null = null;
+      let focusRefreshFallbackTimer: ReturnType<typeof setTimeout> | null = null;
 
       if (isAuthenticated && userId) {
         const cached = bookingsScreenCache.get(userId);
@@ -1187,36 +1239,48 @@ export default function BookingsScreen() {
           setLoading(false);
         }
 
-        if (!cacheIsFresh) {
-          if (!cached) {
-            setLoading(true);
-          }
-          focusRefreshTask = InteractionManager.runAfterInteractions(() => {
-            if (isActive) {
-              void bookingsSummaryQuery.refetch();
-            }
-          });
+        if (!cacheIsFresh && cached) {
+          let refreshStarted = false;
+          const startFocusRefresh = () => {
+            if (!isActive || refreshStarted) return;
+            refreshStarted = true;
+            void refetchBookingsSummary();
+          };
+
+          focusRefreshTask = InteractionManager.runAfterInteractions(startFocusRefresh);
+          focusRefreshFallbackTimer = setTimeout(startFocusRefresh, 800);
+        } else if (!cached) {
+          setLoading(true);
         }
 
         // Auto-refresh so bookings move between tabs based on real time/date
         intervalId = setInterval(async () => {
-          if (!isActive || autoRefreshInFlightRef.current) return;
+          const latestQueryState = bookingsQueryStateRef.current;
+          if (
+            !isActive ||
+            autoRefreshInFlightRef.current ||
+            latestQueryState.isFetching ||
+            latestQueryState.isLoading
+          ) {
+            return;
+          }
 
           autoRefreshInFlightRef.current = true;
           try {
-            await bookingsSummaryQuery.refetch();
+            await refetchBookingsSummary();
           } finally {
             autoRefreshInFlightRef.current = false;
           }
-        }, 30 * 1000);
+        }, BOOKINGS_BACKGROUND_REFRESH_INTERVAL_MS);
       }
 
       return () => {
         isActive = false;
         focusRefreshTask?.cancel();
+        if (focusRefreshFallbackTimer) clearTimeout(focusRefreshFallbackTimer);
         if (intervalId) clearInterval(intervalId);
       };
-    }, [bookingsSummaryQuery.refetch, isAuthenticated, userId]),
+    }, [isAuthenticated, refetchBookingsSummary, userId]),
   );
 
   async function buildLocalStudioBookingsFallback(
@@ -4187,9 +4251,35 @@ export default function BookingsScreen() {
         .map((meta) => meta.item),
     [sortedCurrentItemMeta, deferredActiveFilter, normalizedSearchQuery],
   );
-  const bookingListKey = `${deferredActiveTab}|${deferredActiveAppTab}|${deferredActiveFilter}|${normalizedSearchQuery}`;
-  const bookingListData =
-    loading || filteredItems.length === 0 ? EMPTY_ACTIVITY_ITEMS : filteredItems;
+  const hasLoadedActivitySnapshot = Boolean(userId && bookingsScreenCache.has(userId));
+  const isInitialActivityLoading =
+    (loading || bookingsSummaryQuery.isLoading || (bookingsSummaryQuery.isFetching && !hasLoadedActivitySnapshot)) &&
+    currentItems.length === 0 &&
+    !hasSearchOrFilter;
+  const bookingListData = React.useMemo(
+    () =>
+      isInitialActivityLoading || filteredItems.length === 0
+        ? EMPTY_ACTIVITY_ITEMS
+        : filteredItems.map((booking, index) => ({
+            kind: "booking" as const,
+            booking,
+            index,
+          })),
+    [filteredItems, isInitialActivityLoading],
+  );
+  const bookingKeyExtractor = useCallback((item: any, index: number) => {
+    const booking = item?.booking ?? item;
+    const id =
+      booking?.id ??
+      booking?.booking_id ??
+      booking?.bookingId ??
+      booking?.request_id ??
+      booking?.application_id ??
+      booking?.type_id ??
+      index;
+
+    return `booking:${renderActiveTab}:${booking?.status ?? booking?.raw_status ?? "unknown"}:${id}`;
+  }, [renderActiveTab]);
 
   useEffect(() => {
     if (activeFilter !== "All" && !availableFilters.includes(activeFilter)) {
@@ -4232,6 +4322,174 @@ export default function BookingsScreen() {
     return "Solo Artist";
   };
 
+  const bookingsControlsHeader = React.useMemo(() => (
+    <View style={styles.activityListHeaderControls}>
+      <View style={styles.tabContainer}>
+        <SlidingTabBar
+          activeColor={colors.primary}
+          activeKey={activeTab}
+          backgroundColor={colors.background}
+          borderColor={colors.border}
+          deferOnChange
+          inactiveColor={colors.textSecondary}
+          indicatorColor={colors.primary}
+          indicatorWidthRatio={0.34}
+          onChange={handleBookingTabChange}
+          style={styles.animatedTabs}
+          tabStyle={styles.animatedTab}
+          tabs={bookingTabs}
+          textStyle={styles.animatedTabText}
+        />
+      </View>
+
+      <View style={styles.searchFilterContainer}>
+        <View style={styles.searchFilterRow}>
+          <View
+            style={[
+              styles.searchInputContainer,
+              {
+                backgroundColor: isDark ? "#374151" : "#F3F4F6",
+              },
+            ]}
+          >
+            <Ionicons
+              name="search"
+              size={moderateScale(20)}
+              color={colors.textSecondary}
+            />
+            <TextInput
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+              placeholder={`Search ${String(activeListLabel).toLowerCase()}`}
+              placeholderTextColor={colors.textSecondary}
+              style={[styles.searchInput, { color: colors.text }]}
+              testID="mobile-bookings-search-input"
+              accessibilityLabel="mobile-bookings-search-input"
+            />
+            {searchQuery.length > 0 ? (
+              <TouchableOpacity
+                activeOpacity={1}
+                onPress={() => setSearchQuery("")}
+                hitSlop={{ top: 8, right: 8, bottom: 8, left: 8 }}
+              >
+                <Ionicons
+                  name="close-circle"
+                  size={moderateScale(17)}
+                  color={colors.textSecondary}
+                />
+              </TouchableOpacity>
+            ) : null}
+          </View>
+
+          <TouchableOpacity
+            activeOpacity={1}
+            onPress={() => setShowActivityFilters((value) => !value)}
+            style={[
+              styles.activityFilterButton,
+              {
+                backgroundColor:
+                  showActivityFilters || isActivityFilterActive
+                    ? colors.primary
+                    : isDark
+                      ? "#374151"
+                      : "#F3F4F6",
+              },
+            ]}
+            accessibilityRole="button"
+            accessibilityLabel="Show activity filters"
+            testID="mobile-bookings-filter-toggle"
+          >
+            <Ionicons
+              name="options-outline"
+              size={moderateScale(20)}
+              color={
+                showActivityFilters || isActivityFilterActive
+                  ? "#FFFFFF"
+                  : colors.textSecondary
+              }
+            />
+            {isActivityFilterActive ? (
+              <View style={styles.activityFilterBadge}>
+                <Text style={styles.activityFilterBadgeText}>1</Text>
+              </View>
+            ) : null}
+          </TouchableOpacity>
+        </View>
+
+        {shouldShowActivityFilters ? (
+          <ScrollView
+            horizontal
+            keyboardShouldPersistTaps="handled"
+            showsHorizontalScrollIndicator={false}
+            style={styles.filterScrollView}
+            contentContainerStyle={styles.filterScrollContent}
+          >
+            {availableFilters.map((filterLabel) => {
+              const isActiveFilter = activeFilter === filterLabel;
+
+              return (
+                <TouchableOpacity
+                  activeOpacity={1}
+                  key={filterLabel}
+                  testID={`mobile-bookings-filter-${normalizeBookingTestId(filterLabel)}`}
+                  accessibilityLabel={`mobile-bookings-filter-${normalizeBookingTestId(filterLabel)}`}
+                  onPress={() => {
+                    setActiveFilter(filterLabel);
+                    if (filterLabel === "All") {
+                      setShowActivityFilters(false);
+                    }
+                  }}
+                  style={[
+                    styles.filterChip,
+                    {
+                      backgroundColor: isActiveFilter
+                        ? colors.primary
+                        : isDark
+                          ? "#374151"
+                          : "#F3F4F6",
+                    },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.filterChipText,
+                      {
+                        color: isActiveFilter
+                          ? "#FFFFFF"
+                          : isDark
+                            ? "#D1D5DB"
+                            : "#4B5563",
+                      },
+                    ]}
+                  >
+                    {filterLabel}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+        ) : null}
+      </View>
+    </View>
+  ), [
+    activeFilter,
+    activeListLabel,
+    activeTab,
+    availableFilters,
+    bookingTabs,
+    colors.background,
+    colors.border,
+    colors.primary,
+    colors.text,
+    colors.textSecondary,
+    handleBookingTabChange,
+    isActivityFilterActive,
+    isDark,
+    searchQuery,
+    shouldShowActivityFilters,
+    showActivityFilters,
+  ]);
+
   if (!authLoading && (isGuest || !isAuthenticated)) {
     return (
       <View style={[styles.flex1, { backgroundColor: colors.background }]}>
@@ -4251,169 +4509,24 @@ export default function BookingsScreen() {
       >
         <Header title="My Activity" />
 
-        {/* Tab Navigation */}
-        <View style={styles.tabContainer}>
-          <SlidingTabBar
-            activeColor={colors.primary}
-            activeKey={activeTab}
-            backgroundColor={colors.background}
-            borderColor={colors.border}
-            deferOnChange
-            inactiveColor={colors.textSecondary}
-            indicatorColor={colors.primary}
-            indicatorWidthRatio={0.34}
-            onChange={handleBookingTabChange}
-            style={styles.animatedTabs}
-            tabStyle={styles.animatedTab}
-            tabs={bookingTabs}
-            textStyle={styles.animatedTabText}
-          />
-        </View>
-
-        <View style={styles.searchFilterContainer}>
-          <View style={styles.searchFilterRow}>
-            <View
-              style={[
-                styles.searchInputContainer,
-                {
-                  backgroundColor: isDark ? "#374151" : "#F3F4F6",
-                },
-              ]}
-            >
-              <Ionicons
-                name="search"
-                size={moderateScale(20)}
-                color={colors.textSecondary}
-              />
-              <TextInput
-                value={searchQuery}
-                onChangeText={setSearchQuery}
-                placeholder={`Search ${String(activeListLabel).toLowerCase()}`}
-                placeholderTextColor={colors.textSecondary}
-                style={[styles.searchInput, { color: colors.text }]}
-                testID="mobile-bookings-search-input"
-                accessibilityLabel="mobile-bookings-search-input"
-              />
-              {searchQuery.length > 0 ? (
-                <TouchableOpacity
-                  activeOpacity={1}
-                  onPress={() => setSearchQuery("")}
-                  hitSlop={{ top: 8, right: 8, bottom: 8, left: 8 }}
-                >
-                  <Ionicons
-                    name="close-circle"
-                    size={moderateScale(17)}
-                    color={colors.textSecondary}
-                  />
-                </TouchableOpacity>
-              ) : null}
-            </View>
-
-            <TouchableOpacity
-              activeOpacity={1}
-              onPress={() => setShowActivityFilters((value) => !value)}
-              style={[
-                styles.activityFilterButton,
-                {
-                  backgroundColor:
-                    showActivityFilters || isActivityFilterActive
-                      ? colors.primary
-                      : isDark
-                        ? "#374151"
-                        : "#F3F4F6",
-                },
-              ]}
-              accessibilityRole="button"
-              accessibilityLabel="Show activity filters"
-              testID="mobile-bookings-filter-toggle"
-            >
-              <Ionicons
-                name="options-outline"
-                size={moderateScale(20)}
-                color={
-                  showActivityFilters || isActivityFilterActive
-                    ? "#FFFFFF"
-                    : colors.textSecondary
-                }
-              />
-              {isActivityFilterActive ? (
-                <View style={styles.activityFilterBadge}>
-                  <Text style={styles.activityFilterBadgeText}>1</Text>
-                </View>
-              ) : null}
-            </TouchableOpacity>
-          </View>
-
-          {shouldShowActivityFilters ? (
-            <ScrollView
-              horizontal
-              keyboardShouldPersistTaps="handled"
-              showsHorizontalScrollIndicator={false}
-              style={styles.filterScrollView}
-              contentContainerStyle={styles.filterScrollContent}
-            >
-              {availableFilters.map((filterLabel) => {
-                const isActiveFilter = activeFilter === filterLabel;
-
-                return (
-                  <TouchableOpacity
-                    activeOpacity={1}
-                    key={filterLabel}
-                    testID={`mobile-bookings-filter-${normalizeBookingTestId(filterLabel)}`}
-                    accessibilityLabel={`mobile-bookings-filter-${normalizeBookingTestId(filterLabel)}`}
-                    onPress={() => {
-                      setActiveFilter(filterLabel);
-                      if (filterLabel === "All") {
-                        setShowActivityFilters(false);
-                      }
-                    }}
-                    style={[
-                      styles.filterChip,
-                      {
-                        backgroundColor: isActiveFilter
-                          ? colors.primary
-                          : isDark
-                            ? "#374151"
-                            : "#F3F4F6",
-                      },
-                    ]}
-                  >
-                    <Text
-                      style={[
-                        styles.filterChipText,
-                        {
-                          color: isActiveFilter
-                            ? "#FFFFFF"
-                            : isDark
-                              ? "#D1D5DB"
-                              : "#4B5563",
-                        },
-                      ]}
-                    >
-                      {filterLabel}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </ScrollView>
-          ) : null}
-        </View>
-
-        <FlashList
-          key={bookingListKey}
+        <FlatList
           data={bookingListData}
-          keyExtractor={bookingActivityKeyExtractor}
-          getItemType={getBookingActivityItemType}
+          style={styles.activityList}
+          keyExtractor={bookingKeyExtractor}
           showsVerticalScrollIndicator={false}
           contentContainerStyle={styles.scrollContent}
-          drawDistance={880}
-          overrideProps={BOOKING_FLASHLIST_OVERRIDE_PROPS}
+          initialNumToRender={6}
+          maxToRenderPerBatch={6}
+          windowSize={7}
+          removeClippedSubviews
           ListHeaderComponent={
-            !loading &&
-            ((userRole === "studio-owner" && renderActiveTab === "Pending") ||
-              (userRole === "venue-owner" && renderActiveTab === "Applicants")) &&
-            pendingPermitStudios.length > 0 ? (
-              <View style={styles.permitReviewList}>
+            <>
+              {bookingsControlsHeader}
+              {!loading &&
+              ((userRole === "studio-owner" && renderActiveTab === "Pending") ||
+                (userRole === "venue-owner" && renderActiveTab === "Applicants")) &&
+              pendingPermitStudios.length > 0 ? (
+                <View style={styles.permitReviewList}>
                 {pendingPermitStudios.map((listing: any) => {
                   const normalizedStatus = String(listing?.permit_status || "pending_review").toLowerCase();
                   const isRejected = normalizedStatus === "rejected";
@@ -4617,11 +4730,12 @@ export default function BookingsScreen() {
                     </View>
                   );
                 })}
-              </View>
-            ) : null
+                </View>
+              ) : null}
+            </>
           }
           ListEmptyComponent={
-            loading ? (
+            isInitialActivityLoading ? (
               <View style={styles.bookingsSkeletonContainer}>
                 <Skeleton width="58%" height={18} style={{ marginBottom: 12 }} />
                 {[0, 1, 2].map((index) => (
@@ -4686,7 +4800,8 @@ export default function BookingsScreen() {
               </View>
             ) : null
           }
-          renderItem={({ item }: { item: any }) => {
+          renderItem={({ item: row }: { item: any }) => {
+              const item = row?.booking ?? row;
               // ==========================================
               // 0.75. CONNECTION REQUEST CARD
               // ==========================================
@@ -7828,6 +7943,13 @@ const styles = StyleSheet.create({
       SCREEN_HEIGHT < 700 ? verticalScale(150) : verticalScale(180),
     paddingHorizontal: scale(24),
     paddingTop: moderateScale(16),
+  },
+  activityListHeaderControls: {
+    marginHorizontal: -scale(24),
+    marginTop: -moderateScale(16),
+  },
+  activityList: {
+    flex: 1,
   },
   permitReviewList: {
     gap: moderateScale(8),

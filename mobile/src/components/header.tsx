@@ -114,6 +114,11 @@ function Header({ title, transparent, onBackPress, showBack, leftComponent, righ
             return;
         }
 
+        if (!router.canGoBack()) {
+            router.replace('/feed');
+            return;
+        }
+
         router.back();
     }, [defaultBackRoute, onBackPress]);
 

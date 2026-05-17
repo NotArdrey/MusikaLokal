@@ -2,20 +2,20 @@ import { Ionicons } from '@expo/vector-icons';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import React, { useCallback, useState } from 'react';
 import { InteractionManager, RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { supabase } from '../lib/supabase';
-import CachedImage from '../src/components/CachedImage';
-import CustomAlert, { AlertType } from '../src/components/CustomAlert';
-import Header from '../src/components/header';
-import InlineErrorBanner from '../src/components/InlineErrorBanner';
-import Modal, { normalizeConfirmationInput } from '../src/components/modal';
-import MusicianWorkspaceTabs from '../src/components/MusicianWorkspaceTabs';
-import Navbar from '../src/components/navbar';
-import Skeleton from '../src/components/Skeleton';
-import { useBottomBarClearance } from '../src/hooks/useBottomBarClearance';
-import { useAuth, useRequireAuth } from '../src/context/AuthContext';
-import { useTheme } from '../src/context/ThemeContext';
-import { getActionErrorMessage, getResultErrorMessage, logActionError } from '../src/utils/actionError';
-import { invalidateListingCaches } from '../src/utils/listingCacheInvalidation';
+import { supabase } from '../../lib/supabase';
+import CachedImage from '../../src/components/CachedImage';
+import CustomAlert, { AlertType } from '../../src/components/CustomAlert';
+import Header from '../../src/components/header';
+import InlineErrorBanner from '../../src/components/InlineErrorBanner';
+import Modal, { normalizeConfirmationInput } from '../../src/components/modal';
+import MusicianWorkspaceTabs from '../../src/components/MusicianWorkspaceTabs';
+import Navbar from '../../src/components/navbar';
+import Skeleton from '../../src/components/Skeleton';
+import { useBottomBarClearance } from '../../src/hooks/useBottomBarClearance';
+import { useAuth, useRequireAuth } from '../../src/context/AuthContext';
+import { useTheme } from '../../src/context/ThemeContext';
+import { getActionErrorMessage, getResultErrorMessage, logActionError } from '../../src/utils/actionError';
+import { invalidateListingCaches } from '../../src/utils/listingCacheInvalidation';
 
 const isMissingRelationError = (error: any, relationName: string) => {
     const message = String(error?.message || '').toLowerCase();
@@ -245,18 +245,24 @@ export default function MyGroupScreen() {
             if (!isAuthenticated || !userId) return;
 
             let isActive = true;
-            const focusTask = InteractionManager.runAfterInteractions(() => {
-                if (isActive) {
-                    void fetchGroups();
-                }
-            });
+            let fetchStarted = false;
+            const startFetch = () => {
+                if (!isActive || fetchStarted) return;
+                fetchStarted = true;
+                void fetchGroups();
+            };
+
+            startFetch();
+            const focusTask = InteractionManager.runAfterInteractions(startFetch);
+            const fallbackTimer = setTimeout(startFetch, 800);
             const refreshInterval = setInterval(() => {
                 void fetchGroups();
-            }, 30000);
+            }, 60000);
 
             return () => {
                 isActive = false;
                 focusTask.cancel();
+                clearTimeout(fallbackTimer);
                 clearInterval(refreshInterval);
             };
         }, [fetchGroups, isAuthenticated, userId, refreshKey])

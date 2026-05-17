@@ -19,7 +19,6 @@ import { GestureHandlerRootView } from "react-native-gesture-handler";
 import "../global.css";
 import { prepareRealtimeAuth, supabase } from "../lib/supabase";
 import { AuthProvider, useAuth } from "../src/context/AuthContext";
-import { GlobalNavbar } from "../src/components/navbar";
 import { BottomOverlayProvider } from "../src/context/BottomOverlayContext";
 import { usePushNotifications } from "../src/hooks/usePushNotifications";
 import {
@@ -60,6 +59,7 @@ const NOTIFICATION_TOAST_BACKFILL_LIMIT = 12;
 const NOTIFICATION_TOAST_BACKFILL_LOOKBACK_MS = 5 * 60 * 1000;
 const NOTIFICATION_TOAST_BACKFILL_SKEW_MS = 15000;
 const NOTIFICATION_TOAST_RECONNECT_DELAY_MS = 1500;
+const NOTIFICATION_TOAST_BACKFILL_MIN_INTERVAL_MS = 4_000;
 const NOTIFICATION_TOAST_RECOVERY_POLL_INTERVAL_MS = isE2EFixtureMode()
   ? 3_000
   : 30_000;
@@ -392,6 +392,7 @@ function RootContent() {
     let connectAttemptGeneration = 0;
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
     let recoveryPollTimer: ReturnType<typeof setInterval> | null = null;
+    let lastNotificationBackfillAtMs = 0;
     let notificationGapBackfillCursorMs =
       Date.now() - NOTIFICATION_TOAST_BACKFILL_LOOKBACK_MS;
 
@@ -413,6 +414,8 @@ function RootContent() {
     };
 
     const disposeChannel = async (reason: string) => {
+      const hadChannel = Boolean(activeChannel);
+
       if (activeChannel) {
         const channelToDispose = activeChannel;
         activeChannel = null;
@@ -425,10 +428,12 @@ function RootContent() {
         }
       }
 
-      logNotificationToastDebug("Disposed notification toast channel", {
-        reason,
-        activeUserId,
-      });
+      if (hadChannel) {
+        logNotificationToastDebug("Disposed notification toast channel", {
+          reason,
+          activeUserId,
+        });
+      }
       activeChannelStatus = "CLOSED";
     };
 
@@ -444,8 +449,14 @@ function RootContent() {
     };
 
     const backfillNotificationGap = (reason: string) => {
+      const now = Date.now();
+      if (now - lastNotificationBackfillAtMs < NOTIFICATION_TOAST_BACKFILL_MIN_INTERVAL_MS) {
+        return;
+      }
+
       const sinceMs = notificationGapBackfillCursorMs;
-      notificationGapBackfillCursorMs = Date.now();
+      notificationGapBackfillCursorMs = now;
+      lastNotificationBackfillAtMs = now;
       void backfillRecentNotificationToasts(activeUserId, sinceMs, reason);
     };
 
@@ -462,6 +473,10 @@ function RootContent() {
 
     const connectChannel = async (reason: string) => {
       clearReconnectTimer();
+      if (activeChannel && activeChannelStatus === "SUBSCRIBED" && isNotificationAppActive()) {
+        return;
+      }
+
       const connectAttempt = ++connectAttemptGeneration;
       await disposeChannel(`connect:${reason}`);
 
@@ -808,10 +823,17 @@ function RootContent() {
           animationDuration: 240,
           freezeOnBlur: true,
         }}
-      />
+      >
+        <Stack.Screen
+          name="(tabs)"
+          options={{
+            headerShown: false,
+            animation: "none",
+          }}
+        />
+      </Stack>
 
       <GlobalRadioMiniPlayer />
-      <GlobalNavbar />
     </View>
   );
 }

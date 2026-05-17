@@ -18,27 +18,27 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { supabase } from "../lib/supabase";
-import CachedImage from "../src/components/CachedImage";
-import CustomAlert from "../src/components/CustomAlert";
-import Header from "../src/components/header";
-import ListingDetailsSheet from "../src/components/ListingDetailsSheet";
-import Navbar from "../src/components/navbar";
-import { ProfileCompletionBanner } from "../src/components/ProfileCompletionBanner";
-import ProductionTeamDetailsSheet from "../src/components/ProductionTeamDetailsSheet";
-import RecentlyViewedSheet from "../src/components/RecentlyViewedSheet";
-import SearchBottomSheet from "../src/components/SearchBottomSheet";
-import Skeleton from "../src/components/Skeleton";
-import { useBottomBarClearance } from "../src/hooks/useBottomBarClearance";
-import { useAuth } from "../src/context/AuthContext";
-import { useHomeDataQuery } from "../src/data/hooks";
-import { useTheme } from "../src/context/ThemeContext";
+import { supabase } from "../../lib/supabase";
+import CachedImage from "../../src/components/CachedImage";
+import CustomAlert from "../../src/components/CustomAlert";
+import Header from "../../src/components/header";
+import ListingDetailsSheet from "../../src/components/ListingDetailsSheet";
+import Navbar from "../../src/components/navbar";
+import { ProfileCompletionBanner } from "../../src/components/ProfileCompletionBanner";
+import ProductionTeamDetailsSheet from "../../src/components/ProductionTeamDetailsSheet";
+import RecentlyViewedSheet from "../../src/components/RecentlyViewedSheet";
+import SearchBottomSheet from "../../src/components/SearchBottomSheet";
+import Skeleton from "../../src/components/Skeleton";
+import { useBottomBarClearance } from "../../src/hooks/useBottomBarClearance";
+import { useAuth } from "../../src/context/AuthContext";
+import { useHomeDataQuery } from "../../src/data/hooks";
+import { useTheme } from "../../src/context/ThemeContext";
 import {
   getGroqModelInfo,
   rerankHomeFeedWithGroq,
-} from "../src/services/groqModelRouter";
-import { getScreenCacheKey, peekScreenCache, readScreenCache, writeScreenCache } from "../src/utils/screenCache";
-import { usePageLoadLogger } from "../src/utils/loadTimeLogger";
+} from "../../src/services/groqModelRouter";
+import { getScreenCacheKey, peekScreenCache, readScreenCache, writeScreenCache } from "../../src/utils/screenCache";
+import { usePageLoadLogger } from "../../src/utils/loadTimeLogger";
 
 const { width, height } = Dimensions.get("window");
 

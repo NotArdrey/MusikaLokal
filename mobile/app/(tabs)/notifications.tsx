@@ -12,21 +12,21 @@ import {
     TouchableOpacity,
     View
 } from 'react-native';
-import { supabase } from '../lib/supabase';
-import CustomAlert, { AlertType } from '../src/components/CustomAlert';
-import GuestSignInGate from '../src/components/GuestSignInGate';
-import Header from '../src/components/header';
-import Navbar from '../src/components/navbar';
-import { useBottomBarClearance } from '../src/hooks/useBottomBarClearance';
-import { useAuth } from '../src/context/AuthContext';
-import { useTheme } from '../src/context/ThemeContext';
-import { useNotificationsQuery } from '../src/data/hooks';
-import { queryKeys } from '../src/data/queryKeys';
-import { usePageLoadLogger } from '../src/utils/loadTimeLogger';
+import { supabase } from '../../lib/supabase';
+import CustomAlert, { AlertType } from '../../src/components/CustomAlert';
+import GuestSignInGate from '../../src/components/GuestSignInGate';
+import Header from '../../src/components/header';
+import Navbar from '../../src/components/navbar';
+import { useBottomBarClearance } from '../../src/hooks/useBottomBarClearance';
+import { useAuth } from '../../src/context/AuthContext';
+import { useTheme } from '../../src/context/ThemeContext';
+import { useNotificationsQuery } from '../../src/data/hooks';
+import { queryKeys } from '../../src/data/queryKeys';
+import { usePageLoadLogger } from '../../src/utils/loadTimeLogger';
 import {
     buildNotificationRouteMeta,
     resolveNotificationNavigationTarget,
-} from '../src/utils/notificationNavigation';
+} from '../../src/utils/notificationNavigation';
 
 const DEFAULT_NOTIFICATION_IMAGE = 'https://images.unsplash.com/photo-1598488035139-bdbb2231ce04?w=100&h=100&fit=crop';
 const KNOWN_IMAGE_BUCKETS = ['listings', 'avatars', 'profile-images', 'group-images', 'studio-images', 'gig-images', 'documents', 'portfolio', 'images', 'public-assets'];

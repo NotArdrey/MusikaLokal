@@ -1,15 +1,15 @@
 import { router } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
-import { supabase } from '../lib/supabase';
-import GuestSignInGate from '../src/components/GuestSignInGate';
-import Header from '../src/components/header';
-import Navbar from '../src/components/navbar';
-import Skeleton from '../src/components/Skeleton';
-import { useBottomBarClearance } from '../src/hooks/useBottomBarClearance';
-import { useAuth } from '../src/context/AuthContext';
-import { useTheme } from '../src/context/ThemeContext';
-import { resolveRoleManageRoute } from '../src/utils/roleRouting';
+import { supabase } from '../../lib/supabase';
+import GuestSignInGate from '../../src/components/GuestSignInGate';
+import Header from '../../src/components/header';
+import Navbar from '../../src/components/navbar';
+import Skeleton from '../../src/components/Skeleton';
+import { useBottomBarClearance } from '../../src/hooks/useBottomBarClearance';
+import { useAuth } from '../../src/context/AuthContext';
+import { useTheme } from '../../src/context/ThemeContext';
+import { resolveRoleManageRoute } from '../../src/utils/roleRouting';
 
 export default function ManageScreen() {
     const { colors } = useTheme();

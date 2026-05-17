@@ -36,37 +36,37 @@ import Animated, {
   withSpring,
 } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { supabase, supabaseAnonKey, supabaseUrl } from "../lib/supabase";
-import CustomAlert, { AlertType } from "../src/components/CustomAlert";
-import InAppMediaViewer, { getInAppMediaType } from "../src/components/InAppMediaViewer";
-import ReportModal from "../src/components/ReportModal";
-import GuestSignInGate from "../src/components/GuestSignInGate";
-import Header from "../src/components/header";
-import Navbar from "../src/components/navbar";
-import Skeleton from "../src/components/Skeleton";
-import SlidingTabBar from "../src/components/SlidingTabBar";
-import type { SlidingTabItem } from "../src/components/SlidingTabBar";
-import SmoothTabTransition from "../src/components/SmoothTabTransition";
-import TrackedBottomSheetModal from "../src/components/TrackedBottomSheetModal";
-import { DEFAULT_AVATAR } from "../src/constants/Images";
-import { useAuth } from "../src/context/AuthContext";
+import { supabase, supabaseAnonKey, supabaseUrl } from "../../lib/supabase";
+import CustomAlert, { AlertType } from "../../src/components/CustomAlert";
+import InAppMediaViewer, { getInAppMediaType } from "../../src/components/InAppMediaViewer";
+import ReportModal from "../../src/components/ReportModal";
+import GuestSignInGate from "../../src/components/GuestSignInGate";
+import Header from "../../src/components/header";
+import Navbar from "../../src/components/navbar";
+import Skeleton from "../../src/components/Skeleton";
+import SlidingTabBar from "../../src/components/SlidingTabBar";
+import type { SlidingTabItem } from "../../src/components/SlidingTabBar";
+import SmoothTabTransition from "../../src/components/SmoothTabTransition";
+import TrackedBottomSheetModal from "../../src/components/TrackedBottomSheetModal";
+import { DEFAULT_AVATAR } from "../../src/constants/Images";
+import { useAuth } from "../../src/context/AuthContext";
 import {
   useRadioPlayerActions,
   useRadioPlayerPlayback,
   useRadioPlayerPresence,
-} from "../src/context/RadioPlayerContext";
+} from "../../src/context/RadioPlayerContext";
 import {
   useBottomOverlayRegistration,
   useBottomOverlayVisibility,
-} from "../src/context/BottomOverlayContext";
-import CachedImage from "../src/components/CachedImage";
-import { emitToast } from "../src/events/toastBus";
-import { useTheme } from "../src/context/ThemeContext";
-import { screenUploadsWithAi } from "../src/services/uploadSafetyScreen";
-import { buildSocialFollowKey } from "../src/utils/socialFollow";
-import { getSmoothTabIndex, setSmoothTab } from "../src/utils/smoothTabs";
-import { bottomSheetSpringConfig, motion } from "../src/utils/motion";
-import { isFanUserRole } from "../src/utils/roleRouting";
+} from "../../src/context/BottomOverlayContext";
+import CachedImage from "../../src/components/CachedImage";
+import { emitToast } from "../../src/events/toastBus";
+import { useTheme } from "../../src/context/ThemeContext";
+import { screenUploadsWithAi } from "../../src/services/uploadSafetyScreen";
+import { buildSocialFollowKey } from "../../src/utils/socialFollow";
+import { getSmoothTabIndex, setSmoothTab } from "../../src/utils/smoothTabs";
+import { bottomSheetSpringConfig, motion } from "../../src/utils/motion";
+import { isFanUserRole } from "../../src/utils/roleRouting";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const PROFILE_CONTENT_HORIZONTAL_PADDING = 24;
@@ -411,7 +411,16 @@ type ProfileScreenCachePayload = {
 };
 
 const PROFILE_FOCUS_REFRESH_COOLDOWN_MS = 30000;
+const PROFILE_POSTS_CACHE_TTL_MS = 30000;
+const PROFILE_PLAYLISTS_CACHE_TTL_MS = 30000;
 const profileScreenCache = new Map<string, ProfileScreenCachePayload>();
+const profilePostsCache = new Map<string, { posts: any[]; fetchedAt: number }>();
+const profilePlaylistsCache = new Map<string, { playlists: any[]; fetchedAt: number }>();
+const profileStationCache = new Map<string, {
+  radioPlaylistIds: string[];
+  station: any | null;
+  fetchedAt: number;
+}>();
 
 const sanitizeAvatarUrl = (value: unknown): string | null => {
   if (typeof value !== "string") return null;
@@ -988,6 +997,9 @@ export default function ProfileScreen() {
   const followListSnapPoints = useMemo(() => ["48%", "78%"], []);
   const followListAnimationConfigs = useBottomSheetSpringConfigs(bottomSheetSpringConfig);
   const profileFetchInFlightRef = useRef(false);
+  const profilePostsFetchInFlightRef = useRef<string | null>(null);
+  const profilePlaylistsFetchInFlightRef = useRef<string | null>(null);
+  const profileStationFetchInFlightRef = useRef<string | null>(null);
   const canManageStations = !isGuest && userRole === "admin";
   const { registerOverlay: registerDrawerOverlay, unregisterOverlay: unregisterDrawerOverlay } =
     useBottomOverlayRegistration("ProfileDrawer");
@@ -1392,21 +1404,67 @@ export default function ProfileScreen() {
 
   // Fetch user playlists
   const fetchPlaylists = useCallback(async (targetUserId: string) => {
+    if (!targetUserId) {
+      setUserPlaylists([]);
+      setLoadingPlaylists(false);
+      return;
+    }
+
+    const cached = profilePlaylistsCache.get(targetUserId);
+    if (cached && Date.now() - cached.fetchedAt < PROFILE_PLAYLISTS_CACHE_TTL_MS) {
+      setUserPlaylists(cached.playlists);
+      setLoadingPlaylists(false);
+      return;
+    }
+
+    if (profilePlaylistsFetchInFlightRef.current === targetUserId) {
+      return;
+    }
+
+    profilePlaylistsFetchInFlightRef.current = targetUserId;
     setLoadingPlaylists(true);
     try {
       const { data } = await supabase.functions.invoke("manage-playlists", {
         body: { action: "list_user_playlists", user_id: targetUserId },
       });
-      setUserPlaylists(data?.data || data?.playlists || []);
+      const playlists = data?.data || data?.playlists || [];
+      profilePlaylistsCache.set(targetUserId, {
+        playlists,
+        fetchedAt: Date.now(),
+      });
+      setUserPlaylists(playlists);
     } catch (_) {
       setUserPlaylists([]);
     } finally {
+      if (profilePlaylistsFetchInFlightRef.current === targetUserId) {
+        profilePlaylistsFetchInFlightRef.current = null;
+      }
       setLoadingPlaylists(false);
     }
   }, []);
 
   // Fetch user station (first/primary) and which playlists are on radio
   const fetchStation = useCallback(async (targetUserId: string) => {
+    if (!targetUserId) {
+      setUserStation(null);
+      setRadioPlaylistIds(new Set());
+      setLoadingStation(false);
+      return;
+    }
+
+    const cached = profileStationCache.get(targetUserId);
+    if (cached && Date.now() - cached.fetchedAt < PROFILE_PLAYLISTS_CACHE_TTL_MS) {
+      setUserStation(cached.station);
+      setRadioPlaylistIds(new Set(cached.radioPlaylistIds));
+      setLoadingStation(false);
+      return;
+    }
+
+    if (profileStationFetchInFlightRef.current === targetUserId) {
+      return;
+    }
+
+    profileStationFetchInFlightRef.current = targetUserId;
     setLoadingStation(true);
     try {
       const { data } = await supabase.functions.invoke("manage-playlists", {
@@ -1414,12 +1472,23 @@ export default function ProfileScreen() {
       });
       const stations = data?.data || [];
       const station = stations.length > 0 ? stations[0] : null;
+      const nextRadioPlaylistIds = Array.isArray(station?.slot_playlist_ids)
+        ? station.slot_playlist_ids
+        : [];
+      profileStationCache.set(targetUserId, {
+        station,
+        radioPlaylistIds: nextRadioPlaylistIds,
+        fetchedAt: Date.now(),
+      });
       setUserStation(station);
-      setRadioPlaylistIds(new Set(station?.slot_playlist_ids || []));
+      setRadioPlaylistIds(new Set(nextRadioPlaylistIds));
     } catch (_) {
       setUserStation(null);
       setRadioPlaylistIds(new Set());
     } finally {
+      if (profileStationFetchInFlightRef.current === targetUserId) {
+        profileStationFetchInFlightRef.current = null;
+      }
       setLoadingStation(false);
     }
   }, []);
@@ -1440,6 +1509,10 @@ export default function ProfileScreen() {
         },
       });
       if (data?.success) {
+        if (managedProfileId) {
+          profileStationCache.delete(managedProfileId);
+        }
+
         setRadioPlaylistIds((prev) => {
           const next = new Set(prev);
           if (data.on_radio) {
@@ -1587,17 +1660,20 @@ export default function ProfileScreen() {
         return "upcoming";
       };
 
-      const { data: profileStatsData } = await supabase
-        .from("profiles_with_stats")
-        .select("*")
-        .eq("id", targetId)
-        .maybeSingle();
-
-      const { data: profileData, error: profileError } = await supabase
-        .from("profiles")
-        .select("*")
-        .eq("id", targetId)
-        .maybeSingle();
+      const [profileStatsResult, profileResult] = await Promise.all([
+        supabase
+          .from("profiles_with_stats")
+          .select("*")
+          .eq("id", targetId)
+          .maybeSingle(),
+        supabase
+          .from("profiles")
+          .select("*")
+          .eq("id", targetId)
+          .maybeSingle(),
+      ]);
+      const profileStatsData = profileStatsResult.data;
+      const { data: profileData, error: profileError } = profileResult;
 
       if (profileError) throw profileError;
 
@@ -1738,45 +1814,52 @@ export default function ProfileScreen() {
       setLoadingProfileFollowers(!isGuest);
 
       try {
-        const { count: followerCount, error: followerCountError } = await supabase
-          .from("follows")
-          .select("id", { count: "exact", head: true })
-          .eq("followed_id", targetId)
-          .eq("followed_type", "profile");
+        const [followerCountResult, followingCountResult] = await Promise.all([
+          supabase
+            .from("follows")
+            .select("id", { count: "exact", head: true })
+            .eq("followed_id", targetId)
+            .eq("followed_type", "profile"),
+          supabase
+            .from("follows")
+            .select("id", { count: "exact", head: true })
+            .eq("follower_id", targetId),
+        ]);
 
-        if (!followerCountError && typeof followerCount === "number") {
-          nextProfileFollowerCount = Math.max(0, followerCount);
+        if (!followerCountResult.error && typeof followerCountResult.count === "number") {
+          nextProfileFollowerCount = Math.max(0, followerCountResult.count);
           setProfileFollowerCount(nextProfileFollowerCount);
         }
-      } catch {
-        // Keep the fallback count if follows query is unavailable.
-      }
 
-      try {
-        const { count: followingCount, error: followingCountError } = await supabase
-          .from("follows")
-          .select("id", { count: "exact", head: true })
-          .eq("follower_id", targetId);
-
-        if (!followingCountError && typeof followingCount === "number") {
-          nextProfileFollowingCount = Math.max(0, followingCount);
+        if (!followingCountResult.error && typeof followingCountResult.count === "number") {
+          nextProfileFollowingCount = Math.max(0, followingCountResult.count);
           setProfileFollowingCount(nextProfileFollowingCount);
         }
       } catch {
-        // Keep the fallback following count when follows query is unavailable.
+        // Keep fallback counts when follows queries are unavailable.
       }
 
       if (!isGuest) {
         try {
-          const { data: followingResponse, error: followingError } = await supabase.functions.invoke(
-            "manage-social-feed",
-            {
+          const [followingResult, followersResult] = await Promise.all([
+            supabase.functions.invoke("manage-social-feed", {
               body: {
                 action: "get_following",
                 target_user_id: targetId,
               },
-            },
-          );
+            }),
+            supabase.functions.invoke("manage-social-feed", {
+              body: {
+                action: "get_followers",
+                target_user_id: targetId,
+                target_type: "profile",
+              },
+            }),
+          ]);
+          const followingResponse = followingResult.data;
+          const followingError = followingResult.error;
+          const followersResponse = followersResult.data;
+          const followersError = followersResult.error;
 
           if (!followingError && Array.isArray(followingResponse?.data)) {
             nextProfileFollowingCount = followingResponse.data.length;
@@ -1798,17 +1881,6 @@ export default function ProfileScreen() {
             setProfileFollowingCount(nextProfileFollowingCount);
             setProfileFollowing(nextProfileFollowing);
           }
-
-          const { data: followersResponse, error: followersError } = await supabase.functions.invoke(
-            "manage-social-feed",
-            {
-              body: {
-                action: "get_followers",
-                target_user_id: targetId,
-                target_type: "profile",
-              },
-            },
-          );
 
           if (followersError) {
             nextProfileFollowers = await fetchProfileFollowersDirect(targetId);
@@ -1858,9 +1930,9 @@ export default function ProfileScreen() {
         fetchedAt: Date.now(),
       });
 
-      await fetchBookmarkedListings(targetId, !!ownership && !isGuest);
-      fetchPlaylists(targetId);
-      fetchStation(targetId);
+      void fetchBookmarkedListings(targetId, !!ownership && !isGuest);
+      void fetchPlaylists(targetId);
+      void fetchStation(targetId);
     } catch (e) {
     } finally {
       profileFetchInFlightRef.current = false;
@@ -1893,15 +1965,30 @@ export default function ProfileScreen() {
 
         if (!cacheIsFresh) {
           let isActive = true;
-          const focusTask = InteractionManager.runAfterInteractions(() => {
-            if (isActive) {
-              void fetchProfile({ showLoading: !cached });
-            }
-          });
+          let refreshStarted = false;
+          let focusFallbackTimer: ReturnType<typeof setTimeout> | null = null;
+          const startProfileRefresh = () => {
+            if (!isActive || refreshStarted) return;
+            refreshStarted = true;
+            void fetchProfile({ showLoading: !cached });
+          };
+
+          if (!cached) {
+            startProfileRefresh();
+          } else {
+            const focusTask = InteractionManager.runAfterInteractions(startProfileRefresh);
+            focusFallbackTimer = setTimeout(startProfileRefresh, 800);
+
+            return () => {
+              isActive = false;
+              focusTask.cancel();
+              if (focusFallbackTimer) clearTimeout(focusFallbackTimer);
+            };
+          }
 
           return () => {
             isActive = false;
-            focusTask.cancel();
+            if (focusFallbackTimer) clearTimeout(focusFallbackTimer);
           };
         }
       }
@@ -1936,6 +2023,18 @@ export default function ProfileScreen() {
       return;
     }
 
+    const cached = profilePostsCache.get(targetId);
+    if (cached && Date.now() - cached.fetchedAt < PROFILE_POSTS_CACHE_TTL_MS) {
+      setProfilePosts(cached.posts);
+      setLoadingProfilePosts(false);
+      return;
+    }
+
+    if (profilePostsFetchInFlightRef.current === targetId) {
+      return;
+    }
+
+    profilePostsFetchInFlightRef.current = targetId;
     setLoadingProfilePosts(true);
     try {
       const { data, error } = await supabase.functions.invoke("manage-social-feed", {
@@ -1945,7 +2044,7 @@ export default function ProfileScreen() {
       if (error) throw error;
 
       const rows = Array.isArray(data?.data) ? data.data : [];
-      setProfilePosts(rows.map((post: any) => {
+      const nextPosts = rows.map((post: any) => {
         const media = Array.isArray(post?.media)
           ? post.media.map((item: any) => ({
               ...item,
@@ -1960,24 +2059,40 @@ export default function ProfileScreen() {
           media,
           preview_url: cover?.preview_url || "",
         };
-      }));
+      });
+      profilePostsCache.set(targetId, {
+        posts: nextPosts,
+        fetchedAt: Date.now(),
+      });
+      setProfilePosts(nextPosts);
     } catch (error) {
       console.warn("Profile posts fetch failed", error);
       setProfilePosts([]);
     } finally {
+      if (profilePostsFetchInFlightRef.current === targetId) {
+        profilePostsFetchInFlightRef.current = null;
+      }
       setLoadingProfilePosts(false);
     }
   }, [isGuest]);
 
+  const resolveProfilePostsTargetId = useCallback(() => {
+    return profile?.id || normalizedParamUserId || currentUserId || "";
+  }, [currentUserId, normalizedParamUserId, profile?.id]);
+
   useFocusEffect(useCallback(() => {
-    const targetId = profile?.id || normalizedParamUserId || currentUserId || "";
+    if (activeTab !== "posts") {
+      return undefined;
+    }
+
+    const targetId = resolveProfilePostsTargetId();
     if (!targetId) {
       setProfilePosts([]);
       return undefined;
     }
     void fetchProfilePosts(targetId);
     return undefined;
-  }, [currentUserId, fetchProfilePosts, normalizedParamUserId, profile?.id]));
+  }, [activeTab, fetchProfilePosts, resolveProfilePostsTargetId]));
 
   const openProfilePost = useCallback((post: any) => {
     if (!post?.id) {
@@ -2532,6 +2647,16 @@ export default function ProfileScreen() {
   const viewedProfileId = typeof profile?.id === "string" ? profile.id.trim() : "";
   const profileFollowKey = buildSocialFollowKey("profile", viewedProfileId);
   const canFollowProfile = !isGuest && !isOwner && viewedProfileId.length > 0;
+  const openCreatePlaylist = useCallback(() => {
+    const targetUserId = viewedProfileId || currentUserId || normalizedParamUserId || "";
+
+    if (targetUserId) {
+      profilePlaylistsCache.delete(targetUserId);
+      profileStationCache.delete(targetUserId);
+    }
+
+    router.push("/create_playlist" as any);
+  }, [currentUserId, normalizedParamUserId, viewedProfileId]);
   const formatFollowerRole = (role?: string | null) => {
     if (!role) return "Profile";
     if (role === "group") return "Group";
@@ -2626,6 +2751,13 @@ export default function ProfileScreen() {
       if (!data?.success) {
         throw new Error(data?.error || "Failed to delete playlist.");
       }
+
+      [viewedProfileId, targetUserId].forEach((cacheTargetId) => {
+        if (!cacheTargetId) return;
+
+        profilePlaylistsCache.delete(cacheTargetId);
+        profileStationCache.delete(cacheTargetId);
+      });
 
       setUserPlaylists((prev) => prev.filter((playlist) => playlist.id !== playlistId));
       setRadioPlaylistIds((prev) => {
@@ -2930,6 +3062,19 @@ export default function ProfileScreen() {
     [profileTabOrder],
   );
   const profileActiveTabIndex = getSmoothTabIndex(profileTabOrder, activeTab);
+  const handleProfileTabChange = useCallback((nextTab: ProfileTabKey) => {
+    React.startTransition(() => {
+      setSmoothTab(setActiveTab, nextTab);
+    });
+  }, []);
+
+  useEffect(() => {
+    if (profileTabOrder.includes(activeTab)) {
+      return;
+    }
+
+    setActiveTab(profileTabOrder[0] ?? "about");
+  }, [activeTab, profileTabOrder]);
 
   const openStationScreen = () => {
     if (hasStation && userStation?.id) {
@@ -3253,7 +3398,7 @@ export default function ProfileScreen() {
               borderColor={isDark ? "rgba(255,255,255,0.1)" : "rgba(0,0,0,0.06)"}
               iconSize={22}
               indicatorWidthRatio={0.22}
-              onChange={(nextTab) => setSmoothTab(setActiveTab, nextTab)}
+              onChange={handleProfileTabChange}
               showTopBorder
               tabs={profileTabs}
             />
@@ -3457,7 +3602,7 @@ export default function ProfileScreen() {
                         borderRadius: 10,
                         backgroundColor: colors.primary,
                       }}
-                      onPress={() => router.push("/create_playlist" as any)}
+                      onPress={openCreatePlaylist}
                     >
                       <Ionicons name="add" size={14} color="#fff" />
                       <Text style={{ color: "#fff", fontSize: 12, fontFamily: "Poppins_600SemiBold" }}>New Playlist</Text>
@@ -3851,7 +3996,7 @@ export default function ProfileScreen() {
                     {isOwner && !isGuest && (
                       <TouchableOpacity
                         activeOpacity={1}
-                        onPress={() => router.push("/create_playlist" as any)}
+                        onPress={openCreatePlaylist}
                         style={{
                           marginTop: 16,
                           minHeight: 42,

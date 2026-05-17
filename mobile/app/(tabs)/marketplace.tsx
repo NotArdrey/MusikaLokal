@@ -13,26 +13,26 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import { supabase } from "../lib/supabase";
-import BottomModal from "../src/components/BottomModal";
-import CachedImage from "../src/components/CachedImage";
-import Header from "../src/components/header";
-import ImageUploader from "../src/components/ImageUploader";
-import Navbar from "../src/components/navbar";
-import Skeleton from "../src/components/Skeleton";
-import SlidingTabBar from "../src/components/SlidingTabBar";
-import SmoothTabTransition from "../src/components/SmoothTabTransition";
-import CustomAlert, { AlertType } from "../src/components/CustomAlert";
-import { useBottomBarClearance } from "../src/hooks/useBottomBarClearance";
-import { useAuth } from "../src/context/AuthContext";
-import { emitToast } from "../src/events/toastBus";
-import { useTheme } from "../src/context/ThemeContext";
+import { supabase } from "../../lib/supabase";
+import BottomModal from "../../src/components/BottomModal";
+import CachedImage from "../../src/components/CachedImage";
+import Header from "../../src/components/header";
+import ImageUploader from "../../src/components/ImageUploader";
+import Navbar from "../../src/components/navbar";
+import Skeleton from "../../src/components/Skeleton";
+import SlidingTabBar from "../../src/components/SlidingTabBar";
+import SmoothTabTransition from "../../src/components/SmoothTabTransition";
+import CustomAlert, { AlertType } from "../../src/components/CustomAlert";
+import { useBottomBarClearance } from "../../src/hooks/useBottomBarClearance";
+import { useAuth } from "../../src/context/AuthContext";
+import { emitToast } from "../../src/events/toastBus";
+import { useTheme } from "../../src/context/ThemeContext";
 import {
   useMarketplaceProductsQuery,
   useSellerProductsQuery,
-} from "../src/data/hooks";
-import { createE2EImageFixtureUrls, isE2EFixtureMode } from "../src/utils/e2eFixtures";
-import { getSmoothTabIndex, setSmoothTab } from "../src/utils/smoothTabs";
+} from "../../src/data/hooks";
+import { createE2EImageFixtureUrls, isE2EFixtureMode } from "../../src/utils/e2eFixtures";
+import { getSmoothTabIndex, setSmoothTab } from "../../src/utils/smoothTabs";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const moderateScale = (size: number, factor = 0.3) => {
@@ -66,13 +66,14 @@ const getProductImage = (product: any) => product?.cover_image_url || product?.p
 export default function MarketplaceScreen() {
   const { colors, isDark } = useTheme();
   const { contentBottomPadding } = useBottomBarClearance(24);
-  const { session, isGuest, userId, userRole, roleResolved } = useAuth();
+  const { session, isGuest, userId, userRole, roleResolved, loading: authLoading } = useAuth();
   const queryClient = useQueryClient();
   const e2eProductSubmitInFlightRef = useRef(false);
+  const resolvedUserId = session?.user?.id ?? userId ?? null;
   const normalizedUserRole = (userRole || "").toLowerCase();
   const isFan = normalizedUserRole === "fan";
   const isMusician = normalizedUserRole === "musician";
-  const canSell = Boolean(session) && roleResolved && !isMusician;
+  const canSell = Boolean(session && resolvedUserId) && roleResolved && !isMusician;
 
   const [tab, setTab] = useState<MarketTab>("browse");
 
@@ -103,12 +104,12 @@ export default function MarketplaceScreen() {
 
   const productsQuery = useMarketplaceProductsQuery<any>({
     category,
-    enabled: Boolean(session || isGuest),
+    enabled: !authLoading && Boolean(session || isGuest),
     includeSold: true,
     limit: MARKETPLACE_PAGE_SIZE,
   });
-  const sellerProductsQuery = useSellerProductsQuery<any>(userId, {
-    enabled: canSell,
+  const sellerProductsQuery = useSellerProductsQuery<any>(resolvedUserId, {
+    enabled: !authLoading && canSell,
   });
 
   const products = useMemo(
@@ -119,7 +120,7 @@ export default function MarketplaceScreen() {
     () => Array.isArray(sellerProductsQuery.data?.data) ? sellerProductsQuery.data.data : [],
     [sellerProductsQuery.data],
   );
-  const loading = productsQuery.isLoading || (canSell && sellerProductsQuery.isLoading);
+  const loading = authLoading || productsQuery.isLoading || (canSell && sellerProductsQuery.isLoading);
   const loadingMore = productsQuery.isFetchingNextPage;
   const hasMoreProducts = productsQuery.hasNextPage;
   const refreshing =
@@ -130,7 +131,11 @@ export default function MarketplaceScreen() {
   }, [queryClient]);
 
   const invokeMarketplace = useCallback(async (body: Record<string, unknown>) => {
-    const { data, error } = await supabase.functions.invoke("manage-marketplace", { body });
+    const requestBody = {
+      ...body,
+      ...(resolvedUserId ? { userId: resolvedUserId } : {}),
+    };
+    const { data, error } = await supabase.functions.invoke("manage-marketplace", { body: requestBody });
 
     if (error) {
       console.warn("manage-marketplace failed", {
@@ -140,13 +145,13 @@ export default function MarketplaceScreen() {
         details: (error as any).details,
         hint: (error as any).hint,
         context: (error as any).context,
-        body,
+        body: requestBody,
       });
       throw error;
     }
 
     return data;
-  }, []);
+  }, [resolvedUserId]);
 
   const onRefresh = () => {
     void productsQuery.refetch();
@@ -387,7 +392,7 @@ export default function MarketplaceScreen() {
 
     if (adding || e2eProductSubmitInFlightRef.current) return;
 
-    if (!canSell || !userId) {
+    if (!canSell || !resolvedUserId) {
       setAlert({
         type: "warning",
         title: "Selling Unavailable",
@@ -411,7 +416,7 @@ export default function MarketplaceScreen() {
     setAdding(true);
     try {
       const { error } = await supabase.from("products").insert({
-        seller_id: userId,
+        seller_id: resolvedUserId,
         title: newTitle.trim(),
         description: newDescription.trim() || null,
         product_type: "merch",
@@ -927,7 +932,7 @@ export default function MarketplaceScreen() {
                 onThumbnailChange={setListingThumbnailIndex}
                 maxImages={10}
                 bucketName="listings"
-                userId={userId || session?.user?.id || "marketplace-user"}
+                userId={resolvedUserId || "marketplace-user"}
                 folder="marketplace"
               />
 

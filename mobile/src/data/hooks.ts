@@ -171,14 +171,29 @@ export const useFeedQuery = <TItem = any>(params: {
   personalize?: boolean;
   userId?: string | null;
 }) => {
-  const personalize = params.personalize ?? true;
-  const usePublicDirectRead = params.feedType === "public" && !personalize;
+  const resolvedUserId = params.userId || null;
+  const personalize = (params.personalize ?? true) && Boolean(resolvedUserId);
+  const feedType =
+    params.feedTab === "for_you" && personalize
+      ? "for_you"
+      : params.feedType;
+  const usePublicDirectRead = feedType === "public" && !personalize;
+  const getPageItems = (page: PaginatedResponse<TItem>) =>
+    Array.isArray(page?.items)
+      ? page.items
+      : Array.isArray(page?.data)
+        ? page.data
+        : [];
+  const fetchFeedPage = (body: Record<string, unknown>) =>
+    invokeEdgeFunction<PaginatedResponse<TItem>>("manage-social-feed", {
+      body,
+    });
 
   return useInfiniteQuery({
-    enabled: (params.feedType === "public" || Boolean(params.userId)) && (params.enabled ?? true),
+    enabled: (feedType === "public" || Boolean(resolvedUserId)) && (params.enabled ?? true),
     getNextPageParam: (lastPage: PaginatedResponse<TItem>) => lastPage.nextCursor || undefined,
     initialPageParam: null as string | null,
-    meta: { persist: params.feedType === "public" && !personalize },
+    meta: { persist: feedType === "public" && !personalize },
     placeholderData: keepPreviousData,
     queryFn: async ({ pageParam }) => {
       if (usePublicDirectRead) {
@@ -230,17 +245,44 @@ export const useFeedQuery = <TItem = any>(params: {
         } as PaginatedResponse<TItem>;
       }
 
-      return invokeEdgeFunction<PaginatedResponse<TItem>>("manage-social-feed", {
-        body: {
+      const feedPayload = {
+        action: "get_feed",
+        cursor: pageParam,
+        feed_type: feedType,
+        limit: params.limit,
+        personalize,
+        ...(resolvedUserId ? { userId: resolvedUserId } : {}),
+      };
+      const firstPage = await fetchFeedPage(feedPayload);
+      const firstPosts = getPageItems(firstPage);
+
+      if (params.feedTab === "for_you" && !pageParam && firstPosts.length === 0) {
+        logLoadTime("Feed", "public-fallback-start", {
+          userId: resolvedUserId,
+        });
+
+        const publicFallback = await fetchFeedPage({
           action: "get_feed",
-          cursor: pageParam,
-          feed_type: params.feedType,
+          cursor: undefined,
+          feed_type: "public",
           limit: params.limit,
-          personalize,
-        },
-      });
+          personalize: false,
+          ...(resolvedUserId ? { userId: resolvedUserId } : {}),
+        });
+        const fallbackPosts = getPageItems(publicFallback);
+
+        logLoadTime("Feed", "public-fallback-complete", {
+          posts: fallbackPosts.length,
+        });
+
+        if (fallbackPosts.length > 0) {
+          return publicFallback;
+        }
+      }
+
+      return firstPage;
     },
-    queryKey: queryKeys.feed.list(params.feedTab, params.userId, params.limit, personalize),
+    queryKey: queryKeys.feed.list(params.feedTab, resolvedUserId, params.limit, personalize),
     staleTime: 30_000,
   });
 };
@@ -276,7 +318,11 @@ export const useMarketplaceProductsQuery = <TItem = any>(params: {
         "manage-marketplace",
         { body },
       );
-      const rows = Array.isArray(response?.data) ? response.data : [];
+      const rows = Array.isArray(response?.data)
+        ? response.data
+        : Array.isArray(response?.items)
+          ? response.items
+          : [];
       const items = rows.slice(0, params.limit);
 
       return {
@@ -300,7 +346,7 @@ export const useSellerProductsQuery = <TData = any>(
     placeholderData: keepPreviousData,
     queryFn: () =>
       invokeEdgeFunction<TData>("manage-marketplace", {
-        body: { action: "list_my_products" },
+        body: { action: "list_my_products", userId },
       }),
     queryKey: queryKeys.marketplace.sellerProducts(userId),
     staleTime: 30_000,

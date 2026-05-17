@@ -1584,7 +1584,7 @@ const ListingDetailsSheet = forwardRef<
   useEffect(() => {
     const resolvedUserRole = userRole || currentUserRole;
 
-    if (resolvedUserRole === "producer") {
+    if (listingId && group && resolvedUserRole === "producer") {
       fetchProductionTeams();
       return;
     }
@@ -1595,12 +1595,12 @@ const ListingDetailsSheet = forwardRef<
     setSelectedProductionRosterId(null);
     setLoadingProductionTeams(false);
     setHasLoadedProductionTeams(false);
-  }, [currentUserRole, fetchProductionTeams, userId, userRole]);
+  }, [currentUserRole, fetchProductionTeams, group, listingId, userId, userRole]);
 
   useFocusEffect(
     useCallback(() => {
       const resolvedUserRole = userRole || currentUserRole;
-      if (resolvedUserRole === "producer" && activeUserId) {
+      if (listingId && group && resolvedUserRole === "producer" && activeUserId) {
         let isActive = true;
         const focusTask = InteractionManager.runAfterInteractions(() => {
           if (isActive) {
@@ -1613,14 +1613,14 @@ const ListingDetailsSheet = forwardRef<
           focusTask.cancel();
         };
       }
-    }, [activeUserId, currentUserRole, fetchProductionTeams, userRole]),
+    }, [activeUserId, currentUserRole, fetchProductionTeams, group, listingId, userRole]),
   );
 
   useEffect(() => {
-    if (currentUserRole === "venue-owner") {
+    if (listingId && group && currentUserRole === "venue-owner") {
       fetchOwnedVenues();
     }
-  }, [currentUserRole, currentUserId]);
+  }, [currentUserRole, currentUserId, group, listingId]);
 
   useEffect(() => {
     if (group?.type !== "Gig" || userRole !== "producer") return;

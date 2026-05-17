@@ -96,6 +96,16 @@ const UserSearchModal: React.FC<UserSearchModalProps> = ({
         };
     }, []);
 
+    useEffect(() => {
+        if (visible || !searchTimeoutRef.current) {
+            return;
+        }
+
+        clearTimeout(searchTimeoutRef.current);
+        searchTimeoutRef.current = null;
+        setLoading(false);
+    }, [visible]);
+
     // Load recent conversations' users when modal opens
     React.useEffect(() => {
         if (visible) {
