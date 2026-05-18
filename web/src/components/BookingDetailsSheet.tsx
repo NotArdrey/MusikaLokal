@@ -1,11 +1,21 @@
 import { Ionicons } from "@expo/vector-icons";
 import { BottomSheetModal, BottomSheetScrollView } from "@gorhom/bottom-sheet";
 import { router } from "expo-router";
-import React, { forwardRef, useEffect, useMemo, useState } from "react";
+import React, {
+  forwardRef,
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
     ActivityIndicator,
     Dimensions,
     Linking,
+    Modal as RNModal,
+    Platform,
+    ScrollView,
     StyleSheet,
     Text,
     TouchableOpacity,
@@ -13,7 +23,15 @@ import {
 } from "react-native";
 import { supabase } from "../../lib/supabase";
 import { useTheme } from "../context/ThemeContext";
+import {
+  formatRecordingHours,
+  formatRecordingRuleShort,
+  getRecordingRequiredBlocks,
+  getRecordingRequiredHours,
+  resolveRecordingRule,
+} from "../utils/recordingRule";
 import CachedImage from "./CachedImage";
+import InAppMediaViewer, { isInAppMediaUrl } from "./InAppMediaViewer";
 
 const debugLog = (..._args: unknown[]) => { };
 
@@ -38,20 +56,82 @@ const moderateScale = (size: number, factor = 0.3) => {
 
 interface BookingDetailsSheetProps {
   booking: any;
+  readOnly?: boolean;
   onCancel?: (bookingId: string) => void;
   onConfirm?: (bookingId: string) => void;
+  onLeaveReview?: (booking: any) => void;
 }
 
+export type BookingDetailsHandle = {
+  present: () => void;
+  dismiss: () => void;
+};
+
 const BookingDetailsSheet = forwardRef<
-  BottomSheetModal,
+  BookingDetailsHandle,
   BookingDetailsSheetProps
->(({ booking, onCancel, onConfirm }, ref) => {
+>(({ booking, readOnly = false, onCancel, onConfirm, onLeaveReview }, ref) => {
   const { colors, isDark } = useTheme();
+  const bottomSheetRef = useRef<BottomSheetModal>(null);
+  const [modalVisible, setModalVisible] = useState(false);
+  const isWeb = Platform.OS === "web";
   const [loading, setLoading] = useState(false);
   const [studioDetails, setStudioDetails] = useState<any>(null);
   const [dateOverride, setDateOverride] = useState<any>(null);
+  const [mediaViewerUrl, setMediaViewerUrl] = useState<string | null>(null);
+  const [mediaViewerTitle, setMediaViewerTitle] = useState("Media");
 
   const snapPoints = useMemo(() => ["85%"], []);
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      present: () => {
+        if (isWeb) {
+          setModalVisible(true);
+          return;
+        }
+        bottomSheetRef.current?.present();
+      },
+      dismiss: () => {
+        if (isWeb) {
+          setModalVisible(false);
+          return;
+        }
+        bottomSheetRef.current?.dismiss();
+      },
+    }),
+    [isWeb],
+  );
+
+  const handleClose = () => {
+    if (isWeb) {
+      setModalVisible(false);
+      return;
+    }
+    bottomSheetRef.current?.dismiss();
+  };
+
+  const DetailsScroll = (isWeb
+    ? ScrollView
+    : BottomSheetScrollView) as React.ComponentType<any>;
+
+  const openMediaOrExternal = async (url: string, label: string) => {
+    const normalizedUrl = String(url || "").trim();
+    if (!normalizedUrl) return;
+
+    if (isInAppMediaUrl(normalizedUrl)) {
+      setMediaViewerTitle(label);
+      setMediaViewerUrl(normalizedUrl);
+      return;
+    }
+
+    try {
+      await Linking.openURL(normalizedUrl);
+    } catch {
+      alert(`Could not open ${label}.`);
+    }
+  };
 
   useEffect(() => {
     if (booking?.studio_id) {
@@ -131,6 +211,10 @@ const BookingDetailsSheet = forwardRef<
         return "#F59E0B";
       case "cancelled":
         return "#EF4444";
+      case "refunded":
+        return "#0EA5E9";
+      case "declined":
+        return "#EF4444";
       case "rejected":
         return "#EF4444"; // Gig application rejected
       case "completed":
@@ -149,6 +233,10 @@ const BookingDetailsSheet = forwardRef<
       case "pending":
         return "time-outline";
       case "cancelled":
+        return "close-circle";
+      case "refunded":
+        return "cash-outline";
+      case "declined":
         return "close-circle";
       case "rejected":
         return "close-circle"; // Gig application rejected
@@ -205,17 +293,134 @@ const BookingDetailsSheet = forwardRef<
 
   const isStudio = booking.type_id === "studio_booking" || !!booking.studio_id;
   const isGig = booking.type_id === "gig_application" || !!booking.gig_id;
+  const isReadOnly = readOnly || booking?.viewer_can_act === false;
+  const normalizedSessionType =
+    typeof booking.session_type === "string"
+      ? booking.session_type.trim().toLowerCase()
+      : typeof booking?.modifiers_applied?.session_type === "string"
+        ? booking.modifiers_applied.session_type.trim().toLowerCase()
+        : "";
+  const normalizedRateModel =
+    typeof booking?.modifiers_applied?.rate_model === "string"
+      ? booking.modifiers_applied.rate_model.trim().toLowerCase()
+      : typeof booking?.modifiers_applied?.recording_session?.rate_model === "string"
+        ? booking.modifiers_applied.recording_session.rate_model
+          .trim()
+          .toLowerCase()
+        : "";
+  const normalizedStudioType = String(
+    booking?.studio_type ??
+    booking?.studio?.studio_type ??
+    studioDetails?.studio_type ??
+    "",
+  )
+    .trim()
+    .toLowerCase();
+  const hasRecordingStudioType = normalizedStudioType.includes("recording");
+  const hasRehearsalStudioType = normalizedStudioType.includes("rehearsal");
+  const parsedSongCount = Number.parseInt(
+    String(
+      booking.song_count ??
+      booking?.modifiers_applied?.recording_session?.song_count ??
+      booking?.modifiers_applied?.song_count ??
+      "",
+    ).trim(),
+    10,
+  );
+  const effectiveSongCount =
+    Number.isFinite(parsedSongCount) && parsedSongCount > 0
+      ? parsedSongCount
+      : null;
+  const isRecordingByStudioType =
+    hasRecordingStudioType && !hasRehearsalStudioType;
+  const isRecordingByRateModel = normalizedRateModel === "per_song";
+  const isRecordingSession =
+    isStudio &&
+    (normalizedSessionType === "recording" ||
+      Boolean(effectiveSongCount) ||
+      isRecordingByRateModel ||
+      isRecordingByStudioType);
+  const effectiveDurationHours = Number(
+    booking.duration_hours || booking?.modifiers_applied?.hours || 4,
+  );
+  const parsedLegacyMinHoursPerSong = Number(
+    booking?.modifiers_applied?.recording_session?.min_hours_per_song ??
+      booking?.modifiers_applied?.min_hours_per_song ??
+      "",
+  );
+  const legacyMinHoursPerSong =
+    Number.isFinite(parsedLegacyMinHoursPerSong) &&
+    parsedLegacyMinHoursPerSong > 0
+      ? parsedLegacyMinHoursPerSong
+      : null;
+  const recordingRuleSource = {
+    ...(typeof studioDetails?.settings === "object" && studioDetails?.settings
+      ? studioDetails.settings
+      : {}),
+    ...(typeof booking?.studio_settings === "object" && booking?.studio_settings
+      ? booking.studio_settings
+      : {}),
+    ...(typeof booking?.modifiers_applied === "object" && booking?.modifiers_applied
+      ? booking.modifiers_applied
+      : {}),
+    ...(typeof booking?.modifiers_applied?.recording_session === "object" &&
+    booking?.modifiers_applied?.recording_session
+      ? booking.modifiers_applied.recording_session
+      : {}),
+    ...(legacyMinHoursPerSong
+      ? {
+          recording_songs_per_block: 1,
+          recording_hours_per_block: legacyMinHoursPerSong,
+        }
+      : {}),
+  };
+  const recordingRule = isRecordingSession
+    ? resolveRecordingRule(recordingRuleSource)
+    : null;
+  const recordingRuleLabel = recordingRule
+    ? formatRecordingRuleShort(recordingRule)
+    : null;
+  const parsedRequiredBlocks = Number(
+    booking?.modifiers_applied?.recording_session?.required_blocks ??
+      booking?.modifiers_applied?.required_blocks ??
+      "",
+  );
+  const requiredRecordingBlocks =
+    Number.isFinite(parsedRequiredBlocks) && parsedRequiredBlocks > 0
+      ? parsedRequiredBlocks
+      : effectiveSongCount && recordingRule
+        ? getRecordingRequiredBlocks(effectiveSongCount, recordingRule)
+        : null;
+  const parsedRequiredRecordingHours = Number(
+    booking?.modifiers_applied?.recording_session?.required_total_hours ??
+      booking?.modifiers_applied?.required_total_hours ??
+      "",
+  );
+  const requiredRecordingHours =
+    Number.isFinite(parsedRequiredRecordingHours) &&
+    parsedRequiredRecordingHours > 0
+      ? parsedRequiredRecordingHours
+      : effectiveSongCount && recordingRule
+        ? getRecordingRequiredHours(effectiveSongCount, recordingRule)
+        : null;
+  const parsedSelectedRecordingHours = Number(
+    booking?.modifiers_applied?.recording_session?.selected_total_hours ??
+      booking?.modifiers_applied?.selected_total_hours ??
+      booking.duration_hours ??
+      booking?.modifiers_applied?.hours ??
+      "",
+  );
+  const selectedRecordingHours =
+    Number.isFinite(parsedSelectedRecordingHours) &&
+    parsedSelectedRecordingHours > 0
+      ? parsedSelectedRecordingHours
+      : null;
+  const baseRateValue = Number(booking.base_rate || 0);
+  const normalizedTotalCost = Number(booking.total_cost || 0);
 
-  return (
-    <BottomSheetModal
-      ref={ref}
-      index={0}
-      snapPoints={snapPoints}
-      backgroundStyle={{ backgroundColor: colors.background }}
-      handleIndicatorStyle={{ backgroundColor: isDark ? "#4B5563" : "#E5E7EB" }}
-    >
-      <BottomSheetScrollView style={{ flex: 1 }}>
-        <View style={styles.container}>
+  const detailsContent = (
+    <DetailsScroll style={{ flex: 1 }}>
+      <View style={styles.container}>
           {/* Header */}
           <View style={styles.header}>
             <View style={styles.headerTop}>
@@ -223,7 +428,7 @@ const BookingDetailsSheet = forwardRef<
                 {isGig ? "Application Details" : "Booking Details"}
               </Text>
               <TouchableOpacity activeOpacity={1}
-                onPress={() => (ref as any)?.current?.dismiss()}
+                onPress={handleClose}
                 style={[
                   styles.closeBtn,
                   { backgroundColor: isDark ? "#374151" : "#F3F4F6" },
@@ -481,7 +686,7 @@ const BookingDetailsSheet = forwardRef<
                         Video / Demo
                       </Text>
                       <TouchableOpacity activeOpacity={1}
-                        onPress={() => Linking.openURL(booking.video_url)}
+                        onPress={() => openMediaOrExternal(booking.video_url, "Video / Demo")}
                       >
                         <Text
                           style={[
@@ -514,7 +719,7 @@ const BookingDetailsSheet = forwardRef<
                         CV / Resume
                       </Text>
                       <TouchableOpacity activeOpacity={1}
-                        onPress={() => Linking.openURL(booking.cv_url)}
+                        onPress={() => openMediaOrExternal(booking.cv_url, "CV / Resume")}
                       >
                         <Text
                           style={[
@@ -772,6 +977,127 @@ const BookingDetailsSheet = forwardRef<
                     </View>
                   )}
 
+                  {isStudio && (
+                    <View style={styles.detailItem}>
+                      <Text
+                        style={[
+                          styles.detailLabel,
+                          { color: colors.textSecondary },
+                        ]}
+                      >
+                        Session Type
+                      </Text>
+                      <Text
+                        style={[styles.detailValue, { color: colors.text }]}
+                      >
+                        {isRecordingSession ? "Recording" : "Rehearsal"}
+                      </Text>
+                    </View>
+                  )}
+
+                  {isStudio && isRecordingSession && effectiveSongCount && (
+                    <View style={styles.detailItem}>
+                      <Text
+                        style={[
+                          styles.detailLabel,
+                          { color: colors.textSecondary },
+                        ]}
+                      >
+                        Songs
+                      </Text>
+                      <Text
+                        style={[styles.detailValue, { color: colors.text }]}
+                      >
+                        {effectiveSongCount} song
+                        {effectiveSongCount > 1 ? "s" : ""}
+                      </Text>
+                    </View>
+                  )}
+
+                  {isStudio && isRecordingSession && recordingRuleLabel && (
+                    <View style={styles.detailItem}>
+                      <Text
+                        style={[
+                          styles.detailLabel,
+                          { color: colors.textSecondary },
+                        ]}
+                      >
+                        Recording Rule
+                      </Text>
+                      <Text
+                        style={[styles.detailValue, { color: colors.text }]}
+                      >
+                        {recordingRuleLabel}
+                      </Text>
+                    </View>
+                  )}
+
+                  {isStudio && isRecordingSession && requiredRecordingBlocks && (
+                    <View style={styles.detailItem}>
+                      <Text
+                        style={[
+                          styles.detailLabel,
+                          { color: colors.textSecondary },
+                        ]}
+                      >
+                        Time Blocks
+                      </Text>
+                      <Text
+                        style={[styles.detailValue, { color: colors.text }]}
+                      >
+                        {requiredRecordingBlocks} block
+                        {requiredRecordingBlocks > 1 ? "s" : ""}
+                      </Text>
+                    </View>
+                  )}
+
+                  {isStudio && isRecordingSession && requiredRecordingHours && (
+                    <View style={styles.detailItem}>
+                      <Text
+                        style={[
+                          styles.detailLabel,
+                          { color: colors.textSecondary },
+                        ]}
+                      >
+                        Minimum Required Time
+                      </Text>
+                      <Text
+                        style={[styles.detailValue, { color: colors.text }]}
+                      >
+                        {formatRecordingHours(requiredRecordingHours)} hours
+                      </Text>
+                    </View>
+                  )}
+
+                  {isStudio &&
+                    isRecordingSession &&
+                    selectedRecordingHours && (
+                      <View style={styles.detailItem}>
+                        <Text
+                          style={[
+                            styles.detailLabel,
+                            { color: colors.textSecondary },
+                          ]}
+                        >
+                          Selected Time
+                        </Text>
+                        <Text
+                          style={[
+                            styles.detailValue,
+                            {
+                              color:
+                                requiredRecordingHours &&
+                                selectedRecordingHours < requiredRecordingHours
+                                  ? "#F59E0B"
+                                  : colors.text,
+                            },
+                          ]}
+                        >
+                          {formatRecordingHours(selectedRecordingHours)} hours
+                        </Text>
+                      </View>
+                    )}
+
                   {/* Show studio operating hours for this day */}
                   {dateOverride && isStudio && (
                     <View style={styles.detailItem}>
@@ -890,16 +1216,17 @@ const BookingDetailsSheet = forwardRef<
                           { color: colors.textSecondary },
                         ]}
                       >
-                        Base Rate ({booking.duration_hours || "4"} hrs × ₱
-                        {Number(booking.base_rate).toLocaleString()})
+                        {isRecordingSession
+                          ? `Base Rate (${effectiveSongCount || 1} song${(effectiveSongCount || 1) > 1 ? "s" : ""} × ₱${baseRateValue.toLocaleString()})`
+                          : `Base Rate (${effectiveDurationHours} hrs × ₱${baseRateValue.toLocaleString()})`}
                       </Text>
                       <Text
                         style={[styles.pricingValue, { color: colors.text }]}
                       >
                         ₱
-                        {(
-                          Number(booking.base_rate) *
-                          (booking.duration_hours || 4)
+                        {(isRecordingSession
+                          ? baseRateValue * (effectiveSongCount || 1)
+                          : baseRateValue * effectiveDurationHours
                         ).toLocaleString()}
                       </Text>
                     </View>
@@ -1048,12 +1375,14 @@ const BookingDetailsSheet = forwardRef<
                           { color: colors.textSecondary },
                         ]}
                       >
-                        Rate ({booking.duration_hours || "4"} hrs)
+                        {isRecordingSession
+                          ? `Recording Total${effectiveSongCount ? ` (${effectiveSongCount} songs)` : ""}`
+                          : `Rate (${effectiveDurationHours} hrs)`}
                       </Text>
                       <Text
                         style={[styles.pricingValue, { color: colors.text }]}
                       >
-                        ₱{booking.total_cost?.toLocaleString()}
+                        ₱{normalizedTotalCost.toLocaleString()}
                       </Text>
                     </View>
                   )}
@@ -1069,7 +1398,7 @@ const BookingDetailsSheet = forwardRef<
                     <Text
                       style={[styles.totalValue, { color: colors.primary }]}
                     >
-                      ₱{booking.total_cost?.toLocaleString()}
+                      ₱{normalizedTotalCost.toLocaleString()}
                     </Text>
                   </View>
                 </View>
@@ -1077,12 +1406,31 @@ const BookingDetailsSheet = forwardRef<
 
               {/* Action Buttons */}
               <View style={styles.actions}>
-                {booking.status === "pending" && onConfirm && (
+                {isReadOnly ? (
+                  <TouchableOpacity
+                    activeOpacity={1}
+                    style={[
+                      styles.actionBtn,
+                      styles.cancelBtn,
+                      { borderColor: colors.border },
+                    ]}
+                    onPress={handleClose}
+                  >
+                    <Ionicons
+                      name="close-circle-outline"
+                      size={20}
+                      color="#EF4444"
+                    />
+                    <Text style={styles.cancelBtnText}>Close</Text>
+                  </TouchableOpacity>
+                ) : null}
+
+                {!isReadOnly && booking.status === "pending" && onConfirm && (
                   <TouchableOpacity activeOpacity={1}
                     style={[styles.actionBtn, styles.confirmBtn]}
                     onPress={() => {
                       onConfirm(booking.id);
-                      (ref as any)?.current?.dismiss();
+                      handleClose();
                     }}
                   >
                     <Ionicons
@@ -1096,15 +1444,19 @@ const BookingDetailsSheet = forwardRef<
                   </TouchableOpacity>
                 )}
 
-                {booking.status === "completed" && (
+                {!isReadOnly && booking.status === "completed" && (
                   <TouchableOpacity activeOpacity={1}
                     style={[
                       styles.actionBtn,
                       { backgroundColor: colors.primary },
                     ]}
                     onPress={() => {
-                      router.push("/submit_review" as any);
-                      (ref as any)?.current?.dismiss();
+                      if (onLeaveReview) {
+                        onLeaveReview(booking);
+                      } else {
+                        router.push("/submit_review" as any);
+                      }
+                      handleClose();
                     }}
                   >
                     <Ionicons name="star-outline" size={20} color="#FFFFFF" />
@@ -1112,7 +1464,7 @@ const BookingDetailsSheet = forwardRef<
                   </TouchableOpacity>
                 )}
 
-                {(booking.status === "confirmed" ||
+                {!isReadOnly && (booking.status === "confirmed" ||
                   booking.status === "pending" ||
                   booking.status === "accepted") &&
                   onCancel && (
@@ -1124,7 +1476,7 @@ const BookingDetailsSheet = forwardRef<
                       ]}
                       onPress={() => {
                         onCancel(booking.id);
-                        (ref as any)?.current?.dismiss();
+                        handleClose();
                       }}
                     >
                       <Ionicons
@@ -1140,8 +1492,66 @@ const BookingDetailsSheet = forwardRef<
               </View>
             </>
           )}
-        </View>
-      </BottomSheetScrollView>
+      </View>
+    </DetailsScroll>
+  );
+
+  if (isWeb) {
+    return (
+      <>
+        <RNModal
+          visible={modalVisible}
+          transparent
+          statusBarTranslucent
+          navigationBarTranslucent
+          presentationStyle="overFullScreen"
+          hardwareAccelerated
+          animationType="fade"
+          onRequestClose={handleClose}
+        >
+          <View style={styles.modalOverlay}>
+            <TouchableOpacity
+              activeOpacity={1}
+              onPress={handleClose}
+              style={[
+                styles.modalBackdrop,
+                {
+                  backgroundColor: isDark
+                    ? "rgba(15, 23, 42, 0.72)"
+                    : "rgba(15, 23, 42, 0.45)",
+                },
+              ]}
+            />
+            <View style={[styles.modalCard, { backgroundColor: colors.background }]}>
+              {detailsContent}
+            </View>
+          </View>
+        </RNModal>
+        <InAppMediaViewer
+          visible={!!mediaViewerUrl}
+          uri={mediaViewerUrl}
+          title={mediaViewerTitle}
+          onClose={() => setMediaViewerUrl(null)}
+        />
+      </>
+    );
+  }
+
+  return (
+    <BottomSheetModal
+      ref={bottomSheetRef}
+      index={0}
+      snapPoints={snapPoints}
+      backgroundStyle={{ backgroundColor: colors.background }}
+      handleIndicatorStyle={{ backgroundColor: isDark ? "#4B5563" : "#E5E7EB" }}
+    >
+      {detailsContent}
+      <InAppMediaViewer
+        visible={!!mediaViewerUrl}
+        uri={mediaViewerUrl}
+        title={mediaViewerTitle}
+        onClose={() => setMediaViewerUrl(null)}
+      />
     </BottomSheetModal>
   );
 });
@@ -1313,6 +1723,27 @@ const styles = StyleSheet.create({
     gap: moderateScale(12),
     marginTop: moderateScale(8),
     marginBottom: moderateScale(24),
+  },
+  modalOverlay: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    padding: scale(16),
+  },
+  modalBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  modalCard: {
+    width: "100%",
+    maxWidth: 980,
+    maxHeight: "90%",
+    borderRadius: moderateScale(20),
+    overflow: "hidden",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 12 },
+    shadowOpacity: 0.25,
+    shadowRadius: 24,
+    elevation: 8,
   },
   actionBtn: {
     flexDirection: "row",

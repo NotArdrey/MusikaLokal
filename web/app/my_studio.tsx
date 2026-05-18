@@ -1,19 +1,48 @@
 import { Ionicons } from '@expo/vector-icons';
-import { router, useFocusEffect } from 'expo-router';
-import React, { useCallback, useState } from 'react';
-import { RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View, Platform } from 'react-native';
+import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
+import React, { useCallback, useEffect, useState } from 'react';
+import { RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View, Platform, useWindowDimensions } from 'react-native';
 import { supabase } from '../lib/supabase';
 import CachedImage from '../src/components/CachedImage';
 import CustomAlert, { AlertType } from '../src/components/CustomAlert';
 import Header from '../src/components/header';
-import Modal from '../src/components/modal';
+import Modal, { normalizeConfirmationInput } from '../src/components/modal';
 import Navbar from '../src/components/navbar';
 import { useRequireAuth } from '../src/context/AuthContext';
 import { useTheme } from '../src/context/ThemeContext';
 
+const normalizePermitStatus = (permitStatus: string | null | undefined) => {
+    const normalizedPermitStatus = String(permitStatus || '').trim().toLowerCase();
+    if (!normalizedPermitStatus) return 'pending_review';
+    if (['approved', 'approved_by_admin', 'verified'].includes(normalizedPermitStatus)) return 'approved';
+    if (['pending', 'pending_review', 'in_review', 'under_review'].includes(normalizedPermitStatus)) return 'pending_review';
+    if (['resubmitted', 'resubmit', 'reapplied'].includes(normalizedPermitStatus)) return 'resubmitted';
+    if (['rejected', 'declined'].includes(normalizedPermitStatus)) return 'rejected';
+    return normalizedPermitStatus;
+};
+
 export default function MyStudioScreen() {
     const { colors, isDark } = useTheme();
+    const { width } = useWindowDimensions();
+    const isWebDesktop = Platform.OS === 'web' && width >= 768;
+    const pageBackground = isWebDesktop
+        ? isDark
+            ? '#0A1224'
+            : '#E9EEF8'
+        : colors.background;
+    const pageCardBackground = isWebDesktop
+        ? isDark
+            ? '#0F172A'
+            : '#FFFFFF'
+        : colors.surface;
+    const borderSoft = isWebDesktop
+        ? isDark
+            ? '#1E2C48'
+            : '#D8E3F2'
+        : colors.border;
     const { isAuthenticated, loading: authLoading, userId } = useRequireAuth();
+    const params = useLocalSearchParams<{ refresh?: string }>();
+    const refreshKey = Array.isArray(params.refresh) ? params.refresh[0] : params.refresh;
     const [modalVisible, setModalVisible] = useState(false);
     const [selectedId, setSelectedId] = useState<string | null>(null);
     const [selectedName, setSelectedName] = useState('');
@@ -39,12 +68,12 @@ export default function MyStudioScreen() {
         setAlertVisible(true);
     };
 
-    const fetchStudios = async () => {
+    const fetchStudios = useCallback(async () => {
         if (!userId) return;
         try {
             const { data: baseStudios, error: baseError } = await supabase
                 .from('studios')
-                .select('id, owner_id, name, description, created_at')
+                .select('id, owner_id, name, description, created_at, permit_status, permit_rejection_reason, permit_reviewed_at')
                 .eq('owner_id', userId)
                 .order('created_at', { ascending: false });
 
@@ -97,12 +126,16 @@ export default function MyStudioScreen() {
                 const reviewStats = reviewsByStudioId[studio.id] || { sum: 0, count: 0 };
                 const reviewCount = reviewStats.count;
                 const rating = reviewCount > 0 ? reviewStats.sum / reviewCount : 0;
+                const normalizedPermitStatus = normalizePermitStatus(studio.permit_status);
 
                 return {
                     ...studio,
                     images: imagesByStudioId[studio.id] || [],
                     rating,
                     review_count: reviewCount,
+                    permit_status: normalizedPermitStatus,
+                    permit_rejection_reason: studio.permit_rejection_reason || null,
+                    permit_reviewed_at: studio.permit_reviewed_at || null,
                 };
             }));
         } catch (e) {
@@ -111,15 +144,41 @@ export default function MyStudioScreen() {
             setLoading(false);
             setRefreshing(false);
         }
-    };
+    }, [userId]);
 
     useFocusEffect(
         useCallback(() => {
-            if (isAuthenticated && userId) {
+            if (!isAuthenticated || !userId) return;
+
+            fetchStudios();
+            const refreshInterval = setInterval(() => {
                 fetchStudios();
-            }
-        }, [isAuthenticated, userId])
+            }, 30000);
+
+            return () => {
+                clearInterval(refreshInterval);
+            };
+        }, [isAuthenticated, userId, refreshKey, fetchStudios])
     );
+
+    useEffect(() => {
+        if (!isAuthenticated || !userId) return;
+
+        const channel = supabase
+            .channel(`my-studio-listings:${userId}`)
+            .on(
+                'postgres_changes',
+                { event: '*', schema: 'public', table: 'studios', filter: `owner_id=eq.${userId}` },
+                () => {
+                    fetchStudios();
+                }
+            )
+            .subscribe();
+
+        return () => {
+            supabase.removeChannel(channel);
+        };
+    }, [isAuthenticated, userId, fetchStudios]);
 
     const onRefresh = () => {
         setRefreshing(true);
@@ -140,7 +199,9 @@ export default function MyStudioScreen() {
         setModalVisible(true);
     };
 
-    const isDeleteConfirmed = deleteConfirmationText.trim() === selectedName.trim();
+    const isDeleteConfirmed =
+        normalizeConfirmationInput(deleteConfirmationText) ===
+        normalizeConfirmationInput(selectedName);
 
     const handleDelete = async () => {
         if (!selectedId || !userId || deleting) return;
@@ -221,13 +282,13 @@ export default function MyStudioScreen() {
 
     return (
         <>
-            <View style={[styles.flex1, { backgroundColor: colors.background }]}>
-                <View style={[Platform.OS === 'web' && { width: '100%' }, { flex: 1 }]}>
+            <View style={[styles.flex1, { backgroundColor: pageBackground }]}>
+                <View style={[styles.pageFrame, isWebDesktop && styles.pageFrameWeb]}>
                     <Header title="My Studio" />
 
                     <ScrollView
                         showsVerticalScrollIndicator={false}
-                        contentContainerStyle={styles.scrollContent}
+                        contentContainerStyle={[styles.scrollContent, isWebDesktop && styles.scrollContentWeb]}
                         style={styles.flex1}
                         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
                     >
@@ -239,59 +300,104 @@ export default function MyStudioScreen() {
                                 <Text style={[styles.emptyText, { color: colors.textSecondary }]}>No studios found</Text>
                             </View>
                         ) : (
-                            studios.map((studio) => (
-                                <View key={studio.id} style={[styles.cardContainer, {
-                                    backgroundColor: colors.surface,
-                                    shadowColor: colors.primary,
-                                }]}>
-                                    <View style={styles.imageWrapper}>
-                                        <CachedImage
-                                            uri={(studio.images && studio.images[0]) || 'https://images.unsplash.com/photo-1598488035139-bdbb2231ce04?w=800&fit=crop'}
-                                            style={styles.cardImage}
-                                            width={800}
-                                            height={384}
-                                            quality={72}
-                                            cacheVersion={studio.updated_at || studio.created_at || studio.id}
-                                        />
-                                        <View style={[styles.activeBadge, { backgroundColor: isDark ? 'rgba(0,0,0,0.6)' : 'rgba(255,255,255,0.9)' }]}>
-                                            <Text style={[styles.activeText, { color: colors.primary }]}>Active</Text>
-                                        </View>
-                                    </View>
+                            <View style={[styles.gridWrap, isWebDesktop && styles.gridWrapWeb]}>
+                                {studios.map((studio) => {
+                                    const normalizedPermitStatus = normalizePermitStatus(studio.permit_status);
+                                    const isRejected = normalizedPermitStatus === 'rejected';
+                                    const isApproved = normalizedPermitStatus === 'approved';
+                                    const isResubmitted = normalizedPermitStatus === 'resubmitted';
 
-                                    <View style={styles.cardContent}>
-                                        <Text style={[styles.cardTitle, { color: colors.text }]}>{studio.name}</Text>
-                                        <Text style={[styles.cardDescription, { color: colors.textSecondary }]} numberOfLines={2}>
-                                            {studio.description}
-                                        </Text>
+                                    const permitStatusLabel = isRejected
+                                        ? 'Rejected'
+                                        : isResubmitted
+                                            ? 'Resubmitted'
+                                            : 'Pending Review';
 
-                                        <View style={[styles.actionRow, { borderColor: colors.border }]}>
-                                            <View style={styles.actionLeft}>
-                                                <TouchableOpacity activeOpacity={1}
-                                                    onPress={() => router.push({ pathname: '/manage_studio', params: { id: studio.id } })}
-                                                    style={[styles.manageBtn, { backgroundColor: colors.primary }]}
-                                                >
-                                                    <Ionicons name="settings-outline" size={18} color="#FFF" />
-                                                    <Text style={styles.manageBtnText}>Manage</Text>
-                                                </TouchableOpacity>
+                                    const permitBadgeBackground = isRejected
+                                        ? (isDark ? 'rgba(220,38,38,0.22)' : '#FEE2E2')
+                                        : isResubmitted
+                                            ? (isDark ? 'rgba(37,99,235,0.22)' : '#DBEAFE')
+                                            : (isDark ? 'rgba(245,158,11,0.22)' : '#FEF3C7');
 
-                                                <TouchableOpacity activeOpacity={1}
-                                                    onPress={() => router.push({ pathname: '/edit_studio', params: { id: studio.id } })}
-                                                    style={[styles.editBtn, { borderColor: colors.border }]}
-                                                >
-                                                    <Ionicons name="pencil-outline" size={20} color={colors.text} />
-                                                </TouchableOpacity>
+                                    const permitBadgeColor = isRejected
+                                        ? '#DC2626'
+                                        : isResubmitted
+                                            ? '#2563EB'
+                                            : '#B45309';
+
+                                    return (
+                                    <View key={studio.id} style={[styles.gridItem, isWebDesktop && styles.gridItemWeb]}>
+                                        <View key={studio.id} style={[styles.cardContainer, {
+                                            backgroundColor: pageCardBackground,
+                                            borderColor: borderSoft,
+                                        }, isWebDesktop && styles.webSectionCard, {
+                                            shadowColor: isWebDesktop ? '#0F172A' : colors.primary,
+                                        }]}>
+                                            <View style={[styles.imageWrapper, isWebDesktop && styles.imageWrapperWeb]}>
+                                                <CachedImage
+                                                    uri={(studio.images && studio.images[0]) || 'https://images.unsplash.com/photo-1598488035139-bdbb2231ce04?w=800&fit=crop'}
+                                                    style={styles.cardImage}
+                                                    width={800}
+                                                    height={384}
+                                                    quality={72}
+                                                    cacheVersion={studio.updated_at || studio.created_at || studio.id}
+                                                />
+                                                {!isApproved && (
+                                                    <View style={[styles.activeBadge, { backgroundColor: permitBadgeBackground }]}>
+                                                        <Text style={[styles.activeText, { color: permitBadgeColor }]}>{permitStatusLabel}</Text>
+                                                    </View>
+                                                )}
                                             </View>
 
-                                            <TouchableOpacity activeOpacity={1}
-                                                onPress={() => confirmDelete(studio.id, studio.name)}
-                                                style={styles.deleteBtn}
-                                            >
-                                                <Ionicons name="trash-outline" size={20} color="#EF4444" />
-                                            </TouchableOpacity>
+                                            <View style={styles.cardContent}>
+                                                <Text style={[styles.cardTitle, { color: colors.text }]} numberOfLines={1}>{studio.name}</Text>
+                                                <Text style={[styles.cardDescription, { color: colors.textSecondary }]} numberOfLines={2}>
+                                                    {studio.description}
+                                                </Text>
+
+                                                {isRejected && !!studio.permit_rejection_reason && (
+                                                    <Text style={styles.rejectionReasonText} numberOfLines={3}>
+                                                        Rejection reason: {studio.permit_rejection_reason}
+                                                    </Text>
+                                                )}
+
+                                                {(normalizedPermitStatus === 'pending_review' || normalizedPermitStatus === 'resubmitted') && (
+                                                    <Text style={[styles.permitHintText, { color: colors.textSecondary }]}> 
+                                                        Hidden from Home right now.
+                                                    </Text>
+                                                )}
+
+                                                <View style={[styles.actionRow, { borderColor: colors.border }]}>
+                                                    <View style={styles.actionLeft}>
+                                                        <TouchableOpacity activeOpacity={1}
+                                                            onPress={() => router.push({ pathname: '/manage_studio', params: { id: studio.id } })}
+                                                            style={[styles.manageBtn, { backgroundColor: colors.primary }]}
+                                                        >
+                                                            <Ionicons name="settings-outline" size={16} color="#FFF" />
+                                                            <Text style={styles.manageBtnText}>Manage</Text>
+                                                        </TouchableOpacity>
+
+                                                        <TouchableOpacity activeOpacity={1}
+                                                            onPress={() => router.push({ pathname: '/edit_studio', params: { id: studio.id } })}
+                                                            style={[styles.editBtn, { borderColor: colors.border }]}
+                                                        >
+                                                            <Ionicons name="pencil-outline" size={18} color={colors.text} />
+                                                        </TouchableOpacity>
+                                                    </View>
+
+                                                    <TouchableOpacity activeOpacity={1}
+                                                        onPress={() => confirmDelete(studio.id, studio.name)}
+                                                        style={styles.deleteBtn}
+                                                    >
+                                                        <Ionicons name="trash-outline" size={18} color="#EF4444" />
+                                                    </TouchableOpacity>
+                                                </View>
+                                            </View>
                                         </View>
                                     </View>
-                                </View>
-                            ))
+                                    );
+                                })}
+                            </View>
                         )}
                     </ScrollView>
 
@@ -311,6 +417,7 @@ export default function MyStudioScreen() {
                 inputPlaceholder="Type studio name"
                 inputValue={deleteConfirmationText}
                 onInputChange={setDeleteConfirmationText}
+                requiredInputValue={selectedName}
                 confirmDisabled={!isDeleteConfirmed || deleting}
             />
             <CustomAlert
@@ -329,10 +436,43 @@ const styles = StyleSheet.create({
     flex1: {
         flex: 1,
     },
+    pageFrame: {
+        flex: 1,
+        width: '100%',
+    },
+    pageFrameWeb: {
+        maxWidth: 1240,
+        width: '100%',
+        alignSelf: 'center',
+        paddingHorizontal: 20,
+        paddingTop: 12,
+    },
     scrollContent: {
-        paddingHorizontal: 24,
+        paddingHorizontal: 16,
         paddingBottom: 180,
-        paddingTop: 16,
+        paddingTop: 12,
+    },
+    scrollContentWeb: {
+        maxWidth: 1120,
+        width: '100%',
+        alignSelf: 'center',
+        paddingTop: 10,
+    },
+    gridWrap: {
+        width: '100%',
+    },
+    gridWrapWeb: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        justifyContent: 'space-between',
+    },
+    gridItem: {
+        width: '100%',
+        marginBottom: 14,
+    },
+    gridItemWeb: {
+        width: '49%',
+        marginBottom: 18,
     },
     loadingText: {
         textAlign: 'center',
@@ -349,16 +489,25 @@ const styles = StyleSheet.create({
         fontFamily: 'Poppins_400Regular',
     },
     cardContainer: {
-        marginBottom: 24,
-        borderRadius: 24,
+        borderRadius: 18,
+        borderWidth: 1,
         overflow: 'hidden',
-        shadowOffset: { width: 0, height: 8 },
+        shadowOffset: { width: 0, height: 6 },
         shadowOpacity: 0.1,
+        shadowRadius: 12,
+    },
+    webSectionCard: {
+        shadowOffset: { width: 0, height: 10 },
+        shadowOpacity: 0.08,
         shadowRadius: 16,
+        elevation: 3,
     },
     imageWrapper: {
-        height: 192,
+        height: 170,
         position: 'relative',
+    },
+    imageWrapperWeb: {
+        height: 186,
     },
     cardImage: {
         width: '100%',
@@ -377,49 +526,78 @@ const styles = StyleSheet.create({
         fontFamily: 'Poppins_600SemiBold',
     },
     cardContent: {
-        padding: 16,
+        paddingHorizontal: 14,
+        paddingVertical: 12,
     },
     cardTitle: {
         fontFamily: 'Poppins_600SemiBold',
-        fontSize: 18,
+        fontSize: 16,
         marginBottom: 4,
     },
     cardDescription: {
         fontFamily: 'Poppins_400Regular',
-        fontSize: 13,
-        lineHeight: 20,
+        fontSize: 12,
+        lineHeight: 18,
+    },
+    rejectionReasonText: {
+        marginTop: 8,
+        color: '#DC2626',
+        fontFamily: 'Poppins_500Medium',
+        fontSize: 12,
+        lineHeight: 18,
+    },
+    permitHintText: {
+        marginTop: 8,
+        fontFamily: 'Poppins_400Regular',
+        fontSize: 12,
+        lineHeight: 18,
     },
     actionRow: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
-        marginTop: 16,
+        marginTop: 12,
         borderTopWidth: 1,
-        paddingTop: 16,
+        paddingTop: 12,
     },
     actionLeft: {
         flexDirection: 'row',
-        gap: 12,
+        gap: 8,
     },
     manageBtn: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 8,
-        paddingHorizontal: 16,
-        paddingVertical: 8,
-        borderRadius: 12,
+        gap: 6,
+        paddingHorizontal: 12,
+        paddingVertical: 7,
+        borderRadius: 10,
     },
     manageBtnText: {
         fontFamily: 'Poppins_500Medium',
+        fontSize: 12,
         color: '#FFF',
     },
     editBtn: {
-        padding: 8,
+        padding: 7,
+        borderRadius: 10,
+        borderWidth: 1,
+    },
+    reapplyBtn: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
+        paddingHorizontal: 12,
+        paddingVertical: 8,
         borderRadius: 12,
         borderWidth: 1,
     },
+    reapplyBtnText: {
+        color: '#EA580C',
+        fontFamily: 'Poppins_600SemiBold',
+        fontSize: 12,
+    },
     deleteBtn: {
-        padding: 8,
+        padding: 6,
     },
 });
 

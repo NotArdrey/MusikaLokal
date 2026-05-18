@@ -1,15 +1,20 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import React, { useEffect, useState } from 'react';
-import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { supabase } from '../lib/supabase';
+import GuestSignInGate from '../src/components/GuestSignInGate';
 import Header from '../src/components/header';
 import Modal from '../src/components/modal';
 import Navbar from '../src/components/navbar';
+import ProfileAvatar from '../src/components/ProfileAvatar';
+import { useAuth } from '../src/context/AuthContext';
 import { useTheme } from '../src/context/ThemeContext';
+import { formatDashedNumericDate } from '../src/utils/friendlyDateTime';
 
 export default function AccountDetailsScreen() {
   const { colors, isDark } = useTheme();
+  const { isGuest } = useAuth();
   const [modalVisible, setModalVisible] = useState(false);
   const [profile, setProfile] = useState<any>(null);
   const [userEmail, setUserEmail] = useState<string | null>(null);
@@ -39,6 +44,31 @@ export default function AccountDetailsScreen() {
     }
   };
 
+  const getIdentitySubtitle = () => {
+    if (!profile) return 'Status unavailable';
+
+    const expiryRaw = profile?.id_document_expiry;
+    const expiryDate = expiryRaw ? new Date(expiryRaw) : null;
+    const hasValidExpiry = !!expiryDate && !Number.isNaN(expiryDate.getTime());
+    const isExpired = !!expiryDate && hasValidExpiry && expiryDate <= new Date();
+
+    if (isExpired && expiryDate) {
+      return `Expired on ${formatDashedNumericDate(expiryDate)}`;
+    }
+
+    if (profile?.is_verified) {
+      if (hasValidExpiry && expiryDate) {
+        return `Verified • Expires ${formatDashedNumericDate(expiryDate)}`;
+      }
+      return 'Verified';
+    }
+
+    const status = typeof profile?.verification_status === 'string'
+      ? profile.verification_status.replace(/_/g, ' ')
+      : '';
+    return status ? `Status: ${status}` : 'Not verified';
+  };
+
   const renderSection = (title: string, children: React.ReactNode) => (
     <View style={styles.sectionContainer}>
       <Text style={[styles.sectionHeader, { color: colors.textSecondary }]}>
@@ -59,7 +89,7 @@ export default function AccountDetailsScreen() {
     <TouchableOpacity
       onPress={onPress}
       disabled={!onPress}
-      activeOpacity={onPress ? 0.7 : 1}
+      activeOpacity={1}
       style={[
         styles.itemRow,
         !isLast && { borderBottomWidth: 1 },
@@ -76,6 +106,18 @@ export default function AccountDetailsScreen() {
       {onPress && showArrow && <Ionicons name="chevron-forward" size={20} color={colors.textSecondary} />}
     </TouchableOpacity>
   );
+
+  if (isGuest) {
+    return (
+      <View style={[styles.container, { backgroundColor: colors.background }]}>
+        <Header title="Account Details" />
+        <GuestSignInGate message="Sign in to view and manage your account details." />
+        <View style={styles.navbarContainer}>
+          <Navbar />
+        </View>
+      </View>
+    );
+  }
 
   if (loading) {
     return (
@@ -94,10 +136,11 @@ export default function AccountDetailsScreen() {
 
           <View style={styles.profileHeader}>
             <View style={[styles.avatarContainer, { borderColor: colors.card }]}>
-              <Image
-                source={{ uri: profile?.avatar_url || 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=400&fit=crop' }}
+              <ProfileAvatar
+                uri={profile?.avatar_url}
                 style={styles.avatar}
-                resizeMode="cover"
+                backgroundColor={isDark ? '#374151' : '#E5E7EB'}
+                iconColor={colors.textSecondary}
               />
             </View>
             <Text style={[styles.nameText, { color: colors.text }]}>{profile?.full_name || 'User'}</Text>
@@ -114,7 +157,8 @@ export default function AccountDetailsScreen() {
           {renderSection('Security', (
             <>
               {renderItem('Change Email', 'Update your email address', () => router.push('/change_email'), false, <Ionicons name="at-outline" size={16} color={colors.text} />)}
-              {renderItem('Change Password', 'Update your password', () => router.push('/change_password'), true, <Ionicons name="lock-closed-outline" size={16} color={colors.text} />)}
+              {renderItem('Change Password', 'Update your password', () => router.push('/change_password'), false, <Ionicons name="lock-closed-outline" size={16} color={colors.text} />)}
+              {renderItem('Identity Verification', getIdentitySubtitle(), () => router.push('/identity_verification'), true, <Ionicons name="card-outline" size={16} color={colors.text} />)}
             </>
           ))}
 
@@ -135,7 +179,7 @@ export default function AccountDetailsScreen() {
           ))}
 
           <Text style={[styles.footerText, { color: colors.textSecondary }]}>
-            Member since {profile?.created_at ? new Date(profile.created_at).toLocaleDateString() : 'Unknown'}
+            Member since {profile?.created_at ? formatDashedNumericDate(profile.created_at) : 'Unknown'}
           </Text>
 
         </ScrollView>
@@ -151,6 +195,7 @@ export default function AccountDetailsScreen() {
         title="Close Account"
         message="Are you sure you want to close your account? This action cannot be undone and you will lose all your data."
         buttonText="Close Account"
+        danger
         onConfirm={() => {
           setModalVisible(false);
           // Add close account logic

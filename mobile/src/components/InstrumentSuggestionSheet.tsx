@@ -4,7 +4,6 @@ import {
     ActivityIndicator,
     Dimensions,
     Image,
-    Modal,
     ScrollView,
     StyleSheet,
     Text,
@@ -13,6 +12,7 @@ import {
 } from 'react-native';
 import { supabase } from '../../lib/supabase';
 import { useTheme } from '../context/ThemeContext';
+import BottomModal from './BottomModal';
 import {
     EXPERIENCE_OPTIONS,
     ExperienceLevel,
@@ -21,11 +21,6 @@ import {
     PURPOSE_OPTIONS,
     SuggestionPurpose,
 } from '../types/instruments';
-
-const GROQ_REQUEST_HEADERS = (() => {
-    const key = (process.env.EXPO_PUBLIC_GROQ_API_KEY || '').trim();
-    return key ? { 'x-groq-api-key': key } : undefined;
-})();
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -55,7 +50,6 @@ export default function InstrumentSuggestionSheet({
     const [error, setError] = useState<string | null>(null);
     const [step, setStep] = useState<'preferences' | 'results'>('preferences');
     const [isAIPowered, setIsAIPowered] = useState(false);
-    const [aiProvider, setAIProvider] = useState('');
 
     // Track previous visible state to detect when modal opens
     const prevVisibleRef = useRef(visible);
@@ -71,7 +65,6 @@ export default function InstrumentSuggestionSheet({
             setSuggestions([]);
             setError(null);
             setIsAIPowered(false);
-            setAIProvider('');
         }
     }, [visible, initialGenres]);
 
@@ -91,7 +84,6 @@ export default function InstrumentSuggestionSheet({
         
         try {
             const { data, error: funcError } = await supabase.functions.invoke('instrument-suggestions', {
-                headers: GROQ_REQUEST_HEADERS,
                 body: {
                     action: 'suggest',
                     genres: selectedGenres,
@@ -107,7 +99,6 @@ export default function InstrumentSuggestionSheet({
             if (data?.suggestions) {
                 setSuggestions(data.suggestions);
                 setIsAIPowered(Boolean(data.aiPowered));
-                setAIProvider(data.aiProvider || '');
                 setStep('results');
             } else {
                 setError(data?.message || 'No suggestions found. Try different preferences.');
@@ -211,7 +202,7 @@ export default function InstrumentSuggestionSheet({
     const renderPurposeSelector = () => (
         <View style={styles.selectorContainer}>
             <Text style={[styles.sectionTitle, { color: colors.text }]}>
-                🎯 What's your purpose?
+                🎯 What&apos;s your purpose?
             </Text>
             <View style={styles.purposeGrid}>
                 {PURPOSE_OPTIONS.map(option => {
@@ -356,20 +347,20 @@ export default function InstrumentSuggestionSheet({
                         ))}
                     </View>
                     <Text style={[styles.helperText, { color: colors.textSecondary }]}>
-                        We'll suggest instruments that complement these
+                        We&apos;ll suggest instruments that complement these
                     </Text>
                 </View>
             )}
             
             {/* Get Suggestions Button */}
-            <TouchableOpacity activeOpacity={1}
+            <TouchableOpacity activeOpacity={loading || selectedGenres.length === 0 ? 1 : 0.78}
                 onPress={fetchSuggestions}
                 disabled={loading || selectedGenres.length === 0}
                 style={[
                     styles.primaryButton,
                     { 
                         backgroundColor: selectedGenres.length > 0 ? colors.primary : colors.border,
-                        opacity: loading ? 0.7 : 1,
+                        opacity: loading || selectedGenres.length === 0 ? 0.6 : 1,
                     }
                 ]}
             >
@@ -426,18 +417,18 @@ export default function InstrumentSuggestionSheet({
             </Text>
             <Text style={[styles.resultsSubtitle, { color: colors.textSecondary }]}>
                 {isAIPowered
-                    ? `Powered by ${aiProvider || 'AI'} based on your music preferences`
-                    : `Using ${aiProvider || 'local matching'} based on your music preferences`}
+                    ? 'AI-assisted suggestions based on your music preferences'
+                    : 'Smart suggestions based on your music preferences'}
             </Text>
             
             {/* Suggestion Cards */}
             {suggestions.map((suggestion, index) => renderSuggestionCard(suggestion, index))}
             
             {/* Refresh Button */}
-            <TouchableOpacity activeOpacity={1}
+            <TouchableOpacity activeOpacity={loading ? 1 : 0.78}
                 onPress={fetchSuggestions}
                 disabled={loading}
-                style={[styles.secondaryButton, { borderColor: colors.primary }]}
+                style={[styles.secondaryButton, { borderColor: colors.primary, opacity: loading ? 0.6 : 1 }]}
             >
                 {loading ? (
                     <ActivityIndicator color={colors.primary} />
@@ -454,13 +445,11 @@ export default function InstrumentSuggestionSheet({
     );
 
     return (
-        <Modal
+        <BottomModal
             visible={visible}
-            animationType="slide"
-            transparent={true}
-            onRequestClose={onClose}
+            overlayLabel="InstrumentSuggestionSheet"
+            onClose={onClose}
         >
-            <View style={styles.overlay}>
                 <View style={[styles.container, { backgroundColor: colors.background }]}>
                     {/* Header */}
                     <View style={[styles.header, { borderBottomColor: colors.border }]}>
@@ -491,8 +480,7 @@ export default function InstrumentSuggestionSheet({
                     {/* Content */}
                     {step === 'preferences' ? renderPreferencesStep() : renderResultsStep()}
                 </View>
-            </View>
-        </Modal>
+        </BottomModal>
     );
 }
 
@@ -747,10 +735,15 @@ const styles = StyleSheet.create({
         paddingHorizontal: 8,
         paddingVertical: 2,
         borderRadius: 6,
+        alignItems: 'center',
+        justifyContent: 'center',
     },
     tagText: {
         fontSize: 10,
         fontFamily: 'Poppins_500Medium',
+        lineHeight: 12,
+        includeFontPadding: false,
+        textAlignVertical: 'center',
         textTransform: 'capitalize',
     },
     errorContainer: {

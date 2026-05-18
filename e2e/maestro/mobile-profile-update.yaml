@@ -1,0 +1,38 @@
+appId: ${APP_ID}
+---
+- openLink: "musikalokal://edit_profile"
+- assertVisible:
+    id: "mobile-edit-profile-page"
+- tapOn:
+    id: "mobile-profile-contact-input"
+- eraseText: 40
+- inputText: ${E2E_PROFILE_CONTACT}
+- scrollUntilVisible:
+    element:
+      id: "mobile-profile-bio-input"
+    direction: DOWN
+- tapOn:
+    id: "mobile-profile-bio-input"
+- eraseText: 300
+- inputText: ${E2E_PROFILE_BIO}
+- hideKeyboard
+- scrollUntilVisible:
+    element:
+      id: "mobile-profile-save-button"
+    direction: DOWN
+    timeout: 60000
+    speed: 80
+    visibilityPercentage: 50
+    centerElement: true
+- tapOn:
+    id: "mobile-profile-save-button"
+- waitForAnimationToEnd:
+    timeout: 2000
+- tapOn:
+    id: "mobile-profile-save-button"
+- extendedWaitUntil:
+    visible:
+      id: "custom-alert-button-ok"
+    timeout: 60000
+- tapOn:
+    id: "custom-alert-button-ok"

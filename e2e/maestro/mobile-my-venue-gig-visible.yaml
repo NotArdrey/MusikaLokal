@@ -1,0 +1,9 @@
+appId: ${APP_ID}
+---
+- openLink: "musikalokal://my_venue"
+- scrollUntilVisible:
+    element:
+      id: ${E2E_GIG_CARD_ID}
+    direction: DOWN
+- assertVisible:
+    id: ${E2E_GIG_CARD_ID}

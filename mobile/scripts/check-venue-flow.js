@@ -113,14 +113,10 @@ function indexById(rows) {
       issues: issues.length,
     };
 
-    console.log("Summary:");
-    console.log(JSON.stringify(summary, null, 2));
 
     if (issues.length) {
-      console.log("Issues:");
-      issues.forEach((issue) => console.log(JSON.stringify(issue)));
+      issues.forEach((issue) => undefined);
     } else {
-      console.log("No issues detected in musician→venue and group→venue flows.");
     }
   } catch (error) {
     console.error(error.message || String(error));

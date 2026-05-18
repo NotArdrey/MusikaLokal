@@ -5,8 +5,16 @@ import {
     hasNavigationDestination,
     openNavigationDirections,
 } from "../../utils/navigation";
+import {
+  formatRecordingHours,
+  resolveRecordingRule,
+} from "../../utils/recordingRule";
 import CachedImage from "../CachedImage";
 import ListingMediaCarousel from "./ListingMediaCarousel";
+
+const PROMOTION_CRITERIA_PREFIX = "how to get promo:";
+const PROMOTION_MIN_HOURS_PREFIX = "minimum booking hours:";
+const PROMOTION_MIN_SPEND_PREFIX = "minimum spend:";
 
 interface StudioGigVenueAboutTabProps {
   group: any;
@@ -19,7 +27,6 @@ interface StudioGigVenueAboutTabProps {
   displayRate: string;
   labels: { aboutTitle: string };
   currentUserId: string | null;
-  calculateCompletion: () => number;
   handleProfileNavigation: () => void;
   promotions?: any[];
 }
@@ -35,15 +42,9 @@ const StudioGigVenueAboutTab = ({
   displayRate,
   labels,
   currentUserId,
-  calculateCompletion,
   handleProfileNavigation,
   promotions = [],
 }: StudioGigVenueAboutTabProps) => {
-  const parsedCompletionRate = Number(group.completion_rate);
-  const baseCompletionRate = Number.isFinite(parsedCompletionRate)
-    ? parsedCompletionRate
-    : calculateCompletion();
-  const completionRate = Math.max(0, Math.min(100, Math.round(baseCompletionRate)));
   const managerId = group.owner_id || group.organizer_id;
   const destinationText =
     group?.location || group?.address || group?.name || "Destination";
@@ -53,6 +54,30 @@ const StudioGigVenueAboutTab = ({
     destinationText,
   });
   const isStudioOrVenue = group.type === "Studio" || group.type === "Venue";
+  const normalizedStudioType =
+    typeof group?.studio_type === "string"
+      ? group.studio_type.toLowerCase()
+      : "";
+  const supportsRecordingPricing =
+    Boolean(recordingRate) || normalizedStudioType.includes("recording");
+  const supportsRecording = group.type === "Studio" && supportsRecordingPricing;
+  const recordingRule = supportsRecording
+    ? resolveRecordingRule(group?.settings)
+    : null;
+  const recordingBlockHoursLabel = recordingRule
+    ? `${formatRecordingHours(recordingRule.hoursPerBlock)} hr${recordingRule.hoursPerBlock === 1 ? "" : "s"}`
+    : "";
+  const recordingSongBlockLabel = recordingRule
+    ? `${recordingRule.songsPerBlock} song${recordingRule.songsPerBlock === 1 ? "" : "s"}`
+    : "";
+  const recordingExtraBlockLabel = recordingRule
+    ? recordingRule.songsPerBlock === 1
+      ? `Each additional song adds another ${recordingBlockHoursLabel}.`
+      : `Each additional ${recordingSongBlockLabel} adds another ${recordingBlockHoursLabel}.`
+    : "";
+  const recordingMinimumLabel = recordingRule
+    ? `${recordingBlockHoursLabel} minimum for up to ${recordingSongBlockLabel}`
+    : "";
   const isMediaCarouselType =
     group.type === "Studio" || group.type === "Venue" || group.type === "Gig";
 
@@ -65,6 +90,70 @@ const StudioGigVenueAboutTab = ({
       return p.start_date <= today && p.end_date >= today;
     });
   }, [promotions]);
+
+  const parsePositivePromotionNumber = (value: unknown): number | null => {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed) || parsed <= 0) return null;
+    return parsed;
+  };
+
+  const formatPromotionNumber = (value: number): string => {
+    if (Number.isInteger(value)) return String(value);
+    return value.toFixed(2).replace(/\.00$/, "").replace(/(\.\d*[1-9])0$/, "$1");
+  };
+
+  const extractPromotionMetadata = (promo: any) => {
+    const rawDescription: string =
+      typeof promo?.description === "string" ? promo.description : "";
+    const lines = rawDescription
+      .split(/\r?\n/)
+      .map((line: string) => line.trim())
+      .filter(Boolean);
+
+    const remainingLines: string[] = [];
+    let fallbackCriteria = "";
+    let fallbackMinimumHours: number | null = null;
+    let fallbackMinimumSpend: number | null = null;
+
+    lines.forEach((line: string) => {
+      const normalizedLine = line.toLowerCase();
+
+      if (normalizedLine.startsWith(PROMOTION_CRITERIA_PREFIX)) {
+        fallbackCriteria = line.slice(PROMOTION_CRITERIA_PREFIX.length).trim();
+        return;
+      }
+
+      if (normalizedLine.startsWith(PROMOTION_MIN_HOURS_PREFIX)) {
+        const parsed = parsePositivePromotionNumber(
+          line.slice(PROMOTION_MIN_HOURS_PREFIX.length).trim(),
+        );
+        if (parsed !== null) fallbackMinimumHours = parsed;
+        return;
+      }
+
+      if (normalizedLine.startsWith(PROMOTION_MIN_SPEND_PREFIX)) {
+        const parsed = parsePositivePromotionNumber(
+          line.slice(PROMOTION_MIN_SPEND_PREFIX.length).trim(),
+        );
+        if (parsed !== null) fallbackMinimumSpend = parsed;
+        return;
+      }
+
+      remainingLines.push(line);
+    });
+
+    return {
+      description: remainingLines.join("\n"),
+      criteria:
+        (typeof promo?.criteria === "string" ? promo.criteria.trim() : "") ||
+        fallbackCriteria,
+      minimumBookingHours:
+        parsePositivePromotionNumber(promo?.minimum_booking_hours) ??
+        fallbackMinimumHours,
+      minimumSpend:
+        parsePositivePromotionNumber(promo?.minimum_spend) ?? fallbackMinimumSpend,
+    };
+  };
   const mediaItems = useMemo(() => {
     if (!isMediaCarouselType) return [];
 
@@ -115,8 +204,7 @@ const StudioGigVenueAboutTab = ({
         label: group?.name || `${group?.type || "Listing"} location`,
         destinationText,
       });
-    } catch (error) {
-      console.log("[StudioGigVenueAboutTab] Navigation error:", error);
+    } catch {
     }
   };
 
@@ -130,7 +218,7 @@ const StudioGigVenueAboutTab = ({
         </Text>
         {canNavigate && (
           <TouchableOpacity
-            activeOpacity={0.9}
+            activeOpacity={1}
             style={{
               marginTop: 12,
               alignSelf: "flex-start",
@@ -223,7 +311,7 @@ const StudioGigVenueAboutTab = ({
         </Text>
         {canNavigate && (
           <TouchableOpacity
-            activeOpacity={0.9}
+            activeOpacity={1}
             style={{
               marginTop: 12,
               alignSelf: "flex-start",
@@ -318,7 +406,7 @@ const StudioGigVenueAboutTab = ({
           )}
         </View>
 
-        {/* Row 1: Rating + Completion — always shown */}
+        {/* Rating */}
         <View style={{ flexDirection: "row", gap: 12 }}>
           <View
             style={[
@@ -331,20 +419,9 @@ const StudioGigVenueAboutTab = ({
               {group.rating ? group.rating.toFixed(1) : "-"}
             </Text>
           </View>
-          <View
-            style={[
-              styles.statCard,
-              { backgroundColor: isDark ? "#1F2937" : "#F3F4F6", flex: 1 },
-            ]}
-          >
-            <Text style={[styles.statLabel, { color: colors.textSecondary }]}>Completion</Text>
-            <Text style={[styles.statValue, { color: colors.text }]} numberOfLines={1}>
-              {`${completionRate}%`}
-            </Text>
-          </View>
         </View>
 
-        {/* Row 2: Type + Capacity — only render row if at least one exists */}
+        {/* Type + Capacity */}
         {((group.type === "Studio" && group.studio_type) ||
           ((group.type === "Studio" || group.type === "Venue") && group.pax)) && (
           <View style={{ flexDirection: "row", gap: 12 }}>
@@ -380,6 +457,88 @@ const StudioGigVenueAboutTab = ({
             )}
           </View>
         )}
+
+        {supportsRecording && recordingRule && (
+          <View
+            style={{
+              backgroundColor: isDark ? "#111827" : "#F8FAFC",
+              borderColor: isDark ? "#374151" : "#E5E7EB",
+              borderRadius: 12,
+              borderWidth: 1,
+              gap: 12,
+              padding: 14,
+            }}
+          >
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
+              <View
+                style={{
+                  alignItems: "center",
+                  backgroundColor: isDark ? colors.primary + "22" : colors.primary + "14",
+                  borderRadius: 10,
+                  height: 40,
+                  justifyContent: "center",
+                  width: 40,
+                }}
+              >
+                <Ionicons name="time-outline" size={20} color={colors.primary} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.statLabel, { color: colors.textSecondary }]}>
+                  Recording time minimum
+                </Text>
+                <Text
+                  style={[styles.statValue, { color: colors.text }]}
+                  numberOfLines={2}
+                  adjustsFontSizeToFit
+                >
+                  {recordingMinimumLabel}
+                </Text>
+              </View>
+            </View>
+
+            <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+              {[
+                ["Minimum", recordingBlockHoursLabel],
+                ["Covers", recordingSongBlockLabel],
+                ["Rate", "Per song"],
+              ].map(([label, value]) => (
+                <View
+                  key={label}
+                  style={{
+                    backgroundColor: isDark ? "#1F2937" : "#FFFFFF",
+                    borderColor: isDark ? "#374151" : "#E5E7EB",
+                    borderRadius: 10,
+                    borderWidth: 1,
+                    flexGrow: 1,
+                    minWidth: 104,
+                    paddingHorizontal: 12,
+                    paddingVertical: 10,
+                  }}
+                >
+                  <Text style={[styles.statLabel, { color: colors.textSecondary, marginBottom: 2 }]}>
+                    {label}
+                  </Text>
+                  <Text style={[styles.statValue, { color: colors.text, fontSize: 14 }]}>
+                    {value}
+                  </Text>
+                </View>
+              ))}
+            </View>
+
+            <Text
+              style={[
+                styles.description,
+                {
+                  color: colors.textSecondary,
+                  fontSize: 12,
+                  lineHeight: 18,
+                },
+              ]}
+            >
+              Musicians can split the minimum across available dates and time slots. {recordingExtraBlockLabel}
+            </Text>
+          </View>
+        )}
       </View>
     )}
 
@@ -388,68 +547,99 @@ const StudioGigVenueAboutTab = ({
         <Text style={[styles.sectionTitle, { color: colors.text, marginBottom: 10 }]}>
           Active Promotions
         </Text>
-        {activePromotions.map((promo: any) => (
-          <View
-            key={promo.id}
-            style={{
-              backgroundColor: isDark ? "#1e1b4b" : "#EEF2FF",
-              borderWidth: 1,
-              borderColor: isDark ? "#4338ca" : colors.primary + "40",
-              borderRadius: 12,
-              padding: 14,
-              marginBottom: 8,
-            }}
-          >
-            <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 4 }}>
-              <Ionicons name="pricetag-outline" size={16} color={colors.primary} />
-              <Text
-                style={{
-                  fontFamily: "Poppins_600SemiBold",
-                  color: isDark ? "#c7d2fe" : "#3730a3",
-                  fontSize: 14,
-                }}
-              >
-                {promo.name}
-              </Text>
-            </View>
-            <Text
+        {activePromotions.map((promo: any) => {
+          const metadata = extractPromotionMetadata(promo);
+          const conditionLabels: string[] = [];
+
+          if (metadata.criteria) {
+            conditionLabels.push(`How to get promo: ${metadata.criteria}`);
+          }
+          if (metadata.minimumBookingHours !== null) {
+            conditionLabels.push(
+              `Min ${formatPromotionNumber(metadata.minimumBookingHours)} hr${
+                metadata.minimumBookingHours === 1 ? "" : "s"
+              }`,
+            );
+          }
+          if (metadata.minimumSpend !== null) {
+            conditionLabels.push(`Min spend ₱${metadata.minimumSpend.toLocaleString()}`);
+          }
+
+          return (
+            <View
+              key={promo.id}
               style={{
-                fontFamily: "Poppins_500Medium",
-                color: isDark ? "#a5b4fc" : "#4338ca",
-                fontSize: 13,
+                backgroundColor: isDark ? "#1e1b4b" : "#EEF2FF",
+                borderWidth: 1,
+                borderColor: isDark ? "#4338ca" : colors.primary + "40",
+                borderRadius: 12,
+                padding: 14,
+                marginBottom: 8,
               }}
             >
-              {promo.discount_type === "percentage"
-                ? `${promo.discount_value}% off`
-                : `₱${promo.discount_value}/hr off`}
-              {" "}on {promo.applies_to === "both" ? "all" : promo.applies_to} bookings
-            </Text>
-            {promo.description ? (
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 4 }}>
+                <Ionicons name="pricetag-outline" size={16} color={colors.primary} />
+                <Text
+                  style={{
+                    fontFamily: "Poppins_600SemiBold",
+                    color: isDark ? "#c7d2fe" : "#3730a3",
+                    fontSize: 14,
+                  }}
+                >
+                  {promo.name}
+                </Text>
+              </View>
+              {conditionLabels.length > 0 ? (
+                <Text
+                  style={{
+                    fontFamily: "Poppins_400Regular",
+                    color: isDark ? "#a5b4fc" : "#4338ca",
+                    fontSize: 11,
+                    marginBottom: 2,
+                  }}
+                >
+                  {conditionLabels.join(" • ")}
+                </Text>
+              ) : null}
+              <Text
+                style={{
+                  fontFamily: "Poppins_500Medium",
+                  color: isDark ? "#a5b4fc" : "#4338ca",
+                  fontSize: 13,
+                }}
+              >
+                {promo.discount_type === "percentage"
+                  ? `${promo.discount_value}% off`
+                  : `₱${promo.discount_value}/hr off`}
+                {" "}on {promo.applies_to === "both" ? "all" : promo.applies_to} bookings
+              </Text>
+              {metadata.description ? (
+                <Text
+                  style={{
+                    fontFamily: "Poppins_400Regular",
+                    color: isDark ? "#a5b4fc" : "#4338ca",
+                    fontSize: 12,
+                    marginTop: 2,
+                  }}
+                >
+                  {metadata.description}
+                </Text>
+              ) : null}
               <Text
                 style={{
                   fontFamily: "Poppins_400Regular",
-                  color: isDark ? "#a5b4fc" : "#4338ca",
-                  fontSize: 12,
-                  marginTop: 2,
+                  color: isDark ? "#818cf8" : "#6366f1",
+                  fontSize: 11,
+                  marginTop: 4,
                 }}
               >
-                {promo.description}
+                {promo.is_permanent
+                  ? "Always available"
+                  : `Valid: ${new Date(promo.start_date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })} – ${new Date(promo.end_date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}`}
               </Text>
-            ) : null}
-            <Text
-              style={{
-                fontFamily: "Poppins_400Regular",
-                color: isDark ? "#818cf8" : "#6366f1",
-                fontSize: 11,
-                marginTop: 4,
-              }}
-            >
-              {promo.is_permanent
-                ? "Always available"
-                : `Valid: ${new Date(promo.start_date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })} – ${new Date(promo.end_date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}`}
-            </Text>
-          </View>
-        ))}
+            </View>
+          );
+        })}
       </View>
     )}
 
@@ -495,43 +685,6 @@ const StudioGigVenueAboutTab = ({
             </View>
           </View>
 
-          <View
-            style={{
-              marginTop: 12,
-              flexDirection: "row",
-              alignItems: "center",
-              gap: 8,
-            }}
-          >
-            <View
-              style={{
-                flex: 1,
-                height: 6,
-                backgroundColor: isDark ? "#374151" : "#E5E7EB",
-                borderRadius: 3,
-                overflow: "hidden",
-              }}
-            >
-              <View
-                style={{
-                  width: `${completionRate}%`,
-                  height: "100%",
-                  backgroundColor:
-                    completionRate === 100 ? "#10B981" : colors.primary,
-                }}
-              />
-            </View>
-            <Text
-              style={{
-                fontSize: 11,
-                fontFamily: "Poppins_600SemiBold",
-                color:
-                  completionRate === 100 ? "#10B981" : colors.textSecondary,
-              }}
-            >
-              {`${completionRate}% Complete`}
-            </Text>
-          </View>
         </View>
 
         <TouchableOpacity
@@ -588,47 +741,6 @@ const StudioGigVenueAboutTab = ({
             </View>
           </View>
 
-          <View
-            style={{
-              marginTop: 12,
-              flexDirection: "row",
-              alignItems: "center",
-              gap: 8,
-            }}
-          >
-            <View
-              style={{
-                flex: 1,
-                height: 6,
-                backgroundColor: isDark ? "#374151" : "#E5E7EB",
-                borderRadius: 3,
-                overflow: "hidden",
-              }}
-            >
-              <View
-                style={{
-                  width: `${completionRate}%`,
-                  height: "100%",
-                  backgroundColor:
-                    completionRate === 100
-                      ? "#10B981"
-                      : colors.primary,
-                }}
-              />
-            </View>
-            <Text
-              style={{
-                fontSize: 11,
-                fontFamily: "Poppins_600SemiBold",
-                color:
-                  completionRate === 100
-                    ? "#10B981"
-                    : colors.textSecondary,
-              }}
-            >
-              {`${completionRate}% Complete`}
-            </Text>
-          </View>
         </View>
 
         <TouchableOpacity
@@ -646,46 +758,6 @@ const StudioGigVenueAboutTab = ({
             {managerId === currentUserId ? "Manage Profile" : "Visit Profile"}
           </Text>
         </TouchableOpacity>
-      </View>
-    )}
-
-    {group.type === "Gig" && (
-      <View
-        style={[
-          styles.dealCard,
-          {
-            backgroundColor: isDark ? "#1e293b" : "#ECFDF5",
-            borderColor: isDark ? "#064e3b" : "#10B981",
-          },
-        ]}
-      >
-        <Text
-          style={{
-            fontFamily: "Poppins_600SemiBold",
-            color: isDark ? "#6ee7b7" : "#047857",
-            marginBottom: 8,
-          }}
-        >
-          The Deal
-        </Text>
-        <Text
-          style={{
-            fontFamily: "Poppins_500Medium",
-            color: isDark ? "#d1fae5" : "#065F46",
-          }}
-        >
-          Guarantee + Door Split
-        </Text>
-        <Text
-          style={{
-            fontFamily: "Poppins_400Regular",
-            color: isDark ? "#d1fae5" : "#065F46",
-            fontSize: 13,
-            marginTop: 4,
-          }}
-        >
-          45 min set • Meal Included
-        </Text>
       </View>
     )}
 

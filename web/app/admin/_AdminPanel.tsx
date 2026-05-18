@@ -1,10 +1,10 @@
-import { Ionicons } from '@expo/vector-icons';
+﻿import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
-  Linking,
+  Image,
   Modal,
   Platform,
   ScrollView,
@@ -18,8 +18,10 @@ import {
 import { supabase } from '../../lib/supabase';
 import CustomAlert, { AlertType } from '../../src/components/CustomAlert';
 import Header from '../../src/components/header';
+import InAppMediaViewer from '../../src/components/InAppMediaViewer';
 import { useAuth } from '../../src/context/AuthContext';
 import { useTheme } from '../../src/context/ThemeContext';
+import { getFriendlyDetailEntries, getFriendlyDetailImage } from './_formatters';
 
 export type Tab = 'dashboard' | 'permits' | 'users' | 'reports' | 'audit';
 type PermitFilter = 'all' | 'pending_review' | 'approved' | 'rejected' | 'resubmitted';
@@ -38,9 +40,8 @@ type BookingIncidentFilter =
   | 'resolved_no_refund'
   | 'dismissed';
 type BookingIncidentResolution = 'resolved_refund' | 'resolved_no_refund' | 'dismissed';
-type UserRole = 'musician' | 'studio-owner' | 'venue-owner' | 'admin';
-type SubscriptionStatusOption = 'none' | 'active' | 'cancelled' | 'expired' | 'past_due';
-type UserFilter = 'all' | 'musicians' | 'studio-owner' | 'venue-owner';
+type UserRole = 'fan' | 'musician' | 'studio-owner' | 'venue-owner' | 'producer' | 'admin';
+type UserFilter = 'all' | 'fan' | 'musicians' | 'studio-owner' | 'venue-owner' | 'producer';
 type AuditEntityFilter = 'all' | 'studio' | 'gig';
 type AuditActionFilter = 'all' | 'approved' | 'rejected' | 'submitted' | 'resubmitted';
 
@@ -67,8 +68,6 @@ interface DashboardMetrics {
   resolvedIncidents: number;
   openIncidentsInRange: number;
   resolvedIncidentsInRange: number;
-  activeSubscriptions: number;
-  churnRatePercent: number;
   dau: number;
   mau: number;
   newSignups24h: number;
@@ -81,9 +80,6 @@ interface DashboardMetrics {
   dbHealthy: boolean;
   apiHealthy: boolean;
   paymongoHealthy: boolean;
-  subscriptionTierBasic: number;
-  subscriptionTierPro: number;
-  subscriptionTierOther: number;
   incidentTypeBreakdown: {
     key: string;
     label: string;
@@ -128,11 +124,15 @@ interface UserEntry {
   full_name: string;
   email: string;
   role: string;
+  contact_number?: string | null;
+  address?: string | null;
+  location?: string | null;
+  bio?: string | null;
+  skills?: string[] | null;
+  genres?: string[] | null;
   is_verified: boolean;
+  verification_status?: string | null;
   created_at: string;
-  subscription_status?: string | null;
-  subscription_expires_at?: string | null;
-  subscription_plan_id?: string | null;
 }
 
 interface UserDetailsEntry {
@@ -220,6 +220,11 @@ interface AlertState {
   type: AlertType;
   title: string;
   message: string;
+  buttons?: {
+    text: string;
+    onPress?: () => void;
+    style?: 'default' | 'cancel' | 'destructive';
+  }[];
 }
 
 interface AdminPanelProps {
@@ -256,8 +261,6 @@ const defaultMetrics: DashboardMetrics = {
   resolvedIncidents: 0,
   openIncidentsInRange: 0,
   resolvedIncidentsInRange: 0,
-  activeSubscriptions: 0,
-  churnRatePercent: 0,
   dau: 0,
   mau: 0,
   newSignups24h: 0,
@@ -270,9 +273,6 @@ const defaultMetrics: DashboardMetrics = {
   dbHealthy: false,
   apiHealthy: false,
   paymongoHealthy: false,
-  subscriptionTierBasic: 0,
-  subscriptionTierPro: 0,
-  subscriptionTierOther: 0,
   incidentTypeBreakdown: [],
   peakActivitySlots: [],
   revenueTrend: [],
@@ -441,17 +441,101 @@ const incidentStatuses: BookingIncidentFilter[] = [
   'resolved_no_refund',
   'dismissed',
 ];
-const userRoleOptions: UserRole[] = ['musician', 'studio-owner', 'venue-owner', 'admin'];
-const subscriptionStatusOptions: SubscriptionStatusOption[] = ['none', 'active', 'cancelled', 'expired', 'past_due'];
+
+const manageBookingsActionFallbacks: Record<string, string> = {
+  admin_fetch_booking_incidents: 'fetch_booking_incidents',
+  admin_resolve_booking_incident: 'resolve_booking_incident',
+};
+const userRoleOptions: UserRole[] = ['fan', 'musician', 'studio-owner', 'venue-owner', 'producer', 'admin'];
+
+const normalizeDelimitedList = (value: string) => {
+  const seen = new Set<string>();
+  const items: string[] = [];
+
+  value.split(/[,;\n]/).forEach((item) => {
+    const trimmed = item.trim();
+    const key = trimmed.toLowerCase();
+    if (!trimmed || seen.has(key)) return;
+    seen.add(key);
+    items.push(trimmed);
+  });
+
+  return items;
+};
+
+const formatListForInput = (value: unknown) => (
+  Array.isArray(value)
+    ? value.map((item) => String(item || '').trim()).filter(Boolean).join(', ')
+    : typeof value === 'string'
+      ? value
+      : ''
+);
+
+const formatRoleLabel = (role: UserRole | string) => String(role || '')
+  .split('-')
+  .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+  .join(' ');
+
 const userFilters: { value: UserFilter; label: string }[] = [
   { value: 'all', label: 'all' },
+  { value: 'fan', label: 'fans' },
   { value: 'musicians', label: 'musicians' },
   { value: 'studio-owner', label: 'studio owner' },
   { value: 'venue-owner', label: 'venue owner' },
+  { value: 'producer', label: 'producer' },
 ];
+const USER_MANAGEMENT_HIDDEN_VERIFICATION_STATUSES = new Set(['DECLINED', 'PENDING_REVIEW']);
 const auditEntityTypes: AuditEntityFilter[] = ['all', 'studio', 'gig'];
 const auditActions: AuditActionFilter[] = ['all', 'approved', 'rejected', 'submitted', 'resubmitted'];
 const REPORTS_PAGE_SIZE = 50;
+
+const getDetailsSectionIcon = (title: string) => {
+  const normalized = title.toLowerCase();
+  if (normalized.includes('account') || normalized.includes('owner') || normalized.includes('reporter')) return 'person-circle-outline';
+  if (normalized.includes('report')) return 'flag-outline';
+  if (normalized.includes('review')) return 'shield-checkmark-outline';
+  if (normalized.includes('content') || normalized.includes('item')) return 'document-text-outline';
+  return 'information-circle-outline';
+};
+
+const reportTargetLabels: Record<string, string> = {
+  group: 'Group',
+  studio: 'Studio',
+  venue: 'Studio',
+  gig: 'Gig',
+  user: 'User Profile',
+  profile: 'User Profile',
+  product: 'Marketplace Item',
+  playlist: 'Music',
+  music: 'Music',
+};
+
+const formatReportTargetType = (rawType: unknown) => {
+  const normalized = String(rawType || '').trim().toLowerCase();
+  if (!normalized) return 'Unknown';
+
+  return reportTargetLabels[normalized] || normalized.replace(/[_-]+/g, ' ').replace(/\b\w/g, (match) => match.toUpperCase());
+};
+
+const extractReportTargetName = (record?: Record<string, unknown> | null) => {
+  if (!record) return null;
+
+  const candidates = [
+    record.title,
+    record.name,
+    record.full_name,
+    record.display_name,
+    record.headline,
+  ];
+
+  for (const candidate of candidates) {
+    if (typeof candidate === 'string' && candidate.trim().length > 0) {
+      return candidate.trim();
+    }
+  }
+
+  return null;
+};
 
 const normalizeUserRole = (rawRole: unknown): UserRole => {
   const normalized = String(rawRole || '').trim().toLowerCase();
@@ -463,51 +547,9 @@ const normalizeUserRole = (rawRole: unknown): UserRole => {
   return userRoleOptions.includes(normalized as UserRole) ? (normalized as UserRole) : 'musician';
 };
 
-const normalizeSubscriptionStatus = (rawStatus: unknown): SubscriptionStatusOption => {
-  const normalized = String(rawStatus || '').trim().toLowerCase() as SubscriptionStatusOption;
-  return subscriptionStatusOptions.includes(normalized) ? normalized : 'none';
-};
-
-const toDateTimeLocalValue = (value?: string | null) => {
-  if (!value) return '';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return '';
-
-  // Convert UTC timestamp to local datetime-local compatible text.
-  const timezoneOffsetMs = date.getTimezoneOffset() * 60 * 1000;
-  return new Date(date.getTime() - timezoneOffsetMs).toISOString().slice(0, 16);
-};
-
-const formatDetailLabel = (rawKey: string) => {
-  const withSpaces = rawKey.replace(/_/g, ' ').trim();
-  if (!withSpaces) return 'Field';
-
-  return withSpaces
-    .split(' ')
-    .map((part) => {
-      if (!part) return part;
-      return part.charAt(0).toUpperCase() + part.slice(1);
-    })
-    .join(' ');
-};
-
-const formatDetailValue = (value: unknown) => {
-  if (value === null || value === undefined) return '-';
-
-  if (typeof value === 'boolean') {
-    return value ? 'Yes' : 'No';
-  }
-
-  if (typeof value === 'object') {
-    try {
-      return JSON.stringify(value, null, 2);
-    } catch {
-      return String(value);
-    }
-  }
-
-  const text = String(value).trim();
-  return text || '-';
+const isVisibleInUserManagement = (user: UserEntry) => {
+  const verificationStatus = String(user.verification_status || '').trim().toUpperCase();
+  return !USER_MANAGEMENT_HIDDEN_VERIFICATION_STATUSES.has(verificationStatus);
 };
 
 export default function AdminPanel({ initialTab, children }: AdminPanelProps) {
@@ -565,14 +607,18 @@ export default function AdminPanel({ initialTab, children }: AdminPanelProps) {
   const [editingUserId, setEditingUserId] = useState<string | null>(null);
   const [userFormFullName, setUserFormFullName] = useState('');
   const [userFormEmail, setUserFormEmail] = useState('');
-  const [userFormRole, setUserFormRole] = useState<UserRole>('musician');
+  const [userFormRole, setUserFormRole] = useState<UserRole>('fan');
+  const [userFormContactNumber, setUserFormContactNumber] = useState('');
+  const [userFormAddress, setUserFormAddress] = useState('');
+  const [userFormSkills, setUserFormSkills] = useState('');
+  const [userFormGenres, setUserFormGenres] = useState('');
+  const [userFormBio, setUserFormBio] = useState('');
   const [userFormPassword, setUserFormPassword] = useState('');
+  const [userFormConfirmPassword, setUserFormConfirmPassword] = useState('');
   const [userFormIsVerified, setUserFormIsVerified] = useState(false);
   const [userFormEmailConfirmed, setUserFormEmailConfirmed] = useState(false);
-  const [userFormSubscriptionStatus, setUserFormSubscriptionStatus] = useState<SubscriptionStatusOption>('none');
-  const [userFormSubscriptionExpiresAt, setUserFormSubscriptionExpiresAt] = useState('');
-  const [userFormSubscriptionPlanId, setUserFormSubscriptionPlanId] = useState('');
   const [userFormSubmitting, setUserFormSubmitting] = useState(false);
+  const [userFormSubmitAttempted, setUserFormSubmitAttempted] = useState(false);
 
   const [userDetailsTarget, setUserDetailsTarget] = useState<UserDetailsEntry | null>(null);
   const [reportDetailsTarget, setReportDetailsTarget] = useState<ReportDetailsEntry | null>(null);
@@ -592,6 +638,7 @@ export default function AdminPanel({ initialTab, children }: AdminPanelProps) {
   const [rejectReason, setRejectReason] = useState('');
   const [adminNotes, setAdminNotes] = useState('');
   const [reviewSubmitting, setReviewSubmitting] = useState(false);
+  const [mediaPreview, setMediaPreview] = useState<{ uri: string; title: string } | null>(null);
 
   const [alertState, setAlertState] = useState<AlertState>({
     visible: false,
@@ -602,9 +649,55 @@ export default function AdminPanel({ initialTab, children }: AdminPanelProps) {
 
   const showInlineTabNav = !(Platform.OS === 'web' && width >= 768);
 
+  const userFormErrors = useMemo(() => {
+    const errors: Record<string, string> = {};
+    const email = userFormEmail.trim();
+    const password = userFormPassword.trim();
+
+    if (!userFormFullName.trim()) {
+      errors.fullName = 'Full name is required.';
+    }
+
+    if (!email) {
+      errors.email = 'Email address is required.';
+    } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      errors.email = 'Enter a valid email address.';
+    }
+
+    if (userModalMode === 'create') {
+      if (password.length < 6) {
+        errors.password = 'Password must be at least 6 characters.';
+      }
+
+      if (userFormPassword !== userFormConfirmPassword) {
+        errors.confirmPassword = 'Passwords do not match.';
+      }
+    }
+
+    return errors;
+  }, [
+    userFormEmail,
+    userFormFullName,
+    userFormPassword,
+    userFormConfirmPassword,
+    userModalMode,
+  ]);
+
+  const userFormHasErrors = Object.keys(userFormErrors).length > 0;
+
   const showAlert = useCallback((type: AlertType, title: string, message: string) => {
-    setAlertState({ visible: true, type, title, message });
+    setAlertState({ visible: true, type, title, message, buttons: undefined });
   }, []);
+
+  const openMediaPreview = useCallback((url?: string | null, title = 'Uploaded file') => {
+    const normalized = String(url || '').trim();
+    if (!normalized) {
+      showAlert('warning', 'File unavailable', 'No uploaded file was found for this item.');
+      return;
+    }
+
+    setMediaPreview({ uri: normalized, title });
+  }, [showAlert]);
 
   const handleTabChange = useCallback((nextTab: Tab) => {
     if (nextTab === tab) return;
@@ -685,8 +778,6 @@ export default function AdminPanel({ initialTab, children }: AdminPanelProps) {
       resolvedIncidents: Number(data?.resolvedIncidents || 0),
       openIncidentsInRange: Number(data?.openIncidentsInRange || 0),
       resolvedIncidentsInRange: Number(data?.resolvedIncidentsInRange || 0),
-      activeSubscriptions: Number(data?.activeSubscriptions || 0),
-      churnRatePercent: Number(data?.churnRatePercent || 0),
       dau: Number(data?.dau || 0),
       mau: Number(data?.mau || 0),
       newSignups24h: Number(data?.newSignups24h || 0),
@@ -699,9 +790,6 @@ export default function AdminPanel({ initialTab, children }: AdminPanelProps) {
       dbHealthy: Boolean(data?.dbHealthy),
       apiHealthy: Boolean(data?.apiHealthy),
       paymongoHealthy: Boolean(data?.paymongoHealthy),
-      subscriptionTierBasic: Number(data?.subscriptionTierBasic || 0),
-      subscriptionTierPro: Number(data?.subscriptionTierPro || 0),
-      subscriptionTierOther: Number(data?.subscriptionTierOther || 0),
       incidentTypeBreakdown,
       peakActivitySlots,
       revenueTrend,
@@ -759,14 +847,37 @@ export default function AdminPanel({ initialTab, children }: AdminPanelProps) {
   );
 
   const invokeManageBookingsAction = useCallback(async (payload: Record<string, unknown>) => {
-    const { data, error } = await supabase.functions.invoke<any>('manage-bookings', {
-      body: payload,
-    });
+    const invokeAction = async (requestPayload: Record<string, unknown>) => {
+      const { data, error } = await supabase.functions.invoke<any>('manage-bookings', {
+        body: requestPayload,
+      });
 
-    if (error) throw error;
-    if (data?.error) throw new Error(String(data.error));
+      if (error) throw error;
+      if (data?.error) throw new Error(String(data.error));
 
-    return data;
+      return data;
+    };
+
+    const action = String(payload?.action || '');
+
+    try {
+      return await invokeAction(payload);
+    } catch (primaryError) {
+      const fallbackAction = manageBookingsActionFallbacks[action];
+      if (!fallbackAction) {
+        throw primaryError;
+      }
+
+      const primaryMessage = await getErrorMessage(primaryError, 'Unable to process request.');
+      if (!isUnsupportedActionMessage(primaryMessage, action)) {
+        throw primaryError;
+      }
+
+      return invokeAction({
+        ...payload,
+        action: fallbackAction,
+      });
+    }
   }, []);
 
   const fetchUsers = useCallback(async () => {
@@ -778,7 +889,9 @@ export default function AdminPanel({ initialTab, children }: AdminPanelProps) {
         limit: 300,
       });
 
-      const items = Array.isArray(data?.items) ? data.items : [];
+      const items = Array.isArray(data?.items)
+        ? data.items.filter(isVisibleInUserManagement)
+        : [];
       setUsers(items);
       console.log('[AdminPanel][Users] Fetch success', {
         total: items.length,
@@ -859,16 +972,12 @@ export default function AdminPanel({ initialTab, children }: AdminPanelProps) {
   const fetchIncidents = useCallback(async () => {
     setIncidentsLoading(true);
     try {
-      const { data, error } = await supabase.functions.invoke<any>('manage-bookings', {
-        body: {
-          action: 'admin_fetch_booking_incidents',
-          statusFilter: incidentFilter,
-          limit: 100,
-        },
+      const data = await invokeManageBookingsAction({
+        action: 'admin_fetch_booking_incidents',
+        statusFilter: incidentFilter,
+        limit: 100,
       });
 
-      if (error) throw error;
-      if (data?.error) throw new Error(String(data.error));
       setIncidents(Array.isArray(data?.items) ? data.items : []);
     } catch (error) {
       const message = await getErrorMessage(error, 'Unable to fetch incidents.');
@@ -876,7 +985,7 @@ export default function AdminPanel({ initialTab, children }: AdminPanelProps) {
     } finally {
       setIncidentsLoading(false);
     }
-  }, [incidentFilter, showAlert]);
+  }, [incidentFilter, showAlert, invokeManageBookingsAction]);
 
   const mapAuditRows = useCallback(async (rows: any[]) => {
     const normalizedRows = Array.isArray(rows) ? rows : [];
@@ -1248,17 +1357,12 @@ export default function AdminPanel({ initialTab, children }: AdminPanelProps) {
     async (incidentId: string, resolution: BookingIncidentResolution, adminResolutionNotes = '') => {
       setIncidentActionLoadingId(incidentId);
       try {
-        const { data, error } = await supabase.functions.invoke<any>('manage-bookings', {
-          body: {
-            action: 'admin_resolve_booking_incident',
-            incident_id: incidentId,
-            resolution,
-            admin_notes: adminResolutionNotes.trim() || null,
-          },
+        await invokeManageBookingsAction({
+          action: 'admin_resolve_booking_incident',
+          incident_id: incidentId,
+          resolution,
+          admin_notes: adminResolutionNotes.trim() || null,
         });
-
-        if (error) throw error;
-        if (data?.error) throw new Error(String(data.error));
 
         showAlert('success', 'Incident updated', `Incident marked as ${resolution.replace(/_/g, ' ')}.`);
         await fetchIncidents();
@@ -1271,7 +1375,7 @@ export default function AdminPanel({ initialTab, children }: AdminPanelProps) {
         setIncidentActionLoadingId(null);
       }
     },
-    [fetchIncidents, showAlert],
+    [fetchIncidents, showAlert, invokeManageBookingsAction],
   );
 
   const openIncidentResolutionModal = useCallback(
@@ -1314,13 +1418,17 @@ export default function AdminPanel({ initialTab, children }: AdminPanelProps) {
   const resetUserForm = useCallback(() => {
     setUserFormFullName('');
     setUserFormEmail('');
-    setUserFormRole('musician');
+    setUserFormRole('fan');
+    setUserFormContactNumber('');
+    setUserFormAddress('');
+    setUserFormSkills('');
+    setUserFormGenres('');
+    setUserFormBio('');
     setUserFormPassword('');
+    setUserFormConfirmPassword('');
     setUserFormIsVerified(false);
     setUserFormEmailConfirmed(false);
-    setUserFormSubscriptionStatus('none');
-    setUserFormSubscriptionExpiresAt('');
-    setUserFormSubscriptionPlanId('');
+    setUserFormSubmitAttempted(false);
   }, []);
 
   const openCreateUserModal = useCallback(() => {
@@ -1336,12 +1444,15 @@ export default function AdminPanel({ initialTab, children }: AdminPanelProps) {
     setUserFormFullName(targetUser.full_name || '');
     setUserFormEmail(targetUser.email || '');
     setUserFormRole(normalizeUserRole(targetUser.role));
+    setUserFormContactNumber(targetUser.contact_number || '');
+    setUserFormAddress(targetUser.address || targetUser.location || '');
+    setUserFormSkills(formatListForInput(targetUser.skills));
+    setUserFormGenres(formatListForInput(targetUser.genres));
+    setUserFormBio(targetUser.bio || '');
     setUserFormPassword('');
+    setUserFormConfirmPassword('');
     setUserFormIsVerified(Boolean(targetUser.is_verified));
     setUserFormEmailConfirmed(false);
-    setUserFormSubscriptionStatus(normalizeSubscriptionStatus(targetUser.subscription_status));
-    setUserFormSubscriptionExpiresAt(toDateTimeLocalValue(targetUser.subscription_expires_at));
-    setUserFormSubscriptionPlanId(String(targetUser.subscription_plan_id || '').trim());
     setUserModalVisible(true);
   }, []);
 
@@ -1422,6 +1533,7 @@ export default function AdminPanel({ initialTab, children }: AdminPanelProps) {
     if (userFormSubmitting) return;
     setUserModalVisible(false);
     setEditingUserId(null);
+    setUserFormSubmitAttempted(false);
   }, [userFormSubmitting]);
 
   const closeUserDetailsModal = useCallback(() => {
@@ -1446,32 +1558,25 @@ export default function AdminPanel({ initialTab, children }: AdminPanelProps) {
   const reportDetailsOwnerLoadingKey = 'report-details-owner';
 
   const submitUserForm = useCallback(async () => {
+    setUserFormSubmitAttempted(true);
+
     const email = userFormEmail.trim().toLowerCase();
     const fullName = userFormFullName.trim();
-    const shouldClearSubscription = userFormSubscriptionStatus === 'none';
-    const subscriptionPlanId = shouldClearSubscription ? null : (userFormSubscriptionPlanId.trim() || null);
-    let subscriptionExpiresAt: string | null = null;
+    const contactNumber = userFormContactNumber.trim();
+    const address = userFormAddress.trim();
+    const bio = userFormBio.trim();
+    const skills = normalizeDelimitedList(userFormSkills);
+    const genres = normalizeDelimitedList(userFormGenres);
 
-    if (!shouldClearSubscription) {
-      const rawExpiry = userFormSubscriptionExpiresAt.trim();
-      if (rawExpiry) {
-        const parsedExpiry = new Date(rawExpiry);
-        if (Number.isNaN(parsedExpiry.getTime())) {
-          showAlert('warning', 'Invalid expiration date', 'Use a valid date/time for subscription expiration.');
-          return;
-        }
-
-        subscriptionExpiresAt = parsedExpiry.toISOString();
-      }
-    }
-
-    if (!email) {
-      showAlert('warning', 'Email required', 'Please provide an email address.');
-      return;
-    }
-
-    if (userModalMode === 'create' && userFormPassword.trim().length < 8) {
-      showAlert('warning', 'Weak password', 'Password must be at least 8 characters long.');
+    if (userFormHasErrors) {
+      const missingFields = Object.values(userFormErrors);
+      showAlert(
+        'warning',
+        'Check required fields',
+        missingFields.length > 0
+          ? missingFields.join(' ')
+          : 'Please complete the highlighted fields before saving.',
+      );
       return;
     }
 
@@ -1484,11 +1589,16 @@ export default function AdminPanel({ initialTab, children }: AdminPanelProps) {
           password: userFormPassword,
           fullName,
           role: userFormRole,
+          contactNumber,
+          address,
+          skills,
+          genres,
+          bio,
           isVerified: userFormIsVerified,
           emailConfirmed: userFormEmailConfirmed,
         });
 
-        showAlert('success', 'User created', 'The account was created successfully.');
+        showAlert('success', 'User created', `${fullName} was created as ${formatRoleLabel(userFormRole)}.`);
       } else {
         if (!editingUserId) {
           throw new Error('Missing user id for update.');
@@ -1500,13 +1610,15 @@ export default function AdminPanel({ initialTab, children }: AdminPanelProps) {
           email,
           fullName,
           role: userFormRole,
+          contactNumber,
+          address,
+          skills,
+          genres,
+          bio,
           isVerified: userFormIsVerified,
-          subscriptionStatus: shouldClearSubscription ? null : userFormSubscriptionStatus,
-          subscriptionExpiresAt,
-          subscriptionPlanId,
         });
 
-        showAlert('success', 'User updated', 'User details have been updated.');
+        showAlert('success', 'User updated', `${fullName}'s account and profile details were saved.`);
       }
 
       setUserModalVisible(false);
@@ -1522,20 +1634,24 @@ export default function AdminPanel({ initialTab, children }: AdminPanelProps) {
   }, [
     userFormEmail,
     userFormFullName,
+    userFormContactNumber,
+    userFormAddress,
+    userFormSkills,
+    userFormGenres,
+    userFormBio,
     userModalMode,
     userFormPassword,
     userFormRole,
     userFormIsVerified,
     userFormEmailConfirmed,
-    userFormSubscriptionStatus,
-    userFormSubscriptionExpiresAt,
-    userFormSubscriptionPlanId,
     editingUserId,
     showAlert,
     resetUserForm,
     fetchUsers,
     refreshMetrics,
     invokeAdminUsersManagement,
+    userFormErrors,
+    userFormHasErrors,
   ]);
 
   const deleteUser = useCallback(
@@ -1545,32 +1661,55 @@ export default function AdminPanel({ initialTab, children }: AdminPanelProps) {
         return;
       }
 
+      const message = `Are you sure you want to delete ${targetUser.full_name || targetUser.email}? This cannot be undone.`;
+      const performDelete = async () => {
+        setUserActionLoadingId(targetUser.id);
+        try {
+          await invokeAdminUsersManagement({
+            action: 'delete_user',
+            userId: targetUser.id,
+          });
+
+          showAlert('success', 'User deleted', 'The user account has been removed.');
+          await Promise.all([fetchUsers(), refreshMetrics()]);
+        } catch (error) {
+          const message = await getErrorMessage(error, 'Unable to delete this user.');
+          showAlert('error', 'Failed to delete user', message);
+        } finally {
+          setUserActionLoadingId(null);
+        }
+      };
+
+      if (Platform.OS === 'web') {
+        setAlertState({
+          visible: true,
+          type: 'warning',
+          title: 'Delete user',
+          message,
+          buttons: [
+            { text: 'Cancel', style: 'cancel' },
+            {
+              text: 'Delete',
+              style: 'destructive',
+              onPress: () => {
+                void performDelete();
+              },
+            },
+          ],
+        });
+        return;
+      }
+
       Alert.alert(
         'Delete user',
-        `Are you sure you want to delete ${targetUser.full_name || targetUser.email}? This cannot be undone.`,
+        message,
         [
           { text: 'Cancel', style: 'cancel' },
           {
             text: 'Delete',
             style: 'destructive',
             onPress: () => {
-              void (async () => {
-                setUserActionLoadingId(targetUser.id);
-                try {
-                  await invokeAdminUsersManagement({
-                    action: 'delete_user',
-                    userId: targetUser.id,
-                  });
-
-                  showAlert('success', 'User deleted', 'The user account has been removed.');
-                  await Promise.all([fetchUsers(), refreshMetrics()]);
-                } catch (error) {
-                  const message = await getErrorMessage(error, 'Unable to delete this user.');
-                  showAlert('error', 'Failed to delete user', message);
-                } finally {
-                  setUserActionLoadingId(null);
-                }
-              })();
+              void performDelete();
             },
           },
         ],
@@ -1642,6 +1781,8 @@ export default function AdminPanel({ initialTab, children }: AdminPanelProps) {
 
   const filteredUsers = useMemo(() => {
     const roleFiltered = users.filter((item) => {
+      if (!isVisibleInUserManagement(item)) return false;
+
       const role = String(item.role || '').trim().toLowerCase();
 
       if (userFilter === 'all') return true;
@@ -1720,25 +1861,6 @@ export default function AdminPanel({ initialTab, children }: AdminPanelProps) {
     return metrics.incidentTypeBreakdown.filter((row) => row.category === incidentTypeFilter);
   }, [metrics.incidentTypeBreakdown, incidentTypeFilter]);
 
-  const subscriptionTierTotal = useMemo(() => {
-    return metrics.subscriptionTierBasic + metrics.subscriptionTierPro + metrics.subscriptionTierOther;
-  }, [metrics.subscriptionTierBasic, metrics.subscriptionTierPro, metrics.subscriptionTierOther]);
-
-  const basicTierPercent = useMemo(() => {
-    if (!subscriptionTierTotal) return 0;
-    return (metrics.subscriptionTierBasic / subscriptionTierTotal) * 100;
-  }, [metrics.subscriptionTierBasic, subscriptionTierTotal]);
-
-  const proTierPercent = useMemo(() => {
-    if (!subscriptionTierTotal) return 0;
-    return (metrics.subscriptionTierPro / subscriptionTierTotal) * 100;
-  }, [metrics.subscriptionTierPro, subscriptionTierTotal]);
-
-  const otherTierPercent = useMemo(() => {
-    if (!subscriptionTierTotal) return 0;
-    return (metrics.subscriptionTierOther / subscriptionTierTotal) * 100;
-  }, [metrics.subscriptionTierOther, subscriptionTierTotal]);
-
   const peakActivityMaxCount = useMemo(() => {
     if (!metrics.peakActivitySlots.length) return 1;
     return Math.max(...metrics.peakActivitySlots.map((slot) => Number(slot.count || 0)), 1);
@@ -1779,39 +1901,90 @@ export default function AdminPanel({ initialTab, children }: AdminPanelProps) {
   }, [reviewSubmitting]);
 
   const renderDetailsSection = useCallback((title: string, details: Record<string, unknown> | null, emptyText: string) => {
-    const hiddenDetailKeys = new Set(['auth', 'interest_vector', 'interestVector']);
-    const entries = Object.entries(details || {})
-      .filter(([key]) => !hiddenDetailKeys.has(key))
-      .sort(([a], [b]) => a.localeCompare(b));
+    const entries = getFriendlyDetailEntries(details);
+    const imageUrl = getFriendlyDetailImage(details);
+    const highlightEntries = entries.slice(0, 2);
+    const supportingEntries = entries.slice(2);
+    const sectionIcon = getDetailsSectionIcon(title);
 
     return (
       <View
         style={[
           styles.detailsSection,
           {
-            backgroundColor: colors.inputBackground,
+            backgroundColor: isDark ? '#0F172A' : '#FFFFFF',
             borderColor: colors.border,
           },
         ]}
       >
-        <Text style={[styles.detailsSectionTitle, { color: colors.text }]}>{title}</Text>
+        <View style={styles.detailsSectionHeader}>
+          <View style={[styles.detailsSectionIcon, { backgroundColor: `${colors.primary}18` }]}>
+            <Ionicons name={sectionIcon as any} size={18} color={colors.primary} />
+          </View>
+          <View style={styles.detailsSectionHeaderCopy}>
+            <Text style={[styles.detailsSectionTitle, { color: colors.text }]}>{title}</Text>
+            <Text style={[styles.detailsSectionMeta, { color: colors.textSecondary }]}>
+              {entries.length > 0 ? `${entries.length} visible details` : 'Nothing to review yet'}
+            </Text>
+          </View>
+          {imageUrl ? (
+            <Image
+              source={{ uri: imageUrl }}
+              resizeMode="cover"
+              style={[styles.detailsSectionImage, { borderColor: colors.border }]}
+            />
+          ) : null}
+        </View>
         {entries.length === 0 ? (
           <Text style={[styles.detailsEmptyText, { color: colors.textSecondary }]}>{emptyText}</Text>
         ) : (
-          <View style={styles.detailsRows}>
-            {entries.map(([key, value]) => (
-              <View key={`${title}-${key}`} style={styles.detailRow}>
-                <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>{formatDetailLabel(key)}</Text>
-                <Text selectable style={[styles.detailValue, { color: colors.text }]}>
-                  {formatDetailValue(value)}
-                </Text>
+          <>
+            <View style={styles.detailHighlightGrid}>
+              {highlightEntries.map((entry) => (
+                <View
+                  key={`${title}-${entry.key}-highlight`}
+                  style={[
+                    styles.detailHighlightCard,
+                    {
+                      backgroundColor: isDark ? '#111827' : '#F8FAFC',
+                      borderColor: colors.border,
+                    },
+                  ]}
+                >
+                  <Text style={[styles.detailHighlightLabel, { color: colors.textSecondary }]}>{entry.label}</Text>
+                  <Text selectable style={[styles.detailHighlightValue, { color: colors.text }]}>
+                    {entry.value}
+                  </Text>
+                </View>
+              ))}
+            </View>
+
+            {supportingEntries.length > 0 && (
+              <View style={styles.detailsRows}>
+                {supportingEntries.map((entry) => (
+                  <View
+                    key={`${title}-${entry.key}`}
+                    style={[
+                      styles.detailRow,
+                      {
+                        backgroundColor: isDark ? '#111827' : '#F8FAFC',
+                        borderColor: colors.border,
+                      },
+                    ]}
+                  >
+                    <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>{entry.label}</Text>
+                    <Text selectable style={[styles.detailValue, { color: colors.text }]}>
+                      {entry.value}
+                    </Text>
+                  </View>
+                ))}
               </View>
-            ))}
-          </View>
+            )}
+          </>
         )}
       </View>
     );
-  }, [colors.border, colors.inputBackground, colors.text, colors.textSecondary]);
+  }, [colors.border, colors.primary, colors.text, colors.textSecondary, isDark]);
 
   const useExternalSections = Boolean(children);
 
@@ -1847,10 +2020,6 @@ export default function AdminPanel({ initialTab, children }: AdminPanelProps) {
     selectedRevenueValue,
     revenueTrendRows,
     revenueTrendMax,
-    subscriptionTierTotal,
-    basicTierPercent,
-    proTierPercent,
-    otherTierPercent,
     dashboardIncidentRows,
     peakActivityMaxCount,
     permitSearch,
@@ -2002,7 +2171,7 @@ export default function AdminPanel({ initialTab, children }: AdminPanelProps) {
                   const isActive = dashboardDateRange === r;
                   const labels = { '7d': 'Last 7 Days', '30d': 'Last 30 Days', 'all': 'All Time' };
                   return (
-                    <TouchableOpacity
+                    <TouchableOpacity activeOpacity={1}
                       key={r}
                       onPress={() => setDashboardDateRange(r)}
                       style={[styles.filterChip, { backgroundColor: isActive ? colors.primary : colors.card, borderColor: isActive ? colors.primary : colors.border }]}
@@ -2038,21 +2207,6 @@ export default function AdminPanel({ initialTab, children }: AdminPanelProps) {
                   <View style={styles.badgeGreen}><Text style={styles.badgeTextGreen}>+{metrics.newSignups24h} new signups (24h)</Text></View>
                 </View>
                 <Text style={[styles.pulseSubtitle, { color: colors.textSecondary, marginTop: 8 }]}>DAU: {metrics.dau} | MAU: {metrics.mau}</Text>
-              </View>
-
-              <View style={[styles.pulseCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
-                <View style={styles.pulseHeader}>
-                  <Text style={[styles.pulseTitle, { color: colors.textSecondary }]}>Subscriptions Health</Text>
-                  <Ionicons name="star-outline" size={20} color={colors.primary} />
-                </View>
-                <View style={styles.pulseRow}>
-                  <Text style={[styles.pulseValueMain, { color: colors.text }]}>{metrics.activeSubscriptions}</Text>
-                </View>
-                <View style={{ flexDirection: 'row', gap: 8, marginTop: 12 }}>
-                  <View style={styles.badgeGreen}><Text style={styles.badgeTextGreen}>Active subscribers</Text></View>
-                  <View style={styles.badgeRed}><Text style={styles.badgeTextRed}>Churn {formatPercent(metrics.churnRatePercent)}</Text></View>
-                </View>
-                <Text style={[styles.pulseSubtitle, { color: colors.textSecondary, marginTop: 8 }]}>Tier base tracked from active profiles</Text>
               </View>
 
               <View style={[styles.pulseCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
@@ -2101,10 +2255,10 @@ export default function AdminPanel({ initialTab, children }: AdminPanelProps) {
                     <Text style={[styles.panelSubtitle, { color: colors.textSecondary, marginBottom: 0 }]}>{dashboardDateRangeLabel} real payment aggregates</Text>
                   </View>
                   <View style={{ flexDirection: 'row', borderRadius: 8, borderWidth: 1, borderColor: colors.border, overflow: 'hidden' }}>
-                    <TouchableOpacity onPress={() => setRevenueFilter('gross')} style={{ paddingHorizontal: 12, paddingVertical: 6, backgroundColor: revenueFilter === 'gross' ? colors.primary : 'transparent' }}>
+                    <TouchableOpacity activeOpacity={1} onPress={() => setRevenueFilter('gross')} style={{ paddingHorizontal: 12, paddingVertical: 6, backgroundColor: revenueFilter === 'gross' ? colors.primary : 'transparent' }}>
                       <Text style={{ fontSize: 11, color: revenueFilter === 'gross' ? '#fff' : colors.textSecondary }}>Gross</Text>
                     </TouchableOpacity>
-                    <TouchableOpacity onPress={() => setRevenueFilter('net')} style={{ paddingHorizontal: 12, paddingVertical: 6, backgroundColor: revenueFilter === 'net' ? colors.primary : 'transparent' }}>
+                    <TouchableOpacity activeOpacity={1} onPress={() => setRevenueFilter('net')} style={{ paddingHorizontal: 12, paddingVertical: 6, backgroundColor: revenueFilter === 'net' ? colors.primary : 'transparent' }}>
                       <Text style={{ fontSize: 11, color: revenueFilter === 'net' ? '#fff' : colors.textSecondary }}>Net</Text>
                     </TouchableOpacity>
                   </View>
@@ -2145,45 +2299,6 @@ export default function AdminPanel({ initialTab, children }: AdminPanelProps) {
                 </View>
               </View>
 
-              <View style={[styles.dataEnginePanel, styles.dataEnginePanelRight, { backgroundColor: colors.card, borderColor: colors.border, flex: Platform.OS === 'web' ? 3 : 1 }]}>
-                <Text style={[styles.panelTitle, { color: colors.text }]}>Subscription Tier Split</Text>
-                <Text style={[styles.panelSubtitle, { color: colors.textSecondary, marginBottom: -10 }]}>Active subscriptions by plan ({dashboardDateRangeLabel})</Text>
-                <View style={styles.subscriptionStackWrapper}>
-                  {subscriptionTierTotal === 0 ? (
-                    <Text style={[styles.emptyText, { color: colors.textSecondary, textAlign: 'left', paddingVertical: 8 }]}>No active subscriptions in this date range.</Text>
-                  ) : (
-                    <View style={[styles.subscriptionStackBar, { backgroundColor: isDark ? '#1E293B' : '#E2E8F0' }]}>
-                      {metrics.subscriptionTierBasic > 0 && (
-                        <View style={[styles.subscriptionStackSegment, { flex: basicTierPercent, backgroundColor: colors.primary }]} />
-                      )}
-                      {metrics.subscriptionTierPro > 0 && (
-                        <View style={[styles.subscriptionStackSegment, { flex: proTierPercent, backgroundColor: '#6366f1' }]} />
-                      )}
-                      {metrics.subscriptionTierOther > 0 && (
-                        <View style={[styles.subscriptionStackSegment, { flex: otherTierPercent, backgroundColor: '#f59e0b' }]} />
-                      )}
-                    </View>
-                  )}
-                </View>
-
-                <View style={styles.chartLegendVertical}>
-                  <View style={styles.legendItem}>
-                    <View style={[styles.legendDot, { backgroundColor: colors.primary }]} />
-                    <Text style={[styles.legendText, { color: colors.textSecondary }]}>Basic: {metrics.subscriptionTierBasic} ({formatPercent(basicTierPercent)})</Text>
-                  </View>
-                  <View style={styles.legendItem}>
-                    <View style={[styles.legendDot, { backgroundColor: '#6366f1' }]} />
-                    <Text style={[styles.legendText, { color: colors.textSecondary }]}>Pro: {metrics.subscriptionTierPro} ({formatPercent(proTierPercent)})</Text>
-                  </View>
-                  {metrics.subscriptionTierOther > 0 && (
-                    <View style={styles.legendItem}>
-                      <View style={[styles.legendDot, { backgroundColor: '#f59e0b' }]} />
-                      <Text style={[styles.legendText, { color: colors.textSecondary }]}>Other: {metrics.subscriptionTierOther} ({formatPercent(otherTierPercent)})</Text>
-                    </View>
-                  )}
-                  <Text style={[styles.legendText, { color: colors.textSecondary, marginTop: 6 }]}>Total tracked: {subscriptionTierTotal}</Text>
-                </View>
-              </View>
             </View>
 
             <View style={styles.actionCenterRow}>
@@ -2195,7 +2310,7 @@ export default function AdminPanel({ initialTab, children }: AdminPanelProps) {
                   </View>
                   <View style={{ flexDirection: 'row', borderRadius: 8, borderWidth: 1, borderColor: colors.border, overflow: 'hidden' }}>
                     {(['all', 'booking', 'profile'] as const).map((typeKey) => (
-                      <TouchableOpacity
+                      <TouchableOpacity activeOpacity={1}
                         key={typeKey}
                         onPress={() => setIncidentTypeFilter(typeKey)}
                         style={{ paddingHorizontal: 12, paddingVertical: 6, backgroundColor: incidentTypeFilter === typeKey ? colors.primary : 'transparent' }}
@@ -2361,11 +2476,7 @@ export default function AdminPanel({ initialTab, children }: AdminPanelProps) {
                         {!!item.business_permit_url && (
                           <TouchableOpacity
                             activeOpacity={1}
-                            onPress={() => {
-                              if (item.business_permit_url) {
-                                void Linking.openURL(item.business_permit_url);
-                              }
-                            }}
+                            onPress={() => openMediaPreview(item.business_permit_url, 'Business permit')}
                             style={[styles.smallActionButton, { borderColor: colors.border }]}
                           >
                             <Ionicons name="eye-outline" size={14} color={colors.text} />
@@ -2469,10 +2580,6 @@ export default function AdminPanel({ initialTab, children }: AdminPanelProps) {
                     <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>{user.email}</Text>
                     <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Role: {user.role}</Text>
                     <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Verified: {user.is_verified ? 'Yes' : 'No'}</Text>
-                    <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Subscription: {String(user.subscription_status || 'none').replace(/_/g, ' ')}</Text>
-                    {user.subscription_expires_at ? (
-                      <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Subscription Expires: {formatDateTime(user.subscription_expires_at)}</Text>
-                    ) : null}
                     <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Joined: {formatDateTime(user.created_at)}</Text>
 
                     <View style={styles.cardActionsRow}>
@@ -2653,7 +2760,7 @@ export default function AdminPanel({ initialTab, children }: AdminPanelProps) {
                     <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Status: {report.status}</Text>
                     <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Escalation: {String(report.escalation_status || 'none').replace(/_/g, ' ')}</Text>
                     <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Reporter: {report.reporter_name || 'Unknown'} ({report.reporter_email || 'no email'})</Text>
-                    <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Target: {report.target_type} ({report.target_id})</Text>
+                    <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Target: {formatReportTargetType(report.target_type)} ({report.target_id})</Text>
                     <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Created: {formatDateTime(report.created_at)}</Text>
                     {report.reviewed_at ? (
                       <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Reviewed: {formatDateTime(report.reviewed_at)} {report.reviewer_name ? `by ${report.reviewer_name}` : ''}</Text>
@@ -2763,9 +2870,6 @@ export default function AdminPanel({ initialTab, children }: AdminPanelProps) {
                 )})}
               </View>
             )}
-
-            <Text style={[styles.sectionHeading, { color: colors.text }]}>Booking Incident Queue</Text>
-
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterRow}>
               {incidentStatuses.map((status) => {
                 const active = incidentFilter === status;
@@ -3081,177 +3185,307 @@ export default function AdminPanel({ initialTab, children }: AdminPanelProps) {
               {userModalMode === 'create' ? 'Create User' : 'Edit User'}
             </Text>
 
-            <TextInput
-              value={userFormFullName}
-              onChangeText={setUserFormFullName}
-              placeholder="Full name (optional)"
-              placeholderTextColor={colors.textSecondary}
-              style={[
-                styles.modalInputCompact,
-                {
-                  color: colors.text,
-                  backgroundColor: colors.inputBackground,
-                  borderColor: colors.inputBorder,
-                },
-              ]}
-            />
+            <ScrollView
+              style={styles.userFormScroll}
+              contentContainerStyle={styles.userFormScrollContent}
+              showsVerticalScrollIndicator={false}
+            >
+              <View style={[styles.formSection, { borderColor: colors.border, backgroundColor: isDark ? '#0F172A' : '#F8FAFC' }]}>
+                <View style={styles.formSectionHeader}>
+                  <View style={[styles.formSectionIcon, { backgroundColor: `${colors.primary}18` }]}>
+                    <Ionicons name="person-outline" size={16} color={colors.primary} />
+                  </View>
+                  <Text style={[styles.formSectionTitle, { color: colors.text }]}>Account</Text>
+                </View>
 
-            <TextInput
-              value={userFormEmail}
-              onChangeText={setUserFormEmail}
-              placeholder="Email address"
-              autoCapitalize="none"
-              keyboardType="email-address"
-              placeholderTextColor={colors.textSecondary}
-              style={[
-                styles.modalInputCompact,
-                {
-                  color: colors.text,
-                  backgroundColor: colors.inputBackground,
-                  borderColor: colors.inputBorder,
-                },
-              ]}
-            />
-
-            <Text style={[styles.formLabel, { color: colors.textSecondary }]}>Role</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterRow}>
-              {userRoleOptions.map((role) => {
-                const active = userFormRole === role;
-                return (
-                  <TouchableOpacity
-                    key={role}
-                    activeOpacity={1}
-                    onPress={() => setUserFormRole(role)}
+                <View style={styles.fieldGroup}>
+                  <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>
+                    Full name <Text style={styles.requiredMark}>*</Text>
+                  </Text>
+                  <TextInput
+                    value={userFormFullName}
+                    onChangeText={setUserFormFullName}
+                    placeholder="Full name"
+                    placeholderTextColor={colors.textSecondary}
                     style={[
-                      styles.filterChip,
+                      styles.modalInputCompact,
+                      userFormSubmitAttempted && userFormErrors.fullName ? styles.inputInvalid : null,
                       {
-                        backgroundColor: active ? colors.primary : (isDark ? '#1E293B' : '#FFFFFF'),
-                        borderColor: active ? colors.primary : colors.border,
+                        color: colors.text,
+                        backgroundColor: colors.inputBackground,
+                        borderColor: userFormSubmitAttempted && userFormErrors.fullName ? '#EF4444' : colors.inputBorder,
+                      },
+                    ]}
+                  />
+                  {userFormSubmitAttempted && userFormErrors.fullName ? (
+                    <Text style={styles.fieldErrorText}>{userFormErrors.fullName}</Text>
+                  ) : null}
+                </View>
+
+                <View style={styles.fieldGroup}>
+                  <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>
+                    Email address <Text style={styles.requiredMark}>*</Text>
+                  </Text>
+                  <TextInput
+                    value={userFormEmail}
+                    onChangeText={setUserFormEmail}
+                    placeholder="Email address"
+                    autoCapitalize="none"
+                    keyboardType="email-address"
+                    placeholderTextColor={colors.textSecondary}
+                    style={[
+                      styles.modalInputCompact,
+                      userFormSubmitAttempted && userFormErrors.email ? styles.inputInvalid : null,
+                      {
+                        color: colors.text,
+                        backgroundColor: colors.inputBackground,
+                        borderColor: userFormSubmitAttempted && userFormErrors.email ? '#EF4444' : colors.inputBorder,
+                      },
+                    ]}
+                  />
+                  {userFormSubmitAttempted && userFormErrors.email ? (
+                    <Text style={styles.fieldErrorText}>{userFormErrors.email}</Text>
+                  ) : null}
+                </View>
+
+                <View style={styles.fieldGroup}>
+                  <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>
+                    {userModalMode === 'create' ? 'Register as' : 'Role'}
+                  </Text>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterRow}>
+                    {userRoleOptions.map((role) => {
+                      const active = userFormRole === role;
+                      return (
+                        <TouchableOpacity
+                          key={role}
+                          activeOpacity={1}
+                          onPress={() => setUserFormRole(role)}
+                          style={[
+                            styles.filterChip,
+                            {
+                              backgroundColor: active ? colors.primary : (isDark ? '#1E293B' : '#FFFFFF'),
+                              borderColor: active ? colors.primary : colors.border,
+                            },
+                          ]}
+                        >
+                          <Text style={[styles.filterChipText, { color: active ? '#FFFFFF' : colors.textSecondary }]}>
+                            {formatRoleLabel(role)}
+                          </Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </ScrollView>
+                </View>
+              </View>
+
+              <View style={[styles.formSection, { borderColor: colors.border, backgroundColor: isDark ? '#0F172A' : '#F8FAFC' }]}>
+                <View style={styles.formSectionHeader}>
+                  <View style={[styles.formSectionIcon, { backgroundColor: `${colors.primary}18` }]}>
+                    <Ionicons name="musical-notes-outline" size={16} color={colors.primary} />
+                  </View>
+                  <Text style={[styles.formSectionTitle, { color: colors.text }]}>Profile Details</Text>
+                </View>
+
+                <View style={styles.fieldGroup}>
+                  <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>Contact number</Text>
+                  <TextInput
+                    value={userFormContactNumber}
+                    onChangeText={setUserFormContactNumber}
+                    placeholder="Contact number"
+                    keyboardType="phone-pad"
+                    placeholderTextColor={colors.textSecondary}
+                    style={[
+                      styles.modalInputCompact,
+                      {
+                        color: colors.text,
+                        backgroundColor: colors.inputBackground,
+                        borderColor: colors.inputBorder,
+                      },
+                    ]}
+                  />
+                </View>
+
+                <View style={styles.fieldGroup}>
+                  <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>Address</Text>
+                  <TextInput
+                    value={userFormAddress}
+                    onChangeText={setUserFormAddress}
+                    placeholder="Address"
+                    placeholderTextColor={colors.textSecondary}
+                    style={[
+                      styles.modalInputCompact,
+                      {
+                        color: colors.text,
+                        backgroundColor: colors.inputBackground,
+                        borderColor: colors.inputBorder,
+                      },
+                    ]}
+                  />
+                </View>
+
+                <View style={styles.fieldGroup}>
+                  <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>Roles & instruments</Text>
+                  <TextInput
+                    value={userFormSkills}
+                    onChangeText={setUserFormSkills}
+                    placeholder="Vocalist, Guitarist, Producer"
+                    placeholderTextColor={colors.textSecondary}
+                    style={[
+                      styles.modalInputCompact,
+                      {
+                        color: colors.text,
+                        backgroundColor: colors.inputBackground,
+                        borderColor: colors.inputBorder,
+                      },
+                    ]}
+                  />
+                </View>
+
+                <View style={styles.fieldGroup}>
+                  <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>Genres</Text>
+                  <TextInput
+                    value={userFormGenres}
+                    onChangeText={setUserFormGenres}
+                    placeholder="OPM, Rock, Jazz"
+                    placeholderTextColor={colors.textSecondary}
+                    style={[
+                      styles.modalInputCompact,
+                      {
+                        color: colors.text,
+                        backgroundColor: colors.inputBackground,
+                        borderColor: colors.inputBorder,
+                      },
+                    ]}
+                  />
+                </View>
+
+                <View style={styles.fieldGroup}>
+                  <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>Bio</Text>
+                  <TextInput
+                    value={userFormBio}
+                    onChangeText={setUserFormBio}
+                    placeholder="Short profile bio"
+                    multiline
+                    numberOfLines={3}
+                    textAlignVertical="top"
+                    placeholderTextColor={colors.textSecondary}
+                    style={[
+                      styles.modalInput,
+                      {
+                        color: colors.text,
+                        backgroundColor: colors.inputBackground,
+                        borderColor: colors.inputBorder,
+                      },
+                    ]}
+                  />
+                </View>
+              </View>
+
+            {userModalMode === 'create' && (
+              <View style={[styles.formSection, { borderColor: colors.border, backgroundColor: isDark ? '#0F172A' : '#F8FAFC' }]}>
+                <View style={styles.formSectionHeader}>
+                  <View style={[styles.formSectionIcon, { backgroundColor: `${colors.primary}18` }]}>
+                    <Ionicons name="lock-closed-outline" size={16} color={colors.primary} />
+                  </View>
+                  <Text style={[styles.formSectionTitle, { color: colors.text }]}>Security</Text>
+                </View>
+
+                <View style={styles.fieldGroup}>
+                  <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>
+                    Password <Text style={styles.requiredMark}>*</Text>
+                  </Text>
+                  <TextInput
+                    value={userFormPassword}
+                    onChangeText={setUserFormPassword}
+                    placeholder="Password"
+                    secureTextEntry
+                    autoCapitalize="none"
+                    placeholderTextColor={colors.textSecondary}
+                    style={[
+                      styles.modalInputCompact,
+                      userFormSubmitAttempted && userFormErrors.password ? styles.inputInvalid : null,
+                      {
+                        color: colors.text,
+                        backgroundColor: colors.inputBackground,
+                        borderColor: userFormSubmitAttempted && userFormErrors.password ? '#EF4444' : colors.inputBorder,
+                      },
+                    ]}
+                  />
+                  {userFormSubmitAttempted && userFormErrors.password ? (
+                    <Text style={styles.fieldErrorText}>{userFormErrors.password}</Text>
+                  ) : null}
+                </View>
+
+                <View style={styles.fieldGroup}>
+                  <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>
+                    Confirm password <Text style={styles.requiredMark}>*</Text>
+                  </Text>
+                  <TextInput
+                    value={userFormConfirmPassword}
+                    onChangeText={setUserFormConfirmPassword}
+                    placeholder="Confirm password"
+                    secureTextEntry
+                    autoCapitalize="none"
+                    placeholderTextColor={colors.textSecondary}
+                    style={[
+                      styles.modalInputCompact,
+                      userFormSubmitAttempted && userFormErrors.confirmPassword ? styles.inputInvalid : null,
+                      {
+                        color: colors.text,
+                        backgroundColor: colors.inputBackground,
+                        borderColor: userFormSubmitAttempted && userFormErrors.confirmPassword ? '#EF4444' : colors.inputBorder,
+                      },
+                    ]}
+                  />
+                  {userFormSubmitAttempted && userFormErrors.confirmPassword ? (
+                    <Text style={styles.fieldErrorText}>{userFormErrors.confirmPassword}</Text>
+                  ) : null}
+                </View>
+              </View>
+            )}
+
+              <View style={[styles.formSection, { borderColor: colors.border, backgroundColor: isDark ? '#0F172A' : '#F8FAFC' }]}>
+                <View style={styles.formSectionHeader}>
+                  <View style={[styles.formSectionIcon, { backgroundColor: `${colors.primary}18` }]}>
+                    <Ionicons name="shield-checkmark-outline" size={16} color={colors.primary} />
+                  </View>
+                  <Text style={[styles.formSectionTitle, { color: colors.text }]}>Verification</Text>
+                </View>
+
+                <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>Verified</Text>
+                <View style={styles.booleanToggleRow}>
+                  <TouchableOpacity
+                    activeOpacity={1}
+                    onPress={() => setUserFormIsVerified(true)}
+                    style={[
+                      styles.booleanToggleButton,
+                      {
+                        backgroundColor: userFormIsVerified ? '#16A34A' : (isDark ? '#1E293B' : '#FFFFFF'),
+                        borderColor: userFormIsVerified ? '#16A34A' : colors.border,
                       },
                     ]}
                   >
-                    <Text style={[styles.filterChipText, { color: active ? '#FFFFFF' : colors.textSecondary }]}>
-                      {role}
-                    </Text>
+                    <Text style={[styles.booleanToggleButtonText, { color: userFormIsVerified ? '#FFFFFF' : colors.textSecondary }]}>Yes</Text>
                   </TouchableOpacity>
-                );
-              })}
-            </ScrollView>
 
-            {userModalMode === 'edit' && (
-              <>
-                <Text style={[styles.formLabel, { color: colors.textSecondary }]}>Subscription Status</Text>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterRow}>
-                  {subscriptionStatusOptions.map((status) => {
-                    const active = userFormSubscriptionStatus === status;
-                    return (
-                      <TouchableOpacity
-                        key={status}
-                        activeOpacity={1}
-                        onPress={() => setUserFormSubscriptionStatus(status)}
-                        style={[
-                          styles.filterChip,
-                          {
-                            backgroundColor: active ? colors.primary : (isDark ? '#1E293B' : '#FFFFFF'),
-                            borderColor: active ? colors.primary : colors.border,
-                          },
-                        ]}
-                      >
-                        <Text style={[styles.filterChipText, { color: active ? '#FFFFFF' : colors.textSecondary }]}>
-                          {status.replace(/_/g, ' ')}
-                        </Text>
-                      </TouchableOpacity>
-                    );
-                  })}
-                </ScrollView>
+                  <TouchableOpacity
+                    activeOpacity={1}
+                    onPress={() => setUserFormIsVerified(false)}
+                    style={[
+                      styles.booleanToggleButton,
+                      {
+                        backgroundColor: !userFormIsVerified ? '#DC2626' : (isDark ? '#1E293B' : '#FFFFFF'),
+                        borderColor: !userFormIsVerified ? '#DC2626' : colors.border,
+                      },
+                    ]}
+                  >
+                    <Text style={[styles.booleanToggleButtonText, { color: !userFormIsVerified ? '#FFFFFF' : colors.textSecondary }]}>No</Text>
+                  </TouchableOpacity>
+                </View>
 
-                <TextInput
-                  value={userFormSubscriptionExpiresAt}
-                  onChangeText={setUserFormSubscriptionExpiresAt}
-                  placeholder="Subscription expires (optional, e.g. 2026-12-31T23:59)"
-                  autoCapitalize="none"
-                  placeholderTextColor={colors.textSecondary}
-                  style={[
-                    styles.modalInputCompact,
-                    {
-                      color: colors.text,
-                      backgroundColor: colors.inputBackground,
-                      borderColor: colors.inputBorder,
-                    },
-                  ]}
-                />
-
-                <TextInput
-                  value={userFormSubscriptionPlanId}
-                  onChangeText={setUserFormSubscriptionPlanId}
-                  placeholder="Subscription plan ID (optional)"
-                  autoCapitalize="none"
-                  placeholderTextColor={colors.textSecondary}
-                  style={[
-                    styles.modalInputCompact,
-                    {
-                      color: colors.text,
-                      backgroundColor: colors.inputBackground,
-                      borderColor: colors.inputBorder,
-                    },
-                  ]}
-                />
-              </>
-            )}
-
-            {userModalMode === 'create' && (
-              <TextInput
-                value={userFormPassword}
-                onChangeText={setUserFormPassword}
-                placeholder="Password (minimum 8 characters)"
-                secureTextEntry
-                autoCapitalize="none"
-                placeholderTextColor={colors.textSecondary}
-                style={[
-                  styles.modalInputCompact,
-                  {
-                    color: colors.text,
-                    backgroundColor: colors.inputBackground,
-                    borderColor: colors.inputBorder,
-                  },
-                ]}
-              />
-            )}
-
-            <Text style={[styles.formLabel, { color: colors.textSecondary }]}>Verified</Text>
-            <View style={styles.booleanToggleRow}>
-              <TouchableOpacity
-                activeOpacity={1}
-                onPress={() => setUserFormIsVerified(true)}
-                style={[
-                  styles.booleanToggleButton,
-                  {
-                    backgroundColor: userFormIsVerified ? '#16A34A' : (isDark ? '#1E293B' : '#FFFFFF'),
-                    borderColor: userFormIsVerified ? '#16A34A' : colors.border,
-                  },
-                ]}
-              >
-                <Text style={[styles.booleanToggleButtonText, { color: userFormIsVerified ? '#FFFFFF' : colors.textSecondary }]}>Yes</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                activeOpacity={1}
-                onPress={() => setUserFormIsVerified(false)}
-                style={[
-                  styles.booleanToggleButton,
-                  {
-                    backgroundColor: !userFormIsVerified ? '#DC2626' : (isDark ? '#1E293B' : '#FFFFFF'),
-                    borderColor: !userFormIsVerified ? '#DC2626' : colors.border,
-                  },
-                ]}
-              >
-                <Text style={[styles.booleanToggleButtonText, { color: !userFormIsVerified ? '#FFFFFF' : colors.textSecondary }]}>No</Text>
-              </TouchableOpacity>
-            </View>
-
-            {userModalMode === 'create' && (
-              <>
-                <Text style={[styles.formLabel, { color: colors.textSecondary }]}>Email Confirmed</Text>
+                {userModalMode === 'create' && (
+                  <>
+                    <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>Email confirmed</Text>
                 <View style={styles.booleanToggleRow}>
                   <TouchableOpacity
                     activeOpacity={1}
@@ -3281,8 +3515,10 @@ export default function AdminPanel({ initialTab, children }: AdminPanelProps) {
                     <Text style={[styles.booleanToggleButtonText, { color: !userFormEmailConfirmed ? '#FFFFFF' : colors.textSecondary }]}>No</Text>
                   </TouchableOpacity>
                 </View>
-              </>
-            )}
+                  </>
+                )}
+              </View>
+            </ScrollView>
 
             <View style={styles.modalActionsRow}>
               <TouchableOpacity
@@ -3314,14 +3550,24 @@ export default function AdminPanel({ initialTab, children }: AdminPanelProps) {
       <Modal visible={!!userDetailsTarget} transparent animationType="fade" onRequestClose={closeUserDetailsModal}>
         <View style={styles.modalBackdrop}>
           <View style={[styles.modalCardLarge, { backgroundColor: colors.card, borderColor: colors.border }]}> 
-            <Text style={[styles.modalTitle, { color: colors.text }]}>User Details</Text>
+            <View style={styles.detailsModalHeader}>
+              <View style={[styles.detailsModalIcon, { backgroundColor: `${colors.primary}18` }]}>
+                <Ionicons name="person-circle-outline" size={24} color={colors.primary} />
+              </View>
+              <View style={styles.detailsModalCopy}>
+                <Text style={[styles.modalTitle, { color: colors.text }]}>User Summary</Text>
+                <Text style={[styles.modalDescription, { color: colors.textSecondary }]}>
+                  A clean account overview for admin review.
+                </Text>
+              </View>
+            </View>
 
             <ScrollView
               style={styles.detailsScroll}
               contentContainerStyle={styles.detailsScrollContent}
               showsVerticalScrollIndicator={false}
             >
-              {renderDetailsSection('Profile', userDetailsTarget?.profile || null, 'Profile details are unavailable.')}
+              {renderDetailsSection('Account', userDetailsTarget?.profile || null, 'Account details are unavailable.')}
             </ScrollView>
 
             <View style={styles.modalActionsRow}>
@@ -3340,14 +3586,24 @@ export default function AdminPanel({ initialTab, children }: AdminPanelProps) {
       <Modal visible={!!reportDetailsTarget} transparent animationType="fade" onRequestClose={closeReportDetailsModal}>
         <View style={styles.modalBackdrop}>
           <View style={[styles.modalCardLarge, { backgroundColor: colors.card, borderColor: colors.border }]}> 
-            <Text style={[styles.modalTitle, { color: colors.text }]}>Report Details</Text>
+            <View style={styles.detailsModalHeader}>
+              <View style={[styles.detailsModalIcon, { backgroundColor: `${colors.primary}18` }]}>
+                <Ionicons name="flag-outline" size={23} color={colors.primary} />
+              </View>
+              <View style={styles.detailsModalCopy}>
+                <Text style={[styles.modalTitle, { color: colors.text }]}>Report Summary</Text>
+                <Text style={[styles.modalDescription, { color: colors.textSecondary }]}>
+                  Reporter, reported content, and linked account in one readable view.
+                </Text>
+              </View>
+            </View>
 
             <ScrollView
               style={styles.detailsScroll}
               contentContainerStyle={styles.detailsScrollContent}
               showsVerticalScrollIndicator={false}
             >
-              {renderDetailsSection('Report', reportDetailsTarget?.report || null, 'Report details are unavailable.')}
+              {renderDetailsSection('Report Overview', reportDetailsTarget?.report || null, 'Report details are unavailable.')}
 
               {renderDetailsSection(
                 'Reporter',
@@ -3374,27 +3630,28 @@ export default function AdminPanel({ initialTab, children }: AdminPanelProps) {
               )}
 
               {renderDetailsSection(
-                'Target Reference',
+                'Reported Item',
                 reportDetailsTarget?.target
                   ? {
-                    target_type: reportDetailsTarget.target.type,
+                    target_type: formatReportTargetType(reportDetailsTarget.target.type),
                     target_id: reportDetailsTarget.target.id,
+                    target_name: extractReportTargetName(reportDetailsTarget.target.record),
                     source_table: reportDetailsTarget.target.table,
                   }
                   : null,
-                'Target reference details are unavailable.',
+                'Reported item details are unavailable.',
               )}
 
               {renderDetailsSection(
-                'Target Record',
+                'Reported Content',
                 reportDetailsTarget?.target?.record || null,
-                'Target record details are unavailable.',
+                'Reported content details are unavailable.',
               )}
 
               {renderDetailsSection(
-                'Target Owner / Organizer',
+                'Responsible Account',
                 reportDetailsTarget?.target?.owner_profile || null,
-                'Target owner or organizer details are unavailable.',
+                'Responsible account details are unavailable.',
               )}
             </ScrollView>
 
@@ -3660,11 +3917,19 @@ export default function AdminPanel({ initialTab, children }: AdminPanelProps) {
         </View>
       </Modal>
 
+      <InAppMediaViewer
+        visible={Boolean(mediaPreview)}
+        uri={mediaPreview?.uri || null}
+        title={mediaPreview?.title || 'Uploaded file'}
+        onClose={() => setMediaPreview(null)}
+      />
+
       <CustomAlert
         visible={alertState.visible}
         type={alertState.type}
         title={alertState.title}
         message={alertState.message}
+        buttons={alertState.buttons}
         onClose={() => setAlertState((prev) => ({ ...prev, visible: false }))}
       />
 
@@ -3821,6 +4086,19 @@ const styles = StyleSheet.create({
     gap: 8,
     paddingVertical: 2,
   },
+  fieldErrorText: {
+    color: '#EF4444',
+    fontSize: 11,
+    fontFamily: 'Poppins_500Medium',
+  },
+  fieldGroup: {
+    gap: 6,
+  },
+  fieldLabel: {
+    fontSize: 11,
+    fontFamily: 'Poppins_600SemiBold',
+    textTransform: 'uppercase',
+  },
   filterChip: {
     borderWidth: 1,
     borderRadius: 999,
@@ -3878,6 +4156,28 @@ const styles = StyleSheet.create({
     marginTop: 2,
     fontFamily: 'Poppins_500Medium',
   },
+  formSection: {
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 12,
+    gap: 10,
+  },
+  formSectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  formSectionIcon: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  formSectionTitle: {
+    fontSize: 13,
+    fontFamily: 'Poppins_700Bold',
+  },
   cardActionsRow: {
     marginTop: 8,
     flexDirection: 'row',
@@ -3922,6 +4222,7 @@ const styles = StyleSheet.create({
   modalCard: {
     width: '100%',
     maxWidth: 560,
+    maxHeight: '92%',
     borderRadius: 16,
     borderWidth: 1,
     padding: 16,
@@ -3929,42 +4230,98 @@ const styles = StyleSheet.create({
   },
   modalCardLarge: {
     width: '100%',
-    maxWidth: 760,
-    borderRadius: 16,
+    maxWidth: 860,
+    borderRadius: 20,
     borderWidth: 1,
-    padding: 16,
-    gap: 10,
+    padding: 20,
+    gap: 14,
   },
   detailsScroll: {
-    maxHeight: 460,
+    maxHeight: 520,
   },
   detailsScrollContent: {
-    gap: 10,
+    gap: 12,
     paddingBottom: 4,
   },
   detailsSection: {
     borderWidth: 1,
-    borderRadius: 10,
-    paddingHorizontal: 10,
-    paddingVertical: 10,
-    gap: 8,
+    borderRadius: 16,
+    padding: 14,
+    gap: 12,
+  },
+  detailsSectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  detailsSectionHeaderCopy: {
+    flex: 1,
+    minWidth: 0,
+  },
+  detailsSectionIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  detailsSectionImage: {
+    width: 112,
+    height: 112,
+    borderRadius: 18,
+    borderWidth: 1,
   },
   detailsSectionTitle: {
-    fontSize: 13,
+    fontSize: 14,
     fontFamily: 'Poppins_600SemiBold',
+  },
+  detailsSectionMeta: {
+    fontSize: 11,
+    fontFamily: 'Poppins_400Regular',
+    marginTop: 1,
   },
   detailsRows: {
     gap: 8,
   },
-  detailRow: {
+  detailHighlightGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+  },
+  detailHighlightCard: {
+    flexGrow: 1,
+    flexBasis: 190,
+    borderWidth: 1,
+    borderRadius: 14,
+    padding: 12,
     gap: 4,
   },
-  detailLabel: {
+  detailHighlightLabel: {
     fontSize: 11,
     fontFamily: 'Poppins_600SemiBold',
-    textTransform: 'uppercase',
+  },
+  detailHighlightValue: {
+    fontSize: 15,
+    lineHeight: 21,
+    fontFamily: 'Poppins_600SemiBold',
+  },
+  detailRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  detailLabel: {
+    flexBasis: 132,
+    flexShrink: 0,
+    fontSize: 12,
+    fontFamily: 'Poppins_600SemiBold',
   },
   detailValue: {
+    flex: 1,
     fontSize: 12,
     lineHeight: 18,
     fontFamily: 'Poppins_400Regular',
@@ -3979,7 +4336,25 @@ const styles = StyleSheet.create({
   },
   modalDescription: {
     fontSize: 13,
+    lineHeight: 19,
     fontFamily: 'Poppins_400Regular',
+    marginTop: 2,
+  },
+  detailsModalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  detailsModalIcon: {
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  detailsModalCopy: {
+    flex: 1,
+    minWidth: 0,
   },
   formLabel: {
     fontSize: 12,
@@ -4002,6 +4377,9 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     fontSize: 13,
     fontFamily: 'Poppins_400Regular',
+  },
+  inputInvalid: {
+    borderWidth: 1.5,
   },
   booleanToggleRow: {
     flexDirection: 'row',
@@ -4037,6 +4415,9 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 13,
     fontFamily: 'Poppins_600SemiBold',
+  },
+  requiredMark: {
+    color: '#EF4444',
   },
   pulseGrid: {
     flexDirection: 'row',
@@ -4085,17 +4466,6 @@ const styles = StyleSheet.create({
   },
   badgeTextGreen: {
     color: '#10b981',
-    fontSize: 11,
-    fontFamily: 'Poppins_600SemiBold',
-  },
-  badgeRed: {
-    backgroundColor: 'rgba(239, 68, 68, 0.1)',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 12,
-  },
-  badgeTextRed: {
-    color: '#ef4444',
     fontSize: 11,
     fontFamily: 'Poppins_600SemiBold',
   },
@@ -4198,19 +4568,6 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontFamily: 'Poppins_500Medium',
   },
-  subscriptionStackWrapper: {
-    marginTop: 14,
-    gap: 8,
-  },
-  subscriptionStackBar: {
-    height: 18,
-    borderRadius: 999,
-    overflow: 'hidden',
-    flexDirection: 'row',
-  },
-  subscriptionStackSegment: {
-    height: '100%',
-  },
   chartLegendHorizontal: {
     flexDirection: 'row',
     justifyContent: 'center',
@@ -4278,4 +4635,12 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     padding: 24,
   },
+  userFormScroll: {
+    maxHeight: 560,
+  },
+  userFormScrollContent: {
+    gap: 10,
+    paddingBottom: 4,
+  },
 });
+

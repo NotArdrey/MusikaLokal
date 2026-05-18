@@ -1,9 +1,16 @@
-
 import { Ionicons } from '@expo/vector-icons';
+import {
+  BottomSheetBackdrop,
+  BottomSheetModal,
+  BottomSheetScrollView,
+  useBottomSheetTimingConfigs,
+} from '@gorhom/bottom-sheet';
 import { router } from 'expo-router';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Animated,
+  Easing,
   Platform,
   ScrollView,
   StyleSheet,
@@ -18,6 +25,19 @@ import Header from '../../src/components/header';
 import { useAuth } from '../../src/context/AuthContext';
 import { useTheme } from '../../src/context/ThemeContext';
 import { supabase } from '../../lib/supabase';
+import { getAdminPageCacheKey, readAdminPageCache, writeAdminPageCache } from './_cache';
+import type {
+  AdminPaymentStatusFilter,
+  AdminPaymentTransaction,
+  AdminPaymentTotals,
+} from './_payments';
+import {
+  downloadPaymentTransactionsExcel,
+  fetchAdminPaymentTransactions,
+  getPaymentStatusColor,
+  normalizePaymentActionLabel,
+  PAYMENT_STATUS_FILTERS,
+} from './_payments';
 
 const readErrorContextMessage = async (context: unknown): Promise<string | null> => {
   if (!context) return null;
@@ -89,17 +109,41 @@ const readErrorContextMessage = async (context: unknown): Promise<string | null>
   }
 };
 
-type Tab = 'dashboard' | 'permits' | 'users' | 'reports' | 'audit';
+type Tab = 'dashboard' | 'users' | 'reports' | 'audit' | 'posts' | 'products';
 
 const adminTabRoutes: Record<Tab, string> = {
   dashboard: '/admin',
-  permits: '/admin/permits',
   users: '/admin/users',
   reports: '/admin/reports',
   audit: '/admin/audit',
+  posts: '/admin/posts',
+  products: '/admin/products',
 };
 
+const DASHBOARD_CACHE_TTL_MS = 30_000;
+
+type DashboardDateRange = '7d' | '30d' | 'all';
+type RevenueFilter = 'gross' | 'net';
+type IncidentTypeFilter = 'all' | 'booking' | 'profile';
+type WithdrawalStatusFilter = 'all' | 'pending' | 'processing' | 'completed' | 'failed' | 'cancelled';
+
+const DASHBOARD_DATE_RANGE_LABELS: Record<DashboardDateRange, string> = {
+  '7d': 'Last 7 Days',
+  '30d': 'Last 30 Days',
+  all: 'All Time',
+};
+
+const WITHDRAWAL_STATUS_FILTERS: { key: WithdrawalStatusFilter; label: string }[] = [
+  { key: 'all', label: 'All' },
+  { key: 'completed', label: 'Completed' },
+  { key: 'pending', label: 'Pending' },
+  { key: 'processing', label: 'Processing' },
+  { key: 'failed', label: 'Failed' },
+  { key: 'cancelled', label: 'Cancelled' },
+];
+
 interface DashboardMetrics {
+  generatedAt: string | null;
   totalUsers: number;
   totalStudios: number;
   totalGigs: number;
@@ -114,23 +158,28 @@ interface DashboardMetrics {
   resolvedIncidents: number;
   openIncidentsInRange: number;
   resolvedIncidentsInRange: number;
-  activeSubscriptions: number;
-  churnRatePercent: number;
   dau: number;
   mau: number;
   newSignups24h: number;
   grossRevenue: number;
   netRevenue: number;
+  allTimePlatformNet: number;
+  platformWithdrawn: number;
+  platformAvailable: number;
+  providerEarnings: number;
   pendingPayouts: number;
   avgReportResolutionHours: number;
   avgIncidentResolutionHours: number;
   paymongoSuccessRate: number;
+  paymentMetricsAvailable: boolean;
+  paymentAttempts: number;
+  paidPaymentEvents: number;
+  failedPaymentEvents: number;
+  paymongoLinkedPaymentEvents: number;
+  paymongoLinkedPaymentRate: number;
   dbHealthy: boolean;
   apiHealthy: boolean;
   paymongoHealthy: boolean;
-  subscriptionTierBasic: number;
-  subscriptionTierPro: number;
-  subscriptionTierOther: number;
   incidentTypeBreakdown: {
     key: string;
     label: string;
@@ -157,7 +206,40 @@ interface DashboardMetrics {
   };
 }
 
+interface AdminWithdrawalEntry {
+  id: string;
+  amount: number;
+  net_amount: number;
+  status: WithdrawalStatusFilter;
+  payout_type: string;
+  payout_account_name: string | null;
+  payout_account_number: string | null;
+  payout_bank_name: string | null;
+  reference_number: string | null;
+  notes: string | null;
+  created_at: string | null;
+  processed_at: string | null;
+  source_type?: 'provider' | 'platform';
+  user?: {
+    id?: string;
+    full_name?: string | null;
+    email?: string | null;
+    role?: string | null;
+  } | null;
+}
+
+interface WithdrawalTotals {
+  count: number;
+  totalAmount: number;
+  totalNetAmount: number;
+  completedAmount: number;
+  pendingAmount: number;
+  mockCount: number;
+  platformCount: number;
+}
+
 const defaultMetrics: DashboardMetrics = {
+  generatedAt: null,
   totalUsers: 0,
   totalStudios: 0,
   totalGigs: 0,
@@ -172,23 +254,28 @@ const defaultMetrics: DashboardMetrics = {
   resolvedIncidents: 0,
   openIncidentsInRange: 0,
   resolvedIncidentsInRange: 0,
-  activeSubscriptions: 0,
-  churnRatePercent: 0,
   dau: 0,
   mau: 0,
   newSignups24h: 0,
   grossRevenue: 0,
   netRevenue: 0,
+  allTimePlatformNet: 0,
+  platformWithdrawn: 0,
+  platformAvailable: 0,
+  providerEarnings: 0,
   pendingPayouts: 0,
   avgReportResolutionHours: 0,
   avgIncidentResolutionHours: 0,
   paymongoSuccessRate: 0,
+  paymentMetricsAvailable: false,
+  paymentAttempts: 0,
+  paidPaymentEvents: 0,
+  failedPaymentEvents: 0,
+  paymongoLinkedPaymentEvents: 0,
+  paymongoLinkedPaymentRate: 0,
   dbHealthy: false,
   apiHealthy: false,
   paymongoHealthy: false,
-  subscriptionTierBasic: 0,
-  subscriptionTierPro: 0,
-  subscriptionTierOther: 0,
   incidentTypeBreakdown: [],
   peakActivitySlots: [],
   revenueTrend: [],
@@ -200,6 +287,31 @@ const defaultMetrics: DashboardMetrics = {
     total: 0,
   },
 };
+
+const defaultWithdrawalTotals: WithdrawalTotals = {
+  count: 0,
+  totalAmount: 0,
+  totalNetAmount: 0,
+  completedAmount: 0,
+  pendingAmount: 0,
+  mockCount: 0,
+  platformCount: 0,
+};
+
+const defaultPaymentTotals: AdminPaymentTotals = {
+  count: 0,
+  grossAmount: 0,
+  refundedAmount: 0,
+  netAmount: 0,
+  paidCount: 0,
+  partialCount: 0,
+  pendingCount: 0,
+  failedCount: 0,
+  cancelledCount: 0,
+  refundedCount: 0,
+};
+
+const ADMIN_WITHDRAW_QUICK_AMOUNTS = [100, 500, 1000];
 
 const formatCurrency = (value?: number | null) => {
   const safeValue = Number(value || 0);
@@ -218,6 +330,50 @@ const formatHours = (value?: number | null) => {
 const formatPercent = (value?: number | null) => {
   const safeValue = Number(value || 0);
   return `${safeValue.toFixed(1)}%`;
+};
+
+const formatMetricCount = (value?: number | null) => {
+  const safeValue = Math.max(0, Math.round(Number(value || 0)));
+  return safeValue.toLocaleString('en-PH');
+};
+
+const formatMetricTimestamp = (value?: string | null) => {
+  if (!value) return null;
+
+  const timestamp = new Date(value);
+  if (Number.isNaN(timestamp.getTime())) return null;
+
+  return timestamp.toLocaleTimeString('en-PH', {
+    hour: 'numeric',
+    minute: '2-digit',
+    second: '2-digit',
+  });
+};
+
+const formatDateTime = (value?: string | null) => {
+  if (!value) return 'n/a';
+
+  const timestamp = new Date(value);
+  if (Number.isNaN(timestamp.getTime())) return 'n/a';
+
+  return timestamp.toLocaleString('en-PH', {
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+};
+
+const formatWithdrawalStatus = (status?: string | null) => {
+  const normalized = String(status || '').trim().toLowerCase();
+  if (!normalized) return 'Unknown';
+  return normalized.replace(/_/g, ' ').replace(/\b\w/g, (letter) => letter.toUpperCase());
+};
+
+const maskAccountNumber = (value?: string | null) => {
+  const normalized = String(value || '').replace(/\s+/g, '');
+  if (!normalized) return 'No account';
+  return `****${normalized.slice(-4)}`;
 };
 
 const getErrorMessage = async (error: unknown, fallback: string) => {
@@ -245,6 +401,194 @@ const getErrorMessage = async (error: unknown, fallback: string) => {
 
   return baseMessage;
 };
+
+const useToggleProgress = (isActive: boolean, duration = 220) => {
+  const progress = useRef(new Animated.Value(isActive ? 1 : 0)).current;
+
+  useEffect(() => {
+    Animated.timing(progress, {
+      toValue: isActive ? 1 : 0,
+      duration,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: false,
+    }).start();
+  }, [duration, isActive, progress]);
+
+  return progress;
+};
+
+function SmoothFilterChip({
+  isActive,
+  label,
+  onPress,
+  activeColor,
+  inactiveBackground,
+  inactiveBorder,
+  inactiveText,
+}: {
+  isActive: boolean;
+  label: string;
+  onPress: () => void;
+  activeColor: string;
+  inactiveBackground: string;
+  inactiveBorder: string;
+  inactiveText: string;
+}) {
+  const progress = useToggleProgress(isActive);
+  const backgroundColor = progress.interpolate({
+    inputRange: [0, 1],
+    outputRange: [inactiveBackground, activeColor],
+  });
+  const borderColor = progress.interpolate({
+    inputRange: [0, 1],
+    outputRange: [inactiveBorder, activeColor],
+  });
+  const color = progress.interpolate({
+    inputRange: [0, 1],
+    outputRange: [inactiveText, '#FFFFFF'],
+  });
+
+  return (
+    <TouchableOpacity activeOpacity={0.88} disabled={isActive} onPress={onPress} style={styles.filterTouchable}>
+      <Animated.View style={[styles.filterChip, { backgroundColor, borderColor }]}>
+        <Animated.Text style={[styles.filterChipText, { color }]}>{label}</Animated.Text>
+      </Animated.View>
+    </TouchableOpacity>
+  );
+}
+
+function SmoothSegmentButton({
+  isActive,
+  label,
+  onPress,
+  activeColor,
+  inactiveText,
+  textTransform,
+}: {
+  isActive: boolean;
+  label: string;
+  onPress: () => void;
+  activeColor: string;
+  inactiveText: string;
+  textTransform?: 'capitalize' | 'none';
+}) {
+  const progress = useToggleProgress(isActive, 200);
+  const backgroundColor = progress.interpolate({
+    inputRange: [0, 1],
+    outputRange: ['rgba(0, 0, 0, 0)', activeColor],
+  });
+  const color = progress.interpolate({
+    inputRange: [0, 1],
+    outputRange: [inactiveText, '#FFFFFF'],
+  });
+
+  return (
+    <TouchableOpacity activeOpacity={0.88} disabled={isActive} onPress={onPress}>
+      <Animated.View style={[styles.segmentButton, { backgroundColor }]}>
+        <Animated.Text style={[styles.segmentButtonText, { color, textTransform: textTransform || 'none' }]}>
+          {label}
+        </Animated.Text>
+      </Animated.View>
+    </TouchableOpacity>
+  );
+}
+
+function AnimatedRevenueBar({
+  height,
+  revenueFilter,
+  grossColor,
+  netColor,
+}: {
+  height: number;
+  revenueFilter: RevenueFilter;
+  grossColor: string;
+  netColor: string;
+}) {
+  const heightAnim = useRef(new Animated.Value(height)).current;
+  const colorAnim = useRef(new Animated.Value(revenueFilter === 'gross' ? 0 : 1)).current;
+
+  useEffect(() => {
+    Animated.timing(heightAnim, {
+      toValue: height,
+      duration: 320,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: false,
+    }).start();
+  }, [height, heightAnim]);
+
+  useEffect(() => {
+    Animated.timing(colorAnim, {
+      toValue: revenueFilter === 'gross' ? 0 : 1,
+      duration: 220,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: false,
+    }).start();
+  }, [colorAnim, revenueFilter]);
+
+  const backgroundColor = colorAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [grossColor, netColor],
+  });
+
+  return <Animated.View style={[styles.revenueBarFill, { height: heightAnim, backgroundColor }]} />;
+}
+
+function AnimatedProgressFill({ percent, color }: { percent: number; color: string }) {
+  const widthAnim = useRef(new Animated.Value(percent)).current;
+
+  useEffect(() => {
+    Animated.timing(widthAnim, {
+      toValue: percent,
+      duration: 320,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: false,
+    }).start();
+  }, [percent, widthAnim]);
+
+  const width = widthAnim.interpolate({
+    inputRange: [0, 100],
+    outputRange: ['0%', '100%'],
+  });
+
+  return <Animated.View style={{ width, height: '100%', backgroundColor: color }} />;
+}
+
+function AnimatedMetricText({
+  value,
+  formatter,
+  style,
+}: {
+  value: number;
+  formatter: (value: number) => string;
+  style: any;
+}) {
+  const valueAnim = useRef(new Animated.Value(value)).current;
+  const formatterRef = useRef(formatter);
+  const [displayValue, setDisplayValue] = useState(formatter(value));
+
+  useEffect(() => {
+    formatterRef.current = formatter;
+  }, [formatter]);
+
+  useEffect(() => {
+    const listenerId = valueAnim.addListener(({ value: nextValue }) => {
+      setDisplayValue(formatterRef.current(nextValue));
+    });
+
+    return () => valueAnim.removeListener(listenerId);
+  }, [valueAnim]);
+
+  useEffect(() => {
+    Animated.timing(valueAnim, {
+      toValue: value,
+      duration: 520,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: false,
+    }).start();
+  }, [value, valueAnim]);
+
+  return <Text style={style}>{displayValue}</Text>;
+}
 
 const styles = StyleSheet.create({
   actionCenterPanel: {
@@ -278,11 +622,10 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
     borderRadius: 12,
   },
-  badgeRed: {
-    backgroundColor: 'rgba(239, 68, 68, 0.1)',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 12,
+  badgeInline: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
   },
   badgeText: {
     color: '#FFFFFF',
@@ -291,11 +634,6 @@ const styles = StyleSheet.create({
   },
   badgeTextGreen: {
     color: '#10b981',
-    fontSize: 11,
-    fontFamily: 'Poppins_600SemiBold',
-  },
-  badgeTextRed: {
-    color: '#ef4444',
     fontSize: 11,
     fontFamily: 'Poppins_600SemiBold',
   },
@@ -335,6 +673,124 @@ const styles = StyleSheet.create({
     padding: 16,
     minHeight: 220,
   },
+  dashboardActionButton: {
+    minHeight: 36,
+    borderRadius: 8,
+    borderWidth: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+  },
+  dashboardActionText: {
+    fontSize: 12,
+    fontFamily: 'Poppins_600SemiBold',
+  },
+  adminWithdrawSheetContent: {
+    paddingHorizontal: 18,
+    paddingBottom: 32,
+    paddingTop: 4,
+  },
+  adminWithdrawHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+    marginBottom: 22,
+  },
+  adminWithdrawTitle: {
+    fontSize: 24,
+    fontFamily: 'Poppins_700Bold',
+  },
+  adminWithdrawSubtitle: {
+    fontSize: 13,
+    fontFamily: 'Poppins_400Regular',
+    marginTop: 2,
+  },
+  adminWithdrawCloseButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  adminWithdrawSection: {
+    gap: 8,
+    marginBottom: 18,
+  },
+  adminWithdrawLabel: {
+    fontSize: 13,
+    fontFamily: 'Poppins_600SemiBold',
+  },
+  adminWithdrawInputWrap: {
+    minHeight: 50,
+    borderWidth: 1,
+    borderRadius: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 14,
+  },
+  adminWithdrawCurrency: {
+    fontSize: 22,
+    fontFamily: 'Poppins_700Bold',
+    marginRight: 8,
+  },
+  adminWithdrawInput: {
+    flex: 1,
+    fontSize: 22,
+    fontFamily: 'Poppins_700Bold',
+    outlineStyle: 'none' as any,
+  },
+  adminWithdrawHint: {
+    fontSize: 12,
+    fontFamily: 'Poppins_400Regular',
+  },
+  adminWithdrawQuickGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+    marginBottom: 20,
+  },
+  adminWithdrawQuickButton: {
+    flexGrow: 1,
+    minWidth: 150,
+    minHeight: 42,
+    borderWidth: 1,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 12,
+  },
+  adminWithdrawQuickText: {
+    fontSize: 12,
+    fontFamily: 'Poppins_700Bold',
+  },
+  adminWithdrawNote: {
+    borderRadius: 10,
+    flexDirection: 'row',
+    gap: 10,
+    padding: 14,
+    marginBottom: 40,
+  },
+  adminWithdrawNoteText: {
+    flex: 1,
+    fontSize: 12,
+    lineHeight: 18,
+    fontFamily: 'Poppins_400Regular',
+  },
+  adminWithdrawSubmitButton: {
+    minHeight: 50,
+    borderRadius: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  adminWithdrawSubmitText: {
+    fontSize: 14,
+    fontFamily: 'Poppins_700Bold',
+  },
   dataEnginePanelLeft: {
     flex: Platform.OS === 'web' ? 2 : 1,
   },
@@ -343,6 +799,9 @@ const styles = StyleSheet.create({
   },
   dataEngineRow: {
     flexDirection: Platform.OS === 'web' ? 'row' : 'column',
+    gap: 12,
+  },
+  dashboardMetricsStack: {
     gap: 12,
   },
   emptyText: {
@@ -362,6 +821,9 @@ const styles = StyleSheet.create({
     fontFamily: 'Poppins_500Medium',
     textTransform: 'capitalize',
   },
+  filterTouchable: {
+    borderRadius: 999,
+  },
   flex1: {
     flex: 1,
   },
@@ -379,10 +841,43 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontFamily: 'Poppins_400Regular',
   },
+  liveStatusDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  liveStatusPill: {
+    minHeight: 34,
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+  },
+  liveStatusText: {
+    fontSize: 11,
+    fontFamily: 'Poppins_600SemiBold',
+  },
   loadingText: {
     marginTop: 12,
     fontSize: 14,
     fontFamily: 'Poppins_400Regular',
+  },
+  miniActionButton: {
+    minHeight: 30,
+    borderRadius: 8,
+    borderWidth: 1,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+  },
+  miniActionText: {
+    fontSize: 10,
+    fontFamily: 'Poppins_600SemiBold',
   },
   panelSubtitle: {
     fontSize: 12,
@@ -478,21 +973,22 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontFamily: 'Poppins_400Regular',
   },
+  segmentButton: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  segmentButtonText: {
+    fontSize: 11,
+    fontFamily: 'Poppins_500Medium',
+  },
+  segmentControl: {
+    flexDirection: 'row',
+    borderRadius: 8,
+    borderWidth: 1,
+    overflow: 'hidden',
+  },
   sectionGap: {
     gap: 12,
-  },
-  subscriptionStackBar: {
-    height: 18,
-    borderRadius: 999,
-    overflow: 'hidden',
-    flexDirection: 'row',
-  },
-  subscriptionStackSegment: {
-    height: '100%',
-  },
-  subscriptionStackWrapper: {
-    marginTop: 14,
-    gap: 8,
   },
   tabButton: {
     flexDirection: 'row',
@@ -535,28 +1031,106 @@ const styles = StyleSheet.create({
     fontSize: 11,
     textTransform: 'uppercase',
   },
+  withdrawalActionsCell: {
+    flex: 1.15,
+    alignItems: 'flex-end',
+    justifyContent: 'center',
+    gap: 6,
+  },
+  withdrawalButtonRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  withdrawalContextText: {
+    fontSize: 12,
+    lineHeight: 18,
+    fontFamily: 'Poppins_400Regular',
+    marginBottom: 12,
+  },
+  withdrawalExplainer: {
+    borderWidth: 1,
+    borderRadius: 10,
+    padding: 12,
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+    marginBottom: 12,
+  },
+  withdrawalExplainerText: {
+    fontSize: 12,
+    lineHeight: 18,
+    fontFamily: 'Poppins_400Regular',
+  },
+  withdrawalExplainerTitle: {
+    fontSize: 13,
+    fontFamily: 'Poppins_600SemiBold',
+    marginBottom: 2,
+  },
+  withdrawalSignalCard: {
+    flex: 1,
+    minWidth: 150,
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  withdrawalSignalGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+    marginBottom: 12,
+  },
+  withdrawalSignalLabel: {
+    fontSize: 11,
+    fontFamily: 'Poppins_500Medium',
+    marginBottom: 3,
+  },
+  withdrawalSignalValue: {
+    fontSize: 15,
+    fontFamily: 'Poppins_700Bold',
+  },
 });
 
-const tabItems: Array<{ key: Tab; label: string; icon: string }> = [
+const tabItems: { key: Tab; label: string; icon: string }[] = [
   { key: 'dashboard', label: 'Dashboard', icon: 'stats-chart-outline' },
-  { key: 'permits', label: 'Permits', icon: 'document-text-outline' },
   { key: 'users', label: 'Users', icon: 'people-outline' },
   { key: 'reports', label: 'Reports', icon: 'shield-checkmark-outline' },
   { key: 'audit', label: 'Audit', icon: 'time-outline' },
+  { key: 'posts', label: 'Posts', icon: 'newspaper-outline' },
+  { key: 'products', label: 'Products', icon: 'bag-handle-outline' },
 ];
 
 export default function AdminDashboardPage() {
   const { colors, isDark } = useTheme();
   const { session, loading, isGuest, isAdmin, roleResolved } = useAuth();
   const { width } = useWindowDimensions();
+  const hasHydratedDashboardRef = useRef(false);
+  const latestMetricsRequestRef = useRef(0);
+  const adminWithdrawSheetRef = useRef<BottomSheetModal>(null);
+  const dashboardContentOpacity = useRef(new Animated.Value(1)).current;
 
   const [initializingDashboard, setInitializingDashboard] = useState(false);
+  const [dashboardRefreshing, setDashboardRefreshing] = useState(false);
   const [metrics, setMetrics] = useState<DashboardMetrics>(defaultMetrics);
-  const [dashboardDateRange, setDashboardDateRange] = useState<'7d' | '30d' | 'all'>('30d');
+  const [dashboardDateRange, setDashboardDateRange] = useState<DashboardDateRange>('30d');
   const [globalSearch, setGlobalSearch] = useState('');
   const [dashboardSearchQuery, setDashboardSearchQuery] = useState('');
-  const [revenueFilter, setRevenueFilter] = useState<'gross' | 'net'>('net');
-  const [incidentTypeFilter, setIncidentTypeFilter] = useState<'all' | 'booking' | 'profile'>('all');
+  const [revenueFilter, setRevenueFilter] = useState<RevenueFilter>('net');
+  const [incidentTypeFilter, setIncidentTypeFilter] = useState<IncidentTypeFilter>('all');
+  const [paymentTransactions, setPaymentTransactions] = useState<AdminPaymentTransaction[]>([]);
+  const [paymentTotals, setPaymentTotals] = useState<AdminPaymentTotals>(defaultPaymentTotals);
+  const [paymentStatusFilter, setPaymentStatusFilter] = useState<AdminPaymentStatusFilter>('all');
+  const [paymentTransactionsLoading, setPaymentTransactionsLoading] = useState(false);
+  const [paymentExporting, setPaymentExporting] = useState(false);
+  const [withdrawals, setWithdrawals] = useState<AdminWithdrawalEntry[]>([]);
+  const [withdrawalTotals, setWithdrawalTotals] = useState<WithdrawalTotals>(defaultWithdrawalTotals);
+  const [withdrawalStatusFilter, setWithdrawalStatusFilter] = useState<WithdrawalStatusFilter>('all');
+  const [withdrawalsLoading, setWithdrawalsLoading] = useState(false);
+  const [adminWithdrawAmount, setAdminWithdrawAmount] = useState('');
+  const [adminWithdrawSubmitting, setAdminWithdrawSubmitting] = useState(false);
   const [alertState, setAlertState] = useState<{
     visible: boolean;
     type: AlertType;
@@ -575,6 +1149,33 @@ export default function AdminDashboardPage() {
     setAlertState({ visible: true, type, title, message });
   }, []);
 
+  const adminWithdrawAnimationConfigs = useBottomSheetTimingConfigs({
+    duration: 240,
+    easing: Easing.out(Easing.cubic),
+  });
+
+  const adminWithdrawSnapPoints = useMemo(() => ['72%'], []);
+
+  const renderAdminWithdrawBackdrop = useCallback(
+    (props: any) => (
+      <BottomSheetBackdrop
+        {...props}
+        appearsOnIndex={0}
+        disappearsOnIndex={-1}
+        opacity={0.5}
+      />
+    ),
+    [],
+  );
+
+  const dashboardCacheKey = useMemo(
+    () => getAdminPageCacheKey('dashboard', {
+      dateRange: dashboardDateRange,
+      searchQuery: dashboardSearchQuery,
+    }),
+    [dashboardDateRange, dashboardSearchQuery],
+  );
+
   const handleTabChange = useCallback((nextTab: Tab) => {
     if (nextTab === 'dashboard') return;
     router.replace(adminTabRoutes[nextTab] as any);
@@ -588,12 +1189,25 @@ export default function AdminDashboardPage() {
     return () => clearTimeout(timer);
   }, [globalSearch]);
 
+  useEffect(() => {
+    Animated.timing(dashboardContentOpacity, {
+      toValue: dashboardRefreshing ? 0.72 : 1,
+      duration: dashboardRefreshing ? 120 : 260,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start();
+  }, [dashboardContentOpacity, dashboardRefreshing]);
+
   const fetchMetrics = useCallback(async (filters?: {
-    dateRange?: '7d' | '30d' | 'all';
+    dateRange?: DashboardDateRange;
     searchQuery?: string;
   }) => {
-    const dateRange = filters?.dateRange || '30d';
+    const dateRange: DashboardDateRange = filters?.dateRange || '30d';
     const searchQuery = String(filters?.searchQuery || '').trim();
+    const cacheKey = getAdminPageCacheKey('dashboard', {
+      dateRange,
+      searchQuery,
+    });
 
     const { data, error } = await supabase.functions.invoke<any>('permit-management', {
       body: {
@@ -634,7 +1248,8 @@ export default function AdminDashboardPage() {
       }))
       : [];
 
-    setMetrics({
+    const nextMetrics: DashboardMetrics = {
+      generatedAt: typeof data?.generatedAt === 'string' ? data.generatedAt : new Date().toISOString(),
       totalUsers: Number(data?.totalUsers || 0),
       totalStudios: Number(data?.totalStudios || 0),
       totalGigs: Number(data?.totalGigs || 0),
@@ -649,23 +1264,28 @@ export default function AdminDashboardPage() {
       resolvedIncidents: Number(data?.resolvedIncidents || 0),
       openIncidentsInRange: Number(data?.openIncidentsInRange || 0),
       resolvedIncidentsInRange: Number(data?.resolvedIncidentsInRange || 0),
-      activeSubscriptions: Number(data?.activeSubscriptions || 0),
-      churnRatePercent: Number(data?.churnRatePercent || 0),
       dau: Number(data?.dau || 0),
       mau: Number(data?.mau || 0),
       newSignups24h: Number(data?.newSignups24h || 0),
       grossRevenue: Number(data?.grossRevenue || 0),
       netRevenue: Number(data?.netRevenue || 0),
+      allTimePlatformNet: Number(data?.allTimePlatformNet || data?.netRevenue || 0),
+      platformWithdrawn: Number(data?.platformWithdrawn || 0),
+      platformAvailable: Number(data?.platformAvailable ?? data?.netRevenue ?? 0),
+      providerEarnings: Number(data?.providerEarnings || 0),
       pendingPayouts: Number(data?.pendingPayouts || 0),
       avgReportResolutionHours: Number(data?.avgReportResolutionHours || 0),
       avgIncidentResolutionHours: Number(data?.avgIncidentResolutionHours || 0),
       paymongoSuccessRate: Number(data?.paymongoSuccessRate || 0),
+      paymentMetricsAvailable: Object.prototype.hasOwnProperty.call(data || {}, 'paymentAttempts'),
+      paymentAttempts: Number(data?.paymentAttempts || 0),
+      paidPaymentEvents: Number(data?.paidPaymentEvents || 0),
+      failedPaymentEvents: Number(data?.failedPaymentEvents || 0),
+      paymongoLinkedPaymentEvents: Number(data?.paymongoLinkedPaymentEvents || 0),
+      paymongoLinkedPaymentRate: Number(data?.paymongoLinkedPaymentRate ?? 100),
       dbHealthy: Boolean(data?.dbHealthy),
       apiHealthy: Boolean(data?.apiHealthy),
       paymongoHealthy: Boolean(data?.paymongoHealthy),
-      subscriptionTierBasic: Number(data?.subscriptionTierBasic || 0),
-      subscriptionTierPro: Number(data?.subscriptionTierPro || 0),
-      subscriptionTierOther: Number(data?.subscriptionTierOther || 0),
       incidentTypeBreakdown,
       peakActivitySlots,
       revenueTrend,
@@ -676,29 +1296,126 @@ export default function AdminDashboardPage() {
         transactions: Number(data?.searchSummary?.transactions || 0),
         total: Number(data?.searchSummary?.total || 0),
       },
+    };
+
+    writeAdminPageCache(cacheKey, nextMetrics);
+    return nextMetrics;
+  }, []);
+
+  const fetchAdminWithdrawals = useCallback(async (filters?: {
+    status?: WithdrawalStatusFilter;
+    searchQuery?: string;
+  }) => {
+    const status = filters?.status || 'all';
+    const searchQuery = String(filters?.searchQuery || '').trim();
+
+    const { data, error } = await supabase.functions.invoke<any>('permit-management', {
+      body: {
+        action: 'admin_fetch_withdrawals',
+        status,
+        searchQuery: searchQuery || null,
+        limit: 8,
+      },
     });
+
+    if (error) throw error;
+    if (data?.error) throw new Error(String(data.error));
+
+    const nextWithdrawals = Array.isArray(data?.withdrawals)
+      ? data.withdrawals.map((item: any) => {
+        const owner = Array.isArray(item?.user) ? item.user[0] : item?.user;
+        const normalizedStatus = String(item?.status || 'pending').trim().toLowerCase();
+
+        return {
+          id: String(item?.id || ''),
+          amount: Number(item?.amount || 0),
+          net_amount: Number(item?.net_amount || item?.amount || 0),
+          status: (WITHDRAWAL_STATUS_FILTERS.some((filter) => filter.key === normalizedStatus)
+            ? normalizedStatus
+            : 'pending') as WithdrawalStatusFilter,
+          payout_type: String(item?.payout_type || 'bank'),
+          payout_account_name: item?.payout_account_name || null,
+          payout_account_number: item?.payout_account_number || null,
+          payout_bank_name: item?.payout_bank_name || null,
+          reference_number: item?.reference_number || null,
+          notes: item?.notes || null,
+          created_at: item?.created_at || null,
+          processed_at: item?.processed_at || null,
+          source_type: item?.source_type === 'platform' ? 'platform' : 'provider',
+          user: owner ? {
+            id: owner.id,
+            full_name: owner.full_name || null,
+            email: owner.email || null,
+            role: owner.role || null,
+          } : null,
+        } satisfies AdminWithdrawalEntry;
+      })
+      : [];
+
+    const totalsPayload = data?.totals || {};
+    const nextTotals: WithdrawalTotals = {
+      count: Number(totalsPayload?.count || 0),
+      totalAmount: Number(totalsPayload?.totalAmount || 0),
+      totalNetAmount: Number(totalsPayload?.totalNetAmount || 0),
+      completedAmount: Number(totalsPayload?.completedAmount || 0),
+      pendingAmount: Number(totalsPayload?.pendingAmount || 0),
+      mockCount: Number(totalsPayload?.mockCount || 0),
+      platformCount: Number(totalsPayload?.platformCount || 0),
+    };
+
+    return { withdrawals: nextWithdrawals, totals: nextTotals };
   }, []);
 
   useEffect(() => {
     if (loading || !roleResolved || !session || isGuest || !isAdmin) {
+      latestMetricsRequestRef.current += 1;
       setInitializingDashboard(false);
+      setDashboardRefreshing(false);
+      hasHydratedDashboardRef.current = false;
       return;
     }
 
     let isMounted = true;
-    setInitializingDashboard(true);
+    const requestId = latestMetricsRequestRef.current + 1;
+    latestMetricsRequestRef.current = requestId;
+    const cachedMetrics = readAdminPageCache<DashboardMetrics>(
+      dashboardCacheKey,
+      DASHBOARD_CACHE_TTL_MS,
+    );
+
+    if (cachedMetrics) {
+      setMetrics(cachedMetrics);
+      setInitializingDashboard(false);
+      hasHydratedDashboardRef.current = true;
+      setDashboardRefreshing(true);
+    } else if (!hasHydratedDashboardRef.current) {
+      setInitializingDashboard(true);
+      setDashboardRefreshing(false);
+    } else {
+      setInitializingDashboard(false);
+      setDashboardRefreshing(true);
+    }
 
     void (async () => {
       try {
-        await fetchMetrics({
+        const nextMetrics = await fetchMetrics({
           dateRange: dashboardDateRange,
           searchQuery: dashboardSearchQuery,
         });
+        if (isMounted && latestMetricsRequestRef.current === requestId) {
+          setMetrics(nextMetrics);
+        }
       } catch (error) {
-        const message = await getErrorMessage(error, 'Unable to load admin metrics.');
-        showAlert('error', 'Admin dashboard unavailable', message);
+        if (isMounted && latestMetricsRequestRef.current === requestId && !cachedMetrics) {
+          const message = await getErrorMessage(error, 'Unable to load admin metrics.');
+          showAlert('error', 'Admin dashboard unavailable', message);
+        }
       } finally {
-        if (isMounted) setInitializingDashboard(false);
+        if (isMounted && latestMetricsRequestRef.current === requestId) {
+          setInitializingDashboard(false);
+          setDashboardRefreshing(false);
+          hasHydratedDashboardRef.current = true;
+        }
       }
     })();
 
@@ -711,35 +1428,300 @@ export default function AdminDashboardPage() {
     session,
     isGuest,
     isAdmin,
+    dashboardCacheKey,
     fetchMetrics,
     showAlert,
     dashboardDateRange,
     dashboardSearchQuery,
   ]);
 
+  useEffect(() => {
+    if (loading || !roleResolved || !session || isGuest || !isAdmin) {
+      setPaymentTransactions([]);
+      setPaymentTotals(defaultPaymentTotals);
+      setPaymentTransactionsLoading(false);
+      return;
+    }
+
+    let isMounted = true;
+    setPaymentTransactionsLoading(true);
+
+    void (async () => {
+      try {
+        const result = await fetchAdminPaymentTransactions({
+          status: paymentStatusFilter,
+          searchQuery: dashboardSearchQuery,
+          dateRange: dashboardDateRange,
+          limit: 8,
+        });
+
+        if (!isMounted) return;
+        setPaymentTransactions(result.transactions);
+        setPaymentTotals(result.totals);
+      } catch (error) {
+        if (!isMounted) return;
+        const message = await getErrorMessage(error, 'Unable to load payment transactions.');
+        showAlert('error', 'Payment monitor unavailable', message);
+      } finally {
+        if (isMounted) {
+          setPaymentTransactionsLoading(false);
+        }
+      }
+    })();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [
+    loading,
+    roleResolved,
+    session,
+    isGuest,
+    isAdmin,
+    showAlert,
+    paymentStatusFilter,
+    dashboardDateRange,
+    dashboardSearchQuery,
+  ]);
+
+  useEffect(() => {
+    if (loading || !roleResolved || !session || isGuest || !isAdmin) {
+      setWithdrawals([]);
+      setWithdrawalTotals(defaultWithdrawalTotals);
+      setWithdrawalsLoading(false);
+      return;
+    }
+
+    let isMounted = true;
+    setWithdrawalsLoading(true);
+
+    void (async () => {
+      try {
+        const result = await fetchAdminWithdrawals({
+          status: withdrawalStatusFilter,
+          searchQuery: dashboardSearchQuery,
+        });
+
+        if (!isMounted) return;
+        setWithdrawals(result.withdrawals);
+        setWithdrawalTotals(result.totals);
+      } catch (error) {
+        if (!isMounted) return;
+        const message = await getErrorMessage(error, 'Unable to load withdrawals.');
+        showAlert('error', 'Withdrawal monitor unavailable', message);
+      } finally {
+        if (isMounted) {
+          setWithdrawalsLoading(false);
+        }
+      }
+    })();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [
+    loading,
+    roleResolved,
+    session,
+    isGuest,
+    isAdmin,
+    fetchAdminWithdrawals,
+    showAlert,
+    withdrawalStatusFilter,
+    dashboardSearchQuery,
+  ]);
+
+  const handleShowAllPayments = useCallback(() => {
+    setPaymentStatusFilter('all');
+    setGlobalSearch('');
+  }, []);
+
+  const handleExportPaymentTransactions = useCallback(async () => {
+    if (paymentExporting) return;
+
+    try {
+      setPaymentExporting(true);
+
+      const result = await fetchAdminPaymentTransactions({
+        status: paymentStatusFilter,
+        searchQuery: dashboardSearchQuery,
+        dateRange: dashboardDateRange,
+        limit: 1000,
+      });
+
+      if (result.transactions.length === 0) {
+        showAlert('info', 'No Payments to Export', 'No payment transactions match the current filters.');
+        return;
+      }
+
+      const statusLabel = PAYMENT_STATUS_FILTERS.find((filter) => filter.key === paymentStatusFilter)?.label || 'All';
+      const downloaded = downloadPaymentTransactionsExcel(result.transactions, {
+        dateRangeLabel: DASHBOARD_DATE_RANGE_LABELS[dashboardDateRange],
+        statusLabel,
+      });
+
+      if (!downloaded) {
+        showAlert('info', 'Export Available on Web', 'Open the admin dashboard in a browser to download the Excel file.');
+        return;
+      }
+
+      showAlert('success', 'Excel Export Ready', `${result.transactions.length} payment transaction(s) exported.`);
+    } catch (error) {
+      void getErrorMessage(error, 'Unable to export payment transactions.').then((message) => {
+        showAlert('error', 'Export Failed', message);
+      });
+    } finally {
+      setPaymentExporting(false);
+    }
+  }, [
+    dashboardDateRange,
+    dashboardSearchQuery,
+    paymentExporting,
+    paymentStatusFilter,
+    showAlert,
+  ]);
+
+  const handlePaymentDetails = useCallback((transaction: AdminPaymentTransaction) => {
+    const customer = transaction.customer_name || transaction.customer_email || 'Unknown customer';
+    const studio = transaction.studio_name || 'Unknown studio';
+    const reference = transaction.reference || transaction.payment_intent_id || transaction.checkout_session_id || 'No reference';
+
+    showAlert(
+      'info',
+      'Payment Details',
+      `${studio}\nCustomer: ${customer}\nAction: ${normalizePaymentActionLabel(transaction.action)}\nAmount: ${formatCurrency(transaction.amount)}\nRefund: ${formatCurrency(transaction.refund_amount)}\nNet: ${formatCurrency(transaction.net_amount)}\nRef: ${reference}`,
+    );
+  }, [showAlert]);
+
+  const handleShowAllWithdrawals = useCallback(() => {
+    setWithdrawalStatusFilter('all');
+    setGlobalSearch('');
+  }, []);
+
+  const handleAdminWithdrawShortcut = useCallback(() => {
+    setAdminWithdrawAmount('');
+    adminWithdrawSheetRef.current?.present();
+  }, []);
+
+  const dismissAdminWithdrawSheet = useCallback(() => {
+    adminWithdrawSheetRef.current?.dismiss();
+  }, []);
+
+  const adminWithdrawAvailable = Math.max(Number(metrics.platformAvailable ?? metrics.netRevenue ?? 0), 0);
+  const parsedAdminWithdrawAmount = Number(adminWithdrawAmount);
+  const isAdminWithdrawReady =
+    Number.isFinite(parsedAdminWithdrawAmount) &&
+    parsedAdminWithdrawAmount >= 100 &&
+    parsedAdminWithdrawAmount <= adminWithdrawAvailable;
+
+  const handleAdminWithdrawSubmit = useCallback(async () => {
+    if (adminWithdrawSubmitting) return;
+
+    const amount = Number(adminWithdrawAmount);
+    if (!Number.isFinite(amount) || amount < 100 || amount > adminWithdrawAvailable) {
+      showAlert('error', 'Invalid Amount', 'Enter an amount within the available platform net.');
+      return;
+    }
+
+    try {
+      setAdminWithdrawSubmitting(true);
+
+      const { data, error } = await supabase.functions.invoke<any>('permit-management', {
+        body: {
+          action: 'admin_record_platform_withdrawal',
+          amount,
+          notes: 'Manual platform withdrawal from admin dashboard. No external payout provider was used.',
+        },
+      });
+
+      if (error) throw error;
+      if (data?.error) throw new Error(String(data.error));
+
+      const [nextMetrics, nextWithdrawals] = await Promise.all([
+        fetchMetrics({
+          dateRange: dashboardDateRange,
+          searchQuery: dashboardSearchQuery,
+        }),
+        fetchAdminWithdrawals({
+          status: withdrawalStatusFilter,
+          searchQuery: dashboardSearchQuery,
+        }),
+      ]);
+
+      setMetrics(nextMetrics);
+      setWithdrawals(nextWithdrawals.withdrawals);
+      setWithdrawalTotals(nextWithdrawals.totals);
+      setAdminWithdrawAmount('');
+      dismissAdminWithdrawSheet();
+
+      showAlert(
+        'success',
+        'Platform Withdrawal Recorded',
+        `${data?.reference || 'Manual cashout'} was saved to the database and linked to the current paid booking snapshot. No external transfer was sent.`,
+      );
+    } catch (error) {
+      void getErrorMessage(error, 'Unable to record platform withdrawal.').then((message) => {
+        showAlert('error', 'Withdrawal Failed', message);
+      });
+    } finally {
+      setAdminWithdrawSubmitting(false);
+    }
+  }, [
+    adminWithdrawAmount,
+    adminWithdrawAvailable,
+    adminWithdrawSubmitting,
+    dashboardDateRange,
+    dashboardSearchQuery,
+    dismissAdminWithdrawSheet,
+    fetchAdminWithdrawals,
+    fetchMetrics,
+    showAlert,
+    withdrawalStatusFilter,
+  ]);
+
+  const handleWithdrawalDetails = useCallback((withdrawal: AdminWithdrawalEntry) => {
+    const destination = withdrawal.source_type === 'platform'
+      ? 'Internal ledger'
+      : withdrawal.payout_type === 'bank'
+      ? (withdrawal.payout_bank_name || 'Bank')
+      : withdrawal.payout_type.toUpperCase();
+    const owner = withdrawal.source_type === 'platform'
+      ? 'Platform'
+      : withdrawal.user?.full_name || withdrawal.user?.email || 'Unknown user';
+    const account = maskAccountNumber(withdrawal.payout_account_number);
+    const reference = withdrawal.reference_number || 'No reference';
+
+    showAlert(
+      'info',
+      'Withdrawal Details',
+      `${owner}\n${destination} ${account}\nStatus: ${formatWithdrawalStatus(withdrawal.status)}\nNet: ${formatCurrency(withdrawal.net_amount)}\nRef: ${reference}${withdrawal.source_type === 'platform' ? '\nManual record only; no external transfer was sent.' : ''}`,
+    );
+  }, [showAlert]);
+
+  const handleCopyWithdrawalReference = useCallback(async (reference?: string | null) => {
+    const value = String(reference || '').trim();
+    if (!value) {
+      showAlert('info', 'No Reference', 'This withdrawal has no reference number yet.');
+      return;
+    }
+
+    try {
+      if (Platform.OS === 'web' && typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(value);
+        showAlert('success', 'Reference Copied', value);
+        return;
+      }
+
+      showAlert('info', 'Reference', value);
+    } catch {
+      showAlert('info', 'Reference', value);
+    }
+  }, [showAlert]);
+
   const dashboardIncidentRows = useMemo(() => {
     if (incidentTypeFilter === 'all') return metrics.incidentTypeBreakdown;
     return metrics.incidentTypeBreakdown.filter((row) => row.category === incidentTypeFilter);
   }, [metrics.incidentTypeBreakdown, incidentTypeFilter]);
-
-  const subscriptionTierTotal = useMemo(() => {
-    return metrics.subscriptionTierBasic + metrics.subscriptionTierPro + metrics.subscriptionTierOther;
-  }, [metrics.subscriptionTierBasic, metrics.subscriptionTierPro, metrics.subscriptionTierOther]);
-
-  const basicTierPercent = useMemo(() => {
-    if (!subscriptionTierTotal) return 0;
-    return (metrics.subscriptionTierBasic / subscriptionTierTotal) * 100;
-  }, [metrics.subscriptionTierBasic, subscriptionTierTotal]);
-
-  const proTierPercent = useMemo(() => {
-    if (!subscriptionTierTotal) return 0;
-    return (metrics.subscriptionTierPro / subscriptionTierTotal) * 100;
-  }, [metrics.subscriptionTierPro, subscriptionTierTotal]);
-
-  const otherTierPercent = useMemo(() => {
-    if (!subscriptionTierTotal) return 0;
-    return (metrics.subscriptionTierOther / subscriptionTierTotal) * 100;
-  }, [metrics.subscriptionTierOther, subscriptionTierTotal]);
 
   const peakActivityMaxCount = useMemo(() => {
     if (!metrics.peakActivitySlots.length) return 1;
@@ -749,6 +1731,13 @@ export default function AdminDashboardPage() {
   const selectedRevenueValue = useMemo(() => {
     return revenueFilter === 'gross' ? metrics.grossRevenue : metrics.netRevenue;
   }, [metrics.grossRevenue, metrics.netRevenue, revenueFilter]);
+
+  const selectedRevenueLabel = revenueFilter === 'gross'
+    ? 'Gross booking revenue'
+    : 'Platform net revenue';
+
+  const showWithdrawalRevenueContext =
+    withdrawalTotals.count === 0 && (metrics.grossRevenue > 0 || metrics.providerEarnings > 0);
 
   const revenueTrendRows = useMemo(() => {
     return metrics.revenueTrend.map((row) => ({
@@ -763,10 +1752,18 @@ export default function AdminDashboardPage() {
   }, [revenueTrendRows]);
 
   const dashboardDateRangeLabel = useMemo(() => {
-    if (dashboardDateRange === '7d') return 'Last 7 Days';
-    if (dashboardDateRange === '30d') return 'Last 30 Days';
-    return 'All Time';
+    return DASHBOARD_DATE_RANGE_LABELS[dashboardDateRange];
   }, [dashboardDateRange]);
+
+  const metricsUpdatedLabel = useMemo(() => {
+    return formatMetricTimestamp(metrics.generatedAt);
+  }, [metrics.generatedAt]);
+
+  const liveStatusLabel = dashboardRefreshing
+    ? 'Syncing live data'
+    : metricsUpdatedLabel
+      ? `Live DB | ${metricsUpdatedLabel}`
+      : 'Live DB';
 
   if (loading || !roleResolved || initializingDashboard) {
     return (
@@ -782,7 +1779,11 @@ export default function AdminDashboardPage() {
   }
 
   return (
-    <View style={[styles.flex1, { backgroundColor: colors.background }]}>
+    <View
+      testID="admin-dashboard-page"
+      accessibilityLabel="admin-dashboard-page"
+      style={[styles.flex1, { backgroundColor: colors.background }]}
+    >
       <Header title="Admin" hideBackButton />
 
       <ScrollView
@@ -815,11 +1816,6 @@ export default function AdminDashboardPage() {
                   <Text style={[styles.tabText, { color: active ? '#FFFFFF' : colors.textSecondary }]}>
                     {item.label}
                   </Text>
-                  {item.key === 'permits' && metrics.pendingPermits > 0 && (
-                    <View style={styles.badge}>
-                      <Text style={styles.badgeText}>{metrics.pendingPermits}</Text>
-                    </View>
-                  )}
                 </TouchableOpacity>
               );
             })}
@@ -830,6 +1826,8 @@ export default function AdminDashboardPage() {
           <View style={{ flexDirection: 'row', gap: 12, marginBottom: 8, zIndex: 10, flexWrap: 'wrap' }}>
             <View style={{ flex: 1, minWidth: 200 }}>
               <TextInput
+                testID="admin-dashboard-global-search-input"
+                accessibilityLabel="admin-dashboard-global-search-input"
                 value={globalSearch}
                 onChangeText={setGlobalSearch}
                 placeholder="Global search (users, transactions, reports)..."
@@ -846,22 +1844,36 @@ export default function AdminDashboardPage() {
               />
             </View>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }} style={{ flexGrow: 0 }}>
-              {(['7d', '30d', 'all'] as const).map((r) => {
-                const isActive = dashboardDateRange === r;
-                const labels = { '7d': 'Last 7 Days', '30d': 'Last 30 Days', 'all': 'All Time' };
-                return (
-                  <TouchableOpacity
-                    key={r}
-                    onPress={() => setDashboardDateRange(r)}
-                    style={[styles.filterChip, { backgroundColor: isActive ? colors.primary : colors.card, borderColor: isActive ? colors.primary : colors.border }]}
-                  >
-                    <Text style={[styles.filterChipText, { color: isActive ? '#fff' : colors.textSecondary }]}>{labels[r]}</Text>
-                  </TouchableOpacity>
-                );
-              })}
+              {(Object.keys(DASHBOARD_DATE_RANGE_LABELS) as DashboardDateRange[]).map((range) => (
+                <SmoothFilterChip
+                  key={range}
+                  isActive={dashboardDateRange === range}
+                  label={DASHBOARD_DATE_RANGE_LABELS[range]}
+                  onPress={() => setDashboardDateRange(range)}
+                  activeColor={colors.primary}
+                  inactiveBackground={colors.card}
+                  inactiveBorder={colors.border}
+                  inactiveText={colors.textSecondary}
+                />
+              ))}
             </ScrollView>
+            <View
+              style={[
+                styles.liveStatusPill,
+                {
+                  backgroundColor: isDark ? '#0F172A' : '#FFFFFF',
+                  borderColor: colors.border,
+                },
+              ]}
+            >
+              <View style={[styles.liveStatusDot, { backgroundColor: dashboardRefreshing ? colors.primary : '#10b981' }]} />
+              <Text style={[styles.liveStatusText, { color: dashboardRefreshing ? colors.primary : colors.textSecondary }]}>
+                {liveStatusLabel}
+              </Text>
+            </View>
           </View>
 
+          <Animated.View style={[styles.dashboardMetricsStack, { opacity: dashboardContentOpacity }]}>
           {dashboardSearchQuery.length >= 2 && (
             <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
               <Text style={[styles.cardTitle, { color: colors.text }]}>Search Matches ({dashboardDateRangeLabel})</Text>
@@ -880,27 +1892,37 @@ export default function AdminDashboardPage() {
                 <Ionicons name="people-outline" size={20} color={colors.primary} />
               </View>
               <View style={styles.pulseRow}>
-                <Text style={[styles.pulseValueMain, { color: colors.text }]}>{metrics.totalUsers}</Text>
+                <AnimatedMetricText
+                  value={metrics.totalUsers}
+                  formatter={formatMetricCount}
+                  style={[styles.pulseValueMain, { color: colors.text }]}
+                />
               </View>
               <View style={{ flexDirection: 'row', gap: 8, marginTop: 12 }}>
-                <View style={styles.badgeGreen}><Text style={styles.badgeTextGreen}>+{metrics.newSignups24h} new signups (24h)</Text></View>
+                <View style={[styles.badgeGreen, styles.badgeInline]}>
+                  <Text style={styles.badgeTextGreen}>+</Text>
+                  <AnimatedMetricText
+                    value={metrics.newSignups24h}
+                    formatter={formatMetricCount}
+                    style={styles.badgeTextGreen}
+                  />
+                  <Text style={styles.badgeTextGreen}>new signups (24h)</Text>
+                </View>
               </View>
-              <Text style={[styles.pulseSubtitle, { color: colors.textSecondary, marginTop: 8 }]}>DAU: {metrics.dau} | MAU: {metrics.mau}</Text>
-            </View>
-
-            <View style={[styles.pulseCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
-              <View style={styles.pulseHeader}>
-                <Text style={[styles.pulseTitle, { color: colors.textSecondary }]}>Subscriptions Health</Text>
-                <Ionicons name="star-outline" size={20} color={colors.primary} />
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3, marginTop: 8 }}>
+                <Text style={[styles.pulseSubtitle, { color: colors.textSecondary, marginTop: 0 }]}>DAU:</Text>
+                <AnimatedMetricText
+                  value={metrics.dau}
+                  formatter={formatMetricCount}
+                  style={[styles.pulseSubtitle, { color: colors.textSecondary, marginTop: 0 }]}
+                />
+                <Text style={[styles.pulseSubtitle, { color: colors.textSecondary, marginTop: 0 }]}>| MAU:</Text>
+                <AnimatedMetricText
+                  value={metrics.mau}
+                  formatter={formatMetricCount}
+                  style={[styles.pulseSubtitle, { color: colors.textSecondary, marginTop: 0 }]}
+                />
               </View>
-              <View style={styles.pulseRow}>
-                <Text style={[styles.pulseValueMain, { color: colors.text }]}>{metrics.activeSubscriptions}</Text>
-              </View>
-              <View style={{ flexDirection: 'row', gap: 8, marginTop: 12 }}>
-                <View style={styles.badgeGreen}><Text style={styles.badgeTextGreen}>Active subscribers</Text></View>
-                <View style={styles.badgeRed}><Text style={styles.badgeTextRed}>Churn {formatPercent(metrics.churnRatePercent)}</Text></View>
-              </View>
-              <Text style={[styles.pulseSubtitle, { color: colors.textSecondary, marginTop: 8 }]}>Tier base tracked from active profiles</Text>
             </View>
 
             <View style={[styles.pulseCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
@@ -909,10 +1931,17 @@ export default function AdminDashboardPage() {
                 <Ionicons name="wallet-outline" size={20} color={colors.primary} />
               </View>
               <View style={styles.pulseRow}>
-                <Text style={[styles.pulseValueMain, { color: '#10b981' }]}>{formatCurrency(selectedRevenueValue)}</Text>
+                <AnimatedMetricText
+                  value={selectedRevenueValue}
+                  formatter={formatCurrency}
+                  style={[styles.pulseValueMain, { color: '#10b981' }]}
+                />
               </View>
-              <Text style={[styles.pulseSubtitle, { color: colors.textSecondary, marginTop: 12 }]}>Pending Payouts: {formatCurrency(metrics.pendingPayouts)}</Text>
-              <Text style={[styles.pulseSubtitle, { color: colors.textSecondary, marginTop: 2 }]}>Gross: {formatCurrency(metrics.grossRevenue)} | Net: {formatCurrency(metrics.netRevenue)}</Text>
+              <Text style={[styles.pulseSubtitle, { color: colors.textSecondary, marginTop: 2 }]}>{selectedRevenueLabel}</Text>
+              <Text style={[styles.pulseSubtitle, { color: colors.textSecondary, marginTop: 12 }]}>Provider earnings: {formatCurrency(metrics.providerEarnings)}</Text>
+              <Text style={[styles.pulseSubtitle, { color: colors.textSecondary, marginTop: 2 }]}>Pending payouts: {formatCurrency(metrics.pendingPayouts)}</Text>
+              <Text style={[styles.pulseSubtitle, { color: colors.textSecondary, marginTop: 2 }]}>Platform withdrawn: {formatCurrency(metrics.platformWithdrawn)}</Text>
+              <Text style={[styles.pulseSubtitle, { color: colors.textSecondary, marginTop: 2 }]}>Gross: {formatCurrency(metrics.grossRevenue)} | Platform net: {formatCurrency(metrics.netRevenue)}</Text>
             </View>
 
             <View style={[styles.pulseCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
@@ -934,11 +1963,371 @@ export default function AdminDashboardPage() {
                 </View>
                 <View style={styles.legendItem}>
                   <View style={[styles.legendDot, { backgroundColor: metrics.paymongoHealthy ? '#10b981' : '#f59e0b' }]} />
-                  <Text style={[styles.legendText, { color: colors.textSecondary }]}>PayMongo health: {formatPercent(metrics.paymongoSuccessRate)}</Text>
+                  <Text style={[styles.legendText, { color: colors.textSecondary }]}>
+                    Payment success: {formatPercent(metrics.paymongoSuccessRate)}
+                    {metrics.paymentMetricsAvailable ? ` (${formatMetricCount(metrics.paymentAttempts)} events)` : ''}
+                  </Text>
                 </View>
+                {metrics.paymentMetricsAvailable && (
+                  <View style={styles.legendItem}>
+                    <View style={[styles.legendDot, { backgroundColor: metrics.paymongoLinkedPaymentRate >= 90 ? '#10b981' : '#f59e0b' }]} />
+                    <Text style={[styles.legendText, { color: colors.textSecondary }]}>
+                      PayMongo-linked: {formatMetricCount(metrics.paymongoLinkedPaymentEvents)}/{formatMetricCount(metrics.paidPaymentEvents)}
+                    </Text>
+                  </View>
+                )}
               </View>
               <Text style={[styles.pulseSubtitle, { color: colors.textSecondary, marginTop: 8 }]}>Avg report resolve: {formatHours(metrics.avgReportResolutionHours)}</Text>
             </View>
+          </View>
+
+          <View
+            testID="admin-payment-transactions-section"
+            accessibilityLabel="admin-payment-transactions-section"
+            style={[styles.dataEnginePanel, { backgroundColor: colors.card, borderColor: colors.border }]}
+          >
+            <View style={[styles.pulseHeader, { marginBottom: 16, flexWrap: 'wrap', gap: 10 }]}>
+              <View>
+                <Text style={[styles.panelTitle, { color: colors.text, marginBottom: 0 }]}>Payment Transactions</Text>
+                <Text style={[styles.panelSubtitle, { color: colors.textSecondary, marginBottom: 0 }]}>
+                  Gross: {formatCurrency(paymentTotals.grossAmount)} | Refunds: {formatCurrency(paymentTotals.refundedAmount)} | Net: {formatCurrency(paymentTotals.netAmount)}
+                </Text>
+              </View>
+              <View style={styles.withdrawalButtonRow}>
+                <TouchableOpacity
+                  testID="admin-payment-transactions-export-button"
+                  accessibilityLabel="admin-payment-transactions-export-button"
+                  activeOpacity={paymentExporting ? 1 : 0.88}
+                  disabled={paymentExporting}
+                  onPress={() => void handleExportPaymentTransactions()}
+                  style={[
+                    styles.dashboardActionButton,
+                    {
+                      backgroundColor: colors.primary,
+                      borderColor: colors.primary,
+                      opacity: paymentExporting ? 0.7 : 1,
+                    },
+                  ]}
+                >
+                  {paymentExporting ? (
+                    <ActivityIndicator size="small" color="#FFFFFF" />
+                  ) : (
+                    <Ionicons name="download-outline" size={15} color="#FFFFFF" />
+                  )}
+                  <Text style={[styles.dashboardActionText, { color: '#FFFFFF' }]}>Export Excel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  testID="admin-payment-transactions-view-all-button"
+                  accessibilityLabel="admin-payment-transactions-view-all-button"
+                  activeOpacity={0.88}
+                  onPress={handleShowAllPayments}
+                  style={[
+                    styles.dashboardActionButton,
+                    {
+                      backgroundColor: isDark ? '#0F172A' : '#FFFFFF',
+                      borderColor: colors.border,
+                    },
+                  ]}
+                >
+                  <Ionicons name="albums-outline" size={15} color={colors.primary} />
+                  <Text style={[styles.dashboardActionText, { color: colors.primary }]}>View All</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingBottom: 4 }}>
+              {PAYMENT_STATUS_FILTERS.map((filter) => (
+                <SmoothFilterChip
+                  key={filter.key}
+                  isActive={paymentStatusFilter === filter.key}
+                  label={filter.label}
+                  onPress={() => setPaymentStatusFilter(filter.key)}
+                  activeColor={colors.primary}
+                  inactiveBackground={colors.card}
+                  inactiveBorder={colors.border}
+                  inactiveText={colors.textSecondary}
+                />
+              ))}
+            </ScrollView>
+
+            <View style={{ flexDirection: 'row', gap: 12, flexWrap: 'wrap', marginBottom: 12 }}>
+              <View style={[styles.badgeGreen, styles.badgeInline, { backgroundColor: isDark ? '#064E3B' : '#ECFDF5' }]}>
+                <Text style={styles.badgeTextGreen}>{formatMetricCount(paymentTotals.count)} records</Text>
+              </View>
+              <View style={[styles.badgeGreen, styles.badgeInline, { backgroundColor: isDark ? '#172554' : '#EFF6FF' }]}>
+                <Text style={[styles.badgeTextGreen, { color: '#0ea5e9' }]}>{formatMetricCount(paymentTotals.refundedCount)} refund events</Text>
+              </View>
+              <View style={[styles.badgeGreen, styles.badgeInline, { backgroundColor: isDark ? '#450A0A' : '#FEF2F2' }]}>
+                <Text style={[styles.badgeTextGreen, { color: '#ef4444' }]}>{formatMetricCount(paymentTotals.cancelledCount)} cancelled</Text>
+              </View>
+            </View>
+
+            <View style={styles.tableHeader}>
+              <Text style={[styles.tableCell, styles.th, { color: colors.textSecondary, flex: 1.4 }]}>Customer</Text>
+              <Text style={[styles.tableCell, styles.th, { color: colors.textSecondary, flex: 1.4 }]}>Studio</Text>
+              <Text style={[styles.tableCell, styles.th, { color: colors.textSecondary }]}>Action</Text>
+              <Text style={[styles.tableCell, styles.th, { color: colors.textSecondary, textAlign: 'right' }]}>Net</Text>
+              <Text style={[styles.tableCell, styles.th, { color: colors.textSecondary, textAlign: 'right', flex: 1.1 }]}>Details</Text>
+            </View>
+
+            {paymentTransactionsLoading ? (
+              <ActivityIndicator size="small" color={colors.primary} style={{ paddingVertical: 18 }} />
+            ) : paymentTransactions.length === 0 ? (
+              <Text style={[styles.emptyText, { color: colors.textSecondary, textAlign: 'left', paddingVertical: 12 }]}>
+                No payment transactions match this filter.
+              </Text>
+            ) : (
+              paymentTransactions.map((transaction) => {
+                const statusColor = getPaymentStatusColor(transaction);
+                const customerLabel = transaction.customer_name || transaction.customer_email || 'Unknown customer';
+                const studioLabel = transaction.studio_name || 'Unknown studio';
+
+                return (
+                  <View
+                    key={transaction.id}
+                    testID={`admin-payment-transaction-row-${transaction.booking_id}`}
+                    accessibilityLabel={`admin-payment-transaction-row-${transaction.booking_id}`}
+                    style={[styles.tableRow, { borderBottomColor: colors.border }]}
+                  >
+                    <View style={[styles.tableCell, { flex: 1.4 }]}>
+                      <Text numberOfLines={1} style={{ color: colors.text, fontSize: 12, fontFamily: 'Poppins_500Medium' }}>{customerLabel}</Text>
+                      <Text numberOfLines={1} style={{ color: colors.textSecondary, fontSize: 11, fontFamily: 'Poppins_400Regular' }}>{formatDateTime(transaction.event_at)}</Text>
+                    </View>
+                    <View style={[styles.tableCell, { flex: 1.4 }]}>
+                      <Text numberOfLines={1} style={{ color: colors.text, fontSize: 12, fontFamily: 'Poppins_500Medium' }}>{studioLabel}</Text>
+                      <Text numberOfLines={1} style={{ color: colors.textSecondary, fontSize: 11, fontFamily: 'Poppins_400Regular' }}>{transaction.reference || 'No reference'}</Text>
+                    </View>
+                    <View style={[styles.tableCell, { justifyContent: 'center' }]}>
+                      <View style={[styles.badgeGreen, { alignSelf: 'flex-start', backgroundColor: `${statusColor}26` }]}>
+                        <Text style={[styles.badgeTextGreen, { color: statusColor }]}>{normalizePaymentActionLabel(transaction.action)}</Text>
+                      </View>
+                    </View>
+                    <View style={[styles.tableCell, { justifyContent: 'center' }]}>
+                      <Text style={{ color: colors.text, fontSize: 12, fontFamily: 'Poppins_600SemiBold', textAlign: 'right' }}>
+                        {formatCurrency(transaction.net_amount)}
+                      </Text>
+                      <Text style={{ color: colors.textSecondary, fontSize: 11, fontFamily: 'Poppins_400Regular', textAlign: 'right' }}>
+                        Refund {formatCurrency(transaction.refund_amount)}
+                      </Text>
+                    </View>
+                    <View style={[styles.tableCell, styles.withdrawalActionsCell, { flex: 1.1 }]}>
+                      <TouchableOpacity
+                        testID={`admin-payment-transaction-details-${transaction.booking_id}`}
+                        accessibilityLabel={`admin-payment-transaction-details-${transaction.booking_id}`}
+                        activeOpacity={0.88}
+                        onPress={() => handlePaymentDetails(transaction)}
+                        style={[styles.miniActionButton, { borderColor: colors.border, backgroundColor: isDark ? '#0F172A' : '#FFFFFF' }]}
+                      >
+                        <Ionicons name="document-text-outline" size={13} color={colors.primary} />
+                        <Text style={[styles.miniActionText, { color: colors.primary }]}>Details</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                );
+              })
+            )}
+          </View>
+
+          <View
+            testID="admin-withdrawals-section"
+            accessibilityLabel="admin-withdrawals-section"
+            style={[styles.dataEnginePanel, { backgroundColor: colors.card, borderColor: colors.border }]}
+          >
+            <View style={[styles.pulseHeader, { marginBottom: 16, flexWrap: 'wrap', gap: 10 }]}>
+              <View>
+                <Text style={[styles.panelTitle, { color: colors.text, marginBottom: 0 }]}>Withdrawal Monitor</Text>
+                <Text style={[styles.panelSubtitle, { color: colors.textSecondary, marginBottom: 0 }]}>
+                  Completed: {formatCurrency(withdrawalTotals.completedAmount)} | Pending: {formatCurrency(withdrawalTotals.pendingAmount)} | Platform records: {formatMetricCount(withdrawalTotals.platformCount)}
+                </Text>
+              </View>
+              <View style={styles.withdrawalButtonRow}>
+                <TouchableOpacity
+                  testID="admin-platform-withdrawal-open-button"
+                  accessibilityLabel="admin-platform-withdrawal-open-button"
+                  activeOpacity={0.88}
+                  onPress={handleAdminWithdrawShortcut}
+                  style={[
+                    styles.dashboardActionButton,
+                    {
+                      backgroundColor: colors.primary,
+                      borderColor: colors.primary,
+                    },
+                  ]}
+                >
+                  <Ionicons name="arrow-down-circle-outline" size={15} color="#FFFFFF" />
+                  <Text style={[styles.dashboardActionText, { color: '#FFFFFF' }]}>Withdraw</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  testID="admin-withdrawals-view-all-button"
+                  accessibilityLabel="admin-withdrawals-view-all-button"
+                  activeOpacity={0.88}
+                  onPress={handleShowAllWithdrawals}
+                  style={[
+                    styles.dashboardActionButton,
+                    {
+                      backgroundColor: isDark ? '#0F172A' : '#FFFFFF',
+                      borderColor: colors.border,
+                    },
+                  ]}
+                >
+                  <Ionicons name="albums-outline" size={15} color={colors.primary} />
+                  <Text style={[styles.dashboardActionText, { color: colors.primary }]}>View All</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+
+            <View
+              style={[
+                styles.withdrawalExplainer,
+                {
+                  backgroundColor: isDark ? '#0F172A' : '#F8FAFC',
+                  borderColor: colors.border,
+                },
+              ]}
+            >
+              <Ionicons name="information-circle-outline" size={18} color={colors.primary} />
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.withdrawalExplainerTitle, { color: colors.text }]}>
+                  Revenue and withdrawals are separate.
+                </Text>
+                <Text style={[styles.withdrawalExplainerText, { color: colors.textSecondary }]}>
+                  Revenue is counted from paid bookings. Platform withdrawals are manual database records linked to the current payment snapshot; they do not send money outside the app.
+                </Text>
+              </View>
+            </View>
+
+            <View style={styles.withdrawalSignalGrid}>
+              <View style={[styles.withdrawalSignalCard, { backgroundColor: isDark ? '#102A22' : '#ECFDF5', borderColor: isDark ? '#14532D' : '#BBF7D0' }]}>
+                <Text style={[styles.withdrawalSignalLabel, { color: isDark ? '#86EFAC' : '#047857' }]}>Paid Booking Revenue</Text>
+                <Text style={[styles.withdrawalSignalValue, { color: isDark ? '#D1FAE5' : '#065F46' }]}>{formatCurrency(metrics.grossRevenue)}</Text>
+              </View>
+              <View style={[styles.withdrawalSignalCard, { backgroundColor: isDark ? '#172554' : '#EFF6FF', borderColor: isDark ? '#1D4ED8' : '#BFDBFE' }]}>
+                <Text style={[styles.withdrawalSignalLabel, { color: isDark ? '#93C5FD' : '#0369A1' }]}>Provider Earnings</Text>
+                <Text style={[styles.withdrawalSignalValue, { color: isDark ? '#DBEAFE' : '#0C4A6E' }]}>{formatCurrency(metrics.providerEarnings)}</Text>
+              </View>
+              <View style={[styles.withdrawalSignalCard, { backgroundColor: isDark ? '#312E81' : '#EEF2FF', borderColor: isDark ? '#4F46E5' : '#C7D2FE' }]}>
+                <Text style={[styles.withdrawalSignalLabel, { color: isDark ? '#C4B5FD' : '#4338CA' }]}>Cashout Requests</Text>
+                <Text style={[styles.withdrawalSignalValue, { color: isDark ? '#EDE9FE' : '#312E81' }]}>{formatMetricCount(withdrawalTotals.count)}</Text>
+              </View>
+            </View>
+
+            {showWithdrawalRevenueContext && (
+              <Text style={[styles.withdrawalContextText, { color: colors.textSecondary }]}>
+                No provider has submitted a withdrawal request for this view yet. The revenue total is from booking payments, not cashout records.
+              </Text>
+            )}
+
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingBottom: 4 }}>
+              {WITHDRAWAL_STATUS_FILTERS.map((filter) => (
+                <SmoothFilterChip
+                  key={filter.key}
+                  isActive={withdrawalStatusFilter === filter.key}
+                  label={filter.label}
+                  onPress={() => setWithdrawalStatusFilter(filter.key)}
+                  activeColor={colors.primary}
+                  inactiveBackground={colors.card}
+                  inactiveBorder={colors.border}
+                  inactiveText={colors.textSecondary}
+                />
+              ))}
+            </ScrollView>
+
+            <View style={{ flexDirection: 'row', gap: 12, flexWrap: 'wrap', marginBottom: 12 }}>
+              <View style={[styles.badgeGreen, styles.badgeInline, { backgroundColor: isDark ? '#064E3B' : '#ECFDF5' }]}>
+                <Text style={styles.badgeTextGreen}>{formatMetricCount(withdrawalTotals.count)} records</Text>
+              </View>
+              <View style={[styles.badgeGreen, styles.badgeInline, { backgroundColor: isDark ? '#172554' : '#EFF6FF' }]}>
+                <Text style={[styles.badgeTextGreen, { color: '#0ea5e9' }]}>Requested {formatCurrency(withdrawalTotals.totalAmount)}</Text>
+              </View>
+              <View style={[styles.badgeGreen, styles.badgeInline, { backgroundColor: isDark ? '#312E81' : '#EEF2FF' }]}>
+                <Text style={[styles.badgeTextGreen, { color: colors.primary }]}>Net {formatCurrency(withdrawalTotals.totalNetAmount)}</Text>
+              </View>
+            </View>
+
+            <View style={styles.tableHeader}>
+              <Text style={[styles.tableCell, styles.th, { color: colors.textSecondary, flex: 1.3 }]}>Owner</Text>
+              <Text style={[styles.tableCell, styles.th, { color: colors.textSecondary, flex: 1.5 }]}>Destination</Text>
+              <Text style={[styles.tableCell, styles.th, { color: colors.textSecondary }]}>Status</Text>
+              <Text style={[styles.tableCell, styles.th, { color: colors.textSecondary, textAlign: 'right' }]}>Net Amount</Text>
+              <Text style={[styles.tableCell, styles.th, { color: colors.textSecondary, textAlign: 'right', flex: 1.15 }]}>Actions</Text>
+            </View>
+
+            {withdrawalsLoading ? (
+              <ActivityIndicator size="small" color={colors.primary} style={{ paddingVertical: 18 }} />
+            ) : withdrawals.length === 0 ? (
+              <Text style={[styles.emptyText, { color: colors.textSecondary, textAlign: 'left', paddingVertical: 12 }]}>
+                No withdrawal requests match this filter. Cashouts will appear here after providers submit a withdrawal from their wallet.
+              </Text>
+            ) : (
+              withdrawals.map((withdrawal) => {
+                const destinationLabel = withdrawal.payout_type === 'bank'
+                  ? (withdrawal.payout_bank_name || 'Bank')
+                  : withdrawal.payout_type.toUpperCase();
+                const ownerLabel = withdrawal.user?.full_name || withdrawal.user?.email || 'Unknown user';
+                const statusColor = withdrawal.status === 'completed'
+                  ? '#10b981'
+                  : withdrawal.status === 'failed' || withdrawal.status === 'cancelled'
+                    ? '#ef4444'
+                    : '#f59e0b';
+
+                return (
+                  <View
+                    key={withdrawal.id}
+                    testID={`admin-withdrawal-row-${withdrawal.id}`}
+                    accessibilityLabel={`admin-withdrawal-row-${withdrawal.id}`}
+                    style={[styles.tableRow, { borderBottomColor: colors.border }]}
+                  >
+                    <View style={[styles.tableCell, { flex: 1.3 }]}>
+                      <Text numberOfLines={1} style={{ color: colors.text, fontSize: 12, fontFamily: 'Poppins_500Medium' }}>{ownerLabel}</Text>
+                      <Text numberOfLines={1} style={{ color: colors.textSecondary, fontSize: 11, fontFamily: 'Poppins_400Regular' }}>{formatDateTime(withdrawal.created_at)}</Text>
+                    </View>
+                    <View style={[styles.tableCell, { flex: 1.5 }]}>
+                      <Text numberOfLines={1} style={{ color: colors.text, fontSize: 12, fontFamily: 'Poppins_500Medium' }}>
+                        {destinationLabel} {maskAccountNumber(withdrawal.payout_account_number)}
+                      </Text>
+                      <Text numberOfLines={1} style={{ color: colors.textSecondary, fontSize: 11, fontFamily: 'Poppins_400Regular' }}>
+                        {withdrawal.reference_number || 'No reference'}
+                      </Text>
+                    </View>
+                    <View style={[styles.tableCell, { justifyContent: 'center' }]}>
+                      <View style={[styles.badgeGreen, { alignSelf: 'flex-start', backgroundColor: `${statusColor}26` }]}>
+                        <Text style={[styles.badgeTextGreen, { color: statusColor }]}>{formatWithdrawalStatus(withdrawal.status)}</Text>
+                      </View>
+                    </View>
+                    <View style={[styles.tableCell, { justifyContent: 'center' }]}>
+                      <Text style={{ color: colors.text, fontSize: 12, fontFamily: 'Poppins_600SemiBold', textAlign: 'right' }}>
+                        {formatCurrency(withdrawal.net_amount)}
+                      </Text>
+                      <Text style={{ color: colors.textSecondary, fontSize: 11, fontFamily: 'Poppins_400Regular', textAlign: 'right' }}>
+                        {formatDateTime(withdrawal.processed_at)}
+                      </Text>
+                    </View>
+                    <View style={[styles.tableCell, styles.withdrawalActionsCell]}>
+                      <TouchableOpacity
+                        testID={`admin-withdrawal-details-${withdrawal.id}`}
+                        accessibilityLabel={`admin-withdrawal-details-${withdrawal.id}`}
+                        activeOpacity={0.88}
+                        onPress={() => handleWithdrawalDetails(withdrawal)}
+                        style={[styles.miniActionButton, { borderColor: colors.border, backgroundColor: isDark ? '#0F172A' : '#FFFFFF' }]}
+                      >
+                        <Ionicons name="document-text-outline" size={13} color={colors.primary} />
+                        <Text style={[styles.miniActionText, { color: colors.primary }]}>Details</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        testID={`admin-withdrawal-copy-${withdrawal.id}`}
+                        accessibilityLabel={`admin-withdrawal-copy-${withdrawal.id}`}
+                        activeOpacity={0.88}
+                        onPress={() => handleCopyWithdrawalReference(withdrawal.reference_number)}
+                        style={[styles.miniActionButton, { borderColor: colors.border, backgroundColor: isDark ? '#0F172A' : '#FFFFFF' }]}
+                      >
+                        <Ionicons name="copy-outline" size={13} color={colors.primary} />
+                        <Text style={[styles.miniActionText, { color: colors.primary }]}>Copy</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                );
+              })
+            )}
           </View>
 
           <View style={styles.dataEngineRow}>
@@ -946,19 +2335,31 @@ export default function AdminDashboardPage() {
               <View style={[styles.pulseHeader, { marginBottom: 12, flexWrap: 'wrap', gap: 10 }]}>
                 <View>
                   <Text style={[styles.panelTitle, { color: colors.text }]}>Revenue Growth</Text>
-                  <Text style={[styles.panelSubtitle, { color: colors.textSecondary, marginBottom: 0 }]}>{dashboardDateRangeLabel} real payment aggregates</Text>
+                  <Text style={[styles.panelSubtitle, { color: colors.textSecondary, marginBottom: 0 }]}>{dashboardDateRangeLabel} gross vs platform net</Text>
                 </View>
-                <View style={{ flexDirection: 'row', borderRadius: 8, borderWidth: 1, borderColor: colors.border, overflow: 'hidden' }}>
-                  <TouchableOpacity onPress={() => setRevenueFilter('gross')} style={{ paddingHorizontal: 12, paddingVertical: 6, backgroundColor: revenueFilter === 'gross' ? colors.primary : 'transparent' }}>
-                    <Text style={{ fontSize: 11, color: revenueFilter === 'gross' ? '#fff' : colors.textSecondary }}>Gross</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity onPress={() => setRevenueFilter('net')} style={{ paddingHorizontal: 12, paddingVertical: 6, backgroundColor: revenueFilter === 'net' ? colors.primary : 'transparent' }}>
-                    <Text style={{ fontSize: 11, color: revenueFilter === 'net' ? '#fff' : colors.textSecondary }}>Net</Text>
-                  </TouchableOpacity>
+                <View style={[styles.segmentControl, { borderColor: colors.border }]}>
+                  <SmoothSegmentButton
+                    isActive={revenueFilter === 'gross'}
+                    label="Gross"
+                    onPress={() => setRevenueFilter('gross')}
+                    activeColor={colors.primary}
+                    inactiveText={colors.textSecondary}
+                  />
+                  <SmoothSegmentButton
+                    isActive={revenueFilter === 'net'}
+                    label="Platform Net"
+                    onPress={() => setRevenueFilter('net')}
+                    activeColor={colors.primary}
+                    inactiveText={colors.textSecondary}
+                  />
                 </View>
               </View>
 
-              <Text style={[styles.pulseValueMain, { color: '#10b981', marginBottom: 12 }]}>{formatCurrency(selectedRevenueValue)}</Text>
+              <AnimatedMetricText
+                value={selectedRevenueValue}
+                formatter={formatCurrency}
+                style={[styles.pulseValueMain, { color: '#10b981', marginBottom: 12 }]}
+              />
 
               <View style={styles.revenueTrendContainer}>
                 {revenueTrendRows.length === 0 ? (
@@ -967,12 +2368,16 @@ export default function AdminDashboardPage() {
                   <View style={styles.revenueBarsRow}>
                     {revenueTrendRows.map((point: any, index: number) => {
                       const barHeight = Math.max(8, Math.round((point.value / revenueTrendMax) * 96));
-                      const barColor = revenueFilter === 'gross' ? colors.primary : '#0ea5e9';
 
                       return (
                         <View key={`${point.label}-${index}`} style={styles.revenueBarColumn}>
                           <View style={[styles.revenueBarTrack, { backgroundColor: isDark ? '#1E293B' : '#E2E8F0' }]}>
-                            <View style={[styles.revenueBarFill, { height: barHeight, backgroundColor: barColor }]} />
+                            <AnimatedRevenueBar
+                              height={barHeight}
+                              revenueFilter={revenueFilter}
+                              grossColor={colors.primary}
+                              netColor="#0ea5e9"
+                            />
                           </View>
                           <Text numberOfLines={1} style={[styles.revenueBarLabel, { color: colors.textSecondary }]}>{point.label}</Text>
                         </View>
@@ -988,50 +2393,11 @@ export default function AdminDashboardPage() {
                 </View>
                 <View style={styles.legendItem}>
                   <View style={[styles.legendDot, { backgroundColor: '#0ea5e9' }]} />
-                  <Text style={[styles.legendText, { color: colors.textSecondary }]}>Net: {formatCurrency(metrics.netRevenue)}</Text>
+                  <Text style={[styles.legendText, { color: colors.textSecondary }]}>Platform net: {formatCurrency(metrics.netRevenue)}</Text>
                 </View>
               </View>
             </View>
 
-            <View style={[styles.dataEnginePanel, styles.dataEnginePanelRight, { backgroundColor: colors.card, borderColor: colors.border, flex: Platform.OS === 'web' ? 3 : 1 }]}>
-              <Text style={[styles.panelTitle, { color: colors.text }]}>Subscription Tier Split</Text>
-              <Text style={[styles.panelSubtitle, { color: colors.textSecondary, marginBottom: -10 }]}>Active subscriptions by plan ({dashboardDateRangeLabel})</Text>
-              <View style={styles.subscriptionStackWrapper}>
-                {subscriptionTierTotal === 0 ? (
-                  <Text style={[styles.emptyText, { color: colors.textSecondary, textAlign: 'left', paddingVertical: 8 }]}>No active subscriptions in this date range.</Text>
-                ) : (
-                  <View style={[styles.subscriptionStackBar, { backgroundColor: isDark ? '#1E293B' : '#E2E8F0' }]}>
-                    {metrics.subscriptionTierBasic > 0 && (
-                      <View style={[styles.subscriptionStackSegment, { flex: basicTierPercent, backgroundColor: colors.primary }]} />
-                    )}
-                    {metrics.subscriptionTierPro > 0 && (
-                      <View style={[styles.subscriptionStackSegment, { flex: proTierPercent, backgroundColor: '#6366f1' }]} />
-                    )}
-                    {metrics.subscriptionTierOther > 0 && (
-                      <View style={[styles.subscriptionStackSegment, { flex: otherTierPercent, backgroundColor: '#f59e0b' }]} />
-                    )}
-                  </View>
-                )}
-              </View>
-
-              <View style={styles.chartLegendVertical}>
-                <View style={styles.legendItem}>
-                  <View style={[styles.legendDot, { backgroundColor: colors.primary }]} />
-                  <Text style={[styles.legendText, { color: colors.textSecondary }]}>Basic: {metrics.subscriptionTierBasic} ({formatPercent(basicTierPercent)})</Text>
-                </View>
-                <View style={styles.legendItem}>
-                  <View style={[styles.legendDot, { backgroundColor: '#6366f1' }]} />
-                  <Text style={[styles.legendText, { color: colors.textSecondary }]}>Pro: {metrics.subscriptionTierPro} ({formatPercent(proTierPercent)})</Text>
-                </View>
-                {metrics.subscriptionTierOther > 0 && (
-                  <View style={styles.legendItem}>
-                    <View style={[styles.legendDot, { backgroundColor: '#f59e0b' }]} />
-                    <Text style={[styles.legendText, { color: colors.textSecondary }]}>Other: {metrics.subscriptionTierOther} ({formatPercent(otherTierPercent)})</Text>
-                  </View>
-                )}
-                <Text style={[styles.legendText, { color: colors.textSecondary, marginTop: 6 }]}>Total tracked: {subscriptionTierTotal}</Text>
-              </View>
-            </View>
           </View>
 
           <View style={styles.actionCenterRow}>
@@ -1041,15 +2407,17 @@ export default function AdminDashboardPage() {
                   <Text style={[styles.panelTitle, { color: colors.text, marginBottom: 0 }]}>Incident Resolution</Text>
                   <Text style={[styles.panelSubtitle, { color: colors.textSecondary, marginBottom: 0 }]}>Open: {metrics.openIncidentsInRange} | Resolved: {metrics.resolvedIncidentsInRange} | Avg: {formatHours(metrics.avgIncidentResolutionHours)}</Text>
                 </View>
-                <View style={{ flexDirection: 'row', borderRadius: 8, borderWidth: 1, borderColor: colors.border, overflow: 'hidden' }}>
-                  {(['all', 'booking', 'profile'] as const).map((typeKey) => (
-                    <TouchableOpacity
+                <View style={[styles.segmentControl, { borderColor: colors.border }]}>
+                  {(['all', 'booking', 'profile'] as IncidentTypeFilter[]).map((typeKey) => (
+                    <SmoothSegmentButton
                       key={typeKey}
+                      isActive={incidentTypeFilter === typeKey}
+                      label={typeKey}
                       onPress={() => setIncidentTypeFilter(typeKey)}
-                      style={{ paddingHorizontal: 12, paddingVertical: 6, backgroundColor: incidentTypeFilter === typeKey ? colors.primary : 'transparent' }}
-                    >
-                      <Text style={{ fontSize: 11, color: incidentTypeFilter === typeKey ? '#fff' : colors.textSecondary, textTransform: 'capitalize' }}>{typeKey}</Text>
-                    </TouchableOpacity>
+                      activeColor={colors.primary}
+                      inactiveText={colors.textSecondary}
+                      textTransform="capitalize"
+                    />
                   ))}
                 </View>
               </View>
@@ -1099,7 +2467,7 @@ export default function AdminDashboardPage() {
                           </View>
                         </View>
                         <View style={{ height: 8, backgroundColor: isDark ? '#334155' : '#E2E8F0', borderRadius: 4, overflow: 'hidden' }}>
-                          <View style={{ width: `${widthPercent}%`, height: '100%', backgroundColor: badgeColor }} />
+                          <AnimatedProgressFill percent={widthPercent} color={badgeColor} />
                         </View>
                       </View>
                     );
@@ -1110,8 +2478,127 @@ export default function AdminDashboardPage() {
               </View>
             </View>
           </View>
+          </Animated.View>
         </View>
       </ScrollView>
+
+      <BottomSheetModal
+        ref={adminWithdrawSheetRef}
+        index={0}
+        snapPoints={adminWithdrawSnapPoints}
+        animationConfigs={adminWithdrawAnimationConfigs}
+        animateOnMount
+        enableDynamicSizing={false}
+        enableContentPanningGesture={false}
+        enableOverDrag={false}
+        enablePanDownToClose
+        backdropComponent={renderAdminWithdrawBackdrop}
+        backgroundStyle={{ backgroundColor: colors.background }}
+        handleIndicatorStyle={{
+          backgroundColor: isDark ? '#4B5563' : '#CBD5E1',
+          width: 42,
+        }}
+      >
+        <BottomSheetScrollView
+          testID="admin-platform-withdrawal-modal"
+          accessibilityLabel="admin-platform-withdrawal-modal"
+          contentContainerStyle={styles.adminWithdrawSheetContent}
+          showsVerticalScrollIndicator={false}
+        >
+          <View style={styles.adminWithdrawHeader}>
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.adminWithdrawTitle, { color: colors.text }]}>Withdraw Funds</Text>
+              <Text style={[styles.adminWithdrawSubtitle, { color: colors.textSecondary }]}>
+                Available manual platform net: {formatCurrency(adminWithdrawAvailable)}
+              </Text>
+            </View>
+            <TouchableOpacity
+              testID="admin-platform-withdrawal-close-button"
+              accessibilityLabel="admin-platform-withdrawal-close-button"
+              activeOpacity={0.8}
+              onPress={dismissAdminWithdrawSheet}
+              style={[styles.adminWithdrawCloseButton, { backgroundColor: colors.card }]}
+            >
+              <Ionicons name="close" size={20} color={colors.text} />
+            </TouchableOpacity>
+          </View>
+
+          <View style={styles.adminWithdrawSection}>
+            <Text style={[styles.adminWithdrawLabel, { color: colors.text }]}>Amount to Withdraw</Text>
+            <View style={[styles.adminWithdrawInputWrap, { backgroundColor: colors.card, borderColor: colors.border }]}>
+              <Text style={[styles.adminWithdrawCurrency, { color: colors.textSecondary }]}>₱</Text>
+              <TextInput
+                testID="admin-platform-withdrawal-amount-input"
+                accessibilityLabel="admin-platform-withdrawal-amount-input"
+                value={adminWithdrawAmount}
+                onChangeText={setAdminWithdrawAmount}
+                keyboardType="decimal-pad"
+                placeholder="0.00"
+                placeholderTextColor={colors.textSecondary}
+                style={[styles.adminWithdrawInput, { color: colors.text }]}
+              />
+            </View>
+            <Text style={[styles.adminWithdrawHint, { color: colors.textSecondary }]}>Minimum withdrawal: PHP 100</Text>
+          </View>
+
+          <View style={styles.adminWithdrawQuickGrid}>
+            {[...ADMIN_WITHDRAW_QUICK_AMOUNTS, adminWithdrawAvailable].map((amount, index) => {
+              const isMax = index === ADMIN_WITHDRAW_QUICK_AMOUNTS.length;
+              const normalizedAmount = Math.max(Number(amount || 0), 0);
+              const isActive = Number(adminWithdrawAmount) === normalizedAmount && normalizedAmount > 0;
+              return (
+                <TouchableOpacity
+                  testID={isMax ? 'admin-platform-withdrawal-quick-max' : `admin-platform-withdrawal-quick-${normalizedAmount}`}
+                  accessibilityLabel={isMax ? 'admin-platform-withdrawal-quick-max' : `admin-platform-withdrawal-quick-${normalizedAmount}`}
+                  key={isMax ? 'max' : String(amount)}
+                  activeOpacity={0.8}
+                  onPress={() => setAdminWithdrawAmount(String(normalizedAmount))}
+                  style={[
+                    styles.adminWithdrawQuickButton,
+                    {
+                      backgroundColor: isActive ? colors.primary : colors.card,
+                      borderColor: isActive ? colors.primary : colors.border,
+                    },
+                  ]}
+                >
+                  <Text style={[styles.adminWithdrawQuickText, { color: isActive ? '#FFFFFF' : colors.text }]}>
+                    {isMax ? 'Max' : `PHP ${normalizedAmount.toLocaleString()}`}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+
+          <View style={[styles.adminWithdrawNote, { backgroundColor: isDark ? '#172033' : '#EFF6FF' }]}>
+            <Ionicons name="information-circle-outline" size={18} color={colors.primary} />
+            <Text style={[styles.adminWithdrawNoteText, { color: isDark ? colors.textSecondary : '#1E40AF' }]}>
+              This records an internal database withdrawal and links it to the current paid booking snapshot. No external payout provider is used.
+            </Text>
+          </View>
+
+          <TouchableOpacity
+            testID="admin-platform-withdrawal-submit-button"
+            accessibilityLabel="admin-platform-withdrawal-submit-button"
+            activeOpacity={isAdminWithdrawReady ? 0.82 : 1}
+            disabled={adminWithdrawSubmitting || !isAdminWithdrawReady}
+            onPress={handleAdminWithdrawSubmit}
+            style={[
+              styles.adminWithdrawSubmitButton,
+              {
+                backgroundColor: isAdminWithdrawReady ? colors.primary : colors.border,
+                opacity: isAdminWithdrawReady ? 1 : 0.6,
+              },
+            ]}
+          >
+            {adminWithdrawSubmitting
+              ? <ActivityIndicator size="small" color="#FFFFFF" />
+              : <Ionicons name="arrow-down-circle" size={20} color={isAdminWithdrawReady ? '#FFFFFF' : colors.textSecondary} />}
+            <Text style={[styles.adminWithdrawSubmitText, { color: isAdminWithdrawReady ? '#FFFFFF' : colors.textSecondary }]}>
+              {adminWithdrawSubmitting ? 'Recording...' : 'Confirm Withdrawal'}
+            </Text>
+          </TouchableOpacity>
+        </BottomSheetScrollView>
+      </BottomSheetModal>
 
       <CustomAlert
         visible={alertState.visible}
@@ -1123,3 +2610,4 @@ export default function AdminDashboardPage() {
     </View>
   );
 }
+

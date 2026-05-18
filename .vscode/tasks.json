@@ -1,0 +1,56 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Start MusikaLokal Dev",
+      "dependsOn": [
+        "Start MusikaLokal Mobile",
+        "Start MusikaLokal Web"
+      ],
+      "dependsOrder": "parallel",
+      "problemMatcher": []
+    },
+    {
+      "label": "Start MusikaLokal Mobile",
+      "type": "shell",
+      "command": "powershell.exe",
+      "args": [
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-Command",
+        "if (-not (Test-Path '.\\node_modules')) { npm install; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE } }; npx expo start"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}\\mobile"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
+      "label": "Start MusikaLokal Web",
+      "type": "shell",
+      "command": "powershell.exe",
+      "args": [
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-Command",
+        "if (-not (Test-Path '.\\node_modules')) { npm install; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE } }; npm run dev"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}\\web\\web-app"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    }
+  ]
+}

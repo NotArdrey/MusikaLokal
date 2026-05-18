@@ -1,110 +1,216 @@
-import React, { useState } from 'react';
-import { ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
+import { useFocusEffect } from 'expo-router';
+import React, { useCallback, useState } from 'react';
+import { ActivityIndicator, ScrollView, StyleSheet, Switch, Text, TouchableOpacity, View } from 'react-native';
 import { supabase } from '../lib/supabase';
+import GuestSignInGate from '../src/components/GuestSignInGate';
 import Header from '../src/components/header';
 import Navbar from '../src/components/navbar';
+import { useAuth } from '../src/context/AuthContext';
+import { emitToast } from '../src/events/toastBus';
 import { useTheme } from '../src/context/ThemeContext';
+
+const DEFAULT_PREFERENCES = {
+  push_enabled: true,
+  booking_confirmed: true,
+  awaiting_confirmation: true,
+  upload_required: false,
+  event_reminder: true,
+  leave_review: false,
+};
+
+type PreferenceKey = keyof typeof DEFAULT_PREFERENCES;
+
+type PreferenceOption = {
+  key: PreferenceKey;
+  label: string;
+  description: string;
+};
+
+const PREFERENCE_OPTIONS: PreferenceOption[] = [
+  {
+    key: 'push_enabled',
+    label: 'Push Notifications',
+    description: 'Send system notifications to your device when the app is backgrounded or closed.',
+  },
+  {
+    key: 'booking_confirmed',
+    label: 'Booking Confirmed',
+    description: 'Receive updates when your booking at a venue or studio is confirmed.',
+  },
+  {
+    key: 'awaiting_confirmation',
+    label: 'Awaiting Confirmation',
+    description: 'Get notified when your booking is pending approval from the host.',
+  },
+  {
+    key: 'upload_required',
+    label: 'Upload Required',
+    description: 'Reminders to upload necessary documents or proof for your events.',
+  },
+  {
+    key: 'event_reminder',
+    label: 'Event Reminder',
+    description: 'Receive reminders before your scheduled events or sessions start.',
+  },
+  {
+    key: 'leave_review',
+    label: 'Leave a Review',
+    description: 'Get prompts to rate and review your experience after a booking.',
+  },
+];
 
 export default function NotificationSettingsScreen() {
   const { colors, isDark } = useTheme();
+  const { isGuest } = useAuth();
   const [loading, setLoading] = useState(true);
   const [userId, setUserId] = useState<string | null>(null);
-  const [bookingConfirmed, setBookingConfirmed] = useState(true);
-  const [awaitingConfirmation, setAwaitingConfirmation] = useState(true);
-  const [uploadRequired, setUploadRequired] = useState(false);
-  const [eventReminder, setEventReminder] = useState(true);
-  const [leaveReview, setLeaveReview] = useState(false);
+  const [savingField, setSavingField] = useState<PreferenceKey | null>(null);
+  const [preferences, setPreferences] = useState(DEFAULT_PREFERENCES);
 
-  React.useEffect(() => {
-    const loadPreferences = async () => {
-      try {
-        const {
-          data: { user },
-        } = await supabase.auth.getUser();
+  const loadPreferences = useCallback(async () => {
+    if (isGuest) {
+      setLoading(false);
+      setUserId(null);
+      setPreferences(DEFAULT_PREFERENCES);
+      return;
+    }
 
-        if (!user) {
-          setLoading(false);
-          return;
-        }
+    setLoading(true);
+    try {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
 
-        setUserId(user.id);
-
-        const { data, error } = await supabase
-          .from('notification_preferences')
-          .select('*')
-          .eq('user_id', user.id)
-          .maybeSingle();
-
-        if (error) {
-          console.error('Error loading notification preferences:', error);
-          setLoading(false);
-          return;
-        }
-
-        if (!data) {
-          const { error: insertError } = await supabase
-            .from('notification_preferences')
-            .insert({ user_id: user.id });
-
-          if (insertError) {
-            console.error('Error creating default notification preferences:', insertError);
-          }
-        } else {
-          setBookingConfirmed(data.booking_confirmed ?? true);
-          setAwaitingConfirmation(data.awaiting_confirmation ?? true);
-          setUploadRequired(data.upload_required ?? false);
-          setEventReminder(data.event_reminder ?? true);
-          setLeaveReview(data.leave_review ?? false);
-        }
-      } catch (e) {
-        console.error('Error initializing notification settings:', e);
-      } finally {
-        setLoading(false);
+      if (!user) {
+        setUserId(null);
+        setPreferences(DEFAULT_PREFERENCES);
+        return;
       }
-    };
 
-    loadPreferences();
-  }, []);
+      setUserId(user.id);
 
-  const savePreference = async (field: string, value: boolean) => {
-    if (!userId) return;
+      const { data, error } = await supabase
+        .from('notification_preferences')
+        .select('push_enabled, booking_confirmed, awaiting_confirmation, upload_required, event_reminder, leave_review')
+        .eq('user_id', user.id)
+        .maybeSingle();
 
-    const { error } = await supabase
-      .from('notification_preferences')
-      .upsert({ user_id: userId, [field]: value }, { onConflict: 'user_id' });
+      if (error) {
+        throw error;
+      }
 
-    if (error) {
-      console.error(`Error saving ${field}:`, error);
+      if (!data) {
+        const { error: insertError } = await supabase
+          .from('notification_preferences')
+          .insert({
+            user_id: user.id,
+            ...DEFAULT_PREFERENCES,
+          });
+
+        if (insertError) {
+          throw insertError;
+        }
+
+        setPreferences(DEFAULT_PREFERENCES);
+        return;
+      }
+
+      setPreferences({
+        push_enabled: data.push_enabled ?? DEFAULT_PREFERENCES.push_enabled,
+        booking_confirmed: data.booking_confirmed ?? DEFAULT_PREFERENCES.booking_confirmed,
+        awaiting_confirmation: data.awaiting_confirmation ?? DEFAULT_PREFERENCES.awaiting_confirmation,
+        upload_required: data.upload_required ?? DEFAULT_PREFERENCES.upload_required,
+        event_reminder: data.event_reminder ?? DEFAULT_PREFERENCES.event_reminder,
+        leave_review: data.leave_review ?? DEFAULT_PREFERENCES.leave_review,
+      });
+    } catch (e: any) {
+      console.error('Error initializing notification settings:', e);
+      emitToast({
+        type: 'error',
+        title: 'Unable to Load Preferences',
+        message: e?.message || 'Please try again later.',
+      });
+    } finally {
+      setLoading(false);
+    }
+  }, [isGuest]);
+
+  useFocusEffect(
+    useCallback(() => {
+      loadPreferences();
+    }, [loadPreferences])
+  );
+
+  const savePreference = async (field: PreferenceKey, value: boolean) => {
+    if (!userId) return false;
+
+    setSavingField(field);
+
+    try {
+      const { error } = await supabase
+        .from('notification_preferences')
+        .upsert({ user_id: userId, [field]: value }, { onConflict: 'user_id' });
+
+      if (error) {
+        throw error;
+      }
+
+      emitToast({
+        type: 'success',
+        title: 'Preference Updated',
+        message: 'Your notification preference has been saved.',
+        duration: 1600,
+      });
+      return true;
+    } catch (e: any) {
+      console.error(`Error saving ${field}:`, e);
+      emitToast({
+        type: 'error',
+        title: 'Save Failed',
+        message: e?.message || 'Could not save notification preference.',
+      });
+      return false;
+    } finally {
+      setSavingField(null);
     }
   };
 
-  const handleToggle = (
-    setter: (value: boolean) => void,
-    field: string,
-  ) => (value: boolean) => {
-    setter(value);
-    void savePreference(field, value);
+  const handleToggle = (field: PreferenceKey) => async (value: boolean) => {
+    if (!userId || savingField) return;
+
+    const previousValue = preferences[field];
+    setPreferences((prev) => ({ ...prev, [field]: value }));
+
+    const saved = await savePreference(field, value);
+    if (!saved) {
+      setPreferences((prev) => ({ ...prev, [field]: previousValue }));
+    }
   };
 
-  const renderToggle = (label: string, description: string, value: boolean, onValueChange: (val: boolean) => void) => (
+  const renderToggle = (
+    option: PreferenceOption,
+    value: boolean,
+    onValueChange: (val: boolean) => void
+  ) => (
     <View
       style={[
         styles.row,
         { borderColor: isDark ? colors.border : '#F3F4F6' }
       ]}
-      key={label}
+      key={option.key}
     >
       <View style={styles.textContainer}>
         <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 15, color: colors.text }}>
-          {label}
+          {option.label}
         </Text>
         <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 13, color: colors.textSecondary, marginTop: 4, lineHeight: 20 }}>
-          {description}
+          {option.description}
         </Text>
       </View>
       <Switch
         value={value}
         onValueChange={onValueChange}
+        disabled={loading || !userId || !!savingField}
         trackColor={{ false: isDark ? '#374151' : '#E5E7EB', true: colors.primary + '80' }}
         thumbColor={value ? colors.primary : '#F4F4F5'}
         ios_backgroundColor={isDark ? '#374151' : '#E5E7EB'}
@@ -119,41 +225,26 @@ export default function NotificationSettingsScreen() {
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
         <View style={styles.contentContainer}>
           {loading ? (
-            <Text style={{ color: colors.textSecondary, textAlign: 'center', marginTop: 24 }}>
-              Loading notification settings...
-            </Text>
+            <View style={styles.centeredState}>
+              <ActivityIndicator color={colors.primary} />
+              <Text style={{ color: colors.textSecondary, textAlign: 'center', marginTop: 12 }}>
+                Loading notification settings...
+              </Text>
+            </View>
+          ) : isGuest || !userId ? (
+            <GuestSignInGate message="Sign in to manage your notification preferences." />
           ) : (
             <>
-          {renderToggle(
-            "Booking Confirmed",
-            "Receive updates when your booking at a venue or studio is confirmed.",
-            bookingConfirmed,
-            handleToggle(setBookingConfirmed, 'booking_confirmed')
-          )}
-          {renderToggle(
-            "Awaiting Confirmation",
-            "Get notified when your booking is pending approval from the host.",
-            awaitingConfirmation,
-            handleToggle(setAwaitingConfirmation, 'awaiting_confirmation')
-          )}
-          {renderToggle(
-            "Upload Required",
-            "Reminders to upload necessary documents or proof for your events.",
-            uploadRequired,
-            handleToggle(setUploadRequired, 'upload_required')
-          )}
-          {renderToggle(
-            "Event Reminder",
-            "Receive reminders before your scheduled events or sessions start.",
-            eventReminder,
-            handleToggle(setEventReminder, 'event_reminder')
-          )}
-          {renderToggle(
-            "Leave a Review",
-            "Get prompts to rate and review your experience after a booking.",
-            leaveReview,
-            handleToggle(setLeaveReview, 'leave_review')
-          )}
+              {PREFERENCE_OPTIONS.map((option) =>
+                renderToggle(option, preferences[option.key], handleToggle(option.key))
+              )}
+
+              {savingField ? (
+                <View style={styles.savingRow}>
+                  <ActivityIndicator size="small" color={colors.primary} />
+                  <Text style={[styles.savingText, { color: colors.textSecondary }]}>Saving changes...</Text>
+                </View>
+              ) : null}
             </>
           )}
         </View>
@@ -177,6 +268,42 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
     paddingTop: 8,
   },
+  centeredState: {
+    marginTop: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  guestCard: {
+    marginTop: 20,
+    borderRadius: 16,
+    borderWidth: 1,
+    paddingHorizontal: 18,
+    paddingVertical: 20,
+    alignItems: 'center',
+  },
+  guestTitle: {
+    marginTop: 10,
+    fontSize: 16,
+    fontFamily: 'Poppins_600SemiBold',
+  },
+  guestMessage: {
+    marginTop: 6,
+    textAlign: 'center',
+    lineHeight: 20,
+    fontSize: 13,
+    fontFamily: 'Poppins_400Regular',
+  },
+  signInButton: {
+    marginTop: 14,
+    borderRadius: 10,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+  },
+  signInButtonText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontFamily: 'Poppins_600SemiBold',
+  },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -187,6 +314,17 @@ const styles = StyleSheet.create({
   textContainer: {
     flex: 1,
     paddingRight: 16,
+  },
+  savingRow: {
+    marginTop: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  savingText: {
+    marginLeft: 8,
+    fontSize: 12,
+    fontFamily: 'Poppins_500Medium',
   },
   navbarContainer: {
     position: 'absolute',

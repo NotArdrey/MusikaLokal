@@ -1,12 +1,13 @@
 import { Ionicons } from '@expo/vector-icons';
+import * as ExpoLinking from 'expo-linking';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router, useLocalSearchParams } from 'expo-router';
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-    ActivityIndicator,
     Dimensions,
     Image,
     ScrollView,
+  Share,
     StatusBar,
     StyleSheet,
     Text,
@@ -16,27 +17,33 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { supabase } from '../lib/supabase';
 import CustomAlert, { AlertType } from '../src/components/CustomAlert';
-import Modal from '../src/components/modal';
+import GroupLinkedPlaylistsSection from '../src/components/GroupLinkedPlaylistsSection';
+import ProfileAvatar from '../src/components/ProfileAvatar';
 import ReportModal from '../src/components/ReportModal';
+import Skeleton from '../src/components/Skeleton';
 import { useAuth } from '../src/context/AuthContext';
+import { useListingDetailsQuery } from '../src/data/hooks';
 import { useTheme } from '../src/context/ThemeContext';
+import { usePageLoadLogger } from '../src/utils/loadTimeLogger';
 import { getGroupMembersLabel, getGroupTypeLabel, isGroupLeaderMember } from '../src/utils/groupMembers';
+import { fetchGroupLinkedPlaylists } from '../src/utils/groupPlaylists';
 import {
     hasValidCoordinates,
     openNavigationDirections,
 } from '../src/utils/navigation';
 
-const { width, height } = Dimensions.get('window');
+const { width: SCREEN_WIDTH, height } = Dimensions.get('window');
 const IMG_HEIGHT = height * 0.5;
 export default function GroupDetailsScreen() {
   const { id } = useLocalSearchParams();
   const { colors, isDark } = useTheme();
-  const { userId } = useAuth();
+  const { userId, isGuest } = useAuth();
   const insets = useSafeAreaInsets();
-  const [loading, setLoading] = useState(true);
-  const [group, setGroup] = useState<any>(null);
+  const [groupState, setGroup] = useState<any>(null);
+  const [groupPlaylists, setGroupPlaylists] = useState<any[]>([]);
+  const [loadingGroupPlaylists, setLoadingGroupPlaylists] = useState(false);
   const [isFavorited, setIsFavorited] = useState(false);
-  const [modalVisible, setModalVisible] = useState(false);
+  const [favoriteCount, setFavoriteCount] = useState(0);
   const [alertVisible, setAlertVisible] = useState(false);
   const [showReportModal, setShowReportModal] = useState(false);
   const [alertConfig, setAlertConfig] = useState<{
@@ -50,34 +57,152 @@ export default function GroupDetailsScreen() {
     message: '',
   });
 
-  useEffect(() => {
-    fetchGroupDetails();
+  const groupId = useMemo(() => {
+    const routeId = Array.isArray(id) ? id[0] : id;
+    return routeId || 'bd9552d7-b827-449e-8c43-2a4439c2c62c';
   }, [id]);
+  const groupDetailsQuery = useListingDetailsQuery({
+    id: groupId,
+    type: 'group',
+    userId,
+  });
 
-  const fetchGroupDetails = async () => {
-    try {
-      const { data: { user } } = await supabase.auth.getUser();
-      const userId = user?.id;
+  const applyGroupDetails = useCallback((nextGroup: any) => {
+    setGroup(nextGroup);
+    setIsFavorited(Boolean(nextGroup?.is_favorited));
+    setFavoriteCount(Number(nextGroup?.favorites_count || 0));
+  }, []);
 
-      // Ensure id is a string, not an array
-      const groupId = Array.isArray(id) ? id[0] : id;
-      const finalId = groupId || 'bd9552d7-b827-449e-8c43-2a4439c2c62c';
+  useEffect(() => {
+    if (groupDetailsQuery.data?.id === groupId) {
+      applyGroupDetails(groupDetailsQuery.data);
+    }
+  }, [applyGroupDetails, groupDetailsQuery.data, groupId]);
 
-      const { data, error } = await supabase.functions.invoke('manage-details', {
-        body: { action: 'fetch', type: 'group', id: finalId, userId }
+  const queryGroup = groupDetailsQuery.data?.id === groupId ? groupDetailsQuery.data : null;
+  const group = groupState?.id === groupId ? groupState : queryGroup;
+  const loading = (groupDetailsQuery.isLoading || groupDetailsQuery.isFetching) && !group;
+
+  usePageLoadLogger({
+    counts: {
+      playlists: groupPlaylists.length,
+    },
+    details: {
+      groupId: groupId ? 'present' : 'missing',
+      isFavorited,
+    },
+    loading: loading || groupDetailsQuery.isLoading || loadingGroupPlaylists,
+    page: 'GroupDetails',
+    queries: { groupDetails: groupDetailsQuery },
+    ready: !loading && Boolean(group),
+  });
+
+  useEffect(() => {
+    let isActive = true;
+
+    if (!group?.id) {
+      setGroupPlaylists([]);
+      setLoadingGroupPlaylists(false);
+      return () => {
+        isActive = false;
+      };
+    }
+
+    setLoadingGroupPlaylists(true);
+
+    fetchGroupLinkedPlaylists(group.id)
+      .then((playlistRows) => {
+        if (!isActive) return;
+        setGroupPlaylists(playlistRows);
+      })
+      .catch((playlistError) => {
+        if (!isActive) return;
+        setGroupPlaylists([]);
+      })
+      .finally(() => {
+        if (!isActive) return;
+        setLoadingGroupPlaylists(false);
       });
 
-      if (error) throw error;
-      setGroup(data);
-      setIsFavorited(data.is_favorited);
-    } catch (e) {
-      console.log('Error fetching group:', e);
-    } finally {
-      setLoading(false);
+    return () => {
+      isActive = false;
+    };
+  }, [group?.id]);
+
+  const buildShareUrl = () => {
+    if (!group?.id) {
+      return ExpoLinking.createURL('/home');
+    }
+
+    return ExpoLinking.createURL('/group_details', {
+      queryParams: { id: group.id },
+    });
+  };
+
+  const handleShare = async () => {
+    try {
+      const shareUrl = buildShareUrl();
+      await Share.share({
+        message: `Check out ${group?.name || 'this group'} on MusikaLokal!\n${shareUrl}`,
+        url: shareUrl,
+      });
+    } catch {
+      // No-op if cancelled
     }
   };
 
-  const toggleFavorite = () => setIsFavorited(!isFavorited);
+  const handlePlaylistPress = (playlistId: string) => {
+    if (!playlistId) return;
+
+    router.push({
+      pathname: '/playlist_details',
+      params: { playlist_id: playlistId },
+    });
+  };
+
+  const toggleFavorite = async () => {
+    if (!userId) {
+      showAlert('warning', 'Login Required', 'Please sign in to bookmark this listing.');
+      return;
+    }
+
+    if (!group?.id) {
+      showAlert('error', 'Bookmark Unavailable', 'Missing group details.');
+      return;
+    }
+
+    const previousState = isFavorited;
+    const previousCount = favoriteCount;
+    const optimisticState = !previousState;
+    const optimisticCount = Math.max(0, previousCount + (optimisticState ? 1 : -1));
+
+    setIsFavorited(optimisticState);
+    setFavoriteCount(optimisticCount);
+
+    try {
+      const { data, error } = await supabase.functions.invoke('manage-details', {
+        body: {
+          action: 'toggle_favorite',
+          type: 'group',
+          id: group.id,
+          userId,
+        },
+      });
+
+      if (error) throw error;
+
+      if (typeof data?.is_favorited === 'boolean') {
+        setIsFavorited(data.is_favorited);
+      }
+      if (typeof data?.favorites_count === 'number') {
+        setFavoriteCount(Math.max(0, data.favorites_count));
+      }
+    } catch (e: any) {
+      setIsFavorited(previousState);
+      setFavoriteCount(previousCount);
+      showAlert('error', 'Bookmark Failed', e?.message || 'Unable to update bookmark right now.');
+    }
+  };
 
   const showAlert = (type: AlertType, title: string, message: string, buttons?: any[]) => {
     setAlertConfig({ type, title, message, buttons });
@@ -125,8 +250,7 @@ export default function GroupDetailsScreen() {
         longitude: group?.longitude,
         label: group?.location || group?.name || 'Group location',
       });
-    } catch (error) {
-      console.log('[group_details] Navigation error:', error);
+    } catch {
       showAlert(
         'warning',
         'Navigation Unavailable',
@@ -137,8 +261,70 @@ export default function GroupDetailsScreen() {
 
   if (loading) {
     return (
-      <View style={[styles.loadingContainer, { backgroundColor: colors.background }]}>
-        <ActivityIndicator size="large" color={colors.primary} />
+      <View style={[styles.container, { backgroundColor: colors.background }]}>
+        <StatusBar barStyle="light-content" />
+        <ScrollView
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+          bounces={false}
+        >
+          <View style={[styles.imageContainer, { backgroundColor: colors.border }]}>
+            <Skeleton width="100%" height={IMG_HEIGHT} borderRadius={0} />
+
+            <View style={[styles.headerActions, { top: insets.top + 10 }]}>
+              <TouchableOpacity activeOpacity={1} onPress={() => router.back()} style={styles.roundBtn}>
+                <Ionicons name="arrow-back" size={24} color="#000" />
+              </TouchableOpacity>
+
+              <View style={styles.rightActions}>
+                {[1, 2].map((item) => (
+                  <View key={`group-details-action-skeleton-${item}`} style={styles.roundBtn}>
+                    <Skeleton width={20} height={20} borderRadius={10} />
+                  </View>
+                ))}
+              </View>
+            </View>
+          </View>
+
+          <View style={[styles.contentBody, { backgroundColor: colors.background }]}>
+            <View style={styles.titleSection}>
+              <Skeleton width={SCREEN_WIDTH * 0.62} height={32} style={{ marginBottom: 12 }} />
+              <Skeleton width={SCREEN_WIDTH * 0.45} height={16} style={{ marginBottom: 10 }} />
+              <Skeleton width={SCREEN_WIDTH * 0.55} height={16} />
+            </View>
+
+            <View style={[styles.divider, { backgroundColor: colors.border }]} />
+
+            <View style={styles.hostSection}>
+              <View style={{ flex: 1 }}>
+                <Skeleton width={SCREEN_WIDTH * 0.52} height={18} style={{ marginBottom: 8 }} />
+                <Skeleton width={SCREEN_WIDTH * 0.34} height={14} />
+              </View>
+              <Skeleton width={56} height={56} borderRadius={28} />
+            </View>
+
+            <View style={[styles.divider, { backgroundColor: colors.border }]} />
+
+            <View style={styles.section}>
+              <Skeleton width={SCREEN_WIDTH * 0.48} height={22} />
+              <Skeleton width="100%" height={16} />
+              <Skeleton width="92%" height={16} />
+              <Skeleton width="74%" height={16} />
+            </View>
+
+            <View style={[styles.divider, { backgroundColor: colors.border }]} />
+
+            <View style={styles.section}>
+              <Skeleton width={SCREEN_WIDTH * 0.5} height={22} />
+              {[1, 2].map((item) => (
+                <View key={`group-details-feature-skeleton-${item}`} style={styles.featureItem}>
+                  <Skeleton width={24} height={24} borderRadius={12} />
+                  <Skeleton width={SCREEN_WIDTH * 0.5} height={16} />
+                </View>
+              ))}
+            </View>
+          </View>
+        </ScrollView>
       </View>
     );
   }
@@ -146,6 +332,29 @@ export default function GroupDetailsScreen() {
   if (!group) return null;
 
   const isOwner = !!userId && group?.owner_id === userId;
+  const normalizedLinkedMembers = Array.isArray(group?.auxiliary?.group_members)
+    ? group.auxiliary.group_members.map((row: any) => {
+        const legacyMember = Array.isArray(group?.members)
+          ? group.members.find((member: any) => member?.user_id === row?.user_id)
+          : null;
+        const isLeader = row?.role === 'owner' || row?.user_id === group?.owner_id;
+
+        return {
+          user_id: row?.user_id,
+          name: row?.profiles?.full_name || legacyMember?.name || 'Member',
+          avatar_url: row?.profiles?.avatar_url || legacyMember?.avatar_url || null,
+          instrument: legacyMember?.instrument || (isLeader ? 'Leader' : row?.role || 'Member'),
+          role: isLeader ? 'Leader' : 'Member',
+        };
+      })
+    : [];
+  const displayMembers =
+    normalizedLinkedMembers.length > 0
+      ? normalizedLinkedMembers.sort((a: any, b: any) => (a.role === 'Leader' ? -1 : 1) - (b.role === 'Leader' ? -1 : 1))
+      : Array.isArray(group.members)
+        ? group.members
+        : [];
+  const displayMemberCount = displayMembers.length || Number(group.member_count || group.members_count || 0) || 0;
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
@@ -178,11 +387,13 @@ export default function GroupDetailsScreen() {
             </TouchableOpacity>
 
             <View style={styles.rightActions}>
-              <TouchableOpacity activeOpacity={1} style={styles.roundBtn}>
+              <TouchableOpacity activeOpacity={1} style={styles.roundBtn} onPress={handleShare}>
                 <Ionicons name="share-outline" size={24} color="#000" />
               </TouchableOpacity>
-              {!isOwner && userId ? (
-                <TouchableOpacity activeOpacity={1}
+              {!isOwner && userId && !isGuest ? (
+              <TouchableOpacity activeOpacity={1}
+                  testID="group-report-button"
+                  accessibilityLabel="group-report-button"
                   onPress={openReportModal}
                   style={styles.roundBtn}
                 >
@@ -193,7 +404,7 @@ export default function GroupDetailsScreen() {
                 onPress={toggleFavorite}
                 style={styles.roundBtn}
               >
-                <Ionicons name={isFavorited ? "heart" : "heart-outline"} size={24} color={isFavorited ? "#EF4444" : "#000"} />
+                <Ionicons name={isFavorited ? "bookmark" : "bookmark-outline"} size={24} color={isFavorited ? colors.primary : "#000"} />
               </TouchableOpacity>
             </View>
           </View>
@@ -207,14 +418,17 @@ export default function GroupDetailsScreen() {
             <View style={styles.ratingLocationRow}>
               <Ionicons name="star" size={16} color={colors.text} />
               <Text style={[styles.ratingText, { color: colors.text }]}>
-                {group.rating?.toFixed(2) || '4.95'} · <Text style={{ textDecorationLine: 'underline' }}>{group.review_count || 12} reviews</Text>
+                {group.rating?.toFixed(2) || '4.95'} - <Text style={{ textDecorationLine: 'underline' }}>{group.review_count || 12} reviews</Text>
               </Text>
             </View>
             <Text style={[styles.locationText, { color: colors.textSecondary }]}>
               {group.location || 'Manila, Philippines'}
             </Text>
+            <Text style={[styles.locationText, { color: colors.textSecondary, marginTop: 4 }]}>
+              {favoriteCount} bookmarked
+            </Text>
             {hasValidCoordinates(group?.latitude, group?.longitude) && (
-              <TouchableOpacity
+              <TouchableOpacity activeOpacity={1}
                 style={[styles.navigatePill, { backgroundColor: colors.primary }]}
                 onPress={handleNavigate}
               >
@@ -232,9 +446,11 @@ export default function GroupDetailsScreen() {
               <Text style={[styles.hostedBy, { color: colors.text }]}>Hosted by {group.owner_name || 'Martin'}</Text>
               <Text style={[styles.hostSub, { color: colors.textSecondary }]}>Joined in 2021</Text>
             </View>
-            <Image
-              source={{ uri: group.owner_avatar || null }}
+            <ProfileAvatar
+              uri={group.owner_avatar}
               style={[styles.hostAvatar, { backgroundColor: colors.border }]}
+              backgroundColor={isDark ? '#374151' : '#E5E7EB'}
+              iconColor={colors.textSecondary}
             />
           </View>
 
@@ -261,7 +477,7 @@ export default function GroupDetailsScreen() {
               <View style={styles.featureItem}>
                 <Ionicons name="people-outline" size={24} color={colors.text} />
                 <Text style={[styles.featureText, { color: colors.textSecondary }]}>
-                  {getGroupTypeLabel(group.group_type)} ({group.members?.length || '2'} Members)
+                  {getGroupTypeLabel(group.group_type)} ({displayMemberCount} Member{displayMemberCount === 1 ? '' : 's'})
                 </Text>
               </View>
             </View>
@@ -269,35 +485,44 @@ export default function GroupDetailsScreen() {
 
           <View style={[styles.divider, { backgroundColor: colors.border }]} />
 
+          <View style={styles.section}>
+            <GroupLinkedPlaylistsSection
+              colors={colors}
+              isDark={isDark}
+              playlists={groupPlaylists}
+              loading={loadingGroupPlaylists}
+              onPlaylistPress={handlePlaylistPress}
+              title="Featured Playlists"
+              emptyMessage="This group has not linked any playlists yet."
+            />
+          </View>
+
+          <View style={[styles.divider, { backgroundColor: colors.border }]} />
+
           {/* Group Members Section */}
-          {group.members && group.members.length > 0 && (
+          {displayMembers.length > 0 && (
             <>
               <View style={styles.section}>
                 <Text style={[styles.sectionTitle, { color: colors.text }]}>{getGroupMembersLabel(group.group_type)}</Text>
                 <View style={{ gap: 12 }}>
-                  {group.members.map((member: any, index: number) => {
+                  {displayMembers.map((member: any, index: number) => {
                     const isLeader = isGroupLeaderMember(member, group.owner_id);
                     const memberName = typeof member === 'string' ? member : member.name;
-                    const memberInstrument = typeof member === 'string' ? member : member.instrument;
+                    const memberInstrument = typeof member === 'string' ? 'Member' : member.instrument;
                     return (
                       <View key={index} style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-                        <View style={{ 
-                          width: 44, height: 44, borderRadius: 22, 
-                          backgroundColor: isLeader ? colors.primary : '#E0E7FF',
-                          alignItems: 'center', justifyContent: 'center'
-                        }}>
-                          {member.avatar_url ? (
-                            <Image source={{ uri: member.avatar_url }} style={{ width: 44, height: 44, borderRadius: 22 }} />
-                          ) : (
-                            <Text style={{ color: isLeader ? '#fff' : '#4F46E5', fontWeight: 'bold', fontSize: 16 }}>{memberName?.charAt(0)}</Text>
-                          )}
-                        </View>
+                        <ProfileAvatar
+                          uri={typeof member === 'string' ? null : member.avatar_url}
+                          style={{ width: 44, height: 44, borderRadius: 22 }}
+                          backgroundColor={isLeader ? colors.primary : (isDark ? '#374151' : '#E5E7EB')}
+                          iconColor={isLeader ? '#FFF' : colors.textSecondary}
+                        />
                         <View style={{ flex: 1 }}>
                           <Text style={{ color: colors.text, fontFamily: 'Poppins_500Medium', fontSize: 15 }}>{memberName}</Text>
                           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
                             <Ionicons name="musical-note" size={12} color={colors.primary} />
                             <Text style={{ color: colors.textSecondary, fontSize: 13 }}>{memberInstrument}</Text>
-                            {isLeader && <Text style={{ color: colors.primary, fontSize: 11, marginLeft: 4 }}>• Leader</Text>}
+                            {isLeader && <Text style={{ color: colors.primary, fontSize: 11, marginLeft: 4 }}>| Leader</Text>}
                           </View>
                         </View>
                       </View>
@@ -314,7 +539,7 @@ export default function GroupDetailsScreen() {
             <View style={styles.reviewHeader}>
               <Ionicons name="star" size={20} color={colors.text} />
               <Text style={[styles.sectionTitle, { color: colors.text, marginBottom: 0 }]}>
-                {group.rating?.toFixed(2) || '0.0'} · {group.review_count || 0} reviews
+                {group.rating?.toFixed(2) || '0.0'} - {group.review_count || 0} reviews
               </Text>
             </View>
             <Text style={{ color: colors.textSecondary, fontStyle: 'italic' }}>
@@ -322,31 +547,6 @@ export default function GroupDetailsScreen() {
             </Text>
           </View>
 
-          {/* Sticky Bottom Bar */}
-          <View style={[styles.bottomBar, { backgroundColor: colors.background, borderTopColor: colors.border, paddingBottom: insets.bottom + 16 }]}>
-            <View style={styles.priceContainer}>
-              <Text style={[styles.priceText, { color: colors.text }]}>
-                ₱{group.rate || '1,500'} <Text style={{ fontSize: 14, fontWeight: '400', color: colors.textSecondary }}>night</Text>
-              </Text>
-              <Text style={{ fontSize: 12, textDecorationLine: 'underline', color: colors.text, fontFamily: 'Poppins_600SemiBold' }}>
-                Oct 25 - 30
-              </Text>
-            </View>
-            <TouchableOpacity activeOpacity={1}
-              style={[styles.bookBtn, { backgroundColor: colors.primary }]}
-              onPress={() => setModalVisible(true)}
-            >
-              <Text style={styles.bookBtnText}>Reserve</Text>
-            </TouchableOpacity>
-          </View>
-
-          <Modal
-            visible={modalVisible}
-            onClose={() => setModalVisible(false)}
-            title="Confirm Booking"
-            message="This will send a booking request to the artist."
-            buttonText="Send Request"
-          />
           <CustomAlert
             visible={alertVisible}
             type={alertConfig.type}
@@ -379,7 +579,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   scrollContent: {
-    paddingBottom: 120, // Space for bottom bar
+    paddingBottom: 32,
   },
   imageContainer: {
     height: IMG_HEIGHT,
@@ -563,6 +763,7 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     borderRadius: 8,
     alignItems: 'center',
+    justifyContent: 'center',
     marginTop: 8,
   },
   showAllText: {

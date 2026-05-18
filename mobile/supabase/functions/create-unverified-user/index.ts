@@ -1,10 +1,263 @@
 // @ts-nocheck
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { sendEmailWithGmail } from '../_shared/gmailEmail.ts'
+import {
+    buildIdentityDocumentFingerprint,
+    DIDIT_PENDING_SOURCE,
+    DUPLICATE_REVIEW_SOURCE,
+    findSameRoleIdentityDuplicate,
+    getDuplicateIdentityReviewReason,
+    prepareIdentityNameBirthDateDuplicateInput,
+    queueIdentityReview,
+    recordIdentityDocumentClaim,
+    revokeOrphanSameRoleIdentityClaims,
+} from '../_shared/identityDuplicate.ts'
+import {
+    enforceRegistrationRateLimit,
+    getRegistrationRateLimitStatus,
+    markRegistrationAttempt,
+} from '../_shared/registrationRateLimit.ts'
 
 const corsHeaders = {
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+}
+
+const allowedSignupRoles = new Set(['fan', 'musician'])
+
+async function deleteRowsByIds(client: any, table: string, column: string, ids: string[]) {
+    const uniqueIds = Array.from(new Set(ids.map((id) => String(id || '').trim()).filter(Boolean)))
+    if (uniqueIds.length === 0) return
+
+    const { error } = await client.from(table).delete().in(column, uniqueIds)
+    if (error) throw error
+}
+
+async function nullProfileReference(client: any, table: string, column: string, userId: string) {
+    const { error } = await client.from(table).update({ [column]: null }).eq(column, userId)
+    if (error) throw error
+}
+
+async function cleanupStaleSignupUserRelations(client: any, userId: string) {
+    const [
+        { data: ownedGroups, error: ownedGroupsError },
+        { data: ownedStudios, error: ownedStudiosError },
+    ] = await Promise.all([
+        client.from('groups').select('id').eq('owner_id', userId),
+        client.from('studios').select('id').eq('owner_id', userId),
+    ])
+
+    if (ownedGroupsError) throw ownedGroupsError
+    if (ownedStudiosError) throw ownedStudiosError
+
+    const ownedGroupIds = (ownedGroups || []).map((item: any) => String(item?.id || '')).filter(Boolean)
+    const ownedStudioIds = (ownedStudios || []).map((item: any) => String(item?.id || '')).filter(Boolean)
+
+    const cleanupResults = await Promise.all([
+        deleteRowsByIds(client, 'booking_requests', 'group_id', ownedGroupIds),
+        deleteRowsByIds(client, 'booking_requests', 'studio_id', ownedStudioIds),
+        client.from('booking_requests').delete().eq('sender_id', userId),
+        client.from('booking_requests').delete().eq('receiver_id', userId),
+        nullProfileReference(client, 'gigs', 'permit_reviewed_by', userId),
+        nullProfileReference(client, 'studios', 'permit_reviewed_by', userId),
+        nullProfileReference(client, 'withdrawal_requests', 'processed_by', userId),
+    ])
+
+    for (const result of cleanupResults.slice(2, 4)) {
+        if (result?.error) throw result.error
+    }
+}
+
+function getDefaultDisplayNameForRole(role: unknown) {
+    return String(role || '').trim().toLowerCase() === 'fan' ? 'Fan' : 'Musician'
+}
+
+function escapeHtml(value: unknown) {
+    return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;')
+}
+
+function getConfirmationRedirect(rawRedirectTo: unknown) {
+    const redirectTo = String(rawRedirectTo || '').trim()
+    return redirectTo || Deno.env.get('EMAIL_CONFIRM_REDIRECT_TO') || 'musikalokal://?verified=true'
+}
+
+function normalizeVerificationStatus(value: unknown) {
+    return String(value || '').trim().replace(/[\s-]+/g, '_').toUpperCase()
+}
+
+function buildDeferredEmailDelivery(identityStatus: string) {
+    return {
+        sent: false,
+        queued: false,
+        provider: 'identity_review',
+        skipped: true,
+        reason: identityStatus === 'PENDING_REVIEW'
+            ? 'identity_pending_review'
+            : 'identity_not_approved',
+    }
+}
+
+function getApprovalClaimReviewReason(approvalClaim: any, role: string) {
+    return String(approvalClaim?.review_reason || approvalClaim?.reason || '').trim() || getDuplicateIdentityReviewReason(role)
+}
+
+function getApprovalClaimMatchedOn(approvalClaim: any, fallback = 'DOCUMENT_FINGERPRINT') {
+    return String(approvalClaim?.matched_on || approvalClaim?.match_type || fallback).trim().toUpperCase()
+}
+
+function getApprovalClaimMatchCount(approvalClaim: any, fallback = 1) {
+    const count = Number(approvalClaim?.duplicate_count || approvalClaim?.match_count || approvalClaim?.matches?.length || fallback)
+    return Number.isFinite(count) ? count : fallback
+}
+
+async function getEmailConfirmationGate(supabaseAdmin: any, user: any) {
+    const metadataStatus = normalizeVerificationStatus(user?.user_metadata?.verification_status)
+    const { data: profile, error } = await supabaseAdmin
+        .from('profiles')
+        .select('is_verified, verification_status')
+        .eq('id', user.id)
+        .maybeSingle()
+
+    if (error) {
+        console.error('email_confirmation_gate_profile_lookup_failed', {
+            userId: user?.id || null,
+            message: error.message,
+        })
+    }
+
+    const profileStatus = normalizeVerificationStatus(profile?.verification_status)
+    const status = profileStatus || metadataStatus || 'PENDING'
+    const canSend = profile?.is_verified === true || status === 'APPROVED'
+
+    return { canSend, status }
+}
+
+async function sendEmailConfirmationLink(
+    supabaseAdmin: any,
+    email: string,
+    displayName: string,
+    redirectTo: string,
+    identityStatus: string = 'APPROVED',
+) {
+    const normalizedIdentityStatus = normalizeVerificationStatus(identityStatus) || 'APPROVED'
+    if (normalizedIdentityStatus !== 'APPROVED') {
+        return buildDeferredEmailDelivery(normalizedIdentityStatus)
+    }
+
+    const supabaseUrl = Deno.env.get('SUPABASE_URL') || ''
+    const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY') || ''
+    let supabaseAuthError: string | null = null
+
+    if (supabaseUrl && supabaseAnonKey) {
+        try {
+            const response = await fetch(`${supabaseUrl}/auth/v1/resend`, {
+                method: 'POST',
+                headers: {
+                    apikey: supabaseAnonKey,
+                    Authorization: `Bearer ${supabaseAnonKey}`,
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    type: 'signup',
+                    email,
+                    options: {
+                        email_redirect_to: redirectTo,
+                    },
+                }),
+            })
+
+            if (response.ok) {
+                return { sent: true, queued: false, provider: 'supabase_auth' }
+            }
+
+            const errorText = await response.text().catch(() => '')
+            supabaseAuthError = `Supabase Auth ${response.status}: ${errorText.slice(0, 500)}`
+            console.error('email_confirmation_supabase_auth_failed', { status: response.status, body: errorText.slice(0, 500) })
+        } catch (authEmailError) {
+            supabaseAuthError = authEmailError instanceof Error ? authEmailError.message : String(authEmailError)
+            console.error('email_confirmation_supabase_auth_exception', { message: supabaseAuthError })
+        }
+    } else {
+        supabaseAuthError = 'Missing SUPABASE_URL or SUPABASE_ANON_KEY'
+    }
+
+    const { data, error } = await supabaseAdmin.auth.admin.generateLink({
+        type: 'magiclink',
+        email,
+        options: {
+            redirectTo,
+            data: {
+                is_verified: normalizedIdentityStatus === 'APPROVED',
+                verification_status: normalizedIdentityStatus,
+            },
+        },
+    })
+
+    if (error) {
+        console.error('email_confirmation_link_failed', { email, message: error.message })
+        return { sent: false, queued: false, provider: 'supabase_auth', error: error.message, supabaseAuthError }
+    }
+
+    const actionLink = String(data?.properties?.action_link || '').trim()
+    if (!actionLink) {
+        return { sent: false, queued: false, provider: 'supabase_auth', error: 'Generated confirmation link was empty', supabaseAuthError }
+    }
+
+    const safeName = escapeHtml(displayName || 'there')
+    const safeLink = escapeHtml(actionLink)
+    const subject = 'Confirm your email - MusikaLokal'
+    const statusCopy = normalizedIdentityStatus === 'PENDING_REVIEW'
+        ? 'Your ID scan is still being reviewed by Didit. Please confirm your email address now so your account is ready after approval.'
+        : 'Your ID scan was approved. Please confirm your email address before logging in.'
+    const html = `
+<h1>MusikaLokal</h1>
+<p>Hi ${safeName},</p>
+<p>${statusCopy}</p>
+<p><a href="${safeLink}" style="display:inline-block;background:#5546FF;color:#ffffff;text-decoration:none;padding:12px 20px;border-radius:8px;font-weight:700;">Confirm Email</a></p>
+<p>If the button does not work, open this link:</p>
+<p><a href="${safeLink}">${safeLink}</a></p>
+<p>After confirming your email, return to MusikaLokal and log in.</p>`.trim()
+
+    const gmailDelivery = await sendEmailWithGmail({
+        to: email,
+        subject,
+        html,
+        recipientName: displayName || 'User',
+        source: 'create-unverified-user',
+    })
+
+    if (gmailDelivery.sent) {
+        return { sent: true, queued: false, provider: gmailDelivery.provider, supabaseAuthError }
+    }
+
+    const gmailError = gmailDelivery.error || 'Gmail sender is not configured'
+    console.error('email_confirmation_gmail_failed', {
+        provider: gmailDelivery.provider,
+        message: gmailError,
+    })
+
+    const { error: queueError } = await supabaseAdmin.from('email_notifications').insert({
+        recipient_email: email,
+        recipient_name: displayName || 'User',
+        subject,
+        html_content: html,
+        template_type: 'signup_email_confirmation',
+        status: 'pending',
+        created_at: new Date().toISOString(),
+    })
+
+    if (queueError) {
+        console.error('email_confirmation_queue_failed', { message: queueError.message })
+        return { sent: false, queued: false, provider: 'email_notifications', error: `${gmailError}; ${queueError.message}`, supabaseAuthError }
+    }
+
+    return { sent: false, queued: true, provider: 'email_notifications', error: `${gmailError}; queued in email_notifications`, supabaseAuthError }
 }
 
 serve(async (req) => {
@@ -13,7 +266,79 @@ serve(async (req) => {
     }
 
     try {
-        const { email, password, role } = await req.json()
+        const {
+            email,
+            password,
+            role,
+            fullName,
+            isVerified = false,
+            verificationStatus,
+            diditSessionId,
+            selectedDocumentType,
+            selectedDocumentTypeKey,
+            verificationMode,
+            redirectTo,
+            action,
+        } = await req.json()
+
+        const supabaseAdmin = createClient(
+            Deno.env.get('SUPABASE_URL') ?? '',
+            Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
+        )
+
+        if (action === 'resend_confirmation_email') {
+            const normalizedEmail = String(email || '').trim().toLowerCase()
+            if (!normalizedEmail) {
+                return new Response(JSON.stringify({ error: 'Email required' }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 400,
+                })
+            }
+
+            const { data: listData, error: listError } = await supabaseAdmin.auth.admin.listUsers()
+            if (listError) throw listError
+
+            const existingUser = listData?.users.find(u => u.email?.toLowerCase() === normalizedEmail)
+            if (!existingUser) {
+                return new Response(JSON.stringify({ error: 'Account not found' }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 404,
+                })
+            }
+
+            if (existingUser.email_confirmed_at) {
+                return new Response(JSON.stringify({ message: 'Email is already confirmed', alreadyConfirmed: true }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 200,
+                })
+            }
+
+            const confirmationGate = await getEmailConfirmationGate(supabaseAdmin, existingUser)
+            if (!confirmationGate.canSend) {
+                return new Response(JSON.stringify({
+                    message: 'Email confirmation will be sent after identity review is approved.',
+                    emailConfirmationDeferred: true,
+                    identityStatus: confirmationGate.status,
+                    emailDelivery: buildDeferredEmailDelivery(confirmationGate.status),
+                }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 200,
+                })
+            }
+
+            const emailDelivery = await sendEmailConfirmationLink(
+                supabaseAdmin,
+                normalizedEmail,
+                existingUser.user_metadata?.full_name || existingUser.user_metadata?.name || normalizedEmail.split('@')[0] || getDefaultDisplayNameForRole(existingUser.user_metadata?.role),
+                getConfirmationRedirect(redirectTo),
+                confirmationGate.status,
+            )
+
+            return new Response(JSON.stringify({ emailDelivery }), {
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                status: emailDelivery.sent || emailDelivery.queued ? 200 : 500,
+            })
+        }
 
         if (!email || !password) {
             return new Response(JSON.stringify({ error: 'Email and password required' }), {
@@ -22,20 +347,213 @@ serve(async (req) => {
             })
         }
 
-        // Create Supabase Admin client
-        const supabaseAdmin = createClient(
-            Deno.env.get('SUPABASE_URL') ?? '',
-            Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
-        )
+        const normalizedEmail = String(email).trim().toLowerCase()
+        const normalizedRole = String(role || 'musician').trim().toLowerCase()
+        if (!allowedSignupRoles.has(normalizedRole)) {
+            return new Response(JSON.stringify({ error: 'Invalid signup role.' }), {
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                status: 400,
+            })
+        }
+
+        const normalizedVerificationStatus = String(verificationStatus || '').trim().toUpperCase()
+        const approvedByDidit = Boolean(isVerified) || normalizedVerificationStatus === 'APPROVED'
+        const pendingByDidit = normalizedVerificationStatus === 'PENDING_REVIEW'
+        const fallbackName = String(fullName || normalizedEmail.split('@')[0] || getDefaultDisplayNameForRole(normalizedRole)).trim()
+
+        let diditVerificationData: any = null
+        let documentFingerprint: string | null = null
+        let duplicateIdentityReview: any = null
+        let identityNameBirthDate: any = {
+            fullLegalName: null,
+            normalizedFullLegalName: null,
+            birthDate: null,
+            hasNameBirthDate: false,
+        }
+        let registrationAttemptId: string | null = null
+
+        try {
+            const registrationAttempt = await enforceRegistrationRateLimit(supabaseAdmin, req, {
+                action: 'create_unverified_user',
+                email: normalizedEmail,
+                diditSessionId: diditSessionId || null,
+                metadata: {
+                    role: normalizedRole,
+                    verification_mode: verificationMode || null,
+                    requested_verification_status: normalizedVerificationStatus || null,
+                },
+            })
+            registrationAttemptId = registrationAttempt?.attemptId || null
+        } catch (rateLimitError) {
+            const status = getRegistrationRateLimitStatus(rateLimitError)
+            if (status) {
+                return new Response(JSON.stringify({ error: rateLimitError.message }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status,
+                })
+            }
+            throw rateLimitError
+        }
+
+        if (approvedByDidit || pendingByDidit) {
+            if (!diditSessionId) {
+                return new Response(JSON.stringify({ error: 'Didit session is required for Didit account creation.' }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 400,
+                })
+            }
+
+            let { data: sessionData } = await supabaseAdmin
+                .from('verification_sessions')
+                .select('status, verification_data')
+                .eq('session_ref', diditSessionId)
+                .maybeSingle()
+
+            if (!sessionData && String(diditSessionId).startsWith('TEMP_')) {
+                const { data: userRefSessionData } = await supabaseAdmin
+                    .from('verification_sessions')
+                    .select('status, verification_data')
+                    .eq('verification_data->>user_ref', diditSessionId)
+                    .maybeSingle()
+
+                sessionData = userRefSessionData
+            }
+
+            if (!sessionData) {
+                const diditApiKey = Deno.env.get('DIDIT_API_KEY') || ''
+                if (diditApiKey) {
+                    try {
+                        const decisionResponse = await fetch(`https://verification.didit.me/v3/session/${diditSessionId}/decision/`, {
+                            method: 'GET',
+                            headers: { 'Content-Type': 'application/json', 'x-api-key': diditApiKey },
+                        })
+
+                        if (decisionResponse.ok) {
+                            const decisionPayload = await decisionResponse.json()
+                            const decision = decisionPayload?.decision || decisionPayload
+                            const idVerification = decision?.id_verifications?.[0] || decisionPayload?.id_verifications?.[0]
+                            const faceMatch = decision?.face_matches?.[0] || decisionPayload?.face_matches?.[0]
+                            const idStatus = idVerification?.status
+                            const faceStatus = faceMatch?.status
+
+                            if (idStatus === 'Approved' && faceStatus === 'Approved') {
+                                sessionData = {
+                                    status: 'APPROVED',
+                                    verification_data: {
+                                        full_name: fallbackName,
+                                        email: normalizedEmail,
+                                        raw_data: idVerification,
+                                        document_country: idVerification?.issuing_country || idVerification?.issuingCountry || idVerification?.country || null,
+                                    },
+                                }
+                            } else if (idStatus === 'Approved' && !faceMatch) {
+                                const sourceStatus = normalizeVerificationStatus(decisionPayload?.status || decision?.status)
+                                sessionData = {
+                                    status: sourceStatus === 'PENDING_REVIEW'
+                                        ? 'PENDING_REVIEW'
+                                        : 'PENDING',
+                                    verification_data: { email: normalizedEmail },
+                                }
+                            } else if (idStatus === 'In Review' || faceStatus === 'In Review' || idStatus === 'Pending Review' || faceStatus === 'Pending Review') {
+                                sessionData = { status: 'PENDING_REVIEW', verification_data: { email: normalizedEmail } }
+                            }
+                        }
+                    } catch (diditError) {
+                        console.error('Didit approval fallback failed:', diditError)
+                    }
+                }
+            }
+
+            const resolvedDiditStatus = normalizeVerificationStatus(sessionData?.status)
+            const hasApprovedFaceMatch =
+                sessionData?.verification_data?.face_matches?.[0]?.status === 'Approved' ||
+                sessionData?.verification_data?.face_matches?.[0]?.status === 'APPROVED'
+            if (approvedByDidit && resolvedDiditStatus !== 'APPROVED') {
+                return new Response(JSON.stringify({ error: 'Didit verification is not approved yet. Please try again.' }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 400,
+                })
+            }
+
+            if (approvedByDidit && !hasApprovedFaceMatch) {
+                return new Response(JSON.stringify({ error: 'Didit face match is not approved yet. Please try again.' }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 400,
+                })
+            }
+
+            if (pendingByDidit && !['PENDING_REVIEW', 'IN_REVIEW'].includes(resolvedDiditStatus)) {
+                return new Response(JSON.stringify({ error: 'Didit verification is not pending review. Please try again.' }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 400,
+                })
+            }
+
+            diditVerificationData = sessionData?.verification_data || null
+            identityNameBirthDate = approvedByDidit
+                ? prepareIdentityNameBirthDateDuplicateInput(diditVerificationData?.raw_data || diditVerificationData, {
+                    fullLegalName: diditVerificationData?.verified_full_legal_name || diditVerificationData?.full_legal_name || diditVerificationData?.full_name,
+                    normalizedFullLegalName: diditVerificationData?.normalized_full_legal_name,
+                    birthDate: diditVerificationData?.birth_date || diditVerificationData?.date_of_birth,
+                })
+                : identityNameBirthDate
+            const diditEmail = String(diditVerificationData?.email || '').trim().toLowerCase()
+            if (diditEmail && diditEmail !== normalizedEmail) {
+                return new Response(JSON.stringify({ error: 'Didit verification email does not match this signup email.' }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 400,
+                })
+            }
+
+            documentFingerprint = diditVerificationData?.document_fingerprint || await buildIdentityDocumentFingerprint(
+                diditVerificationData?.raw_data || diditVerificationData,
+                {
+                    documentType: selectedDocumentType,
+                    documentTypeKey: selectedDocumentTypeKey,
+                    documentCountry: diditVerificationData?.document_country,
+                },
+            )
+
+            if (documentFingerprint) {
+                const revokedOrphanClaimCount = await revokeOrphanSameRoleIdentityClaims(supabaseAdmin, {
+                    documentFingerprint,
+                    role: normalizedRole,
+                })
+                if (revokedOrphanClaimCount > 0) {
+                    console.warn('identity_orphan_same_role_claims_revoked', {
+                        role: normalizedRole,
+                        count: revokedOrphanClaimCount,
+                    })
+                }
+
+                duplicateIdentityReview = await findSameRoleIdentityDuplicate(supabaseAdmin, {
+                    documentFingerprint,
+                    role: normalizedRole,
+                    email: normalizedEmail,
+                })
+            }
+        }
+
+        const diditDuplicateFlag = Boolean(diditVerificationData?.duplicate_identity_review_required)
+        const sameRoleDuplicateDetected = Boolean(duplicateIdentityReview?.hasDuplicate)
+        const diditDuplicateFlagRequiresReview = diditDuplicateFlag && (!documentFingerprint || sameRoleDuplicateDetected)
+        const requiresDuplicateIdentityReview = Boolean(sameRoleDuplicateDetected || diditDuplicateFlagRequiresReview)
+        const effectiveVerificationStatus = approvedByDidit && !requiresDuplicateIdentityReview
+            ? 'APPROVED'
+            : (pendingByDidit || requiresDuplicateIdentityReview) ? 'PENDING_REVIEW' : 'PENDING'
+        const effectiveIsVerified = effectiveVerificationStatus === 'APPROVED'
 
         // 1. Check if user already exists in Auth
         const { data: listData, error: listError } = await supabaseAdmin.auth.admin.listUsers()
 
+        if (listError) {
+            throw listError
+        }
+
         // Find existing user by email
-        let existingUser = listData?.users.find(u => u.email?.toLowerCase() === email.toLowerCase())
+        let existingUser = listData?.users.find(u => u.email?.toLowerCase() === normalizedEmail)
 
         if (existingUser) {
-            console.log('Found existing user:', existingUser.id)
 
             // If they are already confirmed, STOP.
             if (existingUser.email_confirmed_at) {
@@ -46,8 +564,17 @@ serve(async (req) => {
             }
 
             // If they are NOT confirmed, this is a stalled/failed signup.
-            // DELETE them to allow a fresh start.
-            console.log('User is unverified. Deleting to allow fresh signup...')
+            // Clear FK blockers first, then delete them to allow a fresh start.
+            try {
+                await cleanupStaleSignupUserRelations(supabaseAdmin, existingUser.id)
+            } catch (cleanupError) {
+                console.error('Failed to clean stale unverified user relations:', cleanupError)
+                return new Response(JSON.stringify({ error: 'Failed to reset existing account. Please contact support.' }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 400,
+                })
+            }
+
             const { error: deleteError } = await supabaseAdmin.auth.admin.deleteUser(existingUser.id)
 
             if (deleteError) {
@@ -61,15 +588,27 @@ serve(async (req) => {
             // Also clean up profile if it exists
             await supabaseAdmin.from('profiles').delete().eq('id', existingUser.id)
 
-            console.log('Existing unverified user deleted.')
         }
 
         // 2. Create Fresh User
+        // Didit approval verifies identity only. The Supabase auth email must
+        // still be confirmed before password login is allowed.
         const { data: user, error: createError } = await supabaseAdmin.auth.admin.createUser({
-            email,
+            email: normalizedEmail,
             password,
             email_confirm: false,
-            user_metadata: { is_verified: false, role }
+            user_metadata: {
+                is_verified: effectiveIsVerified,
+                role: normalizedRole,
+                verification_status: effectiveVerificationStatus,
+                didit_session_id: diditSessionId || null,
+                selected_document_type: selectedDocumentType || null,
+                selected_document_type_key: selectedDocumentTypeKey || null,
+                verification_mode: verificationMode || null,
+                full_name: fallbackName,
+                display_name: fallbackName,
+                name: fallbackName,
+            }
         })
 
         if (createError) {
@@ -87,12 +626,16 @@ serve(async (req) => {
 
         const { error: profileError } = await supabaseAdmin
             .from('profiles')
-            .insert({
+            .upsert({
                 id: userId,
-                email: email,
-                role: role,
+                email: normalizedEmail,
+                full_name: fallbackName,
+                role: normalizedRole,
                 is_verified: false,
-                verification_status: 'NOT_STARTED',
+                verification_status: effectiveVerificationStatus,
+                didit_session_id: diditSessionId || null,
+                id_document_expiry: diditVerificationData?.id_document_expiry || null,
+                id_verified_at: null,
             })
 
         if (profileError) {
@@ -101,18 +644,227 @@ serve(async (req) => {
             throw new Error('Failed to create profile: ' + profileError.message)
         }
 
+        let identityReviewRecord = null
+        let finalVerificationStatus = effectiveVerificationStatus
+        let finalDuplicateIdentityReview = requiresDuplicateIdentityReview
+        if (requiresDuplicateIdentityReview) {
+            const duplicateReason = getDuplicateIdentityReviewReason(normalizedRole)
+            identityReviewRecord = await queueIdentityReview(supabaseAdmin, {
+                userId,
+                email: normalizedEmail,
+                role: normalizedRole,
+                documentType: selectedDocumentType,
+                documentTypeKey: selectedDocumentTypeKey,
+                documentCountry: diditVerificationData?.document_country || 'PHL',
+                source: DUPLICATE_REVIEW_SOURCE,
+                diditSessionId,
+                documentFingerprint,
+                duplicateReason,
+                duplicateMatchCount: duplicateIdentityReview?.matches?.length || diditVerificationData?.duplicate_match_count || 1,
+                verifiedFullLegalName: identityNameBirthDate.fullLegalName,
+                normalizedFullLegalName: identityNameBirthDate.normalizedFullLegalName,
+                birthDate: identityNameBirthDate.birthDate,
+                reviewReason: duplicateReason,
+                matchedOn: 'DOCUMENT_FINGERPRINT',
+                metadata: {
+                    didit_duplicate_flag: diditDuplicateFlag,
+                    source_session_status: normalizedVerificationStatus,
+                    matched_on: 'DOCUMENT_FINGERPRINT',
+                    duplicate_matches: duplicateIdentityReview?.matches || [],
+                },
+            })
+            await recordIdentityDocumentClaim(supabaseAdmin, {
+                userId,
+                role: normalizedRole,
+                documentFingerprint,
+                documentType: selectedDocumentType,
+                documentTypeKey: selectedDocumentTypeKey,
+                documentCountry: diditVerificationData?.document_country || 'PHL',
+                source: DUPLICATE_REVIEW_SOURCE,
+                status: 'PENDING_REVIEW',
+                diditSessionId,
+                manualReviewId: identityReviewRecord?.id || null,
+                email: normalizedEmail,
+                verifiedFullLegalName: identityNameBirthDate.fullLegalName,
+                normalizedFullLegalName: identityNameBirthDate.normalizedFullLegalName,
+                birthDate: identityNameBirthDate.birthDate,
+                reviewReason: duplicateReason,
+                matchedOn: 'DOCUMENT_FINGERPRINT',
+            })
+        } else if (pendingByDidit) {
+            identityReviewRecord = await queueIdentityReview(supabaseAdmin, {
+                userId,
+                email: normalizedEmail,
+                role: normalizedRole,
+                documentType: selectedDocumentType,
+                documentTypeKey: selectedDocumentTypeKey,
+                documentCountry: diditVerificationData?.document_country || 'PHL',
+                source: DIDIT_PENDING_SOURCE,
+                diditSessionId,
+                documentFingerprint,
+                verifiedFullLegalName: identityNameBirthDate.fullLegalName,
+                normalizedFullLegalName: identityNameBirthDate.normalizedFullLegalName,
+                birthDate: identityNameBirthDate.birthDate,
+                metadata: {
+                    source_session_status: normalizedVerificationStatus,
+                },
+            })
+            await recordIdentityDocumentClaim(supabaseAdmin, {
+                userId,
+                role: normalizedRole,
+                documentFingerprint,
+                documentType: selectedDocumentType,
+                documentTypeKey: selectedDocumentTypeKey,
+                documentCountry: diditVerificationData?.document_country || 'PHL',
+                source: DIDIT_PENDING_SOURCE,
+                status: 'PENDING_REVIEW',
+                diditSessionId,
+                manualReviewId: identityReviewRecord?.id || null,
+                email: normalizedEmail,
+                verifiedFullLegalName: identityNameBirthDate.fullLegalName,
+                normalizedFullLegalName: identityNameBirthDate.normalizedFullLegalName,
+                birthDate: identityNameBirthDate.birthDate,
+            })
+        } else if (approvedByDidit) {
+            const approvalClaim = await recordIdentityDocumentClaim(supabaseAdmin, {
+                userId,
+                role: normalizedRole,
+                documentFingerprint,
+                documentType: selectedDocumentType,
+                documentTypeKey: selectedDocumentTypeKey,
+                documentCountry: diditVerificationData?.document_country || 'PHL',
+                source: 'DIDIT',
+                status: 'APPROVED',
+                diditSessionId,
+                email: normalizedEmail,
+                verifiedFullLegalName: identityNameBirthDate.fullLegalName,
+                normalizedFullLegalName: identityNameBirthDate.normalizedFullLegalName,
+                birthDate: identityNameBirthDate.birthDate,
+            })
+
+            if (approvalClaim?.decision === 'PENDING_REVIEW' || approvalClaim?.decision === 'EXISTING_ACCOUNT') {
+                const duplicateReason = getApprovalClaimReviewReason(approvalClaim, normalizedRole)
+                const matchedOn = getApprovalClaimMatchedOn(
+                    approvalClaim,
+                    duplicateReason === 'MISSING_DOCUMENT_FINGERPRINT' ? '' : 'DOCUMENT_FINGERPRINT',
+                )
+                identityReviewRecord = await queueIdentityReview(supabaseAdmin, {
+                    userId,
+                    email: normalizedEmail,
+                    role: normalizedRole,
+                    documentType: selectedDocumentType,
+                    documentTypeKey: selectedDocumentTypeKey,
+                    documentCountry: diditVerificationData?.document_country || 'PHL',
+                    source: DUPLICATE_REVIEW_SOURCE,
+                    diditSessionId,
+                    documentFingerprint,
+                    duplicateReason,
+                    duplicateMatchCount: getApprovalClaimMatchCount(approvalClaim, duplicateReason === 'MISSING_DOCUMENT_FINGERPRINT' ? 0 : 1),
+                    verifiedFullLegalName: identityNameBirthDate.fullLegalName,
+                    normalizedFullLegalName: identityNameBirthDate.normalizedFullLegalName,
+                    birthDate: identityNameBirthDate.birthDate,
+                    reviewReason: duplicateReason,
+                    matchedOn,
+                    metadata: {
+                        didit_duplicate_flag: diditDuplicateFlag,
+                        source_session_status: normalizedVerificationStatus,
+                        matched_on: matchedOn,
+                        approval_claim_result: approvalClaim,
+                    },
+                })
+
+                await recordIdentityDocumentClaim(supabaseAdmin, {
+                    userId,
+                    role: normalizedRole,
+                    documentFingerprint,
+                    documentType: selectedDocumentType,
+                    documentTypeKey: selectedDocumentTypeKey,
+                    documentCountry: diditVerificationData?.document_country || 'PHL',
+                    source: DUPLICATE_REVIEW_SOURCE,
+                    status: 'PENDING_REVIEW',
+                    diditSessionId,
+                    manualReviewId: identityReviewRecord?.id || null,
+                    email: normalizedEmail,
+                    verifiedFullLegalName: identityNameBirthDate.fullLegalName,
+                    normalizedFullLegalName: identityNameBirthDate.normalizedFullLegalName,
+                    birthDate: identityNameBirthDate.birthDate,
+                    reviewReason: duplicateReason,
+                    matchedOn,
+                    metadata: {
+                        matched_on: matchedOn,
+                        approval_claim_result: approvalClaim,
+                    },
+                })
+
+                finalVerificationStatus = 'PENDING_REVIEW'
+                finalDuplicateIdentityReview = true
+
+                await supabaseAdmin
+                    .from('profiles')
+                    .update({
+                        verification_status: 'PENDING_REVIEW',
+                        is_verified: false,
+                        id_verified_at: null,
+                    })
+                    .eq('id', userId)
+
+                const { data: demotedUser } = await supabaseAdmin.auth.admin.updateUserById(userId, {
+                    user_metadata: {
+                        ...(user.user.user_metadata || {}),
+                        is_verified: false,
+                        verification_status: 'PENDING_REVIEW',
+                    },
+                })
+                if (demotedUser?.user) {
+                    user.user = demotedUser.user
+                }
+            }
+        }
+
+        const emailConfirmationRequired = finalVerificationStatus === 'APPROVED'
+        const emailDelivery = emailConfirmationRequired
+            ? await sendEmailConfirmationLink(
+                supabaseAdmin,
+                normalizedEmail,
+                fallbackName,
+                getConfirmationRedirect(redirectTo),
+                finalVerificationStatus,
+            )
+            : buildDeferredEmailDelivery(finalVerificationStatus)
+
+        await markRegistrationAttempt(supabaseAdmin, registrationAttemptId, {
+            success: true,
+            user_id: userId,
+            didit_session_id: diditSessionId || null,
+            metadata: {
+                role: normalizedRole,
+                verification_status: finalVerificationStatus,
+                duplicate_identity_review: finalDuplicateIdentityReview,
+            },
+        })
+
         return new Response(JSON.stringify({
             user: user.user,
-            message: 'User created (unverified)'
+            emailConfirmationRequired,
+            emailConfirmationDeferred: !emailConfirmationRequired,
+            duplicateIdentityReview: finalDuplicateIdentityReview,
+            identityReviewId: identityReviewRecord?.id || null,
+            emailDelivery,
+            message: finalVerificationStatus === 'APPROVED'
+                ? 'User created with verified identity; email confirmation required'
+                : finalVerificationStatus === 'PENDING_REVIEW'
+                    ? 'User created with identity pending review; email confirmation will be sent after approval'
+                : 'User created (unverified); email confirmation required'
         }), {
             headers: { ...corsHeaders, 'Content-Type': 'application/json' },
             status: 200,
         })
 
     } catch (error) {
+        const status = getRegistrationRateLimitStatus(error) || 400
         return new Response(JSON.stringify({ error: error.message }), {
             headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-            status: 400,
+            status,
         })
     }
 })

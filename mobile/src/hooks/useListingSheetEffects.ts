@@ -1,10 +1,12 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useEffect } from "react";
 import { supabase } from "../../lib/supabase";
+import { useListingDetailsQuery } from "../data/hooks";
 
 interface UseListingSheetEffectsParams {
   group: any;
   listingId: string | null;
+  userId?: string | null;
   bookings: any[];
   selectedTimeSlots: { start: string; end: string }[];
   selectedSessionType: "Rehearsal" | "Recording" | null;
@@ -21,9 +23,26 @@ interface UseListingSheetEffectsParams {
   setRelatedListings: (value: any[]) => void;
 }
 
+const getReviewTargetColumn = (type: unknown) => {
+  const normalized = String(type || "").trim().toLowerCase();
+  if (normalized === "studio" || normalized === "venue") return "studio_id";
+  if (normalized === "gig") return "gig_id";
+  if (normalized === "artist" || normalized === "musician" || normalized === "profile") return "user_id";
+  return "group_id";
+};
+
+const normalizeReviewRows = (rows: any[] = []) =>
+  rows.map((row) => ({
+    ...row,
+    author: row?.author ?? row?.profiles ?? null,
+    content: row?.content ?? row?.comment ?? null,
+    likes_count: Number(row?.likes_count ?? row?.computed_likes_count ?? 0),
+  }));
+
 export const useListingSheetEffects = ({
   group,
   listingId,
+  userId,
   bookings,
   selectedTimeSlots,
   selectedSessionType,
@@ -34,6 +53,17 @@ export const useListingSheetEffects = ({
   setReviews,
   setRelatedListings,
 }: UseListingSheetEffectsParams) => {
+  const listingDetailsType = group?.type
+    ? String(group.type).trim().toLowerCase()
+    : null;
+  const groupType = group?.type;
+  const listingDetailsQuery = useListingDetailsQuery({
+    enabled: Boolean(listingId && listingDetailsType),
+    id: listingId,
+    type: listingDetailsType,
+    userId,
+  });
+
   useEffect(() => {
     if (group?.availability) {
       processAvailability(
@@ -72,10 +102,8 @@ export const useListingSheetEffects = ({
               p_item_vector: group.embedding,
               p_weight: 0.05,
             });
-            console.log("🤖 AI learned from view:", group.name);
           }
-        } catch (e) {
-          console.log("Error tracking view:", e);
+        } catch {
         }
       }
     };
@@ -84,112 +112,64 @@ export const useListingSheetEffects = ({
   }, [listingId, group]);
 
   useEffect(() => {
-    const fetchDetails = async () => {
-      if (!listingId) return;
+    if (!listingId || !group) {
+      setReviews([]);
+      setRelatedListings([]);
+      return;
+    }
+
+    if (!listingDetailsQuery.data) return;
+
+    const payload = listingDetailsQuery.data as any;
+    const reviews = normalizeReviewRows(
+      Array.isArray(payload?.reviews) ? payload.reviews : [],
+    );
+
+    if (reviews.length > 0) {
+      setReviews(reviews);
+    }
+    setRelatedListings(
+      Array.isArray(payload?.related_listings) ? payload.related_listings : [],
+    );
+  }, [group, listingDetailsQuery.data, listingId, setRelatedListings, setReviews]);
+
+  useEffect(() => {
+    let active = true;
+
+    if (!listingId || !group) {
+      setReviews([]);
+      return () => {
+        active = false;
+      };
+    }
+
+    void (async () => {
       try {
-        if (!group) return;
+        const col = getReviewTargetColumn(groupType);
+        const { data, error } = await supabase
+          .from("reviews")
+          .select("*, author:profiles!reviews_author_id_fkey(id, full_name, avatar_url, updated_at)")
+          .eq(col, listingId)
+          .order("created_at", { ascending: false })
+          .limit(5);
 
-        const listingTypeRaw = String(group.type || "").toLowerCase();
-        const isStudioLike = listingTypeRaw === "studio" || listingTypeRaw === "venue";
-        const isGig = listingTypeRaw === "gig";
-        const isArtist = listingTypeRaw === "artist" || listingTypeRaw === "musician";
-        const reviewSelect =
-          "*, author:profiles!reviews_author_id_fkey(id, full_name, avatar_url)";
+        if (!active) return;
 
-        const normalizeReviews = (rows: any[] | null | undefined) =>
-          (rows || []).map((row: any) => ({
-            ...row,
-            // Keep compatibility with legacy rows that used comment instead of content.
-            content: row?.content ?? row?.comment ?? null,
-          }));
-
-        let rData: any[] | null = null;
-
-        if (isStudioLike) {
-          const { data } = await supabase
-            .from("reviews")
-            .select(reviewSelect)
-            .eq("studio_id", listingId)
-            .order("created_at", { ascending: false })
-            .limit(5);
-          rData = data;
-        } else if (isGig) {
-          const { data } = await supabase
-            .from("reviews")
-            .select(reviewSelect)
-            .eq("gig_id", listingId)
-            .order("created_at", { ascending: false })
-            .limit(5);
-          rData = data;
-        } else if (isArtist) {
-          const { data } = await supabase
-            .from("reviews")
-            .select(reviewSelect)
-            .eq("user_id", listingId)
-            .order("created_at", { ascending: false })
-            .limit(5);
-          rData = data;
-        } else {
-          // Group listings: prefer group-bound reviews; fallback to owner reviews if none.
-          const { data: groupReviewData } = await supabase
-            .from("reviews")
-            .select(reviewSelect)
-            .eq("group_id", listingId)
-            .order("created_at", { ascending: false })
-            .limit(5);
-
-          if (groupReviewData && groupReviewData.length > 0) {
-            rData = groupReviewData;
-          } else if (group?.owner_id) {
-            const { data: ownerReviewData } = await supabase
-              .from("reviews")
-              .select(reviewSelect)
-              .eq("user_id", group.owner_id)
-              .order("created_at", { ascending: false })
-              .limit(5);
-            rData = ownerReviewData;
-          }
+        if (error) {
+          setReviews([]);
+          return;
         }
 
-        setReviews(normalizeReviews(rData));
-      } catch (e) {
-        console.log("Error reviews:", e);
-        setReviews([]);
-      }
-
-      if (group.embedding) {
-        try {
-          const { data: relatedData } = await supabase.rpc("match_listings", {
-            query_embedding: group.embedding,
-            match_threshold: 0.5,
-            match_count: 5,
-            listing_type: group.type,
-          });
-
-          if (relatedData && relatedData.length > 0) {
-            const relatedIds = relatedData
-              .map((r: any) => r.id)
-              .filter((id: string) => id !== listingId);
-
-            if (relatedIds.length > 0) {
-              let viewName = "groups_with_stats";
-              if (group.type === "Studio" || group.type === "Venue") viewName = "studios_with_stats";
-              if (group.type === "Gig") viewName = "gigs_with_stats";
-
-              const { data: fullRelated } = await supabase
-                .from(viewName)
-                .select("*")
-                .in("id", relatedIds);
-
-              if (fullRelated) setRelatedListings(fullRelated);
-            }
-          }
-        } catch (e) {
-          console.log("Error fetching related:", e);
+        setReviews(normalizeReviewRows(data || []));
+      } catch {
+        if (active) {
+          setReviews([]);
         }
       }
+    })();
+
+    return () => {
+      active = false;
     };
-
-    fetchDetails();
-  }, [listingId, group]);
+  }, [group, groupType, listingId, setReviews]);
 };

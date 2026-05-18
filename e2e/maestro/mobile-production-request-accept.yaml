@@ -1,0 +1,34 @@
+appId: ${APP_ID}
+---
+- openLink: "musikalokal://bookings"
+- assertVisible:
+    id: "mobile-bookings-page"
+- tapOn:
+    id: "mobile-bookings-tab-pending"
+- scrollUntilVisible:
+    element:
+      id: ${E2E_PRODUCTION_REQUEST_CARD_ID}
+    direction: DOWN
+    timeout: 60000
+    speed: 80
+    visibilityPercentage: 50
+    centerElement: true
+- assertVisible:
+    id: ${E2E_PRODUCTION_REQUEST_CARD_ID}
+- scrollUntilVisible:
+    element:
+      id: ${E2E_PRODUCTION_REQUEST_ACCEPT_ID}
+    direction: DOWN
+    timeout: 60000
+    speed: 80
+    visibilityPercentage: 100
+    centerElement: true
+- tapOn:
+    id: ${E2E_PRODUCTION_REQUEST_ACCEPT_ID}
+    point: "50%,25%"
+- extendedWaitUntil:
+    visible:
+      id: "custom-alert-button-accept"
+    timeout: 60000
+- tapOn:
+    id: "custom-alert-button-accept"

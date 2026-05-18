@@ -1,13 +1,13 @@
 import React from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Header from '../src/components/header';
 import Navbar from '../src/components/navbar';
+import { useBottomBarClearance } from '../src/hooks/useBottomBarClearance';
 import { useTheme } from '../src/context/ThemeContext';
 
 export default function PrivacyPolicyScreen() {
   const { colors } = useTheme();
-  const insets = useSafeAreaInsets();
+  const { contentBottomPadding } = useBottomBarClearance(24);
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
@@ -17,7 +17,7 @@ export default function PrivacyPolicyScreen() {
         showsVerticalScrollIndicator={false}
         contentContainerStyle={[
           styles.scrollContent,
-          { paddingBottom: 190 + insets.bottom },
+          { paddingBottom: contentBottomPadding },
         ]}
       >
         <View style={styles.contentContainer}>
@@ -30,7 +30,7 @@ export default function PrivacyPolicyScreen() {
           </Text>
 
           <Text style={[styles.text, { color: colors.textSecondary }]}>
-            For booking cancellations, Musika Lokal applies a non-refundable policy. If a booking is cancelled, any amount already paid (including downpayments or full payments) may be forfeited and credited to the provider according to our Terms and Conditions.
+            For booking cancellations, Musika Lokal records the cancellation actor, reason, payment status, and related wallet activity where applicable. Cancelled booking payments are treated as non-refundable according to our Terms and Conditions.
           </Text>
 
           <Text style={[styles.text, { color: colors.textSecondary }]}>

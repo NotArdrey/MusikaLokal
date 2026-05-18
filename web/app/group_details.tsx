@@ -1,4 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
+import * as ExpoLinking from 'expo-linking';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router, useLocalSearchParams } from 'expo-router';
 import React, { useEffect, useState } from 'react';
@@ -7,6 +8,7 @@ import {
     Dimensions,
     Image,
     ScrollView,
+  Share,
     StatusBar,
     StyleSheet,
     Text,
@@ -17,6 +19,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { supabase } from '../lib/supabase';
 import CustomAlert, { AlertType } from '../src/components/CustomAlert';
 import Modal from '../src/components/modal';
+import ProfileAvatar from '../src/components/ProfileAvatar';
 import ReportModal from '../src/components/ReportModal';
 import { useAuth } from '../src/context/AuthContext';
 import { useTheme } from '../src/context/ThemeContext';
@@ -31,11 +34,12 @@ const IMG_HEIGHT = height * 0.5;
 export default function GroupDetailsScreen() {
   const { id } = useLocalSearchParams();
   const { colors, isDark } = useTheme();
-  const { userId } = useAuth();
+  const { userId, isGuest } = useAuth();
   const insets = useSafeAreaInsets();
   const [loading, setLoading] = useState(true);
   const [group, setGroup] = useState<any>(null);
   const [isFavorited, setIsFavorited] = useState(false);
+  const [favoriteCount, setFavoriteCount] = useState(0);
   const [modalVisible, setModalVisible] = useState(false);
   const [alertVisible, setAlertVisible] = useState(false);
   const [showReportModal, setShowReportModal] = useState(false);
@@ -69,7 +73,8 @@ export default function GroupDetailsScreen() {
 
       if (error) throw error;
       setGroup(data);
-      setIsFavorited(data.is_favorited);
+      setIsFavorited(Boolean(data?.is_favorited));
+      setFavoriteCount(Number(data?.favorites_count || 0));
     } catch (e) {
       console.log('Error fetching group:', e);
     } finally {
@@ -77,7 +82,71 @@ export default function GroupDetailsScreen() {
     }
   };
 
-  const toggleFavorite = () => setIsFavorited(!isFavorited);
+  const buildShareUrl = () => {
+    if (!group?.id) {
+      return ExpoLinking.createURL('/feed');
+    }
+
+    return ExpoLinking.createURL('/group_details', {
+      queryParams: { id: group.id },
+    });
+  };
+
+  const handleShare = async () => {
+    try {
+      const shareUrl = buildShareUrl();
+      await Share.share({
+        message: `Check out ${group?.name || 'this group'} on MusikaLokal!\n${shareUrl}`,
+        url: shareUrl,
+      });
+    } catch {
+      // No-op if cancelled
+    }
+  };
+
+  const toggleFavorite = async () => {
+    if (!userId) {
+      showAlert('warning', 'Login Required', 'Please sign in to bookmark this listing.');
+      return;
+    }
+
+    if (!group?.id) {
+      showAlert('error', 'Bookmark Unavailable', 'Missing group details.');
+      return;
+    }
+
+    const previousState = isFavorited;
+    const previousCount = favoriteCount;
+    const optimisticState = !previousState;
+    const optimisticCount = Math.max(0, previousCount + (optimisticState ? 1 : -1));
+
+    setIsFavorited(optimisticState);
+    setFavoriteCount(optimisticCount);
+
+    try {
+      const { data, error } = await supabase.functions.invoke('manage-details', {
+        body: {
+          action: 'toggle_favorite',
+          type: 'group',
+          id: group.id,
+          userId,
+        },
+      });
+
+      if (error) throw error;
+
+      if (typeof data?.is_favorited === 'boolean') {
+        setIsFavorited(data.is_favorited);
+      }
+      if (typeof data?.favorites_count === 'number') {
+        setFavoriteCount(Math.max(0, data.favorites_count));
+      }
+    } catch (e: any) {
+      setIsFavorited(previousState);
+      setFavoriteCount(previousCount);
+      showAlert('error', 'Bookmark Failed', e?.message || 'Unable to update bookmark right now.');
+    }
+  };
 
   const showAlert = (type: AlertType, title: string, message: string, buttons?: any[]) => {
     setAlertConfig({ type, title, message, buttons });
@@ -143,7 +212,24 @@ export default function GroupDetailsScreen() {
     );
   }
 
-  if (!group) return null;
+  if (!group) {
+    return (
+      <View style={[styles.emptyState, { backgroundColor: colors.background }]}>
+        <Ionicons name="musical-notes-outline" size={42} color={colors.textSecondary} />
+        <Text style={[styles.emptyTitle, { color: colors.text }]}>Group unavailable</Text>
+        <Text style={[styles.emptyMessage, { color: colors.textSecondary }]}>
+          We could not load this group right now.
+        </Text>
+        <TouchableOpacity
+          activeOpacity={1}
+          onPress={() => router.replace('/feed')}
+          style={[styles.emptyButton, { backgroundColor: colors.primary }]}
+        >
+          <Text style={styles.emptyButtonText}>Back to Home</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
 
   const isOwner = !!userId && group?.owner_id === userId;
 
@@ -178,11 +264,13 @@ export default function GroupDetailsScreen() {
             </TouchableOpacity>
 
             <View style={styles.rightActions}>
-              <TouchableOpacity activeOpacity={1} style={styles.roundBtn}>
+              <TouchableOpacity activeOpacity={1} style={styles.roundBtn} onPress={handleShare}>
                 <Ionicons name="share-outline" size={24} color="#000" />
               </TouchableOpacity>
-              {!isOwner && userId ? (
-                <TouchableOpacity activeOpacity={1}
+              {!isOwner && userId && !isGuest ? (
+              <TouchableOpacity activeOpacity={1}
+                  testID="group-report-button"
+                  accessibilityLabel="group-report-button"
                   onPress={openReportModal}
                   style={styles.roundBtn}
                 >
@@ -193,7 +281,7 @@ export default function GroupDetailsScreen() {
                 onPress={toggleFavorite}
                 style={styles.roundBtn}
               >
-                <Ionicons name={isFavorited ? "heart" : "heart-outline"} size={24} color={isFavorited ? "#EF4444" : "#000"} />
+                <Ionicons name={isFavorited ? "bookmark" : "bookmark-outline"} size={24} color={isFavorited ? colors.primary : "#000"} />
               </TouchableOpacity>
             </View>
           </View>
@@ -213,8 +301,11 @@ export default function GroupDetailsScreen() {
             <Text style={[styles.locationText, { color: colors.textSecondary }]}>
               {group.location || 'Manila, Philippines'}
             </Text>
+            <Text style={[styles.locationText, { color: colors.textSecondary, marginTop: 4 }]}>
+              {favoriteCount} bookmarked
+            </Text>
             {hasValidCoordinates(group?.latitude, group?.longitude) && (
-              <TouchableOpacity
+              <TouchableOpacity activeOpacity={1}
                 style={[styles.navigatePill, { backgroundColor: colors.primary }]}
                 onPress={handleNavigate}
               >
@@ -232,9 +323,11 @@ export default function GroupDetailsScreen() {
               <Text style={[styles.hostedBy, { color: colors.text }]}>Hosted by {group.owner_name || 'Martin'}</Text>
               <Text style={[styles.hostSub, { color: colors.textSecondary }]}>Joined in 2021</Text>
             </View>
-            <Image
-              source={{ uri: group.owner_avatar || null }}
+            <ProfileAvatar
+              uri={group.owner_avatar}
               style={[styles.hostAvatar, { backgroundColor: colors.border }]}
+              backgroundColor={isDark ? '#374151' : '#E5E7EB'}
+              iconColor={colors.textSecondary}
             />
           </View>
 
@@ -281,17 +374,12 @@ export default function GroupDetailsScreen() {
                     const memberInstrument = typeof member === 'string' ? member : member.instrument;
                     return (
                       <View key={index} style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-                        <View style={{ 
-                          width: 44, height: 44, borderRadius: 22, 
-                          backgroundColor: isLeader ? colors.primary : '#E0E7FF',
-                          alignItems: 'center', justifyContent: 'center'
-                        }}>
-                          {member.avatar_url ? (
-                            <Image source={{ uri: member.avatar_url }} style={{ width: 44, height: 44, borderRadius: 22 }} />
-                          ) : (
-                            <Text style={{ color: isLeader ? '#fff' : '#4F46E5', fontWeight: 'bold', fontSize: 16 }}>{memberName?.charAt(0)}</Text>
-                          )}
-                        </View>
+                        <ProfileAvatar
+                          uri={typeof member === 'string' ? null : member.avatar_url}
+                          style={{ width: 44, height: 44, borderRadius: 22 }}
+                          backgroundColor={isLeader ? colors.primary : (isDark ? '#374151' : '#E5E7EB')}
+                          iconColor={isLeader ? '#FFF' : colors.textSecondary}
+                        />
                         <View style={{ flex: 1 }}>
                           <Text style={{ color: colors.text, fontFamily: 'Poppins_500Medium', fontSize: 15 }}>{memberName}</Text>
                           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
@@ -377,6 +465,35 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  emptyState: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 28,
+  },
+  emptyTitle: {
+    fontSize: 22,
+    fontFamily: 'Poppins_600SemiBold',
+    marginTop: 14,
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  emptyMessage: {
+    fontSize: 14,
+    fontFamily: 'Poppins_400Regular',
+    textAlign: 'center',
+    marginBottom: 20,
+  },
+  emptyButton: {
+    borderRadius: 10,
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+  },
+  emptyButtonText: {
+    color: '#FFFFFF',
+    fontFamily: 'Poppins_600SemiBold',
+    fontSize: 14,
   },
   scrollContent: {
     paddingBottom: 120, // Space for bottom bar

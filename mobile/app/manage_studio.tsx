@@ -1,11 +1,11 @@
-import { Ionicons } from "@expo/vector-icons";
+﻿import { Ionicons } from "@expo/vector-icons";
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
-import React, { useState } from "react";
+import React, { useRef, useState } from "react";
 import {
     ActivityIndicator,
     Image,
+    InteractionManager,
     Linking,
-    Modal as RNModal,
     ScrollView,
     StyleSheet,
     Text,
@@ -14,15 +14,25 @@ import {
 } from "react-native";
 import { Calendar } from "react-native-calendars";
 import { supabase } from "../lib/supabase";
+import BottomModal from "../src/components/BottomModal";
 import CustomAlert, { AlertType } from "../src/components/CustomAlert";
 import Header from "../src/components/header";
+import InAppMediaViewer, { isInAppMediaUrl } from "../src/components/InAppMediaViewer";
 import Modal from "../src/components/modal";
 import Navbar from "../src/components/navbar";
+import SlidingTabBar from "../src/components/SlidingTabBar";
+import SmoothTabTransition from "../src/components/SmoothTabTransition";
+import { useBottomBarClearance } from "../src/hooks/useBottomBarClearance";
 import { useTheme } from "../src/context/ThemeContext";
 import {
     hasValidCoordinates,
     openNavigationDirections,
 } from "../src/utils/navigation";
+import { formatDashedNumericDate, formatFriendlyDateTime } from "../src/utils/friendlyDateTime";
+import { getSmoothTabIndex, setSmoothTab } from "../src/utils/smoothTabs";
+
+const CUSTOM_DATE_PREVIEW_LIMIT = 5;
+const STUDIO_TABS = ["About", "Setup", "Bookings", "Review"];
 
 const canonicalizeStudioType = (
   value: unknown,
@@ -51,8 +61,12 @@ const inferStudioTypeFromRows = (rows: unknown[]): "Rehearsal" | "Recording" | "
 
 export default function StudioDetailsScreen() {
   const { colors, isDark } = useTheme();
-  const { id } = useLocalSearchParams(); // Get Studio ID
-  const [activeTab, setActiveTab] = useState("About");
+  const { contentBottomPadding } = useBottomBarClearance(24);
+  const { id, tab } = useLocalSearchParams<{ id?: string | string[]; tab?: string | string[] }>(); // Get Studio ID
+  const requestedTab = Array.isArray(tab) ? tab[0] : tab;
+  const [activeTab, setActiveTab] = useState(
+    STUDIO_TABS.includes(requestedTab || "") ? requestedTab || "About" : "About",
+  );
   const [modalVisible, setModalVisible] = useState(false);
   const [modalTitle, setModalTitle] = useState("");
   const [modalMessage, setModalMessage] = useState("");
@@ -62,6 +76,7 @@ export default function StudioDetailsScreen() {
   );
   const [showReasonInput, setShowReasonInput] = useState(false);
   const [cancellationReason, setCancellationReason] = useState("");
+  const cancellationReasonRef = useRef("");
 
   // Calendar View State
   const [viewMode, setViewMode] = useState<"list" | "calendar">("list");
@@ -85,6 +100,16 @@ export default function StudioDetailsScreen() {
     title: "",
     message: "",
   });
+
+  useFocusEffect(
+    React.useCallback(() => {
+      if (requestedTab && STUDIO_TABS.includes(requestedTab) && requestedTab !== activeTab) {
+        setActiveTab(requestedTab);
+      }
+    }, [activeTab, requestedTab]),
+  );
+  const [mediaViewerUrl, setMediaViewerUrl] = useState<string | null>(null);
+  const [mediaViewerTitle, setMediaViewerTitle] = useState("Media");
 
   const showAlert = (
     type: AlertType,
@@ -121,6 +146,28 @@ export default function StudioDetailsScreen() {
 
   const Alert = { alert: showAlertNative };
 
+  const openMediaOrExternal = async (url: string, title = "File") => {
+    const normalizedUrl = String(url || "").trim();
+    if (!normalizedUrl) return;
+
+    if (isInAppMediaUrl(normalizedUrl)) {
+      setMediaViewerTitle(title);
+      setMediaViewerUrl(normalizedUrl);
+      return;
+    }
+
+    try {
+      const supported = await Linking.canOpenURL(normalizedUrl);
+      if (supported) {
+        await Linking.openURL(normalizedUrl);
+      } else {
+        Alert.alert("Error", "Unable to open link");
+      }
+    } catch (error) {
+      Alert.alert("Error", "Failed to open link");
+    }
+  };
+
   const handleNavigateToStudio = async () => {
     try {
       await openNavigationDirections({
@@ -129,7 +176,6 @@ export default function StudioDetailsScreen() {
         label: studio?.address || studio?.name || "Studio location",
       });
     } catch (error) {
-      console.log("[manage_studio] Navigation error:", error);
       showAlert(
         "warning",
         "Navigation Unavailable",
@@ -153,6 +199,38 @@ export default function StudioDetailsScreen() {
       return `${segments[0]}:${segments[1]}`;
     }
     return value;
+  };
+
+  const normalizeSessionType = (value?: unknown) => {
+    if (typeof value !== "string") return "";
+    const normalized = value.trim().toLowerCase();
+    if (normalized === "rehearsal" || normalized === "recording" || normalized === "both") {
+      return normalized;
+    }
+    return "";
+  };
+
+  const getSessionTypeFromReason = (reason?: unknown) => {
+    if (typeof reason !== "string") return "";
+    const match = reason.match(/session_type:(rehearsal|recording|both)/i);
+    return normalizeSessionType(match?.[1]);
+  };
+
+  const formatSessionTypeLabel = (value?: unknown) => {
+    const normalized = normalizeSessionType(value);
+    if (normalized === "rehearsal") return "Rehearsal";
+    if (normalized === "recording") return "Recording";
+    if (normalized === "both") return "Rehearsal & Recording";
+    return "";
+  };
+
+  const formatStatusLabel = (value?: unknown) => {
+    const raw = typeof value === "string" ? value : "";
+    if (!raw.trim()) return "Not submitted";
+    return raw
+      .split("_")
+      .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(" ");
   };
 
   const updateBookingStatus = async (
@@ -201,7 +279,17 @@ export default function StudioDetailsScreen() {
   // Role-based access control + refresh on screen focus (after edits)
   useFocusEffect(
     React.useCallback(() => {
-      checkAuthorization();
+      let isActive = true;
+      const focusTask = InteractionManager.runAfterInteractions(() => {
+        if (isActive) {
+          void checkAuthorization();
+        }
+      });
+
+      return () => {
+        isActive = false;
+        focusTask.cancel();
+      };
     }, [id]),
   );
 
@@ -251,7 +339,6 @@ export default function StudioDetailsScreen() {
         return;
       }
 
-      console.log(`[manage_studio] Fetching data for studioId: ${studioId}, userId: ${userId}`);
 
       // Base query + legacy projection merge
       const { data: studioData, error: studioError } = await supabase
@@ -272,30 +359,59 @@ export default function StudioDetailsScreen() {
         .select('studio_type')
         .eq('studio_id', studioId);
 
+      const [
+        { data: amenityRows, error: amenityRowsError },
+        { data: instrumentRows, error: instrumentRowsError },
+        { data: normalizedMediaRows, error: normalizedMediaError },
+        { data: studioSettings, error: studioSettingsError },
+        { data: promotionRows, error: promotionRowsError },
+      ] = await Promise.all([
+        supabase
+          .from('studio_amenities')
+          .select('amenity')
+          .eq('studio_id', studioId),
+        supabase
+          .from('studio_instruments')
+          .select('*')
+          .eq('studio_id', studioId),
+        supabase
+          .from('studio_media')
+          .select('media_url, sort_order, created_at')
+          .eq('studio_id', studioId)
+          .eq('media_type', 'image')
+          .order('sort_order', { ascending: true })
+          .order('created_at', { ascending: true }),
+        supabase
+          .from('studio_settings')
+          .select('*')
+          .eq('studio_id', studioId)
+          .maybeSingle(),
+        supabase
+          .from('studio_promotions')
+          .select('*')
+          .eq('studio_id', studioId)
+          .order('created_at', { ascending: true }),
+      ]);
+
       if (studioError) {
-        console.log('[manage_studio] Failed to fetch studio details:', studioError.message);
         // if (studioError.message?.includes("non-2xx")) {
-        //   console.log('[manage_studio] Full error object:', JSON.stringify(studioError));
+        //   undefined;
         // }
         throw studioError;
       }
-      if (legacyStudioError) {
-        throw legacyStudioError;
-      }
       if (studioTypesError) {
-        console.log('[manage_studio] Failed to fetch studio_types:', studioTypesError.message);
         throw studioTypesError;
       }
 
       const { data: operatingRows } = await supabase
         .from('studio_operating_hours')
-        .select('day_of_week, open_time, close_time, slot_order, is_open')
+        .select('day_of_week, open_time, close_time, slot_order, is_open, reason')
         .eq('studio_id', studioId)
         .order('day_of_week', { ascending: true })
         .order('slot_order', { ascending: true });
 
       const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-      const availabilityMap = new Map<number, { day: string; slots: { start: string; end: string }[] }>();
+      const availabilityMap = new Map<number, { day: string; slots: { start: string; end: string; session_type?: string }[] }>();
       (operatingRows || []).forEach((row: any) => {
         if (!availabilityMap.has(row.day_of_week)) {
           availabilityMap.set(row.day_of_week, {
@@ -307,42 +423,84 @@ export default function StudioDetailsScreen() {
           availabilityMap.get(row.day_of_week)?.slots.push({
             start: row.open_time,
             end: row.close_time,
+            session_type: getSessionTypeFromReason(row.reason),
           });
         }
       });
 
       const { data: overrideRows } = await supabase
         .from('studio_date_overrides')
-        .select('override_date, is_open, open_time, close_time')
+        .select('override_date, is_open, open_time, close_time, reason, slot_order')
         .eq('studio_id', studioId)
-        .order('override_date', { ascending: true });
+        .order('override_date', { ascending: true })
+        .order('slot_order', { ascending: true });
 
-      const calendarAvailability = (overrideRows || []).map((row: any) => ({
-        date: row.override_date,
-        slots:
-          row.is_open && row.open_time && row.close_time
-            ? [{ start: row.open_time, end: row.close_time }]
-            : [],
-      }));
+      const calendarAvailabilityMap = new Map<string, { date: string; session_type?: string; slots: { start: string; end: string; session_type?: string }[] }>();
+      (overrideRows || []).forEach((row: any) => {
+        if (!row.override_date) return;
+        if (!calendarAvailabilityMap.has(row.override_date)) {
+          calendarAvailabilityMap.set(row.override_date, {
+            date: row.override_date,
+            session_type: getSessionTypeFromReason(row.reason),
+            slots: [],
+          });
+        }
+        if (row.is_open && row.open_time && row.close_time) {
+          calendarAvailabilityMap.get(row.override_date)?.slots.push({
+            start: row.open_time,
+            end: row.close_time,
+            session_type: getSessionTypeFromReason(row.reason),
+          });
+        }
+      });
+      const calendarAvailability = Array.from(calendarAvailabilityMap.values());
 
       const normalized3nfTypes = (studioTypesData || [])
         .map((row: any) => row?.studio_type)
         .filter(Boolean);
-      const legacyTypes = Array.isArray(legacyStudio?.types)
+      const legacyTypes = !legacyStudioError && Array.isArray(legacyStudio?.types)
         ? legacyStudio.types
         : [];
       const resolvedStudioType = normalized3nfTypes.length > 0
         ? inferStudioTypeFromRows(normalized3nfTypes)
         : inferStudioTypeFromRows(legacyTypes);
+      const amenitiesFromRows = !amenityRowsError
+        ? (amenityRows || [])
+          .map((row: any) => row?.amenity)
+          .filter((amenity: any) => typeof amenity === 'string' && amenity.trim().length > 0)
+        : [];
+      const instrumentsFromRows = !instrumentRowsError
+        ? (instrumentRows || [])
+          .map((row: any) => ({
+            id: row?.id,
+            name: row?.instrument_name,
+            image: row?.image_url || '',
+            quantity: row?.quantity,
+            description: row?.description || '',
+          }))
+          .filter((item: any) => typeof item.name === 'string' && item.name.trim().length > 0)
+        : [];
+      const imagesFromRows = !normalizedMediaError
+        ? (normalizedMediaRows || [])
+          .map((row: any) => row?.media_url)
+          .filter((url: any) => typeof url === 'string' && url.trim().length > 0)
+        : [];
+      const activePromotions = !promotionRowsError
+        ? (promotionRows || []).filter((promo: any) => promo?.is_active !== false)
+        : [];
 
       setStudio({
         ...studioData,
         type: resolvedStudioType,
-        amenities: legacyStudio?.amenities || [],
-        images: legacyStudio?.images || [],
-        instruments: legacyStudio?.instruments || [],
+        amenities: amenitiesFromRows.length > 0 ? amenitiesFromRows : (!legacyStudioError ? legacyStudio?.amenities || [] : []),
+        images: imagesFromRows.length > 0 ? imagesFromRows : (!legacyStudioError ? legacyStudio?.images || [] : []),
+        instruments: instrumentsFromRows.length > 0 ? instrumentsFromRows : (!legacyStudioError ? legacyStudio?.instruments || [] : []),
         availability: Array.from(availabilityMap.values()),
         calendar_availability: calendarAvailability,
+        booking_settings: !studioSettingsError
+          ? studioSettings || studioData?.booking_settings || null
+          : studioData?.booking_settings || null,
+        promotions: activePromotions,
       });
 
       // Fetch Bookings (normalized-safe)
@@ -357,7 +515,6 @@ export default function StudioDetailsScreen() {
           .order("created_at", { ascending: false });
 
         if (bookingError) {
-          console.log('[manage_studio] Failed to fetch bookings:', bookingError);
         } else {
           const normalizedBookings = (bookingData || []).map((booking: any) => {
             const orderedSlots = (booking.slots || [])
@@ -391,7 +548,6 @@ export default function StudioDetailsScreen() {
           setBookings(normalizedBookings);
         }
       } catch (bookingErr) {
-        console.log('[manage_studio] Exception fetching bookings:', bookingErr);
       }
 
       // Direct query to reviews table
@@ -402,16 +558,13 @@ export default function StudioDetailsScreen() {
           .eq('studio_id', studioId)
           .order('created_at', { ascending: false });
         if (reviewError) {
-          console.log('[manage_studio] Failed to fetch reviews:', reviewError);
         } else {
           setReviews(reviewData || []);
         }
       } catch (reviewErr) {
-        console.log('[manage_studio] Exception fetching reviews:', reviewErr);
       }
 
     } catch (e: any) {
-      console.log("[manage_studio] Critical error fetching data (masked):", e.message || "Unknown error");
       let errorMsg = "Failed to load studio data";
       if (e.message?.includes("non-2xx")) {
         errorMsg += `\n\nServer Error (500). Please check edge function logs.`;
@@ -435,6 +588,7 @@ export default function StudioDetailsScreen() {
     setModalButtonText(status === "confirmed" ? "Accept" : "Decline");
     setShowReasonInput(isDecline);
     setCancellationReason("");
+    cancellationReasonRef.current = "";
     setModalAction(() => async () => {
       try {
         const {
@@ -446,7 +600,7 @@ export default function StudioDetailsScreen() {
           bookingId,
           status as "confirmed" | "cancelled",
           user.id,
-          isDecline ? cancellationReason : undefined,
+          isDecline ? cancellationReasonRef.current.trim() : undefined,
         );
 
         // Update local state
@@ -456,8 +610,8 @@ export default function StudioDetailsScreen() {
         setModalVisible(false);
         setShowReasonInput(false);
         setCancellationReason("");
+        cancellationReasonRef.current = "";
       } catch (e) {
-        console.log("Error updating booking:", e);
         Alert.alert("Error", "Failed to update booking status");
       }
     });
@@ -573,12 +727,11 @@ export default function StudioDetailsScreen() {
       setSelectedSlots({});
       Alert.alert("Success", "Booking updated successfully!");
     } catch (e) {
-      console.log("Error with partial approval:", e);
       Alert.alert("Error", "Failed to update booking status");
     }
   };
 
-  const tabs = ["About", "Setup", "Bookings", "Review"];
+  const tabs = STUDIO_TABS;
   const isRecordingOnlyStudio = studio?.type === "Recording";
   const isRehearsalOnlyStudio = studio?.type === "Rehearsal";
   const rehearsalRateValue = Number(studio?.rehearsal_rate || 0);
@@ -608,6 +761,90 @@ export default function StudioDetailsScreen() {
           : hourlyRateValue > 0
             ? `₱${hourlyRateValue.toLocaleString()}/hr`
             : "N/A";
+  const studioEquipment = Array.isArray(studio?.instruments)
+    ? studio.instruments.filter((item: any) => {
+      if (typeof item === "string") return item.trim().length > 0;
+      return typeof item?.name === "string" && item.name.trim().length > 0;
+    })
+    : [];
+  const studioPromotions = Array.isArray(studio?.promotions)
+    ? studio.promotions.filter((promo: any) => promo?.is_active !== false)
+    : [];
+  const getEquipmentLabel = (item: any) => {
+    const name = typeof item === "string" ? item : item?.name;
+    const quantity = typeof item === "object" && item?.quantity ? ` x${item.quantity}` : "";
+    return `${name}${quantity}`;
+  };
+  const getEquipmentDescription = (item: any) =>
+    typeof item === "object" && typeof item?.description === "string"
+      ? item.description.trim()
+      : "";
+  const getEquipmentImage = (item: any) =>
+    typeof item === "object" && typeof item?.image === "string"
+      ? item.image.trim()
+      : "";
+  const formatPromotionDiscount = (promo: any) => {
+    const value = Number(promo?.discount_value || 0);
+    if (!value) return "Discount";
+    return promo?.discount_type === "fixed_amount"
+      ? `₱${value.toLocaleString()} off`
+      : `${value}% off`;
+  };
+  const formatPromotionTarget = (value?: unknown) => {
+    const normalized = normalizeSessionType(value);
+    return formatSessionTypeLabel(normalized) || "All sessions";
+  };
+  const formatPromotionDates = (promo: any) => {
+    if (promo?.is_permanent) return "Permanent";
+    if (promo?.start_date && promo?.end_date) {
+      return `${formatDashedNumericDate(promo.start_date)} - ${formatDashedNumericDate(promo.end_date)}`;
+    }
+    return "Date-limited";
+  };
+  const renderStudioEquipment = () => (
+    <View style={styles.equipmentList}>
+      {studioEquipment.map((item: any, i: number) => {
+        const imageUrl = getEquipmentImage(item);
+        const description = getEquipmentDescription(item);
+
+        return (
+          <View
+            key={item?.id || `${getEquipmentLabel(item)}-${i}`}
+            style={[
+              styles.equipmentDetailCard,
+              {
+                backgroundColor: colors.surface,
+                borderColor: colors.border,
+              },
+            ]}
+          >
+            {imageUrl ? (
+              <Image source={{ uri: imageUrl }} style={styles.equipmentThumb} />
+            ) : (
+              <View
+                style={[
+                  styles.equipmentThumbPlaceholder,
+                  { backgroundColor: isDark ? "#374151" : "#F3F4F6" },
+                ]}
+              >
+                <Ionicons name="musical-notes-outline" size={22} color={colors.textSecondary} />
+              </View>
+            )}
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.equipmentDetailName, { color: colors.text }]}>
+                {getEquipmentLabel(item)}
+              </Text>
+              {description ? (
+                <Text style={[styles.equipmentDetailDescription, { color: colors.textSecondary }]}>
+                  {description}
+                </Text>
+              ) : null}
+            </View>
+          </View>
+        );
+      })}
+    </View>
+  );
 
   // Show loading while checking authorization
   if (checkingAuth) {
@@ -645,7 +882,7 @@ export default function StudioDetailsScreen() {
 
         <ScrollView
           showsVerticalScrollIndicator={false}
-          contentContainerStyle={styles.scrollContent}
+          contentContainerStyle={[styles.scrollContent, { paddingBottom: contentBottomPadding }]}
         >
           {/* Header Image & Info */}
           <View style={styles.headerContainer}>
@@ -678,7 +915,7 @@ export default function StudioDetailsScreen() {
               {studio?.address || "Location N/A"}
             </Text>
             {hasValidCoordinates(studio?.latitude, studio?.longitude) && (
-              <TouchableOpacity
+              <TouchableOpacity activeOpacity={1}
                 style={[styles.navigateButton, { backgroundColor: colors.primary }]}
                 onPress={handleNavigateToStudio}
               >
@@ -688,55 +925,25 @@ export default function StudioDetailsScreen() {
             )}
           </View>
 
-          {/* Segmented Control Tabs */}
-          <View
-            style={[
-              styles.tabsContainer,
-              { backgroundColor: colors.inputBackground },
-            ]}
-          >
-            {tabs.map((tab) => (
-              <TouchableOpacity activeOpacity={1}
-                key={tab}
-                onPress={() => setActiveTab(tab)}
-                style={[
-                  styles.tab,
-                  {
-                    backgroundColor:
-                      activeTab === tab ? colors.surface : "transparent",
-                    shadowColor: "#000",
-                    shadowOffset: {
-                      width: 0,
-                      height: activeTab === tab ? 2 : 0,
-                    },
-                    shadowOpacity: activeTab === tab ? 0.05 : 0,
-                    shadowRadius: 4,
-                    elevation: activeTab === tab ? 2 : 0,
-                  },
-                ]}
-              >
-                <Text
-                  style={[
-                    styles.tabText,
-                    {
-                      fontFamily:
-                        activeTab === tab
-                          ? "Poppins_600SemiBold"
-                          : "Poppins_500Medium",
-                      color:
-                        activeTab === tab
-                          ? colors.primary
-                          : colors.textSecondary,
-                    },
-                  ]}
-                >
-                  {tab}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </View>
+          {/* Tabs */}
+          <SlidingTabBar
+            activeColor={colors.primary}
+            activeKey={activeTab}
+            borderColor={colors.border}
+            indicatorColor={colors.primary}
+            indicatorWidthRatio={0.34}
+            onChange={(tab) => setSmoothTab(setActiveTab, tab)}
+            style={styles.tabsContainer}
+            tabs={tabs.map((tab) => ({ key: tab, label: tab }))}
+            textStyle={styles.tabText}
+          />
 
-          <View style={styles.contentContainer}>
+          <SmoothTabTransition
+            activeKey={activeTab}
+            activeIndex={getSmoothTabIndex(tabs, activeTab)}
+            renderOutgoing={false}
+            style={styles.contentContainer}
+          >
             {activeTab === "About" && (
               <View style={styles.aboutContainer}>
                 <View>
@@ -807,9 +1014,74 @@ export default function StudioDetailsScreen() {
                   </View>
                 </View>
 
+                {studioEquipment.length > 0 && (
+                  <View>
+                    <Text
+                      style={[
+                        styles.sectionTitle,
+                        { color: colors.text, marginBottom: 12 },
+                      ]}
+                    >
+                      Studio Equipment
+                    </Text>
+                    {renderStudioEquipment()}
+                  </View>
+                )}
+
                 {/* <View style={{ flexDirection: "row", gap: 16 }}> */}
                 {/* Recording Rate removed as requested */}
                 {/* </View> */}
+
+                {studioPromotions.length > 0 && (
+                  <View>
+                    <Text
+                      style={[
+                        styles.sectionTitle,
+                        { color: colors.text, marginBottom: 12 },
+                      ]}
+                    >
+                      Promotions
+                    </Text>
+                    <View style={styles.promotionList}>
+                      {studioPromotions.map((promo: any) => (
+                        <View
+                          key={promo.id || promo.name}
+                          style={[
+                            styles.promotionCard,
+                            {
+                              backgroundColor: colors.surface,
+                              borderColor: colors.border,
+                            },
+                          ]}
+                        >
+                          <View style={styles.promotionHeader}>
+                            <View style={{ flex: 1 }}>
+                              <Text style={[styles.promotionTitle, { color: colors.text }]}>
+                                {promo.name || "Studio Promotion"}
+                              </Text>
+                              {promo.description ? (
+                                <Text style={[styles.promotionDescription, { color: colors.textSecondary }]}>
+                                  {promo.description}
+                                </Text>
+                              ) : null}
+                            </View>
+                            <Text style={[styles.promotionDiscount, { color: colors.primary }]}>
+                              {formatPromotionDiscount(promo)}
+                            </Text>
+                          </View>
+                          <Text style={[styles.promotionMetaText, { color: colors.textSecondary }]}>
+                            {formatPromotionTarget(promo.applies_to)} | {formatPromotionDates(promo)}
+                          </Text>
+                          {promo.criteria ? (
+                            <Text style={[styles.promotionMetaText, { color: colors.textSecondary }]}>
+                              How to get promo: {promo.criteria}
+                            </Text>
+                          ) : null}
+                        </View>
+                      ))}
+                    </View>
+                  </View>
+                )}
 
                 <View>
                   <Text
@@ -853,26 +1125,7 @@ export default function StudioDetailsScreen() {
                   </Text>
                   {studio?.contract_url ? (
                     <TouchableOpacity activeOpacity={1}
-                      onPress={async () => {
-                        try {
-                          const supported = await Linking.canOpenURL(
-                            studio.contract_url,
-                          );
-                          if (supported) {
-                            await Linking.openURL(studio.contract_url);
-                          } else {
-                            Alert.alert(
-                              "Error",
-                              "Unable to open contract document",
-                            );
-                          }
-                        } catch (error) {
-                          Alert.alert(
-                            "Error",
-                            "Failed to open contract document",
-                          );
-                        }
-                      }}
+                      onPress={() => openMediaOrExternal(studio.contract_url, "Contract")}
                       style={[
                         styles.contractCard,
                         {
@@ -953,7 +1206,7 @@ export default function StudioDetailsScreen() {
                         onPress={() =>
                           router.push({
                             pathname: "/edit_studio",
-                            params: { id: studio?.id },
+                            params: { id: studio?.id, returnTab: "About" },
                           })
                         }
                         style={{ marginTop: 8 }}
@@ -970,6 +1223,57 @@ export default function StudioDetailsScreen() {
                       </TouchableOpacity>
                     </View>
                   )}
+                </View>
+
+                <View>
+                  <Text
+                    style={[
+                      styles.sectionTitle,
+                      { color: colors.text, marginBottom: 12 },
+                    ]}
+                  >
+                    Business Permit
+                  </Text>
+                  <View
+                    style={[
+                      styles.documentMetaCard,
+                      {
+                        backgroundColor: colors.surface,
+                        borderColor: colors.border,
+                      },
+                    ]}
+                  >
+                    <View style={styles.documentMetaRow}>
+                      <View style={[styles.contractIcon, { backgroundColor: colors.primary }]}>
+                        <Ionicons name="shield-checkmark-outline" size={24} color="#fff" />
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={[styles.contractTitle, { color: colors.text }]}>
+                          {formatStatusLabel(studio?.permit_status)}
+                        </Text>
+                        {studio?.permit_rejection_reason ? (
+                          <Text style={[styles.contractSubtitle, { color: colors.textSecondary }]}>
+                            {studio.permit_rejection_reason}
+                          </Text>
+                        ) : (
+                          <Text style={[styles.contractSubtitle, { color: colors.textSecondary }]}>
+                            Permit status from the studio profile.
+                          </Text>
+                        )}
+                      </View>
+                    </View>
+                    {studio?.business_permit_url ? (
+                      <TouchableOpacity activeOpacity={1}
+                        onPress={() => openMediaOrExternal(studio.business_permit_url, "Business Permit")}
+                        style={[styles.mediaButton, { borderColor: colors.primary, marginBottom: 0, marginTop: 12 }]}
+                      >
+                        <Ionicons name="open-outline" size={18} color={colors.primary} />
+                        <Text style={[styles.addGearText, { color: colors.primary, marginLeft: 8 }]}>
+                          View Business Permit
+                        </Text>
+                      </TouchableOpacity>
+                    ) : null}
+                  </View>
                 </View>
               </View>
             )}
@@ -1012,30 +1316,9 @@ export default function StudioDetailsScreen() {
                   >
                     Equipment & Instruments
                   </Text>
-                  <View style={styles.tagsContainer}>
-                    {studio?.instruments?.length ? (
-                      studio.instruments.map((item: any, i: number) => {
-                        const name = item?.name || item;
-                        const quantity = item?.quantity
-                          ? ` ×${item.quantity}`
-                          : "";
-                        return (
-                          <View
-                            key={i}
-                            style={[
-                              styles.tag,
-                              {
-                                borderColor: colors.border,
-                                backgroundColor: colors.surface,
-                              },
-                            ]}
-                          >
-                            <Text
-                              style={[styles.tagText, { color: colors.text }]}
-                            >{`${name}${quantity}`}</Text>
-                          </View>
-                        );
-                      })
+                  <View>
+                    {studioEquipment.length ? (
+                      renderStudioEquipment()
                     ) : (
                       <Text style={{ color: colors.textSecondary }}>
                         No equipment listed.
@@ -1074,7 +1357,7 @@ export default function StudioDetailsScreen() {
                             ? day.slots
                               .map(
                                 (slot: any) =>
-                                  `${formatTime(slot.start)} - ${formatTime(slot.end)}`,
+                                  `${formatTime(slot.start)} - ${formatTime(slot.end)}${slot.session_type ? ` (${formatSessionTypeLabel(slot.session_type)})` : ""}`,
                               )
                               .join(", ")
                             : "No slots"}
@@ -1098,16 +1381,17 @@ export default function StudioDetailsScreen() {
                       >
                         Custom Dates
                       </Text>
-                      {studio.calendar_availability.map(
-                        (entry: any, i: number) => (
-                          <View key={i} style={{ marginBottom: 8 }}>
+                      {studio.calendar_availability
+                        .slice(0, CUSTOM_DATE_PREVIEW_LIMIT)
+                        .map((entry: any, i: number) => (
+                          <View key={entry?.date || i} style={{ marginBottom: 8 }}>
                             <Text
                               style={{
                                 fontFamily: "Poppins_500Medium",
                                 color: colors.text,
                               }}
                             >
-                              {new Date(entry.date).toLocaleDateString()}
+                              {formatDashedNumericDate(entry.date)}
                             </Text>
                             <Text
                               style={{
@@ -1119,14 +1403,24 @@ export default function StudioDetailsScreen() {
                                 ? entry.slots
                                   .map(
                                     (slot: any) =>
-                                      `${formatTime(slot.start)} - ${formatTime(slot.end)}`,
+                                      `${formatTime(slot.start)} - ${formatTime(slot.end)}${slot.session_type ? ` (${formatSessionTypeLabel(slot.session_type)})` : entry.session_type ? ` (${formatSessionTypeLabel(entry.session_type)})` : ""}`,
                                   )
                                   .join(", ")
                                 : "No slots"}
                             </Text>
                           </View>
-                        ),
-                      )}
+                        ))}
+                      {studio.calendar_availability.length > CUSTOM_DATE_PREVIEW_LIMIT ? (
+                        <Text
+                          style={{
+                            fontFamily: "Poppins_500Medium",
+                            color: colors.textSecondary,
+                            marginTop: 2,
+                          }}
+                        >
+                          +{studio.calendar_availability.length - CUSTOM_DATE_PREVIEW_LIMIT} more custom dates
+                        </Text>
+                      ) : null}
                     </View>
                   ) : null}
                 </View>
@@ -1148,9 +1442,33 @@ export default function StudioDetailsScreen() {
                           color: colors.textSecondary,
                         }}
                       >
+                        Minimum Booking:{" "}
+                        {studio.booking_settings.min_booking_duration_hours || 0} hours
+                      </Text>
+                      <Text
+                        style={{
+                          fontFamily: "Poppins_500Medium",
+                          color: colors.textSecondary,
+                        }}
+                      >
                         Lead Time:{" "}
                         {studio.booking_settings.lead_time_hours || 0} hours
                       </Text>
+                      {(isRecordingOnlyStudio || studio?.type === "Both") && (
+                        <Text
+                          style={{
+                            fontFamily: "Poppins_500Medium",
+                            color: colors.textSecondary,
+                          }}
+                        >
+                          Recording Rule:{" "}
+                          {studio.booking_settings.recording_songs_per_block || 1} song(s) per{" "}
+                          {studio.booking_settings.recording_hours_per_block ||
+                            studio.booking_settings.min_booking_duration_hours ||
+                            3}{" "}
+                          hour block
+                        </Text>
+                      )}
                       <Text
                         style={{
                           fontFamily: "Poppins_500Medium",
@@ -1180,7 +1498,7 @@ export default function StudioDetailsScreen() {
                           {studio.booking_settings.peak_season_dates
                             .map(
                               (d: any) =>
-                                `${new Date(d.start).toLocaleDateString()} - ${new Date(d.end).toLocaleDateString()}`,
+                                `${formatDashedNumericDate(d.start)} - ${formatDashedNumericDate(d.end)}`,
                             )
                             .join("; ")}
                         </Text>
@@ -1205,7 +1523,7 @@ export default function StudioDetailsScreen() {
                           {studio.booking_settings.off_peak_dates
                             .map(
                               (d: any) =>
-                                `${new Date(d.start).toLocaleDateString()} - ${new Date(d.end).toLocaleDateString()}`,
+                                `${formatDashedNumericDate(d.start)} - ${formatDashedNumericDate(d.end)}`,
                             )
                             .join("; ")}
                         </Text>
@@ -1222,7 +1540,7 @@ export default function StudioDetailsScreen() {
                   onPress={() =>
                     router.push({
                       pathname: "/edit_studio",
-                      params: { id: studio?.id },
+                      params: { id: studio?.id, returnTab: "Setup" },
                     })
                   }
                   style={[
@@ -1629,15 +1947,9 @@ export default function StudioDetailsScreen() {
                           <Text
                             style={[styles.bookingDate, { color: colors.text }]}
                           >
-                            {booking.raw_date
-                              ? new Date(booking.raw_date).toLocaleDateString()
-                              : booking.booking_date
-                                ? new Date(
-                                  booking.booking_date,
-                                ).toLocaleDateString()
-                                : new Date(
-                                  booking.start_time,
-                                ).toLocaleDateString()}
+                            {formatDashedNumericDate(
+                              booking.raw_date || booking.booking_date || booking.start_time,
+                            )}
                           </Text>
                         </View>
 
@@ -1794,7 +2106,6 @@ export default function StudioDetailsScreen() {
                   )}
               </View>
             )}
-
             {activeTab === "Review" && (
               <View>
                 <View style={styles.reviewHeader}>
@@ -1859,7 +2170,7 @@ export default function StudioDetailsScreen() {
                           fontFamily: "Poppins_400Regular",
                         }}
                       >
-                        {new Date(review.created_at).toLocaleDateString()}
+                        {formatFriendlyDateTime(review.created_at)}
                       </Text>
                     </View>
                     <View style={[styles.starsRow, { marginBottom: 8 }]}>
@@ -1884,7 +2195,7 @@ export default function StudioDetailsScreen() {
                 ))}
               </View>
             )}
-          </View>
+          </SmoothTabTransition>
         </ScrollView>
 
         <Navbar />
@@ -1895,15 +2206,20 @@ export default function StudioDetailsScreen() {
           setModalVisible(false);
           setShowReasonInput(false);
           setCancellationReason("");
+          cancellationReasonRef.current = "";
         }}
         onConfirm={modalAction}
         title={modalTitle}
         message={modalMessage}
         buttonText={modalButtonText}
+        danger={modalButtonText === "Decline"}
         showInput={showReasonInput}
-        onInputChange={setCancellationReason}
+        inputValue={cancellationReason}
+        onInputChange={(text) => {
+          cancellationReasonRef.current = text;
+          setCancellationReason(text);
+        }}
       />
-
       <CustomAlert
         visible={alertVisible}
         type={alertConfig.type}
@@ -1912,19 +2228,23 @@ export default function StudioDetailsScreen() {
         buttons={alertConfig.buttons}
         onClose={() => setAlertVisible(false)}
       />
+      <InAppMediaViewer
+        visible={!!mediaViewerUrl}
+        uri={mediaViewerUrl}
+        title={mediaViewerTitle}
+        onClose={() => setMediaViewerUrl(null)}
+      />
 
       {/* Partial Approval Modal for Multi-Slot Bookings */}
-      <RNModal
+      <BottomModal
         visible={partialModalVisible}
-        transparent={true}
-        animationType="slide"
-        onRequestClose={() => {
+        overlayLabel="ManageStudioPartialApprovalModal"
+        onClose={() => {
           setPartialModalVisible(false);
           setSelectedBookingForPartial(null);
           setSelectedSlots({});
         }}
       >
-        <View style={styles.partialModalOverlay}>
           <View
             style={[
               styles.partialModalContainer,
@@ -2101,8 +2421,7 @@ export default function StudioDetailsScreen() {
               </Text>
             </TouchableOpacity>
           </View>
-        </View>
-      </RNModal>
+      </BottomModal>
     </>
   );
 }
@@ -2167,9 +2486,6 @@ const styles = StyleSheet.create({
   tabsContainer: {
     marginHorizontal: 24,
     marginTop: 24,
-    padding: 4,
-    borderRadius: 16,
-    flexDirection: "row",
   },
   tab: {
     flex: 1,
@@ -2244,6 +2560,82 @@ const styles = StyleSheet.create({
     flexWrap: "wrap",
     gap: 8,
   },
+  equipmentList: {
+    gap: 12,
+  },
+  equipmentDetailCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 12,
+  },
+  equipmentThumb: {
+    width: 56,
+    height: 56,
+    borderRadius: 8,
+  },
+  equipmentThumbPlaceholder: {
+    width: 56,
+    height: 56,
+    borderRadius: 8,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  equipmentDetailName: {
+    fontFamily: "Poppins_600SemiBold",
+    fontSize: 14,
+  },
+  equipmentDetailDescription: {
+    marginTop: 4,
+    fontFamily: "Poppins_400Regular",
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  promotionList: {
+    gap: 12,
+  },
+  promotionCard: {
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 14,
+  },
+  promotionHeader: {
+    flexDirection: "row",
+    gap: 12,
+    alignItems: "flex-start",
+  },
+  promotionTitle: {
+    fontFamily: "Poppins_600SemiBold",
+    fontSize: 14,
+  },
+  promotionDescription: {
+    marginTop: 4,
+    fontFamily: "Poppins_400Regular",
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  promotionDiscount: {
+    fontFamily: "Poppins_700Bold",
+    fontSize: 14,
+  },
+  promotionMetaText: {
+    marginTop: 8,
+    fontFamily: "Poppins_400Regular",
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  documentMetaCard: {
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 16,
+  },
+  documentMetaRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+  },
   tag: {
     paddingHorizontal: 12,
     paddingVertical: 8,
@@ -2258,11 +2650,21 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     borderRadius: 12,
     alignItems: "center",
+    justifyContent: "center",
     borderWidth: 1,
     borderStyle: "dashed",
   },
   addGearText: {
     fontFamily: "Poppins_600SemiBold",
+  },
+  mediaButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    borderWidth: 1,
   },
   roomProfileCard: {
     padding: 16,
@@ -2552,5 +2954,8 @@ const styles = StyleSheet.create({
     paddingVertical: 16,
     borderRadius: 12,
     alignItems: "center",
+    justifyContent: "center",
   },
 });
+
+

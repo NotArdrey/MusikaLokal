@@ -8,6 +8,36 @@ const corsHeaders = {
     'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
+const replaceProfileSkills = async (client: any, profileId: string, skills: string[]) => {
+    const { error: deleteError } = await client.from('profile_skills').delete().eq('profile_id', profileId)
+    if (deleteError) throw deleteError
+
+    const payload = (skills || [])
+        .map((skill) => (skill ?? '').trim())
+        .filter((skill) => skill.length > 0)
+        .map((skill) => ({ profile_id: profileId, skill }))
+
+    if (payload.length > 0) {
+        const { error: insertError } = await client.from('profile_skills').insert(payload)
+        if (insertError) throw insertError
+    }
+}
+
+const replaceProfileGenres = async (client: any, profileId: string, genres: string[]) => {
+    const { error: deleteError } = await client.from('profile_genres').delete().eq('profile_id', profileId)
+    if (deleteError) throw deleteError
+
+    const payload = (genres || [])
+        .map((genre) => (genre ?? '').trim())
+        .filter((genre) => genre.length > 0)
+        .map((genre) => ({ profile_id: profileId, genre }))
+
+    if (payload.length > 0) {
+        const { error: insertError } = await client.from('profile_genres').insert(payload)
+        if (insertError) throw insertError
+    }
+}
+
 serve(async (req: Request) => {
     if (req.method === 'OPTIONS') {
         return new Response('ok', { headers: corsHeaders })
@@ -39,7 +69,7 @@ serve(async (req: Request) => {
 
             // Fetch Profile
             const { data: profile, error } = await supabaseClient
-                .from('profiles')
+                .from('profiles_with_stats')
                 .select('*')
                 .eq('id', userId)
                 .single()
@@ -89,19 +119,37 @@ serve(async (req: Request) => {
             if (full_name !== undefined) updates.full_name = full_name
             if (bio !== undefined) updates.bio = bio
             if (location !== undefined) updates.location = location
-            if (genres !== undefined) updates.genres = genres
-            if (skills !== undefined) updates.skills = skills
 
-            const { data, error } = await supabaseClient
-                .from('profiles')
-                .update(updates)
+            let data: any = null
+            if (Object.keys(updates).length > 0) {
+                const { data: updatedProfile, error } = await supabaseClient
+                    .from('profiles')
+                    .update(updates)
+                    .eq('id', userId)
+                    .select()
+                    .single()
+
+                if (error) throw error
+                data = updatedProfile
+            }
+
+            if (skills !== undefined) {
+                await replaceProfileSkills(supabaseClient, userId, skills)
+            }
+
+            if (genres !== undefined) {
+                await replaceProfileGenres(supabaseClient, userId, genres)
+            }
+
+            const { data: profileWithStats, error: profileError } = await supabaseClient
+                .from('profiles_with_stats')
+                .select('*')
                 .eq('id', userId)
-                .select()
-                .single()
+                .maybeSingle()
 
-            if (error) throw error
+            if (profileError) throw profileError
 
-            return new Response(JSON.stringify(data), {
+            return new Response(JSON.stringify(profileWithStats || data), {
                 headers: { ...corsHeaders, 'Content-Type': 'application/json' },
                 status: 200,
             })

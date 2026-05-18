@@ -1,0 +1,26 @@
+appId: ${APP_ID}
+---
+- openLink: "musikalokal://my_group"
+- scrollUntilVisible:
+    element:
+      id: ${E2E_GROUP_CARD_ID}
+    direction: DOWN
+- assertVisible:
+    id: ${E2E_GROUP_CARD_ID}
+- tapOn:
+    id: ${E2E_GROUP_DELETE_ID}
+- tapOn:
+    id: "app-modal-input"
+- inputText: ${E2E_GROUP_NAME}
+- hideKeyboard
+- waitForAnimationToEnd:
+    timeout: 2000
+- extendedWaitUntil:
+    visible:
+      id: "app-modal-confirm-button"
+    timeout: 60000
+- tapOn:
+    id: "app-modal-confirm-button"
+- tapOn:
+    id: "app-modal-confirm-button"
+    optional: true

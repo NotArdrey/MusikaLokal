@@ -2,6 +2,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 // @ts-ignore
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
+import { withNotificationRouteMeta } from "../_shared/notificationRoutes.ts"
 
 const corsHeaders = {
     'Access-Control-Allow-Origin': '*',
@@ -44,17 +45,47 @@ serve(async (req: Request) => {
 
         // 1. FETCH NOTIFICATIONS
         if (action === 'fetch') {
-            const { userId } = params
+            const { userId, limit, cursor } = params
+            const pageSize = Math.max(1, Math.min(Number(limit) || 30, 60))
 
-            const { data, error } = await supabaseClient
+            let query = supabaseClient
                 .from('notifications')
                 .select('*')
                 .eq('user_id', userId)
                 .order('created_at', { ascending: false })
+                .limit(pageSize + 1)
+
+            if (typeof cursor === 'string' && cursor.trim().length > 0) {
+                query = query.lt('created_at', cursor)
+            }
+
+            const { data, error } = await query
 
             if (error) throw error
 
-            return new Response(JSON.stringify(data), {
+            const rows = data || []
+            const items = rows.slice(0, pageSize)
+            const nextCursor =
+                rows.length > pageSize
+                    ? items[items.length - 1]?.created_at || null
+                    : null
+
+            const { count: unreadCount, error: unreadError } = await supabaseClient
+                .from('notifications')
+                .select('id', { count: 'exact', head: true })
+                .eq('user_id', userId)
+                .eq('read', false)
+
+            if (unreadError) throw unreadError
+
+            const responsePayload = {
+                items,
+                data: items,
+                nextCursor,
+                unreadCount: unreadCount || 0,
+            }
+
+            return new Response(JSON.stringify(responsePayload), {
                 headers: { ...corsHeaders, 'Content-Type': 'application/json' },
                 status: 200,
             })
@@ -84,7 +115,7 @@ serve(async (req: Request) => {
 
         // 3. CREATE NOTIFICATION (Helper for demo/testing)
         if (action === 'create') {
-            const { userId, title, message, type, image } = params
+            const { userId, title, message, type, image, meta } = params
 
             const { data, error } = await supabaseClient
                 .from('notifications')
@@ -94,6 +125,7 @@ serve(async (req: Request) => {
                     message,
                     type: type || 'info',
                     image,
+                    meta: withNotificationRouteMeta(meta),
                     read: false
                 }])
                 .select()

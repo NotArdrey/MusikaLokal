@@ -1,0 +1,17 @@
+{
+  "name": "musika-lokal-e2e",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "e2e:admin-crud": "playwright test -c e2e/playwright.config.ts --project=admin",
+    "e2e:mobile-crud": "playwright test -c e2e/playwright.config.ts --project=mobile",
+    "e2e:cross-app": "playwright test -c e2e/playwright.config.ts --project=cross-app",
+    "e2e:crud-full": "playwright test -c e2e/playwright.config.ts"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.59.1",
+    "@supabase/supabase-js": "^2.93.1",
+    "@types/node": "^24.10.1",
+    "typescript": "~5.9.2"
+  }
+}

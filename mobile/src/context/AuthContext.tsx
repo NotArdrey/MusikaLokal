@@ -2,16 +2,15 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Session } from "@supabase/supabase-js";
 import { router } from "expo-router";
 import React, {
-    createContext,
-    useCallback,
-    useContext,
-    useEffect,
-    useRef,
-    useState,
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
 } from "react";
 import { AppState, AppStateStatus } from "react-native";
 import { clearSupabaseAuthStorage, supabase } from "../../lib/supabase";
-import CustomAlert, { AlertType } from "../components/CustomAlert";
 
 type UnpaidBooking = {
   id: string;
@@ -27,18 +26,18 @@ type AuthContextType = {
   setGuestMode: (enabled: boolean) => Promise<void>;
   isAdmin: boolean;
   userRole: string | null;
+  roleResolved: boolean;
   userId: string | null;
-  // System lock for unpaid balances
+  // Backward-compatible fields; unpaid balances no longer lock app actions.
   isSystemLocked: boolean;
   unpaidBalance: number;
   unpaidBookings: UnpaidBooking[];
   checkSystemLock: () => Promise<void>;
-  showLockAlert: () => void;
-  // Subscription status
-  subscriptionStatus: string | null;
-  subscriptionRequired: boolean;
-  subscriptionChecked: boolean;
-  checkSubscription: () => Promise<void>;
+  showLockAlert: (onBeforeNavigate?: () => void) => void;
+  identityStatus: string | null;
+  identityRequired: boolean;
+  identityChecked: boolean;
+  checkIdentityStatus: () => Promise<void>;
 };
 
 const AuthContext = createContext<AuthContextType>({
@@ -48,16 +47,17 @@ const AuthContext = createContext<AuthContextType>({
   setGuestMode: async () => { },
   isAdmin: false,
   userRole: null,
+  roleResolved: false,
   userId: null,
   isSystemLocked: false,
   unpaidBalance: 0,
   unpaidBookings: [],
   checkSystemLock: async () => { },
   showLockAlert: () => { },
-  subscriptionStatus: null,
-  subscriptionRequired: false,
-  subscriptionChecked: false,
-  checkSubscription: async () => { },
+  identityStatus: null,
+  identityRequired: false,
+  identityChecked: false,
+  checkIdentityStatus: async () => { },
 });
 
 export const useAuth = () => useContext(AuthContext);
@@ -98,43 +98,29 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [isGuest, setIsGuest] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
   const [userRole, setUserRole] = useState<string | null>(null);
+  const [roleResolved, setRoleResolved] = useState(false);
 
-  // System lock state
+  // Payment reminder state. Outstanding balances are surfaced in wallet/activity,
+  // but they no longer lock app actions.
   const [isSystemLocked, setIsSystemLocked] = useState(false);
   const [unpaidBalance, setUnpaidBalance] = useState(0);
   const [unpaidBookings, setUnpaidBookings] = useState<UnpaidBooking[]>([]);
 
-  // Subscription state
-  const [subscriptionStatus, setSubscriptionStatus] = useState<string | null>(
-    null,
-  );
-  const [subscriptionRequired, setSubscriptionRequired] = useState(false);
-  const [subscriptionChecked, setSubscriptionChecked] = useState(false);
-  const [alertVisible, setAlertVisible] = useState(false);
-  const [alertConfig, setAlertConfig] = useState<{
-    type: AlertType;
-    title: string;
-    message: string;
-    buttons?: any[];
-  }>({
-    type: "info",
-    title: "",
-    message: "",
-  });
+  const [identityStatus, setIdentityStatus] = useState<string | null>(null);
+  const [identityRequired, setIdentityRequired] = useState(false);
+  const [identityChecked, setIdentityChecked] = useState(false);
+  const [identityExpiresAt, setIdentityExpiresAt] = useState<string | null>(null);
   const presenceChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
+  const profileRealtimeChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
+  const identityExpiryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const roleFetchInFlightRef = useRef<Promise<void> | null>(null);
+  const lastRoleFetchRef = useRef<{ userId: string | null; fetchedAt: number }>({
+    userId: null,
+    fetchedAt: 0,
+  });
 
-  const showAlert = useCallback(
-    (
-      type: AlertType,
-      title: string,
-      message: string,
-      buttons?: any[],
-    ) => {
-      setAlertConfig({ type, title, message, buttons });
-      setAlertVisible(true);
-    },
-    [],
-  );
+  const ROLE_FETCH_COOLDOWN_MS = 5000;
+  const AUTH_DEBUG_LOGS = false;
 
   const setGuestMode = useCallback(async (enabled: boolean) => {
     setIsGuest(enabled);
@@ -145,174 +131,130 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         await AsyncStorage.removeItem("auth_guest_mode");
       }
     } catch (e) {
-      console.log("Failed to persist guest mode:", e);
     }
   }, []);
 
-  // Check subscription status for owners
-  const checkSubscription = useCallback(async () => {
+  const checkIdentityStatus = useCallback(async () => {
     if (!session?.user?.id) {
-      setSubscriptionStatus(null);
-      setSubscriptionRequired(false);
-      setSubscriptionChecked(true);
+      setIdentityStatus(null);
+      setIdentityRequired(false);
+      setIdentityExpiresAt(null);
+      setIdentityChecked(true);
       return;
     }
 
-    // Reset subscription required to false at start - only set true when confirmed
-    setSubscriptionRequired(false);
+    setIdentityRequired(false);
 
     try {
-      const { data: profile, error } = await supabase
+      let { data: profile, error } = await supabase
         .from("profiles")
-        .select("role, subscription_status, subscription_expires_at")
+        .select("is_verified, verification_status, id_document_expiry")
         .eq("id", session.user.id)
-        .single();
+        .maybeSingle();
 
       if (error) {
-        console.log("Error checking subscription:", error);
-        // Only check metadata if profile doesn't exist (PGRST116 = row not found)
-        // For other errors (network, auth, etc), don't lock out the user
+
         if (error.code === "PGRST116") {
-          // Profile not found - check auth metadata for role (first login scenario)
-          const metadataRole = session.user?.user_metadata?.role;
-          if (metadataRole === "studio-owner" || metadataRole === "venue-owner") {
-            console.log("📋 Profile not found, metadata role requires subscription:", metadataRole);
-            setSubscriptionStatus(null);
-            setSubscriptionRequired(true);
-          }
+          const metadataVerified = session.user?.user_metadata?.is_verified;
+          const needsVerification = metadataVerified !== true;
+          setIdentityStatus(needsVerification ? "UNVERIFIED" : null);
+          setIdentityRequired(needsVerification);
+          setIdentityExpiresAt(null);
         } else {
-          // Other errors (network, etc) - don't lock out user, keep subscriptionRequired false
-          console.log("📋 Non-critical error, not locking user:", error.code);
+          setIdentityStatus(null);
+          setIdentityRequired(false);
+          setIdentityExpiresAt(null);
         }
-        setSubscriptionChecked(true);
+
+        setIdentityChecked(true);
         return;
       }
 
-      // Only studio-owner and venue-owner need subscription
-      const needsSubscription =
-        profile?.role === "studio-owner" || profile?.role === "venue-owner";
+      if ((!profile || profile.is_verified !== true) && session.user?.user_metadata?.is_verified === true) {
+        const { error: promoteError } = await supabase
+          .from("profiles")
+          .upsert({
+            id: session.user.id,
+            email: session.user.email,
+            full_name: session.user.user_metadata?.full_name || session.user.user_metadata?.name || "",
+            role: session.user.user_metadata?.role || "musician",
+            is_verified: true,
+            verification_status: "APPROVED",
+            didit_session_id: session.user.user_metadata?.didit_session_id || null,
+          });
 
-      if (needsSubscription) {
-        const status = profile?.subscription_status;
-        const expiresAt = profile?.subscription_expires_at;
-
-        // Check if subscription is active and not expired
-        let isActive = status === "active";
-        if (isActive && expiresAt) {
-          const expiryDate = new Date(expiresAt);
-          isActive = expiryDate > new Date();
+        if (!promoteError) {
+          const { data: promotedProfile } = await supabase
+            .from("profiles")
+            .select("is_verified, verification_status, id_document_expiry")
+            .eq("id", session.user.id)
+            .maybeSingle();
+          profile = promotedProfile;
         }
-
-        setSubscriptionStatus(isActive ? "active" : status);
-        setSubscriptionRequired(!isActive);
-
-        console.log("📋 Subscription check:", {
-          role: profile?.role,
-          status,
-          expiresAt,
-          isActive,
-          required: !isActive,
-        });
-        setSubscriptionChecked(true);
-      } else {
-        // Musicians don't need subscription
-        setSubscriptionStatus(null);
-        setSubscriptionRequired(false);
-        setSubscriptionChecked(true);
       }
-    } catch (e: any) {
-      console.log("Error in checkSubscription:", e);
-      // Only lock out for profile not found, not for general exceptions
-      if (e?.code === "PGRST116") {
-        const metadataRole = session.user?.user_metadata?.role;
-        if (metadataRole === "studio-owner" || metadataRole === "venue-owner") {
-          console.log("📋 Exception (profile not found), metadata role requires subscription:", metadataRole);
-          setSubscriptionStatus(null);
-          setSubscriptionRequired(true);
+
+      const normalizedStatus =
+        typeof profile?.verification_status === "string"
+          ? profile.verification_status.toUpperCase()
+          : null;
+
+      const expiryIso = profile?.id_document_expiry || null;
+      let isExpired = false;
+      if (expiryIso) {
+        const parsed = new Date(expiryIso);
+        if (!Number.isNaN(parsed.getTime())) {
+          isExpired = parsed <= new Date();
         }
-      } else {
-        // General error - don't lock out user
-        console.log("📋 General exception, not locking user");
-      }
-      setSubscriptionChecked(true);
-    }
-  }, [session?.user?.id]);
-
-  // Check for unpaid balances
-  const checkSystemLock = useCallback(async () => {
-    if (!session?.user?.id) {
-      setIsSystemLocked(false);
-      setUnpaidBalance(0);
-      setUnpaidBookings([]);
-      return;
-    }
-
-    try {
-      const { data: bookings, error } = await supabase
-        .from("studio_bookings")
-        .select("id, remaining_balance, booking_date, studio:studios(name)")
-        .eq("user_id", session.user.id)
-        .gt("remaining_balance", 0)
-        .in("status", ["pending", "confirmed"]);
-
-      if (error) {
-        console.log("Error checking system lock:", error);
-        return;
       }
 
-      if (bookings && bookings.length > 0) {
-        const totalBalance = bookings.reduce(
-          (sum, b) => sum + (b.remaining_balance || 0),
-          0,
-        );
-        setUnpaidBalance(totalBalance);
-        setUnpaidBookings(
-          bookings.map((b) => ({
-            id: b.id,
-            remaining_balance: b.remaining_balance,
-            studio_name: (b.studio as any)?.name || "Unknown Studio",
-            booking_date: b.booking_date,
-          })),
-        );
-        setIsSystemLocked(true);
-      } else {
-        setIsSystemLocked(false);
-        setUnpaidBalance(0);
-        setUnpaidBookings([]);
-      }
+      const verified = profile?.is_verified === true;
+      const needsVerification = !verified || isExpired;
+
+      setIdentityStatus(
+        isExpired ? "EXPIRED" : normalizedStatus || (verified ? "APPROVED" : "UNVERIFIED"),
+      );
+      setIdentityRequired(needsVerification);
+      setIdentityExpiresAt(expiryIso);
+      setIdentityChecked(true);
+
     } catch (e) {
-      console.log("Error in checkSystemLock:", e);
+      setIdentityStatus(null);
+      setIdentityRequired(false);
+      setIdentityExpiresAt(null);
+      setIdentityChecked(true);
     }
   }, [session?.user?.id]);
 
-  // Show lock alert and redirect to wallet
-  const showLockAlert = useCallback(() => {
-    showAlert(
-      "warning",
-      "Action Blocked",
-      `You have an outstanding balance of ₱${unpaidBalance.toLocaleString()}. Please settle your payment to continue using the app.`,
-      [
-        { text: "Cancel", style: "cancel" },
-        { text: "Pay Now", onPress: () => router.push("/wallet") },
-      ],
-    );
-  }, [showAlert, unpaidBalance]);
+  // Outstanding balances should not block product actions.
+  const checkSystemLock = useCallback(async () => {
+    setIsSystemLocked(false);
+    setUnpaidBalance(0);
+    setUnpaidBookings((current) => (current.length > 0 ? [] : current));
+  }, []);
+
+  // Compatibility no-op for callers that still reference the old payment gate.
+  const showLockAlert = useCallback((onBeforeNavigate?: () => void) => {
+    onBeforeNavigate?.();
+  }, []);
 
   useEffect(() => {
-    AsyncStorage.getItem("auth_guest_mode")
-      .then((value) => {
-        if (value === "1") {
-          setIsGuest(true);
-        }
+    AsyncStorage.removeItem("auth_guest_mode")
+      .then(() => {
+        setIsGuest(false);
       })
       .catch((e) => {
-        console.log("Failed to load guest mode:", e);
       });
 
     // Helper to filter/block unverified sessions (prevents auto-login during signup)
     const filterSession = (currentSession: Session | null) => {
-      // If user exists but has explicit is_verified: false, mimic logged out state
-      if (currentSession?.user?.user_metadata?.is_verified === false) {
+      const metadata = currentSession?.user?.user_metadata;
+      const metadataStatus =
+        typeof metadata?.verification_status === "string"
+          ? metadata.verification_status.toUpperCase()
+          : "";
+
+      // If user exists but identity is still pending, mimic logged out state.
+      if (metadata?.is_verified === false && metadataStatus !== "APPROVED") {
         return null;
       }
       return currentSession;
@@ -332,7 +274,6 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       );
 
       if (!isInvalidRefreshToken) {
-        console.log("Auth error detected, clearing local session:", message);
       }
 
       try {
@@ -344,12 +285,14 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       setSession(null);
       setIsAdmin(false);
       setUserRole(null);
+      setRoleResolved(true);
       setIsSystemLocked(false);
       setUnpaidBalance(0);
       setUnpaidBookings([]);
-      setSubscriptionStatus(null);
-      setSubscriptionRequired(false);
-      setSubscriptionChecked(true);
+      setIdentityStatus(null);
+      setIdentityRequired(false);
+      setIdentityChecked(true);
+      setIdentityExpiresAt(null);
       setLoading(false);
     };
 
@@ -386,7 +329,10 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         if (secureSession) {
           setGuestMode(false);
           checkAdmin(secureSession.user.id);
+          setRoleResolved(false);
           fetchUserRole(secureSession.user.id);
+        } else {
+          setRoleResolved(true);
         }
         setLoading(false);
       } catch (error) {
@@ -402,8 +348,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       data: { subscription },
     } = supabase.auth.onAuthStateChange(async (event, session) => {
       const isNoisyStartupSignedOut = event === "SIGNED_OUT" && !session;
-      if (__DEV__ && event !== "INITIAL_SESSION" && !isNoisyStartupSignedOut) {
-        console.log("Auth state change:", event);
+      if (__DEV__ && AUTH_DEBUG_LOGS && event !== "INITIAL_SESSION" && !isNoisyStartupSignedOut) {
       }
 
       // Handle sign out event
@@ -411,19 +356,22 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         setSession(null);
         setIsAdmin(false);
         setUserRole(null);
+        setRoleResolved(true);
         setIsSystemLocked(false);
         setUnpaidBalance(0);
         setUnpaidBookings([]);
-        setSubscriptionStatus(null);
-        setSubscriptionRequired(false);
-        setSubscriptionChecked(true);
+        setIdentityStatus(null);
+        setIdentityRequired(false);
+        setIdentityChecked(true);
+        setIdentityExpiresAt(null);
+        roleFetchInFlightRef.current = null;
+        lastRoleFetchRef.current = { userId: null, fetchedAt: 0 };
         setLoading(false);
         return;
       }
 
       // Handle token refresh errors (session will be null if refresh failed)
       if (event === "TOKEN_REFRESHED" && !session) {
-        console.log("Token refresh failed, clearing session");
         await handleAuthError(new Error("Token refresh failed"));
         return;
       }
@@ -433,17 +381,20 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       if (secureSession) {
         setGuestMode(false);
         checkAdmin(secureSession.user.id);
+        setRoleResolved(false);
         fetchUserRole(secureSession.user.id);
       } else if (event !== "INITIAL_SESSION") {
         // Only reset state if this isn't the initial session load
         setIsAdmin(false);
         setUserRole(null);
+        setRoleResolved(true);
         setIsSystemLocked(false);
         setUnpaidBalance(0);
         setUnpaidBookings([]);
-        setSubscriptionStatus(null);
-        setSubscriptionRequired(false);
-        setSubscriptionChecked(true);
+        setIdentityStatus(null);
+        setIdentityRequired(false);
+        setIdentityChecked(true);
+        setIdentityExpiresAt(null);
       }
       setLoading(false);
     });
@@ -502,55 +453,186 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     };
   }, [session?.user?.id]);
 
-  // Check system lock when session changes
+  // Reset legacy payment gate state when session changes.
   useEffect(() => {
     if (session?.user?.id) {
       checkSystemLock();
     }
   }, [session?.user?.id, checkSystemLock]);
 
-  // Check subscription when session changes (don't wait for userRole state, 
-  // checkSubscription fetches role from DB directly)
+  // Check identity verification and expiry when session changes
   useEffect(() => {
     if (session?.user?.id) {
-      setSubscriptionChecked(false); // Reset before checking
-      checkSubscription();
+      setIdentityChecked(false);
+      checkIdentityStatus();
     } else {
-      setSubscriptionChecked(true); // No session, no check needed
+      setIdentityChecked(true);
+      setIdentityStatus(null);
+      setIdentityRequired(false);
+      setIdentityExpiresAt(null);
     }
-  }, [session?.user?.id, checkSubscription]);
+  }, [session?.user?.id, checkIdentityStatus]);
+
+  // Re-check identity and lock state whenever the profile row changes.
+  useEffect(() => {
+    const activeUserId = session?.user?.id;
+
+    if (!activeUserId) {
+      if (profileRealtimeChannelRef.current) {
+        supabase.removeChannel(profileRealtimeChannelRef.current);
+        profileRealtimeChannelRef.current = null;
+      }
+      return;
+    }
+
+    const channel = supabase
+      .channel(`auth-profile:${activeUserId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "profiles",
+          filter: `id=eq.${activeUserId}`,
+        },
+        async () => {
+          await Promise.all([checkIdentityStatus(), checkSystemLock()]);
+        },
+      )
+      .subscribe();
+
+    profileRealtimeChannelRef.current = channel;
+
+    return () => {
+      supabase.removeChannel(channel);
+      if (profileRealtimeChannelRef.current === channel) {
+        profileRealtimeChannelRef.current = null;
+      }
+    };
+  }, [session?.user?.id, checkIdentityStatus, checkSystemLock]);
+
+  // Re-check on app foreground to catch expiry transitions after backgrounding.
+  useEffect(() => {
+    if (!session?.user?.id) return;
+
+    const appStateSub = AppState.addEventListener("change", (nextState: AppStateStatus) => {
+      if (nextState === "active") {
+        void Promise.all([checkIdentityStatus(), checkSystemLock()]);
+      }
+    });
+
+    return () => {
+      appStateSub.remove();
+    };
+  }, [session?.user?.id, checkIdentityStatus, checkSystemLock]);
+
+  // Trigger re-check exactly when identity document expiry timestamp is reached.
+  useEffect(() => {
+    if (identityExpiryTimerRef.current) {
+      clearTimeout(identityExpiryTimerRef.current);
+      identityExpiryTimerRef.current = null;
+    }
+
+    if (!identityExpiresAt || !session?.user?.id) {
+      return;
+    }
+
+    const expiryDate = new Date(identityExpiresAt);
+    if (Number.isNaN(expiryDate.getTime())) {
+      return;
+    }
+
+    const schedule = () => {
+      const remainingMs = expiryDate.getTime() - Date.now() + 1000;
+      if (remainingMs <= 0) {
+        void checkIdentityStatus();
+        return;
+      }
+
+      const nextDelay = Math.min(remainingMs, 2_147_483_647);
+      identityExpiryTimerRef.current = setTimeout(() => {
+        schedule();
+      }, nextDelay);
+    };
+
+    schedule();
+
+    return () => {
+      if (identityExpiryTimerRef.current) {
+        clearTimeout(identityExpiryTimerRef.current);
+        identityExpiryTimerRef.current = null;
+      }
+    };
+  }, [identityExpiresAt, session?.user?.id, checkIdentityStatus]);
 
   const checkAdmin = async (userId: string) => {
     // Optional: If you have an 'admin' role in your profiles table or metadata
     setIsAdmin(false);
   };
 
-  const fetchUserRole = async (userId: string) => {
-    try {
-      console.log("🔍 Fetching role for user ID:", userId);
-      const { data, error } = await supabase
-        .from("profiles")
-        .select("role")
-        .eq("id", userId)
-        .limit(1);
+  const fetchUserRole = async (nextUserId: string) => {
+    const now = Date.now();
+    const last = lastRoleFetchRef.current;
 
-      if (error) {
-        console.log("❌ Error fetching user role:", error.message, error);
-        setUserRole(null);
-        return;
-      }
-
-      if (data && data.length > 0) {
-        console.log("✅ User role fetched:", data[0].role);
-        setUserRole(data[0].role);
-      } else {
-        console.log("⚠️ No profile data found for user");
-        setUserRole(null);
-      }
-    } catch (error) {
-      console.log("❌ Exception fetching user role:", error);
-      setUserRole(null);
+    if (roleFetchInFlightRef.current && last.userId === nextUserId) {
+      await roleFetchInFlightRef.current;
+      return;
     }
+
+    if (
+      last.userId === nextUserId &&
+      userRole &&
+      now - last.fetchedAt < ROLE_FETCH_COOLDOWN_MS
+    ) {
+      setRoleResolved(true);
+      return;
+    }
+
+    const run = (async () => {
+      try {
+        if (__DEV__ && AUTH_DEBUG_LOGS) {
+        }
+
+        const { data, error } = await supabase
+          .from("profiles")
+          .select("role")
+          .eq("id", nextUserId)
+          .limit(1);
+
+        if (error) {
+          console.warn("Error fetching user role:", error.message);
+          setUserRole(null);
+          setRoleResolved(true);
+          return;
+        }
+
+        if (data && data.length > 0) {
+          if (__DEV__ && AUTH_DEBUG_LOGS) {
+          }
+
+          setUserRole(data[0].role);
+          lastRoleFetchRef.current = { userId: nextUserId, fetchedAt: Date.now() };
+          setRoleResolved(true);
+          return;
+        }
+
+        if (__DEV__ && AUTH_DEBUG_LOGS) {
+        }
+
+        setUserRole(null);
+        setRoleResolved(true);
+      } catch (error) {
+        console.warn("Exception fetching user role:", error);
+        setUserRole(null);
+        setRoleResolved(true);
+      } finally {
+        roleFetchInFlightRef.current = null;
+      }
+    })();
+
+    lastRoleFetchRef.current = { userId: nextUserId, fetchedAt: now };
+    roleFetchInFlightRef.current = run;
+    await run;
   };
 
   return (
@@ -562,27 +644,20 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         setGuestMode,
         isAdmin,
         userRole,
+        roleResolved,
         userId: session?.user?.id || null,
         isSystemLocked,
         unpaidBalance,
         unpaidBookings,
         checkSystemLock,
         showLockAlert,
-        subscriptionStatus,
-        subscriptionRequired,
-        subscriptionChecked,
-        checkSubscription,
+        identityStatus,
+        identityRequired,
+        identityChecked,
+        checkIdentityStatus,
       }}
     >
       {children}
-      <CustomAlert
-        visible={alertVisible}
-        type={alertConfig.type}
-        title={alertConfig.title}
-        message={alertConfig.message}
-        buttons={alertConfig.buttons}
-        onClose={() => setAlertVisible(false)}
-      />
     </AuthContext.Provider>
   );
 };

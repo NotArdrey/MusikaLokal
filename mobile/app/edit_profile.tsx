@@ -21,8 +21,11 @@ import Header from "../src/components/header";
 import LeafletAddressPicker from "../src/components/LeafletAddressPicker";
 import Modal from "../src/components/modal";
 import Navbar from "../src/components/navbar";
+import Skeleton from "../src/components/Skeleton";
 import { DEFAULT_AVATAR } from "../src/constants/Images";
 import { useTheme } from "../src/context/ThemeContext";
+import { ensureUploadPassesSafetyScreening } from "../src/services/uploadSafetyScreen";
+import { isE2EFixtureMode } from "../src/utils/e2eFixtures";
 
 
 
@@ -91,6 +94,24 @@ const GENRES = [
   "OPM",
 ];
 
+const sanitizeAvatarUrl = (value: unknown): string | null => {
+  if (typeof value !== "string") return null;
+
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+
+  const lower = trimmed.toLowerCase();
+  if (lower === "null" || lower === "undefined") return null;
+
+  // Legacy rows may have `/object/avatars/...` which is not publicly readable.
+  return trimmed.replace("/storage/v1/object/avatars/", "/storage/v1/object/public/avatars/");
+};
+
+const withCacheBust = (url: string) => {
+  const delimiter = url.includes("?") ? "&" : "?";
+  return `${url}${delimiter}v=${Date.now()}`;
+};
+
 export default function EditProfileScreen() {
   const { colors, isDark } = useTheme();
 
@@ -158,6 +179,16 @@ export default function EditProfileScreen() {
     [contactNumber, location, bio, selectedRoles, selectedGenres],
   );
 
+  const hasIncompleteRequiredFields = useMemo(
+    () =>
+      !contactNumber.trim() ||
+      !location.trim() ||
+      selectedRoles.length === 0 ||
+      selectedGenres.length === 0 ||
+      !bio.trim(),
+    [contactNumber, location, selectedRoles, selectedGenres, bio],
+  );
+
   const hasUnsavedChanges = useMemo(() => {
     const initial = initialSnapshotRef.current;
     if (!initial) return false;
@@ -185,7 +216,7 @@ export default function EditProfileScreen() {
         {
           text: "Leave",
           style: "destructive",
-          onPress: () => router.back(),
+          onPress: () => router.replace("/profile"),
         },
       ],
     );
@@ -202,8 +233,8 @@ export default function EditProfileScreen() {
         data: { user },
       } = await supabase.auth.getUser();
       if (!user) {
-        showAlert("error", "Error", "Please log in first");
-        router.back();
+        showAlert("warning", "Not Logged In", "Please log in to continue.");
+        router.replace("/");
         return;
       }
 
@@ -241,24 +272,60 @@ export default function EditProfileScreen() {
       }
 
       if (resolvedProfile) {
+        const profileSkills = Array.isArray(resolvedProfile.skills)
+          ? resolvedProfile.skills
+          : [];
+        const profileGenres = Array.isArray(resolvedProfile.genres)
+          ? resolvedProfile.genres
+          : [];
+
+        const needsNormalizedProfileLists = profileSkills.length === 0 || profileGenres.length === 0;
+        const [normalizedSkillsResult, normalizedGenresResult] = needsNormalizedProfileLists
+          ? await Promise.all([
+              supabase
+                .from("profile_skills")
+                .select("skill")
+                .eq("profile_id", user.id),
+              supabase
+                .from("profile_genres")
+                .select("genre")
+                .eq("profile_id", user.id),
+            ])
+          : [{ data: [], error: null }, { data: [], error: null }] as const;
+
+        if (normalizedSkillsResult.error) {
+          throw normalizedSkillsResult.error;
+        }
+        if (normalizedGenresResult.error) {
+          throw normalizedGenresResult.error;
+        }
+
+        const resolvedSkills = profileSkills.length > 0
+          ? profileSkills
+          : (normalizedSkillsResult.data || [])
+              .map((item: any) => item.skill)
+              .filter((value: unknown): value is string => typeof value === "string" && value.trim().length > 0);
+        const resolvedGenres = profileGenres.length > 0
+          ? profileGenres
+          : (normalizedGenresResult.data || [])
+              .map((item: any) => item.genre)
+              .filter((value: unknown): value is string => typeof value === "string" && value.trim().length > 0);
+
         setDisplayName(resolvedProfile.full_name || "");
         setContactNumber(resolvedProfile.contact_number || "");
         setLocation(resolvedProfile.address || resolvedProfile.location || "");
         setBio(resolvedProfile.bio || "");
-        setAvatarUrl(resolvedProfile.avatar_url || DEFAULT_AVATAR);
-        setSelectedRoles(Array.isArray(resolvedProfile.skills) ? resolvedProfile.skills : []);
-        setSelectedGenres(Array.isArray(resolvedProfile.genres) ? resolvedProfile.genres : []);
+        const normalizedAvatarUrl = sanitizeAvatarUrl(resolvedProfile.avatar_url);
+        setAvatarUrl(normalizedAvatarUrl || DEFAULT_AVATAR);
+        setSelectedRoles(resolvedSkills);
+        setSelectedGenres(resolvedGenres);
 
         initialSnapshotRef.current = {
           contactNumber: (resolvedProfile.contact_number || "").trim(),
           location: (resolvedProfile.address || resolvedProfile.location || "").trim(),
           bio: (resolvedProfile.bio || "").trim(),
-          roles: normalizeList(
-            Array.isArray(resolvedProfile.skills) ? resolvedProfile.skills : [],
-          ),
-          genres: normalizeList(
-            Array.isArray(resolvedProfile.genres) ? resolvedProfile.genres : [],
-          ),
+          roles: normalizeList(resolvedSkills),
+          genres: normalizeList(resolvedGenres),
         };
 
       }
@@ -295,7 +362,7 @@ export default function EditProfileScreen() {
     );
   }
 
-  async function handleChangePhoto() {
+  async function chooseAvatarFromLibrary() {
     if (!userId) return;
 
     try {
@@ -323,24 +390,105 @@ export default function EditProfileScreen() {
       const asset = result.assets[0];
 
       if (!asset.base64) {
-        showAlert("error", "Error", "Could not read image data");
+        showAlert("warning", "Couldn't Read Image", "Could not read image data. Please try a different photo.");
         return;
       }
 
       const ext = asset.uri.split(".").pop()?.toLowerCase() || "jpg";
+      const mimeType = `image/${ext === "jpg" ? "jpeg" : ext}`;
+      await ensureUploadPassesSafetyScreening(
+        {
+          name: (asset as any)?.fileName || `profile-photo.${ext}`,
+          mimeType,
+          size: Math.floor((asset.base64.length * 3) / 4),
+          uri: asset.uri,
+          contentDataUrl: `data:${mimeType};base64,${asset.base64}`,
+          kind: "photo",
+        },
+        "edit_profile_avatar",
+      );
       setPendingAvatar({ base64: asset.base64, ext });
       setAvatarUrl(asset.uri);
       showAlert("info", "Photo selected", "Tap Save Profile to apply your new photo.");
     } catch (err: any) {
       setUploadingPhoto(false);
       console.error("❌ Error:", err);
-      showAlert("error", "Error", err.message || "Failed to upload photo");
+      showAlert("warning", "Upload Failed", err.message || "Failed to upload photo");
     }
+  }
+
+  async function captureAvatarWithCamera() {
+    if (!userId) return;
+
+    try {
+      const { status } = await ImagePicker.requestCameraPermissionsAsync();
+      if (status !== "granted") {
+        showAlert(
+          "warning",
+          "Permission Required",
+          "Please allow camera access to take a profile photo.",
+        );
+        return;
+      }
+
+      const result = await ImagePicker.launchCameraAsync({
+        mediaTypes: ["images"],
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.5,
+        base64: true,
+      });
+
+      if (result.canceled || !result.assets?.[0]) return;
+
+      const asset = result.assets[0];
+
+      if (!asset.base64) {
+        showAlert("warning", "Couldn't Read Image", "Could not read image data. Please try again.");
+        return;
+      }
+
+      const ext = asset.uri.split(".").pop()?.toLowerCase() || "jpg";
+      const mimeType = `image/${ext === "jpg" ? "jpeg" : ext}`;
+      await ensureUploadPassesSafetyScreening(
+        {
+          name: (asset as any)?.fileName || `profile-photo.${ext}`,
+          mimeType,
+          size: Math.floor((asset.base64.length * 3) / 4),
+          uri: asset.uri,
+          contentDataUrl: `data:${mimeType};base64,${asset.base64}`,
+          kind: "photo",
+        },
+        "edit_profile_avatar",
+      );
+      setPendingAvatar({ base64: asset.base64, ext });
+      setAvatarUrl(asset.uri);
+      showAlert("info", "Photo selected", "Tap Save Profile to apply your new photo.");
+    } catch (err: any) {
+      setUploadingPhoto(false);
+      console.error("Camera capture error:", err);
+      showAlert("warning", "Capture Failed", err.message || "Failed to capture photo.");
+    }
+  }
+
+  function handleChangePhoto() {
+    if (!userId) return;
+
+    showAlert(
+      "info",
+      "Update Profile Photo",
+      "Take a new photo or choose one from your gallery.",
+      [
+        { text: "Take Photo", onPress: () => void captureAvatarWithCamera() },
+        { text: "Choose from Gallery", onPress: () => void chooseAvatarFromLibrary() },
+        { text: "Cancel", style: "cancel" },
+      ],
+    );
   }
 
   async function handleSave() {
     if (!userId) {
-      showAlert("error", "Error", "Not authenticated");
+      showAlert("warning", "Not Logged In", "Please log in to continue.");
       return;
     }
 
@@ -423,7 +571,7 @@ export default function EditProfileScreen() {
         const { data: urlData } = supabase.storage
           .from("avatars")
           .getPublicUrl(data.path);
-        uploadedAvatarUrl = urlData.publicUrl;
+        uploadedAvatarUrl = sanitizeAvatarUrl(urlData.publicUrl);
       }
 
       const profilePayload: any = {
@@ -437,13 +585,63 @@ export default function EditProfileScreen() {
         profilePayload.avatar_url = uploadedAvatarUrl;
       }
 
-      const { error: profileUpdateError } = await supabase
+      const { data: updatedProfile, error: profileUpdateError } = await supabase
         .from("profiles")
         .update(profilePayload)
-        .eq("id", userId);
+        .eq("id", userId)
+        .select("id")
+        .maybeSingle();
 
       if (profileUpdateError) {
         throw profileUpdateError;
+      }
+
+      if (!updatedProfile) {
+        const {
+          data: { user },
+          error: userError,
+        } = await supabase.auth.getUser();
+
+        if (userError || !user) {
+          throw userError || new Error("Unable to resolve your account. Please sign in again.");
+        }
+
+        if (!user.email) {
+          throw new Error("Your account email is missing. Please sign in again.");
+        }
+
+        const metadataRole =
+          typeof user.user_metadata?.role === "string"
+            ? user.user_metadata.role.trim().toLowerCase()
+            : "";
+        const normalizedRole = ["musician", "studio-owner", "venue-owner", "producer"].includes(
+          metadataRole,
+        )
+          ? metadataRole
+          : "musician";
+
+        const fallbackName =
+          displayName.trim() ||
+          (typeof user.user_metadata?.full_name === "string"
+            ? user.user_metadata.full_name.trim()
+            : "") ||
+          (typeof user.user_metadata?.name === "string"
+            ? user.user_metadata.name.trim()
+            : "") ||
+          user.email.split("@")[0] ||
+          "MusikaLokal User";
+
+        const { error: profileInsertError } = await supabase.from("profiles").insert({
+          id: userId,
+          email: user.email,
+          role: normalizedRole,
+          full_name: fallbackName,
+          ...profilePayload,
+        });
+
+        if (profileInsertError) {
+          throw profileInsertError;
+        }
       }
 
       const { error: skillsDeleteError } = await supabase
@@ -485,7 +683,7 @@ export default function EditProfileScreen() {
       }
 
       if (uploadedAvatarUrl) {
-        setAvatarUrl(uploadedAvatarUrl);
+        setAvatarUrl(withCacheBust(uploadedAvatarUrl));
       }
 
       setPendingAvatar(null);
@@ -499,10 +697,10 @@ export default function EditProfileScreen() {
       };
 
       showAlert("success", "Success", "Profile updated!", [
-        { text: "OK", onPress: () => router.back() },
+        { text: "OK", onPress: () => router.replace("/profile") },
       ]);
     } catch (error: any) {
-      showAlert("error", "Error", error?.message || "Failed to save");
+      showAlert("warning", "Couldn't Save", error?.message || "Failed to save changes.");
     } finally {
       setUploadingPhoto(false);
       setSaving(false);
@@ -511,22 +709,46 @@ export default function EditProfileScreen() {
 
   if (loading) {
     return (
-      <View style={[styles.centered, { backgroundColor: colors.background }]}>
-        <ActivityIndicator size="large" color={colors.primary} />
-        <Text style={[styles.loadingText, { color: colors.textSecondary }]}>
-          Loading...
-        </Text>
+      <View style={[styles.container, { backgroundColor: colors.background }]}>
+        <Header title="Edit Profile" onBackPress={handleAttemptLeave} />
+        <ScrollView style={styles.scroll} contentContainerStyle={styles.editProfileSkeletonContent}>
+          <View style={styles.avatarContainer}>
+            <Skeleton width={110} height={110} borderRadius={55} />
+            <Skeleton width={132} height={14} style={{ marginTop: 12 }} />
+          </View>
+
+          <Skeleton width={94} height={12} style={{ marginBottom: 8 }} />
+          <Skeleton width="100%" height={52} borderRadius={10} style={{ marginBottom: 16 }} />
+
+          <Skeleton width={120} height={12} style={{ marginBottom: 8 }} />
+          <Skeleton width="100%" height={90} borderRadius={10} style={{ marginBottom: 16 }} />
+
+          <Skeleton width={110} height={12} style={{ marginBottom: 8 }} />
+          <Skeleton width="100%" height={52} borderRadius={10} style={{ marginBottom: 16 }} />
+
+          <Skeleton width="100%" height={48} borderRadius={12} style={{ marginTop: 8 }} />
+          <Skeleton width="100%" height={48} borderRadius={12} style={{ marginTop: 10 }} />
+        </ScrollView>
+
+        <Navbar />
       </View>
     );
   }
 
   return (
-    <View style={[styles.container, { backgroundColor: colors.background }]}>
+    <View
+      testID="mobile-edit-profile-page"
+      accessibilityLabel="mobile-edit-profile-page"
+      style={[styles.container, { backgroundColor: colors.background }]}
+    >
       <Header title="Edit Profile" onBackPress={handleAttemptLeave} />
 
       <ScrollView
         style={styles.scroll}
-        contentContainerStyle={styles.scrollContent}
+        contentContainerStyle={[
+          styles.scrollContent,
+          isE2EFixtureMode() && styles.e2eScrollContent,
+        ]}
         showsVerticalScrollIndicator={false}
       >
         {/* Avatar */}
@@ -539,10 +761,12 @@ export default function EditProfileScreen() {
               style={[styles.avatar, { borderColor: colors.primary }]}
             />
             <TouchableOpacity
-              style={[styles.cameraBtn, { backgroundColor: colors.primary }]}
+              testID="mobile-profile-photo-button"
+              accessibilityLabel="mobile-profile-photo-button"
+              style={[styles.cameraBtn, { backgroundColor: colors.primary, opacity: uploadingPhoto ? 0.6 : 1 }]}
               onPress={handleChangePhoto}
               disabled={uploadingPhoto}
-              activeOpacity={1}
+              activeOpacity={uploadingPhoto ? 1 : 0.78}
             >
               {uploadingPhoto ? (
                 <ActivityIndicator size="small" color="#fff" />
@@ -585,6 +809,8 @@ export default function EditProfileScreen() {
             CONTACT NUMBER <Text style={{ color: "#ef4444" }}>*</Text>
           </Text>
           <TextInput
+            testID="mobile-profile-contact-input"
+            accessibilityLabel="mobile-profile-contact-input"
             style={[
               styles.input,
               {
@@ -654,20 +880,18 @@ export default function EditProfileScreen() {
             </View>
           )}
           {/* Search input */}
-          <TextInput
-            style={[
-              styles.searchInput,
-              {
-                backgroundColor: colors.inputBackground,
-                borderColor: colors.border,
-                color: colors.text,
-              },
-            ]}
-            value={roleSearch}
-            onChangeText={setRoleSearch}
-            placeholder="Search roles & instruments..."
-            placeholderTextColor={colors.textSecondary}
-          />
+          <View style={[styles.searchInputWrap, { backgroundColor: isDark ? "#374151" : "#F3F4F6" }]}>
+            <Ionicons name="search" size={20} color={colors.textSecondary} />
+            <TextInput
+              testID="mobile-profile-role-search-input"
+              accessibilityLabel="mobile-profile-role-search-input"
+              style={[styles.searchInput, { color: colors.text }]}
+              value={roleSearch}
+              onChangeText={setRoleSearch}
+              placeholder="Search roles & instruments..."
+              placeholderTextColor={colors.textSecondary}
+            />
+          </View>
           {/* Filtered chips */}
           <View style={styles.chipsCompact}>
             {ROLES.filter(
@@ -677,7 +901,10 @@ export default function EditProfileScreen() {
             )
               .slice(0, roleSearch ? 20 : 8)
               .map((role) => (
-                <TouchableOpacity activeOpacity={1}
+                <TouchableOpacity
+                  testID={`mobile-profile-role-${role.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`}
+                  accessibilityLabel={`mobile-profile-role-${role.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`}
+                  activeOpacity={1}
                   key={role}
                   onPress={() => toggleRole(role)}
                   style={[
@@ -747,20 +974,18 @@ export default function EditProfileScreen() {
             </View>
           )}
           {/* Search input */}
-          <TextInput
-            style={[
-              styles.searchInput,
-              {
-                backgroundColor: colors.inputBackground,
-                borderColor: colors.border,
-                color: colors.text,
-              },
-            ]}
-            value={genreSearch}
-            onChangeText={setGenreSearch}
-            placeholder="Search genres..."
-            placeholderTextColor={colors.textSecondary}
-          />
+          <View style={[styles.searchInputWrap, { backgroundColor: isDark ? "#374151" : "#F3F4F6" }]}>
+            <Ionicons name="search" size={20} color={colors.textSecondary} />
+            <TextInput
+              testID="mobile-profile-genre-search-input"
+              accessibilityLabel="mobile-profile-genre-search-input"
+              style={[styles.searchInput, { color: colors.text }]}
+              value={genreSearch}
+              onChangeText={setGenreSearch}
+              placeholder="Search genres..."
+              placeholderTextColor={colors.textSecondary}
+            />
+          </View>
           {/* Filtered chips */}
           <View style={styles.chipsCompact}>
             {GENRES.filter(
@@ -770,7 +995,10 @@ export default function EditProfileScreen() {
             )
               .slice(0, genreSearch ? 20 : 8)
               .map((genre) => (
-                <TouchableOpacity activeOpacity={1}
+                <TouchableOpacity
+                  testID={`mobile-profile-genre-${genre.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`}
+                  accessibilityLabel={`mobile-profile-genre-${genre.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`}
+                  activeOpacity={1}
                   key={genre}
                   onPress={() => toggleGenre(genre)}
                   style={[
@@ -805,6 +1033,8 @@ export default function EditProfileScreen() {
             BIO <Text style={{ color: "#ef4444" }}>*</Text>
           </Text>
           <TextInput
+            testID="mobile-profile-bio-input"
+            accessibilityLabel="mobile-profile-bio-input"
             style={[
               styles.textArea,
               {
@@ -819,6 +1049,7 @@ export default function EditProfileScreen() {
             placeholderTextColor={colors.textSecondary}
             multiline
             numberOfLines={4}
+            textAlign="left"
             textAlignVertical="top"
           />
         </View>
@@ -826,14 +1057,35 @@ export default function EditProfileScreen() {
 
 
         {/* Buttons */}
+        {hasIncompleteRequiredFields && (
+          <Text
+            style={{
+              color: "#F59E0B",
+              fontFamily: "Poppins_500Medium",
+              fontSize: 12,
+              marginBottom: 10,
+              textAlign: "center",
+            }}
+          >
+            Complete required fields marked * before saving.
+          </Text>
+        )}
         <TouchableOpacity
+          testID="mobile-profile-save-button"
+          accessibilityLabel="mobile-profile-save-button"
           style={[
             styles.saveBtn,
-            { backgroundColor: saving ? colors.textSecondary : colors.primary },
+            {
+              backgroundColor:
+                saving || hasIncompleteRequiredFields
+                  ? colors.textSecondary
+                  : colors.primary,
+              opacity: saving || hasIncompleteRequiredFields ? 0.6 : 1,
+            },
           ]}
           onPress={handleSave}
-          disabled={saving}
-          activeOpacity={1}
+          disabled={saving || hasIncompleteRequiredFields}
+          activeOpacity={saving || hasIncompleteRequiredFields ? 1 : 0.78}
         >
           {saving ? (
             <ActivityIndicator size="small" color="#fff" />
@@ -843,10 +1095,12 @@ export default function EditProfileScreen() {
         </TouchableOpacity>
 
         <TouchableOpacity
+          testID="mobile-profile-cancel-button"
+          accessibilityLabel="mobile-profile-cancel-button"
           style={[styles.cancelBtn, { borderColor: colors.border }]}
           onPress={handleAttemptLeave}
           disabled={saving}
-          activeOpacity={1}
+          activeOpacity={saving ? 1 : 0.78}
         >
           <Text style={[styles.cancelBtnText, { color: colors.text }]}>
             Cancel
@@ -856,7 +1110,7 @@ export default function EditProfileScreen() {
         <View style={{ height: 40 }} />
       </ScrollView>
 
-      <Navbar />
+      {!isE2EFixtureMode() && <Navbar />}
 
       <Modal
         visible={saving}
@@ -887,6 +1141,8 @@ const styles = StyleSheet.create({
   },
   scroll: { flex: 1 },
   scrollContent: { padding: 20, paddingBottom: 150 },
+  e2eScrollContent: { paddingBottom: 280 },
+  editProfileSkeletonContent: { padding: 20, paddingBottom: 150 },
 
   avatarContainer: { alignItems: "center", marginBottom: 24 },
   avatarWrapper: { position: "relative" },
@@ -921,14 +1177,19 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontFamily: "Poppins_600SemiBold",
     letterSpacing: 0.5,
-    marginBottom: 6,
+    marginBottom: 10,
   },
   input: {
     borderWidth: 1,
     borderRadius: 10,
-    padding: 14,
+    height: 52,
+    paddingHorizontal: 14,
+    paddingVertical: 0,
     fontSize: 15,
+    lineHeight: 20,
+    includeFontPadding: false,
     fontFamily: "Poppins_400Regular",
+    textAlignVertical: "center",
   },
   disabledInput: { borderWidth: 1, borderRadius: 10, padding: 14 },
   disabledText: { fontSize: 15, fontFamily: "Poppins_500Medium" },
@@ -936,10 +1197,15 @@ const styles = StyleSheet.create({
   textArea: {
     borderWidth: 1,
     borderRadius: 10,
-    padding: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
     fontSize: 15,
+    lineHeight: 20,
+    includeFontPadding: false,
     fontFamily: "Poppins_400Regular",
     minHeight: 100,
+    textAlign: "left",
+    textAlignVertical: "top",
   },
   chips: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   chip: {
@@ -970,13 +1236,24 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   chipTextCompact: { fontSize: 12, fontFamily: "Poppins_500Medium" },
+  searchInputWrap: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    borderRadius: 16,
+    height: 48,
+    paddingHorizontal: 16,
+  },
   searchInput: {
-    borderWidth: 1,
-    borderRadius: 8,
-    padding: 10,
-    fontSize: 14,
-    fontFamily: "Poppins_400Regular",
+    flex: 1,
+    height: 24,
+    padding: 0,
+    fontSize: 15,
+    lineHeight: 20,
+    includeFontPadding: false,
+    fontFamily: "Poppins_500Medium",
     textAlign: "left",
+    textAlignVertical: "center",
   },
   moreText: {
     fontSize: 12,
@@ -989,6 +1266,7 @@ const styles = StyleSheet.create({
     paddingVertical: 15,
     borderRadius: 10,
     alignItems: "center",
+    justifyContent: "center",
     marginTop: 10,
   },
   saveBtnText: {
@@ -1000,6 +1278,7 @@ const styles = StyleSheet.create({
     paddingVertical: 15,
     borderRadius: 10,
     alignItems: "center",
+    justifyContent: "center",
     borderWidth: 1,
     marginTop: 10,
   },

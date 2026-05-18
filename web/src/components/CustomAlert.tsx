@@ -1,7 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
-import { BlurView } from "expo-blur";
-import React from "react";
-import { Modal, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import React, { useEffect, useMemo } from "react";
+import { Modal, Platform, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { emitToast } from "../events/toastBus";
 import { useTheme } from "../context/ThemeContext";
 
 export type AlertType = "error" | "success" | "warning" | "info";
@@ -18,8 +18,11 @@ interface CustomAlertProps {
   title: string;
   message: string;
   buttons?: AlertButton[];
+  forceModal?: boolean;
   onClose: () => void;
 }
+
+const IS_WEB = Platform.OS === "web";
 
 const alertConfig = {
   error: {
@@ -54,10 +57,48 @@ export default function CustomAlert({
   title,
   message,
   buttons = [{ text: "OK", style: "default" }],
+  forceModal = false,
   onClose,
 }: CustomAlertProps) {
   const { colors, isDark } = useTheme();
   const config = alertConfig[type];
+  const hasStructuredMessage = useMemo(() => {
+    return message.includes("\n") || message.includes("•") || message.includes("- ");
+  }, [message]);
+
+  const shouldUseTopToast = useMemo(() => {
+    const firstButton = buttons[0];
+    const hasSingleButton = buttons.length === 1;
+    const isDefaultOkButton =
+      !!firstButton &&
+      firstButton.text.trim().toLowerCase() === "ok" &&
+      !firstButton.onPress &&
+      (!firstButton.style || firstButton.style === "default");
+
+    return (
+      !forceModal &&
+      (type === "success" || type === "info") &&
+      !hasStructuredMessage &&
+      hasSingleButton &&
+      isDefaultOkButton
+    );
+  }, [buttons, forceModal, hasStructuredMessage, type]);
+
+  useEffect(() => {
+    if (!visible || !shouldUseTopToast) return;
+
+    emitToast({
+      type,
+      title,
+      message,
+    });
+
+    onClose();
+  }, [message, onClose, shouldUseTopToast, title, type, visible]);
+
+  if (shouldUseTopToast) {
+    return null;
+  }
 
   const handleButtonPress = (button: AlertButton) => {
     // Call the onPress callback first, then close the alert
@@ -88,16 +129,23 @@ export default function CustomAlert({
     }
   };
 
+  const usesStackedButtons = buttons.length > 2;
+  const normalizeTestId = (value: string) => (
+    value.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'action'
+  );
+
   return (
     <Modal
       transparent
       statusBarTranslucent
       navigationBarTranslucent
+      presentationStyle="overFullScreen"
+      hardwareAccelerated
       visible={visible}
       animationType="fade"
       onRequestClose={onClose}
     >
-      <BlurView intensity={60} tint="dark" style={styles.overlay}>
+      <View style={styles.overlay}>
         <View
           style={[
             styles.container,
@@ -116,35 +164,46 @@ export default function CustomAlert({
               },
             ]}
           >
-            <Ionicons name={config.icon} size={40} color={config.color} />
+            <Ionicons name={config.icon} size={IS_WEB ? 34 : 38} color={config.color} />
           </View>
 
           {/* Title */}
           <Text style={[styles.title, { color: colors.text }]}>{title}</Text>
 
           {/* Message */}
-          <Text style={[styles.message, { color: colors.textSecondary }]}>
+          <Text
+            style={[
+              styles.message,
+              { color: colors.textSecondary },
+              hasStructuredMessage ? styles.messageStructured : null,
+            ]}
+          >
             {message}
           </Text>
 
           {/* Buttons */}
-          <View style={styles.buttonContainer}>
+          <View style={[styles.buttonContainer, usesStackedButtons && styles.buttonContainerStacked]}>
             {buttons.map((button, index) => {
               const btnStyle = getButtonStyle(button.style);
               return (
                 <TouchableOpacity activeOpacity={1}
                   key={index}
+                  testID={`custom-alert-button-${normalizeTestId(button.text)}`}
+                  accessibilityLabel={`custom-alert-button-${normalizeTestId(button.text)}`}
                   onPress={() => handleButtonPress(button)}
                   style={[
                     styles.button,
                     { backgroundColor: btnStyle.backgroundColor },
-                    buttons.length > 1 && { flex: 1 },
-                    index > 0 && { marginLeft: 12 },
+                    buttons.length === 1 || usesStackedButtons ? styles.fullWidthButton : null,
+                    buttons.length === 2 && { flex: 1 },
+                    usesStackedButtons && index > 0 && { marginTop: 10 },
                   ]}
-                  activeOpacity={1}
                 >
                   <Text
                     style={[styles.buttonText, { color: btnStyle.textColor }]}
+                    numberOfLines={1}
+                    adjustsFontSizeToFit
+                    minimumFontScale={0.85}
                   >
                     {button.text}
                   </Text>
@@ -153,7 +212,7 @@ export default function CustomAlert({
             })}
           </View>
         </View>
-      </BlurView>
+      </View>
     </Modal>
   );
 }
@@ -163,58 +222,73 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    padding: 24,
+    paddingHorizontal: IS_WEB ? 16 : 24,
+    paddingVertical: 20,
+    backgroundColor: 'rgba(15,23,42,0.58)',
   },
   container: {
-    width: '100%',
-    maxWidth: 340,
-    borderRadius: 24,
-    padding: 28,
+    width: IS_WEB ? '92%' : '100%',
+    maxWidth: IS_WEB ? 380 : 340,
+    borderRadius: IS_WEB ? 18 : 24,
+    padding: IS_WEB ? 22 : 26,
     alignItems: 'center',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.25,
-    shadowRadius: 20,
-    elevation: 15,
+    shadowOpacity: 0.22,
+    shadowRadius: 16,
+    elevation: 12,
   },
   iconCircle: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
+    width: IS_WEB ? 68 : 74,
+    height: IS_WEB ? 68 : 74,
+    borderRadius: 999,
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 20,
-    borderWidth: 3,
+    marginBottom: 16,
+    borderWidth: 2,
   },
   title: {
-    fontSize: 20,
+    fontSize: IS_WEB ? 18 : 20,
     fontWeight: '700',
     textAlign: 'center',
-    marginBottom: 12,
+    marginBottom: 10,
     fontFamily: 'Poppins_700Bold',
   },
   message: {
     fontSize: 14,
     textAlign: 'center',
-    lineHeight: 22,
-    marginBottom: 24,
+    lineHeight: IS_WEB ? 21 : 22,
+    marginBottom: IS_WEB ? 20 : 24,
     fontFamily: 'Poppins_400Regular',
+  },
+  messageStructured: {
+    width: '100%',
+    textAlign: 'left',
   },
   buttonContainer: {
     flexDirection: 'row',
     width: '100%',
     justifyContent: 'center',
+    gap: 10,
+  },
+  buttonContainerStacked: {
+    flexDirection: 'column',
+    gap: 0,
   },
   button: {
-    paddingVertical: 14,
-    paddingHorizontal: 24,
-    borderRadius: 14,
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
-    minWidth: 100,
+    minWidth: IS_WEB ? 110 : 100,
+    minHeight: 44,
+  },
+  fullWidthButton: {
+    width: '100%',
   },
   buttonText: {
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: '600',
     fontFamily: 'Poppins_600SemiBold',
     textAlign: 'center',

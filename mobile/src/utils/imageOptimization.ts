@@ -12,18 +12,38 @@ export interface SupabaseTransformOptions {
 const OBJECT_PUBLIC_SEGMENT = "/storage/v1/object/public/";
 const RENDER_PUBLIC_SEGMENT = "/storage/v1/render/image/public/";
 
-const normalizePossibleRelativeSupabaseUrl = (rawUrl: string) => {
-  if (!rawUrl.startsWith("/storage/v1/")) return rawUrl;
-
+const getSupabaseBaseUrl = () => {
   const envBase =
     typeof process !== "undefined"
       ? process.env.EXPO_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL
       : undefined;
 
-  if (!envBase) return rawUrl;
+  if (!envBase) return null;
+  return envBase.endsWith("/") ? envBase.slice(0, -1) : envBase;
+};
 
-  const base = envBase.endsWith("/") ? envBase.slice(0, -1) : envBase;
-  return `${base}${rawUrl}`;
+const normalizePossibleRelativeSupabaseUrl = (rawUrl: string) => {
+  const trimmed = rawUrl.trim();
+  const hasKnownScheme = /^(https?:|data:|file:|content:|blob:|asset:|ph:)/i.test(trimmed);
+
+  if (hasKnownScheme) return trimmed;
+
+  const base = getSupabaseBaseUrl();
+  if (!base) return trimmed;
+
+  if (trimmed.startsWith("/storage/v1/")) {
+    return `${base}${trimmed}`;
+  }
+
+  if (trimmed.startsWith("storage/v1/")) {
+    return `${base}/${trimmed}`;
+  }
+
+  if (trimmed.includes("/") && !trimmed.startsWith("/")) {
+    return `${base}${OBJECT_PUBLIC_SEGMENT}${trimmed.replace(/^\/+/, "")}`;
+  }
+
+  return trimmed;
 };
 
 const normalizeDimension = (value?: number) => {

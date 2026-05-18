@@ -1,5 +1,5 @@
-import { useCallback } from "react";
-import { supabase } from "../../lib/supabase";
+import { useCallback, useRef } from "react";
+import { submitListingRequest } from "../utils/listingRequests";
 
 interface AlertConfig {
   type: "success" | "error" | "warning" | "info";
@@ -36,7 +36,13 @@ export const useBookingRequestAction = ({
   setRequestMessage,
   closeSheet,
 }: UseBookingRequestActionParams) => {
+  const requestInFlightRef = useRef(false);
+
   return useCallback(() => {
+    if (requestInFlightRef.current) {
+      return;
+    }
+
     if (currentUserRole === "venue-owner" && userVenues.length === 0) {
       handleConfirm(
         () => {
@@ -69,24 +75,51 @@ export const useBookingRequestAction = ({
       return;
     }
 
+    if (!currentUserId) {
+      setAlertConfig({
+        type: "error",
+        title: "Sign In Required",
+        message: "Please sign in before sending a booking request.",
+      });
+      setAlertVisible(true);
+      return;
+    }
+
     handleConfirm(
       async () => {
+        if (requestInFlightRef.current) {
+          return;
+        }
+
+        requestInFlightRef.current = true;
         setIsSendingRequest(true);
         try {
           const receiverId = group.type === "Artist" ? group.id : group.owner_id;
           const groupId = group.type === "Group" ? group.id : null;
+          const selectedVenue = userVenues.find((venue: any) => venue?.id === selectedVenueId);
 
-          const { error } = await supabase.from("booking_requests").insert({
-            sender_id: currentUserId,
-            receiver_id: receiverId,
-            group_id: groupId,
-            studio_id: selectedVenueId,
+          if (!receiverId) {
+            throw new Error("We couldn't identify who should receive this request.");
+          }
+
+          await submitListingRequest({
+            currentUserId,
+            receiverUserId: receiverId,
             message: requestMessage,
-            status: "pending",
-            event_details: {},
+            senderEntityType: "venue",
+            senderEntityName: selectedVenue?.name || "Venue",
+            senderEntityId: selectedVenueId,
+            receiverEntityType: group.type === "Artist" ? "musician" : "group",
+            receiverEntityName: group?.name || (group.type === "Artist" ? "Musician" : "Group"),
+            receiverEntityId: group?.id || receiverId,
+            groupId,
+            studioId: selectedVenueId,
+            notificationTitle: "New booking request",
+            notificationMessage: `${selectedVenue?.name || "A venue"} sent you a booking request on MusikaLokal.`,
+            routePath: "/bookings",
+            routeParams: { tab: "Pending" },
+            extraMeta: { source: "listing_details_booking_request" },
           });
-
-          if (error) throw error;
 
           setAlertConfig({
             type: "success",
@@ -101,13 +134,18 @@ export const useBookingRequestAction = ({
           }, 2000);
         } catch (e) {
           console.error("Error sending request:", e);
+          const errorMessage =
+            e instanceof Error && e.message.trim().length > 0
+              ? e.message
+              : "Failed to send request. Please try again.";
           setAlertConfig({
             type: "error",
             title: "Error",
-            message: "Failed to send request. Please try again.",
+            message: errorMessage,
           });
           setAlertVisible(true);
         } finally {
+          requestInFlightRef.current = false;
           setIsSendingRequest(false);
         }
       },

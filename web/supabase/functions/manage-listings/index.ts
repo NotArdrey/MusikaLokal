@@ -2,10 +2,144 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 // @ts-ignore
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import {
+    buildNotificationRouteMeta,
+    withNotificationRouteMeta,
+} from "../_shared/notificationRoutes.ts";
 
 const corsHeaders = {
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-supabase-client-platform',
+}
+
+function uniqueStrings(values: unknown[]) {
+    return Array.from(
+        new Set(
+            values.filter((value): value is string => typeof value === 'string' && value.trim().length > 0),
+        ),
+    )
+}
+
+async function loadProfileLegacyById(client: any, profileIds: string[]) {
+    const ids = uniqueStrings(profileIds)
+    const legacyById = new Map<string, any>()
+    if (ids.length === 0) return legacyById
+
+    const { data, error } = await client
+        .from('profiles_legacy_projection')
+        .select('id, skills, genres, portfolio_urls')
+        .in('id', ids)
+
+    if (error) throw error
+
+    ;(data || []).forEach((row: any) => legacyById.set(row.id, row))
+    return legacyById
+}
+
+async function loadGroupLegacyById(client: any, groupIds: string[]) {
+    const ids = uniqueStrings(groupIds)
+    const legacyById = new Map<string, any>()
+    if (ids.length === 0) return legacyById
+
+    const { data, error } = await client
+        .from('groups_legacy_projection')
+        .select('id, images, members')
+        .in('id', ids)
+
+    if (error) throw error
+
+    ;(data || []).forEach((row: any) => legacyById.set(row.id, row))
+    return legacyById
+}
+
+async function loadStudioLegacyById(client: any, studioIds: string[]) {
+    const ids = uniqueStrings(studioIds)
+    const legacyById = new Map<string, any>()
+    if (ids.length === 0) return legacyById
+
+    const { data, error } = await client
+        .from('studios_with_stats')
+        .select('id, images, location, hourly_rate, rate')
+        .in('id', ids)
+
+    if (error) throw error
+
+    ;(data || []).forEach((row: any) => legacyById.set(row.id, row))
+    return legacyById
+}
+
+function mergeProfileLegacy(profile: any, legacyById: Map<string, any>) {
+    if (!profile?.id) return profile || null
+    const legacy = legacyById.get(profile.id)
+
+    return {
+        ...profile,
+        skills: Array.isArray(legacy?.skills) ? legacy.skills : [],
+        genres: Array.isArray(legacy?.genres) ? legacy.genres : [],
+        portfolio_urls: Array.isArray(legacy?.portfolio_urls) ? legacy.portfolio_urls : [],
+    }
+}
+
+function mergeGroupLegacy(group: any, legacyById: Map<string, any>) {
+    if (!group?.id) return group || null
+    const legacy = legacyById.get(group.id)
+
+    return {
+        ...group,
+        images: Array.isArray(legacy?.images) ? legacy.images : [],
+        members: Array.isArray(legacy?.members) ? legacy.members : [],
+    }
+}
+
+function mergeStudioLegacy(studio: any, studioId: string | null, legacyById: Map<string, any>) {
+    const id = studio?.id || studioId
+    if (!studio && !id) return studio || null
+    const legacy = id ? legacyById.get(id) : null
+
+    return {
+        ...studio,
+        id,
+        images: Array.isArray(legacy?.images) ? legacy.images : [],
+        location: legacy?.location || studio?.location || studio?.address || null,
+        rate_per_hour: studio?.rate_per_hour ?? legacy?.hourly_rate ?? studio?.hourly_rate ?? legacy?.rate ?? studio?.rate ?? null,
+    }
+}
+
+async function hydrateGigApplicationLegacy(client: any, rows: any[]) {
+    const [profileLegacyById, groupLegacyById] = await Promise.all([
+        loadProfileLegacyById(client, rows.map((row: any) => row?.applicant?.id || row?.applicant_id)),
+        loadGroupLegacyById(client, rows.map((row: any) => row?.group?.id || row?.group_id)),
+    ])
+
+    return rows.map((row: any) => ({
+        ...row,
+        applicant: mergeProfileLegacy(row?.applicant, profileLegacyById),
+        group: mergeGroupLegacy(row?.group, groupLegacyById),
+    }))
+}
+
+async function hydrateGroupMemberProfileLegacy(client: any, rows: any[]) {
+    const legacyById = await loadProfileLegacyById(
+        client,
+        rows.map((row: any) => row?.user?.id || row?.user_id),
+    )
+
+    return rows.map((row: any) => ({
+        ...row,
+        user: mergeProfileLegacy(row?.user, legacyById),
+    }))
+}
+
+async function hydrateStudioBookingLegacy(client: any, rows: any[]) {
+    const legacyById = await loadStudioLegacyById(
+        client,
+        rows.map((row: any) => row?.studio?.id || row?.studio_id),
+    )
+
+    return rows.map((row: any) => ({
+        ...row,
+        studio: mergeStudioLegacy(row?.studio, row?.studio_id || null, legacyById),
+    }))
 }
 
 const syncStudio3NF = async (client: any, studioId: string) => {
@@ -17,6 +151,17 @@ const syncGig3NF = async (client: any, gigId: string) => {
     const { error } = await client.rpc('sync_gig_3nf', { p_gig_id: gigId })
     if (error) throw error
 }
+
+const normalizeScheduleSessionType = (value: any): string => {
+    const normalized = String(value || '').trim().toLowerCase()
+    return ['rehearsal', 'recording', 'both'].includes(normalized) ? normalized : 'both'
+}
+
+const buildWeeklyScheduleReason = (source: any): string =>
+    `Weekly schedule [session_type:${normalizeScheduleSessionType(source?.session_type ?? source?.sessionType)}]`
+
+const buildDateOverrideReason = (source: any): string =>
+    `Custom schedule [session_type:${normalizeScheduleSessionType(source?.session_type ?? source?.sessionType)}]`
 
 const replaceGigRequirements = async (client: any, gigId: string, requirements: any) => {
     const { error: deleteError } = await client.from('gig_requirements').delete().eq('gig_id', gigId)
@@ -118,14 +263,21 @@ const replaceStudioInstruments = async (client: any, studioId: string, instrumen
     const payload = (instruments || [])
         .map((item) => {
             if (item && typeof item === 'object') {
+                const quantity = Number(item.quantity)
                 return {
                     instrument_name: String(item.name ?? item.instrument ?? '').trim(),
                     image_url: item.image ?? item.image_url ?? null,
+                    quantity: Number.isFinite(quantity) && quantity > 0 ? Math.trunc(quantity) : null,
+                    description: typeof item.description === 'string' && item.description.trim().length > 0
+                        ? item.description.trim()
+                        : null,
                 }
             }
             return {
                 instrument_name: String(item ?? '').trim(),
                 image_url: null,
+                quantity: null,
+                description: null,
             }
         })
         .filter((item) => item.instrument_name.length > 0)
@@ -133,6 +285,8 @@ const replaceStudioInstruments = async (client: any, studioId: string, instrumen
             studio_id: studioId,
             instrument_name: item.instrument_name,
             image_url: item.image_url,
+            quantity: item.quantity,
+            description: item.description,
         }))
 
     if (payload.length > 0) {
@@ -170,7 +324,6 @@ serve(async (req: Request) => {
 
     try {
         const authHeader = req.headers.get('Authorization');
-        console.log('Authorization header present:', !!authHeader);
 
         if (!authHeader) {
             return new Response(JSON.stringify({ error: 'Missing authorization header' }), {
@@ -181,7 +334,6 @@ serve(async (req: Request) => {
 
         // Decode JWT to get user info
         const jwtPayload = decodeJwtPayload(authHeader)
-        console.log('JWT payload:', { sub: jwtPayload?.sub, email: jwtPayload?.email });
 
         if (!jwtPayload || !jwtPayload.sub) {
             return new Response(JSON.stringify({ error: 'Invalid token' }), {
@@ -233,7 +385,7 @@ serve(async (req: Request) => {
                     title,
                     message,
                     image: image || null,
-                    meta: meta || null,
+                    meta: withNotificationRouteMeta(meta),
                     read: false
                 })
                 .select()
@@ -266,7 +418,7 @@ serve(async (req: Request) => {
                     title: n.title,
                     message: n.message,
                     image: n.image || null,
-                    meta: n.meta || null,
+                    meta: withNotificationRouteMeta(n.meta),
                     read: false
                 }))
 
@@ -391,7 +543,6 @@ serve(async (req: Request) => {
             const viewName = type + 's_with_stats'
             const ownerField = type === 'gig' ? 'organizer_id' : 'owner_id'
 
-            console.log('📥 Fetching single entity:', { type, id, viewName, ownerField, userId });
 
             const { data, error } = await supabaseClient
                 .from(viewName)
@@ -405,14 +556,11 @@ serve(async (req: Request) => {
                 throw error;
             }
 
-            console.log('📥 Fetched data:', JSON.stringify(data, null, 2));
             if (type === 'gig' && data) {
-                console.log('📦 Gig requirements from DB:', JSON.stringify(data.requirements, null, 2));
             }
 
             // Return null if not found (user doesn't own this entity or doesn't exist)
             if (!data) {
-                console.log('⚠️ No data found for entity');
                 return new Response(JSON.stringify(null), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 })
             }
 
@@ -493,7 +641,7 @@ serve(async (req: Request) => {
                     'name', 'address', 'hourly_rate', 'description',
                     'latitude', 'longitude', 'rate', 'contract_url',
                     'availability', 'rehearsal_rate',
-                    'recording_rate', 'open_dates', 'pax', 'business_permit_url'
+                    'recording_rate', 'pax', 'business_permit_url'
                 ];
                 const filteredPayload: any = {};
                 for (const key of validStudioColumns) {
@@ -514,7 +662,7 @@ serve(async (req: Request) => {
                 // 1. Fetch gig settings for cooldown and slot tracking
                 const { data: gigData, error: gigError } = await supabaseClient
                     .from('gigs')
-                    .select('reapplication_cooldown_days, slots_filled, total_slots_filled, status')
+                    .select('reapplication_cooldown_days, total_slots_filled, status')
                     .eq('id', gig_id)
                     .single();
 
@@ -545,7 +693,19 @@ serve(async (req: Request) => {
                 // Check specific slot type availability if provided
                 if (slot_type && gigRequirements?.slots?.[slot_type]) {
                     const slotNeeded = gigRequirements.slots[slot_type]?.needed || 0;
-                    const slotFilled = gigData.slots_filled?.[slot_type]?.accepted || 0;
+                    let slotFilled = 0;
+
+                    if (slotNeeded > 0) {
+                        const { data: slotSummary, error: slotSummaryError } = await supabaseClient
+                            .from('gig_slot_fill_summary')
+                            .select('accepted_count')
+                            .eq('gig_id', gig_id)
+                            .eq('slot_type', slot_type)
+                            .maybeSingle();
+
+                        if (slotSummaryError) throw slotSummaryError;
+                        slotFilled = slotSummary?.accepted_count || 0;
+                    }
                     
                     if (slotNeeded > 0 && slotFilled >= slotNeeded) {
                         throw new Error(`All ${slot_type} slots have been filled. Try applying for a different slot type.`);
@@ -598,7 +758,6 @@ serve(async (req: Request) => {
                     }
                 }
 
-                console.log('✅ Application checks passed - user can apply');
             }
 
 
@@ -621,7 +780,6 @@ serve(async (req: Request) => {
 
             // Log gig requirements if creating a gig
             if (type === 'gig') {
-                console.log('📦 Creating gig with requirements:', JSON.stringify(insertPayload.requirements, null, 2));
                 
                 // For gigs, only allow valid columns to prevent PGRST204 errors
                 const validGigColumns = [
@@ -639,8 +797,6 @@ serve(async (req: Request) => {
                 insertPayload = filteredPayload;
             }
 
-            console.log('📤 Inserting into table:', table);
-            console.log('📤 Insert payload:', JSON.stringify(insertPayload, null, 2));
 
             const { data, error } = await supabaseClient
                 .from(table)
@@ -653,7 +809,6 @@ serve(async (req: Request) => {
                 throw error;
             }
 
-            console.log('✅ Insert successful, returned data:', JSON.stringify(data, null, 2));
 
             // If creating a studio, create operating hours and settings
             if (type === 'studio') {
@@ -702,7 +857,8 @@ serve(async (req: Request) => {
                                     is_open: true,
                                     open_time: slot.start,
                                     close_time: slot.end,
-                                    slot_order: slotIndex
+                                    slot_order: slotIndex,
+                                    reason: buildWeeklyScheduleReason(daySchedule)
                                 });
                             });
                         }
@@ -717,7 +873,8 @@ serve(async (req: Request) => {
                             day_of_week: day,
                             is_open: true,
                             open_time: '09:00',
-                            close_time: '22:00'
+                            close_time: '22:00',
+                            reason: 'Weekly schedule [session_type:both]'
                         })
                     }
                 }
@@ -732,27 +889,20 @@ serve(async (req: Request) => {
                         if (dateEntry.date && dateEntry.slots && dateEntry.slots.length > 0) {
                             // For each slot in the date, create an override entry
                             // The table supports one slot per date, so we'll use the first slot's times
-                            // For multiple slots, we use the earliest start and latest end
-                            const allStarts = dateEntry.slots.map((s: any) => s.start);
-                            const allEnds = dateEntry.slots.map((s: any) => s.end);
-
-                            // Use first slot for now (can be extended for multiple slots per date)
-                            const firstSlot = dateEntry.slots[0];
-
-                            dateOverrides.push({
+                            dateEntry.slots.forEach((slot: any, slotIndex: number) => dateOverrides.push({
                                 studio_id: studioId,
                                 override_date: dateEntry.date,
                                 is_open: true,
-                                open_time: firstSlot.start,
-                                close_time: firstSlot.end,
-                                reason: 'Custom schedule'
-                            });
+                                open_time: slot.start,
+                                close_time: slot.end,
+                                slot_order: slotIndex,
+                                reason: buildDateOverrideReason(dateEntry)
+                            }));
                         }
                     }
 
                     if (dateOverrides.length > 0) {
                         await supabaseClient.from('studio_date_overrides').insert(dateOverrides);
-                        console.log(`📅 Inserted ${dateOverrides.length} date overrides for studio ${studioId}`);
                     }
                 }
             }
@@ -773,7 +923,6 @@ serve(async (req: Request) => {
                 if (memberError) {
                     console.error('⚠️ Failed to add owner to group_members:', memberError);
                 } else {
-                    console.log(`👤 Added owner ${userId} to group_members for group ${groupId}`);
                 }
 
                 // Also add any other members that have user_id in the members JSONB array
@@ -795,7 +944,6 @@ serve(async (req: Request) => {
                         if (additionalError) {
                             console.error('⚠️ Failed to add additional members:', additionalError);
                         } else {
-                            console.log(`👥 Added ${additionalMembers.length} additional members to group_members`);
                         }
                     }
                 }
@@ -848,9 +996,9 @@ serve(async (req: Request) => {
             if (type === 'studio') {
                 const validStudioColumns = [
                     'name', 'address', 'hourly_rate', 'description',
-                    'images', 'latitude', 'longitude', 'rate', 'contract_url',
+                    'latitude', 'longitude', 'rate', 'contract_url',
                     'availability', 'rehearsal_rate',
-                    'recording_rate', 'open_dates', 'pax', 'business_permit_url'
+                    'recording_rate', 'pax', 'business_permit_url'
                 ];
                 const filteredPayload: any = {};
                 for (const key of validStudioColumns) {
@@ -866,9 +1014,7 @@ serve(async (req: Request) => {
 
             if (type === 'studio' && updatePayload.availability) {
                 studioAvailability = updatePayload.availability;
-                // Keep availability in payload if column exists in table
-                // If you want to use normalized tables instead, uncomment the line below:
-                // delete updatePayload.availability;
+                delete updatePayload.availability;
             }
 
             // Extract calendar_availability (specific date overrides)
@@ -885,7 +1031,6 @@ serve(async (req: Request) => {
 
             // Log gig requirements if updating a gig
             if (type === 'gig') {
-                console.log('📦 Updating gig with requirements:', JSON.stringify(updatePayload.requirements, null, 2));
 
                 const validGigColumns = [
                     'name', 'location', 'budget', 'description', 'event_date',
@@ -940,9 +1085,6 @@ serve(async (req: Request) => {
                 });
             }
 
-            console.log('📤 Updating table:', table);
-            console.log('📤 Update payload:', JSON.stringify(updatePayload, null, 2));
-            console.log('📤 Entity ID:', id);
 
             const { data, error } = await supabaseClient
                 .from(table)
@@ -957,9 +1099,7 @@ serve(async (req: Request) => {
                 throw error;
             }
 
-            console.log('✅ Update successful, returned data:', JSON.stringify(data, null, 2));
             if (type === 'gig') {
-                console.log('✅ Gig requirements after update:', JSON.stringify(data.requirements, null, 2));
             }
 
             // Update studio operating hours if availability was provided
@@ -989,7 +1129,8 @@ serve(async (req: Request) => {
                                 is_open: true,
                                 open_time: slot.start,
                                 close_time: slot.end,
-                                slot_order: slotIndex
+                                slot_order: slotIndex,
+                                reason: buildWeeklyScheduleReason(daySchedule)
                             });
                         });
                     }
@@ -1015,22 +1156,20 @@ serve(async (req: Request) => {
 
                 for (const dateEntry of calendarAvailability) {
                     if (dateEntry.date && dateEntry.slots && dateEntry.slots.length > 0) {
-                        const firstSlot = dateEntry.slots[0];
-
-                        dateOverrides.push({
+                        dateEntry.slots.forEach((slot: any, slotIndex: number) => dateOverrides.push({
                             studio_id: studioId,
                             override_date: dateEntry.date,
                             is_open: true,
-                            open_time: firstSlot.start,
-                            close_time: firstSlot.end,
-                            reason: 'Custom schedule'
-                        });
+                            open_time: slot.start,
+                            close_time: slot.end,
+                            slot_order: slotIndex,
+                            reason: buildDateOverrideReason(dateEntry)
+                        }));
                     }
                 }
 
                 if (dateOverrides.length > 0) {
                     await supabaseClient.from('studio_date_overrides').insert(dateOverrides);
-                    console.log(`📅 Updated ${dateOverrides.length} date overrides for studio ${studioId}`);
                 }
             }
 
@@ -1056,7 +1195,6 @@ serve(async (req: Request) => {
                 if (settingsError) {
                     console.error('⚠️ Failed to update studio settings:', settingsError);
                 } else {
-                    console.log('⚙️ Updated studio settings:', settingsUpdate);
                 }
             }
 
@@ -1105,7 +1243,6 @@ serve(async (req: Request) => {
                         if (addError) {
                             console.error('⚠️ Failed to add group members:', addError);
                         } else {
-                            console.log(`👥 Added ${toAdd.length} members to group_members`);
                         }
                     }
 
@@ -1120,7 +1257,6 @@ serve(async (req: Request) => {
                         if (removeError) {
                             console.error('⚠️ Failed to remove group members:', removeError);
                         } else {
-                            console.log(`👥 Removed ${toRemove.length} members from group_members`);
                         }
                     }
                 }
@@ -1154,10 +1290,67 @@ serve(async (req: Request) => {
         // DELETE ENTITY (uses base table for deletes)
         if (action === 'delete') {
             const { type, id } = params // type: 'gig', 'group', 'studio'
+            const rpcClient = createClient(
+                // @ts-ignore
+                Deno.env.get('SUPABASE_URL') ?? '',
+                // @ts-ignore
+                Deno.env.get('SUPABASE_ANON_KEY') ?? Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '',
+                {
+                    global: {
+                        headers: {
+                            Authorization: authHeader,
+                        },
+                    },
+                },
+            )
 
             if (type === 'gig') {
-                const { data: rpcData, error: rpcError } = await supabaseClient.rpc('delete_gig_safely', {
+                const { data: rpcData, error: rpcError } = await rpcClient.rpc('delete_gig_safely', {
                     p_gig_id: id,
+                    p_reason: 'Deleted via manage-listings edge function',
+                });
+
+                if (rpcError) throw rpcError;
+
+                const rpcResult: any = rpcData;
+                if (!rpcResult?.success) {
+                    return new Response(JSON.stringify(rpcResult), {
+                        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                        status: 409,
+                    });
+                }
+
+                return new Response(JSON.stringify({ success: true, ...rpcResult }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 200,
+                });
+            }
+
+            if (type === 'group') {
+                const { data: rpcData, error: rpcError } = await rpcClient.rpc('delete_group_safely', {
+                    p_group_id: id,
+                    p_reason: 'Deleted via manage-listings edge function',
+                });
+
+                if (rpcError) throw rpcError;
+
+                const rpcResult: any = rpcData;
+                if (!rpcResult?.success) {
+                    return new Response(JSON.stringify(rpcResult), {
+                        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                        status: 409,
+                    });
+                }
+
+                return new Response(JSON.stringify({ success: true, ...rpcResult }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 200,
+                });
+            }
+
+            if (type === 'studio') {
+                const { data: rpcData, error: rpcError } = await rpcClient.rpc('delete_studio_safely', {
+                    p_studio_id: id,
                     p_reason: 'Deleted via manage-listings edge function',
                 });
 
@@ -1215,15 +1408,16 @@ serve(async (req: Request) => {
                 .from('gig_applications')
                 .select(`
                     *,
-                    applicant:profiles!applicant_id(id, full_name, avatar_url, role, skills, genres, bio, location, portfolio_urls),
-                    group:groups!group_id(id, name, genre, images, members, description, location, rate)
+                    applicant:profiles!applicant_id(id, full_name, avatar_url, role, bio, location),
+                    group:groups!group_id(id, name, genre, description, location, rate, group_type)
                 `)
                 .eq('gig_id', gigId)
                 .or('leader_approval_status.is.null,leader_approval_status.eq.approved')
                 .order('created_at', { ascending: false });
 
             if (error) throw error;
-            return new Response(JSON.stringify(data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 });
+            const hydratedData = await hydrateGigApplicationLegacy(supabaseClient, data || []);
+            return new Response(JSON.stringify(hydratedData), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 });
         }
 
         // FETCH GROUP APPLICATIONS (My applications as a group/musician)
@@ -1548,13 +1742,14 @@ serve(async (req: Request) => {
                 .from('studio_bookings')
                 .select(`
                     *,
-                    studio:studios!studio_id(name, images, location, rate_per_hour)
+                    studio:studios!studio_id(id, name, address, hourly_rate, rate)
                 `)
                 .eq('user_id', userId)
                 .order('created_at', { ascending: false });
 
             if (error) throw error;
-            return new Response(JSON.stringify(data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 });
+            const hydratedData = await hydrateStudioBookingLegacy(supabaseClient, data || []);
+            return new Response(JSON.stringify(hydratedData), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 });
         }
 
         // CHECK ELIGIBILITY (Spam Block Check)
@@ -1686,14 +1881,15 @@ serve(async (req: Request) => {
                     user_id,
                     role,
                     joined_at,
-                    user:profiles!user_id(id, full_name, avatar_url, email, skills, genres)
+                    user:profiles!user_id(id, full_name, avatar_url, email)
                 `)
                 .eq('group_id', groupId)
                 .order('joined_at', { ascending: true });
 
             if (error) throw error;
+            const hydratedData = await hydrateGroupMemberProfileLegacy(supabaseClient, data || []);
 
-            return new Response(JSON.stringify(data || []), {
+            return new Response(JSON.stringify(hydratedData), {
                 headers: { ...corsHeaders, 'Content-Type': 'application/json' },
                 status: 200,
             });
@@ -1765,7 +1961,10 @@ serve(async (req: Request) => {
                 type: 'success',
                 title: 'Added to Group',
                 message: `You have been added to the group "${group.name}"`,
-                meta: { type: 'group_member_added', group_id: groupId }
+                meta: buildNotificationRouteMeta('/group_details', { id: groupId }, {
+                    type: 'group_member_added',
+                    group_id: groupId,
+                })
             });
 
             return new Response(JSON.stringify(data), {
@@ -1831,7 +2030,10 @@ serve(async (req: Request) => {
                     type: 'warning',
                     title: 'Removed from Group',
                     message: `You have been removed from the group "${group.name}"`,
-                    meta: { type: 'group_member_removed', group_id: groupId }
+                    meta: buildNotificationRouteMeta('/group_details', { id: groupId }, {
+                        type: 'group_member_removed',
+                        group_id: groupId,
+                    })
                 });
             }
 

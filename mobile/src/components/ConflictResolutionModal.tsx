@@ -1,17 +1,17 @@
 import { Ionicons } from '@expo/vector-icons';
-import { BlurView } from 'expo-blur';
+import { FlashList } from '@shopify/flash-list';
 import React, { useState } from 'react';
 import {
     ActivityIndicator,
     Modal,
     Platform,
-    ScrollView,
     StyleSheet,
     Text,
     TouchableOpacity,
     View,
 } from 'react-native';
 import { useTheme } from '../context/ThemeContext';
+import { formatFriendlyDateTime } from '../utils/friendlyDateTime';
 
 export interface ConflictingBooking {
   id: string;
@@ -65,12 +65,9 @@ export default function ConflictResolutionModal({
   const [isResolving, setIsResolving] = useState(false);
 
   const formatDate = (dateStr: string) => {
-    const date = new Date(dateStr);
-    return date.toLocaleDateString('en-US', {
-      weekday: 'short',
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric',
+    return formatFriendlyDateTime(dateStr, {
+      forceDateOnly: true,
+      fallback: dateStr,
     });
   };
 
@@ -137,16 +134,20 @@ export default function ConflictResolutionModal({
   const allResolved = conflicts.every((c) => resolutions[c.id]);
   const moveableCount = conflicts.filter((c) => c.newAvailableSlot).length;
 
+  if (!visible) return null;
+
   return (
     <Modal
-      visible={visible}
+      visible
       animationType="slide"
       transparent={true}
       statusBarTranslucent
       navigationBarTranslucent
+      presentationStyle="overFullScreen"
+      hardwareAccelerated
       onRequestClose={onClose}
     >
-      <BlurView intensity={60} tint="dark" style={styles.overlay}>
+      <View style={styles.overlay}>
         <View
           style={[
             styles.modalContainer,
@@ -199,8 +200,14 @@ export default function ConflictResolutionModal({
           </View>
 
           {/* Conflict List */}
-          <ScrollView style={styles.conflictList} showsVerticalScrollIndicator={false}>
-            {conflicts.map((conflict, index) => (
+          <FlashList
+            data={conflicts}
+            keyExtractor={(conflict) => conflict.id}
+            style={styles.conflictList}
+            contentContainerStyle={styles.conflictListContent}
+            showsVerticalScrollIndicator={false}
+            drawDistance={360}
+            renderItem={({ item: conflict }) => (
               <View
                 key={conflict.id}
                 style={[
@@ -300,7 +307,7 @@ export default function ConflictResolutionModal({
                             },
                           ]}
                         >
-                          {formatDate(conflict.newAvailableSlot.date)},{' '}
+                          {formatDate(conflict.newAvailableSlot.date)} at{' '}
                           {formatTime(conflict.newAvailableSlot.start_time)} -{' '}
                           {formatTime(conflict.newAvailableSlot.end_time)}
                         </Text>
@@ -364,8 +371,8 @@ export default function ConflictResolutionModal({
                   </TouchableOpacity>
                 </View>
               </View>
-            ))}
-          </ScrollView>
+            )}
+          />
 
           {/* Footer Actions */}
           <View style={[styles.footer, { borderTopColor: colors.border }]}>
@@ -379,11 +386,12 @@ export default function ConflictResolutionModal({
               </Text>
             </TouchableOpacity>
 
-            <TouchableOpacity activeOpacity={1}
+            <TouchableOpacity activeOpacity={!allResolved || isResolving ? 1 : 0.78}
               style={[
                 styles.resolveBtn,
                 {
                   backgroundColor: allResolved ? colors.primary : colors.primary + '50',
+                  opacity: !allResolved || isResolving ? 0.6 : 1,
                 },
               ]}
               onPress={handleResolveAll}
@@ -402,7 +410,7 @@ export default function ConflictResolutionModal({
             </TouchableOpacity>
           </View>
         </View>
-      </BlurView>
+      </View>
     </Modal>
   );
 }
@@ -413,6 +421,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     padding: 20,
+    backgroundColor: 'rgba(15,23,42,0.62)',
   },
   modalContainer: {
     width: '100%',
@@ -478,6 +487,8 @@ const styles = StyleSheet.create({
   },
   conflictList: {
     maxHeight: 350,
+  },
+  conflictListContent: {
     paddingHorizontal: 16,
   },
   conflictCard: {

@@ -2,18 +2,19 @@ import { Ionicons } from '@expo/vector-icons';
 import { router, useFocusEffect } from 'expo-router';
 import React, { useCallback, useState } from 'react';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { supabase } from '../lib/supabase';
 import Modal from '../src/components/modal';
 import Navbar from '../src/components/navbar';
 import { useAuth } from '../src/context/AuthContext';
+import { useBottomBarClearance } from '../src/hooks/useBottomBarClearance';
 import { useTheme } from '../src/context/ThemeContext';
+import { isFanUserRole } from '../src/utils/roleRouting';
 
 export default function SettingsScreen() {
   const [modalVisible, setModalVisible] = useState(false);
   const { theme, setTheme, colors, isDark } = useTheme();
   const { isGuest, setGuestMode } = useAuth();
-  const insets = useSafeAreaInsets();
+  const { contentBottomPadding } = useBottomBarClearance(24);
   const [userRole, setUserRole] = useState<string | null>(null);
 
   // Fetch user role on mount
@@ -22,21 +23,21 @@ export default function SettingsScreen() {
       const fetchUserRole = async () => {
         if (isGuest) {
           setUserRole(null);
-          return;
-        }
-
-        const { data: { user } } = await supabase.auth.getUser();
-        if (user) {
-          const { data: profile } = await supabase
-            .from('profiles')
-            .select('role')
-            .eq('id', user.id)
-            .single();
-          if (profile) {
-            setUserRole(profile.role);
+        } else {
+          const { data: { user } } = await supabase.auth.getUser();
+          if (user) {
+            const { data: profile } = await supabase
+              .from('profiles')
+              .select('role')
+              .eq('id', user.id)
+              .single();
+            if (profile) {
+              setUserRole(profile.role);
+            }
           }
         }
       };
+
       fetchUserRole();
     }, [isGuest])
   );
@@ -47,22 +48,21 @@ export default function SettingsScreen() {
     router.replace('/');
   };
 
-  // Check if user is studio/venue owner (shows wallet & subscription)
-  const isOwner = userRole === 'studio-owner' || userRole === 'venue-owner';
+  const isFan = isFanUserRole(userRole);
 
-  const settingsSections: Array<{
+  const settingsSections: {
     title: string;
-    items: Array<{ label: string; icon: string; route: string }>;
-  }> = [];
+    items: { label: string; icon: string; route: string }[];
+  }[] = [];
 
   if (!isGuest) {
     settingsSections.push({
       title: 'Preferences',
       items: [
         { label: 'Account Security', icon: 'shield-outline', route: '/account_details' },
-        ...(isOwner
-          ? [{ label: 'Wallet & Subscription', icon: 'wallet-outline', route: '/wallet' }]
-          : [{ label: 'Wallet', icon: 'wallet-outline', route: '/wallet' }]),
+        { label: 'Notification Preferences', icon: 'notifications-outline', route: '/notification_settings' },
+        { label: 'Identity Verification', icon: 'card-outline', route: '/identity_verification' },
+        ...(!isFan ? [{ label: 'Wallet', icon: 'wallet-outline', route: '/wallet' }] : []),
       ],
     });
   }
@@ -91,7 +91,7 @@ export default function SettingsScreen() {
           showsVerticalScrollIndicator={false}
           contentContainerStyle={[
             styles.scrollContent,
-            { paddingBottom: 190 + insets.bottom },
+            { paddingBottom: contentBottomPadding },
           ]}
         >
 
@@ -207,6 +207,7 @@ export default function SettingsScreen() {
         title="Log Out"
         message="Are you sure you want to log out of your account?"
         buttonText="Log Out"
+        danger
         onConfirm={handleLogout}
       />
     </>
@@ -268,6 +269,7 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     borderRadius: 12,
     alignItems: 'center',
+    justifyContent: 'center',
     borderWidth: 1,
   },
   themeButtonText: {

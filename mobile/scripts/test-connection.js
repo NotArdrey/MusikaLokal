@@ -7,7 +7,7 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-dotenv.config({ path: join(__dirname, '..', '.env') });
+dotenv.config({ path: join(__dirname, '..', '..', '.env') });
 
 const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL;
 const serviceRoleKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFlZmxkeGVnc3Z6ZWNzaGxheXphIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc2ODY1ODI5NSwiZXhwIjoyMDg0MjM0Mjk1fQ.ZS98ixQ1mRA2JsWE0FGHQx6mcEaZDzrLKlWKnuwGVIo';
@@ -15,7 +15,6 @@ const serviceRoleKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmF
 const supabase = createClient(supabaseUrl, serviceRoleKey);
 
 async function testConnection() {
-    console.log('\n🧪 Testing Supabase connection...\n');
     
     try {
         const { data, error } = await supabase
@@ -32,16 +31,10 @@ async function testConnection() {
             .order('email');
         
         if (error) {
-            console.log('❌ Error:', error.message);
         } else {
-            console.log('✅ Successfully connected to Supabase!\n');
-            console.log('📋 All Test Accounts:');
-            console.log('━'.repeat(80));
             data.forEach(p => {
                 const verified = p.is_verified ? '✓' : '✗';
-                console.log(`${verified} ${p.email.padEnd(25)} | ${p.role.padEnd(15)} | ${p.verification_status}`);
             });
-            console.log('\n🎉 All accounts ready!\n');
         }
         
     } catch (err) {

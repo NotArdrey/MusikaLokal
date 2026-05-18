@@ -2,6 +2,7 @@ import { Ionicons } from "@expo/vector-icons";
 import React from "react";
 import { Text, View } from "react-native";
 import CachedImage from "../CachedImage";
+import { formatDashedNumericDate } from "../../utils/friendlyDateTime";
 
 
 interface ReviewsTabProps {
@@ -61,7 +62,7 @@ const ReviewsTab = ({
                   {review.author?.full_name || "Anonymous"}
                 </Text>
                 <Text style={[styles.reviewDate, { color: colors.textSecondary }]}> 
-                  {new Date(review.created_at).toLocaleDateString()}
+                  {formatDashedNumericDate(review.created_at)}
                 </Text>
               </View>
             </View>

@@ -44,26 +44,6 @@ function jsonResponse(payload: unknown, status = 200) {
   });
 }
 
-function extractUserIdFromJwt(authHeader: string): string | null {
-  const token = authHeader.replace(/^Bearer\s+/i, "").trim();
-  if (!token) return null;
-
-  const parts = token.split(".");
-  if (parts.length !== 3) return null;
-
-  try {
-    const normalizedPayload = parts[1]
-      .replace(/-/g, "+")
-      .replace(/_/g, "/");
-    const paddedPayload = normalizedPayload + "=".repeat((4 - (normalizedPayload.length % 4)) % 4);
-    const payload = JSON.parse(atob(paddedPayload));
-    const sub = String(payload?.sub || "").trim();
-    return sub || null;
-  } catch {
-    return null;
-  }
-}
-
 async function getAuthenticatedUserId(
   authHeader: string,
   supabaseUrl: string,
@@ -71,9 +51,6 @@ async function getAuthenticatedUserId(
 ) {
   const token = authHeader.replace(/^Bearer\s+/i, "");
   if (!token) return null;
-
-  const userIdFromJwt = extractUserIdFromJwt(authHeader);
-  if (userIdFromJwt) return userIdFromJwt;
 
   const authClient = createClient(supabaseUrl, anonKey, {
     global: {
@@ -124,10 +101,100 @@ function isMissingColumnError(error: any) {
   const message = String(error?.message || "").toLowerCase();
 
   return (
+    code === "42P01" ||
     code === "42703" ||
     message.includes("does not exist") ||
+    message.includes("relation") ||
     message.includes("unknown column")
   );
+}
+
+function isMissingTableError(error: any, tableName: string) {
+  const code = String(error?.code || "").toUpperCase();
+  const message = String(error?.message || "").toLowerCase();
+  return (
+    code === "42P01" ||
+    message.includes(`relation "${tableName}" does not exist`) ||
+    message.includes(`table "${tableName}" does not exist`)
+  );
+}
+
+async function fetchProfileById(client: any, profileId: string) {
+  const normalizedProfileId = String(profileId || "").trim();
+  if (!normalizedProfileId) return null;
+
+  const { data, error } = await client
+    .from("profiles")
+    .select("*")
+    .eq("id", normalizedProfileId)
+    .maybeSingle();
+
+  if (error) throw error;
+  return data || null;
+}
+
+function selectPreferredLinkedUserId<T extends Record<string, unknown>>(
+  rows: T[],
+  userIdKey: keyof T,
+  roleKey: keyof T,
+) {
+  const rankedRows = [...rows].sort((left, right) => {
+    const leftRole = String(left?.[roleKey] || "").trim().toLowerCase();
+    const rightRole = String(right?.[roleKey] || "").trim().toLowerCase();
+    const leftRank = leftRole === "owner" ? 0 : leftRole === "leader" ? 1 : 2;
+    const rightRank = rightRole === "owner" ? 0 : rightRole === "leader" ? 1 : 2;
+    return leftRank - rightRank;
+  });
+
+  for (const row of rankedRows) {
+    const userId = String(row?.[userIdKey] || "").trim();
+    if (userId) return userId;
+  }
+
+  return "";
+}
+
+async function resolveGroupOwnerId(client: any, groupId: string, directOwnerId?: unknown) {
+  const normalizedGroupId = String(groupId || "").trim();
+  const normalizedDirectOwnerId = String(directOwnerId || "").trim();
+
+  if (!normalizedGroupId) return "";
+  if (normalizedDirectOwnerId) return normalizedDirectOwnerId;
+
+  try {
+    const { data, error } = await client
+      .from("group_members")
+      .select("user_id, role")
+      .eq("group_id", normalizedGroupId);
+
+    if (error) {
+      if (!isMissingColumnError(error)) throw error;
+    } else if (Array.isArray(data) && data.length > 0) {
+      const linkedUserId = selectPreferredLinkedUserId(data, "user_id", "role");
+      if (linkedUserId) return linkedUserId;
+    }
+  } catch (error) {
+    if (!isMissingColumnError(error)) throw error;
+  }
+
+  try {
+    const { data, error } = await client
+      .from("group_roster_members")
+      .select("user_id, member_role")
+      .eq("group_id", normalizedGroupId)
+      .not("user_id", "is", null);
+
+    if (error) {
+      if (!isMissingColumnError(error)) throw error;
+    } else if (Array.isArray(data) && data.length > 0) {
+      const linkedUserId = selectPreferredLinkedUserId(data, "user_id", "member_role");
+      if (linkedUserId) return linkedUserId;
+    }
+  } catch (error) {
+    if (!isMissingColumnError(error)) throw error;
+  }
+
+  return "";
 }
 
 async function assertAdmin(client: any, userId: string) {
@@ -151,6 +218,9 @@ const reportTargetTableMap: Record<string, string> = {
   gig: "gigs",
   user: "profiles",
   profile: "profiles",
+  product: "products",
+  playlist: "playlists",
+  feed_post: "feed_posts",
 };
 
 async function insertNotificationIfMissing(
@@ -244,23 +314,32 @@ async function fetchReportTargetDetails(client: any, rawTargetType: unknown, raw
 
   if (recordError) throw recordError;
 
-  const ownerId = String(
+  if (targetType === "profile" || targetType === "user") {
+    return {
+      type: targetType,
+      id: targetId,
+      table,
+      record: record || null,
+      owner_profile: record || null,
+    };
+  }
+
+  let ownerId = String(
     record?.owner_id ||
     record?.organizer_id ||
+    record?.seller_id ||
+    record?.creator_id ||
     record?.user_id ||
     "",
   ).trim();
 
+  if (!ownerId && targetType === "group") {
+    ownerId = await resolveGroupOwnerId(client, targetId, record?.owner_id);
+  }
+
   let ownerProfile = null;
   if (ownerId) {
-    const { data: ownerRow, error: ownerError } = await client
-      .from("profiles")
-      .select("*")
-      .eq("id", ownerId)
-      .maybeSingle();
-
-    if (ownerError) throw ownerError;
-    ownerProfile = ownerRow || null;
+    ownerProfile = await fetchProfileById(client, ownerId);
   }
 
   return {
@@ -679,6 +758,169 @@ serve(async (req: Request) => {
         },
         usedLegacy,
       });
+    }
+
+    // ADMIN: FETCH BOOKING INCIDENTS
+    if (action === "admin_fetch_booking_incidents") {
+      const statusFilter = String(params.statusFilter || "all").trim().toLowerCase();
+      const limit = Math.min(Math.max(Number(params.limit || 100), 1), 200);
+
+      let incidentQuery = client
+        .from("booking_incidents")
+        .select(
+          "id, booking_id, reporter_user_id, counterparty_user_id, issue_type, status, reporter_notes, counterparty_notes, response_deadline_at, responded_at, resolved_at, resolved_by_user_id, resolution, created_at",
+        )
+        .order("created_at", { ascending: false })
+        .limit(limit);
+
+      if (statusFilter !== "all") {
+        incidentQuery = incidentQuery.eq("status", statusFilter);
+      }
+
+      const { data: incidents, error: incidentError } = await incidentQuery;
+
+      if (incidentError) {
+        if (isMissingTableError(incidentError, "booking_incidents")) {
+          return jsonResponse(
+            { error: "Booking incidents are not available yet. Apply the latest booking incident migration first." },
+            503,
+          );
+        }
+        throw incidentError;
+      }
+
+      const bookingIds = [...new Set((incidents || []).map((item: any) => item.booking_id).filter(Boolean))];
+      const profileIds = [
+        ...new Set(
+          (incidents || [])
+            .flatMap((item: any) => [item.reporter_user_id, item.counterparty_user_id, item.resolved_by_user_id])
+            .filter(Boolean),
+        ),
+      ];
+
+      const bookingMap = new Map<string, any>();
+      if (bookingIds.length > 0) {
+        const { data: bookings, error: bookingsError } = await client
+          .from("studio_bookings")
+          .select("id, booking_date, start_time, end_time, studio_id, studio:studios(name)")
+          .in("id", bookingIds);
+        if (bookingsError) throw bookingsError;
+        (bookings || []).forEach((b: any) => bookingMap.set(b.id, b));
+      }
+
+      const profileMap = new Map<string, any>();
+      if (profileIds.length > 0) {
+        const { data: profiles, error: profilesError } = await client
+          .from("profiles")
+          .select("id, full_name, email")
+          .in("id", profileIds);
+        if (profilesError) throw profilesError;
+        (profiles || []).forEach((p: any) => profileMap.set(p.id, p));
+      }
+
+      const items = (incidents || []).map((incident: any) => {
+        const booking = bookingMap.get(incident.booking_id);
+        const reporter = profileMap.get(incident.reporter_user_id);
+        const counterparty = profileMap.get(incident.counterparty_user_id);
+        return {
+          ...incident,
+          studio_name: booking?.studio?.name || null,
+          booking_date: booking?.booking_date || null,
+          booking_start_time: booking?.start_time || null,
+          booking_end_time: booking?.end_time || null,
+          reporter_name: reporter?.full_name || "Unknown",
+          reporter_email: reporter?.email || "",
+          counterparty_name: counterparty?.full_name || "Unknown",
+          counterparty_email: counterparty?.email || "",
+        };
+      });
+
+      return jsonResponse({ items });
+    }
+
+    // ADMIN: RESOLVE BOOKING INCIDENT
+    if (action === "admin_resolve_booking_incident") {
+      const { incident_id, resolution, admin_notes } = params;
+      const allowedResolutions = ["resolved_refund", "resolved_no_refund", "dismissed"];
+
+      if (!incident_id || !allowedResolutions.includes(String(resolution || ""))) {
+        return jsonResponse(
+          { error: "incident_id and valid resolution are required (resolved_refund | resolved_no_refund | dismissed)." },
+          400,
+        );
+      }
+
+      const { data: incident, error: fetchError } = await client
+        .from("booking_incidents")
+        .select("id, booking_id, status, reporter_user_id, counterparty_user_id")
+        .eq("id", incident_id)
+        .maybeSingle();
+
+      if (fetchError) {
+        if (isMissingTableError(fetchError, "booking_incidents")) {
+          return jsonResponse(
+            { error: "Booking incidents are not available yet. Apply the latest booking incident migration first." },
+            503,
+          );
+        }
+        throw fetchError;
+      }
+
+      if (!incident) {
+        return jsonResponse({ error: "Incident not found." }, 404);
+      }
+
+      if (!["open", "responded", "manual_review"].includes(incident.status)) {
+        return jsonResponse({ error: "This incident is already resolved." }, 409);
+      }
+
+      const fallbackNote =
+        resolution === "resolved_refund"
+          ? "Admin resolved incident with refund outcome."
+          : resolution === "resolved_no_refund"
+            ? "Admin resolved incident with no-refund outcome."
+            : "Admin dismissed incident.";
+
+      const resolverNotes =
+        typeof admin_notes === "string" && admin_notes.trim() ? admin_notes.trim() : fallbackNote;
+
+      const { data: updatedIncident, error: updateError } = await client
+        .from("booking_incidents")
+        .update({
+          status: resolution,
+          resolved_at: new Date().toISOString(),
+          resolved_by_user_id: userId,
+          resolution: resolverNotes,
+        })
+        .eq("id", incident_id)
+        .select("*")
+        .single();
+
+      if (updateError) throw updateError;
+
+      if (resolution !== "resolved_refund" && incident.booking_id) {
+        const { error: payoutError } = await client.rpc("release_booking_payout", {
+          p_booking_id: incident.booking_id,
+          p_reason: `Admin resolved incident ${incident_id}: ${resolution}`,
+        });
+        if (payoutError && payoutError.code !== "42883" && payoutError.code !== "PGRST202") {
+          console.error("Failed to release booking payout:", payoutError);
+        }
+      }
+
+      const notifyTargets = [incident.reporter_user_id, incident.counterparty_user_id].filter(Boolean) as string[];
+      for (const targetUserId of [...new Set(notifyTargets)]) {
+        await client.from("notifications").insert({
+          user_id: targetUserId,
+          type: "info",
+          title: "Booking Incident Resolved",
+          message: `An admin resolved your booking incident as ${String(resolution).replace(/_/g, " ")}.`,
+          read: false,
+          meta: { incident_id, booking_id: incident.booking_id, resolution, event_type: "booking_incident_resolved_by_admin" },
+        }).then(() => {});
+      }
+
+      return jsonResponse({ success: true, incident: updatedIncident });
     }
 
     return jsonResponse({ error: `Unsupported action: ${action}` }, 400);

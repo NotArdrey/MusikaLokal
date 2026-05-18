@@ -1,0 +1,29 @@
+appId: ${APP_ID}
+---
+- openLink: "musikalokal://bookings"
+- assertVisible:
+    id: "mobile-bookings-page"
+- tapOn:
+    id: "mobile-bookings-tab-upcoming"
+- scrollUntilVisible:
+    element:
+      id: ${E2E_BOOKING_CARD_ID}
+    direction: DOWN
+- assertVisible:
+    id: ${E2E_BOOKING_CARD_ID}
+- tapOn:
+    id: ${E2E_BOOKING_REPORT_LATE_ID}
+- tapOn:
+    id: "app-modal-input"
+- inputText: ${E2E_BOOKING_LATE_REASON}
+- hideKeyboard
+- waitForAnimationToEnd:
+    timeout: 2000
+- tapOn:
+    id: "app-modal-confirm-button"
+- tapOn:
+    id: "app-modal-confirm-button"
+    optional: true
+- tapOn:
+    text: "OK"
+    optional: true

@@ -7,7 +7,7 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-dotenv.config({ path: join(__dirname, '..', '.env') });
+dotenv.config({ path: join(__dirname, '..', '..', '.env') });
 
 const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL;
 const serviceRoleKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFlZmxkeGVnc3Z6ZWNzaGxheXphIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc2ODY1ODI5NSwiZXhwIjoyMDg0MjM0Mjk1fQ.ZS98ixQ1mRA2JsWE0FGHQx6mcEaZDzrLKlWKnuwGVIo';
@@ -24,7 +24,6 @@ const emails = [
 ];
 
 async function confirmAndVerify() {
-    console.log('\n✉️  Confirming emails and verifying accounts...\n');
     
     try {
         // Confirm all emails using admin API
@@ -38,9 +37,7 @@ async function confirmAndVerify() {
                 });
                 
                 if (error) {
-                    console.log(`❌ Error confirming ${email}:`, error.message);
                 } else {
-                    console.log(`✅ Confirmed email: ${email}`);
                 }
             }
         }
@@ -55,9 +52,7 @@ async function confirmAndVerify() {
             .in('email', emails);
         
         if (profileError) {
-            console.log('\n❌ Error updating profiles:', profileError.message);
         } else {
-            console.log('\n✅ All profiles verified!');
         }
         
         // Verify results
@@ -67,12 +62,8 @@ async function confirmAndVerify() {
             .in('email', emails)
             .order('email');
         
-        console.log('\n📋 Account Status:');
-        console.log('━'.repeat(80));
         profiles?.forEach(p => {
-            console.log(`✓ ${p.email.padEnd(25)} | ${p.role.padEnd(15)} | Verified: ${p.is_verified}`);
         });
-        console.log('\n🎉 All accounts are ready to use with password: pass123\n');
         
     } catch (err) {
         console.error('❌ Unexpected error:', err.message);

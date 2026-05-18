@@ -1,0 +1,8 @@
+appId: ${APP_ID}
+---
+- tapOn:
+    id: "auth-sign-in-button"
+- extendedWaitUntil:
+    visible:
+      id: "nav-profile"
+    timeout: 60000

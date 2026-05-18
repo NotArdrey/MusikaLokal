@@ -1,37 +1,84 @@
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
-import React, { useEffect, useState } from "react";
+import {
+    BottomSheetBackdrop,
+    BottomSheetModal,
+    BottomSheetScrollView,
+    useBottomSheetTimingConfigs,
+} from "@gorhom/bottom-sheet";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
     ActivityIndicator,
     Dimensions,
     Image,
     Linking,
+    Platform,
     ScrollView,
     StyleSheet,
     Text,
     TouchableOpacity,
+    useWindowDimensions,
     View,
 } from "react-native";
+import { Easing } from "react-native-reanimated";
 import { supabase } from "../lib/supabase";
 import CustomAlert, { AlertType } from "../src/components/CustomAlert";
 import Header from "../src/components/header";
 import Modal from "../src/components/modal";
 import Navbar from "../src/components/navbar";
+import ProfileAvatar from "../src/components/ProfileAvatar";
+import ProductionInviteSection from "../src/components/ProductionInviteSection";
+import SmoothTabTransition from "../src/components/SmoothTabTransition";
 import { useTheme } from "../src/context/ThemeContext";
 import {
     hasValidCoordinates,
     openNavigationDirections,
 } from "../src/utils/navigation";
+import { formatDashedNumericDate } from "../src/utils/friendlyDateTime";
+import { ProductionInviteTarget } from "../src/utils/productionTeamInvites";
+import { sendVenueGigInvites } from "../src/utils/venueGigInvites";
 
 const { width: screenWidth } = Dimensions.get("window");
 const PORTFOLIO_ITEM_SIZE = (screenWidth - 48 - 8) / 3; // 3 columns with gaps
+const OWNER_GIG_TABS = ["About", "Applicants", "Review"];
+const VIEWER_GIG_TABS = ["About", "Review"];
+const ACCEPTED_GIG_STATUSES = ["accepted", "approved", "confirmed", "happening now", "completed"];
+const HIDDEN_APPLICANT_STATUSES = new Set([
+  "cancelled",
+  "canceled",
+  "completed",
+  "declined",
+  "fired",
+  "rejected",
+  "resigned",
+]);
 
 import { useLocalSearchParams } from "expo-router";
 
 export default function GigDetailsScreen() {
   const { colors, isDark } = useTheme();
-  const { id } = useLocalSearchParams();
-  const [activeTab, setActiveTab] = useState("About");
+  const { width: viewportWidth } = useWindowDimensions();
+  const isWebDesktop = Platform.OS === "web" && viewportWidth >= 768;
+  const pageBackground = isWebDesktop
+    ? isDark
+      ? "#0A1224"
+      : "#E9EEF8"
+    : colors.background;
+  const pageCardBackground = isWebDesktop
+    ? isDark
+      ? "#0F172A"
+      : "#FFFFFF"
+    : colors.card;
+  const borderSoft = isWebDesktop
+    ? isDark
+      ? "#1E2C48"
+      : "#D8E3F2"
+    : colors.border;
+  const { id, tab } = useLocalSearchParams<{ id?: string | string[]; tab?: string | string[] }>();
+  const requestedTab = Array.isArray(tab) ? tab[0] : tab;
+  const [activeTab, setActiveTab] = useState(
+    OWNER_GIG_TABS.includes(requestedTab || "") ? requestedTab || "About" : "About",
+  );
   const [modalVisible, setModalVisible] = useState(false);
   const [modalTitle, setModalTitle] = useState("");
   const [modalMessage, setModalMessage] = useState("");
@@ -41,12 +88,60 @@ export default function GigDetailsScreen() {
   );
 
   const [authorized, setAuthorized] = useState(false);
+  const [canManageGig, setCanManageGig] = useState(false);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [checkingAuth, setCheckingAuth] = useState(true);
 
   const [gig, setGig] = useState<any>(null);
   const [applications, setApplications] = useState<any[]>([]);
   const [reviews, setReviews] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [inviteModalVisible, setInviteModalVisible] = useState(false);
+  const [inviteMessage, setInviteMessage] = useState("");
+  const [selectedInviteTargets, setSelectedInviteTargets] = useState<ProductionInviteTarget[]>([]);
+  const [sendingInvites, setSendingInvites] = useState(false);
+  const inviteSheetRef = useRef<BottomSheetModal>(null);
+  const inviteSnapPoints = useMemo(() => ["90%"], []);
+  const inviteAnimationConfigs = useBottomSheetTimingConfigs({
+    duration: 320,
+    easing: Easing.inOut(Easing.cubic),
+  });
+  const renderInviteBackdrop = useCallback(
+    (props: any) => (
+      <BottomSheetBackdrop
+        {...props}
+        appearsOnIndex={0}
+        disappearsOnIndex={-1}
+        opacity={0.5}
+      />
+    ),
+    [],
+  );
+  const handleInviteSheetDismiss = useCallback(() => {
+    setInviteModalVisible(false);
+    if (!sendingInvites) {
+      setInviteMessage("");
+      setSelectedInviteTargets([]);
+    }
+  }, [sendingInvites]);
+
+  useEffect(() => {
+    const availableTabs = canManageGig ? OWNER_GIG_TABS : VIEWER_GIG_TABS;
+    if (requestedTab && availableTabs.includes(requestedTab) && requestedTab !== activeTab) {
+      setActiveTab(requestedTab);
+      return;
+    }
+    if (!availableTabs.includes(activeTab)) {
+      setActiveTab("About");
+    }
+  }, [activeTab, canManageGig, requestedTab]);
+  useEffect(() => {
+    if (inviteModalVisible) {
+      inviteSheetRef.current?.present();
+    } else {
+      inviteSheetRef.current?.dismiss();
+    }
+  }, [inviteModalVisible]);
   const [alertVisible, setAlertVisible] = useState(false);
   const [alertConfig, setAlertConfig] = useState<{
     type: AlertType;
@@ -93,6 +188,18 @@ export default function GigDetailsScreen() {
 
   const Alert = { alert: showAlertNative };
 
+  const fetchApplicationsFallback = async (gigId: string) => {
+    const { data, error } = await supabase
+      .from("gig_applications")
+      .select("id, status, created_at, group_id, applicant_id")
+      .eq("gig_id", gigId)
+      .or("leader_approval_status.is.null,leader_approval_status.eq.approved")
+      .order("created_at", { ascending: false });
+
+    if (error) throw error;
+    return data || [];
+  };
+
   const handleNavigateToGig = async () => {
     try {
       await openNavigationDirections({
@@ -115,6 +222,55 @@ export default function GigDetailsScreen() {
     checkAuthorization();
   }, []);
 
+  const getRouteGigId = () => {
+    const gigId = Array.isArray(id) ? id[0] : id;
+    return typeof gigId === "string" && gigId.length > 0 ? gigId : null;
+  };
+
+  const hasAcceptedGigAccess = async (userId: string, gigId: string) => {
+    const { data: soloApplication, error: soloError } = await supabase
+      .from("gig_applications")
+      .select("id")
+      .eq("gig_id", gigId)
+      .eq("applicant_id", userId)
+      .is("group_id", null)
+      .in("status", ACCEPTED_GIG_STATUSES)
+      .limit(1)
+      .maybeSingle();
+
+    if (soloError) throw soloError;
+    if (soloApplication?.id) return true;
+
+    const { data: groupMembershipRows, error: membershipError } = await supabase
+      .from("group_members")
+      .select("group_id")
+      .eq("user_id", userId);
+
+    if (membershipError) throw membershipError;
+
+    const joinedGroupIds = Array.from(
+      new Set(
+        (groupMembershipRows || [])
+          .map((row: any) => row?.group_id)
+          .filter((value: any): value is string => typeof value === "string" && value.length > 0),
+      ),
+    );
+
+    if (joinedGroupIds.length === 0) return false;
+
+    const { data: groupApplication, error: groupError } = await supabase
+      .from("gig_applications")
+      .select("id")
+      .eq("gig_id", gigId)
+      .in("group_id", joinedGroupIds)
+      .in("status", ACCEPTED_GIG_STATUSES)
+      .limit(1)
+      .maybeSingle();
+
+    if (groupError) throw groupError;
+    return !!groupApplication?.id;
+  };
+
   const checkAuthorization = async () => {
     try {
       const {
@@ -125,6 +281,8 @@ export default function GigDetailsScreen() {
         return;
       }
 
+      setCurrentUserId(user.id);
+
       const { data: profile, error: profileError } = await supabase
         .from('profiles')
         .select('*')
@@ -133,86 +291,144 @@ export default function GigDetailsScreen() {
 
       if (profileError) throw profileError;
 
-      if (profile?.role !== "venue-owner") {
-        Alert.alert("Unauthorized", "Only venue owners can access this page.");
-        router.replace("/home");
+      const gigId = getRouteGigId();
+      if (!gigId) {
+        Alert.alert("Error", "Invalid gig ID");
+        router.replace("/feed");
         return;
       }
 
+      const { data: ownedGig, error: ownedGigError } = await supabase
+        .from("gigs")
+        .select("id")
+        .eq("id", gigId)
+        .eq("organizer_id", user.id)
+        .maybeSingle();
+
+      if (ownedGigError) throw ownedGigError;
+
+      const ownsGig = !!ownedGig?.id && profile?.role === "venue-owner";
+      const canViewAcceptedGig = ownsGig ? true : await hasAcceptedGigAccess(user.id, gigId);
+
+      if (!ownsGig && !canViewAcceptedGig) {
+        Alert.alert("Unauthorized", "You can only view gigs you manage or have been accepted for.");
+        router.replace("/feed");
+        return;
+      }
+
+      setCanManageGig(ownsGig);
       setAuthorized(true);
-      if (id) fetchData(user.id);
+      fetchData(user.id, ownsGig);
     } catch (e) {
       console.error("Authorization check failed:", e);
-      router.replace("/home");
+      router.replace("/feed");
     } finally {
       setCheckingAuth(false);
     }
   };
 
-  const fetchData = async (userId: string) => {
+  const fetchData = async (userId: string, canManage = canManageGig) => {
     setLoading(true);
     try {
       // Ensure id is a string, not an array
-      const gigId = Array.isArray(id) ? id[0] : id;
+      const gigId = getRouteGigId();
       if (!gigId) {
         Alert.alert("Error", "Invalid gig ID");
-        router.replace("/home");
+        router.replace("/feed");
         return;
       }
 
       console.log(`[manage_gig] Fetching data for gigId: ${gigId}, userId: ${userId}`);
 
-      // Base query + legacy projection merge
-      const { data: gigData, error: gigError } = await supabase
-        .from('gigs')
-        .select('*')
-        .eq('id', gigId)
-        .eq('organizer_id', userId)
-        .single();
-
-      const { data: legacyGig, error: legacyGigError } = await supabase
-        .from('gigs_legacy_projection')
-        .select('requirements, images, documents')
-        .eq('id', gigId)
-        .single();
+      // Load 3NF sources first so newly created gigs are visible immediately.
+      const [
+        { data: gigData, error: gigError },
+        { data: requirementRows, error: requirementsError },
+        { data: mediaRows, error: mediaError },
+        { data: legacyGig, error: legacyGigError },
+      ] = await Promise.all([
+        supabase
+          .from('gigs')
+          .select('*')
+          .eq('id', gigId)
+          .maybeSingle(),
+        supabase
+          .from('gig_requirements')
+          .select('requirement_key, requirement_value')
+          .eq('gig_id', gigId),
+        supabase
+          .from('gig_media')
+          .select('media_url, media_type, sort_order, created_at')
+          .eq('gig_id', gigId)
+          .eq('media_type', 'image')
+          .order('sort_order', { ascending: true })
+          .order('created_at', { ascending: true }),
+        supabase
+          .from('gigs_legacy_projection')
+          .select('requirements, images, documents')
+          .eq('id', gigId)
+          .single(),
+      ]);
 
       if (gigError) {
         console.log('[manage_gig] Failed to fetch gig details:', gigError.message);
-        // if (gigError.message?.includes("non-2xx")) {
-        //   console.log('[manage_gig] Full error object:', JSON.stringify(gigError));
-        // }
         throw gigError;
       }
+      if (!gigData) throw new Error("Gig not found");
+      if (canManage && gigData.organizer_id !== userId) throw new Error("Unauthorized");
+      if (requirementsError) throw requirementsError;
+      if (mediaError) throw mediaError;
+
+      // Legacy projection is fallback-only; do not fail page load if this read errors.
       if (legacyGigError) {
-        throw legacyGigError;
+        console.log('[manage_gig] Legacy projection unavailable, using direct 3NF rows only.');
       }
+
+      const requirementsFromRows = (requirementRows || []).reduce((acc: Record<string, any>, row: any) => {
+        if (!row?.requirement_key) return acc;
+        acc[row.requirement_key] = row.requirement_value;
+        return acc;
+      }, {});
+
+      const imagesFromRows = (mediaRows || [])
+        .map((row: any) => row?.media_url)
+        .filter((url: any) => typeof url === 'string' && url.length > 0);
+
       setGig({
         ...gigData,
-        requirements: legacyGig?.requirements || {},
-        images: legacyGig?.images || [],
+        requirements:
+          Object.keys(requirementsFromRows).length > 0
+            ? requirementsFromRows
+            : (legacyGig?.requirements || {}),
+        images: imagesFromRows.length > 0 ? imagesFromRows : (legacyGig?.images || []),
         documents: legacyGig?.documents || [],
       });
 
-      // Fetch Applications
-      try {
-        const { data: { session } } = await supabase.auth.getSession();
-        if (!session) throw new Error("No active session");
+      if (canManage) {
+        try {
+          const { data: { session } } = await supabase.auth.getSession();
+          if (!session) throw new Error("No active session");
 
-        const { data: appData, error: appError } =
-          await supabase.functions.invoke("gig-applications", {
-            body: { action: "fetch_gig_applications", gigId: gigId, userId },
-            headers: {
-              Authorization: `Bearer ${session.access_token}`,
-            },
-          });
-        if (appError) {
-          console.log('[manage_gig] Failed to fetch applications:', appError);
-          // Don't throw here, allowing the page to load at least the gig details
-        } else {
-          setApplications(appData || []);
+          const { data: appData, error: appError } =
+            await supabase.functions.invoke("gig-applications", {
+              body: { action: "fetch_gig_applications", gigId: gigId, userId },
+              headers: {
+                Authorization: `Bearer ${session.access_token}`,
+              },
+            });
+          if (appError) {
+            console.log('[manage_gig] Edge function failed for applications, trying direct query fallback.');
+            const fallbackApps = await fetchApplicationsFallback(gigId);
+            setApplications(fallbackApps);
+          } else {
+            setApplications(appData || []);
+          }
+        } catch (appErr) {
+          console.log('[manage_gig] Exception fetching applications; using empty list fallback:', appErr);
+          setApplications([]);
         }
-      } catch (appErr) {
-        console.log('[manage_gig] Exception fetching applications:', appErr);
+      } else {
+        setApplications([]);
       }
 
       // Direct query to reviews table
@@ -289,11 +505,121 @@ export default function GigDetailsScreen() {
     setModalVisible(true);
   };
 
-  const tabs = ["About", "Applicants", "Review"];
+  const getApplicationStatusMeta = (status: unknown) => {
+    const normalizedStatus = String(status || "pending").trim().toLowerCase();
 
-  const formatMusicianType = (type?: string) => {
+    if (normalizedStatus === "accepted" || normalizedStatus === "approved") {
+      return { label: "Accepted", color: "#10B981", backgroundColor: "#10B98115" };
+    }
+
+    if (normalizedStatus === "pending") {
+      return { label: "Pending", color: colors.primary, backgroundColor: colors.primary + "15" };
+    }
+
+    if (normalizedStatus === "completed") {
+      return { label: "Completed", color: "#2563EB", backgroundColor: "#2563EB15" };
+    }
+
+    if (normalizedStatus === "fired") {
+      return { label: "Fired", color: "#EF4444", backgroundColor: "#EF444415" };
+    }
+
+    if (normalizedStatus === "resigned") {
+      return { label: "Resigned", color: "#F97316", backgroundColor: "#F9731615" };
+    }
+
+    if (normalizedStatus === "cancelled" || normalizedStatus === "canceled") {
+      return { label: "Cancelled", color: "#EF4444", backgroundColor: "#EF444415" };
+    }
+
+    if (normalizedStatus === "rejected" || normalizedStatus === "declined") {
+      return { label: "Declined", color: "#EF4444", backgroundColor: "#EF444415" };
+    }
+
+    return {
+      label: normalizedStatus
+        .split("_")
+        .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+        .join(" "),
+      color: colors.textSecondary,
+      backgroundColor: colors.textSecondary + "15",
+    };
+  };
+
+  const closeInviteModal = () => {
+    if (sendingInvites) return;
+    setInviteModalVisible(false);
+    setInviteMessage("");
+    setSelectedInviteTargets([]);
+  };
+
+  const handleSendVenueInvites = async () => {
+    if (!currentUserId || !gig?.id || !canManageGig || sendingInvites) {
+      return;
+    }
+
+    if (selectedInviteTargets.length === 0) {
+      showAlert("warning", "No Talent Selected", "Select at least one musician, duo, or group to invite.");
+      return;
+    }
+
+    setSendingInvites(true);
+    try {
+      const inviteSummary = await sendVenueGigInvites({
+        currentUserId,
+        gigId: gig.id,
+        gigName: gig.name,
+        gigImage: Array.isArray(gig.images) ? gig.images[0] || null : null,
+        inviteMessage,
+        inviteTargets: selectedInviteTargets,
+      });
+
+      if (inviteSummary.sentCount === 0 && inviteSummary.failedCount > 0) {
+        const failureMessage =
+          inviteSummary.failures.map((failure) => failure.error).find(Boolean) ||
+          "No invites were sent. Please try again.";
+        throw new Error(failureMessage);
+      }
+
+      setInviteModalVisible(false);
+      setInviteMessage("");
+      setSelectedInviteTargets([]);
+      showAlert(
+        inviteSummary.failedCount > 0 ? "warning" : "success",
+        inviteSummary.failedCount > 0 ? "Invites Partially Sent" : "Invites Sent",
+        inviteSummary.failedCount > 0
+          ? `${inviteSummary.sentCount} invite(s) sent, ${inviteSummary.failedCount} failed.`
+          : `${inviteSummary.sentCount} invite(s) sent.`,
+      );
+    } catch (error: any) {
+      showAlert("error", "Invite Failed", error?.message || "Failed to send invites.");
+    } finally {
+      setSendingInvites(false);
+    }
+  };
+
+  const tabs = canManageGig ? OWNER_GIG_TABS : VIEWER_GIG_TABS;
+  const isInviteSubmitDisabled = sendingInvites || selectedInviteTargets.length === 0;
+  const visibleApplications = applications.filter((app) => {
+    const normalizedStatus = String(app?.status || "").trim().toLowerCase();
+    return !HIDDEN_APPLICANT_STATUSES.has(normalizedStatus);
+  });
+
+  const formatMusicianType = (requirements?: any) => {
+    const slots = requirements?.slots || {};
+    const soloNeeded = Number(slots?.solo?.needed || 0);
+    const duoNeeded = Number(slots?.duo?.needed || 0);
+    const bandNeeded = Number(slots?.band?.needed || 0);
+
+    if (duoNeeded > 0 && soloNeeded === 0 && bandNeeded === 0) return "Duo";
+    if (soloNeeded > 0 && duoNeeded === 0 && bandNeeded === 0) return "Solo";
+    if (bandNeeded > 0 && soloNeeded === 0 && duoNeeded === 0) return "Group";
+    if (soloNeeded > 0 && (duoNeeded > 0 || bandNeeded > 0)) return "Both";
+    if (duoNeeded > 0 || bandNeeded > 0) return "Group";
+
+    const type = requirements?.musician_type;
     if (!type) return "Not specified";
-    return type.charAt(0).toUpperCase() + type.slice(1);
+    return String(type).charAt(0).toUpperCase() + String(type).slice(1);
   };
 
   // Show loading while checking authorization
@@ -303,7 +629,7 @@ export default function GigDetailsScreen() {
         style={[
           styles.flex1,
           styles.centerContainer,
-          { backgroundColor: colors.background },
+          { backgroundColor: pageBackground },
         ]}
       >
         <ActivityIndicator size="large" color={colors.primary} />
@@ -327,12 +653,16 @@ export default function GigDetailsScreen() {
 
   return (
     <>
-      <View style={[styles.flex1, { backgroundColor: colors.background }]}>
-        <Header title="Manage Gig" />
+      <View style={[styles.flex1, { backgroundColor: pageBackground }]}>
+        <View style={[styles.pageFrame, isWebDesktop && styles.pageFrameWeb]}>
+        <Header title={canManageGig ? "Manage Gig" : "View Gig"} />
 
         <ScrollView
           showsVerticalScrollIndicator={false}
-          contentContainerStyle={styles.scrollContent}
+          contentContainerStyle={[
+            styles.scrollContent,
+            isWebDesktop && styles.scrollContentWeb,
+          ]}
         >
           {/* Header Image & Info */}
           <View style={styles.headerContainer}>
@@ -361,17 +691,17 @@ export default function GigDetailsScreen() {
               style={[styles.headerLocation, { color: colors.textSecondary }]}
             >
               {gig?.event_date
-                ? new Date(gig.event_date).toLocaleDateString()
+                ? formatDashedNumericDate(gig.event_date)
                 : "Date TBA"}
               {gig?.requirements?.event_start_time &&
                 gig?.requirements?.event_end_time
-                ? ` • ${gig.requirements.event_start_time} - ${gig.requirements.event_end_time}`
+                ? ` � ${gig.requirements.event_start_time} - ${gig.requirements.event_end_time}`
                 : ""}
-              {" • "}
+              {" � "}
               {gig?.location || "Location N/A"}
             </Text>
             {hasValidCoordinates(gig?.latitude, gig?.longitude) && (
-              <TouchableOpacity
+              <TouchableOpacity activeOpacity={1}
                 style={[styles.navigateButton, { backgroundColor: colors.primary }]}
                 onPress={handleNavigateToGig}
               >
@@ -429,7 +759,7 @@ export default function GigDetailsScreen() {
             ))}
           </View>
 
-          <View style={styles.contentContainer}>
+          <SmoothTabTransition activeKey={activeTab} style={styles.contentContainer}>
             {activeTab === "About" && (
               <View style={styles.aboutContainer}>
                 <View>
@@ -506,7 +836,7 @@ export default function GigDetailsScreen() {
                           marginBottom: 6,
                         }}
                       >
-                        Equipments
+                        Provided equipments
                       </Text>
                       <View
                         style={{
@@ -539,7 +869,7 @@ export default function GigDetailsScreen() {
                           )
                         ) : (
                           <Text style={{ color: colors.textSecondary }}>
-                            No specific equipments
+                            No provided equipments
                           </Text>
                         )}
                       </View>
@@ -581,35 +911,33 @@ export default function GigDetailsScreen() {
                           color: colors.text,
                         }}
                       >
-                        {formatMusicianType(gig?.requirements?.musician_type)}
+                        {formatMusicianType(gig?.requirements)}
                       </Text>
                     </View>
                   </View>
                 </View>
 
-                {/* The "Deal" Card */}
+                {/* The Offer Card */}
                 <View
                   style={[
-                    styles.dealCard,
+                    styles.offerCard,
                     {
                       backgroundColor: colors.surface,
                       borderColor: colors.primary,
                     },
                   ]}
                 >
-                  <View style={styles.dealHeader}>
+                  <View style={styles.offerHeader}>
                     <Ionicons
                       name="cash-outline"
                       size={24}
                       color={colors.primary}
                     />
-                    <Text style={[styles.dealTitle, { color: colors.text }]}>
-                      The Deal
-                    </Text>
+                    <Text style={[styles.offerTitle, { color: colors.text }]}>The Offer</Text>
                   </View>
                   <View
                     style={[
-                      styles.dealInfo,
+                      styles.offerInfo,
                       { borderColor: colors.border, borderBottomWidth: 0 },
                     ]}
                   >
@@ -636,7 +964,7 @@ export default function GigDetailsScreen() {
                       <Text
                         style={[styles.payoutAmount, { color: colors.primary }]}
                       >
-                        ₱{(gig?.budget || 0).toLocaleString()}
+                        ?{(gig?.budget || 0).toLocaleString()}
                       </Text>
                     </View>
                   </View>
@@ -785,7 +1113,7 @@ export default function GigDetailsScreen() {
                         onPress={() =>
                           router.push({
                             pathname: "/edit_gig",
-                            params: { id: gig?.id },
+                            params: { id: gig?.id, returnTab: "About" },
                           })
                         }
                         style={{ marginTop: 8 }}
@@ -808,16 +1136,28 @@ export default function GigDetailsScreen() {
 
             {activeTab === "Applicants" && (
               <View style={styles.applicantsContainer}>
-                <Text
-                  style={[
-                    styles.applicantsTitle,
-                    { color: colors.textSecondary },
-                  ]}
-                >
-                  APPLICANTS LIST
-                </Text>
+                <View style={styles.applicantsHeader}>
+                  <Text
+                    style={[
+                      styles.applicantsTitle,
+                      { color: colors.textSecondary },
+                    ]}
+                  >
+                    APPLICANTS LIST
+                  </Text>
+                  {canManageGig ? (
+                    <TouchableOpacity
+                      activeOpacity={1}
+                      onPress={() => setInviteModalVisible(true)}
+                      style={[styles.inviteBtn, { backgroundColor: colors.primary }]}
+                    >
+                      <Ionicons name="person-add-outline" size={16} color="#FFFFFF" />
+                      <Text style={styles.inviteBtnText}>Invite</Text>
+                    </TouchableOpacity>
+                  ) : null}
+                </View>
 
-                {applications.length === 0 ? (
+                {visibleApplications.length === 0 ? (
                   <Text
                     style={{
                       color: colors.textSecondary,
@@ -825,10 +1165,12 @@ export default function GigDetailsScreen() {
                       marginTop: 20,
                     }}
                   >
-                    No applications yet.
+                    No active applications yet.
                   </Text>
                 ) : (
-                  applications.map((app) => (
+                  visibleApplications.map((app) => {
+                    const statusMeta = getApplicationStatusMeta(app.status);
+                    return (
                     <View
                       key={app.id}
                       style={[
@@ -871,22 +1213,9 @@ export default function GigDetailsScreen() {
                               style={[
                                 styles.statusBadge,
                                 {
-                                  backgroundColor:
-                                    app.status === "pending"
-                                      ? colors.primary + "15"
-                                      : app.status === "accepted"
-                                        ? "#10B98115"
-                                        : app.status === "approved"
-                                          ? "#10B98115"
-                                          : "#EF444415",
+                                  backgroundColor: statusMeta.backgroundColor,
                                   borderWidth: 1,
-                                  borderColor:
-                                    app.status === "pending"
-                                      ? colors.primary
-                                      : app.status === "accepted" ||
-                                        app.status === "approved"
-                                        ? "#10B981"
-                                        : "#EF4444",
+                                  borderColor: statusMeta.color,
                                 },
                               ]}
                             >
@@ -894,21 +1223,10 @@ export default function GigDetailsScreen() {
                                 style={{
                                   fontFamily: "Poppins_600SemiBold",
                                   fontSize: 11,
-                                  color:
-                                    app.status === "pending"
-                                      ? colors.primary
-                                      : app.status === "accepted" ||
-                                        app.status === "approved"
-                                        ? "#10B981"
-                                        : "#EF4444",
+                                  color: statusMeta.color,
                                 }}
                               >
-                                {app.status === "accepted" ||
-                                  app.status === "approved"
-                                  ? "Accepted"
-                                  : app.status === "rejected"
-                                    ? "Declined"
-                                    : "Pending"}
+                                {statusMeta.label}
                               </Text>
                             </View>
                           </View>
@@ -923,7 +1241,7 @@ export default function GigDetailsScreen() {
                               app.applicant?.genres?.join(", ") ||
                               "Musician"}
                             {(app.group?.location || app.applicant?.location) &&
-                              ` • ${app.group?.location || app.applicant?.location}`}
+                              ` � ${app.group?.location || app.applicant?.location}`}
                           </Text>
                         </View>
                       </View>
@@ -1385,14 +1703,14 @@ export default function GigDetailsScreen() {
                       {/* View Full Profile Button */}
                       <TouchableOpacity activeOpacity={1}
                         onPress={() => {
-                          console.log("👤 View Profile pressed");
-                          console.log("👤 app.group:", app.group);
-                          console.log("👤 app.applicant:", app.applicant);
-                          console.log("👤 app.applicant_id:", app.applicant_id);
+                          console.log("?? View Profile pressed");
+                          console.log("?? app.group:", app.group);
+                          console.log("?? app.applicant:", app.applicant);
+                          console.log("?? app.applicant_id:", app.applicant_id);
 
                           if (app.group?.id) {
                             console.log(
-                              "👤 Navigating to group:",
+                              "?? Navigating to group:",
                               app.group.id,
                             );
                             router.push({
@@ -1401,7 +1719,7 @@ export default function GigDetailsScreen() {
                             });
                           } else if (app.applicant?.id) {
                             console.log(
-                              "👤 Navigating to profile with applicant.id:",
+                              "?? Navigating to profile with applicant.id:",
                               app.applicant.id,
                             );
                             router.push({
@@ -1410,7 +1728,7 @@ export default function GigDetailsScreen() {
                             });
                           } else if (app.applicant_id) {
                             console.log(
-                              "👤 Navigating to profile with applicant_id:",
+                              "?? Navigating to profile with applicant_id:",
                               app.applicant_id,
                             );
                             router.push({
@@ -1418,7 +1736,7 @@ export default function GigDetailsScreen() {
                               params: { userId: app.applicant_id },
                             });
                           } else {
-                            console.log("❌ No ID available for navigation");
+                            console.log("? No ID available for navigation");
                             Alert.alert("Error", "Unable to view profile");
                           }
                         }}
@@ -1445,7 +1763,7 @@ export default function GigDetailsScreen() {
                       </TouchableOpacity>
 
                       {/* Action Buttons */}
-                      {app.status === "pending" && (
+                      {canManageGig && String(app.status || "").toLowerCase() === "pending" && (
                         <View style={[styles.actionButtons, { marginTop: 12 }]}>
                           <TouchableOpacity activeOpacity={1}
                             onPress={() => confirmAction(app.id, "rejected")}
@@ -1482,7 +1800,8 @@ export default function GigDetailsScreen() {
                         </View>
                       )}
                     </View>
-                  ))
+                    );
+                  })
                 )}
               </View>
             )}
@@ -1528,12 +1847,14 @@ export default function GigDetailsScreen() {
                     >
                       <View style={styles.reviewUserHeader}>
                         <View style={styles.userInfo}>
-                          <Image
-                            source={{ uri: review.author?.avatar_url || null }}
+                          <ProfileAvatar
+                            uri={review.author?.avatar_url}
                             style={[
                               styles.userAvatar,
                               { backgroundColor: colors.border },
                             ]}
+                            backgroundColor={isDark ? "#374151" : "#E5E7EB"}
+                            iconColor={colors.textSecondary}
                           />
                           <Text
                             style={{
@@ -1551,7 +1872,7 @@ export default function GigDetailsScreen() {
                             fontFamily: "Poppins_400Regular",
                           }}
                         >
-                          {new Date(review.created_at).toLocaleDateString()}
+                          {formatDashedNumericDate(review.created_at)}
                         </Text>
                       </View>
                       <View style={[styles.starsRow, { marginBottom: 8 }]}>
@@ -1583,9 +1904,10 @@ export default function GigDetailsScreen() {
                 )}
               </View>
             )}
-          </View>
+          </SmoothTabTransition>
         </ScrollView>
 
+        </View>
         <Navbar />
       </View>
       <Modal
@@ -1595,7 +1917,94 @@ export default function GigDetailsScreen() {
         title={modalTitle}
         message={modalMessage}
         buttonText={modalButtonText}
+        danger={modalButtonText === "Decline"}
       />
+      <BottomSheetModal
+        ref={inviteSheetRef}
+        index={0}
+        snapPoints={inviteSnapPoints}
+        animationConfigs={inviteAnimationConfigs}
+        animateOnMount
+        enableDynamicSizing={false}
+        enableContentPanningGesture={false}
+        enableOverDrag={false}
+        enablePanDownToClose={!sendingInvites}
+        backdropComponent={renderInviteBackdrop}
+        backgroundStyle={{ backgroundColor: colors.background }}
+        handleIndicatorStyle={{
+          backgroundColor: isDark ? "#4B5563" : "#E5E7EB",
+          width: 40,
+        }}
+        onDismiss={handleInviteSheetDismiss}
+      >
+        <BottomSheetScrollView
+          contentContainerStyle={styles.inviteSheetContent}
+          showsVerticalScrollIndicator={false}
+          showsHorizontalScrollIndicator={false}
+          nestedScrollEnabled
+          keyboardShouldPersistTaps="handled"
+        >
+          <View style={[styles.inviteSheetHeader, { borderBottomColor: colors.border }]}>
+            <View style={styles.sheetHeaderCopy}>
+              <Text style={[styles.sheetEyebrow, { color: colors.textSecondary }]}>{gig?.name || "Gig"}</Text>
+              <Text style={[styles.sheetTitle, { color: colors.text }]}>Invite Performers</Text>
+            </View>
+            <TouchableOpacity
+              activeOpacity={1}
+              onPress={closeInviteModal}
+              style={[styles.sheetCloseButton, { backgroundColor: colors.card, borderColor: colors.border }]}
+            >
+              <Ionicons name="close" size={18} color={colors.text} />
+            </TouchableOpacity>
+          </View>
+          <View style={styles.modalContent}>
+            <ProductionInviteSection
+              currentUserId={currentUserId}
+              selectedTargets={selectedInviteTargets}
+              onSelectedTargetsChange={setSelectedInviteTargets}
+              inviteMessage={inviteMessage}
+              onInviteMessageChange={setInviteMessage}
+              disabled={sendingInvites}
+              title="Invite Musicians, Duo, or Group"
+              description="Search performers to invite to this gig. Recipients can respond from Bookings > Pending."
+              searchPlaceholder="Search musician, duo, or group"
+              messagePlaceholder="Add optional gig details for the invite"
+            />
+
+            <TouchableOpacity
+              activeOpacity={isInviteSubmitDisabled ? 1 : 0.78}
+              onPress={handleSendVenueInvites}
+              disabled={isInviteSubmitDisabled}
+              style={[
+                styles.submitBtn,
+                {
+                  backgroundColor:
+                    selectedInviteTargets.length > 0 ? colors.primary : colors.border,
+                  opacity: isInviteSubmitDisabled ? 0.6 : 1,
+                },
+              ]}
+            >
+              {sendingInvites ? (
+                <ActivityIndicator size="small" color="#fff" />
+              ) : (
+                <Text
+                  style={[
+                    styles.submitBtnText,
+                    {
+                      color:
+                        selectedInviteTargets.length > 0
+                          ? "#FFFFFF"
+                          : colors.textSecondary,
+                    },
+                  ]}
+                >
+                  Send Invites
+                </Text>
+              )}
+            </TouchableOpacity>
+          </View>
+        </BottomSheetScrollView>
+      </BottomSheetModal>
       <CustomAlert
         visible={alertVisible}
         type={alertConfig.type}
@@ -1612,12 +2021,29 @@ const styles = StyleSheet.create({
   flex1: {
     flex: 1,
   },
+  pageFrame: {
+    flex: 1,
+    width: "100%",
+  },
+  pageFrameWeb: {
+    maxWidth: 1240,
+    width: "100%",
+    alignSelf: "center",
+    paddingHorizontal: 20,
+    paddingTop: 12,
+  },
   centerContainer: {
     alignItems: "center",
     justifyContent: "center",
   },
   scrollContent: {
     paddingBottom: 180,
+  },
+  scrollContentWeb: {
+    maxWidth: 1120,
+    width: "100%",
+    alignSelf: "center",
+    paddingTop: 10,
   },
   headerContainer: {
     paddingHorizontal: 24,
@@ -1694,22 +2120,22 @@ const styles = StyleSheet.create({
     lineHeight: 24,
     fontFamily: "Poppins_400Regular",
   },
-  dealCard: {
+  offerCard: {
     padding: 20,
     borderRadius: 24,
     borderWidth: 1,
   },
-  dealHeader: {
+  offerHeader: {
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
     marginBottom: 8,
   },
-  dealTitle: {
+  offerTitle: {
     fontSize: 18,
     fontFamily: "Poppins_700Bold",
   },
-  dealInfo: {
+  offerInfo: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "flex-end",
@@ -1777,10 +2203,29 @@ const styles = StyleSheet.create({
   applicantsContainer: {
     gap: 16,
   },
+  applicantsHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+  },
   applicantsTitle: {
     fontSize: 13,
     letterSpacing: 0.5,
     fontFamily: "Poppins_600SemiBold",
+  },
+  inviteBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  inviteBtnText: {
+    color: "#FFFFFF",
+    fontFamily: "Poppins_600SemiBold",
+    fontSize: 12,
   },
   applicantCard: {
     padding: 16,
@@ -1907,6 +2352,56 @@ const styles = StyleSheet.create({
     paddingVertical: 2,
     borderRadius: 6,
   },
+  sheetHeaderCopy: {
+    flex: 1,
+    paddingRight: 12,
+  },
+  sheetEyebrow: {
+    fontSize: 11,
+    letterSpacing: 1.4,
+    textTransform: "uppercase",
+    fontFamily: "Poppins_700Bold",
+  },
+  sheetTitle: {
+    marginTop: 2,
+    fontSize: 20,
+    fontFamily: "Poppins_700Bold",
+  },
+  sheetCloseButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  inviteSheetContent: {
+    paddingHorizontal: 20,
+    paddingTop: 10,
+    paddingBottom: 28,
+  },
+  inviteSheetHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    borderBottomWidth: 1,
+    paddingBottom: 14,
+    marginBottom: 14,
+  },
+  modalContent: {
+    paddingHorizontal: 4,
+  },
+  submitBtn: {
+    marginTop: 20,
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: "center",
+  },
+  submitBtnText: {
+    color: "#fff",
+    fontFamily: "Poppins_600SemiBold",
+    fontSize: 15,
+  },
   skillTag: {
     paddingHorizontal: 10,
     paddingVertical: 4,
@@ -1994,3 +2489,4 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(0,0,0,0.3)",
   },
 });
+

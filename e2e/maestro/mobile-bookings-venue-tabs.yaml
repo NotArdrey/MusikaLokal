@@ -1,0 +1,13 @@
+appId: ${APP_ID}
+---
+- openLink: "musikalokal://bookings"
+- assertVisible:
+    id: "mobile-bookings-page"
+- assertVisible:
+    id: "mobile-bookings-tab-applicants"
+- assertVisible:
+    id: "mobile-bookings-tab-active-musicians"
+- assertVisible:
+    id: "mobile-bookings-tab-history"
+- assertNotVisible:
+    id: "mobile-bookings-tab-pending"

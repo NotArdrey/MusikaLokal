@@ -1,15 +1,17 @@
 import { Ionicons } from "@expo/vector-icons";
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
-import React, { useState } from "react";
+import React, { useRef, useState } from "react";
 import {
     ActivityIndicator,
     Image,
     Linking,
     Modal as RNModal,
+    Platform,
     ScrollView,
     StyleSheet,
     Text,
     TouchableOpacity,
+    useWindowDimensions,
     View,
 } from "react-native";
 import { Calendar } from "react-native-calendars";
@@ -18,16 +20,66 @@ import CustomAlert, { AlertType } from "../src/components/CustomAlert";
 import Header from "../src/components/header";
 import Modal from "../src/components/modal";
 import Navbar from "../src/components/navbar";
+import SmoothTabTransition from "../src/components/SmoothTabTransition";
 import { useTheme } from "../src/context/ThemeContext";
 import {
     hasValidCoordinates,
     openNavigationDirections,
 } from "../src/utils/navigation";
+import { formatDashedNumericDate } from "../src/utils/friendlyDateTime";
+
+const CUSTOM_DATE_PREVIEW_LIMIT = 5;
+const STUDIO_TABS = ["About", "Setup", "Bookings", "Review"];
+
+const canonicalizeStudioType = (
+  value: unknown,
+): "Rehearsal" | "Recording" | null => {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) return null;
+
+  if (normalized.includes("rehearsal")) return "Rehearsal";
+  if (normalized.includes("recording")) return "Recording";
+  return null;
+};
+
+const inferStudioTypeFromRows = (rows: unknown[]): "Rehearsal" | "Recording" | "Both" => {
+  const canonical = Array.from(
+    new Set(
+      rows
+        .map((row) => canonicalizeStudioType(row))
+        .filter((type): type is "Rehearsal" | "Recording" => Boolean(type)),
+    ),
+  );
+
+  if (canonical.length >= 2) return "Both";
+  return canonical[0] || "Both";
+};
 
 export default function StudioDetailsScreen() {
   const { colors, isDark } = useTheme();
-  const { id } = useLocalSearchParams(); // Get Studio ID
-  const [activeTab, setActiveTab] = useState("About");
+  const { width: viewportWidth } = useWindowDimensions();
+  const isWebDesktop = Platform.OS === "web" && viewportWidth >= 768;
+  const pageBackground = isWebDesktop
+    ? isDark
+      ? "#0A1224"
+      : "#E9EEF8"
+    : colors.background;
+  const pageCardBackground = isWebDesktop
+    ? isDark
+      ? "#0F172A"
+      : "#FFFFFF"
+    : colors.card;
+  const borderSoft = isWebDesktop
+    ? isDark
+      ? "#1E2C48"
+      : "#D8E3F2"
+    : colors.border;
+  const { id, tab } = useLocalSearchParams<{ id?: string | string[]; tab?: string | string[] }>(); // Get Studio ID
+  const requestedTab = Array.isArray(tab) ? tab[0] : tab;
+  const [activeTab, setActiveTab] = useState(
+    STUDIO_TABS.includes(requestedTab || "") ? requestedTab || "About" : "About",
+  );
   const [modalVisible, setModalVisible] = useState(false);
   const [modalTitle, setModalTitle] = useState("");
   const [modalMessage, setModalMessage] = useState("");
@@ -37,6 +89,7 @@ export default function StudioDetailsScreen() {
   );
   const [showReasonInput, setShowReasonInput] = useState(false);
   const [cancellationReason, setCancellationReason] = useState("");
+  const cancellationReasonRef = useRef("");
 
   // Calendar View State
   const [viewMode, setViewMode] = useState<"list" | "calendar">("list");
@@ -60,6 +113,14 @@ export default function StudioDetailsScreen() {
     title: "",
     message: "",
   });
+
+  useFocusEffect(
+    React.useCallback(() => {
+      if (requestedTab && STUDIO_TABS.includes(requestedTab) && requestedTab !== activeTab) {
+        setActiveTab(requestedTab);
+      }
+    }, [activeTab, requestedTab]),
+  );
 
   const showAlert = (
     type: AlertType,
@@ -201,7 +262,7 @@ export default function StudioDetailsScreen() {
 
       if (profile?.role !== "studio-owner") {
         Alert.alert("Unauthorized", "Only studio owners can access this page.");
-        router.replace("/home");
+        router.replace("/feed");
         return;
       }
 
@@ -209,7 +270,7 @@ export default function StudioDetailsScreen() {
       if (id) fetchData(user.id);
     } catch (e) {
       console.error("Authorization check failed:", e);
-      router.replace("/home");
+      router.replace("/feed");
     } finally {
       setCheckingAuth(false);
     }
@@ -222,7 +283,7 @@ export default function StudioDetailsScreen() {
       const studioId = Array.isArray(id) ? id[0] : id;
       if (!studioId) {
         Alert.alert("Error", "Invalid studio ID");
-        router.replace("/home");
+        router.replace("/feed");
         return;
       }
 
@@ -242,6 +303,11 @@ export default function StudioDetailsScreen() {
         .eq('id', studioId)
         .single();
 
+      const { data: studioTypesData, error: studioTypesError } = await supabase
+        .from('studio_types')
+        .select('studio_type')
+        .eq('studio_id', studioId);
+
       if (studioError) {
         console.log('[manage_studio] Failed to fetch studio details:', studioError.message);
         // if (studioError.message?.includes("non-2xx")) {
@@ -251,6 +317,10 @@ export default function StudioDetailsScreen() {
       }
       if (legacyStudioError) {
         throw legacyStudioError;
+      }
+      if (studioTypesError) {
+        console.log('[manage_studio] Failed to fetch studio_types:', studioTypesError.message);
+        throw studioTypesError;
       }
 
       const { data: operatingRows } = await supabase
@@ -291,12 +361,19 @@ export default function StudioDetailsScreen() {
             : [],
       }));
 
+      const normalized3nfTypes = (studioTypesData || [])
+        .map((row: any) => row?.studio_type)
+        .filter(Boolean);
+      const legacyTypes = Array.isArray(legacyStudio?.types)
+        ? legacyStudio.types
+        : [];
+      const resolvedStudioType = normalized3nfTypes.length > 0
+        ? inferStudioTypeFromRows(normalized3nfTypes)
+        : inferStudioTypeFromRows(legacyTypes);
+
       setStudio({
         ...studioData,
-        type:
-          Array.isArray(legacyStudio?.types) && legacyStudio.types.length > 1
-            ? 'Both'
-            : legacyStudio?.types?.[0] || 'Both',
+        type: resolvedStudioType,
         amenities: legacyStudio?.amenities || [],
         images: legacyStudio?.images || [],
         instruments: legacyStudio?.instruments || [],
@@ -394,6 +471,7 @@ export default function StudioDetailsScreen() {
     setModalButtonText(status === "confirmed" ? "Accept" : "Decline");
     setShowReasonInput(isDecline);
     setCancellationReason("");
+    cancellationReasonRef.current = "";
     setModalAction(() => async () => {
       try {
         const {
@@ -405,7 +483,7 @@ export default function StudioDetailsScreen() {
           bookingId,
           status as "confirmed" | "cancelled",
           user.id,
-          isDecline ? cancellationReason : undefined,
+          isDecline ? cancellationReasonRef.current.trim() : undefined,
         );
 
         // Update local state
@@ -415,6 +493,7 @@ export default function StudioDetailsScreen() {
         setModalVisible(false);
         setShowReasonInput(false);
         setCancellationReason("");
+        cancellationReasonRef.current = "";
       } catch (e) {
         console.log("Error updating booking:", e);
         Alert.alert("Error", "Failed to update booking status");
@@ -537,7 +616,7 @@ export default function StudioDetailsScreen() {
     }
   };
 
-  const tabs = ["About", "Setup", "Bookings", "Review"];
+  const tabs = STUDIO_TABS;
   const isRecordingOnlyStudio = studio?.type === "Recording";
   const isRehearsalOnlyStudio = studio?.type === "Rehearsal";
   const rehearsalRateValue = Number(studio?.rehearsal_rate || 0);
@@ -559,14 +638,25 @@ export default function StudioDetailsScreen() {
             : "Rate";
   const studioRateDisplay =
     hasRehearsalRate && hasRecordingRate
-      ? `₱${rehearsalRateValue.toLocaleString()}/hr | ₱${recordingRateValue.toLocaleString()}/song`
+      ? `?${rehearsalRateValue.toLocaleString()}/hr | ?${recordingRateValue.toLocaleString()}/song`
       : hasRecordingRate
-        ? `₱${recordingRateValue.toLocaleString()}/song`
+        ? `?${recordingRateValue.toLocaleString()}/song`
         : hasRehearsalRate
-          ? `₱${rehearsalRateValue.toLocaleString()}/hr`
+          ? `?${rehearsalRateValue.toLocaleString()}/hr`
           : hourlyRateValue > 0
-            ? `₱${hourlyRateValue.toLocaleString()}/hr`
+            ? `?${hourlyRateValue.toLocaleString()}/hr`
             : "N/A";
+  const studioEquipment = Array.isArray(studio?.instruments)
+    ? studio.instruments.filter((item: any) => {
+      if (typeof item === "string") return item.trim().length > 0;
+      return typeof item?.name === "string" && item.name.trim().length > 0;
+    })
+    : [];
+  const getEquipmentLabel = (item: any) => {
+    const name = typeof item === "string" ? item : item?.name;
+    const quantity = typeof item === "object" && item?.quantity ? ` x${item.quantity}` : "";
+    return `${name}${quantity}`;
+  };
 
   // Show loading while checking authorization
   if (checkingAuth) {
@@ -575,7 +665,7 @@ export default function StudioDetailsScreen() {
         style={[
           styles.flex1,
           styles.centerContainer,
-          { backgroundColor: colors.background },
+          { backgroundColor: pageBackground },
         ]}
       >
         <ActivityIndicator size="large" color={colors.primary} />
@@ -599,12 +689,16 @@ export default function StudioDetailsScreen() {
 
   return (
     <>
-      <View style={[styles.flex1, { backgroundColor: colors.background }]}>
+      <View style={[styles.flex1, { backgroundColor: pageBackground }]}>
+        <View style={[styles.pageFrame, isWebDesktop && styles.pageFrameWeb]}>
         <Header title="Manage Studio" />
 
         <ScrollView
           showsVerticalScrollIndicator={false}
-          contentContainerStyle={styles.scrollContent}
+          contentContainerStyle={[
+            styles.scrollContent,
+            isWebDesktop && styles.scrollContentWeb,
+          ]}
         >
           {/* Header Image & Info */}
           <View style={styles.headerContainer}>
@@ -637,7 +731,7 @@ export default function StudioDetailsScreen() {
               {studio?.address || "Location N/A"}
             </Text>
             {hasValidCoordinates(studio?.latitude, studio?.longitude) && (
-              <TouchableOpacity
+              <TouchableOpacity activeOpacity={1}
                 style={[styles.navigateButton, { backgroundColor: colors.primary }]}
                 onPress={handleNavigateToStudio}
               >
@@ -695,7 +789,7 @@ export default function StudioDetailsScreen() {
             ))}
           </View>
 
-          <View style={styles.contentContainer}>
+          <SmoothTabTransition activeKey={activeTab} style={styles.contentContainer}>
             {activeTab === "About" && (
               <View style={styles.aboutContainer}>
                 <View>
@@ -765,6 +859,37 @@ export default function StudioDetailsScreen() {
                     </Text>
                   </View>
                 </View>
+
+                {studioEquipment.length > 0 && (
+                  <View>
+                    <Text
+                      style={[
+                        styles.sectionTitle,
+                        { color: colors.text, marginBottom: 12 },
+                      ]}
+                    >
+                      Studio Equipment
+                    </Text>
+                    <View style={styles.tagsContainer}>
+                      {studioEquipment.map((item: any, i: number) => (
+                        <View
+                          key={item?.id || `${getEquipmentLabel(item)}-${i}`}
+                          style={[
+                            styles.tag,
+                            {
+                              borderColor: colors.border,
+                              backgroundColor: colors.surface,
+                            },
+                          ]}
+                        >
+                          <Text style={[styles.tagText, { color: colors.text }]}>
+                            {getEquipmentLabel(item)}
+                          </Text>
+                        </View>
+                      ))}
+                    </View>
+                  </View>
+                )}
 
                 {/* <View style={{ flexDirection: "row", gap: 16 }}> */}
                 {/* Recording Rate removed as requested */}
@@ -912,7 +1037,7 @@ export default function StudioDetailsScreen() {
                         onPress={() =>
                           router.push({
                             pathname: "/edit_studio",
-                            params: { id: studio?.id },
+                            params: { id: studio?.id, returnTab: "About" },
                           })
                         }
                         style={{ marginTop: 8 }}
@@ -972,15 +1097,11 @@ export default function StudioDetailsScreen() {
                     Equipment & Instruments
                   </Text>
                   <View style={styles.tagsContainer}>
-                    {studio?.instruments?.length ? (
-                      studio.instruments.map((item: any, i: number) => {
-                        const name = item?.name || item;
-                        const quantity = item?.quantity
-                          ? ` ×${item.quantity}`
-                          : "";
+                    {studioEquipment.length ? (
+                      studioEquipment.map((item: any, i: number) => {
                         return (
                           <View
-                            key={i}
+                            key={item?.id || `${getEquipmentLabel(item)}-${i}`}
                             style={[
                               styles.tag,
                               {
@@ -991,7 +1112,7 @@ export default function StudioDetailsScreen() {
                           >
                             <Text
                               style={[styles.tagText, { color: colors.text }]}
-                            >{`${name}${quantity}`}</Text>
+                            >{getEquipmentLabel(item)}</Text>
                           </View>
                         );
                       })
@@ -1057,16 +1178,17 @@ export default function StudioDetailsScreen() {
                       >
                         Custom Dates
                       </Text>
-                      {studio.calendar_availability.map(
-                        (entry: any, i: number) => (
-                          <View key={i} style={{ marginBottom: 8 }}>
+                      {studio.calendar_availability
+                        .slice(0, CUSTOM_DATE_PREVIEW_LIMIT)
+                        .map((entry: any, i: number) => (
+                          <View key={entry?.date || i} style={{ marginBottom: 8 }}>
                             <Text
                               style={{
                                 fontFamily: "Poppins_500Medium",
                                 color: colors.text,
                               }}
                             >
-                              {new Date(entry.date).toLocaleDateString()}
+                              {formatDashedNumericDate(entry.date)}
                             </Text>
                             <Text
                               style={{
@@ -1084,8 +1206,18 @@ export default function StudioDetailsScreen() {
                                 : "No slots"}
                             </Text>
                           </View>
-                        ),
-                      )}
+                        ))}
+                      {studio.calendar_availability.length > CUSTOM_DATE_PREVIEW_LIMIT ? (
+                        <Text
+                          style={{
+                            fontFamily: "Poppins_500Medium",
+                            color: colors.textSecondary,
+                            marginTop: 2,
+                          }}
+                        >
+                          +{studio.calendar_availability.length - CUSTOM_DATE_PREVIEW_LIMIT} more custom dates
+                        </Text>
+                      ) : null}
                     </View>
                   ) : null}
                 </View>
@@ -1139,7 +1271,7 @@ export default function StudioDetailsScreen() {
                           {studio.booking_settings.peak_season_dates
                             .map(
                               (d: any) =>
-                                `${new Date(d.start).toLocaleDateString()} - ${new Date(d.end).toLocaleDateString()}`,
+                                `${formatDashedNumericDate(d.start)} - ${formatDashedNumericDate(d.end)}`,
                             )
                             .join("; ")}
                         </Text>
@@ -1164,7 +1296,7 @@ export default function StudioDetailsScreen() {
                           {studio.booking_settings.off_peak_dates
                             .map(
                               (d: any) =>
-                                `${new Date(d.start).toLocaleDateString()} - ${new Date(d.end).toLocaleDateString()}`,
+                                `${formatDashedNumericDate(d.start)} - ${formatDashedNumericDate(d.end)}`,
                             )
                             .join("; ")}
                         </Text>
@@ -1181,7 +1313,7 @@ export default function StudioDetailsScreen() {
                   onPress={() =>
                     router.push({
                       pathname: "/edit_studio",
-                      params: { id: studio?.id },
+                      params: { id: studio?.id, returnTab: "Setup" },
                     })
                   }
                   style={[
@@ -1588,15 +1720,9 @@ export default function StudioDetailsScreen() {
                           <Text
                             style={[styles.bookingDate, { color: colors.text }]}
                           >
-                            {booking.raw_date
-                              ? new Date(booking.raw_date).toLocaleDateString()
-                              : booking.booking_date
-                                ? new Date(
-                                  booking.booking_date,
-                                ).toLocaleDateString()
-                                : new Date(
-                                  booking.start_time,
-                                ).toLocaleDateString()}
+                            {formatDashedNumericDate(
+                              booking.raw_date || booking.booking_date || booking.start_time,
+                            )}
                           </Text>
                         </View>
 
@@ -1753,7 +1879,6 @@ export default function StudioDetailsScreen() {
                   )}
               </View>
             )}
-
             {activeTab === "Review" && (
               <View>
                 <View style={styles.reviewHeader}>
@@ -1818,7 +1943,7 @@ export default function StudioDetailsScreen() {
                           fontFamily: "Poppins_400Regular",
                         }}
                       >
-                        {new Date(review.created_at).toLocaleDateString()}
+                        {formatDashedNumericDate(review.created_at)}
                       </Text>
                     </View>
                     <View style={[styles.starsRow, { marginBottom: 8 }]}>
@@ -1843,9 +1968,10 @@ export default function StudioDetailsScreen() {
                 ))}
               </View>
             )}
-          </View>
+          </SmoothTabTransition>
         </ScrollView>
 
+        </View>
         <Navbar />
       </View>
       <Modal
@@ -1854,15 +1980,20 @@ export default function StudioDetailsScreen() {
           setModalVisible(false);
           setShowReasonInput(false);
           setCancellationReason("");
+          cancellationReasonRef.current = "";
         }}
         onConfirm={modalAction}
         title={modalTitle}
         message={modalMessage}
         buttonText={modalButtonText}
+        danger={modalButtonText === "Decline"}
         showInput={showReasonInput}
-        onInputChange={setCancellationReason}
+        inputValue={cancellationReason}
+        onInputChange={(text) => {
+          cancellationReasonRef.current = text;
+          setCancellationReason(text);
+        }}
       />
-
       <CustomAlert
         visible={alertVisible}
         type={alertConfig.type}
@@ -2070,12 +2201,29 @@ const styles = StyleSheet.create({
   flex1: {
     flex: 1,
   },
+  pageFrame: {
+    flex: 1,
+    width: "100%",
+  },
+  pageFrameWeb: {
+    maxWidth: 1240,
+    width: "100%",
+    alignSelf: "center",
+    paddingHorizontal: 20,
+    paddingTop: 12,
+  },
   centerContainer: {
     alignItems: "center",
     justifyContent: "center",
   },
   scrollContent: {
     paddingBottom: 180,
+  },
+  scrollContentWeb: {
+    maxWidth: 1120,
+    width: "100%",
+    alignSelf: "center",
+    paddingTop: 10,
   },
   headerContainer: {
     paddingHorizontal: 24,
@@ -2513,3 +2661,5 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
 });
+
+

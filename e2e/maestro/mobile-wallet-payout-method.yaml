@@ -1,0 +1,34 @@
+appId: ${APP_ID}
+---
+- openLink: "musikalokal://wallet"
+- assertVisible:
+    id: "mobile-wallet-page"
+- tapOn:
+    id: "mobile-wallet-open-withdraw-button"
+- assertVisible:
+    id: "mobile-wallet-withdraw-modal"
+- tapOn:
+    id: "mobile-wallet-add-payout-empty-button"
+- assertVisible:
+    id: "mobile-wallet-add-payout-modal"
+- tapOn:
+    id: "mobile-wallet-payout-type-gcash"
+- tapOn:
+    id: "mobile-wallet-account-name-input"
+- inputText: ${E2E_PAYOUT_ACCOUNT_NAME}
+- hideKeyboard
+- scrollUntilVisible:
+    element:
+      id: "mobile-wallet-add-payout-submit-button"
+    direction: DOWN
+    timeout: 60000
+    speed: 80
+    visibilityPercentage: 50
+    centerElement: true
+- tapOn:
+    id: "mobile-wallet-add-payout-submit-button"
+- waitForAnimationToEnd:
+    timeout: 1500
+- tapOn:
+    id: "mobile-wallet-add-payout-submit-button"
+    optional: true

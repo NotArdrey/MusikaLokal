@@ -52,7 +52,6 @@ export default function ForgetPasswordScreen() {
   const getRedirectUrl = () => {
     // This creates exp://192.168.x.x:8082/--/change_password
     const url = Linking.createURL("change_password");
-    console.log("Generated Expo redirect URL:", url);
     return url;
   };
 
@@ -61,40 +60,40 @@ export default function ForgetPasswordScreen() {
     setModalVisible(false);
 
     if (!email.trim()) {
-      showAlert("error", "Error", "Please enter your email address.");
+      showAlert("warning", "Email Required", "Please enter your email address.");
       return;
     }
 
     if (!validateEmail(email.trim())) {
-      showAlert("error", "Error", "Please enter a valid email address.");
+      showAlert("warning", "Invalid Email", "Please enter a valid email address.");
       return;
     }
 
     setLoading(true);
     try {
       const redirectUrl = getRedirectUrl();
-      console.log("Password reset redirect URL:", redirectUrl);
 
-      const { error } = await supabase.auth.resetPasswordForEmail(
-        email.trim(),
-        {
+      const { data, error } = await supabase.functions.invoke("account-email", {
+        body: {
+          action: "send_password_reset",
+          email: email.trim(),
           redirectTo: redirectUrl,
         },
-      );
+      });
 
-      if (error) {
-        console.error("Password reset error:", error);
+      if (error || data?.error) {
+        console.error("Password reset error:", error || data?.error);
         showAlert(
-          "error",
-          "Error",
-          error.message || "Failed to send reset link. Please try again.",
+          "warning",
+          "Couldn't Send Reset",
+          data?.error || error?.message || "Failed to send reset link. Please try again.",
         );
       } else {
         setSuccessModalVisible(true);
       }
     } catch (e: any) {
       console.error("Password reset exception:", e);
-      showAlert("error", "Error", "An unexpected error occurred. Please try again.");
+      showAlert("warning", "Couldn't Send Reset", "An unexpected error occurred. Please try again.");
     } finally {
       setLoading(false);
     }
@@ -104,6 +103,8 @@ export default function ForgetPasswordScreen() {
     setSuccessModalVisible(false);
     router.back();
   };
+  const canSubmitReset = validateEmail(email.trim());
+  const isSubmitDisabled = loading || !canSubmitReset;
 
   return (
     <>
@@ -135,34 +136,34 @@ export default function ForgetPasswordScreen() {
             />
           </View>
           <Text style={[styles.helperText, { color: colors.textSecondary }]}>
-            We'll send a password reset link to this email.
+            We&apos;ll send a password reset link to this email.
           </Text>
         </View>
 
         <View style={styles.buttonSection}>
-          <TouchableOpacity activeOpacity={1}
+          <TouchableOpacity activeOpacity={isSubmitDisabled ? 1 : 0.78}
             style={[
               styles.button,
-              { backgroundColor: colors.primary },
-              loading && styles.buttonDisabled,
+              { backgroundColor: canSubmitReset ? colors.primary : colors.border },
+              isSubmitDisabled && styles.buttonDisabled,
             ]}
             onPress={() => {
               if (!email.trim()) {
-                showAlert("error", "Error", "Please enter your email address.");
+                showAlert("warning", "Email Required", "Please enter your email address.");
                 return;
               }
               if (!validateEmail(email.trim())) {
-                showAlert("error", "Error", "Please enter a valid email address.");
+                showAlert("warning", "Invalid Email", "Please enter a valid email address.");
                 return;
               }
               setModalVisible(true);
             }}
-            disabled={loading}
+            disabled={isSubmitDisabled}
           >
             {loading ? (
               <ActivityIndicator color="white" />
             ) : (
-              <Text style={styles.buttonText}>Send Reset Link</Text>
+              <Text style={[styles.buttonText, { color: canSubmitReset ? "white" : colors.textSecondary }]}>Send Reset Link</Text>
             )}
           </TouchableOpacity>
         </View>

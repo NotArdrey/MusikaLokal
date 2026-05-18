@@ -4,11 +4,13 @@ import React, { useEffect, useState } from "react";
 import {
     ActivityIndicator,
     Image,
+    Platform,
     ScrollView,
     StyleSheet,
     Switch,
     Text,
     TouchableOpacity,
+    useWindowDimensions,
     View,
 } from "react-native";
 import { supabase } from "../lib/supabase";
@@ -16,6 +18,8 @@ import CustomAlert, { AlertType } from "../src/components/CustomAlert";
 import Header from "../src/components/header";
 import Modal from "../src/components/modal";
 import Navbar from "../src/components/navbar";
+import ProfileAvatar from "../src/components/ProfileAvatar";
+import SmoothTabTransition from "../src/components/SmoothTabTransition";
 import { useAuth } from "../src/context/AuthContext";
 import { useTheme } from "../src/context/ThemeContext";
 import { getGroupMembersLabel, isGroupLeaderMember } from "../src/utils/groupMembers";
@@ -23,15 +27,38 @@ import {
     hasValidCoordinates,
     openNavigationDirections,
 } from "../src/utils/navigation";
+import { formatDashedNumericDate } from "../src/utils/friendlyDateTime";
 
 import { useLocalSearchParams } from "expo-router";
 
+const GROUP_TABS = ["About", "Applications", "Review"];
+
 export default function GroupDetailsScreen() {
   const { colors, isDark } = useTheme();
+  const { width: viewportWidth } = useWindowDimensions();
+  const isWebDesktop = Platform.OS === "web" && viewportWidth >= 768;
+  const pageBackground = isWebDesktop
+    ? isDark
+      ? "#0A1224"
+      : "#E9EEF8"
+    : colors.background;
+  const pageCardBackground = isWebDesktop
+    ? isDark
+      ? "#0F172A"
+      : "#FFFFFF"
+    : colors.card;
+  const borderSoft = isWebDesktop
+    ? isDark
+      ? "#1E2C48"
+      : "#D8E3F2"
+    : colors.border;
   const { isSystemLocked, showLockAlert } = useAuth();
-  const { id } = useLocalSearchParams();
+  const { id, tab } = useLocalSearchParams<{ id?: string | string[]; tab?: string | string[] }>();
+  const requestedTab = Array.isArray(tab) ? tab[0] : tab;
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState("About");
+  const [activeTab, setActiveTab] = useState(
+    GROUP_TABS.includes(requestedTab || "") ? requestedTab || "About" : "About",
+  );
   const [modalVisible, setModalVisible] = useState(false);
   const [modalTitle, setModalTitle] = useState("");
   const [modalMessage, setModalMessage] = useState("");
@@ -49,6 +76,12 @@ export default function GroupDetailsScreen() {
   const [applications, setApplications] = useState<any[]>([]);
   const [reviews, setReviews] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (requestedTab && GROUP_TABS.includes(requestedTab) && requestedTab !== activeTab) {
+      setActiveTab(requestedTab);
+    }
+  }, [activeTab, requestedTab]);
   const [alertVisible, setAlertVisible] = useState(false);
   const [alertConfig, setAlertConfig] = useState<{
     type: AlertType;
@@ -138,7 +171,7 @@ export default function GroupDetailsScreen() {
 
       if (profile?.role !== "musician") {
         showAlert("error", "Unauthorized", "Only musicians can access this page.");
-        router.replace("/home");
+        router.replace("/feed");
         return;
       }
 
@@ -146,7 +179,7 @@ export default function GroupDetailsScreen() {
       setAuthorized(true);
     } catch (e) {
       console.error("Authorization check failed:", e);
-      router.replace("/home");
+      router.replace("/feed");
     } finally {
       setCheckingAuth(false);
     }
@@ -163,7 +196,7 @@ export default function GroupDetailsScreen() {
       const groupId = Array.isArray(id) ? id[0] : id;
       if (!groupId) {
         showAlert("error", "Error", "Invalid group ID");
-        router.replace("/home");
+        router.replace("/feed");
         return;
       }
 
@@ -434,7 +467,7 @@ export default function GroupDetailsScreen() {
     }
   };
 
-  const tabs = ["About", "Applications", "Review"];
+  const tabs = GROUP_TABS;
   const hasSyncedMembers = groupMembers.length > 0;
   const displayMembers = hasSyncedMembers ? groupMembers : group?.members || [];
   const displayMemberCount = hasSyncedMembers
@@ -448,7 +481,7 @@ export default function GroupDetailsScreen() {
         style={[
           styles.flex1,
           styles.centerContainer,
-          { backgroundColor: colors.background },
+          { backgroundColor: pageBackground },
         ]}
       >
         <ActivityIndicator size="large" color={colors.primary} />
@@ -476,7 +509,7 @@ export default function GroupDetailsScreen() {
         style={[
           styles.flex1,
           styles.centerContainer,
-          { backgroundColor: colors.background },
+          { backgroundColor: pageBackground },
         ]}
       >
         <ActivityIndicator size="large" color={colors.primary} />
@@ -495,12 +528,16 @@ export default function GroupDetailsScreen() {
 
   return (
     <>
-      <View style={[styles.flex1, { backgroundColor: colors.background }]}>
+      <View style={[styles.flex1, { backgroundColor: pageBackground }]}>
+        <View style={[styles.pageFrame, isWebDesktop && styles.pageFrameWeb]}>
         <Header title="Manage Group" />
 
         <ScrollView
           showsVerticalScrollIndicator={false}
-          contentContainerStyle={styles.scrollContent}
+          contentContainerStyle={[
+            styles.scrollContent,
+            isWebDesktop && styles.scrollContentWeb,
+          ]}
         >
           {/* Header Image & Info */}
           <View style={styles.headerContainer}>
@@ -532,7 +569,7 @@ export default function GroupDetailsScreen() {
               {group?.location || "Location N/A"}
             </Text>
             {hasValidCoordinates(group?.latitude, group?.longitude) && (
-              <TouchableOpacity
+              <TouchableOpacity activeOpacity={1}
                 style={[styles.navigateButton, { backgroundColor: colors.primary }]}
                 onPress={handleNavigateToGroup}
               >
@@ -590,7 +627,7 @@ export default function GroupDetailsScreen() {
             ))}
           </View>
 
-          <View style={styles.contentContainer}>
+          <SmoothTabTransition activeKey={activeTab} style={styles.contentContainer}>
             {activeTab === "About" && (
               <View style={styles.aboutContainer}>
                 <View>
@@ -936,7 +973,7 @@ export default function GroupDetailsScreen() {
                         <Text style={{ color: colors.textSecondary }}>
                           Applied on:{" "}
                           {app.created_at
-                            ? new Date(app.created_at).toLocaleDateString()
+                            ? formatDashedNumericDate(app.created_at)
                             : "N/A"}
                         </Text>
                       </View>
@@ -987,12 +1024,14 @@ export default function GroupDetailsScreen() {
                     >
                       <View style={styles.reviewUserHeader}>
                         <View style={styles.userInfo}>
-                          <Image
-                            source={{ uri: review.author?.avatar_url || null }}
+                          <ProfileAvatar
+                            uri={review.author?.avatar_url}
                             style={[
                               styles.userAvatar,
                               { backgroundColor: colors.border },
                             ]}
+                            backgroundColor={isDark ? "#374151" : "#E5E7EB"}
+                            iconColor={colors.textSecondary}
                           />
                           <Text
                             style={{
@@ -1010,7 +1049,7 @@ export default function GroupDetailsScreen() {
                             fontFamily: "Poppins_400Regular",
                           }}
                         >
-                          {new Date(review.created_at).toLocaleDateString()}
+                          {formatDashedNumericDate(review.created_at)}
                         </Text>
                       </View>
                       <View style={[styles.starsRow, { marginBottom: 8 }]}>
@@ -1040,9 +1079,10 @@ export default function GroupDetailsScreen() {
                 )}
               </View>
             )}
-          </View>
+          </SmoothTabTransition>
         </ScrollView>
 
+        </View>
         <Navbar />
       </View>
       <Modal
@@ -1051,6 +1091,7 @@ export default function GroupDetailsScreen() {
         title={modalTitle}
         message={modalMessage}
         buttonText={modalButtonText}
+        danger={modalButtonText === "Reject"}
         onConfirm={() => {
           if (modalAction) {
             modalAction();
@@ -1073,12 +1114,29 @@ const styles = StyleSheet.create({
   flex1: {
     flex: 1,
   },
+  pageFrame: {
+    flex: 1,
+    width: "100%",
+  },
+  pageFrameWeb: {
+    maxWidth: 1240,
+    width: "100%",
+    alignSelf: "center",
+    paddingHorizontal: 20,
+    paddingTop: 12,
+  },
   centerContainer: {
     alignItems: "center",
     justifyContent: "center",
   },
   scrollContent: {
     paddingBottom: 180,
+  },
+  scrollContentWeb: {
+    maxWidth: 1120,
+    width: "100%",
+    alignSelf: "center",
+    paddingTop: 10,
   },
   headerContainer: {
     paddingHorizontal: 24,

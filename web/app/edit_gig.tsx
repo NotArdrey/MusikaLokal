@@ -1,5 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
-import * as FileSystem from "expo-file-system/legacy";
+import * as FileSystem from "expo-file-system/src/legacy";
 import { router } from "expo-router";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
@@ -11,7 +11,8 @@ import {
     Text,
     TextInput,
     TouchableOpacity,
-    View
+    View,
+    useWindowDimensions,
 } from "react-native";
 import { Calendar } from "react-native-calendars";
 import CustomAlert, { AlertType } from "../src/components/CustomAlert";
@@ -87,6 +88,7 @@ const formatTimeInput = (text: string): string => {
 
 const TITLE_MAX_LENGTH = 120;
 const DESCRIPTION_MAX_LENGTH = 1000;
+const IS_WEB = Platform.OS === "web";
 
 type EventSchedule = {
   date: string;
@@ -94,9 +96,115 @@ type EventSchedule = {
   end_time: string;
 };
 
+type StorageRef = {
+  bucket: string;
+  path: string;
+};
+
+const parseStorageRef = (rawUrl: string): StorageRef | null => {
+  if (!rawUrl || typeof rawUrl !== "string") return null;
+  const trimmed = rawUrl.trim();
+  if (!trimmed) return null;
+
+  const safeDecode = (value: string) => {
+    try {
+      return decodeURIComponent(value || "");
+    } catch {
+      return value || "";
+    }
+  };
+
+  const parsePath = (pathname: string) => {
+    const match = pathname.match(
+      /\/storage\/v1\/object\/(?:public|sign|authenticated)\/([^/]+)\/(.+)$/,
+    );
+    if (!match) return null;
+
+    const bucket = safeDecode(match[1] || "").trim();
+    const path = safeDecode((match[2] || "").split("?")[0] || "").trim();
+
+    if (!bucket || !path) return null;
+    return { bucket, path };
+  };
+
+  try {
+    const parsed = new URL(trimmed);
+    return parsePath(parsed.pathname);
+  } catch {
+    if (trimmed.startsWith("/storage/v1/object/")) {
+      return parsePath(trimmed);
+    }
+    return null;
+  }
+};
+
+const chunkArray = <T,>(items: T[], size: number): T[][] => {
+  const chunks: T[][] = [];
+  for (let index = 0; index < items.length; index += size) {
+    chunks.push(items.slice(index, index + size));
+  }
+  return chunks;
+};
+
+const removeStorageObjectsByUrl = async (urls: string[]) => {
+  const dedup = new Map<string, StorageRef>();
+
+  urls.forEach((url) => {
+    const parsed = parseStorageRef(url);
+    if (!parsed) return;
+    dedup.set(`${parsed.bucket}::${parsed.path}`, parsed);
+  });
+
+  const grouped = new Map<string, string[]>();
+  dedup.forEach(({ bucket, path }) => {
+    if (!grouped.has(bucket)) grouped.set(bucket, []);
+    grouped.get(bucket)!.push(path);
+  });
+
+  let deletedObjects = 0;
+  const errors: Array<{ bucket: string; message: string }> = [];
+
+  for (const [bucket, paths] of grouped.entries()) {
+    const chunks = chunkArray(paths, 100);
+    for (const pathsChunk of chunks) {
+      const { data, error } = await supabase.storage.from(bucket).remove(pathsChunk);
+
+      if (error) {
+        errors.push({ bucket, message: error.message });
+        continue;
+      }
+
+      deletedObjects += Array.isArray(data) ? data.length : 0;
+    }
+  }
+
+  return {
+    parsedObjects: dedup.size,
+    deletedObjects,
+    errors,
+  };
+};
+
 export default function EditGigScreen() {
   const { colors, isDark } = useTheme();
-  const { id } = useLocalSearchParams();
+  const { width } = useWindowDimensions();
+  const isWebDesktop = Platform.OS === 'web' && width >= 768;
+  const pageBackground = isWebDesktop ? (isDark ? '#0A1224' : '#E9EEF8') : colors.background;
+  const { id, reapply } = useLocalSearchParams<{
+    id?: string | string[];
+    reapply?: string | string[];
+    returnTab?: string | string[];
+  }>();
+  const returnTab = useLocalSearchParams<{
+    returnTab?: string | string[];
+  }>().returnTab;
+  const returnTabParam = Array.isArray(returnTab) ? returnTab[0] : returnTab;
+  const normalizedReturnTab = ["About", "Applicants", "Review"].includes(returnTabParam || "")
+    ? returnTabParam || "About"
+    : "About";
+  const reapplyParam = Array.isArray(reapply) ? reapply[0] : reapply;
+  const isReapplyRequested =
+    reapplyParam === "1" || reapplyParam === "true";
   const [gigName, setGigName] = useState("");
   const [description, setDescription] = useState("");
   const [address, setAddress] = useState("");
@@ -144,6 +252,19 @@ export default function EditGigScreen() {
     setAlertVisible(true);
   };
 
+  const handleReturnToTabs = useCallback(() => {
+    const gigId = Array.isArray(id) ? id[0] : id;
+    if (gigId) {
+      router.replace({
+        pathname: "/manage_gig",
+        params: { id: gigId, tab: normalizedReturnTab },
+      });
+      return;
+    }
+
+    router.replace("/my_venue");
+  }, [id, normalizedReturnTab]);
+
   const handleAttemptLeave = useCallback(() => {
     if (saving) return;
 
@@ -153,14 +274,15 @@ export default function EditGigScreen() {
       "Your current edits won't be saved unless you tap Save Changes.",
       [
         { text: "Stay", style: "cancel" },
-        { text: "Leave", style: "destructive", onPress: () => router.back() },
+        { text: "Leave", style: "destructive", onPress: handleReturnToTabs },
       ],
     );
-  }, [saving]);
+  }, [handleReturnToTabs, saving]);
 
   // Mock Data
   const [documents, setDocuments] = useState(["Contract.pdf", "Rider_v2.pdf"]);
   const [images, setImages] = useState<string[]>([]);
+  const [initialImages, setInitialImages] = useState<string[]>([]);
   const [thumbnailIndex, setThumbnailIndex] = useState(0);
   const [musicianType, setMusicianType] = useState<"solo" | "group" | "both">(
     "both",
@@ -204,6 +326,7 @@ export default function EditGigScreen() {
 
   // Contract state
   const [contractUrl, setContractUrl] = useState<string>("");
+  const [initialContractUrl, setInitialContractUrl] = useState<string>("");
   const [contractFileName, setContractFileName] = useState<string>("");
   const [uploadingContract, setUploadingContract] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -215,6 +338,11 @@ export default function EditGigScreen() {
   const [uploadingBusinessPermit, setUploadingBusinessPermit] = useState(false);
   const businessPermitInputRef = useRef<HTMLInputElement>(null);
   const [permitStatus, setPermitStatus] = useState<string>("pending_review");
+  const [permitRejectionReason, setPermitRejectionReason] = useState<string>("");
+  const [permitResubmissionsUsed, setPermitResubmissionsUsed] = useState(0);
+  const hasPermitResubmissionRemaining = permitResubmissionsUsed < 1;
+  const canReapplyPermit =
+    permitStatus === "rejected" && hasPermitResubmissionRemaining;
 
   const getNormalizedEventSchedules = (): EventSchedule[] => {
     const cleanedSchedules = eventSchedules
@@ -303,14 +431,14 @@ export default function EditGigScreen() {
 
       if (profile?.role !== "venue-owner") {
         showAlert("error", "Unauthorized", "Only venue owners can edit gigs.");
-        router.replace("/home");
+        router.replace("/feed");
         return;
       }
 
       setAuthorized(true);
     } catch (e) {
       console.error("Authorization check failed:", e);
-      router.replace("/home");
+      router.replace("/feed");
     } finally {
       setCheckingAuth(false);
     }
@@ -376,7 +504,7 @@ export default function EditGigScreen() {
       const gigId = Array.isArray(id) ? id[0] : id;
       if (!gigId) {
         showAlert("error", "Error", "Invalid gig ID");
-        router.replace("/home");
+        router.replace("/feed");
         return;
       }
 
@@ -420,7 +548,7 @@ export default function EditGigScreen() {
           "Not Found",
           "Gig not found or you do not have permission to edit it.",
         );
-        router.replace("/home");
+        router.replace("/feed");
         return;
       }
 
@@ -457,7 +585,7 @@ export default function EditGigScreen() {
           "Not Found",
           "Gig not found or you do not have permission to edit it.",
         );
-        router.replace("/home");
+        router.replace("/feed");
         return;
       }
 
@@ -490,8 +618,8 @@ export default function EditGigScreen() {
       setAddress(data.location);
       console.log('🔧 setAddress:', data.location);
 
-      setLatitude(data.latitude || null);
-      setLongitude(data.longitude || null);
+      setLatitude(data.latitude === null || data.latitude === undefined ? null : Number(data.latitude));
+      setLongitude(data.longitude === null || data.longitude === undefined ? null : Number(data.longitude));
       setCost(data.budget?.toString() || "");
       const schedulesFromRequirements = Array.isArray(data.requirements?.event_schedules)
         ? data.requirements.event_schedules
@@ -562,6 +690,7 @@ export default function EditGigScreen() {
       setReapplicationCooldownDays(data.reapplication_cooldown_days ?? 30);
 
       setContractUrl(data.contract_url || "");
+      setInitialContractUrl(data.contract_url || "");
       if (data.contract_url) {
         const fileName = data.contract_url.split("/").pop() || "Contract.pdf";
         setContractFileName(decodeURIComponent(fileName));
@@ -569,13 +698,16 @@ export default function EditGigScreen() {
       }
       setBusinessPermitUrl(data.business_permit_url || "");
       setInitialBusinessPermitUrl(data.business_permit_url || "");
-      setPermitStatus(data.permit_status || "pending_review");
+      setPermitStatus(String(data.permit_status || "pending_review").toLowerCase());
+      setPermitRejectionReason(data.permit_rejection_reason || "");
+      setPermitResubmissionsUsed(Number(data.permit_resubmissions_used || 0));
       if (data.business_permit_url) {
         const fileName = data.business_permit_url.split("/").pop() || "BusinessPermit.pdf";
         setBusinessPermitFileName(decodeURIComponent(fileName));
         console.log('🔧 setBusinessPermitFileName:', fileName);
       }
       setImages(data.images || []);
+      setInitialImages(data.images || []);
       console.log('🔧 setImages:', data.images || []);
 
       if (data.images && data.images.length > 0) {
@@ -586,7 +718,7 @@ export default function EditGigScreen() {
     } catch (e) {
       console.log("Error fetching gig details:", e);
       showAlert("error", "Error", "Failed to load gig details.");
-      router.replace("/home");
+      router.replace("/feed");
     } finally {
       setLoading(false);
     }
@@ -603,11 +735,11 @@ export default function EditGigScreen() {
       showAlert("error", "Required Field", "Please enter a description");
       return false;
     }
-    if (!address || !latitude || !longitude) {
+    if (!address.trim()) {
       showAlert(
         "error",
         "Required Field",
-        "Please select a location on the map",
+        "Please enter a venue address",
       );
       return false;
     }
@@ -638,6 +770,15 @@ export default function EditGigScreen() {
     return true;
   };
 
+  const isFormComplete =
+    gigName.trim().length > 0 &&
+    description.trim().length > 0 &&
+    address.trim().length > 0 &&
+    cost.trim().length > 0 &&
+    Number.parseFloat(cost) > 0 &&
+    images.length > 0 &&
+    getNormalizedEventSchedules().length > 0;
+
   const performSave = async () => {
     if (saving) return;
     setSaving(true);
@@ -658,6 +799,10 @@ export default function EditGigScreen() {
         setSaving(false);
         return;
       }
+
+      const previousImages = [...initialImages];
+      const previousContract = initialContractUrl || "";
+      const previousBusinessPermit = initialBusinessPermitUrl || "";
 
       const orderedImages = images.length > 0 && images[thumbnailIndex]
         ? [images[thumbnailIndex], ...images.filter((_, i) => i !== thumbnailIndex)]
@@ -712,6 +857,18 @@ export default function EditGigScreen() {
         },
       };
 
+      const rpcPayload = {
+        name: payload.name,
+        description: payload.description,
+        location: payload.location,
+        budget: payload.budget,
+        latitude: payload.latitude,
+        longitude: payload.longitude,
+        event_date: payload.event_date,
+        reapplication_cooldown_days: payload.reapplication_cooldown_days,
+        requirements: payload.requirements,
+      };
+
       console.log(
         "🔵 Updating gig with payload:",
         JSON.stringify(
@@ -731,20 +888,7 @@ export default function EditGigScreen() {
         'update_gig_safely',
         {
           p_gig_id: gigId,
-          p_payload: {
-            name: payload.name,
-            description: payload.description,
-            location: payload.location,
-            budget: payload.budget,
-            images: payload.images,
-            contract_url: payload.contract_url,
-            business_permit_url: payload.business_permit_url,
-            latitude: payload.latitude,
-            longitude: payload.longitude,
-            event_date: payload.event_date,
-            reapplication_cooldown_days: payload.reapplication_cooldown_days,
-            requirements: payload.requirements,
-          },
+          p_payload: rpcPayload,
           p_reason: 'Updated from Edit Gig screen by organizer',
         },
       );
@@ -787,17 +931,98 @@ export default function EditGigScreen() {
         throw new Error(rpcResult?.message || 'Failed to update gig');
       }
 
-      const shouldMarkResubmitted =
-        permitStatus === "rejected" &&
-        !!businessPermitUrl &&
-        businessPermitUrl !== initialBusinessPermitUrl;
+      const contractChanged = previousContract !== (payload.contract_url || "");
+      const businessPermitChanged =
+        previousBusinessPermit !== (payload.business_permit_url || "");
 
-      if (shouldMarkResubmitted) {
+      if (contractChanged || businessPermitChanged) {
+        const { error: refsError } = await supabase
+          .from("gigs")
+          .update({
+            contract_url: payload.contract_url,
+            business_permit_url: payload.business_permit_url,
+          })
+          .eq("id", gigId)
+          .eq("organizer_id", user.id);
+
+        if (refsError) {
+          throw new Error(`Failed to update gig file references: ${refsError.message}`);
+        }
+      }
+
+      const { error: deleteImagesError } = await supabase
+        .from("gig_media")
+        .delete()
+        .eq("gig_id", gigId)
+        .eq("media_type", "image");
+
+      if (deleteImagesError) {
+        throw new Error(`Failed to sync gig images: ${deleteImagesError.message}`);
+      }
+
+      if (payload.images.length > 0) {
+        const { error: insertImagesError } = await supabase
+          .from("gig_media")
+          .insert(
+            payload.images.map((media_url: string, index: number) => ({
+              gig_id: gigId,
+              media_type: "image",
+              media_url,
+              sort_order: index,
+            })),
+          );
+
+        if (insertImagesError) {
+          throw new Error(`Failed to sync gig images: ${insertImagesError.message}`);
+        }
+      }
+
+      const removedUrls = [
+        ...previousImages.filter((url) => !!url && !payload.images.includes(url)),
+        ...(previousContract && previousContract !== (payload.contract_url || "")
+          ? [previousContract]
+          : []),
+        ...(previousBusinessPermit && previousBusinessPermit !== (payload.business_permit_url || "")
+          ? [previousBusinessPermit]
+          : []),
+      ];
+
+      let storageCleanupWarnings: string[] = [];
+      if (removedUrls.length > 0) {
+        const storageCleanup = await removeStorageObjectsByUrl(removedUrls);
+        if (storageCleanup.errors.length > 0) {
+          storageCleanupWarnings = storageCleanup.errors.map(
+            (item) => `${item.bucket}: ${item.message}`,
+          );
+          console.warn("Storage cleanup warnings:", storageCleanupWarnings);
+        }
+      }
+
+      const shouldResetPermitReview =
+        !!businessPermitUrl &&
+        businessPermitUrl !== previousBusinessPermit;
+
+      const isReapplyAction =
+        isReapplyRequested && canReapplyPermit;
+      const reapplyLimitReached =
+        permitStatus === "rejected" &&
+        (shouldResetPermitReview || isReapplyRequested) &&
+        !hasPermitResubmissionRemaining;
+
+      if ((shouldResetPermitReview || isReapplyAction) && !reapplyLimitReached) {
+        const nextPermitStatus =
+          isReapplyAction || permitStatus === "rejected"
+            ? "resubmitted"
+            : "pending_review";
+
         const { error: permitStatusError } = await supabase
           .from("gigs")
           .update({
-            permit_status: "resubmitted",
+            permit_status: nextPermitStatus,
             permit_rejection_reason: null,
+            permit_admin_notes: null,
+            permit_reviewed_by: null,
+            permit_reviewed_at: null,
           })
           .eq("id", gigId)
           .eq("organizer_id", user.id);
@@ -806,7 +1031,11 @@ export default function EditGigScreen() {
           throw new Error(`Failed to update permit status: ${permitStatusError.message}`);
         }
 
-        setPermitStatus("resubmitted");
+        setPermitStatus(nextPermitStatus);
+        setPermitRejectionReason("");
+        if (nextPermitStatus === "resubmitted") {
+          setPermitResubmissionsUsed(1);
+        }
       }
 
       const reconfirmRequired = Number(rpcResult?.reconfirmation?.required_count || 0);
@@ -814,7 +1043,10 @@ export default function EditGigScreen() {
       const softClosed = Boolean(rpcResult?.soft_closed);
       const softClosedRejected = Number(rpcResult?.soft_closed_rejected_count || 0);
 
-      let successMessage = 'Gig updated successfully!';
+      let successMessage =
+        isReapplyAction
+          ? 'Gig updated and permit resubmitted for permit review.'
+          : 'Gig updated successfully!';
       const updateNotes: string[] = [];
 
       if (reconfirmRequired > 0) {
@@ -833,20 +1065,28 @@ export default function EditGigScreen() {
         }
       }
 
+      if (reapplyLimitReached) {
+        updateNotes.push('Permit remains rejected because the one allowed resubmission after decline was already used.');
+      }
+
+      if (storageCleanupWarnings.length > 0) {
+        updateNotes.push('Some replaced files could not be deleted from storage automatically.');
+      }
+
       if (updateNotes.length > 0) {
         successMessage += `\n\n${updateNotes.join('\n')}`;
       }
+
+      setInitialImages(payload.images);
+      setInitialContractUrl(payload.contract_url || "");
+      setInitialBusinessPermitUrl(payload.business_permit_url || "");
 
       console.log("✅ Gig Updated successfully");
       showAlert("success", "Success", successMessage, [
         {
           text: "OK",
           onPress: () => {
-            if (router.canGoBack()) {
-              router.back();
-            } else {
-              router.push("/manage_gig");
-            }
+            handleReturnToTabs();
           },
         },
       ]);
@@ -867,14 +1107,24 @@ export default function EditGigScreen() {
       return;
     }
 
+    const isReapplyAction = isReapplyRequested && canReapplyPermit;
+    const reapplyLimitReached =
+      permitStatus === "rejected" &&
+      isReapplyRequested &&
+      !hasPermitResubmissionRemaining;
+
     showAlert(
       "warning",
-      "Save Changes",
-      "Are you sure you want to update this gig profile?",
+      isReapplyAction ? "Save & Reapply" : "Save Changes",
+      reapplyLimitReached
+        ? "Save your updates now? Permit resubmission is no longer available because the one allowed retry was already used."
+        : isReapplyAction
+        ? "Save your updates and resubmit this gig permit for permit review?"
+        : "Are you sure you want to update this gig profile?",
       [
         { text: "Cancel", style: "cancel" },
         {
-          text: "Save & Update",
+          text: isReapplyAction ? "Save & Reapply" : "Save & Update",
           style: "default",
           onPress: () => performSave(),
         },
@@ -882,8 +1132,12 @@ export default function EditGigScreen() {
     );
   };
 
-  const renderSectionHeader = (title: string, icon: string) => (
-    <View style={styles.sectionHeader}>
+  const renderSectionHeader = (
+    title: string,
+    icon: string,
+    isFirstSection = false,
+  ) => (
+    <View style={[styles.sectionHeader, isFirstSection && styles.firstSectionHeader]}>
       <Ionicons name={icon as any} size={18} color={colors.primary} />
       <Text style={[styles.sectionTitle, { color: colors.text }]}>{title}</Text>
     </View>
@@ -903,11 +1157,19 @@ export default function EditGigScreen() {
       : normalizedLabel.includes("name") || normalizedLabel.includes("title")
         ? TITLE_MAX_LENGTH
         : undefined;
+    const isRequiredLabel =
+      normalizedLabel.includes("name") ||
+      normalizedLabel.includes("title") ||
+      normalizedLabel.includes("description") ||
+      normalizedLabel.includes("payout");
 
     return (
       <View style={styles.inputContainer}>
       <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>
         {label}
+        {isRequiredLabel ? (
+          <Text style={{ color: "#EF4444" }}> *</Text>
+        ) : null}
       </Text>
       <View
         style={[
@@ -934,6 +1196,7 @@ export default function EditGigScreen() {
               height: multiline ? 120 : "auto",
               textAlign: "left",
               textAlignVertical: multiline ? "top" : "center",
+              paddingVertical: multiline ? 12 : 16,
             },
           ]}
         />
@@ -1160,8 +1423,7 @@ export default function EditGigScreen() {
         setUploadingContract(false);
         return;
       }
-
-      const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
+const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
       const { data, error } = await supabase.storage
         .from("documents")
         .upload(filePath, file, {
@@ -1257,24 +1519,23 @@ export default function EditGigScreen() {
           style={{ display: "none" }}
         />
       )}
-      {Platform.OS === "web" && (
-        <input
-          ref={businessPermitInputRef as any}
-          type="file"
-          accept="application/pdf,image/*"
-          onChange={handleWebBusinessPermitSelect}
-          style={{ display: "none" }}
-        />
-      )}
-      <View style={[styles.flex1, { backgroundColor: colors.background }]}>
-        <Header title="Edit Gig" onBackPress={handleAttemptLeave} />
+      <View style={[styles.flex1, { backgroundColor: pageBackground }]}>
+        <Header title="Edit Gig" cardStyle onBackPress={() => router.replace('/manage')} />
+
+        <View style={styles.contentFrame}>
 
         <ScrollView
           showsVerticalScrollIndicator={false}
           contentContainerStyle={styles.scrollContent}
-          style={styles.flex1}
+          style={[
+            styles.formContainer,
+            {
+              backgroundColor: isDark ? "#111827" : "#FFFFFF",
+              borderColor: isDark ? "#1F2937" : "#E5E7EB",
+            },
+          ]}
         >
-          {renderSectionHeader("Basic Details", "information-circle")}
+          {renderSectionHeader("Basic Details", "information-circle", true)}
           {renderInput("Gig Title", gigName, setGigName, "e.g. Saturday Night Live")}
           {renderInput("Description", description, setDescription, "Brief description of the gig", true)}
 
@@ -1311,7 +1572,7 @@ export default function EditGigScreen() {
               ]}
             >
               <View
-                style={{ flexDirection: "row", alignItems: "center", gap: 8 }}
+                style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8 }}
               >
                 <Ionicons
                   name="location-outline"
@@ -1423,10 +1684,8 @@ export default function EditGigScreen() {
                 },
               ]}
             >
-              <View
-                style={{ flexDirection: "row", alignItems: "center", gap: 8 }}
-              >
-                <View style={{ flex: 1 }}>
+              <View style={styles.timeSlotRow}>
+                <View style={styles.timeSlotGroup}>
                   <Text
                     style={{
                       color: colors.textSecondary,
@@ -1437,13 +1696,7 @@ export default function EditGigScreen() {
                   >
                     START TIME
                   </Text>
-                  <View
-                    style={{
-                      flexDirection: "row",
-                      alignItems: "center",
-                      gap: 4,
-                    }}
-                  >
+                  <View style={styles.timeInputRow}>
                     <TextInput
                       value={eventStartTime.split(" ")[0]}
                       onChangeText={(text) => {
@@ -1477,13 +1730,7 @@ export default function EditGigScreen() {
                         { backgroundColor: isDark ? "#374151" : "#E5E7EB" },
                       ]}
                     >
-                      <Text
-                        style={{
-                          fontSize: 12,
-                          fontFamily: "Poppins_600SemiBold",
-                          color: colors.text,
-                        }}
-                      >
+                      <Text style={[styles.ampmBtnText, { color: colors.text }]}>
                         {eventStartTime.split(" ")[1]}
                       </Text>
                     </TouchableOpacity>
@@ -1493,9 +1740,9 @@ export default function EditGigScreen() {
                   name="arrow-forward"
                   size={20}
                   color={colors.textSecondary}
-                  style={{ marginTop: 20 }}
+                  style={styles.timeSlotArrow}
                 />
-                <View style={{ flex: 1 }}>
+                <View style={styles.timeSlotGroup}>
                   <Text
                     style={{
                       color: colors.textSecondary,
@@ -1506,13 +1753,7 @@ export default function EditGigScreen() {
                   >
                     END TIME
                   </Text>
-                  <View
-                    style={{
-                      flexDirection: "row",
-                      alignItems: "center",
-                      gap: 4,
-                    }}
-                  >
+                  <View style={styles.timeInputRow}>
                     <TextInput
                       value={eventEndTime.split(" ")[0]}
                       onChangeText={(text) => {
@@ -1546,13 +1787,7 @@ export default function EditGigScreen() {
                         { backgroundColor: isDark ? "#374151" : "#E5E7EB" },
                       ]}
                     >
-                      <Text
-                        style={{
-                          fontSize: 12,
-                          fontFamily: "Poppins_600SemiBold",
-                          color: colors.text,
-                        }}
-                      >
+                      <Text style={[styles.ampmBtnText, { color: colors.text }]}>
                         {eventEndTime.split(" ")[1]}
                       </Text>
                     </TouchableOpacity>
@@ -1601,7 +1836,7 @@ export default function EditGigScreen() {
                     key={`${item.date}-${item.start_time}-${item.end_time}-${index}`}
                     style={[styles.dayCard, { backgroundColor: isDark ? "#1F2937" : "#F9FAFB", borderColor: colors.border, padding: 12, flexDirection: "row", alignItems: "center", justifyContent: "space-between" }]}
                   >
-                    <View style={{ flex: 1, paddingRight: 8 }}>
+                    <View style={{ flex: 1, minWidth: 150, paddingRight: 8 }}>
                       <Text style={{ color: colors.text, fontFamily: "Poppins_600SemiBold", fontSize: 12 }}>
                         {new Date(item.date).toLocaleDateString("en-US", {
                           weekday: "short",
@@ -1642,7 +1877,7 @@ export default function EditGigScreen() {
             {/* Solo Artists Slots */}
             <View style={[styles.slotCard, { backgroundColor: isDark ? "#1F2937" : "#F9FAFB", borderColor: isDark ? "#374151" : "#E5E7EB" }]}>
               <View style={styles.slotHeader}>
-                <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
                   <Ionicons name="person" size={20} color="#EC4899" />
                   <Text style={[styles.slotTitle, { color: colors.text }]}>Solo Artists</Text>
                 </View>
@@ -1824,7 +2059,7 @@ export default function EditGigScreen() {
             {/* Duo Slots */}
             <View style={[styles.slotCard, { backgroundColor: isDark ? "#1F2937" : "#F9FAFB", borderColor: isDark ? "#374151" : "#E5E7EB", marginTop: 12 }]}>
               <View style={styles.slotHeader}>
-                <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
                   <Ionicons name="people" size={20} color="#8B5CF6" />
                   <Text style={[styles.slotTitle, { color: colors.text }]}>Duos (2 members)</Text>
                 </View>
@@ -2006,7 +2241,7 @@ export default function EditGigScreen() {
             {/* Preferred Group Type Slots */}
             <View style={[styles.slotCard, { backgroundColor: isDark ? "#1F2937" : "#F9FAFB", borderColor: isDark ? "#374151" : "#E5E7EB", marginTop: 12 }]}>
               <View style={styles.slotHeader}>
-                <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
                   <Ionicons name="musical-notes" size={20} color="#3B82F6" />
                   <Text style={[styles.slotTitle, { color: colors.text }]}>Preferred Group Type</Text>
                 </View>
@@ -2062,7 +2297,7 @@ export default function EditGigScreen() {
                             {type.label}
                           </Text>
                           {typeCount > 0 && (
-                            <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+                            <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 4 }}>
                               <View
                                 style={{
                                   minWidth: 20,
@@ -2079,7 +2314,7 @@ export default function EditGigScreen() {
                                 </Text>
                               </View>
                               <TouchableOpacity
-                                activeOpacity={0.8}
+                                activeOpacity={1}
                                 onPress={(event) => {
                                   event.stopPropagation();
                                   setPreferredGroupTypes((prev) => {
@@ -2288,7 +2523,7 @@ export default function EditGigScreen() {
             </Text>
             <View style={[styles.slotCard, { backgroundColor: isDark ? "#1F2937" : "#F9FAFB", borderColor: isDark ? "#374151" : "#E5E7EB" }]}>
               <View style={styles.slotHeader}>
-                <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
                   <Ionicons name="time-outline" size={20} color={colors.primary} />
                   <Text style={[styles.slotTitle, { color: colors.text }]}>Cooldown Period</Text>
                 </View>
@@ -2417,8 +2652,8 @@ export default function EditGigScreen() {
           </View>
 
           <View style={styles.inputContainer}>
-            <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>
-              Equipments
+            <Text style={[styles.inputLabel, { color: colors.textSecondary }]}> 
+              Provided equipments
             </Text>
             <View style={[styles.addMemberRow, { marginBottom: 8 }]}>
               <View
@@ -2563,7 +2798,7 @@ export default function EditGigScreen() {
                     alignItems: "center",
                     gap: 12,
                     flex: 1,
-                  }}
+                  minWidth: 150 }}
                 >
                   <View
                     style={[
@@ -2601,7 +2836,7 @@ export default function EditGigScreen() {
               <TouchableOpacity
                 onPress={handleContractUpload}
                 disabled={uploadingContract}
-                activeOpacity={1}
+                activeOpacity={uploadingContract ? 1 : 0.78}
                 style={[
                   styles.uploadContractBtn,
                   {
@@ -2635,103 +2870,6 @@ export default function EditGigScreen() {
               </TouchableOpacity>
             )}
           </View>
-
-          {renderSectionHeader("Business Permit", "shield-checkmark")}
-          <View style={styles.inputContainer}>
-            <Text
-              style={[styles.inputSubLabel, { color: colors.textSecondary }]}
-            >
-              Upload your business permit (PDF or Image)
-            </Text>
-            {businessPermitUrl ? (
-              <View
-                style={[
-                  styles.contractPreview,
-                  {
-                    backgroundColor: isDark ? "#1F2937" : "#F3F4F6",
-                    borderColor: isDark ? "#374151" : "#E5E7EB",
-                  },
-                ]}
-              >
-                <View
-                  style={{
-                    flexDirection: "row",
-                    alignItems: "center",
-                    gap: 12,
-                    flex: 1,
-                  }}
-                >
-                  <View
-                    style={[
-                      styles.pdfIcon,
-                      { backgroundColor: "#10B981" },
-                    ]}
-                  >
-                    <Ionicons name="shield-checkmark" size={24} color="#fff" />
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text
-                      style={[styles.contractFileName, { color: colors.text }]}
-                      numberOfLines={1}
-                    >
-                      {businessPermitFileName}
-                    </Text>
-                    <Text
-                      style={[
-                        styles.contractFileSize,
-                        { color: colors.textSecondary },
-                      ]}
-                    >
-                      Business Permit
-                    </Text>
-                  </View>
-                </View>
-                <TouchableOpacity activeOpacity={1}
-                  onPress={removeBusinessPermit}
-                  style={styles.removeContractBtn}
-                >
-                  <Ionicons name="trash-outline" size={20} color="#EF4444" />
-                </TouchableOpacity>
-              </View>
-            ) : (
-              <TouchableOpacity
-                onPress={handleBusinessPermitUpload}
-                disabled={uploadingBusinessPermit}
-                activeOpacity={1}
-                style={[
-                  styles.uploadContractBtn,
-                  {
-                    backgroundColor: colors.inputBackground,
-                    borderColor: isDark ? "#374151" : "#E5E7EB",
-                  },
-                ]}
-              >
-                {uploadingBusinessPermit ? (
-                  <ActivityIndicator size="small" color={colors.primary} />
-                ) : (
-                  <>
-                    <Ionicons
-                      name="shield-checkmark-outline"
-                      size={32}
-                      color={colors.textSecondary}
-                    />
-                    <Text style={[styles.uploadText, { color: colors.text }]}>
-                      Upload Business Permit
-                    </Text>
-                    <Text
-                      style={[
-                        styles.uploadSubText,
-                        { color: colors.textSecondary },
-                      ]}
-                    >
-                      PDF or Image format
-                    </Text>
-                  </>
-                )}
-              </TouchableOpacity>
-            )}
-          </View>
-
           <View style={styles.footerActions}>
             <TouchableOpacity
               style={[
@@ -2739,18 +2877,25 @@ export default function EditGigScreen() {
                 {
                   backgroundColor: saving
                     ? colors.textSecondary
-                    : colors.primary,
+                    : isFormComplete
+                      ? colors.primary
+                      : colors.border,
+                  opacity: saving || !isFormComplete ? 0.6 : 1,
                   shadowColor: colors.primary,
                 },
               ]}
               onPress={handleSave}
-              disabled={saving}
-              activeOpacity={1}
+              disabled={saving || !isFormComplete}
+              activeOpacity={saving || !isFormComplete ? 1 : 0.78}
             >
               {saving ? (
                 <ActivityIndicator size="small" color="#fff" />
               ) : (
-                <Text style={styles.saveButtonText}>Save Changes</Text>
+                <Text style={[styles.saveButtonText, { color: isFormComplete ? "#FFFFFF" : colors.textSecondary }]}>
+                  {isReapplyRequested && canReapplyPermit
+                    ? "Save & Reapply"
+                    : "Save Changes"}
+                </Text>
               )}
             </TouchableOpacity>
 
@@ -2769,6 +2914,7 @@ export default function EditGigScreen() {
             </TouchableOpacity>
           </View>
         </ScrollView>
+        </View>
 
         <Navbar />
       </View>
@@ -2799,7 +2945,7 @@ export default function EditGigScreen() {
           setLocationPickerVisible(false);
         }}
         initialLocation={
-          latitude && longitude ? { lat: latitude, lng: longitude } : undefined
+          latitude !== null && longitude !== null ? { lat: latitude, lng: longitude } : undefined
         }
       />
     </>
@@ -2814,39 +2960,63 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
+  contentFrame: {
+    flex: 1,
+    width: "100%",
+    maxWidth: IS_WEB ? 1080 : undefined,
+    alignSelf: "center",
+    paddingHorizontal: IS_WEB ? 24 : 0,
+    paddingTop: IS_WEB ? 16 : 0,
+  },
+  formContainer: {
+    flex: 1,
+    marginTop: IS_WEB ? 0 : 16,
+    borderRadius: IS_WEB ? 20 : 0,
+    borderWidth: IS_WEB ? 1 : 0,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 14 },
+    shadowOpacity: IS_WEB ? 0.08 : 0,
+    shadowRadius: IS_WEB ? 22 : 0,
+    elevation: IS_WEB ? 3 : 0,
+  },
   scrollContent: {
-    paddingTop: 16,
-    paddingBottom: 160,
-    paddingHorizontal: 24,
+    paddingHorizontal: IS_WEB ? 28 : 24,
+    paddingTop: IS_WEB ? 26 : 16,
+    paddingBottom: IS_WEB ? 170 : 160,
   },
   sectionHeader: {
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
-    marginBottom: 16,
     marginTop: 24,
+    marginBottom: 16,
+  },
+  firstSectionHeader: {
+    marginTop: 0,
   },
   sectionTitle: {
     fontFamily: "Poppins_600SemiBold",
     fontSize: 16,
   },
   inputContainer: {
-    marginBottom: 16,
+    marginBottom: 20,
   },
   inputLabel: {
-    marginBottom: 8,
+    marginBottom: 10,
     fontSize: 12,
     textTransform: "uppercase",
     letterSpacing: 1,
     fontFamily: "Poppins_600SemiBold",
   },
   inputWrapper: {
-    borderRadius: 12,
+    borderRadius: 14,
     borderWidth: 1,
     overflow: "hidden",
   },
   input: {
-    padding: 16,
+    paddingHorizontal: 16,
+    paddingVertical: IS_WEB ? 14 : 16,
+    fontSize: 14,
     textAlign: "left",
     textAlignVertical: "center",
   },
@@ -2909,6 +3079,32 @@ const styles = StyleSheet.create({
     fontFamily: "Poppins_400Regular",
     marginBottom: 8,
   },
+  rejectionNotice: {
+    borderRadius: 12,
+    borderWidth: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginBottom: 12,
+  },
+  rejectionNoticeTitle: {
+    color: "#B91C1C",
+    fontSize: 12,
+    fontFamily: "Poppins_700Bold",
+  },
+  rejectionNoticeText: {
+    marginTop: 4,
+    color: "#DC2626",
+    fontSize: 12,
+    lineHeight: 17,
+    fontFamily: "Poppins_500Medium",
+  },
+  rejectionNoticeReason: {
+    marginTop: 6,
+    color: "#DC2626",
+    fontSize: 12,
+    lineHeight: 17,
+    fontFamily: "Poppins_600SemiBold",
+  },
   uploadContractBtn: {
     padding: 32,
     borderWidth: 2,
@@ -2960,20 +3156,51 @@ const styles = StyleSheet.create({
     padding: 16,
   },
   timeInput: {
-    paddingVertical: 10,
+    height: 44,
+    minWidth: 74,
+    paddingVertical: 0,
     paddingHorizontal: 12,
     borderRadius: 8,
     borderWidth: 1,
     fontSize: 14,
     fontFamily: "Poppins_500Medium",
+    textAlign: "center",
+    textAlignVertical: "center",
+    includeFontPadding: false,
   },
   ampmBtn: {
-    paddingVertical: 10,
-    paddingHorizontal: 16,
+    width: 52,
+    height: 44,
+    paddingVertical: 0,
+    paddingHorizontal: 0,
     borderRadius: 8,
     alignItems: "center",
     justifyContent: "center",
-    minWidth: 60,
+  },
+  ampmBtnText: {
+    fontSize: 12,
+    lineHeight: 16,
+    fontFamily: "Poppins_600SemiBold",
+    textAlign: "center",
+    includeFontPadding: false,
+  },
+  timeSlotRow: {
+    flexDirection: "row",
+    alignItems: "flex-end",
+    flexWrap: "wrap",
+    gap: 8,
+  },
+  timeSlotGroup: {
+    flex: 1,
+    minWidth: 130,
+  },
+  timeInputRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+  },
+  timeSlotArrow: {
+    marginBottom: 12,
   },
   calendarContainer: {
     borderRadius: 12,
@@ -3015,23 +3242,27 @@ const styles = StyleSheet.create({
   experienceLevelContainer: {
     flexDirection: "row",
     flexWrap: "wrap",
-    gap: 8,
+    justifyContent: "space-between",
+    rowGap: 12,
   },
   experienceButton: {
+    width: "48%",
+    minHeight: 56,
     paddingVertical: 12,
     paddingHorizontal: 16,
     borderRadius: 12,
     borderWidth: 1,
-    flex: 1,
-    minWidth: "45%",
     alignItems: "center",
+    justifyContent: "center",
   },
   experienceButtonText: {
     fontSize: 13,
     fontFamily: "Poppins_500Medium",
   },
   textInput: {
-    padding: 16,
+    paddingHorizontal: 16,
+    paddingVertical: IS_WEB ? 14 : 16,
+    fontSize: 14,
     fontFamily: "Poppins_400Regular",
   },
   // Slot Card Styles

@@ -22,7 +22,6 @@ export const useCurrentUserVenueRole = () => {
         setHasExistingVenue(false);
       }
     } catch (e) {
-      console.log("Error checking venue:", e);
       setHasExistingVenue(false);
     } finally {
       setCheckingVenue(false);

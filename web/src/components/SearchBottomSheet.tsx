@@ -4,6 +4,7 @@ import {
     BottomSheetModal,
     useBottomSheetTimingConfigs,
 } from "@gorhom/bottom-sheet";
+import { router } from "expo-router";
 import React, {
     forwardRef,
     useCallback,
@@ -76,14 +77,92 @@ const SORT_OPTIONS = [
 
 const PAGE_SIZE = 10;
 
+const getSearchResultTimestamp = (item: any) => {
+  const rawValue = item?.created_at;
+  if (!rawValue) return 0;
+
+  const timestamp = new Date(rawValue).getTime();
+  return Number.isFinite(timestamp) ? timestamp : 0;
+};
+
+const interleaveSearchResultsByType = (items: any[]) => {
+  if (!Array.isArray(items) || items.length <= 1) {
+    return items;
+  }
+
+  const buckets = new Map<string, any[]>();
+
+  items.forEach((item) => {
+    const typeKey = String(item?.type || "Unknown");
+    const bucket = buckets.get(typeKey);
+    if (bucket) {
+      bucket.push(item);
+      return;
+    }
+
+    buckets.set(typeKey, [item]);
+  });
+
+  const orderedTypes = Array.from(buckets.keys());
+  const output: any[] = [];
+
+  while (output.length < items.length) {
+    let addedItem = false;
+
+    for (const typeKey of orderedTypes) {
+      const bucket = buckets.get(typeKey);
+      if (!bucket || bucket.length === 0) {
+        continue;
+      }
+
+      output.push(bucket.shift());
+      addedItem = true;
+    }
+
+    if (!addedItem) {
+      break;
+    }
+  }
+
+  return output;
+};
+
+const collectProfileValues = (rows: any[] | null | undefined, valueKey: string) => {
+  const valueMap = new Map<string, string[]>();
+
+  (rows || []).forEach((row: any) => {
+    const profileId = row?.profile_id;
+    const rawValue = row?.[valueKey];
+    if (typeof profileId !== "string" || typeof rawValue !== "string") {
+      return;
+    }
+
+    const nextValue = rawValue.trim();
+    if (!nextValue) {
+      return;
+    }
+
+    const existingValues = valueMap.get(profileId);
+    if (existingValues) {
+      existingValues.push(nextValue);
+      return;
+    }
+
+    valueMap.set(profileId, [nextValue]);
+  });
+
+  return valueMap;
+};
+
 interface SearchBottomSheetProps {
   onClose?: () => void;
   onItemPress?: (listingId: string) => void;
+  onProductionTeamPress?: (teamId: string) => void;
   onChat?: (item: any) => void;
 }
 
 const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
-  function SearchBottomSheet({ onClose, onItemPress, onChat }, ref) {
+  function SearchBottomSheet({ onClose, onItemPress, onProductionTeamPress, onChat }, ref) {
     const { colors, isDark } = useTheme();
     const { userRole, isGuest } = useAuth();
     const snapPoints = useMemo(() => ["90%"], []);
@@ -201,15 +280,13 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
           let tables: string[] = [];
           const fetchedCountsByTable = new Map<string, number>();
 
-          if (isGuest) {
+          if (isGuest || isOwner) {
             tables = ["groups_with_stats", "profiles"];
-          } else if (isOwner) {
-            tables = ["groups_with_stats"];
           } else {
             if (activeFilter === "All") {
-              tables = ["groups_with_stats", "studios_with_stats", "gigs_with_stats"];
+              tables = ["groups_with_stats", "profiles", "studios_with_stats", "gigs_with_stats"];
             } else if (activeFilter === "Musician") {
-              tables = ["groups_with_stats"];
+              tables = ["groups_with_stats", "profiles"];
             } else if (activeFilter === "Studio") {
               tables = ["studios_with_stats"];
             } else if (activeFilter === "Gig") {
@@ -225,7 +302,7 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
             if (table === "profiles") {
               query = query
                 .select(
-                  "id, full_name, avatar_url, address, created_at, role, genres, skills, show_gig_statuses",
+                  "id, full_name, avatar_url, address, created_at, role, show_gig_statuses",
                 )
                 .eq("role", "musician");
             }
@@ -244,6 +321,11 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
 
             if (table === "gigs_with_stats") {
               query = query.eq("status", "open");
+              query = query.eq("permit_status", "approved");
+            }
+
+            if (table === "studios_with_stats") {
+              query = query.eq("permit_status", "approved");
             }
 
             if (
@@ -253,7 +335,7 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
               query = query.ilike("genre", `%${selectedGenre}%`);
             }
 
-            if (minRating > 0) {
+            if (minRating > 0 && table !== "profiles") {
               query = query.gte("rating", minRating);
             }
 
@@ -306,6 +388,50 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
             fetchedCountsByTable.set(table, fetchedCount);
 
             if (qData) {
+              let profileGenresById = new Map<string, string[]>();
+              let profileSkillsById = new Map<string, string[]>();
+              let profileStatsById = new Map<string, { rating: number; review_count: number; completion_rate: number | null }>();
+
+              if (table === "profiles" && qData.length > 0) {
+                const profileIds = qData
+                  .map((item: any) => item?.id)
+                  .filter((value: any): value is string => typeof value === "string" && value.length > 0);
+
+                if (profileIds.length > 0) {
+                  const [{ data: profileGenreRows }, { data: profileSkillRows }, { data: profileStatRows }] = await Promise.all([
+                    supabase
+                      .from("profile_genres")
+                      .select("profile_id, genre")
+                      .in("profile_id", profileIds),
+                    supabase
+                      .from("profile_skills")
+                      .select("profile_id, skill")
+                      .in("profile_id", profileIds),
+                    supabase
+                      .from("profiles_with_stats")
+                      .select("id, rating, review_count, completion_rate")
+                      .in("id", profileIds),
+                  ]);
+
+                  profileGenresById = collectProfileValues(profileGenreRows, "genre");
+                  profileSkillsById = collectProfileValues(profileSkillRows, "skill");
+                  profileStatsById = new Map(
+                    (profileStatRows || [])
+                      .filter((row: any) => typeof row?.id === "string")
+                      .map((row: any) => [
+                        row.id,
+                        {
+                          rating: Number(row?.rating || 0),
+                          review_count: Number(row?.review_count || 0),
+                          completion_rate: Number.isFinite(Number(row?.completion_rate))
+                            ? Number(row.completion_rate)
+                            : null,
+                        },
+                      ]),
+                  );
+                }
+              }
+
               const type = table.includes("group")
                 ? "Group"
                 : table.includes("studio")
@@ -321,17 +447,35 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
                   type === "Studio"
                     ? item.type || item.studio_type || null
                     : item.studio_type || null,
+                genres: table === "profiles" ? profileGenresById.get(item.id) || [] : item.genres,
+                skills: table === "profiles" ? profileSkillsById.get(item.id) || [] : item.skills,
+                rating:
+                  table === "profiles"
+                    ? profileStatsById.get(item.id)?.rating || 0
+                    : Number(item.rating || 0),
+                review_count:
+                  table === "profiles"
+                    ? profileStatsById.get(item.id)?.review_count || 0
+                    : Number(item.review_count || 0),
+                completion_rate:
+                  table === "profiles"
+                    ? profileStatsById.get(item.id)?.completion_rate ?? null
+                    : item.completion_rate,
                 name: item.name || item.full_name,
                 location: item.location || item.address,
                 image: item.images?.[0] || item.image || item.avatar_url,
                 genre:
                   item.genre ||
-                  (Array.isArray(item.genres) ? item.genres.join(", ") : ""),
+                  (table === "profiles"
+                    ? (profileGenresById.get(item.id) || []).join(", ")
+                    : Array.isArray(item.genres)
+                      ? item.genres.join(", ")
+                      : ""),
                 rate: (item.rate || item.hourly_rate || item.budget)?.toString(),
                 show_gig_statuses: item.show_gig_statuses,
               }));
 
-              const genreFiltered =
+              let filteredResults =
                 selectedGenre !== "All" && table === "profiles"
                   ? mapped.filter((item: any) =>
                       String(item.genre || "")
@@ -340,7 +484,13 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
                     )
                   : mapped;
 
-              results.push(...genreFiltered);
+              if (minRating > 0 && table === "profiles") {
+                filteredResults = filteredResults.filter(
+                  (item: any) => Number(item.rating || 0) >= minRating,
+                );
+              }
+
+              results.push(...filteredResults);
             }
           }
 
@@ -389,6 +539,24 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
               const bPrice = parseFloat(b.rate?.replace(/,/g, "") || "0");
               return bPrice - aPrice;
             });
+          } else {
+            results.sort((a, b) => {
+              const timestampDelta =
+                getSearchResultTimestamp(b) - getSearchResultTimestamp(a);
+              if (timestampDelta !== 0) {
+                return timestampDelta;
+              }
+
+              return String(a.name || "").localeCompare(String(b.name || ""));
+            });
+          }
+
+          if (
+            sortBy === "newest" &&
+            results.some((item) => item.type === "Artist") &&
+            results.some((item) => item.type === "Group")
+          ) {
+            results = interleaveSearchResultsByType(results);
           }
 
           if (requestId !== requestIdRef.current) {
@@ -462,24 +630,32 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
 
     // Realtime Search Updates
     useEffect(() => {
-      const channel = supabase
-        .channel("public:search_updates")
-        .on(
+      const channel = supabase.channel("public:search_updates");
+
+      const realtimeTables = [
+        "gigs",
+        "studios",
+        "groups",
+        "profiles",
+        "studio_promotions",
+        "studio_date_overrides",
+        "profile_skills",
+        "profile_genres",
+        "group_media",
+        "studio_media",
+        "gig_media",
+        "reviews",
+      ];
+
+      realtimeTables.forEach((table) => {
+        channel.on(
           "postgres_changes",
-          { event: "*", schema: "public", table: "gigs" },
+          { event: "*", schema: "public", table },
           () => setRefreshTrigger((prev) => prev + 1),
-        )
-        .on(
-          "postgres_changes",
-          { event: "*", schema: "public", table: "studios" },
-          () => setRefreshTrigger((prev) => prev + 1),
-        )
-        .on(
-          "postgres_changes",
-          { event: "*", schema: "public", table: "groups" },
-          () => setRefreshTrigger((prev) => prev + 1),
-        )
-        .subscribe();
+        );
+      });
+
+      channel.subscribe();
 
       return () => {
         supabase.removeChannel(channel);
@@ -492,10 +668,20 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
         // @ts-ignore
         ref?.current?.dismiss();
         setTimeout(() => {
+          if (item?.type === "Production") {
+            if (onProductionTeamPress) {
+              onProductionTeamPress(item.id);
+              return;
+            }
+
+            router.push({ pathname: "/production_team", params: { teamId: item.id } });
+            return;
+          }
+
           onItemPress?.(item.id);
         }, 120);
       },
-      [onItemPress, ref],
+      [onItemPress, onProductionTeamPress, ref],
     );
 
     const clearSearch = () => setSearchQuery("");
@@ -807,8 +993,8 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
                     style={[styles.searchInput, { color: colors.text }]}
                     placeholder={
                       isOwner
-                        ? "Find musicians, bands..."
-                        : "Find studios, gigs, venues..."
+                        ? "Search musicians and teams"
+                        : "Search artists, studios, gigs"
                     }
                     placeholderTextColor={colors.textSecondary}
                     value={searchQuery}

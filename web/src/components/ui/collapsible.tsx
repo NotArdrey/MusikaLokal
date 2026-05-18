@@ -16,7 +16,7 @@ export function Collapsible({ children, title }: PropsWithChildren & { title: st
       <TouchableOpacity activeOpacity={1}
         style={styles.heading}
         onPress={() => setIsOpen((value) => !value)}
-        activeOpacity={1}>
+      >
         <IconSymbol
           name="chevron.right"
           size={18}

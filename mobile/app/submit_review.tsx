@@ -7,11 +7,13 @@ import CustomAlert, { AlertType } from '../src/components/CustomAlert';
 import Header from '../src/components/header';
 import Modal from '../src/components/modal';
 import Navbar from '../src/components/navbar';
+import { useBottomBarClearance } from '../src/hooks/useBottomBarClearance';
 import { useRequireAuth } from '../src/context/AuthContext';
 import { useTheme } from '../src/context/ThemeContext';
 
 export default function SubmitReviewScreen() {
   const { colors, isDark } = useTheme();
+  const { contentBottomPadding } = useBottomBarClearance(24);
   const { userId, isAuthenticated } = useRequireAuth();
   const params = useLocalSearchParams<{
     studioId?: string;
@@ -89,6 +91,7 @@ export default function SubmitReviewScreen() {
   const reviewSubtitle = isReviewingCounterparty
     ? `How was your interaction with ${entityName}?`
     : `How was your booking with ${entityName}?`;
+  const isSubmitDisabled = selectedValue === 0 || submitting;
 
   const handleSubmitReview = async () => {
     if (submitting) return;
@@ -187,7 +190,6 @@ export default function SubmitReviewScreen() {
         }
       ]);
     } catch (e: any) {
-      console.log('Review submission error:', e);
       const errorMessage = await extractFunctionErrorMessage(
         e,
         'Failed to submit review. Please try again.'
@@ -207,7 +209,10 @@ export default function SubmitReviewScreen() {
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
           style={styles.container}
         >
-          <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
+          <ScrollView
+            showsVerticalScrollIndicator={false}
+            contentContainerStyle={[styles.scrollContent, { paddingBottom: contentBottomPadding }]}
+          >
             <View style={styles.header}>
               <Text style={[styles.title, { color: colors.text }]}>
                 {reviewTitle}
@@ -219,10 +224,9 @@ export default function SubmitReviewScreen() {
 
             <View style={styles.starsContainer}>
               {ratingOptions.map((item) => (
-                <TouchableOpacity
+                <TouchableOpacity activeOpacity={1}
                   key={item}
                   onPress={() => setSelectedValue(item)}
-                  activeOpacity={1}
                 >
                   <Ionicons
                     name={item <= selectedValue ? "star" : "star-outline"}
@@ -255,13 +259,13 @@ export default function SubmitReviewScreen() {
             <TouchableOpacity
               style={[
                 styles.submitButton,
-                { backgroundColor: colors.primary, opacity: selectedValue === 0 || submitting ? 0.5 : 1 }
+                { backgroundColor: selectedValue > 0 ? colors.primary : colors.border, opacity: isSubmitDisabled ? 0.6 : 1 }
               ]}
               onPress={handleSubmitReview}
-              disabled={selectedValue === 0 || submitting}
-              activeOpacity={1}
+              disabled={isSubmitDisabled}
+              activeOpacity={isSubmitDisabled ? 1 : 0.78}
             >
-              <Text style={styles.submitButtonText}>
+              <Text style={[styles.submitButtonText, { color: selectedValue > 0 ? "#FFFFFF" : colors.textSecondary }]}>
                 {submitting ? 'Submitting...' : 'Submit Review'}
               </Text>
             </TouchableOpacity>
@@ -342,6 +346,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     paddingVertical: 16,
     alignItems: 'center',
+    justifyContent: 'center',
     shadowColor: '#6366f1',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.2,

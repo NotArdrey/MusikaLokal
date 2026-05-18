@@ -1,6 +1,8 @@
-import { RealtimeChannel } from '@supabase/supabase-js';
+﻿import { RealtimeChannel } from '@supabase/supabase-js';
 import { useCallback, useEffect, useState } from 'react';
 import { supabase } from '../../lib/supabase';
+import { emitToast } from '../events/toastBus';
+import { getScreenCacheKey, readScreenCache, writeScreenCache } from '../utils/screenCache';
 
 const createUuidV4 = () =>
     'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (char) => {
@@ -37,15 +39,19 @@ export interface Message {
         avatar_url: string | null;
     };
     reactions?: MessageReaction[];
+    local_status?: 'sending' | 'sent' | 'failed';
+    local_error?: string | null;
 }
 
 export interface ConversationParticipant {
     id: string;
+    conversation_id: string;
     user_id: string;
     role: 'owner' | 'admin' | 'member';
     joined_at: string;
     last_read_at: string | null;
     is_muted: boolean;
+    muted_until: string | null;
     profile?: {
         id: string;
         full_name: string;
@@ -73,11 +79,172 @@ export interface Conversation {
         avatar_url: string | null;
     };
     // For group chats
+    current_participant?: ConversationParticipant | null;
     participants?: ConversationParticipant[];
     participant_count?: number;
     last_message?: Message | null;
     unread_count?: number;
+    is_muted?: boolean;
+    muted_until?: string | null;
 }
+
+type SenderProfile = NonNullable<Message['sender']>;
+
+const CONVERSATIONS_CACHE_TTL_MS = 45_000;
+const CHAT_MESSAGES_CACHE_TTL_MS = 60_000;
+const senderProfileCache = new Map<string, SenderProfile>();
+
+const primeSenderProfileCache = (messages: Message[] | null | undefined) => {
+    (messages || []).forEach((message) => {
+        if (message.sender?.id) {
+            senderProfileCache.set(message.sender.id, message.sender);
+        }
+    });
+};
+
+const cacheSenderProfile = (profile: SenderProfile | null | undefined) => {
+    if (!profile?.id) return;
+    senderProfileCache.set(profile.id, profile);
+};
+
+const toTimestamp = (value: string | null | undefined) => {
+    if (!value) return 0;
+    const timestamp = new Date(value).getTime();
+    return Number.isFinite(timestamp) ? timestamp : 0;
+};
+
+export const isConversationMuted = (
+    value: Pick<Conversation, 'is_muted' | 'muted_until'> | Pick<ConversationParticipant, 'is_muted' | 'muted_until'> | null | undefined,
+) => {
+    if (!value?.is_muted) return false;
+    if (!value.muted_until) return true;
+    const mutedUntil = toTimestamp(value.muted_until);
+    return mutedUntil === 0 || mutedUntil > Date.now();
+};
+
+const normalizeProfile = <T,>(profile: T | T[] | null | undefined): T | undefined => {
+    if (Array.isArray(profile)) {
+        return profile[0];
+    }
+
+    return profile || undefined;
+};
+
+const getMessagePreviewText = (message: Message) => {
+    if (message.message_type === 'image') return 'Sent a photo';
+    if (message.message_type === 'file') return 'Sent a file';
+    if (message.message_type === 'system') return message.content || 'System message';
+    return message.content || 'Sent a message';
+};
+
+const getConversationToastTitle = (conversation: Conversation, message: Message) => {
+    const sender = message.sender || senderProfileCache.get(message.sender_id);
+
+    if (conversation.is_group) {
+        const groupName = conversation.group_name || 'Group chat';
+        return sender?.full_name ? `${sender.full_name} in ${groupName}` : groupName;
+    }
+
+    return conversation.other_participant?.full_name || sender?.full_name || 'New message';
+};
+
+const emitIncomingMessageToast = (
+    conversation: Conversation,
+    message: Message,
+    currentUserId: string,
+) => {
+    if (message.sender_id === currentUserId || isConversationMuted(conversation)) {
+        return;
+    }
+
+    emitToast({
+        id: `message-${message.id}`,
+        dedupeKey: `message:${message.id}`,
+        title: getConversationToastTitle(conversation, message),
+        message: getMessagePreviewText(message),
+        type: 'info',
+        source: 'chat-message',
+    });
+};
+
+export type ConversationMuteState = {
+    conversation_id: string;
+    user_id: string;
+    is_muted: boolean;
+    muted_until: string | null;
+};
+
+export const setConversationMute = async (
+    conversationId: string,
+    muted: boolean,
+    mutedUntil: string | null = null,
+): Promise<ConversationMuteState> => {
+    const { data, error } = await supabase.rpc('set_conversation_mute', {
+        p_conversation_id: conversationId,
+        p_muted: muted,
+        p_muted_until: muted ? mutedUntil : null,
+    });
+
+    if (error) {
+        throw error;
+    }
+
+    const row = Array.isArray(data) ? data[0] : data;
+
+    return {
+        conversation_id: row?.conversation_id || conversationId,
+        user_id: row?.user_id || '',
+        is_muted: Boolean(row?.is_muted ?? muted),
+        muted_until: row?.muted_until ?? null,
+    };
+};
+
+const sortMessagesChronologically = (messages: Message[]) => {
+    return [...messages].sort((left, right) => {
+        return toTimestamp(left.created_at) - toTimestamp(right.created_at);
+    });
+};
+
+const upsertMessage = (messages: Message[], nextMessage: Message) => {
+    const existingIndex = messages.findIndex((message) => message.id === nextMessage.id);
+
+    if (existingIndex < 0) {
+        return sortMessagesChronologically([...messages, nextMessage]);
+    }
+
+    const nextMessages = [...messages];
+    const existingMessage = nextMessages[existingIndex];
+    nextMessages[existingIndex] = {
+        ...existingMessage,
+        ...nextMessage,
+        sender: nextMessage.sender || existingMessage.sender,
+        reactions: nextMessage.reactions || existingMessage.reactions,
+        local_status: nextMessage.local_status || existingMessage.local_status,
+        local_error: nextMessage.local_error ?? existingMessage.local_error,
+    };
+
+    return sortMessagesChronologically(nextMessages);
+};
+
+const mergeFetchedMessages = (currentMessages: Message[], fetchedMessages: Message[]) => {
+    const fetchedMessageIds = new Set(fetchedMessages.map((message) => message.id));
+    const localUnresolvedMessages = currentMessages.filter((message) => {
+        return (
+            (message.local_status === 'sending' || message.local_status === 'failed') &&
+            !fetchedMessageIds.has(message.id)
+        );
+    });
+
+    return sortMessagesChronologically([...fetchedMessages, ...localUnresolvedMessages]);
+};
+
+const buildConversationListCacheKey = (currentUserId: string) => {
+    return getScreenCacheKey('chat-conversations', { currentUserId });
+};
+
+const buildConversationMessagesCacheKey = (conversationId: string) => {
+    return getScreenCacheKey('chat-messages', { conversationId });
+};
 
 // Hook to get or create a conversation (1-on-1)
 export function useConversation(otherUserId: string | null, currentUserId: string | null) {
@@ -133,11 +300,12 @@ export function useConversation(otherUserId: string | null, currentUserId: strin
                     .map(([conversationId]) => conversationId);
 
                 if (matchedConversationIds.length > 0) {
-                    const { data: existingConversations, error: existingError } = await supabase
+                    let existingQuery = supabase
                         .from('conversations')
                         .select('*')
                         .eq('is_group', false)
-                        .in('id', matchedConversationIds)
+                        .in('id', matchedConversationIds);
+                    const { data: existingConversations, error: existingError } = await existingQuery
                         .order('updated_at', { ascending: false })
                         .limit(1);
 
@@ -305,20 +473,24 @@ export function useConversations(currentUserId: string | null) {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
 
-    const fetchConversations = useCallback(async () => {
+    const fetchConversations = useCallback(async (options?: { silent?: boolean }) => {
         if (!currentUserId) {
             setLoading(false);
             return;
         }
 
+        const cacheKey = buildConversationListCacheKey(currentUserId);
+
         try {
-            setLoading(true);
+            if (!options?.silent) {
+                setLoading(true);
+            }
             setError(null);
 
             // Fetch conversations where user is a participant
             const { data: participations, error: partError } = await supabase
                 .from('conversation_participants')
-                .select('conversation_id')
+                .select('conversation_id, is_muted, muted_until')
                 .eq('user_id', currentUserId);
 
             if (partError) throw partError;
@@ -326,33 +498,122 @@ export function useConversations(currentUserId: string | null) {
             const conversationIds = participations?.map((p) => p.conversation_id) || [];
             if (conversationIds.length === 0) {
                 setConversations([]);
+                await writeScreenCache(cacheKey, []);
                 return;
             }
 
-            const { data: rawConversations, error: conversationsError } = await supabase
+            const [
+                conversationsResponse,
+                displayResponse,
+                participantsResponse,
+                unreadResponse,
+            ] = await Promise.all([
+                supabase
                     .from('conversations')
                     .select('*')
                     .in('id', conversationIds)
-                    .order('updated_at', { ascending: false });
+                    .order('updated_at', { ascending: false }),
+                supabase
+                    .from('conversations_display_projection')
+                    .select('id, group_name, group_avatar_url')
+                    .in('id', conversationIds),
+                supabase
+                    .from('conversation_participants')
+                    .select(`
+                        *,
+                        profile:profiles!conversation_participants_user_id_fkey(id, full_name, avatar_url)
+                    `)
+                    .in('conversation_id', conversationIds),
+                supabase
+                    .from('messages')
+                    .select('conversation_id, read_at')
+                    .in('conversation_id', conversationIds)
+                    .neq('sender_id', currentUserId)
+                    .is('read_at', null),
+            ]);
 
-            if (conversationsError) throw conversationsError;
+            if (conversationsResponse.error) throw conversationsResponse.error;
+            if (displayResponse.error) {
+                console.warn('Chat display projection fetch failed:', displayResponse.error.message);
+            }
+            if (participantsResponse.error) {
+                console.warn('Chat participants fetch failed:', participantsResponse.error.message);
+            }
+            if (unreadResponse.error) {
+                console.warn('Chat unread count fetch failed:', unreadResponse.error.message);
+            }
 
-            const { data: displayRows, error: displayError } = await supabase
-                .from('conversations_display_projection')
-                .select('id, group_name, group_avatar_url')
-                .in('id', conversationIds);
+            const rawConversations = conversationsResponse.data || [];
+            const displayRows = displayResponse.error ? [] : displayResponse.data || [];
+            const allParticipants = participantsResponse.error ? [] : participantsResponse.data || [];
+            const unreadRows = unreadResponse.error ? [] : unreadResponse.data || [];
 
-            if (displayError) throw displayError;
+            const oldestConversationActivity = rawConversations.reduce<string | null>((oldest, conversation: any) => {
+                const candidate = String(conversation.updated_at || conversation.created_at || '').trim();
+                if (!candidate) return oldest;
+                if (!oldest || toTimestamp(candidate) < toTimestamp(oldest)) {
+                    return candidate;
+                }
+                return oldest;
+            }, null);
 
-            const { data: allParticipants, error: participantsError } = await supabase
-                .from('conversation_participants')
-                .select(`
-                    *,
-                    profile:profiles!conversation_participants_user_id_fkey(id, full_name, avatar_url)
-                `)
-                .in('conversation_id', conversationIds);
+            const latestMessageByConversationId = new Map<string, Message>();
 
-            if (participantsError) throw participantsError;
+            if (oldestConversationActivity) {
+                const { data: recentMessages, error: recentMessagesError } = await supabase
+                    .from('messages')
+                    .select(`
+                        *,
+                        sender:profiles!messages_sender_id_fkey(id, full_name, avatar_url)
+                    `)
+                    .in('conversation_id', conversationIds)
+                    .gte('created_at', oldestConversationActivity)
+                    .order('created_at', { ascending: false });
+
+                if (recentMessagesError) {
+                    console.warn('Chat recent messages fetch failed:', recentMessagesError.message);
+                } else {
+                    (recentMessages || []).forEach((message: Message) => {
+                        if (!latestMessageByConversationId.has(message.conversation_id)) {
+                            latestMessageByConversationId.set(message.conversation_id, message);
+                            cacheSenderProfile(message.sender);
+                        }
+                    });
+                }
+            }
+
+            const missingLatestMessageConversationIds = conversationIds.filter((conversationId) => {
+                return !latestMessageByConversationId.has(conversationId);
+            });
+
+            if (missingLatestMessageConversationIds.length > 0) {
+                const missingLatestMessages = await Promise.all(
+                    missingLatestMessageConversationIds.map(async (conversationId) => {
+                        const { data: message, error: messageError } = await supabase
+                            .from('messages')
+                            .select(`
+                                *,
+                                sender:profiles!messages_sender_id_fkey(id, full_name, avatar_url)
+                            `)
+                            .eq('conversation_id', conversationId)
+                            .order('created_at', { ascending: false })
+                            .limit(1)
+                            .maybeSingle();
+
+                        if (messageError) {
+                            console.warn('Chat latest message fetch failed:', messageError.message);
+                            return null;
+                        }
+                        return message;
+                    }),
+                );
+
+                missingLatestMessages.forEach((message) => {
+                    if (!message) return;
+                    latestMessageByConversationId.set(message.conversation_id, message);
+                    cacheSenderProfile(message.sender);
+                });
+            }
 
             const displayByConversationId = new Map(
                 (displayRows || []).map((row: any) => [row.id, row])
@@ -362,6 +623,14 @@ export function useConversations(currentUserId: string | null) {
                 const current = participantsByConversationId.get(participant.conversation_id) || [];
                 current.push(participant);
                 participantsByConversationId.set(participant.conversation_id, current);
+
+                cacheSenderProfile(normalizeProfile(participant.profile) || null);
+            }
+
+            const unreadCountByConversationId = new Map<string, number>();
+            for (const unreadRow of unreadRows || []) {
+                const nextCount = (unreadCountByConversationId.get(unreadRow.conversation_id) || 0) + 1;
+                unreadCountByConversationId.set(unreadRow.conversation_id, nextCount);
             }
 
             const conversationsWithDisplay = (rawConversations || []).map((conversation: any) => {
@@ -377,73 +646,42 @@ export function useConversations(currentUserId: string | null) {
             const groupConversations = conversationsWithDisplay.filter((c: any) => c.is_group);
 
             // Process 1-on-1 conversations
-            const processedDirectConversations = await Promise.all(
-                (directConversations || []).map(async (conv: any) => {
-                    const conversationParticipants = participantsByConversationId.get(conv.id) || [];
-                    const otherParticipant = conversationParticipants.find((participant) => participant.user_id !== currentUserId)?.profile;
+            const processedDirectConversations = (directConversations || []).map((conv: any) => {
+                const conversationParticipants = participantsByConversationId.get(conv.id) || [];
+                const currentParticipant = conversationParticipants.find((participant) => participant.user_id === currentUserId) || null;
+                const otherParticipant = normalizeProfile(
+                    conversationParticipants.find((participant) => participant.user_id !== currentUserId)?.profile,
+                );
 
-                    // Get last message
-                    const { data: lastMessage } = await supabase
-                        .from('messages')
-                        .select('*')
-                        .eq('conversation_id', conv.id)
-                        .order('created_at', { ascending: false })
-                        .limit(1)
-                        .maybeSingle();
-
-                    // Get unread count
-                    const { count: unreadCount } = await supabase
-                        .from('messages')
-                        .select('*', { count: 'exact', head: true })
-                        .eq('conversation_id', conv.id)
-                        .neq('sender_id', currentUserId)
-                        .is('read_at', null);
-
-                    return {
-                        ...conv,
-                        is_group: false,
-                        other_participant: otherParticipant,
-                        last_message: lastMessage,
-                        unread_count: unreadCount || 0,
-                    };
-                })
-            );
+                return {
+                    ...conv,
+                    is_group: false,
+                    current_participant: currentParticipant,
+                    other_participant: otherParticipant,
+                    last_message: latestMessageByConversationId.get(conv.id) || null,
+                    unread_count: unreadCountByConversationId.get(conv.id) || 0,
+                    is_muted: isConversationMuted(currentParticipant),
+                    muted_until: currentParticipant?.muted_until ?? null,
+                };
+            });
 
             // Process group conversations
-            const processedGroupConversations = await Promise.all(
-                groupConversations.map(async (conv: any) => {
-                    const participants = participantsByConversationId.get(conv.id) || [];
+            const processedGroupConversations = groupConversations.map((conv: any) => {
+                const participants = participantsByConversationId.get(conv.id) || [];
+                const currentParticipant = participants.find((participant) => participant.user_id === currentUserId) || null;
 
-                    // Get last message
-                    const { data: lastMessage } = await supabase
-                        .from('messages')
-                        .select(`
-                            *,
-                            sender:profiles!messages_sender_id_fkey(id, full_name, avatar_url)
-                        `)
-                        .eq('conversation_id', conv.id)
-                        .order('created_at', { ascending: false })
-                        .limit(1)
-                        .maybeSingle();
-
-                    // Get unread count
-                    const { count: unreadCount } = await supabase
-                        .from('messages')
-                        .select('*', { count: 'exact', head: true })
-                        .eq('conversation_id', conv.id)
-                        .neq('sender_id', currentUserId)
-                        .is('read_at', null);
-
-                    return {
-                        ...conv,
-                        is_group: true,
-                        participants: participants || [],
-                        participant_count: participants?.length || 0,
-                        last_message: lastMessage,
-                        unread_count: unreadCount || 0,
-                    };
-                })
-            );
+                return {
+                    ...conv,
+                    is_group: true,
+                    current_participant: currentParticipant,
+                    participants: participants || [],
+                    participant_count: participants?.length || 0,
+                    last_message: latestMessageByConversationId.get(conv.id) || null,
+                    unread_count: unreadCountByConversationId.get(conv.id) || 0,
+                    is_muted: isConversationMuted(currentParticipant),
+                    muted_until: currentParticipant?.muted_until ?? null,
+                };
+            });
 
             // Combine and sort by updated_at
             const allConversations = [
@@ -454,23 +692,54 @@ export function useConversations(currentUserId: string | null) {
             );
 
             setConversations(allConversations);
+            await writeScreenCache(cacheKey, allConversations);
         } catch (err: any) {
             console.error('Error fetching conversations:', err);
             setError(err.message);
         } finally {
-            setLoading(false);
+            if (!options?.silent) {
+                setLoading(false);
+            }
         }
     }, [currentUserId]);
 
     useEffect(() => {
-        fetchConversations();
-    }, [fetchConversations]);
+        if (!currentUserId) {
+            setConversations([]);
+            setLoading(false);
+            return;
+        }
+
+        let cancelled = false;
+
+        void (async () => {
+            const cacheKey = buildConversationListCacheKey(currentUserId);
+            const cachedConversations = await readScreenCache<Conversation[]>(
+                cacheKey,
+                CONVERSATIONS_CACHE_TTL_MS,
+            );
+
+            if (cancelled) {
+                return;
+            }
+
+            if (cachedConversations) {
+                setConversations(cachedConversations);
+                setLoading(false);
+            }
+
+            await fetchConversations({ silent: Boolean(cachedConversations) });
+        })();
+
+        return () => {
+            cancelled = true;
+        };
+    }, [currentUserId, fetchConversations]);
 
     // REALTIME SUBSCRIPTION FOR CONVERSATION LIST
     useEffect(() => {
         if (!currentUserId) return;
 
-        console.log('Setting up realtime subscription for conversation list...');
 
         const channel = supabase
             .channel('conversation_list_updates')
@@ -487,6 +756,9 @@ export function useConversations(currentUserId: string | null) {
                     // Check if this message belongs to any of our conversations
                     setConversations(prevConversations => {
                         const conversationIndex = prevConversations.findIndex(c => c.id === newMessage.conversation_id);
+                        const cacheKey = currentUserId
+                            ? buildConversationListCacheKey(currentUserId)
+                            : null;
 
                         // If conversation exists in our list
                         if (conversationIndex >= 0) {
@@ -499,16 +771,26 @@ export function useConversations(currentUserId: string | null) {
                             // For now, we'll optimistically update without full profile and let UI handle graceful fallback
                             // or fetch asynchronously. 
 
-                            conversation.last_message = newMessage;
+                            const sender = senderProfileCache.get(newMessage.sender_id);
+                            const messageWithSender = {
+                                ...newMessage,
+                                sender,
+                            };
+                            conversation.last_message = messageWithSender;
                             conversation.updated_at = newMessage.created_at;
 
                             if (newMessage.sender_id !== currentUserId) {
                                 conversation.unread_count = (conversation.unread_count || 0) + 1;
+                                emitIncomingMessageToast(conversation, messageWithSender, currentUserId);
                             }
 
                             // Remove from old position and add to top
                             updatedConversations.splice(conversationIndex, 1);
                             updatedConversations.unshift(conversation);
+
+                            if (cacheKey) {
+                                void writeScreenCache(cacheKey, updatedConversations);
+                            }
 
                             return updatedConversations;
                         } else {
@@ -537,6 +819,9 @@ export function useConversations(currentUserId: string | null) {
                         const conversationIndex = prevConversations.findIndex(
                             (conversation) => conversation.id === updatedMessage.conversation_id
                         );
+                        const cacheKey = currentUserId
+                            ? buildConversationListCacheKey(currentUserId)
+                            : null;
 
                         if (conversationIndex < 0) {
                             return prevConversations;
@@ -557,6 +842,10 @@ export function useConversations(currentUserId: string | null) {
                         }
 
                         updatedConversations[conversationIndex] = conversation;
+
+                        if (cacheKey) {
+                            void writeScreenCache(cacheKey, updatedConversations);
+                        }
                         return updatedConversations;
                     });
                 }
@@ -568,26 +857,72 @@ export function useConversations(currentUserId: string | null) {
         };
     }, [currentUserId, fetchConversations]);
 
-    return { conversations, loading, error, refetch: fetchConversations };
+    const toggleConversationMute = useCallback(async (
+        conversationId: string,
+        muted: boolean,
+        mutedUntil: string | null = null,
+    ) => {
+        const muteState = await setConversationMute(conversationId, muted, mutedUntil);
+
+        setConversations((prevConversations) => {
+            const updatedConversations = prevConversations.map((conversation) => {
+                if (conversation.id !== conversationId) {
+                    return conversation;
+                }
+
+                return {
+                    ...conversation,
+                    is_muted: isConversationMuted(muteState),
+                    muted_until: muteState.muted_until,
+                    current_participant: conversation.current_participant
+                        ? {
+                            ...conversation.current_participant,
+                            is_muted: muteState.is_muted,
+                            muted_until: muteState.muted_until,
+                        }
+                        : conversation.current_participant,
+                };
+            });
+
+            if (currentUserId) {
+                void writeScreenCache(buildConversationListCacheKey(currentUserId), updatedConversations);
+            }
+
+            return updatedConversations;
+        });
+
+        return muteState;
+    }, [currentUserId]);
+
+    return { conversations, loading, error, refetch: fetchConversations, toggleConversationMute };
 }
 
 // Hook for chat messages in a conversation
 export function useChat(conversationId: string | null, currentUserId: string | null) {
     const [messages, setMessages] = useState<Message[]>([]);
     const [loading, setLoading] = useState(true);
-    const [sending, setSending] = useState(false);
+    const [pendingSendCount, setPendingSendCount] = useState(0);
     const [error, setError] = useState<string | null>(null);
+    const sending = pendingSendCount > 0;
+    const messageCacheKey = conversationId
+        ? buildConversationMessagesCacheKey(conversationId)
+        : null;
 
     // Fetch initial messages
     useEffect(() => {
         if (!conversationId) {
+            setMessages([]);
             setLoading(false);
             return;
         }
 
-        const fetchMessages = async () => {
+        let cancelled = false;
+
+        const fetchMessages = async (options?: { silent?: boolean }) => {
             try {
-                setLoading(true);
+                if (!options?.silent) {
+                    setLoading(true);
+                }
                 const { data, error: fetchError } = await supabase
                     .from('messages')
                     .select(`
@@ -605,17 +940,52 @@ export function useChat(conversationId: string | null, currentUserId: string | n
                     .order('created_at', { ascending: true });
 
                 if (fetchError) throw fetchError;
-                setMessages(data || []);
+                if (cancelled) return;
+
+                const fetchedMessages = sortMessagesChronologically(data || []);
+                primeSenderProfileCache(fetchedMessages);
+                setMessages((prev) => {
+                    const nextMessages = mergeFetchedMessages(prev, fetchedMessages);
+
+                    if (messageCacheKey) {
+                        void writeScreenCache(messageCacheKey, nextMessages);
+                    }
+
+                    return nextMessages;
+                });
             } catch (err: any) {
                 console.error('Error fetching messages:', err);
                 setError(err.message);
             } finally {
-                setLoading(false);
+                if (!options?.silent && !cancelled) {
+                    setLoading(false);
+                }
             }
         };
 
-        fetchMessages();
-    }, [conversationId]);
+        void (async () => {
+            const cachedMessages = messageCacheKey
+                ? await readScreenCache<Message[]>(messageCacheKey, CHAT_MESSAGES_CACHE_TTL_MS)
+                : null;
+
+            if (cancelled) {
+                return;
+            }
+
+            if (cachedMessages) {
+                const nextMessages = sortMessagesChronologically(cachedMessages);
+                primeSenderProfileCache(nextMessages);
+                setMessages(nextMessages);
+                setLoading(false);
+            }
+
+            await fetchMessages({ silent: Boolean(cachedMessages) });
+        })();
+
+        return () => {
+            cancelled = true;
+        };
+    }, [conversationId, messageCacheKey]);
 
     // Subscribe to realtime updates
     useEffect(() => {
@@ -632,33 +1002,35 @@ export function useChat(conversationId: string | null, currentUserId: string | n
                     filter: `conversation_id=eq.${conversationId}`,
                 },
                 async (payload) => {
-                    // Fetch sender info for the new message
-                    const { data: sender } = await supabase
-                        .from('profiles')
-                        .select('id, full_name, avatar_url')
-                        .eq('id', payload.new.sender_id)
-                        .single();
+                    let sender = senderProfileCache.get(payload.new.sender_id);
+
+                    if (!sender) {
+                        const { data: fetchedSender } = await supabase
+                            .from('profiles')
+                            .select('id, full_name, avatar_url')
+                            .eq('id', payload.new.sender_id)
+                            .single();
+
+                        sender = fetchedSender || undefined;
+                        cacheSenderProfile(sender || null);
+                    }
 
                     const newMessage: Message = {
                         ...payload.new as Message,
                         sender: sender || undefined,
+                        local_status: 'sent',
+                        local_error: null,
                     };
 
                     setMessages((prev) => {
-                        if (prev.some((message) => message.id === newMessage.id)) {
-                            return prev;
-                        }
-                        return [...prev, newMessage];
-                    });
+                        const nextMessages = upsertMessage(prev, newMessage);
 
-                    // Mark as read if not sent by current user
-                    if (payload.new.sender_id !== currentUserId) {
-                        supabase
-                            .from('messages')
-                            .update({ read_at: new Date().toISOString() })
-                            .eq('id', payload.new.id)
-                            .then();
-                    }
+                        if (messageCacheKey) {
+                            void writeScreenCache(messageCacheKey, nextMessages);
+                        }
+
+                        return nextMessages;
+                    });
                 }
             )
             .on(
@@ -672,18 +1044,15 @@ export function useChat(conversationId: string | null, currentUserId: string | n
                 (payload) => {
                     const updatedMessage = payload.new as Message;
 
-                    setMessages((prev) =>
-                        prev.map((message) =>
-                            message.id === updatedMessage.id
-                                ? {
-                                    ...message,
-                                    ...updatedMessage,
-                                    sender: message.sender,
-                                    reactions: message.reactions,
-                                }
-                                : message
-                        )
-                    );
+                    setMessages((prev) => {
+                        const nextMessages = upsertMessage(prev, updatedMessage);
+
+                        if (messageCacheKey) {
+                            void writeScreenCache(messageCacheKey, nextMessages);
+                        }
+
+                        return nextMessages;
+                    });
                 }
             )
             .subscribe();
@@ -691,7 +1060,7 @@ export function useChat(conversationId: string | null, currentUserId: string | n
         return () => {
             supabase.removeChannel(channel);
         };
-    }, [conversationId, currentUserId]);
+    }, [conversationId, currentUserId, messageCacheKey]);
 
     // Send message function
     const sendMessage = useCallback(async (
@@ -703,49 +1072,254 @@ export function useChat(conversationId: string | null, currentUserId: string | n
             return { error: 'Missing required data' };
         }
 
+        const messageId = createUuidV4();
+        const trimmedContent = content.trim();
+
         try {
-            setSending(true);
-            const { error: sendError } = await supabase.from('messages').insert({
+            setError(null);
+            const createdAt = new Date().toISOString();
+            const optimisticMessage: Message = {
+                id: messageId,
                 conversation_id: conversationId,
                 sender_id: currentUserId,
-                content: content.trim(),
+                content: trimmedContent,
+                message_type: messageType,
+                attachment_url: attachmentUrl || null,
+                read_at: null,
+                created_at: createdAt,
+                sender: senderProfileCache.get(currentUserId),
+                reactions: [],
+                local_status: 'sending',
+                local_error: null,
+            };
+
+            setPendingSendCount((count) => count + 1);
+            setMessages((prev) => {
+                const nextMessages = upsertMessage(prev, optimisticMessage);
+
+                if (messageCacheKey) {
+                    void writeScreenCache(messageCacheKey, nextMessages);
+                }
+
+                return nextMessages;
+            });
+
+            const { error: sendError } = await supabase.from('messages').insert({
+                id: messageId,
+                conversation_id: conversationId,
+                sender_id: currentUserId,
+                content: trimmedContent,
                 message_type: messageType,
                 attachment_url: attachmentUrl || null,
             });
 
             if (sendError) throw sendError;
 
-            // Touch the conversation updated_at for sorting
-            const { error: updateError } = await supabase
+            setMessages((prev) => {
+                const nextMessages = upsertMessage(prev, {
+                    ...optimisticMessage,
+                    local_status: 'sent',
+                    local_error: null,
+                });
+
+                if (messageCacheKey) {
+                    void writeScreenCache(messageCacheKey, nextMessages);
+                }
+
+                return nextMessages;
+            });
+
+            void supabase
                 .from('conversations')
                 .update({ updated_at: new Date().toISOString() })
-                .eq('id', conversationId);
-
-            if (updateError) {
-                console.warn('Failed to update conversation timestamp:', updateError);
-                // Non-fatal, proceed
-            }
+                .eq('id', conversationId)
+                .then(({ error: updateError }) => {
+                    if (updateError) {
+                        console.warn('Failed to update conversation timestamp:', updateError);
+                    }
+                });
 
             return { error: null };
         } catch (err: any) {
             console.error('Error sending message:', err);
-            return { error: err.message };
+            const messageError = err?.message || 'Message failed to send';
+            setMessages((prev) => {
+                const failedMessages = prev.map((message) => {
+                    if (
+                        message.id === messageId &&
+                        message.local_status === 'sending'
+                    ) {
+                        return {
+                            ...message,
+                            local_status: 'failed' as const,
+                            local_error: messageError,
+                        };
+                    }
+
+                    return message;
+                });
+
+                if (messageCacheKey) {
+                    void writeScreenCache(messageCacheKey, failedMessages);
+                }
+
+                return failedMessages;
+            });
+            return { error: messageError };
         } finally {
-            setSending(false);
+            setPendingSendCount((count) => Math.max(0, count - 1));
         }
-    }, [conversationId, currentUserId]);
+    }, [conversationId, currentUserId, messageCacheKey]);
+
+    const retryMessage = useCallback(async (messageId: string) => {
+        if (!conversationId || !currentUserId) {
+            return { error: 'Missing required data' };
+        }
+
+        const failedMessage = messages.find((message) => {
+            return (
+                message.id === messageId &&
+                message.sender_id === currentUserId &&
+                message.local_status === 'failed'
+            );
+        });
+
+        if (!failedMessage || !failedMessage.content.trim()) {
+            return { error: 'Message is not available to retry' };
+        }
+
+        const retryAt = new Date().toISOString();
+        const nextMessage: Message = {
+            ...failedMessage,
+            content: failedMessage.content.trim(),
+            created_at: retryAt,
+            local_status: 'sending',
+            local_error: null,
+        };
+
+        try {
+            setError(null);
+            setPendingSendCount((count) => count + 1);
+            setMessages((prev) => {
+                const nextMessages = upsertMessage(prev, nextMessage);
+
+                if (messageCacheKey) {
+                    void writeScreenCache(messageCacheKey, nextMessages);
+                }
+
+                return nextMessages;
+            });
+
+            const { error: sendError } = await supabase
+                .from('messages')
+                .upsert({
+                    id: nextMessage.id,
+                    conversation_id: conversationId,
+                    sender_id: currentUserId,
+                    content: nextMessage.content,
+                    message_type: nextMessage.message_type,
+                    attachment_url: nextMessage.attachment_url,
+                }, { onConflict: 'id' });
+
+            if (sendError) throw sendError;
+
+            setMessages((prev) => {
+                const nextMessages = upsertMessage(prev, {
+                    ...nextMessage,
+                    local_status: 'sent',
+                    local_error: null,
+                });
+
+                if (messageCacheKey) {
+                    void writeScreenCache(messageCacheKey, nextMessages);
+                }
+
+                return nextMessages;
+            });
+
+            void supabase
+                .from('conversations')
+                .update({ updated_at: new Date().toISOString() })
+                .eq('id', conversationId)
+                .then(({ error: updateError }) => {
+                    if (updateError) {
+                        console.warn('Failed to update conversation timestamp:', updateError);
+                    }
+                });
+
+            return { error: null };
+        } catch (err: any) {
+            console.error('Error retrying message:', err);
+            const messageError = err?.message || 'Message failed to send';
+            setMessages((prev) => {
+                const failedMessages = prev.map((message) => {
+                    if (message.id !== messageId) {
+                        return message;
+                    }
+
+                    return {
+                        ...message,
+                        local_status: 'failed' as const,
+                        local_error: messageError,
+                    };
+                });
+
+                if (messageCacheKey) {
+                    void writeScreenCache(messageCacheKey, failedMessages);
+                }
+
+                return failedMessages;
+            });
+            return { error: messageError };
+        } finally {
+            setPendingSendCount((count) => Math.max(0, count - 1));
+        }
+    }, [conversationId, currentUserId, messageCacheKey, messages]);
 
     // Mark messages as read
     const markAsRead = useCallback(async () => {
         if (!conversationId || !currentUserId) return;
 
-        await supabase
+        const hasUnreadIncomingMessages = messages.some((message) => {
+            return message.sender_id !== currentUserId && !message.read_at;
+        });
+
+        if (!hasUnreadIncomingMessages) {
+            return;
+        }
+
+        const readAt = new Date().toISOString();
+
+        const { error: markReadError } = await supabase
             .from('messages')
-            .update({ read_at: new Date().toISOString() })
+            .update({ read_at: readAt })
             .eq('conversation_id', conversationId)
             .neq('sender_id', currentUserId)
             .is('read_at', null);
-    }, [conversationId, currentUserId]);
+
+        if (markReadError) {
+            return;
+        }
+
+        setMessages((prev) => {
+            const nextMessages = prev.map((message) => {
+                if (message.sender_id === currentUserId || message.read_at) {
+                    return message;
+                }
+
+                return {
+                    ...message,
+                    read_at: readAt,
+                };
+            });
+
+            if (messageCacheKey) {
+                void writeScreenCache(messageCacheKey, nextMessages);
+            }
+
+            return nextMessages;
+        });
+    }, [conversationId, currentUserId, messageCacheKey, messages]);
 
     // Add or update reaction to a message
     const addReaction = useCallback(async (messageId: string, emoji: string) => {
@@ -829,7 +1403,7 @@ export function useChat(conversationId: string | null, currentUserId: string | n
         }
     }, [currentUserId]);
 
-    return { messages, loading, sending, error, sendMessage, markAsRead, addReaction, removeReaction };
+    return { messages, loading, sending, error, sendMessage, retryMessage, markAsRead, addReaction, removeReaction };
 }
 
 // Helper to get total unread count (includes both 1-on-1 and group chats)
@@ -898,3 +1472,4 @@ export function useGroupParticipants(conversationId: string | null) {
 
     return { participants, loading, error };
 }
+

@@ -1,6 +1,10 @@
 import { Ionicons } from "@expo/vector-icons";
-import { BottomSheetModal, BottomSheetScrollView } from "@gorhom/bottom-sheet";
-import React, { forwardRef, useEffect, useMemo, useState } from "react";
+import {
+  BottomSheetBackdrop,
+  BottomSheetModal,
+  BottomSheetScrollView,
+} from "@gorhom/bottom-sheet";
+import React, { forwardRef, useCallback, useEffect, useMemo, useState } from "react";
 import {
     ActivityIndicator,
     Alert,
@@ -13,11 +17,26 @@ import {
 } from "react-native";
 import { supabase } from "../../lib/supabase";
 import { useTheme } from "../context/ThemeContext";
+import { formatFriendlyDateTime } from "../utils/friendlyDateTime";
+import {
+  formatRecordingHours,
+  formatRecordingRuleShort,
+  getRecordingRequiredBlocks,
+  getRecordingRequiredHours,
+  resolveRecordingRule,
+} from "../utils/recordingRule";
 import CachedImage from "./CachedImage";
+import InAppMediaViewer, { isInAppMediaUrl } from "./InAppMediaViewer";
+import TrackedBottomSheetModal from "./TrackedBottomSheetModal";
 
 const debugLog = (..._args: unknown[]) => { };
 
 const { width, height } = Dimensions.get("window");
+const bookingStudioDetailsCache = new Map<
+  string,
+  { studioDetails: any; dateOverride: any; cachedAt: number }
+>();
+const BOOKING_DETAILS_CACHE_TTL_MS = 60_000;
 
 // Responsive scaling utilities - optimized for iPhone SE and smaller devices
 const scale = (size: number) => {
@@ -37,6 +56,7 @@ const moderateScale = (size: number, factor = 0.3) => {
 
 interface BookingDetailsSheetProps {
   booking: any;
+  readOnly?: boolean;
   onCancel?: (bookingId: string) => void;
   onConfirm?: (bookingId: string) => void;
   onLeaveReview?: (booking: any) => void;
@@ -45,15 +65,53 @@ interface BookingDetailsSheetProps {
 const BookingDetailsSheet = forwardRef<
   BottomSheetModal,
   BookingDetailsSheetProps
->(({ booking, onCancel, onConfirm, onLeaveReview }, ref) => {
+>(({ booking, readOnly = false, onCancel, onConfirm, onLeaveReview }, ref) => {
   const { colors, isDark } = useTheme();
   const [loading, setLoading] = useState(false);
   const [studioDetails, setStudioDetails] = useState<any>(null);
   const [dateOverride, setDateOverride] = useState<any>(null);
+  const [mediaViewerUrl, setMediaViewerUrl] = useState<string | null>(null);
+  const [mediaViewerTitle, setMediaViewerTitle] = useState("Media");
+  const [isSheetOpen, setIsSheetOpen] = useState(false);
 
   const snapPoints = useMemo(() => ["85%"], []);
+  const handleSheetChange = useCallback((index: number) => {
+    const nextOpen = index >= 0;
+    setIsSheetOpen(nextOpen);
+    if (!nextOpen) {
+      setMediaViewerUrl(null);
+    }
+  }, []);
+  const handleSheetDismiss = useCallback(() => {
+    setIsSheetOpen(false);
+    setMediaViewerUrl(null);
+  }, []);
+  const renderBackdrop = useCallback(
+    (props: any) => (
+      <BottomSheetBackdrop
+        {...props}
+        disappearsOnIndex={-1}
+        appearsOnIndex={0}
+        opacity={0.4}
+        pressBehavior="close"
+      />
+    ),
+    [],
+  );
 
   useEffect(() => {
+    if (!isSheetOpen) {
+      setLoading(false);
+      return;
+    }
+
+    if (booking?.type_id === "booking_request") {
+      setStudioDetails(null);
+      setDateOverride(null);
+      setLoading(false);
+      return;
+    }
+
     if (booking?.studio_id) {
       debugLog("BookingDetailsSheet - Booking data:", {
         start_time: booking.start_time,
@@ -63,12 +121,38 @@ const BookingDetailsSheet = forwardRef<
       });
       fetchStudioDetails();
     }
-  }, [booking]);
+    // Keep this tied to stable booking fields so modal reopen does not refetch
+    // only because the parent recreated the booking object.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    booking?.date,
+    booking?.end_time,
+    booking?.raw_date,
+    booking?.start_time,
+    booking?.studio_id,
+    booking?.type_id,
+    isSheetOpen,
+  ]);
 
   const fetchStudioDetails = async () => {
     if (!booking?.studio_id) return;
 
     try {
+      const bookingDate = booking.raw_date
+        ? booking.raw_date.split("T")[0]
+        : booking.start_time
+          ? new Date(booking.start_time).toISOString().split("T")[0]
+          : "";
+      const cacheKey = `${booking.studio_id}:${bookingDate || booking.id || "no-date"}`;
+      const cached = bookingStudioDetailsCache.get(cacheKey);
+
+      if (cached && Date.now() - cached.cachedAt < BOOKING_DETAILS_CACHE_TTL_MS) {
+        setStudioDetails(cached.studioDetails);
+        setDateOverride(cached.dateOverride);
+        setLoading(false);
+        return;
+      }
+
       setLoading(true);
       const { data, error } = await supabase
         .from("studios_with_stats")
@@ -91,17 +175,17 @@ const BookingDetailsSheet = forwardRef<
         }
       }
 
-      setStudioDetails({
+      const nextStudioDetails = {
         ...data,
         owner,
-      });
+      };
+      let nextDateOverride: any = null;
+
+      setStudioDetails(nextStudioDetails);
+      setDateOverride(null);
 
       // Check if this booking date has a specific date override
-      if (booking.start_time || booking.raw_date) {
-        const bookingDate = booking.raw_date
-          ? booking.raw_date.split("T")[0]
-          : new Date(booking.start_time).toISOString().split("T")[0];
-
+      if (bookingDate) {
         const { data: override, error: overrideError } = await supabase
           .from("studio_date_overrides")
           .select("*")
@@ -110,10 +194,17 @@ const BookingDetailsSheet = forwardRef<
           .maybeSingle();
 
         if (!overrideError && override) {
-          setDateOverride(override);
+          nextDateOverride = override;
+          setDateOverride(nextDateOverride);
           debugLog("📅 Found date override for booking date:", override);
         }
       }
+
+      bookingStudioDetailsCache.set(cacheKey, {
+        studioDetails: nextStudioDetails,
+        dateOverride: nextDateOverride,
+        cachedAt: Date.now(),
+      });
     } catch (e) {
       debugLog("Error fetching studio details:", e);
     } finally {
@@ -130,6 +221,10 @@ const BookingDetailsSheet = forwardRef<
       case "pending":
         return "#F59E0B";
       case "cancelled":
+        return "#EF4444";
+      case "refunded":
+        return "#0EA5E9";
+      case "declined":
         return "#EF4444";
       case "rejected":
         return "#EF4444"; // Gig application rejected
@@ -150,6 +245,10 @@ const BookingDetailsSheet = forwardRef<
         return "time-outline";
       case "cancelled":
         return "close-circle";
+      case "refunded":
+        return "cash-outline";
+      case "declined":
+        return "close-circle";
       case "rejected":
         return "close-circle"; // Gig application rejected
       case "completed":
@@ -162,9 +261,16 @@ const BookingDetailsSheet = forwardRef<
   const formatTime = (time?: string) => {
     if (!time) return "";
     try {
+      const normalized = time.trim();
+
+      // Keep already formatted values like "2:30 PM".
+      if (/\b(am|pm)\b/i.test(normalized)) {
+        return normalized;
+      }
+
       // Handle ISO string
-      if (time.includes("T")) {
-        return new Date(time).toLocaleTimeString([], {
+      if (normalized.includes("T")) {
+        return new Date(normalized).toLocaleTimeString([], {
           hour: "2-digit",
           minute: "2-digit",
           hour12: true,
@@ -172,7 +278,7 @@ const BookingDetailsSheet = forwardRef<
       }
 
       // Handle both "HH:MM:SS" and "HH:MM" formats
-      const timeParts = time.split(":");
+      const timeParts = normalized.split(":");
       const hours = parseInt(timeParts[0]);
       const minutes = parseInt(timeParts[1] || "0");
 
@@ -189,22 +295,464 @@ const BookingDetailsSheet = forwardRef<
 
   const formatDateTime = (dateTime?: string | null) => {
     if (!dateTime) return null;
+    const formatted = formatFriendlyDateTime(dateTime, {
+      forceIncludeTime: true,
+      fallback: "",
+    });
+    return formatted || null;
+  };
+
+  const splitDateAndTimeLabel = (value?: string | null) => {
+    const normalized = String(value || "").trim();
+    if (!normalized) {
+      return { dateLabel: "", timeLabel: "" };
+    }
+
+    if (normalized.includes("•")) {
+      const [dateLabel, ...timeParts] = normalized.split("•");
+      return {
+        dateLabel: dateLabel?.trim() || normalized,
+        timeLabel: timeParts.join("•").trim(),
+      };
+    }
+
+    const atSeparator = /\s+at\s+/i;
+    if (atSeparator.test(normalized)) {
+      const split = normalized.split(atSeparator);
+      return {
+        dateLabel: split[0]?.trim() || normalized,
+        timeLabel: split.slice(1).join(" at ").trim(),
+      };
+    }
+
+    return { dateLabel: normalized, timeLabel: "" };
+  };
+
+  const openMediaOrExternal = async (url: string, label: string) => {
+    const normalizedUrl = String(url || "").trim();
+    if (!normalizedUrl) return;
+
+    if (isInAppMediaUrl(normalizedUrl)) {
+      setMediaViewerTitle(label);
+      setMediaViewerUrl(normalizedUrl);
+      return;
+    }
+
     try {
-      return new Date(dateTime).toLocaleString([], {
-        month: "short",
-        day: "numeric",
-        hour: "numeric",
-        minute: "2-digit",
-      });
-    } catch {
-      return null;
+      await Linking.openURL(normalizedUrl);
+    } catch (error) {
+      Alert.alert("Unable to Open Link", `Could not open ${label}.`);
     }
   };
 
   if (!booking) return null;
 
+  const toStartCase = (value: string) =>
+    value
+      .split(" ")
+      .filter(Boolean)
+      .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+      .join(" ");
+
+  const formatRequestEntity = (name: unknown, entityType: unknown) => {
+    const normalizedName = String(name || "").trim();
+    const normalizedEntityType = String(entityType || "").trim();
+    const entityLabel = normalizedEntityType
+      ? toStartCase(normalizedEntityType.replace(/_/g, " "))
+      : "";
+
+    if (normalizedName && entityLabel) {
+      return `${normalizedName} (${entityLabel})`;
+    }
+
+    return normalizedName || entityLabel || "Unknown";
+  };
+
+  if (booking.type_id === "booking_request") {
+    const createdLabel = formatDateTime(booking?.created_at || booking?.raw_date);
+    const requestKindLabel = toStartCase(
+      String(booking?.request_kind || "application").replace(/_/g, " "),
+    );
+    const senderLabel = formatRequestEntity(
+      booking?.sender_entity_name,
+      booking?.sender_entity_type,
+    );
+    const receiverLabel = formatRequestEntity(
+      booking?.receiver_entity_name,
+      booking?.receiver_entity_type,
+    );
+    const listingTypeLabel = booking?.listing_type
+      ? toStartCase(String(booking.listing_type).replace(/_/g, " "))
+      : null;
+
+    const openRequestAttachment = async (url: string, label: string) => {
+      await openMediaOrExternal(url, label);
+    };
+
+    const attachmentButtons = [
+      booking?.request_contract_url
+        ? {
+            label: "Open Contract",
+            url: booking.request_contract_url,
+          }
+        : null,
+      booking?.request_cv_url
+        ? {
+            label: "Open CV",
+            url: booking.request_cv_url,
+          }
+        : null,
+      booking?.request_video_url
+        ? {
+            label: "Open Video",
+            url: booking.request_video_url,
+          }
+        : null,
+    ].filter(Boolean) as Array<{ label: string; url: string }>;
+
+    return (
+      <>
+        <TrackedBottomSheetModal
+          ref={ref}
+          overlayLabel="BookingRequestDetailsSheet"
+          index={0}
+          snapPoints={snapPoints}
+          enableDynamicSizing={false}
+          enableContentPanningGesture={false}
+          enableOverDrag={false}
+          enablePanDownToClose={true}
+          backdropComponent={renderBackdrop}
+          backgroundStyle={{ backgroundColor: colors.background }}
+          handleIndicatorStyle={{ backgroundColor: isDark ? "#4B5563" : "#E5E7EB" }}
+          onChange={handleSheetChange}
+          onDismiss={handleSheetDismiss}
+        >
+        <BottomSheetScrollView
+          style={{ flex: 1 }}
+          contentContainerStyle={styles.scrollContent}
+        >
+          <View style={styles.container}>
+            <View style={styles.header}>
+              <View style={styles.headerTop}>
+                <Text style={[styles.title, { color: colors.text }]}>Request Details</Text>
+                <TouchableOpacity
+                  activeOpacity={1}
+                  onPress={() => (ref as any)?.current?.dismiss()}
+                  style={[
+                    styles.closeBtn,
+                    { backgroundColor: isDark ? "#374151" : "#F3F4F6" },
+                  ]}
+                >
+                  <Ionicons name="close" size={24} color={colors.text} />
+                </TouchableOpacity>
+              </View>
+
+              <View
+                style={[
+                  styles.statusBadge,
+                  { backgroundColor: getStatusColor(booking.status) + "20" },
+                ]}
+              >
+                <Ionicons
+                  name={getStatusIcon(booking.status) as any}
+                  size={18}
+                  color={getStatusColor(booking.status)}
+                />
+                <Text
+                  style={[
+                    styles.statusText,
+                    { color: getStatusColor(booking.status) },
+                  ]}
+                >
+                  {String(booking.status || "Pending").toUpperCase()}
+                </Text>
+              </View>
+            </View>
+
+            <View
+              style={[
+                styles.card,
+                { backgroundColor: isDark ? "#1F2937" : "#FFFFFF" },
+              ]}
+            >
+              <View style={styles.cardHeader}>
+                <Ionicons
+                  name="information-circle-outline"
+                  size={24}
+                  color={colors.primary}
+                />
+                <Text style={[styles.cardTitle, { color: colors.text }]}>Request Info</Text>
+              </View>
+
+              <View style={styles.detailsGrid}>
+                <View style={styles.detailItem}>
+                  <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>Type</Text>
+                  <Text style={[styles.detailValue, { color: colors.text }]}>
+                    {booking?.type || "Connection Request"}
+                  </Text>
+                </View>
+
+                <View style={styles.detailItem}>
+                  <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>Request Kind</Text>
+                  <Text style={[styles.detailValue, { color: colors.text }]}>{requestKindLabel}</Text>
+                </View>
+
+                <View style={styles.detailItem}>
+                  <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>From</Text>
+                  <Text style={[styles.detailValue, { color: colors.text }]}>{senderLabel}</Text>
+                </View>
+
+                <View style={styles.detailItem}>
+                  <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>To</Text>
+                  <Text style={[styles.detailValue, { color: colors.text }]}>{receiverLabel}</Text>
+                </View>
+
+                {listingTypeLabel ? (
+                  <View style={styles.detailItem}>
+                    <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>Listing Type</Text>
+                    <Text style={[styles.detailValue, { color: colors.text }]}>{listingTypeLabel}</Text>
+                  </View>
+                ) : null}
+
+                <View style={styles.detailItem}>
+                  <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>Pitch / Message</Text>
+                  <Text style={[styles.notesText, { color: colors.text }]}>
+                    {booking?.message || "No pitch provided."}
+                  </Text>
+                </View>
+
+                {booking?.request_application_context ? (
+                  <View style={styles.detailItem}>
+                    <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>
+                      {booking?.request_context_title || "Application Context"}
+                    </Text>
+                    <Text style={[styles.notesText, { color: colors.text }]}>
+                      {booking.request_application_context}
+                    </Text>
+                  </View>
+                ) : null}
+
+                {booking?.request_slot_type ? (
+                  <View style={styles.detailItem}>
+                    <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>Slot / Role</Text>
+                    <Text style={[styles.detailValue, { color: colors.text }]}>
+                      {toStartCase(String(booking.request_slot_type).replace(/_/g, " "))}
+                    </Text>
+                  </View>
+                ) : null}
+
+                {booking?.request_roster_entry_name ? (
+                  <View style={styles.detailItem}>
+                    <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>Featured Performer</Text>
+                    <Text style={[styles.detailValue, { color: colors.text }]}>
+                      {booking.request_roster_entry_name}
+                    </Text>
+                  </View>
+                ) : null}
+
+                {createdLabel ? (
+                  <View style={styles.detailItem}>
+                    <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>Created</Text>
+                    <Text style={[styles.detailValue, { color: colors.text }]}>{createdLabel}</Text>
+                  </View>
+                ) : null}
+              </View>
+            </View>
+
+            <View
+              style={[
+                styles.card,
+                { backgroundColor: isDark ? "#1F2937" : "#FFFFFF" },
+              ]}
+            >
+              <View style={styles.cardHeader}>
+                <Ionicons
+                  name="attach-outline"
+                  size={24}
+                  color={colors.primary}
+                />
+                <Text style={[styles.cardTitle, { color: colors.text }]}>Attachments</Text>
+              </View>
+
+              {attachmentButtons.length === 0 ? (
+                <Text style={[styles.notesText, { color: colors.textSecondary }]}>No files attached.</Text>
+              ) : (
+                <View style={styles.actions}>
+                  {attachmentButtons.map((attachment) => (
+                    <TouchableOpacity
+                      activeOpacity={1}
+                      key={attachment.label}
+                      style={[
+                        styles.actionBtn,
+                        styles.viewStudioBtn,
+                        { borderColor: colors.border },
+                      ]}
+                      onPress={() => openRequestAttachment(attachment.url, attachment.label)}
+                    >
+                      <Text style={[styles.viewStudioBtnText, { color: colors.primary }]}>
+                        {attachment.label}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              )}
+            </View>
+
+            <View style={styles.actions}>
+              <TouchableOpacity
+                activeOpacity={1}
+                style={[
+                  styles.actionBtn,
+                  styles.cancelBtn,
+                  { borderColor: colors.border },
+                ]}
+                onPress={() => (ref as any)?.current?.dismiss()}
+              >
+                <Text style={styles.cancelBtnText}>Close</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </BottomSheetScrollView>
+        </TrackedBottomSheetModal>
+        {mediaViewerUrl ? (
+          <InAppMediaViewer
+            visible
+            uri={mediaViewerUrl}
+            title={mediaViewerTitle}
+            onClose={() => setMediaViewerUrl(null)}
+          />
+        ) : null}
+      </>
+    );
+  }
+
   const isStudio = booking.type_id === "studio_booking" || !!booking.studio_id;
   const isGig = booking.type_id === "gig_application" || !!booking.gig_id;
+  const isReadOnly = readOnly || booking?.viewer_can_act === false;
+  const bookingDateTimeLabel = splitDateAndTimeLabel(booking?.date);
+  const normalizedSessionType =
+    typeof booking.session_type === "string"
+      ? booking.session_type.trim().toLowerCase()
+      : typeof booking?.modifiers_applied?.session_type === "string"
+        ? booking.modifiers_applied.session_type.trim().toLowerCase()
+        : "";
+  const normalizedRateModel =
+    typeof booking?.modifiers_applied?.rate_model === "string"
+      ? booking.modifiers_applied.rate_model.trim().toLowerCase()
+      : typeof booking?.modifiers_applied?.recording_session?.rate_model === "string"
+        ? booking.modifiers_applied.recording_session.rate_model
+          .trim()
+          .toLowerCase()
+        : "";
+  const normalizedStudioType = String(
+    booking?.studio_type ??
+    booking?.studio?.studio_type ??
+    studioDetails?.studio_type ??
+    "",
+  )
+    .trim()
+    .toLowerCase();
+  const hasRecordingStudioType = normalizedStudioType.includes("recording");
+  const hasRehearsalStudioType = normalizedStudioType.includes("rehearsal");
+  const parsedSongCount = Number.parseInt(
+    String(
+      booking.song_count ??
+      booking?.modifiers_applied?.recording_session?.song_count ??
+      booking?.modifiers_applied?.song_count ??
+      "",
+    ).trim(),
+    10,
+  );
+  const effectiveSongCount =
+    Number.isFinite(parsedSongCount) && parsedSongCount > 0
+      ? parsedSongCount
+      : null;
+  const isRecordingByStudioType =
+    hasRecordingStudioType && !hasRehearsalStudioType;
+  const isRecordingByRateModel = normalizedRateModel === "per_song";
+  const isRecordingSession =
+    isStudio &&
+    (normalizedSessionType === "recording" ||
+      Boolean(effectiveSongCount) ||
+      isRecordingByRateModel ||
+      isRecordingByStudioType);
+  const effectiveDurationHours = Number(
+    booking.duration_hours || booking?.modifiers_applied?.hours || 4,
+  );
+  const parsedLegacyMinHoursPerSong = Number(
+    booking?.modifiers_applied?.recording_session?.min_hours_per_song ??
+      booking?.modifiers_applied?.min_hours_per_song ??
+      "",
+  );
+  const legacyMinHoursPerSong =
+    Number.isFinite(parsedLegacyMinHoursPerSong) &&
+    parsedLegacyMinHoursPerSong > 0
+      ? parsedLegacyMinHoursPerSong
+      : null;
+  const recordingRuleSource = {
+    ...(typeof studioDetails?.settings === "object" && studioDetails?.settings
+      ? studioDetails.settings
+      : {}),
+    ...(typeof booking?.studio_settings === "object" && booking?.studio_settings
+      ? booking.studio_settings
+      : {}),
+    ...(typeof booking?.modifiers_applied === "object" && booking?.modifiers_applied
+      ? booking.modifiers_applied
+      : {}),
+    ...(typeof booking?.modifiers_applied?.recording_session === "object" &&
+    booking?.modifiers_applied?.recording_session
+      ? booking.modifiers_applied.recording_session
+      : {}),
+    ...(legacyMinHoursPerSong
+      ? {
+          recording_songs_per_block: 1,
+          recording_hours_per_block: legacyMinHoursPerSong,
+        }
+      : {}),
+  };
+  const recordingRule = isRecordingSession
+    ? resolveRecordingRule(recordingRuleSource)
+    : null;
+  const recordingRuleLabel = recordingRule
+    ? formatRecordingRuleShort(recordingRule)
+    : null;
+  const parsedRequiredBlocks = Number(
+    booking?.modifiers_applied?.recording_session?.required_blocks ??
+      booking?.modifiers_applied?.required_blocks ??
+      "",
+  );
+  const requiredRecordingBlocks =
+    Number.isFinite(parsedRequiredBlocks) && parsedRequiredBlocks > 0
+      ? parsedRequiredBlocks
+      : effectiveSongCount && recordingRule
+        ? getRecordingRequiredBlocks(effectiveSongCount, recordingRule)
+        : null;
+  const parsedRequiredRecordingHours = Number(
+    booking?.modifiers_applied?.recording_session?.required_total_hours ??
+      booking?.modifiers_applied?.required_total_hours ??
+      "",
+  );
+  const requiredRecordingHours =
+    Number.isFinite(parsedRequiredRecordingHours) &&
+    parsedRequiredRecordingHours > 0
+      ? parsedRequiredRecordingHours
+      : effectiveSongCount && recordingRule
+        ? getRecordingRequiredHours(effectiveSongCount, recordingRule)
+        : null;
+  const parsedSelectedRecordingHours = Number(
+    booking?.modifiers_applied?.recording_session?.selected_total_hours ??
+      booking?.modifiers_applied?.selected_total_hours ??
+      booking.duration_hours ??
+      booking?.modifiers_applied?.hours ??
+      "",
+  );
+  const selectedRecordingHours =
+    Number.isFinite(parsedSelectedRecordingHours) &&
+    parsedSelectedRecordingHours > 0
+      ? parsedSelectedRecordingHours
+      : null;
+  const baseRateValue = Number(booking.base_rate || 0);
+  const normalizedTotalCost = Number(booking.total_cost || 0);
 
   const inferApplicationKind = (item: any): "solo" | "duo" | "group" => {
     const candidates = [
@@ -235,14 +783,26 @@ const BookingDetailsSheet = forwardRef<
   const applicationLabel = getApplicationDisplayLabel(booking);
 
   return (
-    <BottomSheetModal
-      ref={ref}
-      index={0}
-      snapPoints={snapPoints}
-      backgroundStyle={{ backgroundColor: colors.background }}
-      handleIndicatorStyle={{ backgroundColor: isDark ? "#4B5563" : "#E5E7EB" }}
-    >
-      <BottomSheetScrollView style={{ flex: 1 }}>
+    <>
+      <TrackedBottomSheetModal
+        ref={ref}
+        overlayLabel="BookingDetailsSheet"
+        index={0}
+        snapPoints={snapPoints}
+        enableDynamicSizing={false}
+        enableContentPanningGesture={false}
+        enableOverDrag={false}
+        enablePanDownToClose={true}
+        backdropComponent={renderBackdrop}
+        backgroundStyle={{ backgroundColor: colors.background }}
+        handleIndicatorStyle={{ backgroundColor: isDark ? "#4B5563" : "#E5E7EB" }}
+        onChange={handleSheetChange}
+        onDismiss={handleSheetDismiss}
+      >
+      <BottomSheetScrollView
+        style={{ flex: 1 }}
+        contentContainerStyle={styles.scrollContent}
+      >
         <View style={styles.container}>
           {/* Header */}
           <View style={styles.header}>
@@ -509,7 +1069,7 @@ const BookingDetailsSheet = forwardRef<
                         Video / Demo
                       </Text>
                       <TouchableOpacity activeOpacity={1}
-                        onPress={() => Linking.openURL(booking.video_url)}
+                        onPress={() => openMediaOrExternal(booking.video_url, "Video / Demo")}
                       >
                         <Text
                           style={[
@@ -542,7 +1102,7 @@ const BookingDetailsSheet = forwardRef<
                         CV / Resume
                       </Text>
                       <TouchableOpacity activeOpacity={1}
-                        onPress={() => Linking.openURL(booking.cv_url)}
+                        onPress={() => openMediaOrExternal(booking.cv_url, "CV / Resume")}
                       >
                         <Text
                           style={[
@@ -754,9 +1314,7 @@ const BookingDetailsSheet = forwardRef<
                             year: "numeric",
                           },
                         )
-                        : booking.date?.includes("•")
-                          ? booking.date.split("•")[0]
-                          : booking.date}
+                        : bookingDateTimeLabel.dateLabel || booking.date}
                     </Text>
                   </View>
 
@@ -772,9 +1330,7 @@ const BookingDetailsSheet = forwardRef<
                     <Text style={[styles.detailValue, { color: colors.text }]}>
                       {formatTime(
                         booking.start_time ||
-                        (booking.date?.includes("•")
-                          ? booking.date.split("•")[1]?.trim()
-                          : ""),
+                        bookingDateTimeLabel.timeLabel,
                       )}
                       {booking.end_time
                         ? ` - ${formatTime(booking.end_time)}`
@@ -799,6 +1355,127 @@ const BookingDetailsSheet = forwardRef<
                       </Text>
                     </View>
                   )}
+
+                  {isStudio && (
+                    <View style={styles.detailItem}>
+                      <Text
+                        style={[
+                          styles.detailLabel,
+                          { color: colors.textSecondary },
+                        ]}
+                      >
+                        Session Type
+                      </Text>
+                      <Text
+                        style={[styles.detailValue, { color: colors.text }]}
+                      >
+                        {isRecordingSession ? "Recording" : "Rehearsal"}
+                      </Text>
+                    </View>
+                  )}
+
+                  {isStudio && isRecordingSession && effectiveSongCount && (
+                    <View style={styles.detailItem}>
+                      <Text
+                        style={[
+                          styles.detailLabel,
+                          { color: colors.textSecondary },
+                        ]}
+                      >
+                        Songs
+                      </Text>
+                      <Text
+                        style={[styles.detailValue, { color: colors.text }]}
+                      >
+                        {effectiveSongCount} song
+                        {effectiveSongCount > 1 ? "s" : ""}
+                      </Text>
+                    </View>
+                  )}
+
+                  {isStudio && isRecordingSession && recordingRuleLabel && (
+                    <View style={styles.detailItem}>
+                      <Text
+                        style={[
+                          styles.detailLabel,
+                          { color: colors.textSecondary },
+                        ]}
+                      >
+                        Recording Rule
+                      </Text>
+                      <Text
+                        style={[styles.detailValue, { color: colors.text }]}
+                      >
+                        {recordingRuleLabel}
+                      </Text>
+                    </View>
+                  )}
+
+                  {isStudio && isRecordingSession && requiredRecordingBlocks && (
+                    <View style={styles.detailItem}>
+                      <Text
+                        style={[
+                          styles.detailLabel,
+                          { color: colors.textSecondary },
+                        ]}
+                      >
+                        Time Blocks
+                      </Text>
+                      <Text
+                        style={[styles.detailValue, { color: colors.text }]}
+                      >
+                        {requiredRecordingBlocks} block
+                        {requiredRecordingBlocks > 1 ? "s" : ""}
+                      </Text>
+                    </View>
+                  )}
+
+                  {isStudio && isRecordingSession && requiredRecordingHours && (
+                    <View style={styles.detailItem}>
+                      <Text
+                        style={[
+                          styles.detailLabel,
+                          { color: colors.textSecondary },
+                        ]}
+                      >
+                        Minimum Required Time
+                      </Text>
+                      <Text
+                        style={[styles.detailValue, { color: colors.text }]}
+                      >
+                        {formatRecordingHours(requiredRecordingHours)} hours
+                      </Text>
+                    </View>
+                  )}
+
+                  {isStudio &&
+                    isRecordingSession &&
+                    selectedRecordingHours && (
+                      <View style={styles.detailItem}>
+                        <Text
+                          style={[
+                            styles.detailLabel,
+                            { color: colors.textSecondary },
+                          ]}
+                        >
+                          Selected Time
+                        </Text>
+                        <Text
+                          style={[
+                            styles.detailValue,
+                            {
+                              color:
+                                requiredRecordingHours &&
+                                selectedRecordingHours < requiredRecordingHours
+                                  ? "#F59E0B"
+                                  : colors.text,
+                            },
+                          ]}
+                        >
+                          {formatRecordingHours(selectedRecordingHours)} hours
+                        </Text>
+                      </View>
+                    )}
 
                   {/* Show studio operating hours for this day */}
                   {dateOverride && isStudio && (
@@ -918,16 +1595,17 @@ const BookingDetailsSheet = forwardRef<
                           { color: colors.textSecondary },
                         ]}
                       >
-                        Base Rate ({booking.duration_hours || "4"} hrs × ₱
-                        {Number(booking.base_rate).toLocaleString()})
+                        {isRecordingSession
+                          ? `Base Rate (${effectiveSongCount || 1} song${(effectiveSongCount || 1) > 1 ? "s" : ""} × ₱${baseRateValue.toLocaleString()})`
+                          : `Base Rate (${effectiveDurationHours} hrs × ₱${baseRateValue.toLocaleString()})`}
                       </Text>
                       <Text
                         style={[styles.pricingValue, { color: colors.text }]}
                       >
                         ₱
-                        {(
-                          Number(booking.base_rate) *
-                          (booking.duration_hours || 4)
+                        {(isRecordingSession
+                          ? baseRateValue * (effectiveSongCount || 1)
+                          : baseRateValue * effectiveDurationHours
                         ).toLocaleString()}
                       </Text>
                     </View>
@@ -1076,12 +1754,14 @@ const BookingDetailsSheet = forwardRef<
                           { color: colors.textSecondary },
                         ]}
                       >
-                        Rate ({booking.duration_hours || "4"} hrs)
+                        {isRecordingSession
+                          ? `Recording Total${effectiveSongCount ? ` (${effectiveSongCount} songs)` : ""}`
+                          : `Rate (${effectiveDurationHours} hrs)`}
                       </Text>
                       <Text
                         style={[styles.pricingValue, { color: colors.text }]}
                       >
-                        ₱{booking.total_cost?.toLocaleString()}
+                        ₱{normalizedTotalCost.toLocaleString()}
                       </Text>
                     </View>
                   )}
@@ -1097,7 +1777,7 @@ const BookingDetailsSheet = forwardRef<
                     <Text
                       style={[styles.totalValue, { color: colors.primary }]}
                     >
-                      ₱{booking.total_cost?.toLocaleString()}
+                      ₱{normalizedTotalCost.toLocaleString()}
                     </Text>
                   </View>
                 </View>
@@ -1105,7 +1785,21 @@ const BookingDetailsSheet = forwardRef<
 
               {/* Action Buttons */}
               <View style={styles.actions}>
-                {booking.status === "pending" && onConfirm && (
+                {isReadOnly ? (
+                  <TouchableOpacity
+                    activeOpacity={1}
+                    style={[
+                      styles.actionBtn,
+                      styles.cancelBtn,
+                      { borderColor: colors.border },
+                    ]}
+                    onPress={() => (ref as any)?.current?.dismiss()}
+                  >
+                    <Text style={styles.cancelBtnText}>Close</Text>
+                  </TouchableOpacity>
+                ) : null}
+
+                {!isReadOnly && booking.status === "pending" && onConfirm && (
                   <TouchableOpacity activeOpacity={1}
                     style={[styles.actionBtn, styles.confirmBtn]}
                     onPress={() => {
@@ -1113,18 +1807,13 @@ const BookingDetailsSheet = forwardRef<
                       (ref as any)?.current?.dismiss();
                     }}
                   >
-                    <Ionicons
-                      name="checkmark-circle"
-                      size={20}
-                      color="#FFFFFF"
-                    />
                     <Text style={styles.actionBtnText}>
                       {isGig ? "Accept Application" : "Confirm Booking"}
                     </Text>
                   </TouchableOpacity>
                 )}
 
-                {booking.status === "completed" && (
+                {!isReadOnly && booking.status === "completed" && (
                   <TouchableOpacity activeOpacity={1}
                     style={[
                       styles.actionBtn,
@@ -1142,12 +1831,11 @@ const BookingDetailsSheet = forwardRef<
                       (ref as any)?.current?.dismiss();
                     }}
                   >
-                    <Ionicons name="star-outline" size={20} color="#FFFFFF" />
                     <Text style={styles.actionBtnText}>Leave Review</Text>
                   </TouchableOpacity>
                 )}
 
-                {(booking.status === "confirmed" ||
+                {!isReadOnly && (booking.status === "confirmed" ||
                   booking.status === "pending" ||
                   booking.status === "accepted") &&
                   onCancel && (
@@ -1162,11 +1850,6 @@ const BookingDetailsSheet = forwardRef<
                         (ref as any)?.current?.dismiss();
                       }}
                     >
-                      <Ionicons
-                        name="close-circle-outline"
-                        size={20}
-                        color="#EF4444"
-                      />
                       <Text style={[styles.cancelBtnText]}>
                         {isGig ? "Decline Application" : "Cancel Booking"}
                       </Text>
@@ -1177,13 +1860,25 @@ const BookingDetailsSheet = forwardRef<
           )}
         </View>
       </BottomSheetScrollView>
-    </BottomSheetModal>
+      </TrackedBottomSheetModal>
+      {mediaViewerUrl ? (
+        <InAppMediaViewer
+          visible
+          uri={mediaViewerUrl}
+          title={mediaViewerTitle}
+          onClose={() => setMediaViewerUrl(null)}
+        />
+      ) : null}
+    </>
   );
 });
 
 BookingDetailsSheet.displayName = "BookingDetailsSheet";
 
 const styles = StyleSheet.create({
+  scrollContent: {
+    paddingBottom: height < 700 ? verticalScale(100) : verticalScale(116),
+  },
   container: {
     padding: height < 700 ? scale(16) : scale(24),
   },
@@ -1354,7 +2049,8 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     gap: scale(8),
-    paddingVertical: moderateScale(16),
+    minHeight: moderateScale(52),
+    paddingVertical: 0,
     borderRadius: moderateScale(12),
   },
   confirmBtn: {
@@ -1371,18 +2067,28 @@ const styles = StyleSheet.create({
   actionBtnText: {
     color: "#FFFFFF",
     fontSize: moderateScale(16),
+    lineHeight: moderateScale(20),
     fontFamily: "Poppins_600SemiBold",
     textAlign: "center",
+    includeFontPadding: false,
+    textAlignVertical: "center",
   },
   cancelBtnText: {
     color: "#EF4444",
     fontSize: moderateScale(16),
+    lineHeight: moderateScale(20),
     fontFamily: "Poppins_600SemiBold",
     textAlign: "center",
+    includeFontPadding: false,
+    textAlignVertical: "center",
   },
   viewStudioBtnText: {
     fontSize: moderateScale(16),
+    lineHeight: moderateScale(20),
     fontFamily: "Poppins_600SemiBold",
+    includeFontPadding: false,
+    textAlign: "center",
+    textAlignVertical: "center",
   },
 });
 

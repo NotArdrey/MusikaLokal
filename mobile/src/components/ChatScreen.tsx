@@ -1,13 +1,18 @@
 import { Ionicons } from '@expo/vector-icons';
 import * as DocumentPicker from 'expo-document-picker';
+import * as Haptics from 'expo-haptics';
+import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
 import React, { useEffect, useRef, useState } from 'react';
 import {
     ActivityIndicator,
+    Animated,
     FlatList,
     Image,
     Keyboard,
+    type KeyboardEvent,
     KeyboardAvoidingView,
+    LayoutAnimation,
     Linking,
     Modal,
     Platform,
@@ -18,15 +23,36 @@ import {
     TouchableOpacity,
     View,
 } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets, type Edge } from 'react-native-safe-area-context';
 import { supabase } from '../../lib/supabase';
+import { useAuth } from '../context/AuthContext';
+import { useBottomOverlayVisibility } from '../context/BottomOverlayContext';
 import { useTheme } from '../context/ThemeContext';
-import { ConversationParticipant, Message, useChat, useGroupParticipants } from '../hooks/useChat';
+import { emitToast } from '../events/toastBus';
+import {
+    ConversationParticipant,
+    Message,
+    isConversationMuted,
+    setConversationMute,
+    useChat,
+    useGroupParticipants,
+} from '../hooks/useChat';
+import { sanitizeStorageFileName, uploadStorageObject } from '../utils/storageUpload';
+import { resolveSupabaseMediaUrl } from '../utils/supabaseMedia';
+import BottomModal from './BottomModal';
 import CustomAlert, { AlertType } from './CustomAlert';
+import InAppMediaViewer, { isInAppMediaUrl } from './InAppMediaViewer';
+import { normalizeVisibleInput } from './modal';
+import ProfileAvatar from './ProfileAvatar';
 import ReportModal from './ReportModal';
 
 // Available reaction emojis
 const REACTION_EMOJIS = ['❤️', '😂', '😮', '😢', '😡', '👍'];
+
+const ANDROID_KEYBOARD_ANIMATION_MS = 220;
+const SEND_SCROLL_DELAY_MS = 16;
+const SEND_LAYOUT_ANIMATION_MS = 180;
+const SEND_CONTROL_PRESS_SCALE = 0.9;
 
 interface ChatScreenProps {
     conversationId: string;
@@ -42,6 +68,9 @@ interface ChatScreenProps {
     groupId?: string | null;
     groupName?: string;
     groupAvatar?: string | null;
+    isMuted?: boolean;
+    mutedUntil?: string | null;
+    onMuteChange?: (isMuted: boolean, mutedUntil: string | null) => void;
     onBack?: () => void;
 }
 
@@ -53,11 +82,16 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
     groupId,
     groupName,
     groupAvatar,
+    isMuted = false,
+    mutedUntil = null,
+    onMuteChange,
     onBack,
 }) => {
     const { colors, isDark } = useTheme();
+    const { isGuest } = useAuth();
     const insets = useSafeAreaInsets();
-    const { messages, loading, sending, sendMessage, markAsRead, addReaction, removeReaction } = useChat(conversationId, currentUserId);
+    useBottomOverlayVisibility(true, 'ChatConversationDetail');
+    const { messages, loading, sendMessage, retryMessage, markAsRead, addReaction, removeReaction } = useChat(conversationId, currentUserId);
     const { participants } = useGroupParticipants(isGroupChat ? conversationId : null);
     const [text, setText] = useState('');
     const flatListRef = useRef<FlatList>(null);
@@ -78,13 +112,77 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
     });
     const [showReportModal, setShowReportModal] = useState(false);
     const [showOptions, setShowOptions] = useState(false);
+    const [chatMuted, setChatMuted] = useState(isMuted);
+    const [chatMutedUntil, setChatMutedUntil] = useState<string | null>(mutedUntil);
+    const [updatingMute, setUpdatingMute] = useState(false);
     const [otherUserOnline, setOtherUserOnline] = useState(false);
     const [otherUserLastSeen, setOtherUserLastSeen] = useState<Date | null>(null);
+    const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
+    const [keyboardAvoidingResetKey, setKeyboardAvoidingResetKey] = useState(0);
+    const [mediaViewerUrl, setMediaViewerUrl] = useState<string | null>(null);
+    const [mediaViewerTitle, setMediaViewerTitle] = useState('Media');
     const presenceChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
+    const latestScrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const sendControlScale = useRef(new Animated.Value(1)).current;
+    const normalizedText = React.useMemo(() => normalizeVisibleInput(text), [text]);
+    const hasMessageText = normalizedText.length > 0;
 
     const showAlert = (type: AlertType, title: string, message: string, buttons?: any[]) => {
         setAlertConfig({ type, title, message, buttons });
         setAlertVisible(true);
+    };
+
+    useEffect(() => {
+        setChatMuted(isMuted);
+        setChatMutedUntil(mutedUntil);
+    }, [isMuted, mutedUntil]);
+
+    const triggerSendFeedback = () => {
+        if (Platform.OS === 'web') return;
+        void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => undefined);
+    };
+
+    const triggerSendErrorFeedback = () => {
+        if (Platform.OS === 'web') return;
+        void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error).catch(() => undefined);
+    };
+
+    const animateSendControl = () => {
+        sendControlScale.stopAnimation();
+        sendControlScale.setValue(SEND_CONTROL_PRESS_SCALE);
+        Animated.spring(sendControlScale, {
+            toValue: 1,
+            friction: 5,
+            tension: 130,
+            useNativeDriver: true,
+        }).start();
+    };
+
+    const smoothNextSendLayout = () => {
+        if (Platform.OS === 'web') return;
+
+        LayoutAnimation.configureNext({
+            duration: SEND_LAYOUT_ANIMATION_MS,
+            create: {
+                type: LayoutAnimation.Types.easeInEaseOut,
+                property: LayoutAnimation.Properties.opacity,
+            },
+            update: {
+                type: LayoutAnimation.Types.easeInEaseOut,
+            },
+            delete: {
+                type: LayoutAnimation.Types.easeInEaseOut,
+                property: LayoutAnimation.Properties.opacity,
+            },
+        });
+    };
+
+    const handleTextChange = (nextText: string) => {
+        const nextHasMessageText = normalizeVisibleInput(nextText).length > 0;
+        if (hasMessageText !== nextHasMessageText) {
+            smoothNextSendLayout();
+        }
+        setText(nextText);
     };
 
     // Real-time presence tracking for 1-on-1 chats (global user presence)
@@ -160,8 +258,44 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
         }
     };
 
+    const effectiveMuted = isConversationMuted({
+        is_muted: chatMuted,
+        muted_until: chatMutedUntil,
+    });
+
+    const handleToggleMute = async () => {
+        if (updatingMute) return;
+
+        const nextMuted = !effectiveMuted;
+        setUpdatingMute(true);
+
+        try {
+            const muteState = await setConversationMute(conversationId, nextMuted);
+            setChatMuted(muteState.is_muted);
+            setChatMutedUntil(muteState.muted_until);
+            onMuteChange?.(muteState.is_muted, muteState.muted_until);
+            setShowOptions(false);
+            emitToast({
+                dedupeKey: `conversation-mute:${conversationId}:${nextMuted}`,
+                title: nextMuted ? 'Chat muted' : 'Chat unmuted',
+                message: nextMuted
+                    ? 'New messages stay in your list without pop-up alerts.'
+                    : 'New messages can show pop-up alerts again.',
+                type: 'info',
+                source: 'chat-mute',
+            });
+        } catch (e: any) {
+            showAlert('error', 'Mute Failed', e?.message || 'Could not update this chat.');
+        } finally {
+            setUpdatingMute(false);
+        }
+    };
+
     const handleOpenReport = () => {
         setShowOptions(false);
+        if (isGuest) {
+            return;
+        }
         if (isGroupChat && !groupId) {
             showAlert('error', 'Unable to Report', 'Group information is missing.');
             return;
@@ -184,41 +318,139 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
         return map;
     }, [participants]);
 
+    const reversedMessages = React.useMemo(() => [...messages].reverse(), [messages]);
+    const resolvedOtherUserAvatar = resolveSupabaseMediaUrl(otherUser?.avatar_url);
+    const resolvedGroupAvatar = resolveSupabaseMediaUrl(groupAvatar);
+
     // Mark messages as read when viewing
     useEffect(() => {
         markAsRead();
     }, [messages.length, markAsRead]);
 
-    // Auto-scroll to bottom on new messages
-    useEffect(() => {
-        if (messages.length > 0) {
-            setTimeout(() => {
-                flatListRef.current?.scrollToEnd({ animated: true });
-            }, 100);
+    const animateKeyboardLayoutChange = (event: KeyboardEvent) => {
+        if (Platform.OS === 'android') {
+            LayoutAnimation.configureNext({
+                duration: ANDROID_KEYBOARD_ANIMATION_MS,
+                update: {
+                    type: LayoutAnimation.Types.easeInEaseOut,
+                },
+            });
+            return;
         }
-    }, [messages.length]);
 
-    // Scroll to bottom when keyboard opens so latest messages stay visible
+        try {
+            Keyboard.scheduleLayoutAnimation(event);
+        } catch {
+            LayoutAnimation.configureNext({
+                duration: event.duration || ANDROID_KEYBOARD_ANIMATION_MS,
+                update: {
+                    type: LayoutAnimation.Types.easeInEaseOut,
+                },
+            });
+        }
+    };
+
+    // Keep the composer moving with the keyboard while the inverted list stays anchored.
     useEffect(() => {
         const keyboardShowEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
-        const sub = Keyboard.addListener(keyboardShowEvent, () => {
-            setTimeout(() => {
-                flatListRef.current?.scrollToEnd({ animated: true });
-            }, Platform.OS === 'ios' ? 50 : 150);
+        const keyboardHideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+
+        const showSub = Keyboard.addListener(keyboardShowEvent, (event) => {
+            animateKeyboardLayoutChange(event);
+            setIsKeyboardVisible(true);
         });
-        return () => sub.remove();
+
+        const hideSub = Keyboard.addListener(keyboardHideEvent, (event) => {
+            animateKeyboardLayoutChange(event);
+            setIsKeyboardVisible(false);
+            if (Platform.OS === 'android') {
+                setKeyboardAvoidingResetKey((currentKey) => currentKey + 1);
+            }
+        });
+
+        return () => {
+            showSub.remove();
+            hideSub.remove();
+        };
     }, []);
 
-    const handleSend = async () => {
-        if (!text.trim() || sending) return;
-        const messageText = text.trim();
+    useEffect(() => {
+        return () => {
+            if (latestScrollTimerRef.current) {
+                clearTimeout(latestScrollTimerRef.current);
+            }
+        };
+    }, []);
+
+    const scrollToLatestMessage = () => {
+        if (latestScrollTimerRef.current) {
+            clearTimeout(latestScrollTimerRef.current);
+        }
+
+        latestScrollTimerRef.current = setTimeout(() => {
+            latestScrollTimerRef.current = null;
+            flatListRef.current?.scrollToOffset({ offset: 0, animated: true });
+        }, SEND_SCROLL_DELAY_MS);
+    };
+
+    const handleSend = () => {
+        const messageText = normalizedText;
+        if (!messageText) return;
+        smoothNextSendLayout();
+        animateSendControl();
         setText('');
-        await sendMessage(messageText);
+        triggerSendFeedback();
+        void sendMessage(messageText).then(({ error }) => {
+            if (error) {
+                triggerSendErrorFeedback();
+            }
+        });
+        scrollToLatestMessage();
+    };
+
+    const handleQuickLike = () => {
+        smoothNextSendLayout();
+        animateSendControl();
+        triggerSendFeedback();
+        void sendMessage('👍').then(({ error }) => {
+            if (error) {
+                triggerSendErrorFeedback();
+            }
+        });
+        scrollToLatestMessage();
+    };
+
+    const handleRetryMessage = (message: Message) => {
+        if (message.sender_id !== currentUserId || message.local_status !== 'failed') return;
+        smoothNextSendLayout();
+        animateSendControl();
+        triggerSendFeedback();
+        void retryMessage(message.id).then(({ error }) => {
+            if (error) {
+                triggerSendErrorFeedback();
+            }
+        });
+        scrollToLatestMessage();
     };
 
     const handleLongPress = (messageId: string) => {
         setSelectedMessageId(messageId);
         setShowReactionPicker(true);
+    };
+
+    const openAttachment = (url: string | null | undefined, title = 'Attachment') => {
+        const normalizedUrl = String(url || '').trim();
+        if (!normalizedUrl) return;
+
+        if (isInAppMediaUrl(normalizedUrl)) {
+            setMediaViewerTitle(title);
+            setMediaViewerUrl(normalizedUrl);
+            return;
+        }
+
+        void Linking.openURL(normalizedUrl).catch(() => {
+            showAlert('error', 'Unable to Open', 'We could not open this attachment.');
+        });
     };
 
     const handleSelectReaction = async (emoji: string) => {
@@ -241,14 +473,8 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
     // Index of the last message I sent that has been seen (read_at set) — Messenger-style
     const lastSeenMessageIndex = React.useMemo(() => {
         if (isGroupChat) return -1;
-        let lastIdx = -1;
-        messages.forEach((m, i) => {
-            if (m.sender_id === currentUserId && m.read_at) {
-                lastIdx = i;
-            }
-        });
-        return lastIdx;
-    }, [messages, currentUserId, isGroupChat]);
+        return reversedMessages.findIndex(m => m.sender_id === currentUserId && m.read_at);
+    }, [reversedMessages, currentUserId, isGroupChat]);
 
     // Pick and send a file/document (5 MB limit)
     const handlePickFile = async () => {
@@ -273,18 +499,16 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
 
             setUploading(true);
             const fileExt = asset.name.split('.').pop()?.toLowerCase() || 'bin';
-            const fileName = `chat/${conversationId}/${Date.now()}_${Math.random().toString(36).substring(7)}.${fileExt}`;
+            const safeFileName = sanitizeStorageFileName(asset.name || `attachment.${fileExt}`, `attachment.${fileExt}`);
+            const fileName = `chat/${conversationId}/${Date.now()}_${Math.random().toString(36).substring(7)}_${safeFileName}`;
 
-            // Upload to Supabase storage
-            const response = await fetch(asset.uri);
-            const arrayBuffer = await response.arrayBuffer();
-
-            const { error } = await supabase.storage
-                .from('chat-attachments')
-                .upload(fileName, arrayBuffer, {
-                    contentType: asset.mimeType || 'application/octet-stream',
-                    upsert: false,
-                });
+            const { error } = await uploadStorageObject({
+                bucket: 'chat-attachments',
+                path: fileName,
+                uri: asset.uri,
+                contentType: asset.mimeType || 'application/octet-stream',
+                upsert: false,
+            });
 
             if (error) {
                 console.error('Upload error:', error);
@@ -313,6 +537,12 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
         return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     };
 
+    const getMessageFooterText = (message: Message) => {
+        if (message.local_status === 'failed') return 'Tap to retry';
+        if (message.local_status === 'sending') return 'Sending';
+        return formatTime(message.created_at);
+    };
+
     const formatDate = (dateString: string) => {
         const date = new Date(dateString);
         const today = new Date();
@@ -330,25 +560,32 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
 
     const renderMessage = ({ item, index }: { item: Message; index: number }) => {
         const isMe = item.sender_id === currentUserId;
-        const showDate = index === 0 ||
-            formatDate(messages[index - 1].created_at) !== formatDate(item.created_at);
+        
+        // Since reversedMessages holds newest at index 0,
+        // message ABOVE visually is index + 1 (older chronologically).
+        // message BELOW visually is index - 1 (newer chronologically).
+        const olderMessage = index < reversedMessages.length - 1 ? reversedMessages[index + 1] : null;
+        const newerMessage = index > 0 ? reversedMessages[index - 1] : null;
 
-        // For group chats, check if we should show sender name
-        const prevMessage = index > 0 ? messages[index - 1] : null;
-        const nextMessage = index < messages.length - 1 ? messages[index + 1] : null;
+        // Show date header if it's the oldest message or the date changes from the older message
+        const showDate = !olderMessage ||
+            formatDate(olderMessage.created_at) !== formatDate(item.created_at);
+
+        // For group chats, check if we should show sender name (if older message is from someone else or day changed)
         const showSenderName = isGroupChat && !isMe && (
-            index === 0 ||
-            prevMessage?.sender_id !== item.sender_id ||
+            !olderMessage ||
+            olderMessage.sender_id !== item.sender_id ||
             showDate
         );
 
-        // Tail: last message in a run (next message is from a different sender or date changes)
-        const isLastInRun = !nextMessage ||
-            nextMessage.sender_id !== item.sender_id ||
-            formatDate(nextMessage.created_at) !== formatDate(item.created_at);
+        // Tail: last message in a run (newer message is from a different sender or date changes)
+        const isLastInRun = !newerMessage ||
+            newerMessage.sender_id !== item.sender_id ||
+            formatDate(newerMessage.created_at) !== formatDate(item.created_at);
 
         // Get sender info from message or participant map
         const senderProfile = item.sender || participantMap.get(item.sender_id);
+        const senderAvatarUrl = resolveSupabaseMediaUrl(senderProfile?.avatar_url);
 
         return (
             <>
@@ -369,16 +606,12 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
                     { marginBottom: isLastInRun ? 8 : 2 },
                 ]}>
                     {!isMe && (
-                        senderProfile?.avatar_url ? (
-                            <Image
-                                source={{ uri: senderProfile.avatar_url }}
-                                style={styles.avatar}
-                            />
-                        ) : (
-                            <View style={[styles.avatar, styles.avatarPlaceholder, { backgroundColor: colors.primary }]}>
-                                <Ionicons name="person" size={20} color="#FFF" />
-                            </View>
-                        )
+                        <ProfileAvatar
+                            uri={senderAvatarUrl}
+                            style={styles.avatar}
+                            backgroundColor={isDark ? '#374151' : '#E5E7EB'}
+                            iconColor={colors.textSecondary}
+                        />
                     )}
                     <View style={styles.messageContent}>
                         {showSenderName && senderProfile && (
@@ -387,6 +620,7 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
                             </Text>
                         )}
                         <Pressable
+                            onPress={isMe && item.local_status === 'failed' ? () => handleRetryMessage(item) : undefined}
                             onLongPress={() => handleLongPress(item.id)}
                             delayLongPress={300}
                         >
@@ -396,20 +630,27 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
                                     ? [styles.myMessage, { backgroundColor: colors.primary }, !isLastInRun && { borderBottomRightRadius: 18 }]
                                     : [styles.theirMessage, { backgroundColor: isDark ? '#374151' : '#E5E7EB' }, !isLastInRun && { borderBottomLeftRadius: 18 }],
                                 item.message_type === 'image' && styles.imageBubble,
+                                item.local_status === 'sending' && styles.pendingMessage,
+                                item.local_status === 'failed' && styles.failedMessage,
                             ]}>
                                 {/* Image message */}
                                 {item.message_type === 'image' && item.attachment_url && (
-                                    <Image
-                                        source={{ uri: item.attachment_url }}
-                                        style={styles.messageImage}
-                                        resizeMode="cover"
-                                    />
+                                    <TouchableOpacity
+                                        activeOpacity={1}
+                                        onPress={() => openAttachment(item.attachment_url, 'Image')}
+                                    >
+                                        <Image
+                                            source={{ uri: item.attachment_url }}
+                                            style={styles.messageImage}
+                                            resizeMode="cover"
+                                        />
+                                    </TouchableOpacity>
                                 )}
                                 {/* File message */}
                                 {item.message_type === 'file' && item.attachment_url && (
                                     <TouchableOpacity
                                         style={[styles.fileBubble, { borderColor: isMe ? 'rgba(255,255,255,0.3)' : colors.border }]}
-                                        onPress={() => Linking.openURL(item.attachment_url!)}
+                                        onPress={() => openAttachment(item.attachment_url, 'Attachment')}
                                         activeOpacity={1}
                                     >
                                         <Ionicons name="document-attach" size={28} color={isMe ? '#FFF' : colors.primary} />
@@ -441,14 +682,26 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
                                         { color: isMe ? 'rgba(255,255,255,0.7)' : colors.textSecondary },
                                         item.message_type === 'image' && { color: '#FFF', textShadowColor: 'rgba(0,0,0,0.5)', textShadowRadius: 2 },
                                     ]}>
-                                        {formatTime(item.created_at)}
+                                        {getMessageFooterText(item)}
                                     </Text>
                                     {isMe && (
                                         <Ionicons
-                                            name={index === lastSeenMessageIndex ? 'checkmark-done' : 'checkmark'}
+                                            name={
+                                                item.local_status === 'failed'
+                                                    ? 'alert-circle'
+                                                    : item.local_status === 'sending'
+                                                        ? 'time-outline'
+                                                        : index === lastSeenMessageIndex
+                                                            ? 'checkmark-done'
+                                                            : 'checkmark'
+                                            }
                                             size={14}
                                             color={
-                                                item.message_type === 'image'
+                                                item.local_status === 'failed'
+                                                    ? '#FCA5A5'
+                                                    : item.local_status === 'sending'
+                                                        ? 'rgba(255,255,255,0.55)'
+                                                        : item.message_type === 'image'
                                                     ? '#FFF'
                                                     : index === lastSeenMessageIndex
                                                         ? '#93C5FD'
@@ -495,20 +748,13 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
                 {/* Messenger-style seen indicator — avatar floats right below the last seen message */}
                 {isMe && index === lastSeenMessageIndex && otherUser && (
                     <View style={styles.seenContainer}>
-                        {otherUser.avatar_url ? (
-                            <Image
-                                source={{ uri: otherUser.avatar_url }}
-                                style={[styles.seenAvatar, { borderColor: colors.background }]}
-                            />
-                        ) : (
-                            <View style={[
-                                styles.seenAvatar,
-                                styles.avatarPlaceholder,
-                                { backgroundColor: colors.primary, borderColor: colors.background },
-                            ]}>
-                                <Ionicons name="person" size={9} color="#FFF" />
-                            </View>
-                        )}
+                        <ProfileAvatar
+                            uri={resolvedOtherUserAvatar}
+                            style={[styles.seenAvatar, { borderColor: colors.background }]}
+                            iconSize={9}
+                            backgroundColor={isDark ? '#374151' : '#E5E7EB'}
+                            iconColor={colors.textSecondary}
+                        />
                     </View>
                 )}
             </>
@@ -528,23 +774,144 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
 
     // Get display info based on chat type
     const displayName = isGroupChat ? groupName : otherUser?.full_name;
-    const displayAvatar = isGroupChat ? groupAvatar : otherUser?.avatar_url;
-    const displaySubtitle = isGroupChat
+    const displayAvatar = isGroupChat ? resolvedGroupAvatar : resolvedOtherUserAvatar;
+    const baseDisplaySubtitle = isGroupChat
         ? `${participants.length} member${participants.length !== 1 ? 's' : ''}`
         : otherUserOnline
             ? 'Active now'
             : otherUserLastSeen
                 ? formatLastSeen(otherUserLastSeen)
                 : null;
+    const displaySubtitle = effectiveMuted
+        ? baseDisplaySubtitle
+            ? `Muted - ${baseDisplaySubtitle}`
+            : 'Muted'
+        : baseDisplaySubtitle;
     const reportTargetName = isGroupChat ? (groupName || 'this group') : (otherUser?.full_name || 'this user');
     const reportTitle = isGroupChat ? 'Report Group' : 'Report User';
+    const keyboardAvoidingBehavior = Platform.OS === 'ios' ? 'padding' : 'height';
+    const composerBottomPadding = Platform.OS === 'ios'
+        ? (isKeyboardVisible ? 16 : Math.max(insets.bottom, 8) + 4)
+        : (isKeyboardVisible ? 12 : 8);
+    const composerSafeAreaEdges: Edge[] = Platform.OS === 'android' && !isKeyboardVisible ? ['bottom'] : [];
+    const chatContent = (
+        <>
+            {loading ? (
+                <View style={styles.loadingContainer}>
+                    <ActivityIndicator size="large" color={colors.primary} />
+                </View>
+            ) : messages.length === 0 ? (
+                <View style={styles.emptyContainer}>
+                    <View style={[styles.emptyIconWrap, { backgroundColor: isDark ? 'rgba(99,102,241,0.15)' : 'rgba(99,102,241,0.1)' }]}>
+                        <Ionicons name="chatbubble-ellipses-outline" size={36} color={colors.primary} />
+                    </View>
+                    <Text style={[styles.emptyText, { color: colors.text }]}>
+                        No messages yet
+                    </Text>
+                    <Text style={[styles.emptySubtext, { color: colors.textSecondary }]}>
+                        Say hi to kick things off! 👋
+                    </Text>
+                </View>
+            ) : (
+                <FlatList
+                    ref={flatListRef}
+                    data={reversedMessages}
+                    keyExtractor={(item) => item.id}
+                    renderItem={renderMessage}
+                    contentContainerStyle={styles.messagesList}
+                    initialNumToRender={18}
+                    maxToRenderPerBatch={24}
+                    windowSize={10}
+                    removeClippedSubviews={Platform.OS === 'android'}
+                    showsVerticalScrollIndicator={false}
+                    keyboardShouldPersistTaps="handled"
+                    keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
+                    inverted={true}
+                />
+            )}
+
+            <SafeAreaView
+                edges={composerSafeAreaEdges}
+                style={[
+                    styles.inputSafeArea,
+                    {
+                        backgroundColor: colors.background,
+                        borderTopColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.07)',
+                        borderTopWidth: StyleSheet.hairlineWidth,
+                    },
+                ]}
+            >
+                <View style={[
+                    styles.inputContainer,
+                    {
+                        backgroundColor: colors.background,
+                        paddingBottom: composerBottomPadding,
+                    },
+                ]}>
+                    <TouchableOpacity
+                        style={[styles.inputAction, uploading && styles.inputActionDisabled]}
+                        onPress={() => setShowAttachmentPicker(true)}
+                        disabled={uploading}
+                        activeOpacity={uploading ? 1 : 0.78}
+                    >
+                        {uploading ? (
+                            <ActivityIndicator size="small" color={colors.primary} />
+                        ) : (
+                            <Ionicons name="add-circle" size={30} color={colors.primary} />
+                        )}
+                    </TouchableOpacity>
+
+                    <View style={[
+                        styles.textInputWrapper,
+                        { backgroundColor: isDark ? '#2C2F3A' : '#F0F2F5' }
+                    ]}>
+                        <TextInput
+                            style={[styles.input, { color: colors.text }]}
+                            value={text}
+                            onChangeText={handleTextChange}
+                            placeholder="Message…"
+                            placeholderTextColor={colors.textSecondary}
+                            multiline
+                            maxLength={1000}
+                        />
+                    </View>
+
+                    <Animated.View style={[styles.sendControlWrap, { transform: [{ scale: sendControlScale }] }]}>
+                        {hasMessageText ? (
+                            <TouchableOpacity
+                                onPress={handleSend}
+                                disabled={!hasMessageText}
+                                style={[styles.sendButton, { backgroundColor: colors.primary }]}
+                                activeOpacity={!hasMessageText ? 1 : 0.78}
+                            >
+                                <Ionicons name="send" size={19} color="#FFF" style={{ marginLeft: 2 }} />
+                            </TouchableOpacity>
+                        ) : (
+                            <TouchableOpacity
+                                style={styles.thumbsUpButton}
+                                onPress={handleQuickLike}
+                                activeOpacity={0.82}
+                                accessibilityRole="button"
+                                accessibilityLabel="Send quick like"
+                            >
+                                <LinearGradient
+                                    colors={[colors.primary, '#5865F2']}
+                                    start={{ x: 0, y: 0 }}
+                                    end={{ x: 1, y: 1 }}
+                                    style={styles.thumbsUpGradient}
+                                >
+                                    <Ionicons name="thumbs-up" size={18} color="#FFF" />
+                                </LinearGradient>
+                            </TouchableOpacity>
+                        )}
+                    </Animated.View>
+                </View>
+            </SafeAreaView>
+        </>
+    );
 
     return (
-        <KeyboardAvoidingView
-            style={[styles.container, { backgroundColor: colors.background }]}
-            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-            keyboardVerticalOffset={Platform.OS === 'ios' ? insets.top : 0}
-        >
+        <View style={[styles.container, { backgroundColor: colors.background }]}>
             {/* Header */}
             <View style={[
                 styles.header,
@@ -559,7 +926,7 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
                         onPress={onBack}
                         style={styles.backButton}
                         hitSlop={{ top: 10, left: 10, right: 10, bottom: 10 }}
-                        activeOpacity={0.7}
+                        activeOpacity={1}
                     >
                         <Ionicons name="chevron-back" size={26} color={colors.text} />
                     </TouchableOpacity>
@@ -567,27 +934,29 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
                 <TouchableOpacity
                     onPress={openOtherUserProfile}
                     disabled={isGroupChat || !otherUser?.id || otherUser.id === currentUserId}
-                    activeOpacity={0.75}
+                    activeOpacity={1}
                     style={styles.headerMainTouchable}
                 >
                     {/* Avatar with online indicator */}
                     <View style={styles.headerAvatarWrap}>
                         {isGroupChat ? (
                             <View style={[styles.groupAvatarContainer, { backgroundColor: colors.primary }]}>
-                                {displayAvatar ? (
-                                    <Image source={{ uri: displayAvatar }} style={styles.headerAvatar} />
-                                ) : (
-                                    <Ionicons name="people" size={22} color="#FFF" />
-                                )}
+                                <ProfileAvatar
+                                    uri={displayAvatar}
+                                    style={styles.headerAvatar}
+                                    iconName="people"
+                                    iconSize={22}
+                                    backgroundColor={colors.primary}
+                                    iconColor="#FFF"
+                                />
                             </View>
                         ) : (
-                            displayAvatar ? (
-                                <Image source={{ uri: displayAvatar }} style={styles.headerAvatar} />
-                            ) : (
-                                <View style={[styles.headerAvatar, styles.avatarPlaceholder, { backgroundColor: colors.primary }]}>
-                                    <Ionicons name="person" size={20} color="#FFF" />
-                                </View>
-                            )
+                            <ProfileAvatar
+                                uri={displayAvatar}
+                                style={styles.headerAvatar}
+                                backgroundColor={isDark ? '#374151' : '#E5E7EB'}
+                                iconColor={colors.textSecondary}
+                            />
                         )}
                         {!isGroupChat && otherUserOnline && (
                             <View style={[styles.onlineDot, { borderColor: colors.background }]} />
@@ -600,7 +969,7 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
                         {displaySubtitle !== null && (
                             <Text style={[
                                 styles.headerStatus,
-                                { color: !isGroupChat && otherUserOnline ? '#10B981' : colors.textSecondary },
+                                { color: !effectiveMuted && !isGroupChat && otherUserOnline ? '#10B981' : colors.textSecondary },
                             ]}>
                                 {displaySubtitle}
                             </Text>
@@ -611,7 +980,7 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
                     <TouchableOpacity
                         style={[styles.headerActionBtn, { backgroundColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)' }]}
                         onPress={() => setShowOptions(true)}
-                        activeOpacity={0.7}
+                        activeOpacity={1}
                     >
                         <Ionicons name="ellipsis-horizontal" size={20} color={colors.text} />
                     </TouchableOpacity>
@@ -619,16 +988,13 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
             </View>
 
             {/* Options Bottom Sheet */}
-            <Modal
+            <BottomModal
                 visible={showOptions}
-                transparent
-                animationType="slide"
-                onRequestClose={() => setShowOptions(false)}
+                overlayLabel="ChatOptionsSheet"
+                onClose={() => setShowOptions(false)}
+                backdropColor="rgba(0,0,0,0.45)"
+                closeOnBackdropPress
             >
-                <Pressable
-                    style={[styles.modalOverlay, styles.dimOverlay]}
-                    onPress={() => setShowOptions(false)}
-                >
                     <View style={[styles.optionsSheet, { backgroundColor: isDark ? '#1E2530' : '#FFFFFF' }]}>
                         <View style={styles.attachmentPickerHandle} />
                         <Text style={[styles.optionsSheetTitle, { color: colors.text }]}>
@@ -651,6 +1017,30 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
                         )}
                         <TouchableOpacity activeOpacity={1}
                             style={[styles.optionRow, { borderBottomColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)' }]}
+                            onPress={handleToggleMute}
+                            disabled={updatingMute}
+                            accessibilityRole="button"
+                            accessibilityLabel={effectiveMuted ? 'Unmute notifications' : 'Mute notifications'}
+                        >
+                            <View style={[styles.optionIconWrap, { backgroundColor: isDark ? 'rgba(99,102,241,0.15)' : 'rgba(99,102,241,0.1)' }]}>
+                                <Ionicons
+                                    name={effectiveMuted ? 'notifications-outline' : 'notifications-off-outline'}
+                                    size={20}
+                                    color={colors.primary}
+                                />
+                            </View>
+                            <Text style={[styles.optionLabel, { color: colors.text }]}>
+                                {effectiveMuted ? 'Unmute Notifications' : 'Mute Notifications'}
+                            </Text>
+                            {updatingMute ? (
+                                <ActivityIndicator size="small" color={colors.primary} />
+                            ) : (
+                                <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
+                            )}
+                        </TouchableOpacity>
+                        {!isGuest && (
+                        <TouchableOpacity activeOpacity={1}
+                            style={[styles.optionRow, { borderBottomColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)' }]}
                             onPress={handleOpenReport}
                         >
                             <View style={[styles.optionIconWrap, { backgroundColor: 'rgba(239,68,68,0.12)' }]}>
@@ -659,6 +1049,7 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
                             <Text style={[styles.optionLabel, { color: '#EF4444' }]}>Report</Text>
                             <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
                         </TouchableOpacity>
+                        )}
                         <TouchableOpacity activeOpacity={1}
                             style={styles.optionCancelBtn}
                             onPress={() => setShowOptions(false)}
@@ -666,8 +1057,7 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
                             <Text style={[styles.optionCancelText, { color: colors.textSecondary }]}>Cancel</Text>
                         </TouchableOpacity>
                     </View>
-                </Pressable>
-            </Modal>
+            </BottomModal>
 
             {/* Report Modal */}
             <ReportModal
@@ -679,86 +1069,13 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
             />
 
             {/* Messages */}
-            <View style={styles.messagesContainer}>
-                {loading ? (
-                    <View style={styles.loadingContainer}>
-                        <ActivityIndicator size="large" color={colors.primary} />
-                    </View>
-                ) : messages.length === 0 ? (
-                    <View style={styles.emptyContainer}>
-                        <View style={[styles.emptyIconWrap, { backgroundColor: isDark ? 'rgba(99,102,241,0.15)' : 'rgba(99,102,241,0.1)' }]}>
-                            <Ionicons name="chatbubble-ellipses-outline" size={36} color={colors.primary} />
-                        </View>
-                        <Text style={[styles.emptyText, { color: colors.text }]}>
-                            No messages yet
-                        </Text>
-                        <Text style={[styles.emptySubtext, { color: colors.textSecondary }]}>
-                            Say hi to kick things off! 👋
-                        </Text>
-                    </View>
-                ) : (
-                    <FlatList
-                        ref={flatListRef}
-                        data={messages}
-                        keyExtractor={(item) => item.id}
-                        renderItem={renderMessage}
-                        contentContainerStyle={styles.messagesList}
-                        onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: false })}
-                        showsVerticalScrollIndicator={false}
-                        keyboardShouldPersistTaps="handled"
-                        keyboardDismissMode="interactive"
-                    />
-                )}
-
-                {/* Input */}
-                <View style={[
-                    styles.inputContainer,
-                    {
-                        backgroundColor: colors.background,
-                        borderTopColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.07)',
-                        paddingBottom: Math.max(insets.bottom, 8) + (Platform.OS === 'ios' ? 4 : 2),
-                        borderTopWidth: StyleSheet.hairlineWidth,
-                    },
-                ]}>
-                    <TouchableOpacity style={styles.inputAction} onPress={() => setShowAttachmentPicker(true)} activeOpacity={0.7}>
-                        <Ionicons name="add-circle" size={30} color={colors.primary} />
-                    </TouchableOpacity>
-
-                    <View style={[
-                        styles.textInputWrapper,
-                        { backgroundColor: isDark ? '#2C2F3A' : '#F0F2F5' }
-                    ]}>
-                        <TextInput
-                            style={[styles.input, { color: colors.text }]}
-                            value={text}
-                            onChangeText={setText}
-                            placeholder="Message…"
-                            placeholderTextColor={colors.textSecondary}
-                            multiline
-                            maxLength={1000}
-                        />
-                    </View>
-
-                    {text.trim().length > 0 ? (
-                        <TouchableOpacity
-                            onPress={handleSend}
-                            disabled={!text.trim() || sending}
-                            style={[styles.sendButton, { backgroundColor: colors.primary, opacity: sending ? 0.7 : 1 }]}
-                            activeOpacity={0.8}
-                        >
-                            {sending ? (
-                                <ActivityIndicator size="small" color="#FFF" />
-                            ) : (
-                                <Ionicons name="send" size={19} color="#FFF" style={{ marginLeft: 2 }} />
-                            )}
-                        </TouchableOpacity>
-                    ) : (
-                        <TouchableOpacity style={styles.thumbsUpButton} onPress={() => sendMessage('👍')} activeOpacity={0.7}>
-                            <Ionicons name="thumbs-up" size={28} color={colors.primary} />
-                        </TouchableOpacity>
-                    )}
-                </View>
-            </View>
+            <KeyboardAvoidingView
+                key={Platform.OS === 'android' ? keyboardAvoidingResetKey : 'ios'}
+                behavior={keyboardAvoidingBehavior}
+                style={styles.messagesContainer}
+            >
+                {chatContent}
+            </KeyboardAvoidingView>
 
             {/* Reaction Picker Modal */}
             <Modal
@@ -789,16 +1106,13 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
             </Modal>
 
             {/* Attachment Picker Modal */}
-            <Modal
+            <BottomModal
                 visible={showAttachmentPicker}
-                transparent
-                animationType="slide"
-                onRequestClose={() => setShowAttachmentPicker(false)}
+                overlayLabel="ChatAttachmentSheet"
+                onClose={() => setShowAttachmentPicker(false)}
+                backdropColor="rgba(0,0,0,0.45)"
+                closeOnBackdropPress
             >
-                <Pressable
-                    style={[styles.modalOverlay, styles.dimOverlay]}
-                    onPress={() => setShowAttachmentPicker(false)}
-                >
                     <View style={[
                         styles.attachmentPicker,
                         { backgroundColor: isDark ? '#1F2937' : '#FFFFFF' }
@@ -821,8 +1135,14 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
                             </TouchableOpacity>
                         </View>
                     </View>
-                </Pressable>
-            </Modal>
+            </BottomModal>
+
+            <InAppMediaViewer
+                visible={!!mediaViewerUrl}
+                uri={mediaViewerUrl}
+                title={mediaViewerTitle}
+                onClose={() => setMediaViewerUrl(null)}
+            />
 
             <CustomAlert
                 visible={alertVisible}
@@ -832,7 +1152,7 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
                 buttons={alertConfig.buttons}
                 onClose={() => setAlertVisible(false)}
             />
-        </KeyboardAvoidingView>
+        </View>
     );
 };
 
@@ -1000,6 +1320,12 @@ const styles = StyleSheet.create({
         borderRadius: 18,
         maxWidth: '100%',
     },
+    pendingMessage: {
+        opacity: 0.72,
+    },
+    failedMessage: {
+        backgroundColor: '#DC2626',
+    },
     myMessage: {
         backgroundColor: '#0084FF',
         borderBottomRightRadius: 4,
@@ -1023,29 +1349,42 @@ const styles = StyleSheet.create({
     },
     inputContainer: {
         flexDirection: 'row',
-        alignItems: 'flex-end',
+        alignItems: 'center',
         paddingHorizontal: 8,
         paddingTop: 8,
         gap: 6,
     },
+    inputSafeArea: {
+        backgroundColor: '#FFFFFF',
+    },
     inputAction: {
-        paddingBottom: 6,
+        width: 40,
+        height: 40,
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    inputActionDisabled: {
+        opacity: 0.7,
     },
     textInputWrapper: {
         flex: 1,
         flexDirection: 'row',
-        alignItems: 'flex-end',
+        alignItems: 'center',
         borderRadius: 22,
         paddingHorizontal: 14,
-        paddingVertical: 6,
-        minHeight: 40,
+        paddingVertical: 0,
+        minHeight: 44,
     },
     input: {
         flex: 1,
         fontSize: 15,
+        minHeight: 44,
         maxHeight: 120,
-        paddingVertical: Platform.OS === 'ios' ? 4 : 2,
+        paddingTop: Platform.OS === 'android' ? 0 : 11,
+        paddingBottom: Platform.OS === 'android' ? 0 : 11,
         lineHeight: 20,
+        textAlignVertical: 'center',
+        includeFontPadding: false,
     },
     sendButton: {
         width: 40,
@@ -1055,8 +1394,32 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         marginBottom: 0,
     },
+    sendControlWrap: {
+        width: 40,
+        height: 40,
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
     thumbsUpButton: {
-        paddingBottom: 6,
+        width: 40,
+        height: 40,
+        borderRadius: 20,
+        justifyContent: 'center',
+        alignItems: 'center',
+        shadowColor: '#5865F2',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.24,
+        shadowRadius: 8,
+        elevation: 4,
+    },
+    thumbsUpGradient: {
+        width: 36,
+        height: 36,
+        borderRadius: 18,
+        justifyContent: 'center',
+        alignItems: 'center',
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.26)',
     },
     // Reaction styles
     reactionsContainer: {
@@ -1165,10 +1528,6 @@ const styles = StyleSheet.create({
     },
     // Options bottom sheet
     optionsSheet: {
-        position: 'absolute',
-        bottom: 0,
-        left: 0,
-        right: 0,
         borderTopLeftRadius: 24,
         borderTopRightRadius: 24,
         paddingHorizontal: 16,
@@ -1207,6 +1566,7 @@ const styles = StyleSheet.create({
     optionCancelBtn: {
         marginTop: 12,
         alignItems: 'center',
+        justifyContent: 'center',
         paddingVertical: 14,
     },
     optionCancelText: {
@@ -1215,10 +1575,6 @@ const styles = StyleSheet.create({
     },
     // Attachment picker styles
     attachmentPicker: {
-        position: 'absolute',
-        bottom: 0,
-        left: 0,
-        right: 0,
         borderTopLeftRadius: 20,
         borderTopRightRadius: 20,
         paddingBottom: 40,

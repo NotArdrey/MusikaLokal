@@ -1,12 +1,15 @@
 import { Ionicons } from '@expo/vector-icons';
-import { BottomSheetBackdrop, BottomSheetFlatList, BottomSheetModal, useBottomSheetTimingConfigs } from '@gorhom/bottom-sheet';
+import { BottomSheetBackdrop, BottomSheetFlatList, BottomSheetModal, useBottomSheetSpringConfigs } from '@gorhom/bottom-sheet';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { forwardRef, useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Dimensions, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { Easing } from 'react-native-reanimated';
 import { supabase } from '../../lib/supabase';
+import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
+import { bottomSheetSpringConfig } from '../utils/motion';
+import { getRecentlyViewedStorageKey } from '../utils/recentlyViewed';
 import ListingCard from './ListingCard';
+import TrackedBottomSheetModal from './TrackedBottomSheetModal';
 
 const { width, height } = Dimensions.get('window');
 
@@ -29,16 +32,19 @@ const moderateScale = (size: number, factor = 0.3) => {
 interface RecentlyViewedSheetProps {
     onClose?: () => void;
     onItemPress?: (listingId: string) => void;
+    onProductionTeamPress?: (teamId: string) => void;
     onChat?: (item: any) => void;
 }
 
-const RecentlyViewedSheet = forwardRef<BottomSheetModal, RecentlyViewedSheetProps>(({ onClose, onItemPress, onChat }, ref) => {
-    const { colors, isDark } = useTheme();
+const RecentlyViewedSheet = forwardRef<BottomSheetModal, RecentlyViewedSheetProps>(({ onClose, onItemPress, onProductionTeamPress, onChat }, ref) => {
+    const { colors } = useTheme();
+    const { isGuest, userId } = useAuth();
     const snapPoints = useMemo(() => ['90%'], []);
-    const animationConfigs = useBottomSheetTimingConfigs({
-        duration: 320,
-        easing: Easing.inOut(Easing.cubic),
-    });
+    const animationConfigs = useBottomSheetSpringConfigs(bottomSheetSpringConfig);
+    const recentlyViewedStorageKey = useMemo(
+        () => getRecentlyViewedStorageKey(userId, isGuest),
+        [isGuest, userId],
+    );
 
     const [data, setData] = useState<any[]>([]);
     const [loading, setLoading] = useState(false);
@@ -65,21 +71,27 @@ const RecentlyViewedSheet = forwardRef<BottomSheetModal, RecentlyViewedSheetProp
     }, [ref]);
 
     const handleCardPress = useCallback((item: any) => {
-        if (onItemPress) {
+        if (onItemPress || onProductionTeamPress) {
             closeSheet();
             setTimeout(() => {
-                onItemPress(item.id);
+                if (item?.type === 'Production' && onProductionTeamPress) {
+                    onProductionTeamPress(item.id);
+                    return;
+                }
+
+                if (onItemPress) {
+                    onItemPress(item.id);
+                }
             }, 120);
         }
-    }, [closeSheet, onItemPress]);
+    }, [closeSheet, onItemPress, onProductionTeamPress]);
 
     // Fetch recently viewed items - uses full objects stored by home.tsx
     useEffect(() => {
         const fetchRecentlyViewed = async () => {
             setLoading(true);
             try {
-                // Use the same key as home.tsx: 'recently_viewed_items'
-                const historyJson = await AsyncStorage.getItem('recently_viewed_items');
+                const historyJson = await AsyncStorage.getItem(recentlyViewedStorageKey);
                 if (!historyJson) {
                     setData([]);
                     setLoading(false);
@@ -99,11 +111,17 @@ const RecentlyViewedSheet = forwardRef<BottomSheetModal, RecentlyViewedSheetProp
                 // If first item is an object with 'id' and 'type', use directly
                 if (typeof history[0] === 'object' && history[0].id) {
                     // Normalize the data format for ListingCard
-                    const normalizedData = history.map((item: any) => ({
-                        ...item,
-                        image: item.image || item.images?.[0] || 'https://via.placeholder.com/300x200?text=Item',
-                        rating: item.rating || 0,
-                    }));
+                    const normalizedData = history
+                        .filter((item: any) => {
+                            const itemType = String(item?.type || '').toLowerCase();
+                            if (itemType !== 'studio' && itemType !== 'gig') return true;
+                            return String(item?.permit_status || '').toLowerCase() === 'approved';
+                        })
+                        .map((item: any) => ({
+                            ...item,
+                            image: item.image || item.images?.[0] || 'https://via.placeholder.com/300x200?text=Item',
+                            rating: item.rating || 0,
+                        }));
                     setData(normalizedData);
                     setLoading(false);
                     return;
@@ -114,9 +132,14 @@ const RecentlyViewedSheet = forwardRef<BottomSheetModal, RecentlyViewedSheetProp
 
                 // Fetch from projection-backed stats views (legacy-compatible shape)
                 const [studiosRes, groupsRes, gigsRes] = await Promise.all([
-                    supabase.from('studios_with_stats').select('*').in('id', recentIds),
+                    supabase.from('studios_with_stats').select('*').eq('permit_status', 'approved').in('id', recentIds),
                     supabase.from('groups_with_stats').select('*').in('id', recentIds),
-                    supabase.from('gigs_with_stats').select('*').in('id', recentIds)
+                    supabase
+                        .from('gigs_with_stats')
+                        .select('*')
+                        .eq('status', 'open')
+                        .eq('permit_status', 'approved')
+                        .in('id', recentIds)
                 ]);
 
                 const combined: any[] = [];
@@ -172,7 +195,7 @@ const RecentlyViewedSheet = forwardRef<BottomSheetModal, RecentlyViewedSheetProp
         };
 
         fetchRecentlyViewed();
-    }, []);
+    }, [recentlyViewedStorageKey]);
 
     const renderItem = useCallback(({ item }: { item: any }) => (
         <View style={{ paddingHorizontal: scale(24), marginBottom: moderateScale(16) }}>
@@ -194,8 +217,9 @@ const RecentlyViewedSheet = forwardRef<BottomSheetModal, RecentlyViewedSheetProp
 
     return (
         <>
-            <BottomSheetModal
+            <TrackedBottomSheetModal
                 ref={ref}
+                overlayLabel="RecentlyViewedSheet"
                 index={0}
                 snapPoints={snapPoints}
                 animationConfigs={animationConfigs}
@@ -247,7 +271,7 @@ const RecentlyViewedSheet = forwardRef<BottomSheetModal, RecentlyViewedSheetProp
                         removeClippedSubviews
                     />
                 )}
-            </BottomSheetModal>
+            </TrackedBottomSheetModal>
         </>
     );
 });
@@ -309,5 +333,7 @@ const styles = StyleSheet.create({
         textAlign: 'center',
     },
 });
+
+RecentlyViewedSheet.displayName = 'RecentlyViewedSheet';
 
 export default RecentlyViewedSheet;

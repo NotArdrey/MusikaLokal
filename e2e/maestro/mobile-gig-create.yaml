@@ -1,0 +1,40 @@
+appId: ${APP_ID}
+---
+- openLink: "musikalokal://add_gig"
+- assertVisible:
+    id: "mobile-add-gig-page"
+- tapOn:
+    id: "mobile-add-gig-event-name-input"
+- inputText: ${E2E_GIG_NAME}
+- hideKeyboard
+- scrollUntilVisible:
+    element:
+      id: "mobile-add-gig-description-input"
+    direction: DOWN
+    timeout: 60000
+    speed: 80
+    visibilityPercentage: 50
+    centerElement: true
+- tapOn:
+    id: "mobile-add-gig-description-input"
+- inputText: ${E2E_GIG_DESCRIPTION}
+- hideKeyboard
+- scrollUntilVisible:
+    element:
+      id: "mobile-add-gig-next-button"
+    direction: DOWN
+    timeout: 60000
+    speed: 80
+    visibilityPercentage: 50
+    centerElement: true
+- tapOn:
+    id: "mobile-add-gig-next-button"
+- tapOn:
+    id: "mobile-add-gig-next-button"
+- tapOn:
+    id: "mobile-add-gig-next-button"
+- tapOn:
+    id: "mobile-add-gig-next-button"
+    optional: true
+- tapOn:
+    id: "custom-alert-button-create"

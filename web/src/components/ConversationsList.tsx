@@ -4,32 +4,34 @@ import React, { useState } from 'react';
 import {
     ActivityIndicator,
     FlatList,
-    Image,
     StyleSheet,
     Text,
     TouchableOpacity,
     View
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { DEFAULT_AVATAR } from '../constants/Images';
 import { useTheme } from '../context/ThemeContext';
-import { Conversation, useConversations } from '../hooks/useChat';
+import { emitToast } from '../events/toastBus';
+import { Conversation, isConversationMuted, useConversations } from '../hooks/useChat';
+import ProfileAvatar from './ProfileAvatar';
 import UserSearchModal from './UserSearchModal';
 
 interface ConversationsListProps {
     currentUserId: string;
     onSelectConversation: (conversation: Conversation) => void;
     onNewConversation?: () => void;
+    selectedConversationId?: string | null;
 }
 
 const ConversationsList: React.FC<ConversationsListProps> = ({
     currentUserId,
     onSelectConversation,
     onNewConversation,
+    selectedConversationId = null,
 }) => {
     const { colors, isDark } = useTheme();
     const insets = useSafeAreaInsets();
-    const { conversations, loading, refetch } = useConversations(currentUserId);
+    const { conversations, loading, refetch, toggleConversationMute } = useConversations(currentUserId);
     const [showNewMessageModal, setShowNewMessageModal] = useState(false);
 
     const handleSelectUserForNewMessage = (user: { id: string; full_name: string; avatar_url: string | null }) => {
@@ -62,14 +64,41 @@ const ConversationsList: React.FC<ConversationsListProps> = ({
         }
     };
 
+    const handleToggleMute = async (conversation: Conversation) => {
+        const nextMuted = !isConversationMuted(conversation);
+
+        try {
+            await toggleConversationMute(conversation.id, nextMuted);
+            emitToast({
+                dedupeKey: `conversation-mute:${conversation.id}:${nextMuted}`,
+                title: nextMuted ? 'Chat muted' : 'Chat unmuted',
+                message: nextMuted
+                    ? 'New messages stay in your list without pop-up alerts.'
+                    : 'New messages can show pop-up alerts again.',
+                type: 'info',
+                source: 'chat-mute',
+            });
+        } catch (err: any) {
+            emitToast({
+                dedupeKey: `conversation-mute-error:${conversation.id}`,
+                title: 'Mute failed',
+                message: err?.message || 'Could not update this chat.',
+                type: 'error',
+                source: 'chat-mute',
+            });
+        }
+    };
+
     const renderConversation = ({ item }: { item: Conversation }) => {
         const isGroup = item.is_group;
         const otherUser = item.other_participant;
         const lastMessage = item.last_message;
+        const muted = isConversationMuted(item);
         const hasUnread = (item.unread_count || 0) > 0;
         const isLastMessageFromMe = !!lastMessage && lastMessage.sender_id === currentUserId;
         const isLastMessageSeen = !isGroup && isLastMessageFromMe && !!lastMessage?.read_at;
         const showOutgoingStatus = !hasUnread && isLastMessageFromMe;
+        const isSelected = selectedConversationId === item.id;
 
         // Determine display info based on chat type
         const displayName = isGroup
@@ -99,25 +128,39 @@ const ConversationsList: React.FC<ConversationsListProps> = ({
             <TouchableOpacity
                 style={[
                     styles.conversationItem,
-                    hasUnread && { backgroundColor: isDark ? 'rgba(99,102,241,0.06)' : 'rgba(99,102,241,0.04)' },
+                    { backgroundColor: isSelected ? (isDark ? 'rgba(255,255,255,0.1)' : '#F0F2F5') : 'transparent' },
+                    hasUnread && !isSelected && { backgroundColor: isDark ? 'rgba(0,132,255,0.12)' : 'rgba(0,132,255,0.08)' },
                 ]}
                 onPress={() => onSelectConversation(item)}
-                activeOpacity={0.7}
+                onLongPress={() => {
+                    void handleToggleMute(item);
+                }}
+                delayLongPress={260}
+                accessibilityRole="button"
+                accessibilityLabel={`${displayName || 'Chat'}${muted ? ', muted' : ''}`}
+                accessibilityHint="Open chat. Long press to mute or unmute notifications."
+                activeOpacity={1}
             >
                 {/* Avatar */}
                 <View style={styles.avatarContainer}>
                     {isGroup ? (
                         <View style={[styles.groupAvatar, { backgroundColor: colors.primary }]}>
-                            {displayAvatar ? (
-                                <Image source={{ uri: displayAvatar }} style={styles.avatar} />
-                            ) : (
-                                <Ionicons name="people" size={26} color="#FFF" />
-                            )}
+                            <ProfileAvatar
+                                uri={displayAvatar}
+                                style={styles.avatar}
+                                iconName="people"
+                                iconSize={26}
+                                backgroundColor={colors.primary}
+                                iconColor="#FFF"
+                            />
                         </View>
-                    ) : displayAvatar ? (
-                        <Image source={{ uri: displayAvatar }} style={styles.avatar} />
                     ) : (
-                        <Image source={DEFAULT_AVATAR} style={styles.avatar} />
+                        <ProfileAvatar
+                            uri={displayAvatar}
+                            style={styles.avatar}
+                            backgroundColor={isDark ? '#374151' : '#E5E7EB'}
+                            iconColor={colors.textSecondary}
+                        />
                     )}
                     {hasUnread && (
                         <View style={[styles.onlineDot, { backgroundColor: colors.primary, borderColor: colors.background }]} />
@@ -138,6 +181,14 @@ const ConversationsList: React.FC<ConversationsListProps> = ({
                             >
                                 {displayName || 'Chat'}
                             </Text>
+                            {muted && (
+                                <Ionicons
+                                    name="notifications-off-outline"
+                                    size={14}
+                                    color={colors.textSecondary}
+                                    style={styles.mutedIcon}
+                                />
+                            )}
                         </View>
                         <Text style={[styles.conversationTime, { color: hasUnread ? colors.primary : colors.textSecondary, fontWeight: hasUnread ? '700' : '400' }]}>
                             {lastMessage ? formatTime(lastMessage.created_at) : ''}
@@ -164,7 +215,13 @@ const ConversationsList: React.FC<ConversationsListProps> = ({
                         ) : showOutgoingStatus ? (
                             <View style={styles.outgoingStatusRow}>
                                 {isLastMessageSeen && otherUser?.avatar_url ? (
-                                    <Image source={{ uri: otherUser.avatar_url }} style={styles.seenAvatarIndicator} />
+                                    <ProfileAvatar
+                                        uri={otherUser.avatar_url}
+                                        style={styles.seenAvatarIndicator}
+                                        iconSize={8}
+                                        backgroundColor={isDark ? '#374151' : '#E5E7EB'}
+                                        iconColor={colors.textSecondary}
+                                    />
                                 ) : isLastMessageSeen ? (
                                     <Ionicons name="checkmark-done" size={15} color={colors.primary} />
                                 ) : (
@@ -196,20 +253,20 @@ const ConversationsList: React.FC<ConversationsListProps> = ({
                     <TouchableOpacity
                         style={styles.composeBtn}
                         onPress={() => setShowNewMessageModal(true)}
-                        activeOpacity={0.7}
+                        activeOpacity={1}
                     >
-                        <Ionicons name="create-outline" size={26} color={colors.primary} />
+                        <Ionicons name="create" size={20} color="#0084FF" />
                     </TouchableOpacity>
                 </View>
 
                 {/* Search Bar */}
                 <TouchableOpacity
-                    style={[styles.searchBar, { backgroundColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.05)' }]}
+                    style={[styles.searchBar, { backgroundColor: isDark ? 'rgba(255,255,255,0.08)' : '#F0F2F5' }]}
                     onPress={() => setShowNewMessageModal(true)}
-                    activeOpacity={0.7}
+                    activeOpacity={1}
                 >
                     <Ionicons name="search" size={17} color={colors.textSecondary} style={{ marginRight: 8 }} />
-                    <Text style={{ color: colors.textSecondary, fontSize: 15 }}>Search or start new chat…</Text>
+                    <Text style={{ color: colors.textSecondary, fontSize: 15 }}>Search Messenger</Text>
                 </TouchableOpacity>
             </View>
 
@@ -232,7 +289,7 @@ const ConversationsList: React.FC<ConversationsListProps> = ({
                     <TouchableOpacity
                         style={[styles.newMessageButton, { backgroundColor: colors.primary }]}
                         onPress={() => setShowNewMessageModal(true)}
-                        activeOpacity={0.85}
+                        activeOpacity={1}
                     >
                         <Ionicons name="create" size={18} color="#FFF" />
                         <Text style={styles.newMessageButtonText}>New Message</Text>
@@ -269,9 +326,8 @@ const styles = StyleSheet.create({
         flex: 1,
     },
     header: {
-        paddingHorizontal: 20,
-        paddingBottom: 12,
-        borderBottomWidth: StyleSheet.hairlineWidth,
+        paddingHorizontal: 14,
+        paddingBottom: 10,
     },
     headerTopRow: {
         flexDirection: 'row',
@@ -280,12 +336,17 @@ const styles = StyleSheet.create({
         marginBottom: 12,
     },
     headerTitle: {
-        fontSize: 28,
+        fontSize: 24,
         fontWeight: '800',
-        letterSpacing: -0.5,
+        letterSpacing: 0,
     },
     composeBtn: {
-        padding: 4,
+        width: 36,
+        height: 36,
+        borderRadius: 18,
+        justifyContent: 'center',
+        alignItems: 'center',
+        backgroundColor: 'rgba(0,132,255,0.12)',
     },
     searchBar: {
         flexDirection: 'row',
@@ -326,27 +387,30 @@ const styles = StyleSheet.create({
         paddingHorizontal: 24,
     },
     list: {
-        paddingTop: 6,
+        paddingTop: 4,
+        paddingHorizontal: 8,
     },
     conversationItem: {
         flexDirection: 'row',
         alignItems: 'center',
-        paddingHorizontal: 16,
-        paddingVertical: 12,
+        paddingHorizontal: 8,
+        paddingVertical: 9,
+        borderRadius: 12,
+        marginVertical: 1,
     },
     avatarContainer: {
         position: 'relative',
         marginRight: 12,
     },
     avatar: {
-        width: 56,
-        height: 56,
-        borderRadius: 28,
+        width: 50,
+        height: 50,
+        borderRadius: 25,
     },
     groupAvatar: {
-        width: 56,
-        height: 56,
-        borderRadius: 28,
+        width: 50,
+        height: 50,
+        borderRadius: 25,
         justifyContent: 'center',
         alignItems: 'center',
     },
@@ -377,6 +441,9 @@ const styles = StyleSheet.create({
     conversationName: {
         fontSize: 15.5,
         flex: 1,
+    },
+    mutedIcon: {
+        marginLeft: 6,
     },
     conversationTime: {
         fontSize: 12,
@@ -414,8 +481,7 @@ const styles = StyleSheet.create({
         fontWeight: '700',
     },
     separator: {
-        height: StyleSheet.hairlineWidth,
-        marginLeft: 84,
+        height: 0,
     },
     newMessageButton: {
         flexDirection: 'row',

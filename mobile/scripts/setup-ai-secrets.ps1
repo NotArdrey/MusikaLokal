@@ -39,7 +39,7 @@ if (-not $ProjectRef) {
     throw "Unable to determine project ref. Pass -ProjectRef or set EXPO_PUBLIC_SUPABASE_URL in $EnvFile"
 }
 
-$secretNames = @('GROQ_API_KEY', 'GEMINI_API_KEY', 'OPENAI_API_KEY')
+$secretNames = @('GROQ_API_KEY', 'GEMINI_API_KEY', 'OPENAI_API_KEY', 'ACRCLOUD_HOST', 'ACRCLOUD_ACCESS_KEY', 'ACRCLOUD_ACCESS_SECRET', 'ACRCLOUD_MIN_SCORE')
 $secretPairs = @()
 $configuredKeys = @()
 
@@ -58,10 +58,10 @@ foreach ($name in $secretNames) {
 }
 
 if ($secretPairs.Count -eq 0) {
-    throw "No AI provider keys found in $EnvFile. Add GROQ_API_KEY and/or GEMINI_API_KEY and rerun."
+    throw "No Edge Function secrets found in $EnvFile. Add GROQ_API_KEY, GEMINI_API_KEY, OPENAI_API_KEY, or ACRCLOUD_* values and rerun."
 }
 
-Write-Host "Setting $($secretPairs.Count) AI secret(s) on project $ProjectRef ..."
+Write-Host "Setting $($secretPairs.Count) Edge Function secret(s) on project $ProjectRef ..."
 & npx supabase secrets set --project-ref $ProjectRef @secretPairs
 
 if ($LASTEXITCODE -ne 0) {
@@ -69,4 +69,4 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 Write-Host ("Configured keys: " + ($configuredKeys -join ', '))
-Write-Host "Done. Deploy the function next: npx supabase functions deploy instrument-suggestions --project-ref $ProjectRef --no-verify-jwt"
+Write-Host "Done. Deploy the function next: npx supabase functions deploy upload-safety-screen --project-ref $ProjectRef --no-verify-jwt"

@@ -1,12 +1,17 @@
 import { Ionicons } from "@expo/vector-icons";
-import { router } from "expo-router";
-import React, { useCallback, useEffect, useState } from "react";
+import {
+  BottomSheetBackdrop,
+  BottomSheetModal,
+  BottomSheetScrollView,
+  useBottomSheetSpringConfigs,
+} from "@gorhom/bottom-sheet";
+import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
     ActivityIndicator,
     BackHandler,
     Image,
     Keyboard,
-    Modal as RNModal,
     ScrollView,
     StyleSheet,
     Text,
@@ -14,12 +19,17 @@ import {
     TouchableOpacity,
     View
 } from "react-native";
+import BottomModal from "../src/components/BottomModal";
 import CustomAlert, { AlertType } from "../src/components/CustomAlert";
+import GroupInviteSection from "../src/components/GroupInviteSection";
+import PlaylistSelectionSection from "../src/components/PlaylistSelectionSection";
 import Header from "../src/components/header";
 import ImageUploader from "../src/components/ImageUploader";
 import LocationPicker from "../src/components/LocationPicker";
-import Modal from "../src/components/modal";
-import Navbar from "../src/components/navbar";
+import Modal, { normalizeVisibleInput } from "../src/components/modal";
+import Navbar, { NAVBAR_CLEARANCE } from "../src/components/navbar";
+import ProfileAvatar from "../src/components/ProfileAvatar";
+import TrackedBottomSheetModal from "../src/components/TrackedBottomSheetModal";
 import {
     isDuoGroupType,
     mapDbGroupTypeToUiGroupType,
@@ -32,9 +42,20 @@ import {
     getGroupTypeLabel,
     isGroupLeaderMember,
 } from "../src/utils/groupMembers";
+import { bottomSheetSpringConfig } from "../src/utils/motion";
+import {
+  fetchGroupLinkedPlaylists,
+  fetchUserOwnedPlaylists,
+  syncGroupLinkedPlaylists,
+} from "../src/utils/groupPlaylists";
+import { buildNotificationRouteMeta } from "../src/utils/notificationNavigation";
+import {
+  GroupInviteTarget,
+  sendGroupMemberInvites,
+} from "../src/utils/groupMemberInvites";
 
-import { useLocalSearchParams } from "expo-router";
 import { supabase } from "../lib/supabase";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 const GENRES = [
   "Rock",
@@ -72,9 +93,97 @@ const GENRES = [
 const TITLE_MAX_LENGTH = 120;
 const DESCRIPTION_MAX_LENGTH = 1000;
 
+const formatSupabaseError = (error: any): string => {
+  const parts = [
+    error?.message,
+    error?.details ? `Details: ${error.details}` : null,
+    error?.hint ? `Hint: ${error.hint}` : null,
+    error?.code ? `Code: ${error.code}` : null,
+  ].filter(Boolean);
+
+  return parts.join("\n") || "Unknown error";
+};
+
+const logActionError = (
+  context: string,
+  error: any,
+  extra?: Record<string, unknown>,
+) => {
+  console.error(`[${context}]`, {
+    message: error?.message || String(error),
+    code: error?.code,
+    details: error?.details,
+    hint: error?.hint,
+    extra,
+  });
+};
+
+const getRosterMemberName = (member: any, index: number): string => {
+  const visibleName = String(member?.name || "").trim();
+  const roleName = String(member?.role || "").trim();
+  const instrumentName = String(member?.instrument || "").trim();
+
+  return visibleName || roleName || instrumentName || `Member ${index + 1}`;
+};
+
+const buildRosterInviteTargets = (
+  members: Array<{ name?: string; instrument?: string; user_id?: string; avatar_url?: string }>,
+  ownerUserId: string,
+  activeMemberUserIds: string[],
+): GroupInviteTarget[] => {
+  const activeMemberIdSet = new Set(activeMemberUserIds);
+  const seen = new Set<string>();
+
+  return members
+    .filter((member) => {
+      const memberId = typeof member?.user_id === "string" ? member.user_id.trim() : "";
+      if (!memberId || memberId === ownerUserId || activeMemberIdSet.has(memberId) || seen.has(memberId)) {
+        return false;
+      }
+      seen.add(memberId);
+      return true;
+    })
+    .map((member) => {
+      const memberId = String(member.user_id);
+      const displayName = String(member.name || "Musician").trim() || "Musician";
+      const instrument = String(member.instrument || "").trim();
+
+      return {
+        key: `musician:${memberId}`,
+        id: memberId,
+        receiverUserId: memberId,
+        displayName,
+        subtitle: instrument ? `Invited ${instrument}` : "Invited musician",
+        image: member.avatar_url || null,
+      };
+    });
+};
+
+const mergeInviteTargets = (targets: GroupInviteTarget[]) => {
+  const byReceiver = new Map<string, GroupInviteTarget>();
+  targets.forEach((target) => {
+    if (!target?.receiverUserId || byReceiver.has(target.receiverUserId)) {
+      return;
+    }
+    byReceiver.set(target.receiverUserId, target);
+  });
+  return Array.from(byReceiver.values());
+};
+
 export default function EditGroupScreen() {
   const { colors, isDark } = useTheme();
+  const insets = useSafeAreaInsets();
+  const groupTypeSheetRef = useRef<BottomSheetModal>(null);
+  const groupTypeSheetSnapPoints = useMemo(() => ["78%"], []);
+  const groupTypeSheetAnimationConfigs = useBottomSheetSpringConfigs(bottomSheetSpringConfig);
   const { id } = useLocalSearchParams();
+  const returnTab = useLocalSearchParams<{
+    returnTab?: string | string[];
+  }>().returnTab;
+  const returnTabParam = Array.isArray(returnTab) ? returnTab[0] : returnTab;
+  const normalizedReturnTab = ["About", "Applications", "Review"].includes(returnTabParam || "")
+    ? returnTabParam || "About"
+    : "About";
   const [groupName, setGroupName] = useState("");
   const [selectedGenres, setSelectedGenres] = useState<string[]>([]);
   const [showAllGenres, setShowAllGenres] = useState(false);
@@ -121,6 +230,19 @@ export default function EditGroupScreen() {
     setAlertVisible(true);
   };
 
+  const handleReturnToTabs = useCallback(() => {
+    const groupId = Array.isArray(id) ? id[0] : id;
+    if (groupId) {
+      router.replace({
+        pathname: "/manage_group",
+        params: { id: groupId, tab: normalizedReturnTab },
+      });
+      return;
+    }
+
+    router.replace("/my_group");
+  }, [id, normalizedReturnTab]);
+
   const isMissingRelationError = (error: any, relationName: string) => {
     const message = String(error?.message || "").toLowerCase();
     return error?.code === "42P01" && message.includes(relationName.toLowerCase());
@@ -135,10 +257,10 @@ export default function EditGroupScreen() {
       "Your current edits won't be saved unless you tap Save Changes.",
       [
         { text: "Stay", style: "cancel" },
-        { text: "Leave", style: "destructive", onPress: () => router.back() },
+        { text: "Leave", style: "destructive", onPress: handleReturnToTabs },
       ],
     );
-  }, [saving]);
+  }, [handleReturnToTabs, saving]);
 
   // Enhanced member structure: { name, instrument, role?, user_id?, avatar_url? }
   interface MemberDetail {
@@ -149,15 +271,41 @@ export default function EditGroupScreen() {
     avatar_url?: string;
   }
   const [members, setMembers] = useState<MemberDetail[]>([]);
+  const [isLeaderInstrumentFinalized, setIsLeaderInstrumentFinalized] = useState(true);
+  const [memberInstrumentFinalization, setMemberInstrumentFinalization] = useState<Record<number, boolean>>({});
   const [newMemberInstrument, setNewMemberInstrument] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [pendingMember, setPendingMember] = useState<any>(null);
+  const [selectedInviteTargets, setSelectedInviteTargets] = useState<GroupInviteTarget[]>([]);
+  const [inviteMessage, setInviteMessage] = useState("");
 
   // Group type based on the constants
   const [groupType, setGroupType] = useState<string>(mapDbGroupTypeToUiGroupType("band"));
   const [groupTypeModalVisible, setGroupTypeModalVisible] = useState(false);
+  const groupTypeSheetSurfaceColor = isDark ? "#1E2530" : "#FFFFFF";
+  const renderGroupTypeSheetBackdrop = useCallback((props: any) => (
+    <BottomSheetBackdrop
+      {...props}
+      appearsOnIndex={0}
+      disappearsOnIndex={-1}
+      opacity={0.65}
+      pressBehavior="close"
+    />
+  ), []);
+  const handleGroupTypeSheetDismiss = useCallback(() => {
+    setGroupTypeModalVisible(false);
+  }, []);
+
+  useEffect(() => {
+    if (groupTypeModalVisible) {
+      groupTypeSheetRef.current?.present();
+      return;
+    }
+
+    groupTypeSheetRef.current?.dismiss();
+  }, [groupTypeModalVisible]);
 
   // Leadership Transfer State
   const [transferModalVisible, setTransferModalVisible] = useState(false);
@@ -174,6 +322,9 @@ export default function EditGroupScreen() {
     activeApplications: 0,
     activeBookings: 0,
   });
+  const [ownedPlaylists, setOwnedPlaylists] = useState<any[]>([]);
+  const [selectedPlaylistIds, setSelectedPlaylistIds] = useState<string[]>([]);
+  const [loadingPlaylists, setLoadingPlaylists] = useState(false);
 
   // Role-based access control
   useEffect(() => {
@@ -202,7 +353,7 @@ export default function EditGroupScreen() {
       if (profileError) throw profileError;
 
       if (profile?.role !== "musician") {
-        showAlert("error", "Unauthorized", "Only musicians can edit groups.");
+        showAlert("warning", "Unauthorized", "Only musicians can edit groups.");
         router.replace("/home");
         return;
       }
@@ -221,6 +372,63 @@ export default function EditGroupScreen() {
       fetchGroupDetails();
     }
   }, [id, authorized]);
+
+  const fetchPlaylistOptions = useCallback(async () => {
+    const groupId = Array.isArray(id) ? id[0] : id;
+    if (!groupId || !currentUserId) {
+      return;
+    }
+
+    setLoadingPlaylists(true);
+    try {
+      const [playlistRows, linkedPlaylists] = await Promise.all([
+        fetchUserOwnedPlaylists(currentUserId),
+        fetchGroupLinkedPlaylists(groupId),
+      ]);
+
+      setOwnedPlaylists(playlistRows);
+      setSelectedPlaylistIds(
+        linkedPlaylists.map((playlist) => playlist.playlist_id),
+      );
+    } catch (playlistError) {
+      logActionError("edit_group.fetch_playlists_failed", playlistError, {
+        groupId,
+        currentUserId,
+      });
+      setOwnedPlaylists([]);
+      setSelectedPlaylistIds([]);
+      showAlert(
+        "warning",
+        "Couldn't Load Playlists",
+        `Linked playlists could not be loaded: ${formatSupabaseError(playlistError)}`,
+      );
+    } finally {
+      setLoadingPlaylists(false);
+    }
+  }, [currentUserId, id]);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (!authorized || !currentUserId || !id) {
+        return undefined;
+      }
+
+      void fetchPlaylistOptions();
+      return undefined;
+    }, [authorized, currentUserId, fetchPlaylistOptions, id]),
+  );
+
+  const handleTogglePlaylist = useCallback((playlistId: string) => {
+    setSelectedPlaylistIds((prev) =>
+      prev.includes(playlistId)
+        ? prev.filter((id) => id !== playlistId)
+        : [...prev, playlistId],
+    );
+  }, []);
+
+  const handleCreatePlaylist = useCallback(() => {
+    router.push("/create_playlist");
+  }, []);
 
   useEffect(() => {
     const backSubscription = BackHandler.addEventListener(
@@ -282,7 +490,7 @@ export default function EditGroupScreen() {
         });
       }
     } catch (impactError) {
-      console.log("Unable to fetch impact summary:", impactError);
+      logActionError("edit_group.fetch_impact_failed", impactError, { groupId });
     }
   };
 
@@ -299,7 +507,7 @@ export default function EditGroupScreen() {
       // Ensure id is a string, not an array
       const groupId = Array.isArray(id) ? id[0] : id;
       if (!groupId) {
-        showAlert("error", "Error", "Invalid group ID");
+        showAlert("warning", "Invalid Group", "Invalid group ID. Please try again.");
         router.replace("/home");
         return;
       }
@@ -369,7 +577,7 @@ export default function EditGroupScreen() {
 
       if (!baseData) {
         showAlert(
-          "error",
+          "warning",
           "Not Found",
           "Group not found or you do not have permission to edit it.",
         );
@@ -386,7 +594,7 @@ export default function EditGroupScreen() {
       // If no data returned, user doesn't own this group
       if (!data) {
         showAlert(
-          "error",
+          "warning",
           "Not Found",
           "Group not found or you do not have permission to edit it.",
         );
@@ -447,9 +655,13 @@ export default function EditGroupScreen() {
         .select("user_id, role, profiles:user_id(full_name, avatar_url)")
         .eq("group_id", groupId);
 
+      if (dbMembersError) {
+        throw dbMembersError;
+      }
+
       const membersFromDb: MemberDetail[] = [];
       const addedUserIds = new Set<string>();
-      const dbRows = dbMembersError ? [] : dbMembers || [];
+      const dbRows = dbMembers || [];
 
       dbRows.forEach((row: any) => {
         const matchedByUser = parsedMembers.find(
@@ -496,6 +708,16 @@ export default function EditGroupScreen() {
           }));
 
       setMembers(combinedMembers);
+      const loadedLeader = combinedMembers.find((member) =>
+        isGroupLeaderMember(member, data.owner_id || null),
+      );
+      setIsLeaderInstrumentFinalized(Boolean(loadedLeader?.instrument?.trim()));
+      setMemberInstrumentFinalization(
+        combinedMembers.reduce<Record<number, boolean>>((acc, member, memberIndex) => {
+          acc[memberIndex] = Boolean(member.instrument?.trim());
+          return acc;
+        }, {}),
+      );
       setInitialMemberUserIds(
         (membersFromDb.length > 0 ? membersFromDb : combinedMembers)
           .map((member) => member.user_id)
@@ -508,8 +730,14 @@ export default function EditGroupScreen() {
 
       fetchGroupImpactSummary(groupId);
     } catch (e) {
-      console.log("Error fetching group details:", e);
-      showAlert("error", "Error", "Failed to load group details.");
+      logActionError("edit_group.fetch_details_failed", e, {
+        groupId: Array.isArray(id) ? id[0] : id,
+      });
+      showAlert(
+        "warning",
+        "Couldn't Load Details",
+        `Failed to load group details: ${formatSupabaseError(e)}`,
+      );
       router.replace("/home");
     } finally {
       setLoading(false);
@@ -518,20 +746,20 @@ export default function EditGroupScreen() {
 
   const validateForm = (): boolean => {
     if (!groupName.trim()) {
-      showAlert("error", "Required Field", "Please enter a group name");
+      showAlert("warning", "Required Field", "Please enter a group name");
       return false;
     }
     if (selectedGenres.length === 0) {
-      showAlert("error", "Required Field", "Please select at least one genre");
+      showAlert("warning", "Required Field", "Please select at least one genre");
       return false;
     }
     if (!description.trim()) {
-      showAlert("error", "Required Field", "Please enter a description");
+      showAlert("warning", "Required Field", "Please enter a description");
       return false;
     }
     if (!address || !latitude || !longitude) {
       showAlert(
-        "error",
+        "warning",
         "Required Field",
         "Please select a location on the map",
       );
@@ -539,7 +767,7 @@ export default function EditGroupScreen() {
     }
     if (images.length === 0) {
       showAlert(
-        "error",
+        "warning",
         "Required Field",
         "Please upload at least one group photo",
       );
@@ -549,9 +777,40 @@ export default function EditGroupScreen() {
     const leader = members.find((m) => isGroupLeaderMember(m, groupOwnerId));
     if (!leader?.instrument?.trim()) {
       showAlert(
-        "error",
+        "warning",
         "Leader Instrument Required",
         "Please enter your instrument/role as the group leader.",
+      );
+      return false;
+    }
+    if (!isLeaderInstrumentFinalized) {
+      showAlert(
+        "warning",
+        "Leader Instrument Not Finalized",
+        "Tap the check icon beside the leader instrument to finalize it before saving.",
+      );
+      return false;
+    }
+    const memberWithoutInstrument = members.find((member) => !member.instrument?.trim());
+    if (memberWithoutInstrument) {
+      showAlert(
+        "warning",
+        "Missing Instrument",
+        `Please enter an instrument for ${memberWithoutInstrument.name || "a member"}.`,
+      );
+      return false;
+    }
+    const unfinalizedMember = members.find(
+      (member, index) =>
+        !isGroupLeaderMember(member, groupOwnerId) &&
+        Boolean(member.instrument?.trim()) &&
+        !memberInstrumentFinalization[index],
+    );
+    if (unfinalizedMember) {
+      showAlert(
+        "warning",
+        "Member Instrument Not Finalized",
+        `Tap the check icon beside ${unfinalizedMember.name || "this member"}'s instrument before saving.`,
       );
       return false;
     }
@@ -559,10 +818,11 @@ export default function EditGroupScreen() {
     const selectedType = PH_MUSIC_GROUP_TYPES.find((t) => t.id === groupType);
     if (selectedType) {
       if (members.length < selectedType.minMembers) {
+        const remainingMembers = selectedType.minMembers - members.length;
         showAlert(
           "warning",
           `${selectedType.label} Requirement`,
-          `A ${selectedType.label} must have at least ${selectedType.minMembers} members. Adjust members or change group type.`,
+          `A ${selectedType.label} must have at least ${selectedType.minMembers} members. You currently have ${members.length}. Add ${remainingMembers} more member${remainingMembers === 1 ? "" : "s"} or change the group type.`,
         );
         return false;
       }
@@ -586,7 +846,7 @@ export default function EditGroupScreen() {
       // Ensure id is a string, not an array
       const groupId = Array.isArray(id) ? id[0] : id;
       if (!groupId) {
-        showAlert("error", "Error", "Invalid group ID");
+        showAlert("warning", "Invalid Group", "Invalid group ID. Please try again.");
         setSaving(false);
         return;
       }
@@ -612,7 +872,7 @@ export default function EditGroupScreen() {
       };
 
       // Direct update to groups table
-      const { error } = await supabase
+      const { data: updatedGroup, error } = await supabase
         .from('groups')
         .update({
           name: payload.name,
@@ -624,20 +884,30 @@ export default function EditGroupScreen() {
           group_type: payload.group_type,
         })
         .eq('id', groupId)
-        .eq('owner_id', user.id);
+        .eq('owner_id', user.id)
+        .select('id')
+        .single();
 
-      if (error) {
-        console.error('❌ Update failed with error:', error);
-        const errorMsg = error.message || "Unknown error";
-        showAlert("error", "Error", `Failed to update group: ${errorMsg}`);
-        return;
+      if (error || !updatedGroup) {
+        logActionError("edit_group.update_base_failed", error, {
+          groupId,
+          userId: user.id,
+        });
+        throw new Error(`Failed to update group: ${formatSupabaseError(error)}`);
       }
 
-      await supabase.from('group_roster_members').delete().eq('group_id', groupId);
+      const { error: deleteRosterError } = await supabase
+        .from('group_roster_members')
+        .delete()
+        .eq('group_id', groupId);
+      if (deleteRosterError) {
+        logActionError("edit_group.clear_roster_failed", deleteRosterError, { groupId });
+        throw new Error(`Failed to clear group roster: ${formatSupabaseError(deleteRosterError)}`);
+      }
       const rosterRows = (payload.members || []).map((member: any, index: number) => ({
         group_id: groupId,
         user_id: member.user_id || null,
-        member_name: member.name || null,
+        member_name: getRosterMemberName(member, index),
         member_role: member.role || null,
         instrument: member.instrument || null,
         avatar_url: member.avatar_url || null,
@@ -652,12 +922,23 @@ export default function EditGroupScreen() {
           .from('group_roster_members')
           .insert(rosterRows);
         if (rosterError) {
-          showAlert("error", "Error", `Group profile updated but failed to sync roster: ${rosterError.message || "Unknown error"}`);
-          return;
+          logActionError("edit_group.save_roster_failed", rosterError, {
+            groupId,
+            rowCount: rosterRows.length,
+          });
+          throw new Error(`Failed to sync group roster: ${formatSupabaseError(rosterError)}`);
         }
       }
 
-      await supabase.from('group_media').delete().eq('group_id', groupId).eq('media_type', 'image');
+      const { error: deleteMediaError } = await supabase
+        .from('group_media')
+        .delete()
+        .eq('group_id', groupId)
+        .eq('media_type', 'image');
+      if (deleteMediaError) {
+        logActionError("edit_group.clear_images_failed", deleteMediaError, { groupId });
+        throw new Error(`Failed to clear group images: ${formatSupabaseError(deleteMediaError)}`);
+      }
       const imageRows = (payload.images || []).map((media_url: string, index: number) => ({
         group_id: groupId,
         media_type: 'image',
@@ -669,8 +950,11 @@ export default function EditGroupScreen() {
           .from('group_media')
           .insert(imageRows);
         if (mediaError) {
-          showAlert("error", "Error", `Group profile updated but failed to sync images: ${mediaError.message || "Unknown error"}`);
-          return;
+          logActionError("edit_group.save_images_failed", mediaError, {
+            groupId,
+            rowCount: imageRows.length,
+          });
+          throw new Error(`Failed to sync group images: ${formatSupabaseError(mediaError)}`);
         }
       }
 
@@ -681,7 +965,9 @@ export default function EditGroupScreen() {
             ...(members || [])
               .map((member) => member?.user_id)
               .filter((memberId): memberId is string =>
-                typeof memberId === "string" && memberId.trim().length > 0,
+                typeof memberId === "string" &&
+                memberId.trim().length > 0 &&
+                initialMemberUserIds.includes(memberId),
               ),
           ],
         ),
@@ -698,12 +984,11 @@ export default function EditGroupScreen() {
         .upsert(membershipRows, { onConflict: "group_id,user_id" });
 
       if (upsertMembersError) {
-        showAlert(
-          "error",
-          "Error",
-          `Group profile updated but failed to sync members: ${upsertMembersError.message || "Unknown error"}`,
-        );
-        return;
+        logActionError("edit_group.sync_members_failed", upsertMembersError, {
+          groupId,
+          userIds: desiredMemberUserIds,
+        });
+        throw new Error(`Failed to sync group members: ${formatSupabaseError(upsertMembersError)}`);
       }
 
       if (desiredMemberUserIds.length > 0) {
@@ -715,34 +1000,76 @@ export default function EditGroupScreen() {
           .not("user_id", "in", inClause);
 
         if (deleteStaleMembersError) {
-          showAlert(
-            "error",
-            "Error",
-            `Group profile updated but failed to remove stale members: ${deleteStaleMembersError.message || "Unknown error"}`,
+          logActionError("edit_group.remove_stale_members_failed", deleteStaleMembersError, {
+            groupId,
+            userIds: desiredMemberUserIds,
+          });
+          throw new Error(
+            `Failed to remove stale group members: ${formatSupabaseError(deleteStaleMembersError)}`,
           );
-          return;
         }
       }
 
-      console.log("✅ Group Updated");
-      showAlert("success", "Success", "Group updated successfully!", [
+      try {
+        await syncGroupLinkedPlaylists(groupId, selectedPlaylistIds);
+      } catch (playlistError: any) {
+        logActionError("edit_group.sync_playlists_failed", playlistError, {
+          groupId,
+          playlistIds: selectedPlaylistIds,
+        });
+        throw new Error(
+          `Group details were saved, but linked playlists could not be updated: ${formatSupabaseError(playlistError)}`,
+        );
+      }
+
+      let inviteSummaryMessage = "";
+      const inviteTargets = mergeInviteTargets([
+        ...buildRosterInviteTargets(payload.members || [], user.id, initialMemberUserIds),
+        ...selectedInviteTargets,
+      ]);
+      if (inviteTargets.length > 0) {
+        const inviteSummary = await sendGroupMemberInvites({
+          currentUserId: user.id,
+          groupId,
+          groupName,
+          groupImageUrl: payload.images[0] || null,
+          inviteMessage,
+          inviteTargets,
+        });
+
+        inviteSummaryMessage =
+          inviteSummary.failedCount > 0
+            ? ` ${inviteSummary.sentCount} invite(s) sent, ${inviteSummary.failedCount} not sent.`
+            : ` ${inviteSummary.sentCount} invite(s) sent.`;
+        if (inviteSummary.failedCount > 0) {
+          console.error("[edit_group.send_invites_partial_failure]", {
+            groupId,
+            failures: inviteSummary.failures,
+          });
+        }
+        setSelectedInviteTargets([]);
+        setInviteMessage("");
+      }
+
+      showAlert("success", "Success", `Group updated successfully!${inviteSummaryMessage}`, [
         {
           text: "OK",
           onPress: () => {
-            if (router.canGoBack()) {
-              router.back();
-            } else {
-              router.replace({ pathname: "/manage_group", params: { id: groupId } });
-            }
+            router.replace({
+              pathname: "/manage_group",
+              params: { id: groupId, tab: normalizedReturnTab, refresh: String(Date.now()) },
+            });
           },
         },
       ]);
     } catch (e: any) {
-      console.log("❌ Error updating group:", e);
+      logActionError("edit_group.save_failed", e, {
+        groupId: Array.isArray(id) ? id[0] : id,
+      });
       showAlert(
-        "error",
-        "Error",
-        `Failed to update group: ${e?.message || "Unknown error"}`,
+        "warning",
+        "Couldn't Save Group",
+        `Failed to update group: ${formatSupabaseError(e)}`,
       );
     } finally {
       setSaving(false);
@@ -812,6 +1139,26 @@ export default function EditGroupScreen() {
       return;
     }
 
+    const normalizeMemberName = (value?: string | null) =>
+      (value || "").trim().toLowerCase();
+
+    const isMusicianAlreadyAdded = (musician: {
+      id?: string | null;
+      full_name?: string | null;
+    }) => {
+      const musicianName = normalizeMemberName(musician.full_name);
+      return members.some((member) => {
+        const sameId = Boolean(
+          member.user_id && musician.id && member.user_id === musician.id,
+        );
+        const sameName = Boolean(
+          musicianName &&
+            normalizeMemberName(member.name) === musicianName,
+        );
+        return sameId || sameName;
+      });
+    };
+
     setIsSearching(true);
     try {
       const { data, error } = await supabase
@@ -822,7 +1169,10 @@ export default function EditGroupScreen() {
         .limit(5);
 
       if (error) throw error;
-      setSearchResults(data || []);
+      const filteredResults = (data || []).filter(
+        (musician) => !isMusicianAlreadyAdded(musician),
+      );
+      setSearchResults(filteredResults);
     } catch (error) {
       console.error("Error searching musicians:", error);
     } finally {
@@ -833,9 +1183,17 @@ export default function EditGroupScreen() {
   const selectMember = (musician: any) => {
     // Check if already added
     if (
-      members.some(
-        (m) => m.user_id === musician.id || m.name === musician.full_name,
-      )
+      members.some((m) => {
+        const normalizedMusicianName = (musician.full_name || "")
+          .trim()
+          .toLowerCase();
+        const normalizedMemberName = (m.name || "").trim().toLowerCase();
+        return (
+          (m.user_id && musician.id && m.user_id === musician.id) ||
+          (normalizedMusicianName &&
+            normalizedMemberName === normalizedMusicianName)
+        );
+      })
     ) {
       showAlert(
         "warning",
@@ -846,23 +1204,44 @@ export default function EditGroupScreen() {
       setSearchResults([]);
       return;
     }
+    Keyboard.dismiss();
     setPendingMember(musician);
     setSearchQuery("");
     setSearchResults([]);
   };
 
   const confirmAddMember = (instrument: string) => {
-    if (pendingMember && instrument.trim()) {
-      const newMember: MemberDetail = {
-        name: pendingMember.full_name,
-        instrument: instrument.trim(),
-        user_id: pendingMember.id,
-        avatar_url: pendingMember.avatar_url,
-      };
-      setMembers([...members, newMember]);
-      setPendingMember(null);
-      setNewMemberInstrument("");
+    if (!pendingMember) {
+      return;
     }
+
+    const trimmedInstrument = instrument.trim();
+    if (!trimmedInstrument) {
+      showAlert(
+        "warning",
+        "Instrument Required",
+        "Enter an instrument for the selected member before adding them.",
+      );
+      return;
+    }
+
+    const newMember: MemberDetail = {
+      name: pendingMember.full_name,
+      instrument: trimmedInstrument,
+      user_id: pendingMember.id,
+      avatar_url: pendingMember.avatar_url,
+    };
+    setMembers((prev) => {
+      const nextMembers = [...prev, newMember];
+      setMemberInstrumentFinalization((prevFinalization) => ({
+        ...prevFinalization,
+        [nextMembers.length - 1]: true,
+      }));
+      return nextMembers;
+    });
+    Keyboard.dismiss();
+    setPendingMember(null);
+    setNewMemberInstrument("");
   };
 
   const removeMember = (index: number) => {
@@ -893,18 +1272,87 @@ export default function EditGroupScreen() {
         {
           text: "Remove",
           style: "destructive",
-          onPress: () => setMembers(members.filter((_, i) => i !== index)),
+          onPress: () => {
+            setMembers((prev) => prev.filter((_, i) => i !== index));
+            setMemberInstrumentFinalization((prev) => {
+              const next: Record<number, boolean> = {};
+              Object.entries(prev).forEach(([rawIndex, isFinalized]) => {
+                const memberIndex = Number(rawIndex);
+                if (memberIndex < index) {
+                  next[memberIndex] = isFinalized;
+                  return;
+                }
+                if (memberIndex > index) {
+                  next[memberIndex - 1] = isFinalized;
+                }
+              });
+              return next;
+            });
+          },
         },
       ],
     );
   };
 
   const updateMemberInstrument = (index: number, instrument: string) => {
-    setMembers((prev) =>
-      prev.map((member, memberIndex) =>
+    setMembers((prev) => {
+      const currentInstrument = prev[index]?.instrument ?? "";
+      if (currentInstrument === instrument) {
+        return prev;
+      }
+
+      const updated = prev.map((member, memberIndex) =>
         memberIndex === index ? { ...member, instrument } : member,
-      ),
-    );
+      );
+
+      setMemberInstrumentFinalization((prevFinalization) => ({
+        ...prevFinalization,
+        [index]: false,
+      }));
+
+      if (isGroupLeaderMember(updated[index], groupOwnerId)) {
+        setIsLeaderInstrumentFinalized(false);
+      }
+
+      return updated;
+    });
+  };
+
+  const finalizeMemberInstrument = (index: number) => {
+    const value = members[index]?.instrument?.trim() || "";
+    const isLeader = isGroupLeaderMember(members[index], groupOwnerId);
+
+    if (!value) {
+      showAlert(
+        "warning",
+        isLeader ? "Leader Instrument Required" : "Member Instrument Required",
+        isLeader
+          ? "Please enter the leader instrument before finalizing."
+          : "Please enter the member instrument before finalizing.",
+      );
+      return;
+    }
+
+    updateMemberInstrument(index, value);
+    setMemberInstrumentFinalization((prev) => ({
+      ...prev,
+      [index]: true,
+    }));
+    if (isLeader) {
+      setIsLeaderInstrumentFinalized(true);
+    }
+    Keyboard.dismiss();
+  };
+
+  const enableMemberInstrumentEdit = (index: number) => {
+    const isLeader = isGroupLeaderMember(members[index], groupOwnerId);
+    setMemberInstrumentFinalization((prev) => ({
+      ...prev,
+      [index]: false,
+    }));
+    if (isLeader) {
+      setIsLeaderInstrumentFinalized(false);
+    }
   };
 
   const handleGroupTypeChange = (nextType: string) => {
@@ -955,7 +1403,6 @@ export default function EditGroupScreen() {
         .eq("group_id", groupId);
 
       if (error) {
-        console.log("Error fetching group members:", error);
         return;
       }
 
@@ -989,7 +1436,6 @@ export default function EditGroupScreen() {
         .maybeSingle();
 
       if (error) {
-        console.log("Error fetching pending transfer:", error);
         return;
       }
 
@@ -1021,29 +1467,35 @@ export default function EditGroupScreen() {
         .single();
 
       if (error) {
-        console.error("Error creating transfer request:", error);
-        showAlert(
-          "error",
-          "Error",
-          "Failed to send transfer request. " + (error.message || ""),
-        );
-        return;
+        logActionError("edit_group.create_transfer_failed", error, {
+          groupId,
+          toUserId: selectedNewLeader.user_id,
+        });
+        throw new Error(`Failed to send transfer request: ${formatSupabaseError(error)}`);
       }
 
       // Direct insert to notifications table
-      await supabase.from('notifications').insert({
+      const { error: notificationError } = await supabase.from('notifications').insert({
         user_id: selectedNewLeader.user_id,
         type: "info",
         title: "Leadership Transfer Request",
         message: `You have been invited to become the leader of "${groupName}". Open to accept or decline.`,
-        meta: {
+        meta: buildNotificationRouteMeta('/notifications', undefined, {
           type: "leadership_transfer",
           request_id: data.id,
           group_id: groupId,
           group_name: groupName,
-        },
+        }),
         read: false,
       });
+      if (notificationError) {
+        logActionError("edit_group.create_transfer_notification_failed", notificationError, {
+          groupId,
+          requestId: data.id,
+          toUserId: selectedNewLeader.user_id,
+        });
+        throw new Error(`Failed to notify new leader: ${formatSupabaseError(notificationError)}`);
+      }
 
       showAlert(
         "success",
@@ -1057,8 +1509,12 @@ export default function EditGroupScreen() {
       setTransferMessage("");
       fetchPendingTransfer();
     } catch (e) {
-      console.error("Error initiating transfer:", e);
-      showAlert("error", "Error", "Failed to send transfer request.");
+      logActionError("edit_group.initiate_transfer_failed", e);
+      showAlert(
+        "warning",
+        "Transfer Failed",
+        `Failed to send transfer request: ${formatSupabaseError(e)}`,
+      );
     } finally {
       setIsTransferring(false);
     }
@@ -1096,7 +1552,7 @@ export default function EditGroupScreen() {
               setPendingTransfer(null);
             } catch (e) {
               console.error("Error cancelling transfer:", e);
-              showAlert("error", "Error", "Failed to cancel transfer request.");
+              showAlert("warning", "Couldn't Cancel Transfer", "Failed to cancel transfer request.");
             }
           },
         },
@@ -1112,8 +1568,12 @@ export default function EditGroupScreen() {
     }
   }, [authorized, id, currentUserId]);
 
-  const renderSectionHeader = (title: string, icon: string) => (
-    <View style={styles.sectionHeader}>
+  const renderSectionHeader = (
+    title: string,
+    icon: string,
+    isFirstSection = false,
+  ) => (
+    <View style={[styles.sectionHeader, isFirstSection && styles.firstSectionHeader]}>
       <Ionicons name={icon as any} size={18} color={colors.primary} />
       <Text style={[styles.sectionTitle, { color: colors.text }]}>{title}</Text>
     </View>
@@ -1131,11 +1591,19 @@ export default function EditGroupScreen() {
       : normalizedLabel.includes("name") || normalizedLabel.includes("title")
         ? TITLE_MAX_LENGTH
         : undefined;
+    const isRequiredLabel =
+      normalizedLabel.includes("name") ||
+      normalizedLabel.includes("title") ||
+      normalizedLabel.includes("description") ||
+      normalizedLabel.includes("payout");
 
     return (
       <View style={styles.inputContainer}>
       <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>
         {label}
+        {isRequiredLabel ? (
+          <Text style={{ color: "#EF4444" }}> *</Text>
+        ) : null}
       </Text>
       <View
         style={[
@@ -1160,6 +1628,7 @@ export default function EditGroupScreen() {
               height: multiline ? 120 : "auto",
               textAlign: "left",
               textAlignVertical: multiline ? "top" : "center",
+              paddingVertical: multiline ? 12 : 16,
             },
           ]}
         />
@@ -1167,6 +1636,40 @@ export default function EditGroupScreen() {
       </View>
     );
   };
+
+  const membersMissingInstrumentCount = members.filter(
+    (member) => !member.instrument?.trim(),
+  ).length;
+  const leaderIndexForSave = getLeaderIndex();
+  const leaderNeedsFinalization =
+    leaderIndexForSave >= 0 &&
+    Boolean(members[leaderIndexForSave]?.instrument?.trim()) &&
+    !isLeaderInstrumentFinalized;
+  const nonLeaderNeedsFinalizationCount = members.reduce((count, member, index) => {
+    if (isGroupLeaderMember(member, groupOwnerId)) {
+      return count;
+    }
+    if (!member.instrument?.trim()) {
+      return count;
+    }
+    return memberInstrumentFinalization[index] ? count : count + 1;
+  }, 0);
+  const disableSaveForMissingInstruments =
+    membersMissingInstrumentCount > 0 ||
+    leaderNeedsFinalization ||
+    nonLeaderNeedsFinalizationCount > 0;
+  const selectedGroupType = PH_MUSIC_GROUP_TYPES.find((type) => type.id === groupType);
+  const requiredMemberCount = selectedGroupType?.minMembers || 1;
+  const remainingMemberCount = Math.max(requiredMemberCount - members.length, 0);
+  const isFormComplete =
+    groupName.trim().length > 0 &&
+    selectedGenres.length > 0 &&
+    description.trim().length > 0 &&
+    Boolean(address && latitude && longitude) &&
+    images.length > 0 &&
+    remainingMemberCount === 0 &&
+    !disableSaveForMissingInstruments;
+  const footerClearance = NAVBAR_CLEARANCE + insets.bottom + 24;
 
   // Show loading while checking authorization
   if (checkingAuth) {
@@ -1228,10 +1731,15 @@ export default function EditGroupScreen() {
 
         <ScrollView
           showsVerticalScrollIndicator={false}
-          contentContainerStyle={styles.scrollContent}
+          contentContainerStyle={[
+            styles.scrollContent,
+            { paddingBottom: footerClearance },
+          ]}
           style={styles.flex1}
+          keyboardShouldPersistTaps="always"
+          keyboardDismissMode="on-drag"
         >
-          {renderSectionHeader("Group Details", "people")}
+          {renderSectionHeader("Group Details", "people", true)}
 
           {/* Group Type Selection */}
           <View style={styles.inputContainer}>
@@ -1291,7 +1799,7 @@ export default function EditGroupScreen() {
               ]}
             >
               <View
-                style={{ flexDirection: "row", alignItems: "center", gap: 8 }}
+                style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8 }}
               >
                 <Ionicons
                   name="location-outline"
@@ -1384,6 +1892,7 @@ export default function EditGroupScreen() {
             bucketName="listings"
             userId={id as string}
             folder="groups"
+            safetyContext="edit_group_images"
           />
 
           {renderSectionHeader(groupMembersLabel, "person")}
@@ -1392,7 +1901,12 @@ export default function EditGroupScreen() {
           <View style={styles.addMemberSection}>
             {/* Search Bar */}
             {!pendingMember && (
-              <View style={styles.searchContainer}>
+              <View
+                style={[
+                  styles.searchContainer,
+                  { backgroundColor: isDark ? "#374151" : "#F3F4F6" },
+                ]}
+              >
                 <Ionicons
                   name="search"
                   size={20}
@@ -1407,9 +1921,7 @@ export default function EditGroupScreen() {
                   style={[
                     styles.searchInput,
                     {
-                      backgroundColor: colors.inputBackground,
                       color: colors.text,
-                      borderColor: isDark ? "#374151" : "#E5E7EB",
                     },
                   ]}
                 />
@@ -1443,13 +1955,11 @@ export default function EditGroupScreen() {
                     ]}
                     onPress={() => selectMember(musician)}
                   >
-                    <Image
-                      source={
-                        musician.avatar_url
-                          ? { uri: musician.avatar_url }
-                          : require("../assets/images/default_avatar.png")
-                      }
+                    <ProfileAvatar
+                      uri={musician.avatar_url}
                       style={styles.resultAvatar}
+                      backgroundColor={isDark ? "#374151" : "#E5E7EB"}
+                      iconColor={colors.textSecondary}
                     />
                     <View>
                       <Text
@@ -1500,13 +2010,11 @@ export default function EditGroupScreen() {
                     marginBottom: 16,
                   }}
                 >
-                  <Image
-                    source={
-                      pendingMember.avatar_url
-                        ? { uri: pendingMember.avatar_url }
-                        : require("../assets/images/default_avatar.png")
-                    }
+                  <ProfileAvatar
+                    uri={pendingMember.avatar_url}
                     style={{ width: 40, height: 40, borderRadius: 20 }}
+                    backgroundColor={isDark ? "#374151" : "#E5E7EB"}
+                    iconColor={colors.textSecondary}
                   />
                   <Text
                     style={{
@@ -1518,7 +2026,7 @@ export default function EditGroupScreen() {
                     {pendingMember.full_name}
                   </Text>
                 </View>
-                <View style={{ flexDirection: "row", gap: 8 }}>
+                <View style={{ flexDirection: "row", gap: 8 , flexWrap: "wrap", minWidth: "100%" }}>
                   <TextInput
                     value={newMemberInstrument}
                     onChangeText={setNewMemberInstrument}
@@ -1538,13 +2046,13 @@ export default function EditGroupScreen() {
                       },
                     ]}
                   />
-                  <TouchableOpacity activeOpacity={1}
+                  <TouchableOpacity activeOpacity={!normalizeVisibleInput(newMemberInstrument) ? 1 : 0.78}
                     onPress={() => confirmAddMember(newMemberInstrument)}
-                    disabled={!newMemberInstrument.trim()}
+                    disabled={!normalizeVisibleInput(newMemberInstrument)}
                     style={[
                       styles.addMemberButton,
                       {
-                        backgroundColor: !newMemberInstrument.trim()
+                        backgroundColor: !normalizeVisibleInput(newMemberInstrument)
                           ? "#9CA3AF"
                           : colors.primary,
                         width: 48,
@@ -1552,6 +2060,7 @@ export default function EditGroupScreen() {
                         borderRadius: 8,
                         justifyContent: "center",
                         alignItems: "center",
+                        opacity: !normalizeVisibleInput(newMemberInstrument) ? 0.6 : 1,
                       },
                     ]}
                   >
@@ -1585,7 +2094,12 @@ export default function EditGroupScreen() {
             {members.map((member, index) => {
               const isLeader = isGroupLeaderMember(member, groupOwnerId);
               const currentInstrument = member.instrument || "";
-              const needsInstrument = isLeader && !currentInstrument.trim();
+              const needsInstrument = !normalizeVisibleInput(currentInstrument);
+              const isInstrumentFinalized = isLeader
+                ? isLeaderInstrumentFinalized
+                : Boolean(memberInstrumentFinalization[index]);
+              const needsMemberFinalization =
+                Boolean(normalizeVisibleInput(currentInstrument)) && !isInstrumentFinalized;
               return (
                 <View
                   key={index}
@@ -1593,7 +2107,7 @@ export default function EditGroupScreen() {
                     styles.memberItem,
                     {
                       backgroundColor: isDark ? "#1F2937" : "#F9FAFB",
-                      borderColor: needsInstrument
+                      borderColor: needsInstrument || needsMemberFinalization
                         ? "#F59E0B"
                         : isDark
                           ? "#374151"
@@ -1602,32 +2116,12 @@ export default function EditGroupScreen() {
                   ]}
                 >
                   <View style={styles.memberInfo}>
-                    <View
-                      style={[
-                        styles.avatarPlaceholder,
-                        {
-                          backgroundColor: isLeader
-                            ? colors.primary
-                            : "#E0E7FF",
-                        },
-                      ]}
-                    >
-                      {member.avatar_url ? (
-                        <Image
-                          source={{ uri: member.avatar_url }}
-                          style={{ width: 32, height: 32, borderRadius: 16 }}
-                        />
-                      ) : (
-                        <Text
-                          style={[
-                            styles.avatarText,
-                            { color: isLeader ? "#fff" : "#4F46E5" },
-                          ]}
-                        >
-                          {member.name?.charAt(0)}
-                        </Text>
-                      )}
-                    </View>
+                    <ProfileAvatar
+                      uri={member.avatar_url}
+                      style={styles.avatarPlaceholder}
+                      backgroundColor={isLeader ? colors.primary : (isDark ? "#374151" : "#E5E7EB")}
+                      iconColor={isLeader ? "#FFF" : colors.textSecondary}
+                    />
                     <View style={{ flex: 1 }}>
                       <Text
                         style={[
@@ -1641,7 +2135,48 @@ export default function EditGroupScreen() {
                       >
                         {member.name || "Unnamed"}
                       </Text>
-                      {isLeader ? (
+                      {isInstrumentFinalized ? (
+                        <View
+                          style={{
+                            flexDirection: "row",
+                            gap: 8,
+                            marginTop: 6,
+                            alignItems: "center",
+                          }}
+                        >
+                          <View
+                            style={{
+                              flex: 1,
+                              backgroundColor: colors.inputBackground,
+                              borderRadius: 8,
+                              height: 40,
+                              paddingHorizontal: 12,
+                              justifyContent: "center",
+                              borderWidth: 1,
+                              borderColor: "#10B981",
+                            }}
+                          >
+                            <Text style={{ color: colors.text, fontSize: 14 }}>
+                              {currentInstrument}
+                            </Text>
+                          </View>
+                          <TouchableOpacity
+                            activeOpacity={1}
+                            onPress={() => enableMemberInstrumentEdit(index)}
+                            style={[
+                              styles.addMemberButton,
+                              {
+                                width: 40,
+                                height: 40,
+                                borderRadius: 8,
+                                backgroundColor: "#0EA5E9",
+                              },
+                            ]}
+                          >
+                            <Ionicons name="create-outline" size={18} color="#fff" />
+                          </TouchableOpacity>
+                        </View>
+                      ) : (
                         <View
                           style={{
                             flexDirection: "row",
@@ -1657,6 +2192,12 @@ export default function EditGroupScreen() {
                             onChangeText={(text) =>
                               updateMemberInstrument(index, text)
                             }
+                            onEndEditing={(event) =>
+                              updateMemberInstrument(
+                                index,
+                                normalizeVisibleInput(event.nativeEvent.text),
+                              )
+                            }
                             style={[
                               styles.input,
                               {
@@ -1669,67 +2210,90 @@ export default function EditGroupScreen() {
                                 textAlign: "left",
                                 color: colors.text,
                                 borderWidth: 1,
-                                borderColor: isDark ? "#374151" : "#E5E7EB",
+                                borderColor: needsInstrument || needsMemberFinalization
+                                  ? "#F59E0B"
+                                  : isDark
+                                    ? "#374151"
+                                    : "#E5E7EB",
                               },
                             ]}
                           />
-                          <TouchableOpacity activeOpacity={1}
-                            onPress={() => {
-                              updateMemberInstrument(index, currentInstrument.trim());
-                              Keyboard.dismiss();
-                            }}
-                            disabled={!currentInstrument.trim()}
+                          <TouchableOpacity
+                            activeOpacity={!normalizeVisibleInput(currentInstrument) ? 1 : 0.78}
+                            onPress={() => finalizeMemberInstrument(index)}
+                            disabled={!normalizeVisibleInput(currentInstrument)}
                             style={[
                               styles.addMemberButton,
                               {
                                 width: 40,
                                 height: 40,
                                 borderRadius: 8,
-                                backgroundColor: !currentInstrument.trim()
+                                backgroundColor: !normalizeVisibleInput(currentInstrument)
                                   ? "#9CA3AF"
                                   : colors.primary,
+                                opacity: !normalizeVisibleInput(currentInstrument) ? 0.6 : 1,
                               },
                             ]}
                           >
                             <Ionicons name="checkmark" size={20} color="#fff" />
                           </TouchableOpacity>
                         </View>
-                      ) : (
-                        <TextInput
-                          placeholder="Enter instrument (e.g., Vocals, Guitar)"
-                          placeholderTextColor={colors.textSecondary}
-                          value={currentInstrument}
-                          onChangeText={(text) =>
-                            updateMemberInstrument(index, text)
-                          }
-                          style={[
-                            styles.input,
-                            {
-                              marginTop: 6,
-                              backgroundColor: colors.inputBackground,
-                              borderRadius: 8,
-                              height: 40,
-                              paddingHorizontal: 12,
-                              paddingVertical: 0,
-                              textAlign: "left",
-                              color: colors.text,
-                              borderWidth: 1,
-                              borderColor: isDark ? "#374151" : "#E5E7EB",
-                            },
-                          ]}
-                        />
                       )}
-                      {isLeader && (
+                      <Text
+                        style={{
+                          fontSize: 10,
+                          color: needsInstrument || needsMemberFinalization
+                            ? "#F59E0B"
+                            : colors.textSecondary,
+                          marginTop: 4,
+                        }}
+                      >
+                        {needsInstrument
+                          ? isLeader
+                            ? "Leader (required before saving)"
+                            : "Member (required before saving)"
+                          : needsMemberFinalization
+                            ? isLeader
+                              ? "Leader (tap check icon to finalize)"
+                              : "Member (tap check icon to finalize)"
+                            : isLeader
+                              ? "Leader (confirmed)"
+                              : "Member (confirmed)"}
+                      </Text>
+                      <View
+                        style={{
+                          flexDirection: "row",
+                          alignItems: "center",
+                          marginTop: 4,
+                        }}
+                      >
+                        <Ionicons
+                          name={
+                            needsInstrument || needsMemberFinalization
+                              ? "alert-circle-outline"
+                              : "checkmark-circle"
+                          }
+                          size={12}
+                          color={
+                            needsInstrument || needsMemberFinalization
+                              ? "#F59E0B"
+                              : "#10B981"
+                          }
+                        />
                         <Text
                           style={{
                             fontSize: 10,
-                            color: colors.textSecondary,
-                            marginTop: 4,
+                            marginLeft: 4,
+                            color: needsInstrument || needsMemberFinalization
+                              ? "#F59E0B"
+                              : "#10B981",
                           }}
                         >
-                          Leader
+                          {needsInstrument || needsMemberFinalization
+                            ? `${isLeader ? "Leader" : "Member"} instrument not confirmed`
+                            : `${isLeader ? "Leader" : "Member"} instrument confirmed`}
                         </Text>
-                      )}
+                      </View>
                     </View>
                   </View>
                   {!isLeader && (
@@ -1748,6 +2312,37 @@ export default function EditGroupScreen() {
             })}
           </View>
 
+          {renderSectionHeader("Member Invites", "person-add")}
+
+          <GroupInviteSection
+            currentUserId={currentUserId}
+            groupId={Array.isArray(id) ? id[0] : id}
+            selectedTargets={selectedInviteTargets}
+            onSelectedTargetsChange={setSelectedInviteTargets}
+            inviteMessage={inviteMessage}
+            onInviteMessageChange={setInviteMessage}
+            excludedUserIds={members
+              .map((member) => member.user_id)
+              .filter((memberId): memberId is string => Boolean(memberId))}
+            disabled={saving}
+          />
+
+          {renderSectionHeader("Playlists", "musical-notes")}
+
+          <PlaylistSelectionSection
+            colors={colors}
+            isDark={isDark}
+            playlists={ownedPlaylists}
+            selectedPlaylistIds={selectedPlaylistIds}
+            loading={loadingPlaylists}
+            onTogglePlaylist={handleTogglePlaylist}
+            onCreatePlaylist={handleCreatePlaylist}
+            title="Linked Playlists"
+            subtitle="Choose the playlists that should appear on this group profile. Linked playlists show up on the manage page and listing details."
+            emptyMessage="Create a playlist first, then return here to link it to the group."
+            disabled={saving}
+          />
+
           {/* Leadership Transfer Section */}
           {renderSectionHeader("Leadership", "shield-checkmark")}
 
@@ -1765,7 +2360,7 @@ export default function EditGroupScreen() {
                   alignItems: "center",
                   gap: 8,
                   flex: 1,
-                }}
+                minWidth: 150 }}
               >
                 <Ionicons name="time-outline" size={20} color="#F59E0B" />
                 <View style={{ flex: 1 }}>
@@ -1828,24 +2423,47 @@ export default function EditGroupScreen() {
           </Text>
 
           <View style={styles.footerActions}>
+            {(remainingMemberCount > 0 || disableSaveForMissingInstruments) && (
+              <Text
+                style={{
+                  width: "100%",
+                  textAlign: "center",
+                  marginBottom: 8,
+                  color: "#F59E0B",
+                  fontFamily: "Poppins_500Medium",
+                  fontSize: 12,
+                }}
+              >
+                {remainingMemberCount > 0
+                  ? `${selectedGroupType?.label || "This group type"} requires at least ${requiredMemberCount} members. Add ${remainingMemberCount} more member${remainingMemberCount === 1 ? "" : "s"} before saving.`
+                  : leaderNeedsFinalization
+                    ? "Tap the check icon to finalize the leader instrument before saving."
+                    : nonLeaderNeedsFinalizationCount > 0
+                      ? "Tap each check icon to finalize member instruments before saving."
+                      : "Add instruments for all members before saving."}
+              </Text>
+            )}
             <TouchableOpacity
               style={[
                 styles.saveButton,
                 {
                   backgroundColor: saving
                     ? colors.textSecondary
-                    : colors.primary,
+                    : isFormComplete
+                      ? colors.primary
+                      : colors.border,
+                  opacity: saving || !isFormComplete ? 0.6 : 1,
                   shadowColor: colors.primary,
                 },
               ]}
               onPress={handleSave}
-              disabled={saving}
-              activeOpacity={1}
+              disabled={saving || !isFormComplete}
+              activeOpacity={saving || !isFormComplete ? 1 : 0.78}
             >
               {saving ? (
                 <ActivityIndicator size="small" color="#fff" />
               ) : (
-                <Text style={styles.saveButtonText}>Save Changes</Text>
+                <Text style={[styles.saveButtonText, { color: isFormComplete ? "#FFFFFF" : colors.textSecondary }]}>Save Changes</Text>
               )}
             </TouchableOpacity>
 
@@ -1899,19 +2517,11 @@ export default function EditGroupScreen() {
       />
 
       {/* Leadership Transfer Modal */}
-      <RNModal
+      <BottomModal
         visible={transferModalVisible}
-        animationType="slide"
-        transparent={true}
-        onRequestClose={() => setTransferModalVisible(false)}
+        overlayLabel="EditGroupTransferLeadershipModal"
+        onClose={() => setTransferModalVisible(false)}
       >
-        <View
-          style={{
-            flex: 1,
-            backgroundColor: "rgba(0,0,0,0.5)",
-            justifyContent: "flex-end",
-          }}
-        >
           <View
             style={[
               styles.transferModalContent,
@@ -1968,15 +2578,14 @@ export default function EditGroupScreen() {
                     ]}
                     onPress={() => setSelectedNewLeader(member)}
                   >
-                    <Image
-                      source={{
-                        uri:
-                          member.avatar_url || "https://via.placeholder.com/44",
-                      }}
+                    <ProfileAvatar
+                      uri={member.avatar_url}
                       style={[
                         styles.memberAvatar,
                         { backgroundColor: colors.border },
                       ]}
+                      backgroundColor={isDark ? "#374151" : "#E5E7EB"}
+                      iconColor={colors.textSecondary}
                     />
                     <View style={{ flex: 1 }}>
                       <Text style={[styles.memberName, { color: colors.text }]}>
@@ -2023,7 +2632,7 @@ export default function EditGroupScreen() {
             )}
 
             {/* Actions */}
-            <View style={{ flexDirection: "row", gap: 12, marginTop: 16 }}>
+            <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 12, marginTop: 16 }}>
               <TouchableOpacity activeOpacity={1}
                 style={[
                   styles.cancelButton,
@@ -2057,7 +2666,7 @@ export default function EditGroupScreen() {
                 ]}
                 onPress={initiateTransfer}
                 disabled={!selectedNewLeader || isTransferring}
-                activeOpacity={1}
+                activeOpacity={!selectedNewLeader || isTransferring ? 1 : 0.78}
               >
                 {isTransferring ? (
                   <ActivityIndicator color="white" size="small" />
@@ -2069,71 +2678,95 @@ export default function EditGroupScreen() {
               </TouchableOpacity>
             </View>
           </View>
-        </View>
-      </RNModal>
+      </BottomModal>
 
-      {/* Group Type Selector Modal Native Implementation */}
-      {groupTypeModalVisible && (
-        <View style={StyleSheet.absoluteFillObject}>
-          <TouchableOpacity
-            style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.5)" }}
-            activeOpacity={1}
-            onPress={() => setGroupTypeModalVisible(false)}
-          />
-          <View style={{
-            position: "absolute",
-            bottom: 0,
-            left: 0,
-            right: 0,
-            backgroundColor: colors.card,
-            borderTopLeftRadius: 24,
-            borderTopRightRadius: 24,
-            maxHeight: "80%",
-            padding: 24,
-            paddingBottom: 24,
-          }}>
-            <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-              <Text style={{ fontSize: 18, fontFamily: "Poppins_600SemiBold", color: colors.text }}>
+      <TrackedBottomSheetModal
+        ref={groupTypeSheetRef}
+        overlayLabel="EditGroupTypeModal"
+        index={0}
+        snapPoints={groupTypeSheetSnapPoints}
+        animationConfigs={groupTypeSheetAnimationConfigs}
+        animateOnMount
+        enableDynamicSizing={false}
+        enablePanDownToClose
+        backdropComponent={renderGroupTypeSheetBackdrop}
+        backgroundStyle={{
+          backgroundColor: groupTypeSheetSurfaceColor,
+          borderTopLeftRadius: 28,
+          borderTopRightRadius: 28,
+        }}
+        handleComponent={null}
+        onDismiss={handleGroupTypeSheetDismiss}
+      >
+        <View
+          style={[
+            styles.groupTypeSheet,
+            {
+              backgroundColor: groupTypeSheetSurfaceColor,
+              paddingBottom: Math.max(24, insets.bottom + 24),
+            },
+          ]}
+        >
+            <View style={styles.groupTypeSheetHeader}>
+              <TouchableOpacity
+                activeOpacity={1}
+                onPress={() => setGroupTypeModalVisible(false)}
+                style={[
+                  styles.groupTypeSheetCloseButton,
+                  { backgroundColor: isDark ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.06)" },
+                ]}
+              >
+                <Ionicons name="close" size={22} color={colors.textSecondary} />
+              </TouchableOpacity>
+              <Text style={[styles.groupTypeSheetTitle, { color: colors.text }]}>
                 Select Group Type
               </Text>
-              <TouchableOpacity activeOpacity={1} onPress={() => setGroupTypeModalVisible(false)}>
-                <Ionicons name="close" size={24} color={colors.textSecondary} />
-              </TouchableOpacity>
+              <View style={styles.groupTypeSheetHeaderSpacer} />
             </View>
 
-            <ScrollView showsVerticalScrollIndicator={false}>
-              {PH_MUSIC_GROUP_TYPES.map((type) => (
-                <TouchableOpacity activeOpacity={1}
-                  key={type.id}
-                  style={{
-                    flexDirection: "row",
-                    paddingVertical: 16,
-                    borderBottomWidth: 1,
-                    borderBottomColor: isDark ? "#374151" : "#F3F4F6",
-                    alignItems: "center"
-                  }}
-                  onPress={() => handleGroupTypeChange(type.id)}
-                >
-                  <View style={{ flex: 1 }}>
-                    <Text style={{ color: colors.text, fontFamily: "Poppins_600SemiBold", fontSize: 16 }}>
-                      {type.label}
-                    </Text>
-                    <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_400Regular", fontSize: 13, marginTop: 4 }}>
-                      {type.description}
-                    </Text>
-                    <Text style={{ color: colors.primary, fontFamily: "Poppins_500Medium", fontSize: 12, marginTop: 4 }}>
-                      Min: {type.minMembers} members
-                    </Text>
-                  </View>
-                  {groupType === type.id && (
-                    <Ionicons name="checkmark-circle" size={24} color={colors.primary} style={{ marginLeft: 16 }} />
-                  )}
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
+            <BottomSheetScrollView
+              showsVerticalScrollIndicator={false}
+              keyboardShouldPersistTaps="always"
+              contentContainerStyle={styles.groupTypeSheetList}
+            >
+              {PH_MUSIC_GROUP_TYPES.map((type) => {
+                const selected = groupType === type.id;
+
+                return (
+                  <TouchableOpacity
+                    activeOpacity={1}
+                    key={type.id}
+                    style={[
+                      styles.groupTypeSheetOption,
+                      {
+                        backgroundColor: selected
+                          ? (isDark ? "rgba(99,102,241,0.18)" : "rgba(99,102,241,0.08)")
+                          : (isDark ? "#252D3A" : "#F7F8FA"),
+                        borderColor: selected ? colors.primary : "transparent",
+                      },
+                    ]}
+                    onPress={() => handleGroupTypeChange(type.id)}
+                  >
+                    <View style={styles.groupTypeSheetOptionCopy}>
+                      <Text style={[styles.groupTypeSheetOptionTitle, { color: colors.text }]}>
+                        {type.label}
+                      </Text>
+                      <Text style={[styles.groupTypeSheetOptionDescription, { color: colors.textSecondary }]}>
+                        {type.description}
+                      </Text>
+                      <Text style={[styles.groupTypeSheetOptionMeta, { color: colors.primary }]}>
+                        Min: {type.minMembers} members
+                      </Text>
+                    </View>
+                    <View style={styles.groupTypeSheetOptionCheck}>
+                      {selected ? <Ionicons name="checkmark-circle" size={24} color={colors.primary} /> : null}
+                    </View>
+                  </TouchableOpacity>
+                );
+              })}
+            </BottomSheetScrollView>
           </View>
-        </View>
-      )}
+      </TrackedBottomSheetModal>
     </>
   );
 }
@@ -2154,17 +2787,21 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
+    marginTop: 24,
     marginBottom: 16,
+  },
+  firstSectionHeader: {
+    marginTop: 0,
   },
   sectionTitle: {
     fontFamily: "Poppins_600SemiBold",
     fontSize: 16,
   },
   inputContainer: {
-    marginBottom: 16,
+    marginBottom: 20,
   },
   inputLabel: {
-    marginBottom: 8,
+    marginBottom: 10,
     fontSize: 12,
     textTransform: "uppercase",
     letterSpacing: 1,
@@ -2229,22 +2866,25 @@ const styles = StyleSheet.create({
   searchContainer: {
     flexDirection: "row",
     alignItems: "center",
+    gap: 10,
     marginBottom: 12,
     position: "relative",
+    borderRadius: 16,
+    height: 48,
+    paddingHorizontal: 16,
   },
   searchIcon: {
-    position: "absolute",
-    left: 12,
-    zIndex: 1,
   },
   searchInput: {
     flex: 1,
-    height: 48,
-    borderRadius: 8,
-    borderWidth: 1,
-    paddingLeft: 40,
-    paddingRight: 40,
-    fontFamily: "Poppins_400Regular",
+    height: 24,
+    padding: 0,
+    paddingRight: 28,
+    fontSize: 15,
+    lineHeight: 20,
+    includeFontPadding: false,
+    fontFamily: "Poppins_500Medium",
+    textAlignVertical: "center",
   },
   searchSpinner: {
     position: "absolute",
@@ -2425,13 +3065,14 @@ const styles = StyleSheet.create({
     padding: 12,
     marginTop: 16,
     minHeight: 80,
-    textAlignVertical: "top",
+    textAlignVertical: "center",
     fontFamily: "Poppins_400Regular",
   },
   transferConfirmButton: {
     borderRadius: 12,
     paddingVertical: 14,
     alignItems: "center",
+    justifyContent: "center",
     marginTop: 16,
   },
   transferConfirmButtonText: {
@@ -2444,6 +3085,76 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     borderRadius: 12,
     borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  groupTypeSheet: {
+    flex: 1,
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    paddingHorizontal: 20,
+    paddingTop: 12,
+  },
+  groupTypeSheetHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 16,
+  },
+  groupTypeSheetCloseButton: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  groupTypeSheetTitle: {
+    flex: 1,
+    fontSize: 18,
+    textAlign: "center",
+    fontFamily: "Poppins_700Bold",
+  },
+  groupTypeSheetHeaderSpacer: {
+    width: 38,
+    height: 38,
+  },
+  groupTypeSheetList: {
+    gap: 8,
+    paddingBottom: 4,
+  },
+  groupTypeSheetOption: {
+    flexDirection: "row",
+    alignItems: "center",
+    minHeight: 92,
+    borderRadius: 14,
+    borderWidth: 1.5,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    gap: 12,
+  },
+  groupTypeSheetOptionCopy: {
+    flex: 1,
+    gap: 3,
+  },
+  groupTypeSheetOptionTitle: {
+    fontSize: 15,
+    lineHeight: 20,
+    fontFamily: "Poppins_600SemiBold",
+  },
+  groupTypeSheetOptionDescription: {
+    fontSize: 12,
+    lineHeight: 17,
+    fontFamily: "Poppins_400Regular",
+  },
+  groupTypeSheetOptionMeta: {
+    fontSize: 11,
+    lineHeight: 15,
+    fontFamily: "Poppins_700Bold",
+    textTransform: "uppercase",
+  },
+  groupTypeSheetOptionCheck: {
+    width: 24,
+    height: 24,
     alignItems: "center",
     justifyContent: "center",
   },

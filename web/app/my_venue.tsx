@@ -1,19 +1,105 @@
 import { Ionicons } from '@expo/vector-icons';
-import { router, useFocusEffect } from 'expo-router';
-import React, { useCallback, useState } from 'react';
-import { RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View, Platform } from 'react-native';
+import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
+import React, { useCallback, useEffect, useState } from 'react';
+import { RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View, Platform, useWindowDimensions } from 'react-native';
 import { supabase } from '../lib/supabase';
 import CachedImage from '../src/components/CachedImage';
 import CustomAlert, { AlertType } from '../src/components/CustomAlert';
 import Header from '../src/components/header';
-import Modal from '../src/components/modal';
+import Modal, { normalizeVisibleInput } from '../src/components/modal';
+import MusicianWorkspaceTabs from '../src/components/MusicianWorkspaceTabs';
 import Navbar from '../src/components/navbar';
-import { useRequireAuth } from '../src/context/AuthContext';
+import Skeleton from '../src/components/Skeleton';
+import { useAuth, useRequireAuth } from '../src/context/AuthContext';
 import { useTheme } from '../src/context/ThemeContext';
+import { formatDashedNumericDate } from '../src/utils/friendlyDateTime';
+
+const DEFAULT_GIG_IMAGE = 'https://images.unsplash.com/photo-1501281668745-f7f57925c3b4?w=800&fit=crop';
+const JOINED_GIG_APPLICATION_STATUSES = ['accepted', 'approved', 'completed'];
+
+const normalizeStatus = (status: unknown) => String(status || '').trim().toLowerCase();
+
+const isJoinedGigApplicationStatus = (status: unknown) =>
+    JOINED_GIG_APPLICATION_STATUSES.includes(normalizeStatus(status));
+
+const collectJoinedGigIdsFromBookingsPayload = (payload: any) => {
+    const buckets = payload?.categorized || payload || {};
+    const rows = ['Upcoming', 'Ongoing', 'Review']
+        .flatMap((key) => Array.isArray(buckets?.[key]) ? buckets[key] : []);
+
+    return Array.from(
+        new Set(
+            rows
+                .filter((item: any) => item?.type_id === 'gig_application' && isJoinedGigApplicationStatus(item?.raw_status))
+                .map((item: any) => item?.gig_id)
+                .filter((value: any): value is string => typeof value === 'string' && value.length > 0),
+        ),
+    );
+};
+
+const looksLikeDisplayImage = (uri: string) => {
+    if (!uri) return false;
+
+    const trimmed = uri.trim();
+    const lowered = trimmed.toLowerCase();
+    if (!lowered) return false;
+
+    if (lowered.startsWith('data:image/')) return true;
+
+    if (
+       lowered.includes('/documents/') ||
+        lowered.includes('/contracts/') ||
+        lowered.includes('business_permit') ||
+        lowered.includes('application/pdf')
+    ) {
+        return false;
+    }
+
+    if (/\.(jpg|jpeg|png|webp|gif|bmp|svg)(\?|$)/i.test(trimmed)) return true;
+    if (lowered.includes('/image') || lowered.includes('/images/')) return true;
+    return lowered.startsWith('http');
+};
+
+const resolveGigImage = (gig: any) => {
+    const imageList = Array.isArray(gig?.images) ? gig.images.filter((item: any) => typeof item === 'string') : [];
+    const best = imageList.find((img: string) => looksLikeDisplayImage(img));
+    return best || imageList[0] || DEFAULT_GIG_IMAGE;
+};
+
+const normalizePermitStatus = (permitStatus: string | null | undefined) => {
+    const normalizedPermitStatus = String(permitStatus || '').trim().toLowerCase();
+    if (!normalizedPermitStatus) return 'pending_review';
+    if (['approved', 'approved_by_admin', 'verified'].includes(normalizedPermitStatus)) return 'approved';
+    if (['pending', 'pending_review', 'in_review', 'under_review'].includes(normalizedPermitStatus)) return 'pending_review';
+    if (['resubmitted', 'resubmit', 'reapplied'].includes(normalizedPermitStatus)) return 'resubmitted';
+    if (['rejected', 'declined'].includes(normalizedPermitStatus)) return 'rejected';
+    return normalizedPermitStatus;
+};
 
 export default function MyVenueScreen() {
     const { colors, isDark } = useTheme();
-    const { isAuthenticated, loading: authLoading, userId } = useRequireAuth();
+    const { width } = useWindowDimensions();
+    const isWebDesktop = Platform.OS === 'web' && width >= 768;
+    const pageBackground = isWebDesktop
+        ? isDark
+            ? '#0A1224'
+            : '#E9EEF8'
+        : colors.background;
+    const pageCardBackground = isWebDesktop
+        ? isDark
+            ? '#0F172A'
+            : '#FFFFFF'
+        : colors.surface;
+    const borderSoft = isWebDesktop
+        ? isDark
+            ? '#1E2C48'
+            : '#D8E3F2'
+        : colors.border;
+    const { isAuthenticated, userId } = useRequireAuth();
+    const { userRole } = useAuth();
+    const isMusicianView = userRole === 'musician';
+    const params = useLocalSearchParams<{ refresh?: string }>();
+    const refreshKey = Array.isArray(params.refresh) ? params.refresh[0] : params.refresh;
     const [modalVisible, setModalVisible] = useState(false);
     const [selectedId, setSelectedId] = useState<string | null>(null);
     const [selectedName, setSelectedName] = useState('');
@@ -39,16 +125,105 @@ export default function MyVenueScreen() {
         setAlertVisible(true);
     };
 
-    const fetchGigs = async () => {
+    const fetchGigs = useCallback(async () => {
         if (!userId) return;
         try {
-            const { data: baseGigs, error: baseError } = await supabase
-                .from('gigs')
-                .select('id, organizer_id, name, location, budget, description, event_date, status, created_at')
-                .eq('organizer_id', userId)
-                .order('created_at', { ascending: false });
+            let baseGigs: any[] = [];
 
-            if (baseError) throw baseError;
+            if (isMusicianView) {
+                const { data: bookingPayload, error: bookingPayloadError } = await supabase.functions.invoke('manage-bookings', {
+                    body: { action: 'fetch', userId },
+                });
+
+                if (bookingPayloadError) {
+                    console.log('Error fetching joined gig applications from manage-bookings:', bookingPayloadError);
+                }
+
+                let joinedGigIds = bookingPayloadError ? [] : collectJoinedGigIdsFromBookingsPayload(bookingPayload);
+
+                const [
+                    { data: groupMembershipRows, error: membershipError },
+                    { data: ownedGroupRows, error: ownedGroupsError },
+                ] = await Promise.all([
+                    supabase
+                        .from('group_members')
+                        .select('group_id')
+                        .eq('user_id', userId),
+                    supabase
+                        .from('groups')
+                        .select('id')
+                        .eq('owner_id', userId),
+                ]);
+
+                if (membershipError) {
+                    console.log('Error fetching musician group memberships:', membershipError);
+                }
+
+                if (ownedGroupsError) {
+                    console.log('Error fetching musician owned groups:', ownedGroupsError);
+                }
+
+                const joinedGroupIds = Array.from(
+                    new Set(
+                        [
+                            ...(groupMembershipRows || []).map((row: any) => row?.group_id),
+                            ...(ownedGroupRows || []).map((row: any) => row?.id),
+                        ].filter((value: any): value is string => typeof value === 'string' && value.length > 0),
+                    ),
+                );
+
+                const [soloAppsResult, groupAppsResult] = await Promise.all([
+                    supabase
+                        .from('gig_applications')
+                        .select('gig_id')
+                        .eq('applicant_id', userId)
+                        .is('group_id', null)
+                        .in('status', JOINED_GIG_APPLICATION_STATUSES),
+                    joinedGroupIds.length > 0
+                        ? supabase
+                            .from('gig_applications')
+                            .select('gig_id')
+                            .in('group_id', joinedGroupIds)
+                            .in('status', JOINED_GIG_APPLICATION_STATUSES)
+                        : Promise.resolve({ data: [] as any[], error: null }),
+                ]);
+
+                if (soloAppsResult.error) throw soloAppsResult.error;
+                if (groupAppsResult.error) throw groupAppsResult.error;
+
+                joinedGigIds = Array.from(
+                    new Set(
+                        [
+                            ...joinedGigIds,
+                            ...(soloAppsResult.data || []).map((row: any) => row?.gig_id),
+                            ...(groupAppsResult.data || []).map((row: any) => row?.gig_id),
+                        ].filter((value: any): value is string => typeof value === 'string' && value.length > 0),
+                    ),
+                );
+
+                if (joinedGigIds.length === 0) {
+                    setGigs([]);
+                    return;
+                }
+
+                const { data: joinedGigs, error: joinedGigsError } = await supabase
+                    .from('gigs')
+                    .select('id, organizer_id, name, location, budget, description, event_date, status, created_at, permit_status, permit_rejection_reason, permit_reviewed_at')
+                    .in('id', joinedGigIds)
+                    .order('created_at', { ascending: false });
+
+                if (joinedGigsError) throw joinedGigsError;
+                baseGigs = joinedGigs || [];
+            } else {
+                const { data, error: baseError } = await supabase
+                    .from('gigs')
+                    .select('id, organizer_id, name, location, budget, description, event_date, status, created_at, permit_status, permit_rejection_reason, permit_reviewed_at')
+                    .eq('organizer_id', userId)
+                    .order('created_at', { ascending: false });
+
+                if (baseError) throw baseError;
+                baseGigs = data || [];
+            }
 
             const gigIds = (baseGigs || []).map((gig: any) => gig.id);
 
@@ -110,6 +285,7 @@ export default function MyVenueScreen() {
                 const reviewStats = reviewsByGigId[gig.id] || { sum: 0, count: 0 };
                 const reviewCount = reviewStats.count;
                 const rating = reviewCount > 0 ? reviewStats.sum / reviewCount : 0;
+                const normalizedPermitStatus = normalizePermitStatus(gig.permit_status);
 
                 return {
                     ...gig,
@@ -117,6 +293,10 @@ export default function MyVenueScreen() {
                     images: imagesByGigId[gig.id] || [],
                     rating,
                     review_count: reviewCount,
+                    permit_status: normalizedPermitStatus,
+                    permit_rejection_reason: gig.permit_rejection_reason || null,
+                    permit_reviewed_at: gig.permit_reviewed_at || null,
+                    is_owner: gig.organizer_id === userId,
                 };
             }));
         } catch (e) {
@@ -125,15 +305,41 @@ export default function MyVenueScreen() {
             setLoading(false);
             setRefreshing(false);
         }
-    };
+    }, [isMusicianView, userId]);
 
     useFocusEffect(
         useCallback(() => {
-            if (isAuthenticated && userId) {
+            if (!isAuthenticated || !userId) return;
+
+            fetchGigs();
+            const refreshInterval = setInterval(() => {
                 fetchGigs();
-            }
-        }, [isAuthenticated, userId])
+            }, 30000);
+
+            return () => {
+                clearInterval(refreshInterval);
+            };
+        }, [isAuthenticated, userId, refreshKey, fetchGigs])
     );
+
+    useEffect(() => {
+        if (!isAuthenticated || !userId || isMusicianView) return;
+
+        const channel = supabase
+            .channel(`my-venue-listings:${userId}`)
+            .on(
+                'postgres_changes',
+                { event: '*', schema: 'public', table: 'gigs', filter: `organizer_id=eq.${userId}` },
+                () => {
+                    fetchGigs();
+                }
+            )
+            .subscribe();
+
+        return () => {
+            supabase.removeChannel(channel);
+        };
+    }, [isAuthenticated, userId, fetchGigs, isMusicianView]);
 
     const onRefresh = () => {
         setRefreshing(true);
@@ -156,7 +362,8 @@ export default function MyVenueScreen() {
 
     const handleDelete = async () => {
         if (!selectedId || !userId || deleting) return;
-        if (!cancellationReason.trim()) {
+        const reason = normalizeVisibleInput(cancellationReason);
+        if (!reason) {
             showAlert('warning', 'Cancellation Reason Required', 'Please provide a cancellation reason before deleting this gig.');
             return;
         }
@@ -164,7 +371,7 @@ export default function MyVenueScreen() {
         try {
             const { data, error } = await supabase.rpc('delete_gig_safely', {
                 p_gig_id: selectedId,
-                p_reason: cancellationReason.trim(),
+                p_reason: reason,
             });
 
             if (error) throw error;
@@ -211,87 +418,195 @@ export default function MyVenueScreen() {
         }
     };
 
+    const handleOpenGigChat = (gig: any) => {
+        if (!gig?.organizer_id) {
+            showAlert('warning', 'Chat Unavailable', 'Venue organizer is unavailable for this gig.');
+            return;
+        }
+
+        router.push({
+            pathname: '/chat',
+            params: {
+                recipientId: gig.organizer_id,
+                gigId: gig.id,
+            },
+        });
+    };
+
     return (
         <>
-            <View style={[styles.flex1, { backgroundColor: colors.background }]}>
-                <View style={[Platform.OS === 'web' && { width: '100%' }, { flex: 1 }]}>
+            <View style={[styles.flex1, { backgroundColor: pageBackground }]}>
+                <View style={[styles.pageFrame, isWebDesktop && styles.pageFrameWeb]}>
                     <Header title="My Venue" />
 
                     <ScrollView
                         showsVerticalScrollIndicator={false}
-                        contentContainerStyle={styles.scrollContent}
+                        contentContainerStyle={[styles.scrollContent, isWebDesktop && styles.scrollContentWeb]}
                         style={styles.flex1}
                         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
                     >
+                        {isMusicianView && (
+                            <MusicianWorkspaceTabs activeKey="venue" />
+                        )}
+
                         {loading ? (
-                            <Text style={[styles.loadingText, { color: colors.textSecondary }]}>Loading gigs...</Text>
+                            <View style={[styles.gridWrap, isWebDesktop && styles.gridWrapWeb]}>
+                                {[0, 1].map((index) => (
+                                    <View key={`venue-skeleton-${index}`} style={[styles.gridItem, isWebDesktop && styles.gridItemWeb]}>
+                                        <View style={[styles.cardContainer, { backgroundColor: pageCardBackground, borderColor: borderSoft }]}>
+                                            <Skeleton width="100%" height={isWebDesktop ? 186 : 170} borderRadius={0} />
+                                            <View style={styles.cardContent}>
+                                                <Skeleton width="56%" height={16} />
+                                                <Skeleton width="100%" height={12} style={{ marginTop: 8 }} />
+                                                <Skeleton width="78%" height={12} style={{ marginTop: 6 }} />
+                                                <View style={styles.skeletonActionRow}>
+                                                    <Skeleton width={92} height={32} borderRadius={10} />
+                                                    <Skeleton width={32} height={32} borderRadius={10} />
+                                                </View>
+                                            </View>
+                                        </View>
+                                    </View>
+                                ))}
+                            </View>
                         ) : gigs.length === 0 ? (
                             <View style={styles.emptyState}>
                                 <Ionicons name="musical-notes-outline" size={48} color={colors.textSecondary} />
-                                <Text style={[styles.emptyText, { color: colors.textSecondary }]}>No gigs found</Text>
+                                <Text style={[styles.emptyTitle, { color: colors.text }]}>{isMusicianView ? 'No joined venues yet' : 'No gigs yet'}</Text>
+                                <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
+                                    {isMusicianView ? 'Accepted venue gigs will appear here.' : 'Create your first gig to manage applications and event details.'}
+                                </Text>
                             </View>
                         ) : (
-                            gigs.map((gig) => (
-                                <View key={gig.id} style={[styles.cardContainer, {
-                                    backgroundColor: colors.surface,
-                                    shadowColor: colors.primary,
-                                }]}>
-                                    <View style={styles.imageWrapper}>
-                                        <CachedImage
-                                            uri={(gig.images && gig.images[0]) || 'https://images.unsplash.com/photo-1501281668745-f7f57925c3b4?w=800&fit=crop'}
-                                            style={styles.cardImage}
-                                            width={800}
-                                            height={384}
-                                            quality={72}
-                                            cacheVersion={gig.updated_at || gig.created_at || gig.id}
-                                        />
-                                        <View style={[styles.statusBadge, { backgroundColor: isDark ? 'rgba(0,0,0,0.6)' : 'rgba(255,255,255,0.9)' }]}>
-                                            <Text style={[styles.statusText, { color: colors.primary }]}>{gig.status || 'Active'}</Text>
-                                        </View>
-                                        <View style={styles.budgetBadge}>
-                                            <Text style={styles.budgetText}>₱{gig.budget?.toLocaleString()}</Text>
-                                        </View>
-                                    </View>
+                            <View style={[styles.gridWrap, isWebDesktop && styles.gridWrapWeb]}>
+                                {gigs.map((gig) => {
+                                    const normalizedPermitStatus = normalizePermitStatus(gig.permit_status);
+                                    const isRejected = normalizedPermitStatus === 'rejected';
+                                    const isApproved = normalizedPermitStatus === 'approved';
+                                    const isResubmitted = normalizedPermitStatus === 'resubmitted';
+                                    const canManageGig = !isMusicianView || gig.is_owner === true;
 
-                                    <View style={styles.cardContent}>
-                                        <Text style={[styles.cardTitle, { color: colors.text }]}>{gig.name}</Text>
-                                        <Text style={[styles.cardSubTitle, { color: colors.primary }]}>
-                                            {gig.event_date ? new Date(gig.event_date).toLocaleDateString() : 'Date TBA'}
-                                            {gig.requirements?.event_start_time && gig.requirements?.event_end_time ? ` • ${gig.requirements.event_start_time} - ${gig.requirements.event_end_time}` : ''} • {gig.location}
-                                        </Text>
+                                    const permitStatusLabel = isRejected
+                                        ? 'Rejected'
+                                        : isResubmitted
+                                            ? 'Resubmitted'
+                                            : 'Pending Review';
 
-                                        <Text style={[styles.cardDescription, { color: colors.textSecondary }]} numberOfLines={2}>
-                                            {gig.description}
-                                        </Text>
+                                    const permitBadgeBackground = isRejected
+                                        ? (isDark ? 'rgba(220,38,38,0.22)' : '#FEE2E2')
+                                        : isResubmitted
+                                            ? (isDark ? 'rgba(37,99,235,0.22)' : '#DBEAFE')
+                                            : (isDark ? 'rgba(245,158,11,0.22)' : '#FEF3C7');
 
-                                        <View style={[styles.actionRow, { borderColor: colors.border }]}>
-                                            <View style={styles.actionLeft}>
-                                                <TouchableOpacity activeOpacity={1}
-                                                    onPress={() => router.push({ pathname: '/manage_gig', params: { id: gig.id } })}
-                                                    style={[styles.manageBtn, { backgroundColor: colors.primary }]}
-                                                >
-                                                    <Ionicons name="settings-outline" size={18} color="#FFF" />
-                                                    <Text style={styles.manageBtnText}>Manage</Text>
-                                                </TouchableOpacity>
+                                    const permitBadgeColor = isRejected
+                                        ? '#DC2626'
+                                        : isResubmitted
+                                            ? '#2563EB'
+                                            : '#B45309';
 
-                                                <TouchableOpacity activeOpacity={1}
-                                                    onPress={() => router.push({ pathname: '/edit_gig', params: { id: gig.id } })}
-                                                    style={[styles.editBtn, { borderColor: colors.border }]}
-                                                >
-                                                    <Ionicons name="pencil-outline" size={20} color={colors.text} />
-                                                </TouchableOpacity>
+                                    return (
+                                    <View key={gig.id} style={[styles.gridItem, isWebDesktop && styles.gridItemWeb]}>
+                                        <View style={[styles.cardContainer, {
+                                            backgroundColor: pageCardBackground,
+                                            borderColor: borderSoft,
+                                        }, isWebDesktop && styles.webSectionCard, {
+                                            shadowColor: isWebDesktop ? '#0F172A' : colors.primary,
+                                        }]}>
+                                            <View style={[styles.imageWrapper, isWebDesktop && styles.imageWrapperWeb]}>
+                                                <CachedImage
+                                                    uri={resolveGigImage(gig)}
+                                                    style={styles.cardImage}
+                                                    width={800}
+                                                    height={384}
+                                                    quality={72}
+                                                    cacheVersion={gig.updated_at || gig.created_at || gig.id}
+                                                    contentFit="cover"
+                                                />
+                                                <View style={[styles.statusBadge, { backgroundColor: isDark ? 'rgba(0,0,0,0.6)' : 'rgba(255,255,255,0.9)' }]}>
+                                                    <Text style={[styles.statusText, { color: colors.primary }]}>{gig.status || 'Active'}</Text>
+                                                </View>
+                                                <View style={styles.budgetBadge}>
+                                                    <Text style={styles.budgetText}>₱{gig.budget?.toLocaleString()}</Text>
+                                                </View>
                                             </View>
 
-                                            <TouchableOpacity activeOpacity={1}
-                                                onPress={() => confirmDelete(gig.id, gig.name)}
-                                                style={styles.deleteBtn}
-                                            >
-                                                <Ionicons name="trash-outline" size={20} color="#EF4444" />
-                                            </TouchableOpacity>
+                                            <View style={styles.cardContent}>
+                                                <Text style={[styles.cardTitle, { color: colors.text }]} numberOfLines={1}>{gig.name}</Text>
+                                                <Text style={[styles.cardSubTitle, { color: colors.primary }]} numberOfLines={1}>
+                                                    {gig.event_date ? formatDashedNumericDate(gig.event_date) : 'Date TBA'}
+                                                    {gig.requirements?.event_start_time && gig.requirements?.event_end_time ? ` • ${gig.requirements.event_start_time} - ${gig.requirements.event_end_time}` : ''} • {gig.location}
+                                                </Text>
+
+                                                <Text style={[styles.cardDescription, { color: colors.textSecondary }]} numberOfLines={2}>
+                                                    {gig.description}
+                                                </Text>
+
+                                                {!isApproved && (
+                                                    <View style={[styles.permitStatusChip, { backgroundColor: permitBadgeBackground }]}>
+                                                        <Text style={[styles.permitStatusChipText, { color: permitBadgeColor }]}>Permit: {permitStatusLabel}</Text>
+                                                    </View>
+                                                )}
+
+                                                {isRejected && !!gig.permit_rejection_reason && (
+                                                    <Text style={styles.rejectionReasonText} numberOfLines={3}>
+                                                        Rejection reason: {gig.permit_rejection_reason}
+                                                    </Text>
+                                                )}
+
+                                                {(normalizedPermitStatus === 'pending_review' || normalizedPermitStatus === 'resubmitted') && (
+                                                    <Text style={[styles.permitHintText, { color: colors.textSecondary }]}> 
+                                                        Hidden from Home right now.
+                                                    </Text>
+                                                )}
+
+                                                <View style={[styles.actionRow, { borderColor: colors.border }]}>
+                                                    <View style={styles.actionLeft}>
+                                                        <TouchableOpacity activeOpacity={1}
+                                                            onPress={() => {
+                                                                if (canManageGig) {
+                                                                    router.push({ pathname: '/manage_gig', params: { id: gig.id } });
+                                                                    return;
+                                                                }
+
+                                                                router.push({ pathname: '/manage_gig', params: { id: gig.id } });
+                                                            }}
+                                                            style={[styles.manageBtn, { backgroundColor: colors.primary }]}
+                                                        >
+                                                            <Ionicons name={canManageGig ? 'settings-outline' : 'eye-outline'} size={16} color="#FFF" />
+                                                            <Text style={styles.manageBtnText}>{canManageGig ? 'Manage' : 'View'}</Text>
+                                                        </TouchableOpacity>
+
+                                                        {canManageGig ? (
+                                                            <TouchableOpacity activeOpacity={1}
+                                                                onPress={() => router.push({ pathname: '/edit_gig', params: { id: gig.id } })}
+                                                                style={[styles.editBtn, { borderColor: colors.border }]}
+                                                            >
+                                                                <Ionicons name="pencil-outline" size={18} color={colors.text} />
+                                                            </TouchableOpacity>
+                                                        ) : (
+                                                            <TouchableOpacity activeOpacity={1}
+                                                                onPress={() => handleOpenGigChat(gig)}
+                                                                style={[styles.editBtn, { borderColor: colors.border }]}
+                                                            >
+                                                                <Ionicons name="chatbubble-outline" size={18} color={colors.text} />
+                                                            </TouchableOpacity>
+                                                        )}
+                                                    </View>
+
+                                                    {canManageGig ? (
+                                                        <TouchableOpacity activeOpacity={1}
+                                                            onPress={() => confirmDelete(gig.id, gig.name)}
+                                                            style={styles.deleteBtn}
+                                                        >
+                                                            <Ionicons name="trash-outline" size={18} color="#EF4444" />
+                                                        </TouchableOpacity>
+                                                    ) : null}
+                                                </View>
+                                            </View>
                                         </View>
                                     </View>
-                                </View>
-                            ))
+                                    );
+                                })}
+                            </View>
                         )}
 
                     </ScrollView>
@@ -312,7 +627,7 @@ export default function MyVenueScreen() {
                 inputPlaceholder="Cancellation reason"
                 inputValue={cancellationReason}
                 onInputChange={setCancellationReason}
-                confirmDisabled={!cancellationReason.trim() || deleting}
+                confirmDisabled={deleting}
             />
             <CustomAlert
                 visible={alertVisible}
@@ -330,36 +645,82 @@ const styles = StyleSheet.create({
     flex1: {
         flex: 1,
     },
+    pageFrame: {
+        flex: 1,
+        width: '100%',
+    },
+    pageFrameWeb: {
+        maxWidth: 1240,
+        width: '100%',
+        alignSelf: 'center',
+        paddingHorizontal: 20,
+        paddingTop: 12,
+    },
     scrollContent: {
-        paddingHorizontal: 24,
+        paddingHorizontal: 16,
         paddingBottom: 180,
-        paddingTop: 16,
+        paddingTop: 12,
     },
-    loadingText: {
-        textAlign: 'center',
-        marginTop: 20,
-        fontFamily: 'Poppins_400Regular',
+    scrollContentWeb: {
+        maxWidth: 1120,
+        width: '100%',
+        alignSelf: 'center',
+        paddingTop: 10,
     },
+    gridWrap: {
+        width: '100%',
+    },
+    gridWrapWeb: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        justifyContent: 'space-between',
+    },
+    gridItem: {
+        width: '100%',
+        marginBottom: 14,
+    },
+    gridItemWeb: {
+        width: '49%',
+        marginBottom: 18,
+    },
+    skeletonActionRow: { marginTop: 12, flexDirection: 'row', gap: 8 },
     emptyState: {
         alignItems: 'center',
-        paddingVertical: 40,
-        opacity: 0.5,
+        paddingVertical: 48,
+    },
+    emptyTitle: {
+        marginTop: 16,
+        fontFamily: 'Poppins_600SemiBold',
+        fontSize: 18,
     },
     emptyText: {
-        marginTop: 16,
+        marginTop: 8,
         fontFamily: 'Poppins_400Regular',
+        fontSize: 13,
+        textAlign: 'center',
     },
     cardContainer: {
-        marginBottom: 24,
-        borderRadius: 24,
+        borderRadius: 18,
+        borderWidth: 1,
         overflow: 'hidden',
-        shadowOffset: { width: 0, height: 8 },
+        shadowOffset: { width: 0, height: 6 },
         shadowOpacity: 0.1,
+        shadowRadius: 12,
+    },
+    webSectionCard: {
+        shadowOffset: { width: 0, height: 10 },
+        shadowOpacity: 0.08,
         shadowRadius: 16,
+        elevation: 3,
     },
     imageWrapper: {
-        height: 192,
+        height: 170,
         position: 'relative',
+        overflow: 'hidden',
+        backgroundColor: '#0F172A',
+    },
+    imageWrapperWeb: {
+        height: 186,
     },
     cardImage: {
         width: '100%',
@@ -392,54 +753,94 @@ const styles = StyleSheet.create({
         color: '#FFF',
     },
     cardContent: {
-        padding: 16,
+        paddingHorizontal: 14,
+        paddingVertical: 12,
     },
     cardTitle: {
         fontFamily: 'Poppins_600SemiBold',
-        fontSize: 18,
+        fontSize: 16,
         marginBottom: 2,
     },
     cardSubTitle: {
         fontFamily: 'Poppins_500Medium',
-        fontSize: 13,
-        marginBottom: 6,
+        fontSize: 12,
+        marginBottom: 5,
     },
     cardDescription: {
         fontFamily: 'Poppins_400Regular',
-        fontSize: 13,
-        lineHeight: 20,
+        fontSize: 12,
+        lineHeight: 18,
+    },
+    permitStatusChip: {
+        marginTop: 10,
+        alignSelf: 'flex-start',
+        borderRadius: 999,
+        paddingHorizontal: 10,
+        paddingVertical: 4,
+    },
+    permitStatusChipText: {
+        fontFamily: 'Poppins_600SemiBold',
+        fontSize: 11,
+    },
+    rejectionReasonText: {
+        marginTop: 8,
+        color: '#DC2626',
+        fontFamily: 'Poppins_500Medium',
+        fontSize: 12,
+        lineHeight: 17,
+    },
+    permitHintText: {
+        marginTop: 8,
+        fontFamily: 'Poppins_400Regular',
+        fontSize: 12,
+        lineHeight: 17,
     },
     actionRow: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
-        marginTop: 16,
+        marginTop: 12,
         borderTopWidth: 1,
-        paddingTop: 16,
+        paddingTop: 12,
     },
     actionLeft: {
         flexDirection: 'row',
-        gap: 12,
+        gap: 8,
     },
     manageBtn: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 8,
-        paddingHorizontal: 16,
-        paddingVertical: 8,
-        borderRadius: 12,
+        gap: 6,
+        paddingHorizontal: 12,
+        paddingVertical: 7,
+        borderRadius: 10,
     },
     manageBtnText: {
         fontFamily: 'Poppins_500Medium',
+        fontSize: 12,
         color: '#FFF',
     },
     editBtn: {
-        padding: 8,
-        borderRadius: 12,
+        padding: 7,
+        borderRadius: 10,
         borderWidth: 1,
     },
+    reapplyBtn: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
+        borderRadius: 12,
+        borderWidth: 1,
+        paddingHorizontal: 12,
+        paddingVertical: 8,
+    },
+    reapplyBtnText: {
+        color: '#EA580C',
+        fontFamily: 'Poppins_600SemiBold',
+        fontSize: 12,
+    },
     deleteBtn: {
-        padding: 8,
+        padding: 6,
     },
 });
 

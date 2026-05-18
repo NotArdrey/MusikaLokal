@@ -1,7 +1,8 @@
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
-import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { memo, useCallback, useEffect, useMemo, useState } from "react";
 import {
+  ActivityIndicator,
     Platform,
     Pressable,
     ScrollView,
@@ -9,27 +10,243 @@ import {
     StyleSheet,
     Text,
     TouchableOpacity,
+    type DimensionValue,
     View,
 } from "react-native";
 import { PH_MUSIC_GROUP_TYPES } from "../constants/groupTypes";
 import { useAuth } from "../context/AuthContext";
+import { emitToast } from "../events/toastBus";
 import { useTheme } from "../context/ThemeContext";
+import { supabase } from "../../lib/supabase";
 import { getGigApplicationDeadlineInfo } from "../utils/gigApplication";
+import { addFavoriteChangedListener, emitFavoriteChanged } from "../utils/favoriteEvents";
+import { isFanUserRole } from "../utils/roleRouting";
 import CachedImage from "./CachedImage";
 import PagerView from "./PagerView";
 
 const debugLog = (..._args: unknown[]) => { };
+
+const getFavoriteTargetType = (
+  listingType?: string,
+): "group" | "studio" | "gig" | "profile" | null => {
+  const normalized = (listingType || "").toLowerCase();
+  if (normalized === "group") return "group";
+  if (normalized === "artist" || normalized === "musician") return "profile";
+  if (normalized === "studio" || normalized === "venue") return "studio";
+  if (normalized === "gig") return "gig";
+  return null;
+};
 
 interface ListingCardProps {
   item: any;
   onPress: (item: any) => void;
   onInvite?: (item: any) => void;
   onChat?: (item: any) => void;
-  variant?: "horizontal" | "vertical";
+  variant?: "horizontal" | "vertical" | "feed";
   style?: any;
   hasGroups?: boolean;
   showGigSummary?: boolean;
+  actionSlot?: React.ReactNode;
 }
+
+type OptimizedListingImageStripProps = {
+  images: string[];
+  pageIndex: number;
+  onPageIndexChange: (index: number) => void;
+  fallbackUri?: string | null;
+  cacheVersion?: string | number | null;
+  pagerStyle: any;
+  imageStyle: any;
+  pageWidth: DimensionValue;
+  imageWidth: number;
+  imageHeight: number;
+};
+
+type PriceDisplayItem = {
+  key: string;
+  amount: string;
+  unit?: string;
+  label?: string;
+};
+
+const PESO_SIGN = "\u20B1";
+
+const getPositiveInteger = (value: unknown) => {
+  if (value === null || value === undefined || value === "") return 0;
+  const parsed = parseInt(String(value), 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+};
+
+const buildPriceItem = (
+  key: string,
+  value: unknown,
+  unit?: string,
+  label?: string,
+): PriceDisplayItem | null => {
+  const amount = getPositiveInteger(value);
+  if (amount <= 0) return null;
+
+  return {
+    key,
+    amount: `${PESO_SIGN}${amount.toLocaleString()}`,
+    unit,
+    label,
+  };
+};
+
+const formatPriceDisplayLabel = (priceItem: PriceDisplayItem) => {
+  const unit = priceItem.unit ? priceItem.unit.replace("/", " / ") : "";
+  const label = priceItem.label ? ` (${priceItem.label})` : "";
+  return `${priceItem.amount}${unit}${label}`;
+};
+
+const LISTING_FALLBACK_IMAGES: Record<string, string[]> = {
+  Artist: [
+    "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=900&q=75",
+    "https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=900&q=75",
+    "https://images.unsplash.com/photo-1521572267360-ee0c2909d518?auto=format&fit=crop&w=900&q=75",
+  ],
+  Gig: [
+    "https://images.unsplash.com/photo-1514525253161-7a46d19cd819?auto=format&fit=crop&w=1000&q=75",
+    "https://images.unsplash.com/photo-1470229722913-7c0e2dbbafd3?auto=format&fit=crop&w=1000&q=75",
+    "https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?auto=format&fit=crop&w=1000&q=75",
+  ],
+  Group: [
+    "https://images.unsplash.com/photo-1521335629791-ce4aec67dd47?auto=format&fit=crop&w=1000&q=75",
+    "https://images.unsplash.com/photo-1506157786151-b8491531f063?auto=format&fit=crop&w=1000&q=75",
+    "https://images.unsplash.com/photo-1516280440614-37939bbacd81?auto=format&fit=crop&w=1000&q=75",
+  ],
+  Production: [
+    "https://images.unsplash.com/photo-1598488035139-bdbb2231ce04?auto=format&fit=crop&w=1000&q=75",
+    "https://images.unsplash.com/photo-1511379938547-c1f69419868d?auto=format&fit=crop&w=1000&q=75",
+    "https://images.unsplash.com/photo-1514320291840-2e0a9bf2a9ae?auto=format&fit=crop&w=1000&q=75",
+  ],
+  Studio: [
+    "https://images.unsplash.com/photo-1598488035139-bdbb2231ce04?auto=format&fit=crop&w=1000&q=75",
+    "https://images.unsplash.com/photo-1511379938547-c1f69419868d?auto=format&fit=crop&w=1000&q=75",
+    "https://images.unsplash.com/photo-1516280440614-37939bbacd81?auto=format&fit=crop&w=1000&q=75",
+  ],
+};
+
+const getListingFallbackImage = (type?: string, id?: string | number | null) => {
+  const normalizedType = typeof type === "string" && type.length > 0 ? type : "Group";
+  const images = LISTING_FALLBACK_IMAGES[normalizedType] || LISTING_FALLBACK_IMAGES.Group;
+  const seed = String(id || normalizedType)
+    .split("")
+    .reduce((sum, char) => sum + char.charCodeAt(0), 0);
+
+  return images[seed % images.length];
+};
+
+const shouldMountListingImagePage = (
+  index: number,
+  activeIndex: number,
+  total: number,
+) => {
+  if (Math.abs(index - activeIndex) <= 1) return true;
+
+  return (
+    (activeIndex === 0 && index === total - 1) ||
+    (activeIndex === total - 1 && index === 0)
+  );
+};
+
+const OptimizedListingImageStrip = memo(
+  function OptimizedListingImageStrip({
+    images,
+    pageIndex,
+    onPageIndexChange,
+    fallbackUri,
+    cacheVersion,
+    pagerStyle,
+    imageStyle,
+    pageWidth,
+    imageWidth,
+    imageHeight,
+  }: OptimizedListingImageStripProps) {
+    const safePageIndex = Math.min(Math.max(pageIndex, 0), images.length - 1);
+
+    if (images.length <= 1) {
+      return (
+        <CachedImage
+          uri={images.length > 0 ? images[0] : undefined}
+          fallbackUri={fallbackUri}
+          style={imageStyle}
+          width={imageWidth}
+          height={imageHeight}
+          cacheVersion={cacheVersion}
+        />
+      );
+    }
+
+    if (Platform.OS === "web") {
+      return (
+        <ScrollView
+          horizontal
+          pagingEnabled
+          showsHorizontalScrollIndicator={false}
+          style={pagerStyle}
+          nestedScrollEnabled
+          directionalLockEnabled
+          scrollEnabled
+          onStartShouldSetResponder={() => true}
+          onMoveShouldSetResponder={() => true}
+          onMomentumScrollEnd={(e) => {
+            const containerWidth =
+              typeof pageWidth === "number"
+                ? pageWidth
+                : e.nativeEvent.layoutMeasurement.width;
+            const nextIndex = Math.round(
+              e.nativeEvent.contentOffset.x / Math.max(containerWidth, 1),
+            );
+            onPageIndexChange(Math.min(Math.max(nextIndex, 0), images.length - 1));
+          }}
+        >
+          {images.map((img: string, index: number) => (
+            <View key={`${img}-${index}`} style={[styles.pagerPage, { width: pageWidth }]}>
+              {shouldMountListingImagePage(index, safePageIndex, images.length) ? (
+                <CachedImage
+                  uri={img}
+                  fallbackUri={fallbackUri}
+                  style={imageStyle}
+                  width={imageWidth}
+                  height={imageHeight}
+                  cacheVersion={cacheVersion}
+                />
+              ) : null}
+            </View>
+          ))}
+        </ScrollView>
+      );
+    }
+
+    return (
+      <PagerView
+        style={pagerStyle}
+        initialPage={safePageIndex}
+        scrollEnabled
+        onPageSelected={(e: any) => {
+          onPageIndexChange(e.nativeEvent.position);
+        }}
+      >
+        {images.map((img: string, index: number) => (
+          <View key={`${img}-${index}`} style={styles.pagerPage}>
+            {shouldMountListingImagePage(index, safePageIndex, images.length) ? (
+              <CachedImage
+                uri={img}
+                fallbackUri={fallbackUri}
+                style={imageStyle}
+                width={imageWidth}
+                height={imageHeight}
+                cacheVersion={cacheVersion}
+              />
+            ) : null}
+          </View>
+        ))}
+      </PagerView>
+    );
+  },
+);
 
 const ListingCard: React.FC<ListingCardProps> = ({
   item,
@@ -40,15 +257,15 @@ const ListingCard: React.FC<ListingCardProps> = ({
   style,
   hasGroups,
   showGigSummary = true,
+  actionSlot,
 }) => {
   const { colors, isDark } = useTheme();
   const { userRole, userId } = useAuth(); // To avoid showing warning to owners
-  const [isLiked, setIsLiked] = useState(false);
+  const isFan = isFanUserRole(userRole);
+  const [isBookmarked, setIsBookmarked] = useState(false);
+  const [bookmarkBusy, setBookmarkBusy] = useState(false);
   const [pageIndex, setPageIndex] = useState(0);
-  const horizontalWebScrollRef = useRef<ScrollView | null>(null);
-  const verticalWebScrollRef = useRef<ScrollView | null>(null);
-  const horizontalPagerRef = useRef<any>(null);
-  const verticalPagerRef = useRef<any>(null);
+  const isFeedVariant = variant === "feed";
 
   // Check if current user can invite (ONLY venue-owner viewing a musician/Group)
   const canInvite = useMemo(
@@ -57,6 +274,33 @@ const ListingCard: React.FC<ListingCardProps> = ({
       (item.type === "Group" || item.type === "Artist"),
     [item.type, userRole],
   );
+
+  const favoriteTargetType = useMemo(
+    () => getFavoriteTargetType(item?.type),
+    [item?.type],
+  );
+
+  useEffect(() => {
+    if (typeof item?.is_favorited === "boolean") {
+      setIsBookmarked(item.is_favorited);
+    }
+  }, [item?.id, item?.is_favorited]);
+
+  useEffect(() => {
+    if (!favoriteTargetType || !item?.id) return;
+
+    const subscription = addFavoriteChangedListener((payload) => {
+      if (payload.targetType !== favoriteTargetType || payload.id !== item.id) {
+        return;
+      }
+
+      setIsBookmarked(payload.isFavorited);
+    });
+
+    return () => {
+      subscription.remove();
+    };
+  }, [favoriteTargetType, item?.id]);
 
   // Group Warning Logic
   const showGroupWarning = useMemo(
@@ -71,7 +315,7 @@ const ListingCard: React.FC<ListingCardProps> = ({
   // Gig Application Deadline Logic (24hrs before event)
   const gigDeadlineInfo = useMemo(() => {
     return getGigApplicationDeadlineInfo(item);
-  }, [item.event_date, item.requirements?.event_start_time, item.type]);
+  }, [item]);
 
   const getPreferenceTagText = useCallback((label: string, values: unknown) => {
     if (!Array.isArray(values) || values.length === 0) return null;
@@ -110,18 +354,13 @@ const ListingCard: React.FC<ListingCardProps> = ({
 
   // Determine "Price/Rate" Label - handle dynamic pricing for studios
   // Skip pricing for Groups
-  const { priceLabel, secondaryPriceLabel, isGroup } = useMemo(() => {
+  const { priceLabel, secondaryPriceLabel, priceItems, isGroup } = useMemo(() => {
+    const nextPriceItems: PriceDisplayItem[] = [];
     let nextPriceLabel = "";
     let nextSecondaryPriceLabel = "";
     const nextIsGroup = item.type === "Group";
-    const rehearsalRateValue =
-      item.rehearsal_rate && item.rehearsal_rate !== "0"
-        ? parseInt(item.rehearsal_rate)
-        : 0;
-    const recordingRateValue =
-      item.recording_rate && item.recording_rate !== "0"
-        ? parseInt(item.recording_rate)
-        : 0;
+    const rehearsalRateValue = getPositiveInteger(item.rehearsal_rate);
+    const recordingRateValue = getPositiveInteger(item.recording_rate);
     const isRecordingOnlyStudio =
       item.type === "Studio" && item.studio_type === "Recording";
     const isRehearsalOnlyStudio =
@@ -129,9 +368,7 @@ const ListingCard: React.FC<ListingCardProps> = ({
     const hasRehearsalRate = rehearsalRateValue > 0 && !isRecordingOnlyStudio;
     const hasRecordingRate = recordingRateValue > 0 && !isRehearsalOnlyStudio;
 
-    if (nextIsGroup) {
-      nextPriceLabel = "";
-    } else if (item.type === "Studio") {
+    if (!nextIsGroup && item.type === "Studio") {
       if (hasRehearsalRate && hasRecordingRate) {
         nextPriceLabel = `₱${rehearsalRateValue.toLocaleString()} / hr (Rehearsal)`;
         nextSecondaryPriceLabel = `₱${recordingRateValue.toLocaleString()} / song (Recording)`;
@@ -142,7 +379,7 @@ const ListingCard: React.FC<ListingCardProps> = ({
       } else if (item.hourly_rate && item.hourly_rate !== "0") {
         nextPriceLabel = `₱${parseInt(item.hourly_rate).toLocaleString()} / hr`;
       } else {
-        nextPriceLabel = "Inquire for rates";
+        nextPriceLabel = "";
       }
     } else if (item.hourly_rate && item.hourly_rate !== "0") {
       nextPriceLabel = `₱${parseInt(item.hourly_rate).toLocaleString()} / hr`;
@@ -159,15 +396,105 @@ const ListingCard: React.FC<ListingCardProps> = ({
         nextPriceLabel = `₱${parseInt(item.rate).toLocaleString()}`;
       }
     } else {
-      nextPriceLabel = "Inquire for rates";
+      nextPriceLabel = "";
+    }
+
+    if (!nextIsGroup && item.type === "Studio") {
+      if (hasRehearsalRate && hasRecordingRate) {
+        nextPriceItems.push(
+          buildPriceItem("rehearsal", rehearsalRateValue, "/hr", "Rehearsal")!,
+          buildPriceItem("recording", recordingRateValue, "/song", "Recording")!,
+        );
+      } else if (hasRehearsalRate) {
+        nextPriceItems.push(
+          buildPriceItem("rehearsal", rehearsalRateValue, "/hr", "Rehearsal")!,
+        );
+      } else if (hasRecordingRate) {
+        nextPriceItems.push(
+          buildPriceItem("recording", recordingRateValue, "/song", "Recording")!,
+        );
+      } else {
+        const hourlyPrice = buildPriceItem("hourly", item.hourly_rate, "/hr");
+        if (hourlyPrice) nextPriceItems.push(hourlyPrice);
+      }
+    } else if (!nextIsGroup) {
+      const hourlyPrice = buildPriceItem("hourly", item.hourly_rate, "/hr");
+      const rehearsalPrice = buildPriceItem("rehearsal", item.rehearsal_rate, "/hr", "Rehearsal");
+      const recordingPrice = buildPriceItem("recording", item.recording_rate, "/song", "Recording");
+      const budgetPrice = buildPriceItem("budget", item.budget, undefined, "Budget");
+      const numericRatePrice = buildPriceItem("rate", item.rate, undefined, "Rate");
+
+      if (hourlyPrice) {
+        nextPriceItems.push(hourlyPrice);
+      } else if (rehearsalPrice) {
+        nextPriceItems.push(rehearsalPrice);
+      } else if (recordingPrice) {
+        nextPriceItems.push(recordingPrice);
+      } else if (budgetPrice) {
+        nextPriceItems.push(budgetPrice);
+      } else if (typeof item.rate === "string" && item.rate.trim() && item.rate !== "0") {
+        const rawRate = item.rate.trim();
+        nextPriceItems.push({
+          key: "rate",
+          amount: rawRate.startsWith(PESO_SIGN) ? rawRate : `${PESO_SIGN}${rawRate}`,
+          label: "Rate",
+        });
+      } else if (numericRatePrice) {
+        nextPriceItems.push(numericRatePrice);
+      }
     }
 
     return {
-      priceLabel: nextPriceLabel,
-      secondaryPriceLabel: nextSecondaryPriceLabel,
+      priceLabel: nextPriceItems[0] ? formatPriceDisplayLabel(nextPriceItems[0]) : nextPriceLabel,
+      secondaryPriceLabel: nextPriceItems[1]
+        ? formatPriceDisplayLabel(nextPriceItems[1])
+        : nextSecondaryPriceLabel,
+      priceItems: nextPriceItems,
       isGroup: nextIsGroup,
     };
   }, [item]);
+
+  const renderPriceItems = useCallback(
+    (compact = false) => (
+      <View style={[styles.priceList, compact && styles.feedPriceList]}>
+        {priceItems.map((priceItem) => (
+          <View key={priceItem.key} style={styles.priceItemRow}>
+            <View
+              style={[
+                styles.priceChip,
+                {
+                  backgroundColor: isDark
+                    ? "rgba(139,92,246,0.16)"
+                    : "rgba(124,58,237,0.09)",
+                  borderColor: isDark
+                    ? "rgba(167,139,250,0.26)"
+                    : "rgba(124,58,237,0.16)",
+                },
+              ]}
+            >
+              <Text style={[styles.priceAmount, { color: colors.primary }]}>
+                {priceItem.amount}
+              </Text>
+              {priceItem.unit ? (
+                <Text style={[styles.priceUnit, { color: colors.textSecondary }]}>
+                  {priceItem.unit}
+                </Text>
+              ) : null}
+            </View>
+            {priceItem.label ? (
+              <Text
+                style={[styles.priceLabelText, { color: colors.textSecondary }]}
+                numberOfLines={1}
+              >
+                {priceItem.label}
+              </Text>
+            ) : null}
+          </View>
+        ))}
+      </View>
+    ),
+    [colors.primary, colors.textSecondary, isDark, priceItems],
+  );
 
   // Determine Badge Color & Label
   const { badgeLabel, badgeColor } = useMemo(() => {
@@ -192,6 +519,9 @@ const ListingCard: React.FC<ListingCardProps> = ({
     } else if (normalizedType === "Artist") {
       nextBadgeLabel = "Artist";
       nextBadgeColor = "#EC4899";
+    } else if (normalizedType === "Production") {
+      nextBadgeLabel = "Production Team";
+      nextBadgeColor = "#F97316";
     } else {
       nextBadgeLabel = normalizedType;
       nextBadgeColor = "#7C3AED";
@@ -199,6 +529,19 @@ const ListingCard: React.FC<ListingCardProps> = ({
 
     return { badgeLabel: nextBadgeLabel, badgeColor: nextBadgeColor };
   }, [item.hourly_rate, item.studio_type, item.type, item.group_type]);
+
+  const completionRate = useMemo(() => {
+    if (item?.completion_rate === null || item?.completion_rate === undefined || item?.completion_rate === "") {
+      return null;
+    }
+
+    const parsed = Number(item?.completion_rate);
+    if (!Number.isFinite(parsed)) return null;
+    return Math.max(0, Math.min(100, Math.round(parsed)));
+  }, [item?.completion_rate]);
+  const showCompletionBadge =
+    completionRate !== null &&
+    ["Artist", "Group"].includes(String(item.type || ""));
 
   // Shared actions
   const handleShare = async () => {
@@ -211,9 +554,116 @@ const ListingCard: React.FC<ListingCardProps> = ({
     }
   };
 
-  const toggleLike = useCallback(() => {
-    setIsLiked((prev) => !prev);
-  }, []);
+  useEffect(() => {
+    let isMounted = true;
+
+    const syncBookmarkState = async () => {
+      if (!favoriteTargetType || !item?.id || !userId) {
+        if (isMounted) {
+          setIsBookmarked(false);
+        }
+        return;
+      }
+
+      try {
+        const { count, error } = await supabase
+          .from("favorites")
+          .select("id", { count: "exact", head: true })
+          .eq(`${favoriteTargetType}_id`, item.id)
+          .eq("user_id", userId);
+
+        if (error) throw error;
+        if (isMounted) {
+          setIsBookmarked((count || 0) > 0);
+        }
+      } catch {
+        if (isMounted) {
+          setIsBookmarked(false);
+        }
+      }
+    };
+
+    void syncBookmarkState();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [favoriteTargetType, item?.id, userId]);
+
+  const handleBookmarkAction = useCallback(
+    async (e: any) => {
+      e?.stopPropagation?.();
+
+      if (bookmarkBusy) {
+        return;
+      }
+
+      if (!favoriteTargetType || !item?.id) {
+        emitToast({
+          type: "info",
+          title: "Bookmark unavailable",
+          message: "Bookmarking is currently available for artists, groups, studios, and gigs.",
+        });
+        return;
+      }
+
+      if (!userId) {
+        emitToast({
+          type: "warning",
+          title: "Login required",
+          message: "Please sign in to bookmark listings.",
+        });
+        return;
+      }
+
+      const previousState = isBookmarked;
+      const optimisticState = !previousState;
+
+      setBookmarkBusy(true);
+      setIsBookmarked(optimisticState);
+
+      try {
+        const { data, error } = await supabase.functions.invoke("manage-details", {
+          body: {
+            action: "toggle_favorite",
+            type: favoriteTargetType,
+            id: item.id,
+            userId,
+          },
+        });
+
+        if (error) throw error;
+
+        const resolvedFavorited =
+          typeof data?.is_favorited === "boolean"
+            ? data.is_favorited
+            : optimisticState;
+
+        setIsBookmarked(resolvedFavorited);
+        emitFavoriteChanged({
+          id: item.id,
+          isFavorited: resolvedFavorited,
+          targetType: favoriteTargetType,
+          favoriteCount: typeof data?.favorites_count === "number" ? data.favorites_count : undefined,
+        });
+      } catch (error: any) {
+        setIsBookmarked(previousState);
+        emitFavoriteChanged({
+          id: item.id,
+          isFavorited: previousState,
+          targetType: favoriteTargetType,
+        });
+        emitToast({
+          type: "error",
+          title: "Bookmark failed",
+          message: error?.message || "Unable to update bookmark right now.",
+        });
+      } finally {
+        setBookmarkBusy(false);
+      }
+    },
+    [bookmarkBusy, favoriteTargetType, isBookmarked, item?.id, userId],
+  );
 
   const handleInviteAction = useCallback(
     (e: any) => {
@@ -233,8 +683,8 @@ const ListingCard: React.FC<ListingCardProps> = ({
 
   // Determine if chat button should be shown (not for own items)
   const canChat = useMemo(
-    () => onChat && item.owner_id !== userId && item.organizer_id !== userId,
-    [item.organizer_id, item.owner_id, onChat, userId],
+    () => !isFan && onChat && item.owner_id !== userId && item.organizer_id !== userId,
+    [isFan, item.organizer_id, item.owner_id, onChat, userId],
   );
 
   const shouldShowGigSummary = useMemo(
@@ -247,13 +697,25 @@ const ListingCard: React.FC<ListingCardProps> = ({
 
   const showOpenApplicationsBadge = useMemo(
     () =>
-      item.type === "Group" &&
-      item.open_group_applications === true &&
+      ((item.type === "Group" && item.open_group_applications === true) ||
+        (item.type === "Production" && item.open_production_applications === true)) &&
       !!userId &&
       userRole === "musician" &&
       item.owner_id !== userId,
-    [item.open_group_applications, item.owner_id, item.type, userId, userRole],
+    [item.open_group_applications, item.open_production_applications, item.owner_id, item.type, userId, userRole],
   );
+
+  const showCustomContractBadge = Boolean(item?.contract_url);
+  const showAgreementBadge = item.type === "Gig";
+
+  const viewActionLabel = useMemo(() => {
+    if (item.type === "Artist") return "View Musician";
+    if (item.type === "Group") return "View Group";
+    if (item.type === "Studio") return "View Studio";
+    if (item.type === "Gig") return "View Gig";
+    if (item.type === "Production") return "View Team";
+    return "View Details";
+  }, [item.type]);
 
   const gigSummary = useMemo(
     () => [
@@ -276,50 +738,42 @@ const ListingCard: React.FC<ListingCardProps> = ({
     }
     return [];
   }, [item.image, item.images]);
+  const fallbackImageUri = useMemo(() => {
+    if (typeof item.owner_avatar_url === "string" && item.owner_avatar_url.length > 0) {
+      return item.owner_avatar_url;
+    }
+
+    if (typeof item.avatar_url === "string" && item.avatar_url.length > 0) {
+      return item.avatar_url;
+    }
+
+    if (item.type === "Artist") {
+      return null;
+    }
+
+    return getListingFallbackImage(item.type, item.id || item.name);
+  }, [item.avatar_url, item.id, item.name, item.owner_avatar_url, item.type]);
+  const showProfileImagePlaceholder = item.type === "Artist";
   const hasMultipleImages = images.length > 1;
   const imageCacheVersion = useMemo(
     () => item.updated_at || item.created_at || item.id,
     [item.created_at, item.id, item.updated_at],
   );
+  const imageStripKey = useMemo(
+    () =>
+      [
+        item?.type || "listing",
+        item?.id || item?.name || "unknown",
+        images.length,
+        images[0] || "",
+        images[images.length - 1] || "",
+      ].join(":"),
+    [images, item?.id, item?.name, item?.type],
+  );
 
   useEffect(() => {
-    if (!hasMultipleImages) {
-      setPageIndex(0);
-      return;
-    }
-
-    const interval = setInterval(() => {
-      setPageIndex((prev) => {
-        const next = (prev + 1) % images.length;
-
-        if (variant === "horizontal") {
-          if (Platform.OS === "web") {
-            horizontalWebScrollRef.current?.scrollTo({
-              x: next * 280,
-              y: 0,
-              animated: true,
-            });
-          } else {
-            horizontalPagerRef.current?.setPage?.(next);
-          }
-        } else {
-          if (Platform.OS === "web") {
-            verticalWebScrollRef.current?.scrollTo({
-              x: next * 320,
-              y: 0,
-              animated: true,
-            });
-          } else {
-            verticalPagerRef.current?.setPage?.(next);
-          }
-        }
-
-        return next;
-      });
-    }, 3200);
-
-    return () => clearInterval(interval);
-  }, [hasMultipleImages, images.length, variant]);
+    setPageIndex(0);
+  }, [imageStripKey]);
 
   // --- RENDER VARIANTS ---
 
@@ -348,75 +802,28 @@ const ListingCard: React.FC<ListingCardProps> = ({
           ]}
         >
           {/* Full Background Image / Slideshow */}
-          {hasMultipleImages ? (
-            <View style={StyleSheet.absoluteFillObject}>
-              {Platform.OS === "web" ? (
-                <ScrollView
-                  ref={horizontalWebScrollRef}
-                  horizontal
-                  pagingEnabled
-                  showsHorizontalScrollIndicator={false}
-                  style={StyleSheet.absoluteFillObject}
-                  nestedScrollEnabled
-                  directionalLockEnabled
-                  scrollEnabled
-                  onStartShouldSetResponder={() => true}
-                  onMoveShouldSetResponder={() => true}
-                  onMomentumScrollEnd={(e) => {
-                    const newIndex = Math.round(
-                      e.nativeEvent.contentOffset.x / cardWidth,
-                    );
-                    setPageIndex(newIndex);
-                  }}
-                >
-                  {images.map((img: string, index: number) => (
-                    <View
-                      key={index}
-                      style={[styles.pagerPage, { width: cardWidth }]}
-                    >
-                      <CachedImage
-                        uri={img}
-                        style={StyleSheet.absoluteFillObject}
-                        width={cardWidth}
-                        height={cardHeight}
-                        cacheVersion={imageCacheVersion}
-                      />
-                    </View>
-                  ))}
-                </ScrollView>
-              ) : (
-                <PagerView
-                  ref={horizontalPagerRef}
-                  style={StyleSheet.absoluteFillObject}
-                  initialPage={0}
-                  scrollEnabled
-                  onPageSelected={(e: any) =>
-                    setPageIndex(e.nativeEvent.position)
-                  }
-                >
-                  {images.map((img: string, index: number) => (
-                    <View key={index} style={styles.pagerPage}>
-                      <CachedImage
-                        uri={img}
-                        style={StyleSheet.absoluteFillObject}
-                        width={cardWidth}
-                        height={cardHeight}
-                        cacheVersion={imageCacheVersion}
-                      />
-                    </View>
-                  ))}
-                </PagerView>
-              )}
+          {showProfileImagePlaceholder && (
+            <View style={[styles.profileImagePlaceholder, StyleSheet.absoluteFillObject]}>
+              <Ionicons
+                name="person"
+                size={84}
+                color={isDark ? "rgba(226,232,240,0.72)" : "rgba(71,85,105,0.5)"}
+              />
             </View>
-          ) : (
-            <CachedImage
-              uri={images.length > 0 ? images[0] : undefined}
-              style={StyleSheet.absoluteFillObject}
-              width={cardWidth}
-              height={cardHeight}
-              cacheVersion={imageCacheVersion}
-            />
           )}
+          <OptimizedListingImageStrip
+            key={imageStripKey}
+            images={images}
+            pageIndex={pageIndex}
+            onPageIndexChange={setPageIndex}
+            fallbackUri={fallbackImageUri}
+            pagerStyle={StyleSheet.absoluteFillObject}
+            imageStyle={StyleSheet.absoluteFillObject}
+            pageWidth={cardWidth}
+            imageWidth={cardWidth}
+            imageHeight={cardHeight}
+            cacheVersion={imageCacheVersion}
+          />
 
           {/* Gradient Overlay */}
           <LinearGradient
@@ -493,13 +900,22 @@ const ListingCard: React.FC<ListingCardProps> = ({
               </TouchableOpacity>
             )}
 
-            {/* Like Button Glass */}
-            <TouchableOpacity activeOpacity={1} style={styles.glassIconBtn} onPress={toggleLike}>
-              <Ionicons
-                name={isLiked ? "heart" : "heart-outline"}
-                size={20}
-                color={isLiked ? "#EF4444" : "#FFF"}
-              />
+            {/* Bookmark Button Glass */}
+            <TouchableOpacity
+              activeOpacity={1}
+              disabled={bookmarkBusy}
+              style={styles.glassIconBtn}
+              onPress={handleBookmarkAction}
+            >
+              {bookmarkBusy ? (
+                <ActivityIndicator size="small" color="#FFF" />
+              ) : (
+                <Ionicons
+                  name={isBookmarked ? "bookmark" : "bookmark-outline"}
+                  size={20}
+                  color={isBookmarked ? colors.primary : "#FFF"}
+                />
+              )}
             </TouchableOpacity>
           </View>
 
@@ -544,6 +960,11 @@ const ListingCard: React.FC<ListingCardProps> = ({
                 <View style={[styles.tagBadge, { backgroundColor: badgeColor }]}>
                   <Text style={styles.tagText}>{badgeLabel}</Text>
                 </View>
+                {showCompletionBadge && (
+                  <View style={[styles.tagBadge, { backgroundColor: completionRate === 100 ? "#10B981" : "#2563EB" }]}>
+                    <Text style={styles.tagText}>Completion {completionRate}%</Text>
+                  </View>
+                )}
                 {item.pax && (item.type === "Studio" || item.hourly_rate) && (
                   <View style={[styles.tagBadge, { backgroundColor: "#10B981" }]}>
                     <Text style={styles.tagText}>{item.pax} pax</Text>
@@ -659,6 +1080,18 @@ const ListingCard: React.FC<ListingCardProps> = ({
                     <Text style={styles.tagText}>Open Applications</Text>
                   </View>
                 )}
+                {showCustomContractBadge && (
+                  <View style={[styles.tagBadge, styles.contractBadge]}>
+                    <Ionicons name="document-text-outline" size={11} color="#FFFFFF" />
+                    <Text style={styles.tagText}>Custom Contract</Text>
+                  </View>
+                )}
+                {showAgreementBadge && (
+                  <View style={[styles.tagBadge, styles.agreementBadge]}>
+                    <Ionicons name="shield-checkmark-outline" size={11} color="#FFFFFF" />
+                    <Text style={styles.tagText}>Agreement Required</Text>
+                  </View>
+                )}
                 {/* Total Slots Badge for Gigs without detailed slots */}
                 {item.type === "Gig" && item.requirements?.total_slots_needed > 0 && !item.requirements?.slots && (
                   <View style={[styles.tagBadge, { backgroundColor: "#10B981" }]}>
@@ -770,14 +1203,19 @@ const ListingCard: React.FC<ListingCardProps> = ({
 
   // 2. STANDARD VERTICAL CARD (For Search / Lists)
   // Legacy Layout: Image Top, White Info Box Bottom
-  const imageHeight = 180;
+  const imageHeight = isFeedVariant ? 212 : 180;
 
   return (
     <Pressable
       onPress={() => onPress(item)}
       style={({ pressed }) => [
         styles.card,
-        { width: "100%", backgroundColor: isDark ? "#1F2937" : "#FFFFFF" },
+        isFeedVariant && styles.feedCard,
+        {
+          width: "100%",
+          backgroundColor: isDark ? "#1F2937" : "#FFFFFF",
+          borderColor: isFeedVariant ? (isDark ? "#334155" : "#EEF0F4") : undefined,
+        },
         style,
         { transform: [{ scale: pressed ? 0.99 : 1 }] },
       ]}
@@ -785,72 +1223,36 @@ const ListingCard: React.FC<ListingCardProps> = ({
       <View
         style={[
           styles.cardContent,
+          isFeedVariant && styles.feedCardContent,
           { backgroundColor: isDark ? "#1F2937" : "#FFFFFF" },
         ]}
       >
         {/* Image Section */}
-        <View style={[styles.imageContainer, { height: imageHeight }]}>
+        <View style={[styles.imageContainer, isFeedVariant && styles.feedImageContainer, { height: imageHeight }]}>
+          {showProfileImagePlaceholder && (
+            <View style={[styles.profileImagePlaceholder, StyleSheet.absoluteFillObject]}>
+              <Ionicons
+                name="person"
+                size={72}
+                color={isDark ? "rgba(226,232,240,0.72)" : "rgba(71,85,105,0.5)"}
+              />
+            </View>
+          )}
           {hasMultipleImages ? (
             <View style={{ flex: 1 }}>
-              {Platform.OS === "web" ? (
-                <ScrollView
-                  ref={verticalWebScrollRef}
-                  horizontal
-                  pagingEnabled
-                  showsHorizontalScrollIndicator={false}
-                  style={{ flex: 1 }}
-                  nestedScrollEnabled
-                  directionalLockEnabled
-                  scrollEnabled
-                  onStartShouldSetResponder={() => true}
-                  onMoveShouldSetResponder={() => true}
-                  onMomentumScrollEnd={(e) => {
-                    const containerWidth =
-                      e.nativeEvent.layoutMeasurement.width;
-                    const newIndex = Math.round(
-                      e.nativeEvent.contentOffset.x / containerWidth,
-                    );
-                    setPageIndex(newIndex);
-                  }}
-                >
-                  {images.map((img: string, index: number) => (
-                    <View
-                      key={index}
-                      style={[styles.pagerPage, { width: "100%" }]}
-                    >
-                      <CachedImage
-                        uri={img}
-                        style={styles.image}
-                        width={640}
-                        height={360}
-                        cacheVersion={imageCacheVersion}
-                      />
-                    </View>
-                  ))}
-                </ScrollView>
-              ) : (
-                <PagerView
-                  ref={verticalPagerRef}
-                  style={{ flex: 1 }}
-                  initialPage={0}
-                  scrollEnabled
-                  onPageSelected={(e: any) =>
-                    setPageIndex(e.nativeEvent.position)
-                  }
-                >
-                  {images.map((img: string, index: number) => (
-                    <View key={index} style={styles.pagerPage}>
-                      <CachedImage
-                        uri={img}
-                        style={styles.image}
-                        width={640}
-                        height={360}
-                        cacheVersion={imageCacheVersion}
-                      />
-                    </View>
-                  ))}
-                </PagerView>
-              )}
+              <OptimizedListingImageStrip
+                key={imageStripKey}
+                images={images}
+                pageIndex={pageIndex}
+                onPageIndexChange={setPageIndex}
+                fallbackUri={fallbackImageUri}
+                pagerStyle={{ flex: 1 }}
+                imageStyle={styles.image}
+                pageWidth="100%"
+                imageWidth={640}
+                imageHeight={360}
+                cacheVersion={imageCacheVersion}
+              />
               {/* Pagination Dots for Vertical Card */}
               <View style={[styles.paginationContainer, { bottom: 10 }]}>
                 {images.map((_: any, i: number) => (
@@ -870,6 +1272,7 @@ const ListingCard: React.FC<ListingCardProps> = ({
           ) : (
             <CachedImage
               uri={images.length > 0 ? images[0] : undefined}
+              fallbackUri={fallbackImageUri}
               style={styles.image}
               width={640}
               height={360}
@@ -877,8 +1280,16 @@ const ListingCard: React.FC<ListingCardProps> = ({
             />
           )}
 
+          {isFeedVariant && (
+            <LinearGradient
+              colors={["transparent", "rgba(15,23,42,0.34)"]}
+              style={styles.feedMediaGradient}
+              pointerEvents="none"
+            />
+          )}
+
           {/* Seasonal Rate Badges (Vertical) - Bottom Left Corner */}
-          {(item.has_seasonal_pricing ||
+          {!isFeedVariant && (item.has_seasonal_pricing ||
             (item.weekend_multiplier &&
               parseFloat(item.weekend_multiplier) > 1)) &&
             (item.type === "Studio" || item.hourly_rate) && (
@@ -926,6 +1337,7 @@ const ListingCard: React.FC<ListingCardProps> = ({
             )}
 
           {/* Top Actions for Standard Card */}
+          {!isFeedVariant && (
           <View style={[styles.topActions]}>
             {/* Left: Warning + Deadline badges */}
             <View style={{ flexDirection: "column", gap: 6, flex: 1, alignItems: "flex-start" }}>
@@ -977,49 +1389,79 @@ const ListingCard: React.FC<ListingCardProps> = ({
                   <Ionicons name="chatbubble-ellipses" size={18} color="#FFF" />
                 </TouchableOpacity>
               )}
-              <TouchableOpacity activeOpacity={1} style={styles.iconBtn} onPress={toggleLike}>
-                <Ionicons
-                  name={isLiked ? "heart" : "heart-outline"}
-                  size={20}
-                  color={isLiked ? "#EF4444" : "#000"}
-                />
+              <TouchableOpacity
+                activeOpacity={1}
+                disabled={bookmarkBusy}
+                style={styles.iconBtn}
+                onPress={handleBookmarkAction}
+              >
+                {bookmarkBusy ? (
+                  <ActivityIndicator size="small" color={colors.primary} />
+                ) : (
+                  <Ionicons
+                    name={isBookmarked ? "bookmark" : "bookmark-outline"}
+                    size={20}
+                    color={isBookmarked ? colors.primary : "#0F172A"}
+                  />
+                )}
               </TouchableOpacity>
             </View>
           </View>
+          )}
         </View>
 
         {/* Info Section */}
-        <View style={styles.info}>
+        <View style={[styles.info, isFeedVariant && styles.feedInfo]}>
           {/* Type & Pax Badges (Moved from Image Overlay) */}
-          <View
-            style={{
-              flexDirection: "row",
-              alignItems: "flex-start",
-              marginBottom: 6,
-            }}
-          >
-            <View
-              style={{
-                flexDirection: "row",
-                alignItems: "center",
-                gap: 6,
-                flexWrap: "wrap",
-                flex: 1,
-                paddingRight: 8,
-              }}
-            >
+          <View style={[styles.metaHeaderRow, isFeedVariant && styles.feedMetaHeaderRow]}>
+            <View style={styles.metaHeaderLeft}>
               <View
                 style={[
                   styles.tagBadge,
-                  styles.tagBadgeSmall,
+                  isFeedVariant ? styles.feedStatusBadge : styles.tagBadgeSmall,
                   { backgroundColor: badgeColor },
                 ]}
               >
-                <Text style={[styles.tagText, { fontSize: 10 }]}>
+                <Text style={[styles.tagText, { fontSize: isFeedVariant ? 11 : 10 }]}>
                   {badgeLabel}
                 </Text>
               </View>
-              {item.pax && (item.type === "Studio" || item.hourly_rate) && (
+              {isFeedVariant && gigDeadlineInfo && (
+                <View
+                  style={[
+                    styles.feedStatusBadge,
+                    {
+                      backgroundColor: gigDeadlineInfo.isPassed
+                        ? "#6B7280"
+                        : gigDeadlineInfo.isUrgent
+                          ? "#F59E0B"
+                          : "#10B981",
+                    },
+                  ]}
+                >
+                  <Text style={[styles.tagText, { fontSize: 11 }]}>
+                    {gigDeadlineInfo.isPassed
+                      ? "Closed"
+                      : gigDeadlineInfo.hoursLeft < 24
+                        ? `${gigDeadlineInfo.hoursLeft}h left`
+                        : `${Math.ceil(gigDeadlineInfo.hoursLeft / 24)}d left`}
+                  </Text>
+                </View>
+              )}
+              {!isFeedVariant && showCompletionBadge && (
+                <View
+                  style={[
+                    styles.tagBadge,
+                    styles.tagBadgeSmall,
+                    { backgroundColor: completionRate === 100 ? "#10B981" : "#2563EB" },
+                  ]}
+                >
+                  <Text style={[styles.tagText, { fontSize: 10 }]}>
+                    Completion {completionRate}%
+                  </Text>
+                </View>
+              )}
+              {!isFeedVariant && item.pax && (item.type === "Studio" || item.hourly_rate) && (
                 <View
                   style={[
                     styles.tagBadge,
@@ -1032,6 +1474,51 @@ const ListingCard: React.FC<ListingCardProps> = ({
                   </Text>
                 </View>
               )}
+
+              {item.rating > 0 && (item.review_count || 0) > 0 && (
+                <View style={styles.ratingInlineRow}>
+                  <Ionicons name="star" size={14} color="#FBBF24" />
+                  <Text style={[styles.ratingText, { color: colors.textSecondary }]}>
+                    {item.rating.toFixed(1)}
+                  </Text>
+                </View>
+              )}
+
+            </View>
+
+            {isFeedVariant ? (
+              <TouchableOpacity
+                activeOpacity={1}
+                accessibilityLabel={isBookmarked ? "Remove saved listing" : "Save listing"}
+                accessibilityRole="button"
+                disabled={bookmarkBusy}
+                style={[
+                  styles.feedSaveBtn,
+                  {
+                    backgroundColor: isDark ? "#0F172A" : "#F8FAFC",
+                    borderColor: isDark ? "#334155" : "#E2E8F0",
+                  },
+                ]}
+                onPress={handleBookmarkAction}
+              >
+                {bookmarkBusy ? (
+                  <ActivityIndicator size="small" color={colors.primary} />
+                ) : (
+                  <Ionicons
+                    name={isBookmarked ? "bookmark" : "bookmark-outline"}
+                    size={20}
+                    color={isBookmarked ? colors.primary : colors.textSecondary}
+                  />
+                )}
+              </TouchableOpacity>
+            ) : actionSlot ? (
+              <View style={styles.metaHeaderRight}>
+                {actionSlot}
+              </View>
+            ) : null}
+          </View>
+
+          <View style={[styles.metaBadgeFlow, isFeedVariant && styles.hidden]}>
               {/* Special Schedule Badge */}
               {item.has_special_dates &&
                 (item.type === "Studio" || item.hourly_rate) && (
@@ -1056,6 +1543,30 @@ const ListingCard: React.FC<ListingCardProps> = ({
                   ]}
                 >
                   <Text style={[styles.tagText, { fontSize: 10 }]}>Open Applications</Text>
+                </View>
+              )}
+              {showCustomContractBadge && (
+                <View
+                  style={[
+                    styles.tagBadge,
+                    styles.tagBadgeSmall,
+                    styles.contractBadge,
+                  ]}
+                >
+                  <Ionicons name="document-text-outline" size={11} color="#FFFFFF" />
+                  <Text style={[styles.tagText, { fontSize: 10 }]}>Custom Contract</Text>
+                </View>
+              )}
+              {showAgreementBadge && (
+                <View
+                  style={[
+                    styles.tagBadge,
+                    styles.tagBadgeSmall,
+                    styles.agreementBadge,
+                  ]}
+                >
+                  <Ionicons name="shield-checkmark-outline" size={11} color="#FFFFFF" />
+                  <Text style={[styles.tagText, { fontSize: 10 }]}>Agreement Required</Text>
                 </View>
               )}
 
@@ -1211,18 +1722,10 @@ const ListingCard: React.FC<ListingCardProps> = ({
                     </Text>
                   </View>
                 )}
-            </View>
-
-            {item.rating > 0 && (item.review_count || 0) > 0 && (
-              <View style={styles.ratingBadge}>
-                <Ionicons name="star" size={12} color="#FBBF24" />
-                <Text style={styles.ratingText}>{item.rating.toFixed(1)}</Text>
-              </View>
-            )}
           </View>
 
           <View>
-            <Text style={[styles.title, { color: colors.text }]}>
+            <Text style={[styles.title, { color: colors.text }]} numberOfLines={2}>
               {item.name}
             </Text>
             <View
@@ -1249,7 +1752,7 @@ const ListingCard: React.FC<ListingCardProps> = ({
               </Text>
             </View>
 
-            {shouldShowGigSummary && (
+            {!isFeedVariant && shouldShowGigSummary && (
               <View style={styles.gigSummaryRowVertical}>
                 {gigSummary.map((summary) => (
                   <View
@@ -1274,7 +1777,36 @@ const ListingCard: React.FC<ListingCardProps> = ({
           </View>
 
           {/* Hide entire price row for Groups */}
-          {!isGroup && (
+          {!isGroup && isFeedVariant && priceItems.length > 0 && (
+            <View style={styles.feedPriceBlock}>
+              {renderPriceItems(true)}
+            </View>
+          )}
+
+          {isFeedVariant && (
+            <View style={styles.feedActionsRow}>
+              <TouchableOpacity
+                activeOpacity={1}
+                accessibilityLabel={viewActionLabel}
+                accessibilityRole="button"
+                style={[
+                  styles.feedViewBtn,
+                  {
+                    backgroundColor: isDark ? "#111827" : "#FFFFFF",
+                    borderColor: isDark ? "#334155" : "#CBD5E1",
+                  },
+                ]}
+                onPress={() => onPress(item)}
+              >
+                <Text style={[styles.feedViewText, { color: colors.text }]}>
+                  {viewActionLabel}
+                </Text>
+              </TouchableOpacity>
+              {actionSlot ? <View style={styles.feedActionSlot}>{actionSlot}</View> : null}
+            </View>
+          )}
+
+          {!isFeedVariant && !isGroup && (priceItems.length > 0 || item.review_count > 0) && (
             <View
               style={[
                 styles.priceRow,
@@ -1285,21 +1817,7 @@ const ListingCard: React.FC<ListingCardProps> = ({
                 },
               ]}
             >
-              <View style={{ flexDirection: "column" }}>
-                <Text style={[styles.price, { color: colors.primary }]}>
-                  {priceLabel}
-                </Text>
-                {secondaryPriceLabel && (
-                  <Text
-                    style={[
-                      styles.price,
-                      { color: colors.primary, marginTop: 2 },
-                    ]}
-                  >
-                    {secondaryPriceLabel}
-                  </Text>
-                )}
-              </View>
+              {priceItems.length > 0 ? renderPriceItems() : null}
               <View style={{ flex: 1 }} />
               {item.review_count > 0 && (
                 <Text style={styles.reviewCount}>
@@ -1310,7 +1828,7 @@ const ListingCard: React.FC<ListingCardProps> = ({
           )}
 
           {/* Instruments Display for Studios/Venues */}
-          {item.instruments &&
+          {!isFeedVariant && item.instruments &&
             Array.isArray(item.instruments) &&
             item.instruments.length > 0 && (
               <View
@@ -1355,22 +1873,32 @@ const styles = StyleSheet.create({
   card: {
     marginBottom: 20,
     marginRight: 0,
-    borderRadius: 24,
+    borderRadius: 26,
     overflow: "hidden",
     borderWidth: 1,
-    borderColor: "rgba(0,0,0,0.05)",
-    // Modern Shadow
+    borderColor: "rgba(15,23,42,0.08)",
     shadowColor: "#000",
-    shadowOffset: { width: 0, height: 4 }, // Slightly softer
-    shadowOpacity: 0.1, // Reduced opacity
-    shadowRadius: 10,
-    elevation: 4, // Reduced elevation for Android
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.08,
+    shadowRadius: 18,
+    elevation: 5,
+  },
+  feedCard: {
+    marginBottom: 12,
+    borderRadius: 22,
+    borderColor: "#EEF0F4",
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.04,
+    shadowRadius: 12,
+    elevation: 2,
   },
   cardContent: {
-    // flex: 1 removed to allow auto-height for vertical cards
-    borderRadius: 24, // Matches card
-    overflow: "hidden", // Clips content
+    borderRadius: 26,
+    overflow: "hidden",
     position: "relative",
+  },
+  feedCardContent: {
+    borderRadius: 22,
   },
   // --- Immersive Styles ---
   immersiveTopRow: {
@@ -1426,15 +1954,19 @@ const styles = StyleSheet.create({
     color: "#FFF",
     fontFamily: "Poppins_600SemiBold",
     fontSize: 11,
+    lineHeight: 13,
+    includeFontPadding: false,
+    textAlignVertical: "center",
   },
   glassIconBtn: {
     width: 36,
     height: 36,
     borderRadius: 18,
-    backgroundColor: "#111827", // Solid heavy dark for button too
+    backgroundColor: "#111827",
     alignItems: "center",
     justifyContent: "center",
-    // Removed border
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.14)",
   },
   tagBadge: {
     alignSelf: "flex-start",
@@ -1443,18 +1975,36 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
     borderRadius: 6,
     marginBottom: 8,
+    alignItems: "center",
+    justifyContent: "center",
   },
   // Smaller variant used in vertical list cards
   tagBadgeSmall: {
+    alignSelf: "center",
     paddingHorizontal: 8,
     paddingVertical: 3,
     borderRadius: 6,
     marginBottom: 0,
   },
+  contractBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: "#0F766E",
+  },
+  agreementBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: "#475569",
+  },
   tagText: {
     color: "#FFF",
     fontSize: 10,
     fontFamily: "Poppins_600SemiBold",
+    lineHeight: 12,
+    includeFontPadding: false,
+    textAlignVertical: "center",
     textTransform: "uppercase",
   },
 
@@ -1464,9 +2014,26 @@ const styles = StyleSheet.create({
     backgroundColor: "#f3f4f6",
     position: "relative",
   },
+  profileImagePlaceholder: {
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#E5E7EB",
+  },
+  feedImageContainer: {
+    borderTopLeftRadius: 22,
+    borderTopRightRadius: 22,
+    overflow: "hidden",
+  },
   image: {
     width: "100%",
     height: "100%",
+  },
+  feedMediaGradient: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 0,
+    height: 76,
   },
   pagerPage: {
     width: "100%",
@@ -1490,50 +2057,119 @@ const styles = StyleSheet.create({
   },
   topActions: {
     position: "absolute",
-    top: 12,
-    left: 12,
-    right: 12,
+    top: 14,
+    left: 14,
+    right: 14,
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "flex-start",
     zIndex: 10,
-    gap: 12, // Added gap to separate rating and heart
+    gap: 10,
   },
   ratingBadge: {
-    backgroundColor: "rgba(255, 255, 255, 0.95)",
+    backgroundColor: "rgba(255, 255, 255, 0.97)",
     paddingHorizontal: 10,
     paddingVertical: 6,
     borderRadius: 20,
     flexDirection: "row",
     alignItems: "center",
     gap: 4,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.6)",
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.15,
-    shadowRadius: 4,
+    shadowOpacity: 0.12,
+    shadowRadius: 6,
     elevation: 2,
   },
   ratingText: {
     fontFamily: "Poppins_600SemiBold",
     fontSize: 12,
     color: "#1F2937",
+    includeFontPadding: false,
+    lineHeight: 16,
   },
   iconBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 38,
+    height: 38,
+    borderRadius: 19,
     backgroundColor: "rgba(255, 255, 255, 0.95)",
     alignItems: "center",
     justifyContent: "center",
+    borderWidth: 1,
+    borderColor: "rgba(148,163,184,0.24)",
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
+    shadowOpacity: 0.08,
+    shadowRadius: 6,
     elevation: 2,
   },
   info: {
-    padding: 16,
-    gap: 8, // Better separation
+    paddingHorizontal: 18,
+    paddingTop: 16,
+    paddingBottom: 18,
+    gap: 10,
+  },
+  feedInfo: {
+    paddingHorizontal: 14,
+    paddingTop: 12,
+    paddingBottom: 14,
+    gap: 8,
+  },
+  metaHeaderRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 10,
+    marginBottom: 6,
+  },
+  feedMetaHeaderRow: {
+    marginBottom: 2,
+  },
+  metaHeaderLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    flexWrap: "wrap",
+    flex: 1,
+    minWidth: 0,
+  },
+  metaHeaderRight: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "flex-end",
+    gap: 8,
+    flexShrink: 0,
+  },
+  metaBadgeFlow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    flexWrap: "wrap",
+  },
+  hidden: {
+    display: "none",
+  },
+  feedStatusBadge: {
+    alignSelf: "center",
+    paddingHorizontal: 9,
+    paddingVertical: 4,
+    borderRadius: 8,
+    marginBottom: 0,
+  },
+  feedSaveBtn: {
+    width: 38,
+    height: 38,
+    borderRadius: 14,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  ratingInlineRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    marginLeft: 2,
   },
   title: {
     fontFamily: "Poppins_600SemiBold",
@@ -1555,16 +2191,87 @@ const styles = StyleSheet.create({
   },
   priceRow: {
     flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    marginTop: 10, // More separation for price
-    paddingTop: 10,
+    alignItems: "flex-start",
+    gap: 8,
+    marginTop: 12,
+    paddingTop: 12,
     borderTopWidth: 1,
-    borderColor: "rgba(0,0,0,0.05)", // Subtle separator
+    borderColor: "rgba(15,23,42,0.08)",
   },
   price: {
     fontFamily: "Poppins_600SemiBold",
     fontSize: 15,
+  },
+  priceList: {
+    flexShrink: 1,
+    gap: 6,
+  },
+  feedPriceList: {
+    gap: 7,
+  },
+  priceItemRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    flexWrap: "wrap",
+    gap: 8,
+    minHeight: 30,
+  },
+  priceChip: {
+    minHeight: 28,
+    borderRadius: 8,
+    borderWidth: 1,
+    paddingHorizontal: 9,
+    paddingVertical: 4,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  priceAmount: {
+    fontFamily: "Poppins_700Bold",
+    fontSize: 15,
+    lineHeight: 18,
+    includeFontPadding: false,
+    textAlignVertical: "center",
+  },
+  priceUnit: {
+    fontFamily: "Poppins_500Medium",
+    fontSize: 11,
+    lineHeight: 14,
+    includeFontPadding: false,
+    textAlignVertical: "center",
+    marginLeft: 2,
+  },
+  priceLabelText: {
+    fontFamily: "Poppins_500Medium",
+    fontSize: 12,
+    flexShrink: 1,
+  },
+  feedPriceBlock: {
+    marginTop: 0,
+  },
+  feedActionsRow: {
+    flexDirection: "row",
+    gap: 10,
+    marginTop: 4,
+  },
+  feedViewBtn: {
+    flex: 1,
+    minHeight: 40,
+    borderRadius: 14,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 12,
+  },
+  feedViewText: {
+    fontFamily: "Poppins_600SemiBold",
+    fontSize: 12,
+    lineHeight: 16,
+    includeFontPadding: false,
+    textAlignVertical: "center",
+  },
+  feedActionSlot: {
+    flex: 1,
   },
   reviewCount: {
     fontFamily: "Poppins_400Regular",

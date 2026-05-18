@@ -9,10 +9,12 @@ import {
     Text,
     TextInput,
     TouchableOpacity,
+    useWindowDimensions,
     View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../context/ThemeContext';
+import CustomAlert from './CustomAlert';
 
 export const REPORT_REASONS_BY_TYPE: Record<string, string[]> = {
     group: [
@@ -55,10 +57,53 @@ export const REPORT_REASONS_BY_TYPE: Record<string, string[]> = {
         'Spam',
         'Other',
     ],
+    product: [
+        'False or misleading listing',
+        'Counterfeit or prohibited item',
+        'Inappropriate images or description',
+        'Spam or scam',
+        'Unsafe or suspicious seller behavior',
+        'Other',
+    ],
+    playlist: [
+        'Inappropriate or offensive content',
+        'Misleading or fake upload',
+        'Spam or scam',
+        'Harassment or bullying',
+        'Unsafe or unauthorized content',
+        'Other',
+    ],
+    music: [
+        'Inappropriate or offensive content',
+        'Misleading or fake upload',
+        'Spam or scam',
+        'Harassment or bullying',
+        'Unsafe or unauthorized content',
+        'Other',
+    ],
+    post: [
+        'Spam or scam',
+        'Harassment or bullying',
+        'Inappropriate content',
+        'Misleading or false information',
+        'Hate speech',
+        'Other',
+    ],
+    feed_post: [
+        'Spam or scam',
+        'Harassment or bullying',
+        'Inappropriate content',
+        'Misleading or false information',
+        'Hate speech',
+        'Other',
+    ],
 };
 
 // Fallback list (generic)
 export const REPORT_REASONS = REPORT_REASONS_BY_TYPE.group;
+
+export const reportReasonTestId = (reason: string) =>
+    `report-reason-${String(reason || 'unknown').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')}`;
 
 interface ReportModalProps {
     visible: boolean;
@@ -79,29 +124,46 @@ export default function ReportModal({
 }: ReportModalProps) {
     const { colors, isDark } = useTheme();
     const insets = useSafeAreaInsets();
+    const { height } = useWindowDimensions();
     const [selectedReason, setSelectedReason] = useState<string | null>(null);
     const [details, setDetails] = useState('');
     const [submitting, setSubmitting] = useState(false);
     const [submitted, setSubmitted] = useState(false);
+    const [errorMessage, setErrorMessage] = useState<string | null>(null);
+    const [feedbackVisible, setFeedbackVisible] = useState(false);
 
     // Pick reasons based on type; fallback to generic group reasons
     const reasons = (reportType && REPORT_REASONS_BY_TYPE[reportType.toLowerCase()])
         ? REPORT_REASONS_BY_TYPE[reportType.toLowerCase()]
         : REPORT_REASONS;
+    const isOtherReason = selectedReason?.trim().toLowerCase() === 'other';
+    const trimmedDetails = details.trim();
 
     const handleClose = () => {
         setSelectedReason(null);
         setDetails('');
         setSubmitted(false);
+        setErrorMessage(null);
+        setFeedbackVisible(false);
         onClose();
     };
 
     const handleSubmit = async () => {
-        if (!selectedReason) return;
+        if (!selectedReason) {
+            setFeedbackVisible(true);
+            return;
+        }
+        if (isOtherReason && !trimmedDetails) {
+            setErrorMessage('Please tell us the reason for this report.');
+            return;
+        }
         setSubmitting(true);
+        setErrorMessage(null);
         try {
-            await onSubmit(selectedReason, details.trim() || undefined);
+            await onSubmit(selectedReason, trimmedDetails || undefined);
             setSubmitted(true);
+        } catch (error: any) {
+            setErrorMessage(error?.message || 'Unable to submit report right now.');
         } finally {
             setSubmitting(false);
         }
@@ -113,6 +175,12 @@ export default function ReportModal({
     const selectedBg = isDark ? 'rgba(99,102,241,0.18)' : 'rgba(99,102,241,0.08)';
     const borderSelected = '#6366F1';
     const accent = colors.primary;
+    const isSubmitDisabled = submitting || !selectedReason || (isOtherReason && !trimmedDetails);
+    const sheetMaxHeight = Math.min(
+        720,
+        Math.max(320, height - Math.max(insets.top, 12) - 16),
+    );
+    const reasonsMaxHeight = Math.max(150, Math.min(420, sheetMaxHeight - 280));
 
     return (
         <Modal
@@ -124,11 +192,14 @@ export default function ReportModal({
         >
             <Pressable style={[styles.overlay, { backgroundColor: overlayBg }]} onPress={handleClose}>
                 <Pressable
+                    testID="report-modal"
+                    accessibilityLabel="report-modal"
                     style={[
                         styles.sheet,
                         {
                             backgroundColor: cardBg,
-                            paddingBottom: Math.max(insets.bottom, 20) + 8,
+                            maxHeight: sheetMaxHeight,
+                            paddingBottom: Math.max(insets.bottom, 14) + 6,
                         },
                     ]}
                     onPress={() => {}} // prevent closing when tapping inside
@@ -149,6 +220,8 @@ export default function ReportModal({
                                 Thanks for letting us know. Our team will review this report shortly and take appropriate action.
                             </Text>
                             <TouchableOpacity
+                                testID="report-done-button"
+                                accessibilityLabel="report-done-button"
                                 style={[styles.doneBtn, { backgroundColor: accent }]}
                                 onPress={handleClose}
                                 activeOpacity={1}
@@ -174,12 +247,13 @@ export default function ReportModal({
                                     : "What's the issue?"}
                             </Text>
                             <Text style={[styles.subheadingNote, { color: colors.textSecondary }]}>
-                                Your report is anonymous. We won't share your identity with anyone.
+                                Your report is anonymous. We will not share your identity with anyone.
                             </Text>
 
                             {/* Reasons List */}
                             <ScrollView
-                                style={styles.reasonsScroll}
+                                style={[styles.reasonsScroll, { maxHeight: reasonsMaxHeight }]}
+                                contentContainerStyle={styles.reasonsContent}
                                 showsVerticalScrollIndicator={false}
                                 keyboardShouldPersistTaps="handled"
                             >
@@ -188,6 +262,8 @@ export default function ReportModal({
                                     return (
                                         <TouchableOpacity
                                             key={reason}
+                                            testID={reportReasonTestId(reason)}
+                                            accessibilityLabel={reportReasonTestId(reason)}
                                             style={[
                                                 styles.reasonRow,
                                                 {
@@ -195,8 +271,11 @@ export default function ReportModal({
                                                     borderColor: isSelected ? borderSelected : 'transparent',
                                                 },
                                             ]}
-                                            onPress={() => setSelectedReason(reason)}
-                                            activeOpacity={0.7}
+                                            onPress={() => {
+                                                setSelectedReason(reason);
+                                                setErrorMessage(null);
+                                            }}
+                                            activeOpacity={1}
                                         >
                                             <Text
                                                 style={[
@@ -223,9 +302,11 @@ export default function ReportModal({
                                     );
                                 })}
 
-                                {/* Additional details field – shown when "Other" is selected */}
-                                {selectedReason === 'Other' && (
+                                {/* Additional details field shown when "Other" is selected */}
+                                {isOtherReason && (
                                     <TextInput
+                                        testID="report-details-input"
+                                        accessibilityLabel="report-details-input"
                                         style={[
                                             styles.detailsInput,
                                             {
@@ -234,30 +315,39 @@ export default function ReportModal({
                                                 borderColor: isDark ? '#374151' : '#E5E7EB',
                                             },
                                         ]}
-                                        placeholder="Tell us more (optional)…"
+                                        placeholder="Type the reason for your report"
                                         placeholderTextColor={colors.textSecondary}
                                         multiline
                                         numberOfLines={3}
                                         value={details}
-                                        onChangeText={setDetails}
+                                        onChangeText={(value) => {
+                                            setDetails(value);
+                                            setErrorMessage(null);
+                                        }}
                                         textAlignVertical="top"
                                     />
                                 )}
                             </ScrollView>
 
+                            {errorMessage ? (
+                                <Text style={[styles.errorText, { color: '#EF4444' }]}>{errorMessage}</Text>
+                            ) : null}
+
                             {/* Submit + Cancel */}
                             <View style={styles.footer}>
                                 <TouchableOpacity
+                                    testID="report-submit-button"
+                                    accessibilityLabel="report-submit-button"
                                     style={[
                                         styles.submitBtn,
                                         {
                                             backgroundColor: selectedReason ? accent : (isDark ? '#374151' : '#E5E7EB'),
-                                            opacity: submitting ? 0.7 : 1,
+                                            opacity: isSubmitDisabled ? 0.6 : 1,
                                         },
                                     ]}
                                     onPress={handleSubmit}
-                                    disabled={!selectedReason || submitting}
-                                    activeOpacity={1}
+                                    disabled={isSubmitDisabled}
+                                    activeOpacity={isSubmitDisabled ? 1 : 0.78}
                                 >
                                     {submitting ? (
                                         <ActivityIndicator size="small" color="#FFF" />
@@ -273,6 +363,8 @@ export default function ReportModal({
                                     )}
                                 </TouchableOpacity>
                                 <TouchableOpacity
+                                    testID="report-cancel-button"
+                                    accessibilityLabel="report-cancel-button"
                                     style={[styles.cancelBtn, { borderColor: isDark ? '#374151' : '#E5E7EB' }]}
                                     onPress={handleClose}
                                     activeOpacity={1}
@@ -286,6 +378,14 @@ export default function ReportModal({
                     )}
                 </Pressable>
             </Pressable>
+            <CustomAlert
+                visible={feedbackVisible}
+                type="warning"
+                title="Reason Required"
+                message="Please select a reason before submitting your report."
+                forceModal
+                onClose={() => setFeedbackVisible(false)}
+            />
         </Modal>
     );
 }
@@ -295,12 +395,17 @@ const styles = StyleSheet.create({
         flex: 1,
         justifyContent: 'flex-end',
     },
+    errorText: {
+        fontSize: 13,
+        fontWeight: '500',
+        marginTop: 10,
+    },
     sheet: {
-        borderTopLeftRadius: 28,
-        borderTopRightRadius: 28,
-        paddingHorizontal: 20,
-        paddingTop: 12,
-        maxHeight: '88%',
+        borderTopLeftRadius: 24,
+        borderTopRightRadius: 24,
+        paddingHorizontal: 18,
+        paddingTop: 10,
+        overflow: 'hidden',
         shadowColor: '#000',
         shadowOffset: { width: 0, height: -4 },
         shadowOpacity: 0.18,
@@ -313,13 +418,13 @@ const styles = StyleSheet.create({
         borderRadius: 2,
         backgroundColor: '#9CA3AF',
         alignSelf: 'center',
-        marginBottom: 16,
+        marginBottom: 12,
     },
     headerRow: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
-        marginBottom: 16,
+        marginBottom: 12,
     },
     closeBtn: {
         width: 38,
@@ -342,18 +447,23 @@ const styles = StyleSheet.create({
     subheadingNote: {
         fontSize: 12,
         lineHeight: 18,
-        marginBottom: 16,
+        marginBottom: 12,
     },
     reasonsScroll: {
+        width: '100%',
         flexGrow: 0,
+        flexShrink: 1,
+    },
+    reasonsContent: {
+        paddingBottom: 2,
     },
     reasonRow: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
-        paddingHorizontal: 16,
-        paddingVertical: 14,
-        borderRadius: 14,
+        paddingHorizontal: 14,
+        paddingVertical: 12,
+        borderRadius: 12,
         marginBottom: 8,
         borderWidth: 1.5,
     },
@@ -373,7 +483,7 @@ const styles = StyleSheet.create({
     },
     detailsInput: {
         borderWidth: 1,
-        borderRadius: 14,
+        borderRadius: 12,
         paddingHorizontal: 14,
         paddingVertical: 12,
         fontSize: 14,
@@ -383,11 +493,12 @@ const styles = StyleSheet.create({
     },
     footer: {
         paddingTop: 12,
-        gap: 10,
+        marginTop: 4,
+        gap: 8,
     },
     submitBtn: {
-        height: 52,
-        borderRadius: 16,
+        height: 48,
+        borderRadius: 14,
         justifyContent: 'center',
         alignItems: 'center',
     },
@@ -396,8 +507,8 @@ const styles = StyleSheet.create({
         fontWeight: '700',
     },
     cancelBtn: {
-        height: 48,
-        borderRadius: 16,
+        height: 44,
+        borderRadius: 14,
         borderWidth: 1.5,
         justifyContent: 'center',
         alignItems: 'center',

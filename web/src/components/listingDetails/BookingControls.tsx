@@ -3,6 +3,7 @@ import React from "react";
 import { Text, TouchableOpacity, View } from "react-native";
 import { Calendar } from "react-native-calendars";
 import styles from "../ListingDetailsSheet.styles";
+import { normalizeStudioType } from "./availability";
 
 interface BookingControlsProps {
   colors: any;
@@ -48,6 +49,14 @@ const toLocalDateKey = (value: Date) => {
   return `${year}-${month}-${day}`;
 };
 
+const BOOKING_LOOKAHEAD_DAYS = 90;
+
+const addLocalDays = (value: Date, days: number) => {
+  const next = new Date(value);
+  next.setDate(next.getDate() + days);
+  return next;
+};
+
 const BookingControls = ({
   colors,
   isDark,
@@ -79,6 +88,11 @@ const BookingControls = ({
   const now = new Date();
   const minLeadDateTime = new Date(now.getTime() + leadTimeHours * 60 * 60 * 1000);
   const minSelectableDate = toLocalDateKey(minLeadDateTime);
+  const maxSelectableDate = toLocalDateKey(
+    addLocalDays(now, BOOKING_LOOKAHEAD_DAYS - 1),
+  );
+  const normalizedStudioType = normalizeStudioType(group?.studio_type);
+  const supportsSessionTypeSelection = normalizedStudioType === "Both";
 
   return (
     <View
@@ -95,7 +109,7 @@ const BookingControls = ({
         },
       ]}
     >
-      {group?.studio_type === "Both" && (
+      {supportsSessionTypeSelection && (
         <View style={{ marginBottom: 16 }}>
           <Text
             style={[
@@ -240,32 +254,9 @@ const BookingControls = ({
             { color: colors.text, fontSize: 16, marginBottom: 0 },
           ]}
         >
-          {isRecordingMode ? "Select Recording Date" : "Select Date & Time"}
+          Select Date & Time
         </Text>
-        {isRecordingMode ? (
-          <View
-            style={[
-              styles.durationBadge,
-              {
-                backgroundColor: isDark
-                  ? "rgba(124, 58, 237, 0.15)"
-                  : "rgba(124, 58, 237, 0.1)",
-              },
-            ]}
-          >
-            <Ionicons name="mic" size={14} color={colors.primary} />
-            <Text
-              style={{
-                fontFamily: "Poppins_600SemiBold",
-                color: colors.primary,
-                marginLeft: 4,
-                fontSize: 12,
-              }}
-            >
-              Whole Day
-            </Text>
-          </View>
-        ) : duration > 0 ? (
+        {duration > 0 ? (
           <View
             style={[
               styles.durationBadge,
@@ -322,6 +313,7 @@ const BookingControls = ({
       <Calendar
         current={toLocalDateKey(new Date())}
         minDate={minSelectableDate}
+        maxDate={maxSelectableDate}
         markedDates={{
           ...markedDates,
           [selectedDate]: {
@@ -340,7 +332,7 @@ const BookingControls = ({
           },
         }}
         onDayPress={async (day) => {
-          if (day.dateString < minSelectableDate) {
+          if (day.dateString < minSelectableDate || day.dateString > maxSelectableDate) {
             return;
           }
 
@@ -348,17 +340,21 @@ const BookingControls = ({
             return;
           }
 
-          const slots = await fetchAvailableSlots(day.dateString);
-          if (!slots || slots.length === 0) {
-            return;
-          }
-
+          // Always commit the selection so the user gets feedback;
+          // the slot picker below will show an empty state when no
+          // times are available instead of silently swallowing the tap.
           setSelectedDate(day.dateString);
           setSelectedSlot(null);
           setValidEndTimes([]);
           setEndTime(null);
           const selectedDateObj = new Date(day.dateString);
           setDate(selectedDateObj);
+
+          try {
+            await fetchAvailableSlots(day.dateString);
+          } catch (err) {
+            console.warn("[BookingControls] fetchAvailableSlots failed:", err);
+          }
         }}
         theme={{
           backgroundColor: "transparent",
@@ -398,7 +394,7 @@ const BookingControls = ({
             },
           ]}
         >
-          {isRecordingMode ? (
+          {false ? (
             <View>
               <Text
                 style={{
@@ -462,19 +458,18 @@ const BookingControls = ({
                           color: colors.text,
                         }}
                       >
-                        {formatTime12(recordingDaySlot.start)} - {formatTime12(recordingDaySlot.end)}
+                        {formatTime12(recordingDaySlot!.start)} - {formatTime12(recordingDaySlot!.end)}
                       </Text>
                     </View>
                   </View>
 
                   {(() => {
-                    const startParts = recordingDaySlot.start.split(":").map(Number);
-                    const endParts = recordingDaySlot.end.split(":").map(Number);
+                    const startParts = recordingDaySlot!.start.split(":").map(Number);
+                    const endParts = recordingDaySlot!.end.split(":").map(Number);
                     const startMinutes = startParts[0] * 60 + startParts[1];
                     const endMinutes = endParts[0] * 60 + endParts[1];
                     const durationHours = (endMinutes - startMinutes) / 60;
                     const rate = parseInt(displayRate.replace(/,/g, "")) || 0;
-                    const totalCost = rate * durationHours;
 
                     return (
                       <View
@@ -491,15 +486,25 @@ const BookingControls = ({
                         </View>
                         <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
                           <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_400Regular" }}>Rate</Text>
-                          <Text style={{ color: colors.text, fontFamily: "Poppins_500Medium" }}>₱{displayRate}/hr</Text>
+                          <Text style={{ color: colors.text, fontFamily: "Poppins_500Medium" }}>₱{displayRate}/song</Text>
                         </View>
                         <View style={{ height: 1, backgroundColor: colors.border, marginVertical: 8 }} />
                         <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
-                          <Text style={{ color: colors.text, fontFamily: "Poppins_600SemiBold" }}>Total</Text>
+                          <Text style={{ color: colors.text, fontFamily: "Poppins_600SemiBold" }}>Minimum (1 song)</Text>
                           <Text style={{ color: colors.primary, fontFamily: "Poppins_600SemiBold", fontSize: 16 }}>
-                            ₱{totalCost.toLocaleString()}
+                            ₱{rate.toLocaleString()}
                           </Text>
                         </View>
+                        <Text
+                          style={{
+                            color: colors.textSecondary,
+                            fontFamily: "Poppins_400Regular",
+                            fontSize: 11,
+                            marginTop: 8,
+                          }}
+                        >
+                          Final total depends on the number of songs you enter below.
+                        </Text>
                       </View>
                     );
                   })()}
@@ -569,7 +574,7 @@ const BookingControls = ({
                       else grouped.Evening.push(slot);
                     });
 
-                    return (Object.keys(grouped) as Array<keyof typeof grouped>).map(
+                    return (Object.keys(grouped) as (keyof typeof grouped)[]).map(
                       (period) => {
                         if (grouped[period].length === 0) return null;
                         return (

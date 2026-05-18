@@ -1,77 +1,54 @@
 import { Ionicons } from '@expo/vector-icons';
 import { BlurView } from 'expo-blur';
-import { router, useFocusEffect, usePathname } from 'expo-router';
-import { memo, useCallback, useMemo, useState } from 'react';
-import { Platform, StyleSheet, TouchableOpacity, View, useWindowDimensions } from 'react-native';
+import { router, usePathname } from 'expo-router';
+import { memo, useEffect, useMemo, useState } from 'react';
+import { Platform, StyleSheet, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { supabase } from '../../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
+import { isFanUserRole, resolveRoleManageRoute } from '../utils/roleRouting';
+
+export const NAVBAR_BOTTOM_OFFSET = Platform.OS === 'web' ? 0 : 24;
+export const NAVBAR_HEIGHT = Platform.OS === 'web' ? 0 : 84;
+export const NAVBAR_CLEARANCE = NAVBAR_BOTTOM_OFFSET + NAVBAR_HEIGHT + 16;
 
 function Navbar() {
     const { colors, isDark } = useTheme();
-    const { isGuest } = useAuth();
+    const { isAdmin, isGuest, roleResolved, session, userRole } = useAuth();
     const insets = useSafeAreaInsets();
     const pathname = usePathname();
     const [manageRoute, setManageRoute] = useState('/manage'); // Fallback
-    const { width } = useWindowDimensions();
+    const isFan = isFanUserRole(userRole);
 
-    const fetchUserRole = useCallback(async () => {
-        if (isGuest) return; // Skip for guests
-        try {
-            const { data: { session } } = await supabase.auth.getSession();
-            if (!session?.access_token) return;
-
-            const tokenExpiry = session.expires_at ? session.expires_at * 1000 : 0;
-            if (tokenExpiry && tokenExpiry < Date.now()) return;
-
-            const { data, error } = await supabase.functions.invoke('manage-profile', {
-                body: { action: 'fetch', userId: session.user.id }
-            });
-
-            if (error) return;
-
-            if (data && data.role) {
-                if (data.role === 'studio-owner') {
-                    setManageRoute('/my_studio');
-                } else if (data.role === 'manager' || data.role === 'musician-member') {
-                    setManageRoute('/my_group');
-                } else if (data.role === 'venue-owner') {
-                    setManageRoute('/my_venue');
-                } else if (data.role === 'admin') {
-                    setManageRoute('/admin');
-                } else {
-                    setManageRoute('/manage');
-                }
-            } else {
-                setManageRoute('/manage');
-            }
-        } catch (e) {
+    useEffect(() => {
+        if (isGuest || isFan || !session?.user?.id) {
             setManageRoute('/manage');
+            return;
         }
-    }, [isGuest]);
 
-    useFocusEffect(
-        useCallback(() => {
-            fetchUserRole();
-        }, [fetchUserRole])
-    );
+        if (!roleResolved) {
+            setManageRoute('/manage');
+            return;
+        }
+
+        setManageRoute(resolveRoleManageRoute(userRole, { adminRoute: isAdmin ? '/admin' : undefined }));
+    }, [isAdmin, isFan, isGuest, roleResolved, session?.user?.id, userRole]);
 
     const activeTab = useMemo(() => {
-        if (pathname.includes('home')) return 'home';
+        if (pathname.includes('feed') || pathname.includes('home')) return 'home';
         if (pathname.includes('bookings')) return 'activity';
         if (pathname.includes('ai_suggestions')) return 'ai-suggest';
         if (pathname.includes('profile') || pathname.includes('settings') || pathname.includes('wallet')) {
             return 'profile';
         }
         if (
-            pathname === '/admin' ||
-            pathname.startsWith('/admin/') ||
             pathname === '/manage' ||
             pathname.startsWith('/manage/') ||
             pathname.includes('my_studio') ||
             pathname.includes('my_venue') ||
             pathname.includes('my_group') ||
+            pathname.includes('my_production') ||
+            pathname.includes('production_team') ||
             pathname.includes('manage_') ||
             pathname.includes('edit_') ||
             pathname.includes('add_')
@@ -82,22 +59,38 @@ function Navbar() {
     }, [pathname]);
 
     const navItems = useMemo(
-        () => [
-            { id: 'home', icon: 'home', label: 'Home', route: '/home' },
-            { id: 'ai-suggest', icon: 'sparkles', label: 'AI', route: '/ai_suggestions' },
-            { id: 'activity', icon: 'calendar', label: 'Activity', route: '/bookings' },
-            { id: 'manage', icon: 'briefcase', label: 'Manage', route: manageRoute },
-            { id: 'profile', icon: 'person', label: 'Profile', route: '/profile' }
-        ],
-        [manageRoute],
-    );
+        () => {
+            if (isGuest || isFan) {
+                return [
+                    { id: 'home', icon: 'home', label: 'Home', route: '/feed' },
+                    { id: 'profile', icon: 'person', label: 'Profile', route: '/profile' },
+                ];
+            }
 
-    if (Platform.OS === 'web' && width >= 768) {
+            return [
+                { id: 'home', icon: 'home', label: 'Home', route: '/feed' },
+                { id: 'ai-suggest', icon: 'sparkles', label: 'AI', route: '/ai_suggestions' },
+                { id: 'activity', icon: 'calendar', label: 'Activity', route: '/bookings' },
+                { id: 'manage', icon: 'briefcase', label: 'Manage', route: manageRoute },
+                { id: 'profile', icon: 'person', label: 'Profile', route: '/profile' }
+            ];
+        },
+        [isFan, isGuest, manageRoute],
+    );
+    const useCompactFanNavbar = isFan && !isGuest;
+
+    if (isGuest || Platform.OS === 'web') {
         return null;
     }
 
     return (
-        <View style={[styles.navbarWrapper, { bottom: 24 + insets.bottom }]}>
+        <View
+            style={[
+                styles.navbarWrapper,
+                useCompactFanNavbar ? styles.compactNavbarWrapper : null,
+                { bottom: NAVBAR_BOTTOM_OFFSET + insets.bottom },
+            ]}
+        >
             <BlurView
                 intensity={Platform.OS === 'ios' ? 80 : 100}
                 tint={isDark ? "systemMaterialDark" : "systemMaterialLight"}
@@ -109,14 +102,18 @@ function Navbar() {
                     }
                 ]}
             >
-                <View style={styles.container}>
+                <View style={[styles.container, useCompactFanNavbar ? styles.compactContainer : null]}>
                     {navItems.map((item) => {
                         const isActive = activeTab === item.id;
                         return (
                             <TouchableOpacity activeOpacity={1}
                                 key={item.id}
+                                testID={`nav-${item.id}`}
+                                accessibilityRole="button"
+                                accessibilityLabel={`nav-${item.id}`}
                                 style={[
                                     styles.tabButton,
+                                    useCompactFanNavbar ? styles.compactTabButton : null,
                                     isActive && { backgroundColor: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.05)' }
                                 ]}
                                 onPress={() => {
@@ -162,6 +159,10 @@ const styles = StyleSheet.create({
         elevation: 10,
         overflow: 'hidden', // Ensure blur respects border radius
     },
+    compactNavbarWrapper: {
+        width: 184,
+        maxWidth: '58%',
+    },
     blurContainer: {
         borderRadius: 24,
         overflow: 'hidden',
@@ -174,11 +175,20 @@ const styles = StyleSheet.create({
         paddingVertical: 12,
         paddingHorizontal: 8,
     },
+    compactContainer: {
+        justifyContent: 'center',
+        gap: 8,
+    },
     tabButton: {
         alignItems: 'center',
         justifyContent: 'center',
         padding: 16,
         borderRadius: 20,
+    },
+    compactTabButton: {
+        width: 72,
+        height: 56,
+        padding: 0,
     },
     iconWrapper: {
         alignItems: 'center',

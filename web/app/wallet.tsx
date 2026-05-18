@@ -1,14 +1,18 @@
 import { Ionicons } from '@expo/vector-icons';
 import * as ExpoLinking from 'expo-linking';
-import { useFocusEffect, useRouter } from 'expo-router';
-import React, { useCallback, useMemo, useState } from 'react';
+import { useFocusEffect, useLocalSearchParams } from 'expo-router';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Image, KeyboardAvoidingView, Linking, Platform, RefreshControl, Modal as RNModal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { supabase } from '../lib/supabase';
 import CustomAlert, { AlertType } from '../src/components/CustomAlert';
+import GuestSignInGate from '../src/components/GuestSignInGate';
 import Header from '../src/components/header';
 import CustomModal from '../src/components/modal';
 import Navbar from '../src/components/navbar';
+import { useAuth } from '../src/context/AuthContext';
+import { emitToast } from '../src/events/toastBus';
 import { useTheme } from '../src/context/ThemeContext';
+import { formatDashedNumericDate } from '../src/utils/friendlyDateTime';
 
 // Payout Method Type
 interface PayoutMethod {
@@ -34,33 +38,62 @@ interface WithdrawalRequest {
   created_at: string;
 }
 
-// Subscription Plan Type
-interface SubscriptionPlan {
-  id: string;
-  name: string;
-  description: string;
-  price: number;
-  features: string[];
-  duration_days: number;
+interface WithdrawalErrorPayload {
+  error?: string;
+  error_code?: string;
+  next_steps?: string[];
+  suggestion?: string;
 }
 
-// User Subscription Type
-interface Subscription {
-  id: string;
-  plan_id: string;
-  status: 'active' | 'cancelled' | 'expired' | 'pending' | 'past_due';
-  current_period_start: string;
-  current_period_end: string;
-  cancel_at_period_end: boolean;
-  plan?: SubscriptionPlan;
-}
+const TRANSACTION_CATEGORY_LABELS: Record<string, string> = {
+  booking: 'Booking',
+  booking_balance: 'Balance',
+  booking_downpayment: 'Downpayment',
+  booking_payment: 'Full payment',
+  credit: 'Credit',
+  debit: 'Debit',
+  deposit: 'Deposit',
+  earning: 'Earning',
+  refund: 'Refund',
+  withdrawal: 'Withdrawal',
+};
+
+const formatTransactionText = (value: unknown) => {
+  const text = String(value || '').trim();
+  if (!text) return '';
+
+  return text
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+};
+
+const getTransactionCategory = (tx: any) => {
+  const referenceType = String(tx?.reference_type || '').trim().toLowerCase();
+  if (referenceType) return referenceType;
+
+  return String(tx?.type || '').trim().toLowerCase() || 'other';
+};
+
+const getTransactionCategoryLabel = (tx: any) => {
+  const category = getTransactionCategory(tx);
+  return TRANSACTION_CATEGORY_LABELS[category] || formatTransactionText(category);
+};
+
+const getTransactionTitle = (tx: any) => {
+  const type = String(tx?.type || '').trim().toLowerCase();
+  if (type === 'deposit') return 'Deposit';
+  if (type === 'withdrawal') return 'Withdrawal';
+  if (type === 'earning') return 'Earning';
+  if (type === 'refund') return 'Refund';
+
+  return formatTransactionText(type) || 'Wallet Transaction';
+};
 
 export default function WalletScreen() {
   const { colors, isDark } = useTheme();
-  const router = useRouter();
-  const [modalVisible, setModalVisible] = useState(false);
-  const [subscriptionModalVisible, setSubscriptionModalVisible] = useState(false);
-  const [cancelSubscriptionModalVisible, setCancelSubscriptionModalVisible] = useState(false);
+  const { isGuest } = useAuth();
+  const params = useLocalSearchParams<{ refresh?: string }>();
+  const walletRefreshKey = Array.isArray(params.refresh) ? params.refresh[0] : params.refresh;
 
   // Withdrawal modal states
   const [withdrawModalVisible, setWithdrawModalVisible] = useState(false);
@@ -73,7 +106,7 @@ export default function WalletScreen() {
   const [loadingPayoutMethods, setLoadingPayoutMethods] = useState(false);
 
   // Add payout method states
-  const [newPayoutType, setNewPayoutType] = useState<'bank' | 'gcash' | 'maya' | 'paypal'>('gcash');
+  const [newPayoutType, setNewPayoutType] = useState<'bank' | 'gcash' | 'maya'>('gcash');
   const [newAccountName, setNewAccountName] = useState('');
   const [newAccountNumber, setNewAccountNumber] = useState('');
   const [newBankName, setNewBankName] = useState('');
@@ -83,21 +116,10 @@ export default function WalletScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [transactions, setTransactions] = useState<any[]>([]);
+  const [txFilter, setTxFilter] = useState<string>("all");
   const [unpaidBookings, setUnpaidBookings] = useState<any[]>([]);
   const [payingBookingId, setPayingBookingId] = useState<string | null>(null);
 
-  // Subscription state
-  const [userRole, setUserRole] = useState<string | null>(null);
-  const [subscription, setSubscription] = useState<Subscription | null>(null);
-  const [subscriptionPlans, setSubscriptionPlans] = useState<SubscriptionPlan[]>([]);
-  const [selectedPlan, setSelectedPlan] = useState<SubscriptionPlan | null>(null);
-  const [subscribing, setSubscribing] = useState(false);
-
-  // Refund-based withdrawal state (no ID required)
-  const [hasRefundEligiblePayments, setHasRefundEligiblePayments] = useState(false);
-  const [maxRefundableAmount, setMaxRefundableAmount] = useState(0);
-  const [withdrawalMethod, setWithdrawalMethod] = useState<'payout' | 'refund'>('payout');
-  const [checkingRefundEligibility, setCheckingRefundEligibility] = useState(false);
   const [alertVisible, setAlertVisible] = useState(false);
   const [alertConfig, setAlertConfig] = useState<{
     type: AlertType;
@@ -109,120 +131,187 @@ export default function WalletScreen() {
     title: '',
     message: '',
   });
+  const parsedWithdrawAmount = Number(withdrawAmount);
+  const isWithdrawReady =
+    Number.isFinite(parsedWithdrawAmount) &&
+    parsedWithdrawAmount >= 100 &&
+    parsedWithdrawAmount <= balance &&
+    Boolean(selectedPayoutMethod);
+  const isPayoutMethodReady =
+    newAccountName.trim().length > 0 &&
+    newAccountNumber.trim().length > 0 &&
+    (newPayoutType !== 'bank' || newBankName.trim().length > 0);
+  const isWithdrawSubmitDisabled = withdrawing || !isWithdrawReady;
+  const isPayoutMethodSubmitDisabled = addingPayoutMethod || !isPayoutMethodReady;
 
   const showAlert = (type: AlertType, title: string, message: string, buttons?: any[]) => {
     setAlertConfig({ type, title, message, buttons });
     setAlertVisible(true);
   };
 
-  const showAlertNative = (title: string, message?: string, buttons?: any[]) => {
-    const lowerTitle = (title || '').toLowerCase();
-    let type: AlertType = 'info';
+  const isSimpleTopToastButtons = (buttons?: any[]) => {
+    if (!buttons || buttons.length === 0) return true;
+    if (buttons.length !== 1) return false;
+
+    const onlyButton = buttons[0];
+    const normalizedText = String(onlyButton?.text ?? 'OK').trim().toLowerCase();
+    const hasNoCallback = !onlyButton?.onPress;
+    const isNeutralStyle =
+      !onlyButton?.style || onlyButton.style === 'default' || onlyButton.style === 'cancel';
+
+    return (
+      hasNoCallback &&
+      isNeutralStyle &&
+      (normalizedText === 'ok' || normalizedText === 'close' || normalizedText === 'got it')
+    );
+  };
+
+  const resolveAlertType = (title: string): AlertType => {
+    const lowerTitle = title.toLowerCase();
     if (lowerTitle.includes('error') || lowerTitle.includes('failed') || lowerTitle.includes('invalid') || lowerTitle.includes('missing') || lowerTitle.includes('insufficient')) {
-      type = 'error';
-    } else if (lowerTitle.includes('success')) {
-      type = 'success';
-    } else if (lowerTitle.includes('warning')) {
-      type = 'warning';
+      return 'error';
     }
-    showAlert(type, title || 'Notice', message || '', buttons);
+    if (lowerTitle.includes('success')) {
+      return 'success';
+    }
+    if (lowerTitle.includes('warning')) {
+      return 'warning';
+    }
+    return 'info';
+  };
+
+  const showAlertNative = (title: string, message?: string, buttons?: any[]) => {
+    const normalizedTitle = title || 'Notice';
+    const normalizedMessage = message || '';
+    const type = resolveAlertType(normalizedTitle);
+
+    if ((type === 'success' || type === 'info') && isSimpleTopToastButtons(buttons)) {
+      emitToast({
+        type,
+        title: normalizedTitle,
+        message: normalizedMessage.trim() ? normalizedMessage : normalizedTitle,
+      });
+      return;
+    }
+
+    showAlert(type, normalizedTitle, normalizedMessage, buttons);
   };
 
   const Alert = { alert: showAlertNative };
 
-  const fetchWallet = async () => {
+  const parseFunctionErrorPayload = async (error: any): Promise<WithdrawalErrorPayload | null> => {
+    const context = error?.context;
+    if (!context) return null;
+
+    if (typeof context?.json === 'function') {
+      try {
+        const payload = await context.json();
+        if (payload && typeof payload === 'object') {
+          return payload as WithdrawalErrorPayload;
+        }
+      } catch {
+        // Ignore JSON parsing errors and continue with fallback handling.
+      }
+    }
+
+    if (typeof context === 'object') {
+      return context as WithdrawalErrorPayload;
+    }
+
+    return null;
+  };
+
+  const isMerchantNotReadyError = (message?: string, errorCode?: string) => {
+    const normalizedMessage = String(message || '').toLowerCase();
+    const normalizedCode = String(errorCode || '').toLowerCase();
+
+    return (
+      normalizedCode === 'merchant_not_ready' ||
+      normalizedMessage.includes("don't have permission to perform this operation") ||
+      normalizedMessage.includes('do not have permission to perform this operation') ||
+      (
+        normalizedMessage.includes('permission') &&
+        (
+          normalizedMessage.includes('disbursement') ||
+          normalizedMessage.includes('payout') ||
+          normalizedMessage.includes('cashout')
+        )
+      )
+    );
+  };
+
+  const formatMerchantOnboardingMessage = (nextSteps?: string[]) => {
+    const steps = Array.isArray(nextSteps) && nextSteps.length > 0
+      ? nextSteps
+      : [
+        'Complete your PayMongo merchant onboarding (KYC and business verification).',
+        'Request and enable disbursements or payouts on that merchant account.',
+        'Use the matching secret key for the same mode and account.',
+        'Retry with a small withdrawal amount.',
+      ];
+
+    return [
+      'Real cashout is currently unavailable for this account.',
+      'You can still test the flow in test mode.',
+      '',
+      'What to do next:',
+      ...steps.map((step, index) => `${index + 1}. ${step}`),
+    ].join('\n');
+  };
+
+  const showMerchantNotReadyAlert = (nextSteps?: string[]) => {
+    Alert.alert(
+      'Cashout Unavailable',
+      formatMerchantOnboardingMessage(nextSteps),
+      [{ text: 'OK' }],
+    );
+  };
+
+  const handleWithdrawalError = async (
+    fallbackTitle: string,
+    rawError: any,
+    payload?: WithdrawalErrorPayload | null,
+  ) => {
+    const parsedPayload = payload || await parseFunctionErrorPayload(rawError);
+    const errorMessage = parsedPayload?.error || rawError?.message || 'Failed to process withdrawal';
+
+    if (isMerchantNotReadyError(errorMessage, parsedPayload?.error_code)) {
+      showMerchantNotReadyAlert(parsedPayload?.next_steps);
+      return;
+    }
+
+    Alert.alert(fallbackTitle, errorMessage);
+  };
+
+  const fetchWallet = useCallback(async () => {
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
+      setLoading(true);
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
 
-      // 0. Get User Profile (role)
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('role')
-        .eq('id', user.id)
-        .single();
+      const { data, error } = await supabase.functions.invoke('withdrawals', {
+        body: { action: 'get_wallet_summary' }
+      });
 
-      if (profile) {
-        setUserRole(profile.role);
-      }
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
 
-      // 1. Get Wallet
-      let { data: wallet, error: walletError } = await supabase
-        .from('wallets')
-        .select('*')
-        .eq('user_id', user.id)
-        .single();
+      const nextPayoutMethods = Array.isArray(data?.payoutMethods)
+        ? data.payoutMethods
+        : [];
 
-      if (walletError && walletError.code === 'PGRST116') {
-        // Create wallet if doesn't exist
-        const { data: newWallet, error: createError } = await supabase
-          .from('wallets')
-          .insert([{ user_id: user.id, balance: 0 }])
-          .select()
-          .single();
-
-        if (createError) throw createError;
-        wallet = newWallet;
-      } else if (walletError) {
-        throw walletError;
-      }
-
-      setBalance(wallet?.balance || 0);
-
-      // 2. Get Transactions
-      if (wallet?.id) {
-        const { data: txs, error: txError } = await supabase
-          .from('wallet_transactions')
-          .select('*')
-          .eq('wallet_id', wallet.id)
-          .order('created_at', { ascending: false });
-
-        if (txError) throw txError;
-        setTransactions(txs || []);
-      }
-
-      // 3. Get Unpaid Bookings (remaining balance > 0)
-      const { data: bookings, error: bookingsError } = await supabase
-        .from('studio_bookings')
-        .select('*, studio:studios(name, images)')
-        .eq('user_id', user.id)
-        .gt('remaining_balance', 0)
-        .in('status', ['pending', 'confirmed'])
-        .order('booking_date', { ascending: true });
-
-      if (!bookingsError && bookings) {
-        setUnpaidBookings(bookings);
-      }
-
-      // 4. Get Subscription Plans (for studio/venue owners)
-      if (profile?.role === 'studio-owner' || profile?.role === 'venue-owner') {
-        const { data: plan } = await supabase
-          .from('subscription_plans')
-          .select('*')
-          .eq('is_active', true)
-          .single();
-
-        if (plan) {
-          setSubscriptionPlans([plan]);
+      setBalance(Number(data?.balance || data?.wallet?.balance || 0));
+      setTransactions(Array.isArray(data?.transactions) ? data.transactions : []);
+      setUnpaidBookings(Array.isArray(data?.unpaidBookings) ? data.unpaidBookings : []);
+      setPayoutMethods(nextPayoutMethods);
+      setSelectedPayoutMethod((current) => {
+        if (current && nextPayoutMethods.some((method: PayoutMethod) => method.id === current.id)) {
+          return current;
         }
 
-        // 5. Get User's Active Subscription
-        const { data: sub } = await supabase
-          .from('subscriptions')
-          .select('*, plan:subscription_plans(*)')
-          .eq('user_id', user.id)
-          .single();
-
-        if (sub) {
-          setSubscription(sub);
-        }
-      }
-
-      // 6. Fetch Payout Methods
-      await fetchPayoutMethods();
-
-      // 7. Fetch Withdrawal History
-      await fetchWithdrawals();
+        return nextPayoutMethods.find((method: PayoutMethod) => method.is_default) || nextPayoutMethods[0] || null;
+      });
+      setWithdrawals(Array.isArray(data?.withdrawals) ? data.withdrawals : []);
 
     } catch (e) {
       console.log('Error fetching wallet:', e);
@@ -230,7 +319,7 @@ export default function WalletScreen() {
       setLoading(false);
       setRefreshing(false);
     }
-  };
+  }, []);
 
   // Fetch payout methods
   const fetchPayoutMethods = async () => {
@@ -254,25 +343,6 @@ export default function WalletScreen() {
       console.log('Error fetching payout methods:', e);
     } finally {
       setLoadingPayoutMethods(false);
-    }
-  };
-
-  // Fetch withdrawals
-  const fetchWithdrawals = async () => {
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) return;
-
-      const { data, error } = await supabase.functions.invoke('withdrawals', {
-        body: { action: 'get_withdrawals' }
-      });
-
-      if (error) throw error;
-      if (data?.withdrawals) {
-        setWithdrawals(data.withdrawals);
-      }
-    } catch (e) {
-      console.log('Error fetching withdrawals:', e);
     }
   };
 
@@ -332,41 +402,57 @@ export default function WalletScreen() {
   useFocusEffect(
     useCallback(() => {
       fetchWallet();
-    }, [])
+      let isActive = true;
+      let walletChannel: ReturnType<typeof supabase.channel> | null = null;
+
+      const setupWalletRealtime = async () => {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!isActive || !user) return;
+
+        walletChannel = supabase
+          .channel(`wallet-realtime-${user.id}`)
+          .on(
+            'postgres_changes',
+            {
+              event: '*',
+              schema: 'public',
+              table: 'wallets',
+              filter: `user_id=eq.${user.id}`,
+            },
+            () => {
+              fetchWallet();
+            },
+          )
+          .subscribe();
+      };
+
+      void setupWalletRealtime();
+
+      return () => {
+        isActive = false;
+        if (walletChannel) {
+          void supabase.removeChannel(walletChannel);
+        }
+      };
+    }, [fetchWallet])
   );
+
+  useEffect(() => {
+    if (walletRefreshKey) {
+      void fetchWallet();
+    }
+  }, [fetchWallet, walletRefreshKey]);
 
   const onRefresh = () => {
     setRefreshing(true);
     fetchWallet();
   };
 
-  // Check if user has payments eligible for refund-based withdrawal
-  const checkRefundEligibility = async () => {
-    try {
-      setCheckingRefundEligibility(true);
-      const { data, error } = await supabase.functions.invoke('withdrawals', {
-        body: { action: 'get_refund_eligible_payments' }
-      });
-
-      if (!error && data?.success) {
-        setHasRefundEligiblePayments(data.has_eligible_payments || false);
-        setMaxRefundableAmount(data.max_refundable_amount || 0);
-      }
-    } catch (e) {
-      console.log('Failed to check refund eligibility:', e);
-    } finally {
-      setCheckingRefundEligibility(false);
-    }
-  };
-
   // Open withdraw modal
-  const openWithdrawModal = () => {
+  const openWithdrawModal = useCallback(() => {
     setWithdrawAmount('');
-    setWithdrawalMethod('payout'); // Default to payout method
     setWithdrawModalVisible(true);
-    // Check for refund eligibility in the background
-    checkRefundEligibility();
-  };
+  }, []);
 
   // Handle actual withdrawal request
   const handleWithdraw = async () => {
@@ -374,7 +460,7 @@ export default function WalletScreen() {
     const amount = parseFloat(withdrawAmount);
 
     if (!amount || amount < 100) {
-      Alert.alert('Invalid Amount', 'Minimum withdrawal amount is ₱100');
+      Alert.alert('Invalid Amount', 'Minimum withdrawal amount is PHP 100');
       return;
     }
 
@@ -383,50 +469,6 @@ export default function WalletScreen() {
       return;
     }
 
-    // For refund-based withdrawal
-    if (withdrawalMethod === 'refund') {
-      if (amount > maxRefundableAmount) {
-        Alert.alert('Amount Too High', `Maximum refundable amount is ₱${maxRefundableAmount.toLocaleString()}`);
-        return;
-      }
-
-      try {
-        setWithdrawing(true);
-
-        const { data, error } = await supabase.functions.invoke('withdrawals', {
-          body: {
-            action: 'request_withdrawal_refund',
-            amount: amount
-          }
-        });
-
-        if (error) throw error;
-
-        if (data?.error) {
-          Alert.alert('Withdrawal Failed', data.error);
-          return;
-        }
-
-        Alert.alert(
-          'Withdrawal Successful! 💸',
-          data?.message || 'The amount will be refunded to your original payment method.',
-          [{
-            text: 'OK', onPress: () => {
-              setWithdrawModalVisible(false);
-              setWithdrawAmount('');
-              fetchWallet(); // Refresh to update balance
-            }
-          }]
-        );
-      } catch (e: any) {
-        Alert.alert('Error', e?.message || 'Failed to process withdrawal');
-      } finally {
-        setWithdrawing(false);
-      }
-      return;
-    }
-
-    // For payout-based withdrawal (existing logic)
     if (!selectedPayoutMethod) {
       Alert.alert('No Payout Method', 'Please add a payout method first');
       return;
@@ -443,16 +485,23 @@ export default function WalletScreen() {
         }
       });
 
-      if (error) throw error;
-
-      if (data?.error) {
-        Alert.alert('Withdrawal Failed', data.error);
+      if (error) {
+        await handleWithdrawalError('Withdrawal Failed', error);
         return;
       }
 
+      if (data?.error) {
+        await handleWithdrawalError('Withdrawal Failed', null, data as WithdrawalErrorPayload);
+        return;
+      }
+
+      const isMockCashout = Boolean((data as any)?.mock_cashout);
+
       Alert.alert(
-        'Withdrawal Submitted! ✓',
-        data?.message || 'Your payout will be processed within 1-3 business days.',
+        isMockCashout ? 'Mock Cashout Success (Test Mode)' : 'Withdrawal Submitted!',
+        data?.message || (isMockCashout
+          ? 'Mock cashout recorded. No real money was transferred.'
+          : 'Your payout will be processed within 1-3 business days.'),
         [{
           text: 'OK', onPress: () => {
             setWithdrawModalVisible(false);
@@ -462,7 +511,7 @@ export default function WalletScreen() {
         }]
       );
     } catch (e: any) {
-      Alert.alert('Error', e?.message || 'Failed to process withdrawal');
+      await handleWithdrawalError('Error', e);
     } finally {
       setWithdrawing(false);
     }
@@ -517,36 +566,6 @@ export default function WalletScreen() {
     } finally {
       setAddingPayoutMethod(false);
     }
-  };
-
-  // Delete payout method
-  const handleDeletePayoutMethod = async (methodId: string) => {
-    Alert.alert(
-      'Delete Payout Method',
-      'Are you sure you want to remove this payout method?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              const { data, error } = await supabase.functions.invoke('withdrawals', {
-                body: {
-                  action: 'delete_payout_method',
-                  payout_method_id: methodId
-                }
-              });
-
-              if (error) throw error;
-              await fetchPayoutMethods();
-            } catch (e: any) {
-              Alert.alert('Error', e?.message || 'Failed to delete payout method');
-            }
-          }
-        }
-      ]
-    );
   };
 
   // Cancel pending withdrawal
@@ -615,109 +634,47 @@ export default function WalletScreen() {
     }
   };
 
-  // Subscribe to a plan
-  const handleSubscribe = async (plan: SubscriptionPlan) => {
-    if (subscribing) return;
-    try {
-      setSubscribing(true);
-      setSelectedPlan(plan);
-
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
-
-      // Generate redirect URLs
-      const redirectUrl = ExpoLinking.createURL('payment-result', {
-        queryParams: { status: 'success', type: 'subscription', plan_id: plan.id }
-      });
-      const cancelRedirectUrl = ExpoLinking.createURL('payment-result', {
-        queryParams: { status: 'cancelled', type: 'subscription' }
-      });
-
-      const { data: paymentData, error: paymentError } = await supabase.functions.invoke('paymongo', {
-        body: {
-          action: 'create_subscription_checkout',
-          user_id: user.id,
-          plan_id: plan.id,
-          amount: plan.price,
-          plan_name: plan.name,
-          description: `${plan.name} Plan - Monthly Subscription`,
-          redirect_url: redirectUrl,
-          cancel_redirect_url: cancelRedirectUrl
-        }
-      });
-
-      if (paymentError) {
-        Alert.alert('Error', 'Failed to create subscription. Please try again.');
-        return;
-      }
-
-      if (paymentData?.checkout_url) {
-        const canOpen = await Linking.canOpenURL(paymentData.checkout_url);
-        if (canOpen) {
-          await Linking.openURL(paymentData.checkout_url);
-        } else {
-          Alert.alert('Error', 'Unable to open payment page.');
-        }
-      }
-    } catch (e: any) {
-      Alert.alert('Error', e?.message || 'Failed to initiate subscription.');
-    } finally {
-      setSubscribing(false);
-      setSubscriptionModalVisible(false);
-    }
-  };
-
-  // Cancel subscription
-  const handleCancelSubscription = async () => {
-    try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user || !subscription) return;
-
-      const { error } = await supabase
-        .from('subscriptions')
-        .update({
-          cancel_at_period_end: true,
-          cancelled_at: new Date().toISOString()
-        })
-        .eq('id', subscription.id);
-
-      if (error) throw error;
-
-      Alert.alert(
-        'Subscription Cancelled',
-        `Your subscription will remain active until ${new Date(subscription.current_period_end).toLocaleDateString()}.`
-      );
-
-      setCancelSubscriptionModalVisible(false);
-      fetchWallet(); // Refresh data
-    } catch (e: any) {
-      Alert.alert('Error', e?.message || 'Failed to cancel subscription.');
-    }
-  };
-
-  // Get subscription status badge color
-  const getSubscriptionStatusColor = (status: string) => {
-    switch (status) {
-      case 'active': return { bg: '#DCFCE7', text: '#15803D' };
-      case 'cancelled': return { bg: '#FEE2E2', text: '#DC2626' };
-      case 'expired': return { bg: '#FEF3C7', text: '#D97706' };
-      case 'past_due': return { bg: '#FEE2E2', text: '#DC2626' };
-      default: return { bg: '#E5E7EB', text: '#6B7280' };
-    }
-  };
-
-  // Check if user is studio/venue owner
-  const isOwner = userRole === 'studio-owner' || userRole === 'venue-owner';
-
   const pendingWithdrawals = useMemo(
     () => withdrawals.filter((w) => w.status === 'pending' || w.status === 'processing'),
     [withdrawals],
   );
 
+  const pendingBalance = useMemo(
+    () => pendingWithdrawals.reduce((sum, w) => sum + (Number(w.amount) || 0), 0),
+    [pendingWithdrawals],
+  );
+
+  const filteredTransactions = useMemo(() => {
+    if (txFilter === "all") return transactions;
+    return transactions.filter((tx: any) => getTransactionCategory(tx) === txFilter);
+  }, [transactions, txFilter]);
+
+  const txFilterOptions = [
+    { key: "all", label: "All activity" },
+    { key: "deposit", label: "Deposits" },
+    { key: "withdrawal", label: "Withdrawals" },
+    { key: "booking_payment", label: "Full payment" },
+    { key: "booking_downpayment", label: "Downpayment" },
+    { key: "booking_balance", label: "Balance" },
+    { key: "refund", label: "Refunds" },
+  ];
+
+  if (isGuest) {
+    return (
+      <View style={[styles.container, { backgroundColor: colors.background }]}>
+        <Header title="Wallet" />
+        <GuestSignInGate message="Sign in to view your wallet and payment history." />
+        <View style={styles.navbarContainer}>
+          <Navbar />
+        </View>
+      </View>
+    );
+  }
+
   return (
     <>
       <View style={[styles.container, { backgroundColor: colors.background }]}>
-        <Header title="Wallet & Subscription" />
+        <Header title="Wallet" />
 
         <ScrollView
           showsVerticalScrollIndicator={false}
@@ -743,7 +700,7 @@ export default function WalletScreen() {
               <View style={styles.balanceRow}>
                 <View>
                   <Text style={styles.balanceSubLabel}>Pending</Text>
-                  <Text style={styles.balanceSubValue}>₱ 500.00</Text>
+                  <Text style={styles.balanceSubValue}>₱ {pendingBalance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Text>
                 </View>
                 <View style={[styles.balanceDivider, { backgroundColor: 'rgba(255,255,255,0.2)' }]} />
                 <View>
@@ -765,15 +722,6 @@ export default function WalletScreen() {
                 <Ionicons name="arrow-down-circle-outline" size={20} color={colors.primary} />
                 <Text style={{ fontFamily: 'Poppins_600SemiBold', color: colors.primary }}>Withdraw</Text>
               </TouchableOpacity>
-              <TouchableOpacity activeOpacity={1}
-                style={[
-                  styles.actionButton,
-                  { backgroundColor: colors.surface, borderColor: colors.border }
-                ]}
-              >
-                <Ionicons name="add-circle-outline" size={20} color={colors.primary} />
-                <Text style={{ fontFamily: 'Poppins_600SemiBold', color: colors.primary }}>Top Up</Text>
-              </TouchableOpacity>
             </View>
           </View>
 
@@ -784,15 +732,20 @@ export default function WalletScreen() {
                 <View style={styles.unpaidHeader}>
                   <View style={styles.unpaidHeaderLeft}>
                     <Ionicons name="warning" size={24} color="#DC2626" />
-                    <View>
-                      <Text style={styles.unpaidTitle}>Outstanding Balance</Text>
-                      <Text style={styles.unpaidSubtitle}>
+                    <View style={styles.unpaidTitleBlock}>
+                      <Text style={styles.unpaidTitle} numberOfLines={2}>Outstanding Balance</Text>
+                      <Text style={styles.unpaidSubtitle} numberOfLines={2}>
                         {unpaidBookings.length} booking{unpaidBookings.length > 1 ? 's' : ''} with pending payment
                       </Text>
                     </View>
                   </View>
-                  <Text style={styles.unpaidTotal}>
-                    ₱{unpaidBookings.reduce((sum, b) => sum + (b.remaining_balance || 0), 0).toLocaleString()}
+                  <Text
+                    style={styles.unpaidTotal}
+                    numberOfLines={1}
+                    adjustsFontSizeToFit
+                    minimumFontScale={0.75}
+                  >
+                    PHP {unpaidBookings.reduce((sum, b) => sum + (b.remaining_balance || 0), 0).toLocaleString()}
                   </Text>
                 </View>
 
@@ -812,16 +765,16 @@ export default function WalletScreen() {
                     <View style={styles.unpaidInfo}>
                       <Text style={styles.unpaidName} numberOfLines={1}>{booking.studio?.name}</Text>
                       <Text style={styles.unpaidDate}>
-                        {new Date(booking.booking_date).toLocaleDateString()} • {booking.start_time?.slice(0, 5)}
+                        {formatDashedNumericDate(booking.booking_date)} • {booking.start_time?.slice(0, 5)}
                       </Text>
                       <Text style={styles.unpaidAmount}>
-                        Balance: ₱{booking.remaining_balance?.toLocaleString()}
+                        Balance: PHP {booking.remaining_balance?.toLocaleString()}
                       </Text>
                     </View>
-                    <TouchableOpacity activeOpacity={1}
+                    <TouchableOpacity activeOpacity={payingBookingId === booking.id ? 1 : 0.78}
                       onPress={() => handlePayBalance(booking)}
                       disabled={payingBookingId === booking.id}
-                      style={styles.payNowBtn}
+                      style={[styles.payNowBtn, { opacity: payingBookingId === booking.id ? 0.6 : 1 }]}
                     >
                       {payingBookingId === booking.id ? (
                         <ActivityIndicator size="small" color="white" />
@@ -836,83 +789,9 @@ export default function WalletScreen() {
                 ))}
 
                 <Text style={styles.unpaidWarning}>
-                  ⚠️ Please settle your outstanding balance to continue using the app
+                  You can settle outstanding balances from Activity when ready.
                 </Text>
               </View>
-            </View>
-          )}
-
-          {/* Subscription Card */}
-          {isOwner && (
-            <View style={styles.cardWrapper}>
-              {subscription ? (
-                // Active Subscription Display
-                <View style={[styles.subscriptionCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
-                  <View style={styles.subscriptionHeader}>
-                    <View>
-                      <Text style={[styles.subscriptionTitle, { color: colors.text }]}>{subscription.plan?.name || 'Subscription'} Plan</Text>
-                      <Text style={[styles.subscriptionDate, { color: colors.textSecondary }]}>
-                        {subscription.cancel_at_period_end
-                          ? `Expires on ${new Date(subscription.current_period_end).toLocaleDateString()}`
-                          : `Renews on ${new Date(subscription.current_period_end).toLocaleDateString()}`
-                        }
-                      </Text>
-                    </View>
-                    <View style={[styles.activeBadge, { backgroundColor: getSubscriptionStatusColor(subscription.status).bg }]}>
-                      <Text style={[styles.activeBadgeText, { color: getSubscriptionStatusColor(subscription.status).text }]}>
-                        {subscription.cancel_at_period_end ? 'Cancelling' : subscription.status.charAt(0).toUpperCase() + subscription.status.slice(1)}
-                      </Text>
-                    </View>
-                  </View>
-
-                  {/* Plan Features */}
-                  <View style={styles.featuresContainer}>
-                    {(subscription.plan?.features || []).slice(0, 3).map((feature: string, idx: number) => (
-                      <View key={idx} style={styles.featureRow}>
-                        <Ionicons name="checkmark-circle" size={16} color="#10B981" />
-                        <Text style={[styles.featureText, { color: colors.textSecondary }]}>{feature}</Text>
-                      </View>
-                    ))}
-                  </View>
-
-                  <View style={styles.subscriptionActions}>
-                    {!subscription.cancel_at_period_end && (
-                      <TouchableOpacity activeOpacity={1}
-                        onPress={() => setCancelSubscriptionModalVisible(true)}
-                        style={styles.cancelSubBtn}
-                      >
-                        <Text style={styles.cancelSubText}>Cancel Subscription</Text>
-                      </TouchableOpacity>
-                    )}
-                    <TouchableOpacity activeOpacity={1}
-                      onPress={() => setSubscriptionModalVisible(true)}
-                      style={styles.manageSubBtn}
-                    >
-                      <Text style={[styles.manageSubText, { color: colors.primary }]}>View Plan</Text>
-                    </TouchableOpacity>
-                  </View>
-                </View>
-              ) : (
-                // No Subscription - Show Subscribe CTA
-                <View style={[styles.subscriptionCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
-                  <View style={styles.noSubContainer}>
-                    <View style={[styles.noSubIcon, { backgroundColor: isDark ? colors.primaryLight : '#EEF2FF' }]}>
-                      <Ionicons name="diamond-outline" size={32} color={colors.primary} />
-                    </View>
-                    <Text style={[styles.noSubTitle, { color: colors.text }]}>Unlock Premium Features</Text>
-                    <Text style={[styles.noSubDesc, { color: colors.textSecondary }]}>
-                      Subscribe to list your {userRole === 'studio-owner' ? 'studios' : 'venues'} and access powerful tools
-                    </Text>
-                    <TouchableOpacity activeOpacity={1}
-                      onPress={() => setSubscriptionModalVisible(true)}
-                      style={[styles.subscribeBtn, { backgroundColor: colors.primary }]}
-                    >
-                      <Ionicons name="star" size={18} color="white" />
-                      <Text style={styles.subscribeBtnText}>Subscribe</Text>
-                    </TouchableOpacity>
-                  </View>
-                </View>
-              )}
             </View>
           )}
 
@@ -945,13 +824,13 @@ export default function WalletScreen() {
                           </View>
                         </View>
                         <Text style={[styles.transactionDate, { color: colors.textSecondary }]}>
-                          {new Date(withdrawal.created_at).toLocaleDateString()} • ****{withdrawal.payout_account_number.slice(-4)}
+                          {formatDashedNumericDate(withdrawal.created_at)} • ****{withdrawal.payout_account_number.slice(-4)}
                         </Text>
                       </View>
                     </View>
                     <View style={styles.withdrawalRight}>
                       <Text style={[styles.transactionAmount, { color: '#D97706' }]}>
-                        -₱{withdrawal.amount.toLocaleString()}
+                        -PHP {withdrawal.amount.toLocaleString()}
                       </Text>
                       {withdrawal.status === 'pending' && (
                         <TouchableOpacity activeOpacity={1} onPress={() => handleCancelWithdrawal(withdrawal.id)}>
@@ -967,31 +846,57 @@ export default function WalletScreen() {
 
           {/* Transaction History */}
           <View style={styles.historySection}>
-            <Text style={[styles.historyTitle, { color: colors.text }]}>Transaction History</Text>
+            <Text style={[styles.historyTitle, { color: colors.text }]}>Wallet Activity</Text>
+
+            {/* Filter chips */}
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 10 }}>
+              {txFilterOptions.map((opt) => (
+                <TouchableOpacity activeOpacity={1}
+                  key={opt.key}
+                  onPress={() => setTxFilter(opt.key)}
+                  style={{
+                    paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16, marginRight: 8,
+                    backgroundColor: txFilter === opt.key ? colors.primary : colors.card,
+                    borderWidth: 1, borderColor: txFilter === opt.key ? colors.primary : colors.border,
+                  }}
+                >
+                  <Text style={{
+                    fontFamily: 'Poppins_500Medium', fontSize: 12,
+                    color: txFilter === opt.key ? '#fff' : colors.textSecondary,
+                  }}>
+                    {opt.label}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
 
             <View style={[styles.historyContainer, { backgroundColor: colors.card, borderColor: colors.border }]}>
               {loading ? (
                 <View style={{ padding: 20, alignItems: 'center' }}>
                   <ActivityIndicator size="small" color={colors.primary} />
                 </View>
-              ) : transactions.length === 0 ? (
+              ) : filteredTransactions.length === 0 ? (
                 <View style={{ padding: 20, alignItems: 'center' }}>
-                  <Text style={{ color: colors.textSecondary, fontFamily: 'Poppins_400Regular' }}>No transaction history</Text>
+                  <Text style={{ color: colors.textSecondary, fontFamily: 'Poppins_400Regular' }}>No wallet activity yet</Text>
                 </View>
               ) : (
-                transactions.map((tx, index) => (
+                filteredTransactions.map((tx, index) => {
+                  const txCategoryLabel = getTransactionCategoryLabel(tx);
+                  const txAmount = Number(tx.amount || 0);
+
+                  return (
                   <View
                     key={tx.id}
                     style={[
                       styles.transactionItem,
-                      { borderBottomWidth: index === transactions.length - 1 ? 0 : 1, borderBottomColor: colors.border }
+                      { borderBottomWidth: index === filteredTransactions.length - 1 ? 0 : 1, borderBottomColor: colors.border }
                     ]}
                   >
                     <View style={styles.transactionLeft}>
                       <View
                         style={[
                           styles.transactionIcon,
-                          { backgroundColor: tx.is_credit ? '#DCFCE7' : '#FEE2E2' } // green-100 / red-100
+                          { backgroundColor: tx.is_credit ? '#DCFCE7' : '#FEE2E2' }
                         ]}
                       >
                         <Ionicons
@@ -1000,18 +905,29 @@ export default function WalletScreen() {
                           color={tx.is_credit ? '#10B981' : '#EF4444'}
                         />
                       </View>
-                      <View>
-                        <Text style={[styles.transactionType, { color: colors.text }]}>{tx.type.charAt(0).toUpperCase() + tx.type.slice(1)}</Text>
-                        <Text style={[styles.transactionDate, { color: colors.textSecondary }]}>
-                          {new Date(tx.created_at).toLocaleDateString()}
+                      <View style={styles.transactionTextBlock}>
+                        <Text style={[styles.transactionType, { color: colors.text }]} numberOfLines={1}>
+                          {getTransactionTitle(tx)}
+                        </Text>
+                        {txCategoryLabel && getTransactionCategory(tx) !== 'booking' && (
+                          <Text
+                            style={{ fontFamily: 'Poppins_400Regular', fontSize: 11, color: colors.primary }}
+                            numberOfLines={1}
+                          >
+                            {txCategoryLabel}
+                          </Text>
+                        )}
+                        <Text style={[styles.transactionDate, { color: colors.textSecondary }]} numberOfLines={1}>
+                          {formatDashedNumericDate(tx.created_at)}
                         </Text>
                       </View>
                     </View>
                     <Text style={[styles.transactionAmount, { color: tx.is_credit ? '#10B981' : '#EF4444' }]}>
-                      {tx.is_credit ? '+' : '-'}₱ {tx.amount.toFixed(2)}
+                      {tx.is_credit ? '+' : '-'}₱{txAmount.toFixed(2)}
                     </Text>
                   </View>
-                ))
+                  );
+                })
               )}
             </View>
           </View>
@@ -1039,7 +955,7 @@ export default function WalletScreen() {
               <View>
                 <Text style={[styles.withdrawModalTitle, { color: colors.text }]}>Withdraw Funds</Text>
                 <Text style={[styles.withdrawModalSubtitle, { color: colors.textSecondary }]}>
-                  Available: ₱{balance?.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                  Available: PHP {balance?.toLocaleString(undefined, { minimumFractionDigits: 2 })}
                 </Text>
               </View>
               <TouchableOpacity activeOpacity={1}
@@ -1066,7 +982,7 @@ export default function WalletScreen() {
                   />
                 </View>
                 <Text style={[styles.inputHint, { color: colors.textSecondary }]}>
-                  Minimum withdrawal: ₱100
+                  Minimum withdrawal: PHP 100
                 </Text>
               </View>
 
@@ -1088,95 +1004,13 @@ export default function WalletScreen() {
                       styles.quickAmountText,
                       { color: parseFloat(withdrawAmount) === amount ? 'white' : colors.text }
                     ]}>
-                      {idx === 3 ? 'Max' : `₱${amount}`}
+                      {idx === 3 ? 'Max' : `PHP ${amount}`}
                     </Text>
                   </TouchableOpacity>
                 ))}
               </View>
 
-              {/* Withdrawal Method Selection */}
-              <View style={styles.inputSection}>
-                <Text style={[styles.inputLabel, { color: colors.text }]}>Withdrawal Method</Text>
-                <View style={{ flexDirection: 'row', gap: 10, marginTop: 8 }}>
-                  {/* Payout Method Option */}
-                  <TouchableOpacity activeOpacity={1}
-                    onPress={() => setWithdrawalMethod('payout')}
-                    style={[
-                      styles.methodOption,
-                      {
-                        backgroundColor: colors.surface,
-                        borderColor: withdrawalMethod === 'payout' ? colors.primary : colors.border,
-                        borderWidth: withdrawalMethod === 'payout' ? 2 : 1,
-                        flex: 1,
-                      }
-                    ]}
-                  >
-                    <Ionicons
-                      name="wallet-outline"
-                      size={24}
-                      color={withdrawalMethod === 'payout' ? colors.primary : colors.textSecondary}
-                    />
-                    <Text style={[
-                      styles.methodOptionTitle,
-                      { color: withdrawalMethod === 'payout' ? colors.primary : colors.text }
-                    ]}>
-                      Payout
-                    </Text>
-                    <Text style={[styles.methodOptionDesc, { color: colors.textSecondary }]}>
-                      GCash, Maya, Bank
-                    </Text>
-                    {withdrawalMethod === 'payout' && (
-                      <Ionicons name="checkmark-circle" size={18} color={colors.primary} style={{ position: 'absolute', top: 8, right: 8 }} />
-                    )}
-                  </TouchableOpacity>
-
-                  {/* Refund Method Option */}
-                  <TouchableOpacity activeOpacity={1}
-                    onPress={() => hasRefundEligiblePayments && setWithdrawalMethod('refund')}
-                    disabled={!hasRefundEligiblePayments && !checkingRefundEligibility}
-                    style={[
-                      styles.methodOption,
-                      {
-                        backgroundColor: colors.surface,
-                        borderColor: withdrawalMethod === 'refund' ? colors.primary : colors.border,
-                        borderWidth: withdrawalMethod === 'refund' ? 2 : 1,
-                        flex: 1,
-                        opacity: hasRefundEligiblePayments ? 1 : 0.5,
-                      }
-                    ]}
-                  >
-                    {checkingRefundEligibility ? (
-                      <ActivityIndicator size="small" color={colors.primary} />
-                    ) : (
-                      <Ionicons
-                        name="refresh-outline"
-                        size={24}
-                        color={withdrawalMethod === 'refund' ? colors.primary : colors.textSecondary}
-                      />
-                    )}
-                    <Text style={[
-                      styles.methodOptionTitle,
-                      { color: withdrawalMethod === 'refund' ? colors.primary : colors.text }
-                    ]}>
-                      Refund
-                    </Text>
-                    <Text style={[styles.methodOptionDesc, { color: colors.textSecondary }]}>
-                      {hasRefundEligiblePayments ? 'No ID required' : 'Not available'}
-                    </Text>
-                    {withdrawalMethod === 'refund' && (
-                      <Ionicons name="checkmark-circle" size={18} color={colors.primary} style={{ position: 'absolute', top: 8, right: 8 }} />
-                    )}
-                  </TouchableOpacity>
-                </View>
-                {hasRefundEligiblePayments && maxRefundableAmount > 0 && (
-                  <Text style={[styles.inputHint, { color: colors.primary, marginTop: 8 }]}>
-                    💡 Refund available up to ₱{maxRefundableAmount.toLocaleString()} - goes back to your original payment method
-                  </Text>
-                )}
-              </View>
-
-              {/* Payout Method Section - Only show if payout method is selected */}
-              {withdrawalMethod === 'payout' && (
+              {/* Payout Method Section */}
                 <View style={styles.inputSection}>
                   <View style={styles.payoutMethodHeader}>
                     <Text style={[styles.inputLabel, { color: colors.text }]}>Payout Method</Text>
@@ -1214,12 +1048,12 @@ export default function WalletScreen() {
                             <View style={[styles.payoutIconBox, { backgroundColor: isDark ? colors.primaryLight : '#EEF2FF' }]}>
                               <Ionicons name={getPayoutIcon(method.type) as any} size={20} color={colors.primary} />
                             </View>
-                            <View>
+                            <View style={styles.payoutMethodTextBlock}>
                               <Text style={[styles.payoutMethodName, { color: colors.text }]}>
                                 {getPayoutLabel(method.type)}
                                 {method.bank_name ? ` - ${method.bank_name}` : ''}
                               </Text>
-                              <Text style={[styles.payoutMethodAccount, { color: colors.textSecondary }]}>
+                              <Text style={[styles.payoutMethodAccount, { color: colors.textSecondary }]} numberOfLines={1}>
                                 {method.account_name} • ****{method.account_number.slice(-4)}
                               </Text>
                             </View>
@@ -1232,33 +1066,22 @@ export default function WalletScreen() {
                     </View>
                   )}
                 </View>
-              )}
-
-              {/* Refund Info Section - Only show if refund method is selected */}
-              {withdrawalMethod === 'refund' && hasRefundEligiblePayments && (
-                <View style={[styles.noteCard, { backgroundColor: isDark ? colors.surface : '#DBEAFE' }]}>
-                  <Ionicons name="information-circle-outline" size={20} color="#2563EB" />
-                  <Text style={[styles.noteText, { color: isDark ? colors.textSecondary : '#1E40AF' }]}>
-                    The withdrawal will be processed as a refund to your original payment method (GCash, Maya, card, etc.). No ID verification required!
-                  </Text>
-                </View>
-              )}
 
               {/* Withdrawal Summary */}
               {withdrawAmount && parseFloat(withdrawAmount) >= 100 && (
                 <View style={[styles.summaryCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
                   <View style={styles.summaryRow}>
                     <Text style={[styles.summaryLabel, { color: colors.textSecondary }]}>Withdrawal Amount</Text>
-                    <Text style={[styles.summaryValue, { color: colors.text }]}>₱{parseFloat(withdrawAmount).toLocaleString()}</Text>
+                    <Text style={[styles.summaryValue, { color: colors.text }]}>PHP {parseFloat(withdrawAmount).toLocaleString()}</Text>
                   </View>
                   <View style={styles.summaryRow}>
                     <Text style={[styles.summaryLabel, { color: colors.textSecondary }]}>Processing Fee</Text>
-                    <Text style={[styles.summaryValue, { color: colors.text }]}>₱0.00</Text>
+                    <Text style={[styles.summaryValue, { color: colors.text }]}>PHP 0.00</Text>
                   </View>
                   <View style={[styles.summaryDivider, { backgroundColor: colors.border }]} />
                   <View style={styles.summaryRow}>
-                    <Text style={[styles.summaryLabelBold, { color: colors.text }]}>You'll Receive</Text>
-                    <Text style={[styles.summaryValueBold, { color: colors.primary }]}>₱{parseFloat(withdrawAmount).toLocaleString()}</Text>
+                    <Text style={[styles.summaryLabelBold, { color: colors.text }]}>{"You'll Receive"}</Text>
+                    <Text style={[styles.summaryValueBold, { color: colors.primary }]}>PHP {parseFloat(withdrawAmount).toLocaleString()}</Text>
                   </View>
                 </View>
               )}
@@ -1267,36 +1090,20 @@ export default function WalletScreen() {
               <View style={[styles.noteCard, { backgroundColor: isDark ? colors.surface : '#FEF3C7' }]}>
                 <Ionicons name="time-outline" size={20} color="#D97706" />
                 <Text style={[styles.noteText, { color: isDark ? colors.textSecondary : '#92400E' }]}>
-                  {withdrawalMethod === 'refund'
-                    ? 'Refunds are typically processed within 5-7 business days depending on your payment provider.'
-                    : 'Withdrawals are processed within 1-3 business days. You\'ll be notified once the transfer is complete.'
-                  }
+                  Simulated withdrawals complete immediately and deduct from your real in-app wallet balance. No external money is sent.
                 </Text>
               </View>
             </ScrollView>
 
             {/* Submit Button */}
-            <TouchableOpacity activeOpacity={1}
+            <TouchableOpacity activeOpacity={isWithdrawSubmitDisabled ? 1 : 0.78}
               onPress={handleWithdraw}
-              disabled={
-                withdrawing ||
-                !withdrawAmount ||
-                parseFloat(withdrawAmount) < 100 ||
-                (withdrawalMethod === 'payout' && !selectedPayoutMethod) ||
-                (withdrawalMethod === 'refund' && (!hasRefundEligiblePayments || parseFloat(withdrawAmount) > maxRefundableAmount))
-              }
+              disabled={isWithdrawSubmitDisabled}
               style={[
                 styles.withdrawSubmitBtn,
                 {
-                  backgroundColor: (
-                    !withdrawAmount ||
-                    parseFloat(withdrawAmount) < 100 ||
-                    (withdrawalMethod === 'payout' && !selectedPayoutMethod) ||
-                    (withdrawalMethod === 'refund' && (!hasRefundEligiblePayments || parseFloat(withdrawAmount) > maxRefundableAmount))
-                  )
-                    ? colors.border
-                    : colors.primary,
-                  opacity: withdrawing ? 0.7 : 1
+                  backgroundColor: isWithdrawReady ? colors.primary : colors.border,
+                  opacity: isWithdrawSubmitDisabled ? 0.6 : 1
                 }
               ]}
             >
@@ -1304,9 +1111,9 @@ export default function WalletScreen() {
                 <ActivityIndicator size="small" color="white" />
               ) : (
                 <>
-                  <Ionicons name={withdrawalMethod === 'refund' ? 'refresh' : 'arrow-down-circle'} size={20} color="white" />
-                  <Text style={styles.withdrawSubmitText}>
-                    {withdrawalMethod === 'refund' ? 'Request Refund' : 'Confirm Withdrawal'}
+                  <Ionicons name="arrow-down-circle" size={20} color={isWithdrawReady ? "white" : colors.textSecondary} />
+                  <Text style={[styles.withdrawSubmitText, { color: isWithdrawReady ? "white" : colors.textSecondary }]}>
+                    Confirm Withdrawal
                   </Text>
                 </>
               )}
@@ -1342,7 +1149,7 @@ export default function WalletScreen() {
               <View style={styles.inputSection}>
                 <Text style={[styles.inputLabel, { color: colors.text }]}>Payout Type</Text>
                 <View style={styles.payoutTypeGrid}>
-                  {(['gcash', 'maya', 'bank', 'paypal'] as const).map((type) => (
+                  {(['gcash', 'maya', 'bank'] as const).map((type) => (
                     <TouchableOpacity activeOpacity={1}
                       key={type}
                       onPress={() => setNewPayoutType(type)}
@@ -1399,17 +1206,15 @@ export default function WalletScreen() {
               {/* Account Number */}
               <View style={styles.inputSection}>
                 <Text style={[styles.inputLabel, { color: colors.text }]}>
-                  {newPayoutType === 'gcash' || newPayoutType === 'maya' ? 'Mobile Number' :
-                    newPayoutType === 'paypal' ? 'PayPal Email' : 'Account Number'}
+                  {newPayoutType === 'gcash' || newPayoutType === 'maya' ? 'Mobile Number' : 'Account Number'}
                 </Text>
                 <TextInput
                   style={[styles.textInput, { backgroundColor: colors.surface, borderColor: colors.border, color: colors.text }]}
                   placeholder={
-                    newPayoutType === 'gcash' || newPayoutType === 'maya' ? '09XX XXX XXXX' :
-                      newPayoutType === 'paypal' ? 'email@example.com' : 'XXXX XXXX XXXX'
+                    newPayoutType === 'gcash' || newPayoutType === 'maya' ? '09XX XXX XXXX' : 'XXXX XXXX XXXX'
                   }
                   placeholderTextColor={colors.textSecondary}
-                  keyboardType={newPayoutType === 'paypal' ? 'email-address' : 'default'}
+                  keyboardType={newPayoutType === 'gcash' || newPayoutType === 'maya' ? 'phone-pad' : 'default'}
                   value={newAccountNumber}
                   onChangeText={setNewAccountNumber}
                 />
@@ -1417,134 +1222,22 @@ export default function WalletScreen() {
             </ScrollView>
 
             {/* Add Button */}
-            <TouchableOpacity activeOpacity={1}
+            <TouchableOpacity activeOpacity={isPayoutMethodSubmitDisabled ? 1 : 0.78}
               onPress={handleAddPayoutMethod}
-              disabled={addingPayoutMethod}
-              style={[styles.withdrawSubmitBtn, { backgroundColor: colors.primary, opacity: addingPayoutMethod ? 0.7 : 1 }]}
+              disabled={isPayoutMethodSubmitDisabled}
+              style={[styles.withdrawSubmitBtn, { backgroundColor: isPayoutMethodReady ? colors.primary : colors.border, opacity: isPayoutMethodSubmitDisabled ? 0.6 : 1 }]}
             >
               {addingPayoutMethod ? (
                 <ActivityIndicator size="small" color="white" />
               ) : (
                 <>
-                  <Ionicons name="add-circle" size={20} color="white" />
-                  <Text style={styles.withdrawSubmitText}>Add Payout Method</Text>
+                  <Ionicons name="add-circle" size={20} color={isPayoutMethodReady ? "white" : colors.textSecondary} />
+                  <Text style={[styles.withdrawSubmitText, { color: isPayoutMethodReady ? "white" : colors.textSecondary }]}>Add Payout Method</Text>
                 </>
               )}
             </TouchableOpacity>
           </View>
         </KeyboardAvoidingView>
-      </RNModal>
-
-      {/* Cancel Subscription Modal */}
-      <CustomModal
-        visible={cancelSubscriptionModalVisible}
-        onClose={() => setCancelSubscriptionModalVisible(false)}
-        title="Cancel Subscription"
-        message={`Your subscription will remain active until ${subscription ? new Date(subscription.current_period_end).toLocaleDateString() : ''}. After that, you won't be charged again.`}
-        buttonText="Cancel Subscription"
-        danger={true}
-        onConfirm={handleCancelSubscription}
-      />
-
-      {/* Subscription Plans Modal */}
-      <RNModal
-        visible={subscriptionModalVisible}
-        animationType="slide"
-        transparent={true}
-        onRequestClose={() => setSubscriptionModalVisible(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={[styles.plansModal, { backgroundColor: colors.background, paddingBottom: Platform.OS === 'ios' ? 40 : 20 }]}>
-            <View style={styles.plansModalHeader}>
-              <View>
-                <Text style={[styles.plansModalTitle, { color: colors.text }]}>Subscribe</Text>
-                <Text style={[styles.plansModalSubtitle, { color: colors.textSecondary }]}>Get full access to MusikaLokal</Text>
-              </View>
-              <TouchableOpacity activeOpacity={1}
-                onPress={() => setSubscriptionModalVisible(false)}
-                style={[styles.closeModalButton, { backgroundColor: colors.surface }]}
-              >
-                <Ionicons name="close" size={24} color={colors.text} />
-              </TouchableOpacity>
-            </View>
-
-            <ScrollView
-              style={styles.plansScrollView}
-              showsVerticalScrollIndicator={false}
-              contentContainerStyle={{ paddingBottom: 20 }}
-            >
-              {subscriptionPlans.length > 0 && (() => {
-                const plan = subscriptionPlans[0];
-                const isCurrentPlan = subscription?.plan_id === plan.id;
-                const planColor = colors.primary;
-
-                return (
-                  <View
-                    key={plan.id}
-                    style={[
-                      styles.planCard,
-                      {
-                        backgroundColor: colors.card,
-                        borderColor: planColor,
-                        borderWidth: 2,
-                      }
-                    ]}
-                  >
-                    <View style={styles.planCardHeader}>
-                      <View style={[styles.planIcon, { backgroundColor: `${planColor}20` }]}>
-                        <Ionicons
-                          name="diamond-outline"
-                          size={24}
-                          color={planColor}
-                        />
-                      </View>
-                      <View style={{ flex: 1 }}>
-                        <Text style={[styles.planName, { color: colors.text }]}>{plan.name}</Text>
-                        <Text style={[styles.planDescription, { color: colors.textSecondary }]}>{plan.description}</Text>
-                      </View>
-                    </View>
-
-                    <View style={styles.planPriceInfo}>
-                      <Text style={[styles.planPrice, { color: colors.text }]}>₱{plan.price.toLocaleString()}</Text>
-                      <Text style={[styles.planPeriod, { color: colors.textSecondary }]}> /month</Text>
-                    </View>
-
-                    <View style={styles.separator} />
-
-                    <View style={styles.planFeatures}>
-                      {(plan.features || []).map((feature: string, idx: number) => (
-                        <View key={idx} style={styles.planFeatureRow}>
-                          <Ionicons name="checkmark-circle" size={18} color={planColor} />
-                          <Text style={[styles.planFeatureText, { color: colors.textSecondary }]}>{feature}</Text>
-                        </View>
-                      ))}
-                    </View>
-
-                    <TouchableOpacity activeOpacity={1}
-                      onPress={() => handleSubscribe(plan)}
-                      disabled={subscribing || isCurrentPlan}
-                      style={[
-                        styles.selectPlanBtn,
-                        {
-                          backgroundColor: isCurrentPlan ? colors.border : planColor,
-                          shadowColor: isCurrentPlan ? "transparent" : planColor,
-                        }
-                      ]}
-                    >
-                      {subscribing && selectedPlan?.id === plan.id ? (
-                        <ActivityIndicator size="small" color="white" />
-                      ) : (
-                        <Text style={[styles.selectPlanBtnText, { color: isCurrentPlan ? colors.textSecondary : 'white' }]}>
-                          {isCurrentPlan ? 'Current Plan' : 'Subscribe Now'}
-                        </Text>
-                      )}
-                    </TouchableOpacity>
-                  </View>
-                );
-              })()}
-            </ScrollView>
-          </View>
-        </View>
       </RNModal>
 
       <CustomModal
@@ -1558,13 +1251,6 @@ export default function WalletScreen() {
         visible={addingPayoutMethod}
         loading
         loadingMessage="Adding payout method..."
-        onClose={() => { }}
-      />
-
-      <CustomModal
-        visible={subscribing}
-        loading
-        loadingMessage="Setting up subscription..."
         onClose={() => { }}
       />
 
@@ -1669,44 +1355,6 @@ const styles = StyleSheet.create({
     gap: 8,
     borderWidth: 1,
   },
-  subscriptionCard: {
-    padding: 20,
-    borderRadius: 16,
-    borderWidth: 1,
-  },
-  subscriptionHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    marginBottom: 8,
-  },
-  subscriptionTitle: {
-    fontSize: 16, // text-base
-    fontFamily: 'Poppins_600SemiBold',
-  },
-  subscriptionDate: {
-    fontSize: 12, // text-xs
-    fontFamily: 'Poppins_400Regular',
-  },
-  activeBadge: {
-    paddingHorizontal: 12,
-    paddingVertical: 4,
-    borderRadius: 999,
-    backgroundColor: '#DCFCE7', // green-100
-  },
-  activeBadgeText: {
-    fontSize: 12, // text-xs
-    color: '#15803D', // green-700
-    fontFamily: 'Poppins_600SemiBold',
-  },
-  manageSubBtn: {
-    marginTop: 8,
-    alignSelf: 'flex-start',
-  },
-  manageSubText: {
-    fontFamily: 'Poppins_500Medium',
-    fontSize: 13,
-  },
   historySection: {
     paddingHorizontal: 24,
     marginTop: 32,
@@ -1731,6 +1379,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
+    flex: 1,
+    minWidth: 0,
+  },
+  transactionTextBlock: {
+    flex: 1,
+    minWidth: 0,
   },
   transactionIcon: {
     width: 40,
@@ -1750,6 +1404,7 @@ const styles = StyleSheet.create({
   transactionAmount: {
     fontFamily: 'Poppins_600SemiBold',
     fontSize: 14,
+    flexShrink: 0,
   },
   navbarContainer: {
     position: 'absolute',
@@ -1767,12 +1422,19 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
+    gap: 12,
     marginBottom: 16,
   },
   unpaidHeaderLeft: {
     flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
+    alignItems: 'flex-start',
+    gap: 10,
+    flex: 1,
+    minWidth: 0,
+  },
+  unpaidTitleBlock: {
+    flex: 1,
+    minWidth: 0,
   },
   unpaidTitle: {
     fontSize: 16,
@@ -1785,9 +1447,13 @@ const styles = StyleSheet.create({
     color: '#B91C1C',
   },
   unpaidTotal: {
-    fontSize: 20,
+    fontSize: 18,
+    lineHeight: 24,
     fontFamily: 'Poppins_700Bold',
     color: '#DC2626',
+    flexShrink: 0,
+    maxWidth: 132,
+    textAlign: 'right',
   },
   unpaidItem: {
     flexDirection: 'row',
@@ -1802,6 +1468,7 @@ const styles = StyleSheet.create({
   },
   unpaidInfo: {
     flex: 1,
+    minWidth: 0,
   },
   unpaidName: {
     fontSize: 14,
@@ -1842,102 +1509,10 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: '#FECACA',
   },
-  // Subscription Styles
-  featuresContainer: {
-    marginTop: 12,
-    marginBottom: 8,
-  },
-  featureRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginBottom: 6,
-  },
-  featureText: {
-    fontSize: 13,
-    fontFamily: 'Poppins_400Regular',
-  },
-  subscriptionActions: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginTop: 12,
-    paddingTop: 12,
-    borderTopWidth: 1,
-    borderTopColor: '#E5E7EB',
-  },
-  cancelSubBtn: {
-    paddingVertical: 8,
-  },
-  cancelSubText: {
-    fontSize: 13,
-    fontFamily: 'Poppins_500Medium',
-    color: '#DC2626',
-  },
-  noSubContainer: {
-    alignItems: 'center',
-    paddingVertical: 24,
-  },
-  noSubIcon: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 16,
-  },
-  noSubTitle: {
-    fontSize: 18,
-    fontFamily: 'Poppins_600SemiBold',
-    marginBottom: 8,
-  },
-  noSubDesc: {
-    fontSize: 14,
-    fontFamily: 'Poppins_400Regular',
-    textAlign: 'center',
-    paddingHorizontal: 16,
-    marginBottom: 20,
-  },
-  subscribeBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    paddingHorizontal: 24,
-    paddingVertical: 14,
-    borderRadius: 12,
-  },
-  subscribeBtnText: {
-    fontSize: 15,
-    fontFamily: 'Poppins_600SemiBold',
-    color: 'white',
-  },
-  // Plans Modal Styles
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.5)',
     justifyContent: 'flex-end',
-  },
-  plansModal: {
-    borderTopLeftRadius: 28,
-    borderTopRightRadius: 28,
-    maxHeight: '90%',
-    padding: 24,
-    width: '100%',
-  },
-  plansModalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 24,
-  },
-  plansModalTitle: {
-    fontSize: 24,
-    fontFamily: 'Poppins_700Bold',
-  },
-  plansModalSubtitle: {
-    fontSize: 14,
-    fontFamily: 'Poppins_400Regular',
-    marginTop: 2,
   },
   closeModalButton: {
     width: 36,
@@ -1945,104 +1520,6 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  plansScrollView: {
-    maxHeight: '100%',
-  },
-  planCard: {
-    borderRadius: 20,
-    padding: 20,
-    marginBottom: 16,
-    position: 'relative',
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 8,
-    elevation: 3,
-  },
-  planCardHeader: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    marginBottom: 16,
-    gap: 12,
-  },
-  planIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  popularBadge: {
-    position: 'absolute',
-    top: 0,
-    right: 0,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderBottomLeftRadius: 16,
-    zIndex: 10,
-  },
-  popularBadgeText: {
-    color: 'white',
-    fontSize: 10,
-    fontFamily: 'Poppins_700Bold',
-  },
-  planName: {
-    fontSize: 18,
-    fontFamily: 'Poppins_700Bold',
-    marginBottom: 4,
-  },
-  planDescription: {
-    fontSize: 13,
-    fontFamily: 'Poppins_400Regular',
-    lineHeight: 18,
-  },
-  planPriceInfo: {
-    flexDirection: 'row',
-    alignItems: 'baseline',
-    marginBottom: 16,
-  },
-  planPrice: {
-    fontSize: 28,
-    fontFamily: 'Poppins_700Bold',
-  },
-  planPeriod: {
-    fontSize: 14,
-    fontFamily: 'Poppins_500Medium',
-  },
-  separator: {
-    height: 1,
-    backgroundColor: 'rgba(0,0,0,0.05)',
-    marginBottom: 16,
-  },
-  planFeatures: {
-    gap: 12,
-    marginBottom: 20,
-  },
-  planFeatureRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-  },
-  planFeatureText: {
-    fontSize: 14,
-    fontFamily: 'Poppins_400Regular',
-    flex: 1,
-  },
-  selectPlanBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 14,
-    borderRadius: 14,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.2,
-    shadowRadius: 8,
-    elevation: 4,
-  },
-  selectPlanBtnText: {
-    fontSize: 15,
-    fontFamily: 'Poppins_600SemiBold',
   },
   // Withdraw Modal Styles
   withdrawModal: {
@@ -2085,13 +1562,21 @@ const styles = StyleSheet.create({
   },
   currencyPrefix: {
     fontSize: 24,
+    lineHeight: 32,
     fontFamily: 'Poppins_600SemiBold',
     marginRight: 8,
+    includeFontPadding: false,
+    textAlignVertical: 'center',
   },
   amountInput: {
     flex: 1,
+    height: 56,
     fontSize: 24,
+    lineHeight: 32,
     fontFamily: 'Poppins_600SemiBold',
+    includeFontPadding: false,
+    paddingVertical: 0,
+    textAlignVertical: 'center',
   },
   inputHint: {
     fontSize: 12,
@@ -2105,10 +1590,12 @@ const styles = StyleSheet.create({
   },
   quickAmountBtn: {
     flex: 1,
+    minHeight: 44,
     paddingVertical: 10,
     borderRadius: 10,
     borderWidth: 1,
     alignItems: 'center',
+    justifyContent: 'center',
   },
   quickAmountText: {
     fontSize: 14,
@@ -2170,6 +1657,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 12,
     flex: 1,
+    minWidth: 0,
   },
   payoutIconBox: {
     width: 44,
@@ -2181,6 +1669,10 @@ const styles = StyleSheet.create({
   payoutMethodName: {
     fontSize: 14,
     fontFamily: 'Poppins_600SemiBold',
+  },
+  payoutMethodTextBlock: {
+    flex: 1,
+    minWidth: 0,
   },
   payoutMethodAccount: {
     fontSize: 12,
@@ -2275,12 +1767,16 @@ const styles = StyleSheet.create({
     fontFamily: 'Poppins_500Medium',
   },
   textInput: {
+    height: 56,
     borderRadius: 12,
     borderWidth: 1,
     paddingHorizontal: 16,
-    paddingVertical: 14,
+    paddingVertical: 0,
     fontSize: 16,
+    lineHeight: 22,
     fontFamily: 'Poppins_400Regular',
+    includeFontPadding: false,
+    textAlignVertical: 'center',
   },
   // Withdrawal history styles
   withdrawalItem: {
@@ -2319,3 +1815,4 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
 });
+

@@ -1,6 +1,12 @@
-import { Ionicons } from "@expo/vector-icons";
+﻿import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
-import React, { useEffect, useState } from "react";
+import {
+    BottomSheetBackdrop,
+    BottomSheetModal,
+    BottomSheetScrollView,
+    useBottomSheetSpringConfigs,
+} from "@gorhom/bottom-sheet";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
     ActivityIndicator,
     Dimensions,
@@ -15,23 +21,51 @@ import {
 import { supabase } from "../lib/supabase";
 import CustomAlert, { AlertType } from "../src/components/CustomAlert";
 import Header from "../src/components/header";
+import InAppMediaViewer, { isInAppMediaUrl } from "../src/components/InAppMediaViewer";
 import Modal from "../src/components/modal";
 import Navbar from "../src/components/navbar";
+import ProfileAvatar from "../src/components/ProfileAvatar";
+import ProductionInviteSection from "../src/components/ProductionInviteSection";
+import SlidingTabBar from "../src/components/SlidingTabBar";
+import SmoothTabTransition from "../src/components/SmoothTabTransition";
+import TrackedBottomSheetModal from "../src/components/TrackedBottomSheetModal";
+import { useBottomBarClearance } from "../src/hooks/useBottomBarClearance";
 import { useTheme } from "../src/context/ThemeContext";
 import {
     hasValidCoordinates,
     openNavigationDirections,
 } from "../src/utils/navigation";
+import { formatFriendlyDateTime } from "../src/utils/friendlyDateTime";
+import { ProductionInviteTarget } from "../src/utils/productionTeamInvites";
+import { sendVenueGigInvites } from "../src/utils/venueGigInvites";
+import { getSmoothTabIndex, setSmoothTab } from "../src/utils/smoothTabs";
+import { bottomSheetSpringConfig } from "../src/utils/motion";
 
 const { width: screenWidth } = Dimensions.get("window");
 const PORTFOLIO_ITEM_SIZE = (screenWidth - 48 - 8) / 3; // 3 columns with gaps
+const OWNER_GIG_TABS = ["About", "Applicants", "Review"];
+const VIEWER_GIG_TABS = ["About", "Review"];
+const ACCEPTED_GIG_STATUSES = ["accepted", "approved", "confirmed", "happening now", "completed"];
+const HIDDEN_APPLICANT_STATUSES = new Set([
+  "cancelled",
+  "canceled",
+  "completed",
+  "declined",
+  "fired",
+  "rejected",
+  "resigned",
+]);
 
 import { useLocalSearchParams } from "expo-router";
 
 export default function GigDetailsScreen() {
   const { colors, isDark } = useTheme();
-  const { id } = useLocalSearchParams();
-  const [activeTab, setActiveTab] = useState("About");
+  const { contentBottomPadding } = useBottomBarClearance(24);
+  const { id, tab } = useLocalSearchParams<{ id?: string | string[]; tab?: string | string[] }>();
+  const requestedTab = Array.isArray(tab) ? tab[0] : tab;
+  const [activeTab, setActiveTab] = useState(
+    OWNER_GIG_TABS.includes(requestedTab || "") ? requestedTab || "About" : "About",
+  );
   const [modalVisible, setModalVisible] = useState(false);
   const [modalTitle, setModalTitle] = useState("");
   const [modalMessage, setModalMessage] = useState("");
@@ -41,6 +75,8 @@ export default function GigDetailsScreen() {
   );
 
   const [authorized, setAuthorized] = useState(false);
+  const [canManageGig, setCanManageGig] = useState(false);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [checkingAuth, setCheckingAuth] = useState(true);
 
   const [gig, setGig] = useState<any>(null);
@@ -58,6 +94,52 @@ export default function GigDetailsScreen() {
     title: "",
     message: "",
   });
+  const [mediaViewerUrl, setMediaViewerUrl] = useState<string | null>(null);
+  const [mediaViewerTitle, setMediaViewerTitle] = useState("Media");
+  const [inviteModalVisible, setInviteModalVisible] = useState(false);
+  const [inviteMessage, setInviteMessage] = useState("");
+  const [selectedInviteTargets, setSelectedInviteTargets] = useState<ProductionInviteTarget[]>([]);
+  const [sendingInvites, setSendingInvites] = useState(false);
+  const inviteSheetRef = useRef<BottomSheetModal>(null);
+  const inviteSnapPoints = useMemo(() => ["90%"], []);
+  const inviteAnimationConfigs = useBottomSheetSpringConfigs(bottomSheetSpringConfig);
+  const renderInviteBackdrop = useCallback(
+    (props: any) => (
+      <BottomSheetBackdrop
+        {...props}
+        appearsOnIndex={0}
+        disappearsOnIndex={-1}
+        opacity={0.5}
+      />
+    ),
+    [],
+  );
+  const handleInviteSheetDismiss = useCallback(() => {
+    setInviteModalVisible(false);
+    if (!sendingInvites) {
+      setInviteMessage("");
+      setSelectedInviteTargets([]);
+    }
+  }, [sendingInvites]);
+
+  useEffect(() => {
+    const availableTabs = canManageGig ? OWNER_GIG_TABS : VIEWER_GIG_TABS;
+    if (requestedTab && availableTabs.includes(requestedTab) && requestedTab !== activeTab) {
+      setActiveTab(requestedTab);
+      return;
+    }
+    if (!availableTabs.includes(activeTab)) {
+      setActiveTab("About");
+    }
+  }, [activeTab, canManageGig, requestedTab]);
+
+  useEffect(() => {
+    if (inviteModalVisible) {
+      inviteSheetRef.current?.present();
+    } else {
+      inviteSheetRef.current?.dismiss();
+    }
+  }, [inviteModalVisible]);
 
   const showAlert = (
     type: AlertType,
@@ -91,6 +173,28 @@ export default function GigDetailsScreen() {
     showAlert(type, title || "Notice", message || "", buttons);
   };
 
+  const openMediaOrExternal = async (url: string, title = "Media") => {
+    const normalizedUrl = String(url || "").trim();
+    if (!normalizedUrl) return;
+
+    if (isInAppMediaUrl(normalizedUrl)) {
+      setMediaViewerTitle(title);
+      setMediaViewerUrl(normalizedUrl);
+      return;
+    }
+
+    try {
+      const supported = await Linking.canOpenURL(normalizedUrl);
+      if (supported) {
+        await Linking.openURL(normalizedUrl);
+      } else {
+        Alert.alert("Error", "Unable to open link");
+      }
+    } catch (error) {
+      Alert.alert("Error", "Failed to open link");
+    }
+  };
+
   const Alert = { alert: showAlertNative };
 
   const fetchApplicationsFallback = async (gigId: string) => {
@@ -113,7 +217,6 @@ export default function GigDetailsScreen() {
         label: gig?.location || gig?.name || "Gig location",
       });
     } catch (error) {
-      console.log("[manage_gig] Navigation error:", error);
       showAlert(
         "warning",
         "Navigation Unavailable",
@@ -127,6 +230,55 @@ export default function GigDetailsScreen() {
     checkAuthorization();
   }, []);
 
+  const getRouteGigId = () => {
+    const gigId = Array.isArray(id) ? id[0] : id;
+    return typeof gigId === "string" && gigId.length > 0 ? gigId : null;
+  };
+
+  const hasAcceptedGigAccess = async (userId: string, gigId: string) => {
+    const { data: soloApplication, error: soloError } = await supabase
+      .from("gig_applications")
+      .select("id")
+      .eq("gig_id", gigId)
+      .eq("applicant_id", userId)
+      .is("group_id", null)
+      .in("status", ACCEPTED_GIG_STATUSES)
+      .limit(1)
+      .maybeSingle();
+
+    if (soloError) throw soloError;
+    if (soloApplication?.id) return true;
+
+    const { data: groupMembershipRows, error: membershipError } = await supabase
+      .from("group_members")
+      .select("group_id")
+      .eq("user_id", userId);
+
+    if (membershipError) throw membershipError;
+
+    const joinedGroupIds = Array.from(
+      new Set(
+        (groupMembershipRows || [])
+          .map((row: any) => row?.group_id)
+          .filter((value: any): value is string => typeof value === "string" && value.length > 0),
+      ),
+    );
+
+    if (joinedGroupIds.length === 0) return false;
+
+    const { data: groupApplication, error: groupError } = await supabase
+      .from("gig_applications")
+      .select("id")
+      .eq("gig_id", gigId)
+      .in("group_id", joinedGroupIds)
+      .in("status", ACCEPTED_GIG_STATUSES)
+      .limit(1)
+      .maybeSingle();
+
+    if (groupError) throw groupError;
+    return !!groupApplication?.id;
+  };
+
   const checkAuthorization = async () => {
     try {
       const {
@@ -137,6 +289,8 @@ export default function GigDetailsScreen() {
         return;
       }
 
+      setCurrentUserId(user.id);
+
       const { data: profile, error: profileError } = await supabase
         .from('profiles')
         .select('*')
@@ -145,14 +299,34 @@ export default function GigDetailsScreen() {
 
       if (profileError) throw profileError;
 
-      if (profile?.role !== "venue-owner") {
-        Alert.alert("Unauthorized", "Only venue owners can access this page.");
+      const gigId = getRouteGigId();
+      if (!gigId) {
+        Alert.alert("Error", "Invalid gig ID");
         router.replace("/home");
         return;
       }
 
+      const { data: ownedGig, error: ownedGigError } = await supabase
+        .from("gigs")
+        .select("id")
+        .eq("id", gigId)
+        .eq("organizer_id", user.id)
+        .maybeSingle();
+
+      if (ownedGigError) throw ownedGigError;
+
+      const ownsGig = !!ownedGig?.id && profile?.role === "venue-owner";
+      const canViewAcceptedGig = ownsGig ? true : await hasAcceptedGigAccess(user.id, gigId);
+
+      if (!ownsGig && !canViewAcceptedGig) {
+        Alert.alert("Unauthorized", "You can only view gigs you manage or have been accepted for.");
+        router.replace("/home");
+        return;
+      }
+
+      setCanManageGig(ownsGig);
       setAuthorized(true);
-      if (id) fetchData(user.id);
+      fetchData(user.id, ownsGig);
     } catch (e) {
       console.error("Authorization check failed:", e);
       router.replace("/home");
@@ -161,18 +335,17 @@ export default function GigDetailsScreen() {
     }
   };
 
-  const fetchData = async (userId: string) => {
+  const fetchData = async (userId: string, canManage = canManageGig) => {
     setLoading(true);
     try {
       // Ensure id is a string, not an array
-      const gigId = Array.isArray(id) ? id[0] : id;
+      const gigId = getRouteGigId();
       if (!gigId) {
         Alert.alert("Error", "Invalid gig ID");
         router.replace("/home");
         return;
       }
 
-      console.log(`[manage_gig] Fetching data for gigId: ${gigId}, userId: ${userId}`);
 
       // Load 3NF sources first so newly created gigs are visible immediately.
       const [
@@ -185,8 +358,7 @@ export default function GigDetailsScreen() {
           .from('gigs')
           .select('*')
           .eq('id', gigId)
-          .eq('organizer_id', userId)
-          .single(),
+          .maybeSingle(),
         supabase
           .from('gig_requirements')
           .select('requirement_key, requirement_value')
@@ -205,19 +377,14 @@ export default function GigDetailsScreen() {
           .single(),
       ]);
 
-      if (gigError) {
-        console.log('[manage_gig] Failed to fetch gig details:', gigError.message);
-        // if (gigError.message?.includes("non-2xx")) {
-        //   console.log('[manage_gig] Full error object:', JSON.stringify(gigError));
-        // }
-        throw gigError;
-      }
+      if (gigError) throw gigError;
+      if (!gigData) throw new Error("Gig not found");
+      if (canManage && gigData.organizer_id !== userId) throw new Error("Unauthorized");
       if (requirementsError) throw requirementsError;
       if (mediaError) throw mediaError;
 
       // Legacy projection is fallback-only; do not fail page load if this read errors.
       if (legacyGigError) {
-        console.log('[manage_gig] Legacy projection unavailable, using direct 3NF rows only.');
       }
 
       const requirementsFromRows = (requirementRows || []).reduce((acc: Record<string, any>, row: any) => {
@@ -240,27 +407,28 @@ export default function GigDetailsScreen() {
         documents: legacyGig?.documents || [],
       });
 
-      // Fetch Applications
-      try {
-        const { data: { session } } = await supabase.auth.getSession();
-        if (!session) throw new Error("No active session");
+      if (canManage) {
+        try {
+          const { data: { session } } = await supabase.auth.getSession();
+          if (!session) throw new Error("No active session");
 
-        const { data: appData, error: appError } =
-          await supabase.functions.invoke("gig-applications", {
-            body: { action: "fetch_gig_applications", gigId: gigId, userId },
-            headers: {
-              Authorization: `Bearer ${session.access_token}`,
-            },
-          });
-        if (appError) {
-          console.log('[manage_gig] Edge function failed for applications, trying direct query fallback.');
-          const fallbackApps = await fetchApplicationsFallback(gigId);
-          setApplications(fallbackApps);
-        } else {
-          setApplications(appData || []);
+          const { data: appData, error: appError } =
+            await supabase.functions.invoke("gig-applications", {
+              body: { action: "fetch_gig_applications", gigId: gigId, userId },
+              headers: {
+                Authorization: `Bearer ${session.access_token}`,
+              },
+            });
+          if (appError) {
+            const fallbackApps = await fetchApplicationsFallback(gigId);
+            setApplications(fallbackApps);
+          } else {
+            setApplications(appData || []);
+          }
+        } catch (appErr) {
+          setApplications([]);
         }
-      } catch (appErr) {
-        console.log('[manage_gig] Exception fetching applications; using empty list fallback:', appErr);
+      } else {
         setApplications([]);
       }
 
@@ -272,16 +440,13 @@ export default function GigDetailsScreen() {
           .eq('gig_id', gigId)
           .order('created_at', { ascending: false });
         if (reviewError) {
-          console.log('[manage_gig] Failed to fetch reviews:', reviewError);
         } else {
           setReviews(reviewData || []);
         }
       } catch (reviewErr) {
-        console.log('[manage_gig] Exception fetching reviews:', reviewErr);
       }
 
     } catch (e: any) {
-      console.log("[manage_gig] Critical error fetching data (masked):", e.message || "Unknown error");
       let errorMsg = "Failed to load gig data";
       if (e.message?.includes("non-2xx")) {
         errorMsg += `\n\nServer Error (500). Please check edge function logs.`;
@@ -331,14 +496,111 @@ export default function GigDetailsScreen() {
         );
         setModalVisible(false);
       } catch (e) {
-        console.log("Error updating application:", e);
         Alert.alert("Error", "Failed to update application status");
       }
     });
     setModalVisible(true);
   };
 
-  const tabs = ["About", "Applicants", "Review"];
+  const getApplicationStatusMeta = (status: unknown) => {
+    const normalizedStatus = String(status || "pending").trim().toLowerCase();
+
+    if (normalizedStatus === "accepted" || normalizedStatus === "approved") {
+      return { label: "Accepted", color: "#10B981", backgroundColor: "#10B98115" };
+    }
+
+    if (normalizedStatus === "pending") {
+      return { label: "Pending", color: colors.primary, backgroundColor: colors.primary + "15" };
+    }
+
+    if (normalizedStatus === "completed") {
+      return { label: "Completed", color: "#2563EB", backgroundColor: "#2563EB15" };
+    }
+
+    if (normalizedStatus === "fired") {
+      return { label: "Fired", color: "#EF4444", backgroundColor: "#EF444415" };
+    }
+
+    if (normalizedStatus === "resigned") {
+      return { label: "Resigned", color: "#F97316", backgroundColor: "#F9731615" };
+    }
+
+    if (normalizedStatus === "cancelled" || normalizedStatus === "canceled") {
+      return { label: "Cancelled", color: "#EF4444", backgroundColor: "#EF444415" };
+    }
+
+    if (normalizedStatus === "rejected" || normalizedStatus === "declined") {
+      return { label: "Declined", color: "#EF4444", backgroundColor: "#EF444415" };
+    }
+
+    return {
+      label: normalizedStatus
+        .split("_")
+        .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+        .join(" "),
+      color: colors.textSecondary,
+      backgroundColor: colors.textSecondary + "15",
+    };
+  };
+
+  const closeInviteModal = () => {
+    if (sendingInvites) return;
+    setInviteModalVisible(false);
+    setInviteMessage("");
+    setSelectedInviteTargets([]);
+  };
+
+  const handleSendVenueInvites = async () => {
+    if (!currentUserId || !gig?.id || !canManageGig || sendingInvites) {
+      return;
+    }
+
+    if (selectedInviteTargets.length === 0) {
+      showAlert("warning", "No Talent Selected", "Select at least one musician, duo, or group to invite.");
+      return;
+    }
+
+    setSendingInvites(true);
+    try {
+      const inviteSummary = await sendVenueGigInvites({
+        currentUserId,
+        gigId: gig.id,
+        gigName: gig.name,
+        gigImage: Array.isArray(gig.images) ? gig.images[0] || null : null,
+        inviteMessage,
+        inviteTargets: selectedInviteTargets,
+      });
+
+      if (inviteSummary.sentCount === 0 && inviteSummary.failedCount > 0) {
+        const failureMessage =
+          inviteSummary.failures.map((failure) => failure.error).find(Boolean) ||
+          "No invites were sent. Please try again.";
+        throw new Error(failureMessage);
+      }
+
+      setInviteModalVisible(false);
+      setInviteMessage("");
+      setSelectedInviteTargets([]);
+      showAlert(
+        inviteSummary.failedCount > 0 ? "warning" : "success",
+        inviteSummary.failedCount > 0 ? "Invites Partially Sent" : "Invites Sent",
+        inviteSummary.failedCount > 0
+          ? `${inviteSummary.sentCount} invite(s) sent, ${inviteSummary.failedCount} failed.`
+          : `${inviteSummary.sentCount} invite(s) sent.`,
+      );
+    } catch (error: any) {
+      showAlert("error", "Invite Failed", error?.message || "Failed to send invites.");
+    } finally {
+      setSendingInvites(false);
+    }
+  };
+
+  const tabs = canManageGig ? OWNER_GIG_TABS : VIEWER_GIG_TABS;
+  const isInviteSubmitDisabled = sendingInvites || selectedInviteTargets.length === 0;
+  const visibleApplications = applications.filter((app) => {
+    const normalizedStatus = String(app?.status || "").trim().toLowerCase();
+    return !HIDDEN_APPLICANT_STATUSES.has(normalizedStatus);
+  });
 
   const formatMusicianType = (requirements?: any) => {
     const slots = requirements?.slots || {};
@@ -356,6 +618,73 @@ export default function GigDetailsScreen() {
     if (!type) return "Not specified";
     return String(type).charAt(0).toUpperCase() + String(type).slice(1);
   };
+
+  const formatStatusLabel = (value?: unknown) => {
+    const raw = typeof value === "string" ? value : "";
+    if (!raw.trim()) return "Not submitted";
+    return raw
+      .split("_")
+      .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(" ");
+  };
+
+  const getEventSchedules = (sourceGig?: any) => {
+    const schedules = sourceGig?.requirements?.event_schedules;
+    if (Array.isArray(schedules) && schedules.length > 0) {
+      return schedules
+        .map((schedule: any, index: number) => ({
+          id: schedule?.id || `${schedule?.date || sourceGig?.event_date || "schedule"}-${index}`,
+          date: schedule?.date || sourceGig?.event_date,
+          start: schedule?.start || schedule?.start_time || sourceGig?.requirements?.event_start_time,
+          end: schedule?.end || schedule?.end_time || sourceGig?.requirements?.event_end_time,
+        }))
+        .filter((schedule: any) => schedule.date || schedule.start || schedule.end);
+    }
+
+    if (
+      sourceGig?.event_date ||
+      sourceGig?.requirements?.event_start_time ||
+      sourceGig?.requirements?.event_end_time
+    ) {
+      return [{
+        id: "primary-schedule",
+        date: sourceGig?.event_date,
+        start: sourceGig?.requirements?.event_start_time,
+        end: sourceGig?.requirements?.event_end_time,
+      }];
+    }
+
+    return [];
+  };
+
+  const getSlotGroups = (requirements?: any) => {
+    const slots = requirements?.slots || {};
+    const groups = [
+      { key: "solo", label: "Solo", data: slots.solo },
+      { key: "duo", label: "Duo", data: slots.duo },
+      { key: "band", label: "Group", data: slots.band },
+    ];
+
+    return groups
+      .map((group) => ({
+        ...group,
+        needed: Number(group.data?.needed || 0),
+        roles: Array.isArray(group.data?.roles) ? group.data.roles : [],
+        genres: Array.isArray(group.data?.preferred_genres)
+          ? group.data.preferred_genres
+          : [],
+        instruments: Array.isArray(group.data?.preferred_instruments)
+          ? group.data.preferred_instruments
+          : [],
+        groupTypes: Array.isArray(group.data?.preferred_group_types)
+          ? group.data.preferred_group_types
+          : [],
+      }))
+      .filter((group) => group.needed > 0);
+  };
+
+  const eventSchedules = getEventSchedules(gig);
+  const slotGroups = getSlotGroups(gig?.requirements);
 
   // Show loading while checking authorization
   if (checkingAuth) {
@@ -389,11 +718,11 @@ export default function GigDetailsScreen() {
   return (
     <>
       <View style={[styles.flex1, { backgroundColor: colors.background }]}>
-        <Header title="Manage Gig" />
+        <Header title={canManageGig ? "Manage Gig" : "View Gig"} />
 
         <ScrollView
           showsVerticalScrollIndicator={false}
-          contentContainerStyle={styles.scrollContent}
+          contentContainerStyle={[styles.scrollContent, { paddingBottom: contentBottomPadding }]}
         >
           {/* Header Image & Info */}
           <View style={styles.headerContainer}>
@@ -422,17 +751,17 @@ export default function GigDetailsScreen() {
               style={[styles.headerLocation, { color: colors.textSecondary }]}
             >
               {gig?.event_date
-                ? new Date(gig.event_date).toLocaleDateString()
+                ? formatFriendlyDateTime(gig.event_date, { forceDateOnly: true })
                 : "Date TBA"}
               {gig?.requirements?.event_start_time &&
                 gig?.requirements?.event_end_time
-                ? ` • ${gig.requirements.event_start_time} - ${gig.requirements.event_end_time}`
+                ? ` at ${gig.requirements.event_start_time} - ${gig.requirements.event_end_time}`
                 : ""}
-              {" • "}
+              {" - "}
               {gig?.location || "Location N/A"}
             </Text>
             {hasValidCoordinates(gig?.latitude, gig?.longitude) && (
-              <TouchableOpacity
+              <TouchableOpacity activeOpacity={1}
                 style={[styles.navigateButton, { backgroundColor: colors.primary }]}
                 onPress={handleNavigateToGig}
               >
@@ -442,55 +771,25 @@ export default function GigDetailsScreen() {
             )}
           </View>
 
-          {/* Segmented Control Tabs */}
-          <View
-            style={[
-              styles.tabsContainer,
-              { backgroundColor: colors.inputBackground },
-            ]}
-          >
-            {tabs.map((tab) => (
-              <TouchableOpacity activeOpacity={1}
-                key={tab}
-                onPress={() => setActiveTab(tab)}
-                style={[
-                  styles.tab,
-                  {
-                    backgroundColor:
-                      activeTab === tab ? colors.surface : "transparent",
-                    shadowColor: "#000",
-                    shadowOffset: {
-                      width: 0,
-                      height: activeTab === tab ? 2 : 0,
-                    },
-                    shadowOpacity: activeTab === tab ? 0.05 : 0,
-                    shadowRadius: 4,
-                    elevation: activeTab === tab ? 2 : 0,
-                  },
-                ]}
-              >
-                <Text
-                  style={[
-                    styles.tabText,
-                    {
-                      fontFamily:
-                        activeTab === tab
-                          ? "Poppins_600SemiBold"
-                          : "Poppins_500Medium",
-                      color:
-                        activeTab === tab
-                          ? colors.primary
-                          : colors.textSecondary,
-                    },
-                  ]}
-                >
-                  {tab}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </View>
+          {/* Tabs */}
+          <SlidingTabBar
+            activeColor={colors.primary}
+            activeKey={activeTab}
+            borderColor={colors.border}
+            indicatorColor={colors.primary}
+            indicatorWidthRatio={0.34}
+            onChange={(tab) => setSmoothTab(setActiveTab, tab)}
+            style={styles.tabsContainer}
+            tabs={tabs.map((tab) => ({ key: tab, label: tab }))}
+            textStyle={styles.tabText}
+          />
 
-          <View style={styles.contentContainer}>
+          <SmoothTabTransition
+            activeKey={activeTab}
+            activeIndex={getSmoothTabIndex(tabs, activeTab)}
+            renderOutgoing={false}
+            style={styles.contentContainer}
+          >
             {activeTab === "About" && (
               <View style={styles.aboutContainer}>
                 <View>
@@ -499,6 +798,51 @@ export default function GigDetailsScreen() {
                   >
                     {gig?.description || "No description available."}
                   </Text>
+                </View>
+
+                <View>
+                  <Text
+                    style={[
+                      styles.sectionTitle,
+                      { color: colors.text, marginBottom: 12 },
+                    ]}
+                  >
+                    Schedule
+                  </Text>
+                  {eventSchedules.length > 0 ? (
+                    <View style={styles.detailList}>
+                      {eventSchedules.map((schedule: any) => (
+                        <View
+                          key={schedule.id}
+                          style={[
+                            styles.detailCard,
+                            {
+                              backgroundColor: colors.surface,
+                              borderColor: colors.border,
+                            },
+                          ]}
+                        >
+                          <Ionicons name="calendar-outline" size={20} color={colors.primary} />
+                          <View style={{ flex: 1 }}>
+                            <Text style={[styles.detailCardTitle, { color: colors.text }]}>
+                              {schedule.date
+                                ? formatFriendlyDateTime(schedule.date, { forceDateOnly: true })
+                                : "Date TBA"}
+                            </Text>
+                            <Text style={[styles.detailCardText, { color: colors.textSecondary }]}>
+                              {schedule.start && schedule.end
+                                ? `${schedule.start} - ${schedule.end}`
+                                : "Time TBA"}
+                            </Text>
+                          </View>
+                        </View>
+                      ))}
+                    </View>
+                  ) : (
+                    <Text style={{ color: colors.textSecondary }}>
+                      No schedule set.
+                    </Text>
+                  )}
                 </View>
 
                 <View>
@@ -567,7 +911,7 @@ export default function GigDetailsScreen() {
                           marginBottom: 6,
                         }}
                       >
-                        Equipments
+                        Provided equipments
                       </Text>
                       <View
                         style={{
@@ -600,30 +944,10 @@ export default function GigDetailsScreen() {
                           )
                         ) : (
                           <Text style={{ color: colors.textSecondary }}>
-                            No specific equipments
+                            No provided equipments
                           </Text>
                         )}
                       </View>
-                    </View>
-
-                    <View>
-                      <Text
-                        style={{
-                          fontFamily: "Poppins_500Medium",
-                          color: colors.textSecondary,
-                          marginBottom: 6,
-                        }}
-                      >
-                        Experience Level
-                      </Text>
-                      <Text
-                        style={{
-                          fontFamily: "Poppins_500Medium",
-                          color: colors.text,
-                        }}
-                      >
-                        {gig?.requirements?.experience_level || "Not specified"}
-                      </Text>
                     </View>
 
                     <View>
@@ -648,29 +972,87 @@ export default function GigDetailsScreen() {
                   </View>
                 </View>
 
-                {/* The "Deal" Card */}
+                <View>
+                  <Text
+                    style={[
+                      styles.sectionTitle,
+                      { color: colors.text, marginBottom: 12 },
+                    ]}
+                  >
+                    Slot Details
+                  </Text>
+                  {slotGroups.length > 0 ? (
+                    <View style={styles.detailList}>
+                      {slotGroups.map((slotGroup) => (
+                        <View
+                          key={slotGroup.key}
+                          style={[
+                            styles.slotDetailCard,
+                            {
+                              backgroundColor: colors.surface,
+                              borderColor: colors.border,
+                            },
+                          ]}
+                        >
+                          <View style={styles.slotDetailHeader}>
+                            <Text style={[styles.slotDetailTitle, { color: colors.text }]}>
+                              {slotGroup.label}
+                            </Text>
+                            <Text style={[styles.slotDetailCount, { color: colors.primary }]}>
+                              {slotGroup.needed} needed
+                            </Text>
+                          </View>
+                          {slotGroup.roles.length > 0 ? (
+                            <Text style={[styles.detailCardText, { color: colors.textSecondary }]}>
+                              Roles: {slotGroup.roles.join(", ")}
+                            </Text>
+                          ) : null}
+                          {slotGroup.groupTypes.length > 0 ? (
+                            <Text style={[styles.detailCardText, { color: colors.textSecondary }]}>
+                              Preferred group types: {slotGroup.groupTypes.join(", ")}
+                            </Text>
+                          ) : null}
+                          {slotGroup.genres.length > 0 ? (
+                            <Text style={[styles.detailCardText, { color: colors.textSecondary }]}>
+                              Preferred genres: {slotGroup.genres.join(", ")}
+                            </Text>
+                          ) : null}
+                          {slotGroup.instruments.length > 0 ? (
+                            <Text style={[styles.detailCardText, { color: colors.textSecondary }]}>
+                              Preferred instruments: {slotGroup.instruments.join(", ")}
+                            </Text>
+                          ) : null}
+                        </View>
+                      ))}
+                    </View>
+                  ) : (
+                    <Text style={{ color: colors.textSecondary }}>
+                      No slot details configured.
+                    </Text>
+                  )}
+                </View>
+
+                {/* The Offer Card */}
                 <View
                   style={[
-                    styles.dealCard,
+                    styles.offerCard,
                     {
                       backgroundColor: colors.surface,
                       borderColor: colors.primary,
                     },
                   ]}
                 >
-                  <View style={styles.dealHeader}>
+                  <View style={styles.offerHeader}>
                     <Ionicons
                       name="cash-outline"
                       size={24}
                       color={colors.primary}
                     />
-                    <Text style={[styles.dealTitle, { color: colors.text }]}>
-                      The Deal
-                    </Text>
+                    <Text style={[styles.offerTitle, { color: colors.text }]}>The Offer</Text>
                   </View>
                   <View
                     style={[
-                      styles.dealInfo,
+                      styles.offerInfo,
                       { borderColor: colors.border, borderBottomWidth: 0 },
                     ]}
                   >
@@ -746,26 +1128,7 @@ export default function GigDetailsScreen() {
                   </Text>
                   {gig?.contract_url ? (
                     <TouchableOpacity activeOpacity={1}
-                      onPress={async () => {
-                        try {
-                          const supported = await Linking.canOpenURL(
-                            gig.contract_url,
-                          );
-                          if (supported) {
-                            await Linking.openURL(gig.contract_url);
-                          } else {
-                            Alert.alert(
-                              "Error",
-                              "Unable to open contract document",
-                            );
-                          }
-                        } catch (error) {
-                          Alert.alert(
-                            "Error",
-                            "Failed to open contract document",
-                          );
-                        }
-                      }}
+                      onPress={() => openMediaOrExternal(gig.contract_url, "Contract")}
                       style={[
                         styles.contractCard,
                         {
@@ -846,7 +1209,7 @@ export default function GigDetailsScreen() {
                         onPress={() =>
                           router.push({
                             pathname: "/edit_gig",
-                            params: { id: gig?.id },
+                            params: { id: gig?.id, returnTab: "About" },
                           })
                         }
                         style={{ marginTop: 8 }}
@@ -864,21 +1227,87 @@ export default function GigDetailsScreen() {
                     </View>
                   )}
                 </View>
+
+                <View>
+                  <Text
+                    style={[
+                      styles.sectionTitle,
+                      { color: colors.text, marginBottom: 12 },
+                    ]}
+                  >
+                    Business Permit
+                  </Text>
+                  <View
+                    style={[
+                      styles.documentMetaCard,
+                      {
+                        backgroundColor: colors.surface,
+                        borderColor: colors.border,
+                      },
+                    ]}
+                  >
+                    <View style={styles.documentMetaRow}>
+                      <View style={[styles.contractIcon, { backgroundColor: colors.primary }]}>
+                        <Ionicons name="shield-checkmark-outline" size={24} color="#fff" />
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={[styles.contractTitle, { color: colors.text }]}>
+                          {formatStatusLabel(gig?.permit_status)}
+                        </Text>
+                        {gig?.permit_rejection_reason ? (
+                          <Text style={[styles.contractSubtitle, { color: colors.textSecondary }]}>
+                            {gig.permit_rejection_reason}
+                          </Text>
+                        ) : (
+                          <Text style={[styles.contractSubtitle, { color: colors.textSecondary }]}>
+                            Permit status from the gig profile.
+                          </Text>
+                        )}
+                      </View>
+                    </View>
+                    {gig?.business_permit_url ? (
+                      <TouchableOpacity activeOpacity={1}
+                        onPress={() => openMediaOrExternal(gig.business_permit_url, "Business Permit")}
+                        style={[
+                          styles.mediaButton,
+                          { borderColor: colors.primary, marginBottom: 0, marginTop: 12 },
+                        ]}
+                      >
+                        <Ionicons name="open-outline" size={18} color={colors.primary} />
+                        <Text style={[styles.mediaButtonText, { color: colors.primary }]}>
+                          View Business Permit
+                        </Text>
+                      </TouchableOpacity>
+                    ) : null}
+                  </View>
+                </View>
               </View>
             )}
 
             {activeTab === "Applicants" && (
               <View style={styles.applicantsContainer}>
-                <Text
-                  style={[
-                    styles.applicantsTitle,
-                    { color: colors.textSecondary },
-                  ]}
-                >
-                  APPLICANTS LIST
-                </Text>
+                <View style={styles.applicantsHeader}>
+                  <Text
+                    style={[
+                      styles.applicantsTitle,
+                      { color: colors.textSecondary },
+                    ]}
+                  >
+                    APPLICANTS LIST
+                  </Text>
+                  {canManageGig ? (
+                    <TouchableOpacity
+                      activeOpacity={1}
+                      onPress={() => setInviteModalVisible(true)}
+                      style={[styles.inviteBtn, { backgroundColor: colors.primary }]}
+                    >
+                      <Ionicons name="person-add-outline" size={16} color="#FFFFFF" />
+                      <Text style={styles.inviteBtnText}>Invite</Text>
+                    </TouchableOpacity>
+                  ) : null}
+                </View>
 
-                {applications.length === 0 ? (
+                {visibleApplications.length === 0 ? (
                   <Text
                     style={{
                       color: colors.textSecondary,
@@ -886,10 +1315,34 @@ export default function GigDetailsScreen() {
                       marginTop: 20,
                     }}
                   >
-                    No applications yet.
+                    No active applications yet.
                   </Text>
                 ) : (
-                  applications.map((app) => (
+                  visibleApplications.map((app) => {
+                    const statusMeta = getApplicationStatusMeta(app.status);
+                    const rosterProfile = app.production_roster?.roster_profile;
+                    const rosterGroup = app.production_roster?.roster_group;
+                    const displayGroup = app.group || rosterGroup;
+                    const displayApplicant = rosterProfile || app.applicant;
+                    const displayName =
+                      displayGroup?.name ||
+                      displayApplicant?.full_name ||
+                      "Unknown Applicant";
+                    const displayGenres =
+                      displayGroup?.genre ||
+                      displayApplicant?.genres?.join(", ") ||
+                      (app.production_team?.name ? "Production submission" : "Musician");
+                    const displayLocation =
+                      displayGroup?.location || displayApplicant?.location;
+                    const displaySkills = displayApplicant?.skills || [];
+                    const displayPortfolio = displayApplicant?.portfolio_urls || [];
+                    const displayAvatar =
+                      displayGroup?.images?.[0] ||
+                      displayApplicant?.avatar_url ||
+                      app.production_team?.logo_url ||
+                      "https://i.pravatar.cc/100";
+
+                    return (
                     <View
                       key={app.id}
                       style={[
@@ -901,10 +1354,7 @@ export default function GigDetailsScreen() {
                       <View style={styles.applicantHeader}>
                         <Image
                           source={{
-                            uri:
-                              app.group?.images?.[0] ||
-                              app.applicant?.avatar_url ||
-                              "https://i.pravatar.cc/100",
+                            uri: displayAvatar,
                           }}
                           style={styles.applicantImage}
                         />
@@ -924,30 +1374,15 @@ export default function GigDetailsScreen() {
                                 color: colors.text,
                               }}
                             >
-                              {app.group?.name ||
-                                app.applicant?.full_name ||
-                                "Unknown Applicant"}
+                              {displayName}
                             </Text>
                             <View
                               style={[
                                 styles.statusBadge,
                                 {
-                                  backgroundColor:
-                                    app.status === "pending"
-                                      ? colors.primary + "15"
-                                      : app.status === "accepted"
-                                        ? "#10B98115"
-                                        : app.status === "approved"
-                                          ? "#10B98115"
-                                          : "#EF444415",
+                                  backgroundColor: statusMeta.backgroundColor,
                                   borderWidth: 1,
-                                  borderColor:
-                                    app.status === "pending"
-                                      ? colors.primary
-                                      : app.status === "accepted" ||
-                                        app.status === "approved"
-                                        ? "#10B981"
-                                        : "#EF4444",
+                                  borderColor: statusMeta.color,
                                 },
                               ]}
                             >
@@ -955,21 +1390,10 @@ export default function GigDetailsScreen() {
                                 style={{
                                   fontFamily: "Poppins_600SemiBold",
                                   fontSize: 11,
-                                  color:
-                                    app.status === "pending"
-                                      ? colors.primary
-                                      : app.status === "accepted" ||
-                                        app.status === "approved"
-                                        ? "#10B981"
-                                        : "#EF4444",
+                                  color: statusMeta.color,
                                 }}
                               >
-                                {app.status === "accepted" ||
-                                  app.status === "approved"
-                                  ? "Accepted"
-                                  : app.status === "rejected"
-                                    ? "Declined"
-                                    : "Pending"}
+                                {statusMeta.label}
                               </Text>
                             </View>
                           </View>
@@ -980,18 +1404,26 @@ export default function GigDetailsScreen() {
                               color: colors.textSecondary,
                             }}
                           >
-                            {app.group?.genre ||
-                              app.applicant?.genres?.join(", ") ||
-                              "Musician"}
-                            {(app.group?.location || app.applicant?.location) &&
-                              ` • ${app.group?.location || app.applicant?.location}`}
+                            {displayGenres}
+                            {displayLocation && ` • ${displayLocation}`}
                           </Text>
+                          {app.production_team?.name && (
+                            <Text
+                              style={{
+                                fontFamily: "Poppins_500Medium",
+                                fontSize: 11,
+                                color: colors.primary,
+                                marginTop: 4,
+                              }}
+                            >
+                              Submitted via {app.production_team.name}
+                            </Text>
+                          )}
                         </View>
                       </View>
 
                       {/* Skills/Instruments */}
-                      {app.applicant?.skills &&
-                        app.applicant.skills.length > 0 && (
+                      {displaySkills.length > 0 && (
                           <View style={{ marginBottom: 12 }}>
                             <Text
                               style={{
@@ -1010,7 +1442,7 @@ export default function GigDetailsScreen() {
                                 gap: 6,
                               }}
                             >
-                              {app.applicant.skills
+                              {displaySkills
                                 .slice(0, 5)
                                 .map((skill: string, idx: number) => (
                                   <View
@@ -1033,7 +1465,7 @@ export default function GigDetailsScreen() {
                                     </Text>
                                   </View>
                                 ))}
-                              {app.applicant.skills.length > 5 && (
+                              {displaySkills.length > 5 && (
                                 <View
                                   style={[
                                     styles.skillTag,
@@ -1047,7 +1479,7 @@ export default function GigDetailsScreen() {
                                       color: colors.primary,
                                     }}
                                   >
-                                    +{app.applicant.skills.length - 5}
+                                    +{displaySkills.length - 5}
                                   </Text>
                                 </View>
                               )}
@@ -1056,7 +1488,7 @@ export default function GigDetailsScreen() {
                         )}
 
                       {/* Group Members */}
-                      {app.group?.members && app.group.members.length > 0 && (
+                      {displayGroup?.members && displayGroup.members.length > 0 && (
                         <View style={{ marginBottom: 12 }}>
                           <Text
                             style={{
@@ -1066,7 +1498,7 @@ export default function GigDetailsScreen() {
                               marginBottom: 6,
                             }}
                           >
-                            Group Members ({app.group.members.length})
+                            Group Members ({displayGroup.members.length})
                           </Text>
                           <Text
                             style={{
@@ -1075,7 +1507,7 @@ export default function GigDetailsScreen() {
                               color: colors.text,
                             }}
                           >
-                            {app.group.members
+                            {displayGroup.members
                               .map((m: any) =>
                                 typeof m === "string" ? m : m.name,
                               )
@@ -1125,23 +1557,7 @@ export default function GigDetailsScreen() {
                       {/* Demo Video */}
                       {app.video_url && (
                         <TouchableOpacity activeOpacity={1}
-                          onPress={async () => {
-                            try {
-                              const supported = await Linking.canOpenURL(
-                                app.video_url,
-                              );
-                              if (supported) {
-                                await Linking.openURL(app.video_url);
-                              } else {
-                                Alert.alert(
-                                  "Error",
-                                  "Unable to open video link",
-                                );
-                              }
-                            } catch (error) {
-                              Alert.alert("Error", "Failed to open video");
-                            }
-                          }}
+                          onPress={() => openMediaOrExternal(app.video_url, "Demo Video")}
                           style={[
                             styles.mediaButton,
                             {
@@ -1182,26 +1598,7 @@ export default function GigDetailsScreen() {
                             CV / Resume
                           </Text>
                           <TouchableOpacity activeOpacity={1}
-                            onPress={async () => {
-                              try {
-                                const supported = await Linking.canOpenURL(
-                                  app.cv_url,
-                                );
-                                if (supported) {
-                                  await Linking.openURL(app.cv_url);
-                                } else {
-                                  Alert.alert(
-                                    "Error",
-                                    "Unable to open CV/Resume",
-                                  );
-                                }
-                              } catch (error) {
-                                Alert.alert(
-                                  "Error",
-                                  "Failed to open CV/Resume",
-                                );
-                              }
-                            }}
+                            onPress={() => openMediaOrExternal(app.cv_url, "CV / Resume")}
                             style={[
                               styles.cvButton,
                               {
@@ -1236,8 +1633,7 @@ export default function GigDetailsScreen() {
                       )}
 
                       {/* Portfolio/Music - Instagram Style Grid */}
-                      {app.applicant?.portfolio_urls &&
-                        app.applicant.portfolio_urls.length > 0 && (
+                      {displayPortfolio.length > 0 && (
                           <View style={{ marginBottom: 12 }}>
                             <Text
                               style={{
@@ -1250,7 +1646,7 @@ export default function GigDetailsScreen() {
                               Music & Portfolio
                             </Text>
                             <View style={styles.portfolioGrid}>
-                              {app.applicant.portfolio_urls.map(
+                              {displayPortfolio.map(
                                 (url: string, idx: number) => {
                                   const isImage =
                                     /\.(jpg|jpeg|png|gif|webp)$/i.test(url);
@@ -1265,20 +1661,7 @@ export default function GigDetailsScreen() {
                                   return (
                                     <TouchableOpacity activeOpacity={1}
                                       key={idx}
-                                      onPress={async () => {
-                                        try {
-                                          const supported =
-                                            await Linking.canOpenURL(url);
-                                          if (supported) {
-                                            await Linking.openURL(url);
-                                          }
-                                        } catch (error) {
-                                          Alert.alert(
-                                            "Error",
-                                            "Failed to open link",
-                                          );
-                                        }
-                                      }}
+                                      onPress={() => openMediaOrExternal(url, isVideo ? "Portfolio Video" : "Portfolio Media")}
                                       style={[
                                         styles.portfolioGridItem,
                                         {
@@ -1360,8 +1743,7 @@ export default function GigDetailsScreen() {
                         )}
 
                       {/* Legacy Portfolio Links (for non-media URLs) */}
-                      {app.applicant?.portfolio_urls &&
-                        app.applicant.portfolio_urls.filter(
+                      {displayPortfolio.filter(
                           (url: string) =>
                             !/\.(jpg|jpeg|png|gif|webp|mp4|mov|webm)$/i.test(
                               url,
@@ -1382,7 +1764,7 @@ export default function GigDetailsScreen() {
                             >
                               Other Links
                             </Text>
-                            {app.applicant.portfolio_urls
+                            {displayPortfolio
                               .filter(
                                 (url: string) =>
                                   !/\.(jpg|jpeg|png|gif|webp|mp4|mov|webm)$/i.test(
@@ -1397,20 +1779,7 @@ export default function GigDetailsScreen() {
                               .map((url: string, idx: number) => (
                                 <TouchableOpacity activeOpacity={1}
                                   key={idx}
-                                  onPress={async () => {
-                                    try {
-                                      const supported =
-                                        await Linking.canOpenURL(url);
-                                      if (supported) {
-                                        await Linking.openURL(url);
-                                      }
-                                    } catch (error) {
-                                      Alert.alert(
-                                        "Error",
-                                        "Failed to open link",
-                                      );
-                                    }
-                                  }}
+                                  onPress={() => openMediaOrExternal(url, "Portfolio Link")}
                                   style={[
                                     styles.portfolioLink,
                                     { backgroundColor: colors.inputBackground },
@@ -1446,40 +1815,22 @@ export default function GigDetailsScreen() {
                       {/* View Full Profile Button */}
                       <TouchableOpacity activeOpacity={1}
                         onPress={() => {
-                          console.log("👤 View Profile pressed");
-                          console.log("👤 app.group:", app.group);
-                          console.log("👤 app.applicant:", app.applicant);
-                          console.log("👤 app.applicant_id:", app.applicant_id);
-
-                          if (app.group?.id) {
-                            console.log(
-                              "👤 Navigating to group:",
-                              app.group.id,
-                            );
+                          if (displayGroup?.id) {
                             router.push({
                               pathname: "/group_details",
-                              params: { id: app.group.id },
+                              params: { id: displayGroup.id },
                             });
-                          } else if (app.applicant?.id) {
-                            console.log(
-                              "👤 Navigating to profile with applicant.id:",
-                              app.applicant.id,
-                            );
+                          } else if (displayApplicant?.id) {
                             router.push({
                               pathname: "/profile",
-                              params: { userId: app.applicant.id },
+                              params: { userId: displayApplicant.id },
                             });
                           } else if (app.applicant_id) {
-                            console.log(
-                              "👤 Navigating to profile with applicant_id:",
-                              app.applicant_id,
-                            );
                             router.push({
                               pathname: "/profile",
                               params: { userId: app.applicant_id },
                             });
                           } else {
-                            console.log("❌ No ID available for navigation");
                             Alert.alert("Error", "Unable to view profile");
                           }
                         }}
@@ -1501,12 +1852,12 @@ export default function GigDetailsScreen() {
                             marginLeft: 8,
                           }}
                         >
-                          View Full {app.group ? "Group" : "Profile"}
+                          View Full {displayGroup ? "Group" : "Profile"}
                         </Text>
                       </TouchableOpacity>
 
                       {/* Action Buttons */}
-                      {app.status === "pending" && (
+                      {canManageGig && String(app.status || "").toLowerCase() === "pending" && (
                         <View style={[styles.actionButtons, { marginTop: 12 }]}>
                           <TouchableOpacity activeOpacity={1}
                             onPress={() => confirmAction(app.id, "rejected")}
@@ -1543,7 +1894,8 @@ export default function GigDetailsScreen() {
                         </View>
                       )}
                     </View>
-                  ))
+                    );
+                  })
                 )}
               </View>
             )}
@@ -1589,12 +1941,14 @@ export default function GigDetailsScreen() {
                     >
                       <View style={styles.reviewUserHeader}>
                         <View style={styles.userInfo}>
-                          <Image
-                            source={{ uri: review.author?.avatar_url || null }}
+                          <ProfileAvatar
+                            uri={review.author?.avatar_url}
                             style={[
                               styles.userAvatar,
                               { backgroundColor: colors.border },
                             ]}
+                            backgroundColor={isDark ? "#374151" : "#E5E7EB"}
+                            iconColor={colors.textSecondary}
                           />
                           <Text
                             style={{
@@ -1612,7 +1966,7 @@ export default function GigDetailsScreen() {
                             fontFamily: "Poppins_400Regular",
                           }}
                         >
-                          {new Date(review.created_at).toLocaleDateString()}
+                          {formatFriendlyDateTime(review.created_at)}
                         </Text>
                       </View>
                       <View style={[styles.starsRow, { marginBottom: 8 }]}>
@@ -1644,7 +1998,7 @@ export default function GigDetailsScreen() {
                 )}
               </View>
             )}
-          </View>
+          </SmoothTabTransition>
         </ScrollView>
 
         <Navbar />
@@ -1656,7 +2010,95 @@ export default function GigDetailsScreen() {
         title={modalTitle}
         message={modalMessage}
         buttonText={modalButtonText}
+        danger={modalButtonText === "Decline"}
       />
+      <TrackedBottomSheetModal
+        ref={inviteSheetRef}
+        overlayLabel="ManageGigInviteSheet"
+        index={0}
+        snapPoints={inviteSnapPoints}
+        animationConfigs={inviteAnimationConfigs}
+        animateOnMount
+        enableDynamicSizing={false}
+        enableContentPanningGesture={false}
+        enableOverDrag={false}
+        enablePanDownToClose={!sendingInvites}
+        backdropComponent={renderInviteBackdrop}
+        backgroundStyle={{ backgroundColor: colors.background }}
+        handleIndicatorStyle={{
+          backgroundColor: isDark ? "#4B5563" : "#E5E7EB",
+          width: 40,
+        }}
+        onDismiss={handleInviteSheetDismiss}
+      >
+        <BottomSheetScrollView
+          contentContainerStyle={styles.inviteSheetContent}
+          showsVerticalScrollIndicator={false}
+          showsHorizontalScrollIndicator={false}
+          nestedScrollEnabled
+          keyboardShouldPersistTaps="handled"
+        >
+          <View style={[styles.inviteSheetHeader, { borderBottomColor: colors.border }]}>
+            <View style={styles.sheetHeaderCopy}>
+              <Text style={[styles.sheetEyebrow, { color: colors.textSecondary }]}>{gig?.name || "Gig"}</Text>
+              <Text style={[styles.sheetTitle, { color: colors.text }]}>Invite Performers</Text>
+            </View>
+            <TouchableOpacity
+              activeOpacity={1}
+              onPress={closeInviteModal}
+              style={[styles.sheetCloseButton, { backgroundColor: colors.card, borderColor: colors.border }]}
+            >
+              <Ionicons name="close" size={18} color={colors.text} />
+            </TouchableOpacity>
+          </View>
+          <View style={styles.modalContent}>
+            <ProductionInviteSection
+              currentUserId={currentUserId}
+              selectedTargets={selectedInviteTargets}
+              onSelectedTargetsChange={setSelectedInviteTargets}
+              inviteMessage={inviteMessage}
+              onInviteMessageChange={setInviteMessage}
+              disabled={sendingInvites}
+              title="Invite Musicians, Duo, or Group"
+              description="Search performers to invite to this gig. Recipients can respond from Bookings > Pending."
+              searchPlaceholder="Search musician, duo, or group"
+              messagePlaceholder="Add optional gig details for the invite"
+            />
+
+            <TouchableOpacity
+              activeOpacity={isInviteSubmitDisabled ? 1 : 0.78}
+              onPress={handleSendVenueInvites}
+              disabled={isInviteSubmitDisabled}
+              style={[
+                styles.submitBtn,
+                {
+                  backgroundColor:
+                    selectedInviteTargets.length > 0 ? colors.primary : colors.border,
+                  opacity: isInviteSubmitDisabled ? 0.6 : 1,
+                },
+              ]}
+            >
+              {sendingInvites ? (
+                <ActivityIndicator size="small" color="#fff" />
+              ) : (
+                <Text
+                  style={[
+                    styles.submitBtnText,
+                    {
+                      color:
+                        selectedInviteTargets.length > 0
+                          ? "#FFFFFF"
+                          : colors.textSecondary,
+                    },
+                  ]}
+                >
+                  Send Invites
+                </Text>
+              )}
+            </TouchableOpacity>
+          </View>
+        </BottomSheetScrollView>
+      </TrackedBottomSheetModal>
       <CustomAlert
         visible={alertVisible}
         type={alertConfig.type}
@@ -1664,6 +2106,12 @@ export default function GigDetailsScreen() {
         message={alertConfig.message}
         buttons={alertConfig.buttons}
         onClose={() => setAlertVisible(false)}
+      />
+      <InAppMediaViewer
+        visible={!!mediaViewerUrl}
+        uri={mediaViewerUrl}
+        title={mediaViewerTitle}
+        onClose={() => setMediaViewerUrl(null)}
       />
     </>
   );
@@ -1729,9 +2177,6 @@ const styles = StyleSheet.create({
   tabsContainer: {
     marginHorizontal: 24,
     marginTop: 24,
-    padding: 4,
-    borderRadius: 16,
-    flexDirection: "row",
   },
   tab: {
     flex: 1,
@@ -1755,22 +2200,22 @@ const styles = StyleSheet.create({
     lineHeight: 24,
     fontFamily: "Poppins_400Regular",
   },
-  dealCard: {
+  offerCard: {
     padding: 20,
     borderRadius: 24,
     borderWidth: 1,
   },
-  dealHeader: {
+  offerHeader: {
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
     marginBottom: 8,
   },
-  dealTitle: {
+  offerTitle: {
     fontSize: 18,
     fontFamily: "Poppins_700Bold",
   },
-  dealInfo: {
+  offerInfo: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "flex-end",
@@ -1785,6 +2230,47 @@ const styles = StyleSheet.create({
   sectionTitle: {
     fontSize: 18,
     fontFamily: "Poppins_600SemiBold",
+  },
+  detailList: {
+    gap: 12,
+  },
+  detailCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 14,
+  },
+  detailCardTitle: {
+    fontFamily: "Poppins_600SemiBold",
+    fontSize: 14,
+  },
+  detailCardText: {
+    marginTop: 4,
+    fontFamily: "Poppins_400Regular",
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  slotDetailCard: {
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 14,
+  },
+  slotDetailHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: 12,
+    marginBottom: 8,
+  },
+  slotDetailTitle: {
+    fontFamily: "Poppins_600SemiBold",
+    fontSize: 15,
+  },
+  slotDetailCount: {
+    fontFamily: "Poppins_700Bold",
+    fontSize: 13,
   },
   galleryContainer: {
     gap: 12,
@@ -1838,10 +2324,29 @@ const styles = StyleSheet.create({
   applicantsContainer: {
     gap: 16,
   },
+  applicantsHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+  },
   applicantsTitle: {
     fontSize: 13,
     letterSpacing: 0.5,
     fontFamily: "Poppins_600SemiBold",
+  },
+  inviteBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  inviteBtnText: {
+    color: "#FFFFFF",
+    fontFamily: "Poppins_600SemiBold",
+    fontSize: 12,
   },
   applicantCard: {
     padding: 16,
@@ -1968,6 +2473,56 @@ const styles = StyleSheet.create({
     paddingVertical: 2,
     borderRadius: 6,
   },
+  sheetHeaderCopy: {
+    flex: 1,
+    paddingRight: 12,
+  },
+  sheetEyebrow: {
+    fontSize: 11,
+    letterSpacing: 1.4,
+    textTransform: "uppercase",
+    fontFamily: "Poppins_700Bold",
+  },
+  sheetTitle: {
+    marginTop: 2,
+    fontSize: 20,
+    fontFamily: "Poppins_700Bold",
+  },
+  sheetCloseButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  inviteSheetContent: {
+    paddingHorizontal: 20,
+    paddingTop: 10,
+    paddingBottom: 28,
+  },
+  inviteSheetHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    borderBottomWidth: 1,
+    paddingBottom: 14,
+    marginBottom: 14,
+  },
+  modalContent: {
+    paddingHorizontal: 4,
+  },
+  submitBtn: {
+    marginTop: 20,
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: "center",
+  },
+  submitBtnText: {
+    color: "#fff",
+    fontFamily: "Poppins_600SemiBold",
+    fontSize: 15,
+  },
   skillTag: {
     paddingHorizontal: 10,
     paddingVertical: 4,
@@ -1988,6 +2543,20 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     borderWidth: 1,
     marginBottom: 12,
+  },
+  mediaButtonText: {
+    marginLeft: 8,
+    fontFamily: "Poppins_600SemiBold",
+  },
+  documentMetaCard: {
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 16,
+  },
+  documentMetaRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
   },
   portfolioLink: {
     flexDirection: "row",
@@ -2055,3 +2624,4 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(0,0,0,0.3)",
   },
 });
+

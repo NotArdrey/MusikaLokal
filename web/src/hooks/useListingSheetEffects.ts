@@ -21,6 +21,22 @@ interface UseListingSheetEffectsParams {
   setRelatedListings: (value: any[]) => void;
 }
 
+const getReviewTargetColumn = (type: unknown) => {
+  const normalized = String(type || "").trim().toLowerCase();
+  if (normalized === "studio" || normalized === "venue") return "studio_id";
+  if (normalized === "gig") return "gig_id";
+  if (normalized === "artist" || normalized === "musician" || normalized === "profile") return "user_id";
+  return "group_id";
+};
+
+const normalizeReviewRows = (rows: any[] = []) =>
+  rows.map((row) => ({
+    ...row,
+    author: row?.author ?? row?.profiles ?? null,
+    content: row?.content ?? row?.comment ?? null,
+    likes_count: Number(row?.likes_count ?? row?.computed_likes_count ?? 0),
+  }));
+
 export const useListingSheetEffects = ({
   group,
   listingId,
@@ -85,24 +101,31 @@ export const useListingSheetEffects = ({
 
   useEffect(() => {
     const fetchDetails = async () => {
-      if (!listingId) return;
+      if (!listingId || !group) {
+        setReviews([]);
+        setRelatedListings([]);
+        return;
+      }
+
       try {
-        if (!group) return;
+        const col = getReviewTargetColumn(group.type);
 
-        let col = "group_id";
-        if (group.type === "Studio" || group.type === "Venue") col = "studio_id";
-        if (group.type === "Gig") col = "gig_id";
-
-        const { data: rData } = await supabase
+        const { data: rData, error: reviewsError } = await supabase
           .from("reviews")
-          .select("*, author:author_id(full_name, avatar_url)")
+          .select("*, author:profiles!reviews_author_id_fkey(id, full_name, avatar_url, updated_at)")
           .eq(col, listingId)
           .order("created_at", { ascending: false })
           .limit(5);
 
-        if (rData) setReviews(rData);
+        if (reviewsError) {
+          console.log("Error reviews:", reviewsError);
+          setReviews([]);
+        } else {
+          setReviews(normalizeReviewRows(rData || []));
+        }
       } catch (e) {
         console.log("Error reviews:", e);
+        setReviews([]);
       }
 
       if (group.embedding) {
@@ -130,14 +153,22 @@ export const useListingSheetEffects = ({
                 .in("id", relatedIds);
 
               if (fullRelated) setRelatedListings(fullRelated);
+              else setRelatedListings([]);
+            } else {
+              setRelatedListings([]);
             }
+          } else {
+            setRelatedListings([]);
           }
         } catch (e) {
           console.log("Error fetching related:", e);
+          setRelatedListings([]);
         }
+      } else {
+        setRelatedListings([]);
       }
     };
 
     fetchDetails();
-  }, [listingId, group]);
+  }, [listingId, group, setRelatedListings, setReviews]);
 };

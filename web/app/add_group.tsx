@@ -12,6 +12,7 @@ import {
     Text,
     TextInput,
     TouchableOpacity,
+    useWindowDimensions,
     View
 } from "react-native";
 import { supabase } from "../lib/supabase";
@@ -19,8 +20,9 @@ import CustomAlert, { AlertType } from "../src/components/CustomAlert";
 import Header from "../src/components/header";
 import ImageUploader from "../src/components/ImageUploader";
 import LocationPicker from "../src/components/LocationPicker";
-import Modal from "../src/components/modal";
+import Modal, { normalizeVisibleInput } from "../src/components/modal";
 import Navbar from "../src/components/navbar";
+import ProfileAvatar from "../src/components/ProfileAvatar";
 import {
     isDuoGroupType,
     mapDbGroupTypeToUiGroupType,
@@ -66,9 +68,17 @@ const GENRES = [
 
 const TITLE_MAX_LENGTH = 120;
 const DESCRIPTION_MAX_LENGTH = 1000;
+const IS_WEB = Platform.OS === "web";
 
 export default function AddGroupScreen() {
   const { colors, isDark } = useTheme();
+  const { width: viewportWidth } = useWindowDimensions();
+  const isWebDesktop = Platform.OS === "web" && viewportWidth >= 768;
+  const pageBackground = isWebDesktop
+    ? isDark
+      ? "#0A1224"
+      : "#E9EEF8"
+    : colors.background;
   const params = useLocalSearchParams<{ mode?: string }>();
   const isDuoMode = params.mode === "duo";
   const { isSystemLocked, showLockAlert } = useAuth();
@@ -97,6 +107,8 @@ export default function AddGroupScreen() {
   }
   const [members, setMembers] = useState<MemberDetail[]>([]);
   const [leaderInstrument, setLeaderInstrument] = useState(""); // Separate state for leader instrument input
+  const [isLeaderInstrumentFinalized, setIsLeaderInstrumentFinalized] = useState(false);
+  const [memberInstrumentFinalization, setMemberInstrumentFinalization] = useState<Record<number, boolean>>({});
 
   const [newMemberInstrument, setNewMemberInstrument] = useState("");
   const [authorized, setAuthorized] = useState(false);
@@ -160,6 +172,26 @@ export default function AddGroupScreen() {
       return;
     }
 
+    const normalizeMemberName = (value?: string | null) =>
+      (value || "").trim().toLowerCase();
+
+    const isMusicianAlreadyAdded = (musician: {
+      id?: string | null;
+      full_name?: string | null;
+    }) => {
+      const musicianName = normalizeMemberName(musician.full_name);
+      return members.some((member) => {
+        const sameId = Boolean(
+          member.user_id && musician.id && member.user_id === musician.id,
+        );
+        const sameName = Boolean(
+          musicianName &&
+            normalizeMemberName(member.name) === musicianName,
+        );
+        return sameId || sameName;
+      });
+    };
+
     setIsSearching(true);
     try {
       const { data, error } = await supabase
@@ -170,7 +202,10 @@ export default function AddGroupScreen() {
         .limit(5);
 
       if (error) throw error;
-      setSearchResults(data || []);
+      const filteredResults = (data || []).filter(
+        (musician) => !isMusicianAlreadyAdded(musician),
+      );
+      setSearchResults(filteredResults);
     } catch (error) {
       console.error("Error searching musicians:", error);
     } finally {
@@ -184,9 +219,17 @@ export default function AddGroupScreen() {
   const selectMember = (musician: any) => {
     // Check if already added
     if (
-      members.some(
-        (m) => m.user_id === musician.id || m.name === musician.full_name,
-      )
+      members.some((m) => {
+        const normalizedMusicianName = (musician.full_name || "")
+          .trim()
+          .toLowerCase();
+        const normalizedMemberName = (m.name || "").trim().toLowerCase();
+        return (
+          (m.user_id && musician.id && m.user_id === musician.id) ||
+          (normalizedMusicianName &&
+            normalizedMemberName === normalizedMusicianName)
+        );
+      })
     ) {
       showAlert(
         "warning",
@@ -211,7 +254,14 @@ export default function AddGroupScreen() {
         user_id: pendingMember.id,
         avatar_url: pendingMember.avatar_url,
       };
-      setMembers([...members, newMember]);
+      setMembers((prev) => {
+        const nextMembers = [...prev, newMember];
+        setMemberInstrumentFinalization((prevFinalization) => ({
+          ...prevFinalization,
+          [nextMembers.length - 1]: true,
+        }));
+        return nextMembers;
+      });
       setPendingMember(null);
       setNewMemberInstrument("");
     }
@@ -254,7 +304,7 @@ export default function AddGroupScreen() {
 
       if (profile?.role !== "musician") {
         showAlert("error", "Unauthorized", "Only musicians can create groups.");
-        router.replace("/home");
+        router.replace("/feed");
         return;
       }
 
@@ -272,11 +322,13 @@ export default function AddGroupScreen() {
           avatar_url: profile?.avatar_url,
         },
       ]);
+      setIsLeaderInstrumentFinalized(false);
+      setMemberInstrumentFinalization({ 0: false });
 
       setAuthorized(true);
     } catch (e) {
       console.error("Authorization check failed:", e);
-      router.replace("/home");
+      router.replace("/feed");
     } finally {
       setCheckingAuth(false);
     }
@@ -328,24 +380,31 @@ export default function AddGroupScreen() {
     }
     if (currentStep === 2) {
       const leaderIndex = getLeaderIndex();
-      // Sync leader instrument before validation
+      const normalizedLeaderInstrument = leaderInstrument.trim();
+      let membersForValidation = members;
+
+      // Resolve leader instrument in-memory first to avoid stale state reads.
       if (
-        leaderInstrument.trim() &&
-        leaderIndex >= 0
+        normalizedLeaderInstrument &&
+        leaderIndex >= 0 &&
+        members[leaderIndex]?.instrument?.trim() !== normalizedLeaderInstrument
       ) {
-        const updated = [...members];
-        updated[leaderIndex] = {
-          ...updated[leaderIndex],
-          instrument: leaderInstrument.trim(),
-        };
-        setMembers(updated);
+        membersForValidation = members.map((member, index) =>
+          index === leaderIndex
+            ? { ...member, instrument: normalizedLeaderInstrument }
+            : member,
+        );
+        setMembers(membersForValidation);
       }
 
       // Validate leader has an instrument/role
-      const leaderHasInstrument =
-        leaderInstrument.trim() ||
-        members.find((m) => isGroupLeaderMember(m, currentUserId))?.instrument?.trim();
-      if (!leaderHasInstrument) {
+      const leaderMember =
+        leaderIndex >= 0
+          ? membersForValidation[leaderIndex]
+          : membersForValidation.find((m) =>
+              isGroupLeaderMember(m, currentUserId),
+            );
+      if (!leaderMember?.instrument?.trim()) {
         showAlert(
           "error",
           "Leader Instrument Required",
@@ -353,8 +412,30 @@ export default function AddGroupScreen() {
         );
         return false;
       }
+      if (!isLeaderInstrumentFinalized) {
+        showAlert(
+          "error",
+          "Leader Instrument Not Finalized",
+          "Tap the check icon beside the leader instrument to finalize it before continuing.",
+        );
+        return false;
+      }
+      const unfinalizedMember = membersForValidation.find((member, index) => {
+        if (isGroupLeaderMember(member, currentUserId)) {
+          return false;
+        }
+        return Boolean(member.instrument?.trim()) && !memberInstrumentFinalization[index];
+      });
+      if (unfinalizedMember) {
+        showAlert(
+          "error",
+          "Member Instrument Not Finalized",
+          `Tap the check icon beside ${unfinalizedMember.name || "this member"}'s instrument before continuing.`,
+        );
+        return false;
+      }
       // Validate all members have instruments
-      const memberWithoutInstrument = members.find(
+      const memberWithoutInstrument = membersForValidation.find(
         (m) => !m.instrument?.trim(),
       );
       if (memberWithoutInstrument) {
@@ -368,7 +449,7 @@ export default function AddGroupScreen() {
       // Validate member count based on group type
       const selectedType = PH_MUSIC_GROUP_TYPES.find((t) => t.id === groupType);
       if (selectedType) {
-        if (members.length < selectedType.minMembers) {
+        if (membersForValidation.length < selectedType.minMembers) {
           showAlert(
             "warning",
             `${selectedType.label} Requirement`,
@@ -411,7 +492,7 @@ export default function AddGroupScreen() {
 
   const handleBack = () => {
     if (step > 1) setStep(step - 1);
-    else router.back();
+    else router.replace("/my_group");
   };
 
   const createGroup = async () => {
@@ -568,7 +649,7 @@ export default function AddGroupScreen() {
     if (newGroupId) {
       router.replace({ pathname: "/manage_group", params: { id: newGroupId } });
     } else {
-      router.back();
+      router.replace("/my_group");
     }
   };
 
@@ -611,10 +692,35 @@ export default function AddGroupScreen() {
       );
       return;
     }
-    setMembers(members.filter((_, i) => i !== index));
+    setMembers((prev) => prev.filter((_, i) => i !== index));
+    setMemberInstrumentFinalization((prev) => {
+      const next: Record<number, boolean> = {};
+      Object.entries(prev).forEach(([rawIndex, isFinalized]) => {
+        const memberIndex = Number(rawIndex);
+        if (memberIndex < index) {
+          next[memberIndex] = isFinalized;
+          return;
+        }
+        if (memberIndex > index) {
+          next[memberIndex - 1] = isFinalized;
+        }
+      });
+      return next;
+    });
   };
 
   const updateMemberInstrument = (index: number, instrument: string) => {
+    const currentValue = normalizeVisibleInput(members[index]?.instrument ?? "");
+    const nextValue = normalizeVisibleInput(instrument);
+    if (currentValue === nextValue) {
+      return;
+    }
+
+    setMemberInstrumentFinalization((prev) => ({
+      ...prev,
+      [index]: false,
+    }));
+
     setMembers((prev) => {
       const updated = prev.map((member, memberIndex) =>
         memberIndex === index ? { ...member, instrument } : member,
@@ -622,10 +728,49 @@ export default function AddGroupScreen() {
 
       if (isGroupLeaderMember(updated[index], currentUserId)) {
         setLeaderInstrument(instrument);
+        setIsLeaderInstrumentFinalized(false);
       }
 
       return updated;
     });
+  };
+
+  const finalizeMemberInstrument = (index: number) => {
+    const value = members[index]?.instrument?.trim() || "";
+    const isLeader = isGroupLeaderMember(members[index], currentUserId);
+
+    if (!value) {
+      showAlert(
+        "warning",
+        isLeader ? "Leader Instrument Required" : "Member Instrument Required",
+        isLeader
+          ? "Please enter the leader instrument before finalizing."
+          : "Please enter the member instrument before finalizing.",
+      );
+      return;
+    }
+
+    updateMemberInstrument(index, value);
+    setMemberInstrumentFinalization((prev) => ({
+      ...prev,
+      [index]: true,
+    }));
+    if (isLeader) {
+      setLeaderInstrument(value);
+      setIsLeaderInstrumentFinalized(true);
+    }
+    Keyboard.dismiss();
+  };
+
+  const enableMemberInstrumentEdit = (index: number) => {
+    const isLeader = isGroupLeaderMember(members[index], currentUserId);
+    setMemberInstrumentFinalization((prev) => ({
+      ...prev,
+      [index]: false,
+    }));
+    if (isLeader) {
+      setIsLeaderInstrumentFinalized(false);
+    }
   };
 
   const renderInput = (
@@ -642,11 +787,19 @@ export default function AddGroupScreen() {
       : normalizedLabel.includes("name") || normalizedLabel.includes("title")
         ? TITLE_MAX_LENGTH
         : undefined;
+    const isRequiredLabel =
+      normalizedLabel.includes("name") ||
+      normalizedLabel.includes("title") ||
+      normalizedLabel.includes("description") ||
+      normalizedLabel.includes("payout");
 
     return (
       <View style={styles.inputContainer}>
       <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>
         {label}
+        {isRequiredLabel ? (
+          <Text style={{ color: "#EF4444" }}> *</Text>
+        ) : null}
       </Text>
       <View
         style={[
@@ -673,7 +826,7 @@ export default function AddGroupScreen() {
               height: multiline ? 120 : "auto",
               textAlign: "left",
               textAlignVertical: multiline ? "top" : "center",
-              paddingVertical: 16,
+              paddingVertical: multiline ? 12 : 16,
             },
           ]}
         />
@@ -682,13 +835,65 @@ export default function AddGroupScreen() {
     );
   };
 
+  const membersMissingInstrumentCount = members.filter(
+    (member) => !member.instrument?.trim(),
+  ).length;
+  const leaderIndexForStep = getLeaderIndex();
+  const leaderNeedsFinalization =
+    step === 2 &&
+    leaderIndexForStep >= 0 &&
+    Boolean(members[leaderIndexForStep]?.instrument?.trim()) &&
+    !isLeaderInstrumentFinalized;
+  const membersNeedFinalizationCount =
+    step === 2
+      ? members.reduce((count, member, index) => {
+          const hasInstrument = Boolean(member.instrument?.trim());
+          if (!hasInstrument) {
+            return count;
+          }
+          const isLeader = isGroupLeaderMember(member, currentUserId);
+          if (isLeader) {
+            return leaderNeedsFinalization ? count + 1 : count;
+          }
+          return memberInstrumentFinalization[index] ? count : count + 1;
+        }, 0)
+      : 0;
+  const nonLeaderNeedsFinalization =
+    membersNeedFinalizationCount - (leaderNeedsFinalization ? 1 : 0) > 0;
+  const disableNextForMissingInstruments =
+    step === 2 &&
+    (membersMissingInstrumentCount > 0 || membersNeedFinalizationCount > 0);
+  const selectedGroupType = PH_MUSIC_GROUP_TYPES.find((type) => type.id === groupType);
+  const requiredMemberCount = selectedGroupType?.minMembers || 1;
+  const remainingMemberCount = Math.max(requiredMemberCount - members.length, 0);
+  const isCurrentStepComplete =
+    step === 1
+      ? groupName.trim().length > 0 &&
+        selectedGenres.length > 0 &&
+        description.trim().length > 0 &&
+        Boolean(address && latitude && longitude) &&
+        images.length > 0
+      : step === 2
+        ? remainingMemberCount === 0 && !disableNextForMissingInstruments
+        : true;
+
   return (
     <>
-      <View style={[styles.flex1, { backgroundColor: colors.background }]}>
-        <Header title="Create Group" />
+      <View style={[styles.flex1, { backgroundColor: pageBackground }]}>
+        <Header title="Create Group" cardStyle onBackPress={handleBack} />
+
+        <View style={styles.contentFrame}>
 
         {/* Enhanced Step Indicator (Fixed at top) */}
-        <View style={styles.stepIndicatorContainer}>
+        <View
+          style={[
+            styles.stepIndicatorContainer,
+            {
+              backgroundColor: isDark ? "#111827" : "#FFFFFF",
+              borderColor: isDark ? "#1F2937" : "#E5E7EB",
+            },
+          ]}
+        >
           <View style={styles.stepIndicatorContent}>
             {/* Progress Line Background */}
             <View
@@ -738,6 +943,9 @@ export default function AddGroupScreen() {
                     />
                   </View>
                   <Text
+                    numberOfLines={1}
+                    adjustsFontSizeToFit
+                    minimumFontScale={0.82}
                     style={[
                       styles.stepText,
                       {
@@ -763,7 +971,13 @@ export default function AddGroupScreen() {
           keyboardVerticalOffset={Platform.OS === "ios" ? 90 : 0}
         >
           <ScrollView
-            style={styles.formContainer}
+            style={[
+              styles.formContainer,
+              {
+                backgroundColor: isDark ? "#111827" : "#FFFFFF",
+                borderColor: isDark ? "#1F2937" : "#E5E7EB",
+              },
+            ]}
             showsVerticalScrollIndicator={false}
             contentContainerStyle={[
               styles.scrollContent,
@@ -922,6 +1136,7 @@ export default function AddGroupScreen() {
                     bucketName="listings"
                     userId={newGroupId || "temp"}
                     folder="groups"
+                    safetyContext="add_group_images"
                   />
                 </View>
 
@@ -1059,35 +1274,12 @@ export default function AddGroupScreen() {
                             { borderBottomColor: colors.border },
                           ]}
                         >
-                          <View
-                            style={[
-                              styles.avatarPlaceholder,
-                              {
-                                backgroundColor: colors.primary + "20",
-                                marginRight: 12,
-                              },
-                            ]}
-                          >
-                            {musician.avatar_url ? (
-                              <Image
-                                source={{ uri: musician.avatar_url }}
-                                style={{
-                                  width: 32,
-                                  height: 32,
-                                  borderRadius: 16,
-                                }}
-                              />
-                            ) : (
-                              <Text
-                                style={{
-                                  color: colors.primary,
-                                  fontWeight: "bold",
-                                }}
-                              >
-                                {musician.full_name.charAt(0)}
-                              </Text>
-                            )}
-                          </View>
+                          <ProfileAvatar
+                            uri={musician.avatar_url}
+                            style={[styles.avatarPlaceholder, { marginRight: 12 }]}
+                            backgroundColor={isDark ? "#374151" : "#E5E7EB"}
+                            iconColor={colors.textSecondary}
+                          />
                           <View>
                             <Text
                               style={{
@@ -1138,31 +1330,12 @@ export default function AddGroupScreen() {
                           marginBottom: 8,
                         }}
                       >
-                        <View
-                          style={[
-                            styles.avatarPlaceholder,
-                            {
-                              backgroundColor: colors.primary + "20",
-                              marginRight: 12,
-                            },
-                          ]}
-                        >
-                          {pendingMember.avatar_url ? (
-                            <Image
-                              source={{ uri: pendingMember.avatar_url }}
-                              style={{ width: 32, height: 32, borderRadius: 16 }}
-                            />
-                          ) : (
-                            <Text
-                              style={{
-                                color: colors.primary,
-                                fontWeight: "bold",
-                              }}
-                            >
-                              {pendingMember.full_name?.charAt(0)}
-                            </Text>
-                          )}
-                        </View>
+                        <ProfileAvatar
+                          uri={pendingMember.avatar_url}
+                          style={[styles.avatarPlaceholder, { marginRight: 12 }]}
+                          backgroundColor={isDark ? "#374151" : "#E5E7EB"}
+                          iconColor={colors.textSecondary}
+                        />
                         <Text
                           style={{
                             color: colors.text,
@@ -1172,7 +1345,7 @@ export default function AddGroupScreen() {
                           {pendingMember.full_name}
                         </Text>
                       </View>
-                      <View style={{ flexDirection: "row", gap: 8 }}>
+                      <View style={{ flexDirection: "row", gap: 8 , flexWrap: "wrap", minWidth: "100%" }}>
                         <TextInput
                           value={newMemberInstrument}
                           onChangeText={setNewMemberInstrument}
@@ -1241,9 +1414,14 @@ export default function AddGroupScreen() {
                 ) : (
                   <View style={styles.membersList}>
                     {members.map((member, index) => {
-                      const isLeader = member.role === "Leader";
+                      const isLeader = isGroupLeaderMember(member, currentUserId);
                       const currentInstrument = member.instrument || "";
-                      const needsInstrument = isLeader && !currentInstrument.trim();
+                      const needsInstrument = !normalizeVisibleInput(currentInstrument);
+                      const isInstrumentFinalized = isLeader
+                        ? isLeaderInstrumentFinalized
+                        : Boolean(memberInstrumentFinalization[index]);
+                      const needsMemberFinalization =
+                        Boolean(normalizeVisibleInput(currentInstrument)) && !isInstrumentFinalized;
                       return (
                         <View
                           key={member.user_id || `member-${index}`}
@@ -1252,6 +1430,7 @@ export default function AddGroupScreen() {
                             {
                               backgroundColor: isDark ? "#1F2937" : "#F9FAFB",
                               borderColor: needsInstrument
+                                || needsMemberFinalization
                                 ? "#F59E0B"
                                 : isDark
                                   ? "#374151"
@@ -1260,36 +1439,12 @@ export default function AddGroupScreen() {
                           ]}
                         >
                           <View style={styles.memberInfo}>
-                            <View
-                              style={[
-                                styles.avatarPlaceholder,
-                                {
-                                  backgroundColor: isLeader
-                                    ? colors.primary
-                                    : "#E0E7FF",
-                                },
-                              ]}
-                            >
-                              {member.avatar_url ? (
-                                <Image
-                                  source={{ uri: member.avatar_url }}
-                                  style={{
-                                    width: 32,
-                                    height: 32,
-                                    borderRadius: 16,
-                                  }}
-                                />
-                              ) : (
-                                <Text
-                                  style={[
-                                    styles.avatarText,
-                                    { color: isLeader ? "#fff" : "#4F46E5" },
-                                  ]}
-                                >
-                                  {member.name?.charAt(0)}
-                                </Text>
-                              )}
-                            </View>
+                            <ProfileAvatar
+                              uri={member.avatar_url}
+                              style={styles.avatarPlaceholder}
+                              backgroundColor={isLeader ? colors.primary : (isDark ? "#374151" : "#E5E7EB")}
+                              iconColor={isLeader ? "#FFF" : colors.textSecondary}
+                            />
                             <View style={{ flex: 1 }}>
                               <Text
                                 style={[
@@ -1299,7 +1454,48 @@ export default function AddGroupScreen() {
                               >
                                 {member.name}
                               </Text>
-                              {isLeader ? (
+                              {isInstrumentFinalized ? (
+                                <View
+                                  style={{
+                                    flexDirection: "row",
+                                    gap: 8,
+                                    marginTop: 6,
+                                    alignItems: "center",
+                                  }}
+                                >
+                                  <View
+                                    style={{
+                                      flex: 1,
+                                      backgroundColor: colors.inputBackground,
+                                      borderRadius: 8,
+                                      height: 40,
+                                      paddingHorizontal: 12,
+                                      justifyContent: "center",
+                                      borderWidth: 1,
+                                      borderColor: "#10B981",
+                                    }}
+                                  >
+                                    <Text style={{ color: colors.text, fontSize: 14 }}>
+                                      {currentInstrument}
+                                    </Text>
+                                  </View>
+                                  <TouchableOpacity
+                                    activeOpacity={1}
+                                    onPress={() => enableMemberInstrumentEdit(index)}
+                                    style={[
+                                      styles.addBtn,
+                                      {
+                                        width: 40,
+                                        height: 40,
+                                        borderRadius: 8,
+                                        backgroundColor: "#0EA5E9",
+                                      },
+                                    ]}
+                                  >
+                                    <Ionicons name="create-outline" size={18} color="#fff" />
+                                  </TouchableOpacity>
+                                </View>
+                              ) : (
                                 <View
                                   style={{
                                     flexDirection: "row",
@@ -1315,6 +1511,12 @@ export default function AddGroupScreen() {
                                     onChangeText={(text) =>
                                       updateMemberInstrument(index, text)
                                     }
+                                    onEndEditing={(event) =>
+                                      updateMemberInstrument(
+                                        index,
+                                        normalizeVisibleInput(event.nativeEvent.text),
+                                      )
+                                    }
                                     style={[
                                       styles.textInput,
                                       {
@@ -1326,72 +1528,91 @@ export default function AddGroupScreen() {
                                         paddingVertical: 0,
                                         textAlign: "left",
                                         color: colors.text,
+                                        borderWidth: 1,
+                                        borderColor: needsInstrument || needsMemberFinalization
+                                          ? "#F59E0B"
+                                          : isDark
+                                            ? "#374151"
+                                            : "#E5E7EB",
                                       },
                                     ]}
                                   />
-                                  <TouchableOpacity activeOpacity={1}
-                                    onPress={() => {
-                                      updateMemberInstrument(
-                                        index,
-                                        currentInstrument.trim(),
-                                      );
-                                      Keyboard.dismiss();
-                                    }}
-                                    disabled={!currentInstrument.trim()}
+                                  <TouchableOpacity
+                                    activeOpacity={!normalizeVisibleInput(currentInstrument) ? 1 : 0.78}
+                                    onPress={() => finalizeMemberInstrument(index)}
+                                    disabled={!normalizeVisibleInput(currentInstrument)}
                                     style={[
                                       styles.addBtn,
                                       {
                                         width: 40,
                                         height: 40,
                                         borderRadius: 8,
-                                        backgroundColor: !currentInstrument.trim()
+                                        backgroundColor: !normalizeVisibleInput(currentInstrument)
                                           ? "#9CA3AF"
                                           : colors.primary,
+                                        opacity: !normalizeVisibleInput(currentInstrument) ? 0.6 : 1,
                                       },
                                     ]}
                                   >
-                                    <Ionicons
-                                      name="checkmark"
-                                      size={20}
-                                      color="#fff"
-                                    />
+                                    <Ionicons name="checkmark" size={20} color="#fff" />
                                   </TouchableOpacity>
                                 </View>
-                              ) : (
-                                <TextInput
-                                  placeholder="Enter instrument (e.g., Vocals, Guitar)"
-                                  placeholderTextColor={colors.textSecondary}
-                                  value={currentInstrument}
-                                  onChangeText={(text) =>
-                                    updateMemberInstrument(index, text)
-                                  }
-                                  style={[
-                                    styles.textInput,
-                                    {
-                                      flex: 1,
-                                      marginTop: 6,
-                                      backgroundColor: colors.inputBackground,
-                                      borderRadius: 8,
-                                      height: 40,
-                                      paddingHorizontal: 12,
-                                      paddingVertical: 0,
-                                      textAlign: "left",
-                                      color: colors.text,
-                                    },
-                                  ]}
-                                />
                               )}
-                              {isLeader && (
+                              <Text
+                                style={{
+                                  fontSize: 10,
+                                  color: needsInstrument || needsMemberFinalization
+                                    ? "#F59E0B"
+                                    : colors.textSecondary,
+                                  marginTop: 4,
+                                }}
+                              >
+                                {needsInstrument
+                                  ? isLeader
+                                    ? "Leader (required before continuing)"
+                                    : "Member (required before continuing)"
+                                  : needsMemberFinalization
+                                    ? isLeader
+                                      ? "Leader (tap check icon to finalize)"
+                                      : "Member (tap check icon to finalize)"
+                                    : isLeader
+                                      ? "Leader (confirmed)"
+                                      : "Member (confirmed)"}
+                              </Text>
+                              <View
+                                style={{
+                                  flexDirection: "row",
+                                  alignItems: "center",
+                                  marginTop: 4,
+                                }}
+                              >
+                                <Ionicons
+                                  name={
+                                    needsInstrument || needsMemberFinalization
+                                      ? "alert-circle-outline"
+                                      : "checkmark-circle"
+                                  }
+                                  size={12}
+                                  color={
+                                    needsInstrument || needsMemberFinalization
+                                      ? "#F59E0B"
+                                      : "#10B981"
+                                  }
+                                />
                                 <Text
                                   style={{
                                     fontSize: 10,
-                                    color: colors.textSecondary,
-                                    marginTop: 4,
+                                    marginLeft: 4,
+                                    color: needsInstrument || needsMemberFinalization
+                                      ? "#F59E0B"
+                                      : "#10B981",
                                   }}
                                 >
-                                  Leader
+                                  {needsInstrument || needsMemberFinalization
+                                    ? `${isLeader ? "Leader" : "Member"} instrument not confirmed`
+                                    : `${isLeader ? "Leader" : "Member"} instrument confirmed`}
                                 </Text>
-                              )}
+                              </View>
                             </View>
                           </View>
                           {!isLeader && (
@@ -1507,58 +1728,88 @@ export default function AddGroupScreen() {
             {/* Navigation Buttons */}
             {!isKeyboardVisible && (
               <View style={styles.navigationButtons}>
-                <TouchableOpacity
-                  onPress={handleBack}
-                  disabled={creating}
-                  activeOpacity={1}
-                  style={[
-                    styles.backBtn,
-                    {
-                      flex: 1,
-                      borderColor: isDark ? "#6366F1" : "#E5E7EB",
-                      backgroundColor: isDark ? "transparent" : "#fff",
-                      opacity: creating ? 0.5 : 1,
-                    },
-                  ]}
-                >
+                {(remainingMemberCount > 0 || disableNextForMissingInstruments) && (
                   <Text
+                    style={{
+                      width: "100%",
+                      textAlign: "center",
+                      marginBottom: 8,
+                      color: "#F59E0B",
+                      fontFamily: "Poppins_500Medium",
+                      fontSize: 12,
+                    }}
+                  >
+                    {remainingMemberCount > 0
+                      ? `${selectedGroupType?.label || "This group type"} requires at least ${requiredMemberCount} members. Add ${remainingMemberCount} more member${remainingMemberCount === 1 ? "" : "s"} to continue.`
+                      : leaderNeedsFinalization
+                        ? "Tap the check icon to finalize the leader instrument."
+                        : nonLeaderNeedsFinalization
+                          ? "Tap each check icon to finalize member instruments."
+                          : "Add instruments for all members to continue."}
+                  </Text>
+                )}
+                <View style={styles.navigationButtonRow}>
+                  <TouchableOpacity
+                    onPress={handleBack}
+                    disabled={creating}
+                    activeOpacity={creating ? 1 : 0.78}
                     style={[
-                      styles.backBtnText,
-                      { color: isDark ? "#A5B4FC" : colors.text },
+                      styles.backBtn,
+                      {
+                        flex: 1,
+                        borderColor: isDark ? "#6366F1" : "#E5E7EB",
+                        backgroundColor: isDark ? "transparent" : "#fff",
+                        opacity: creating ? 0.5 : 1,
+                      },
                     ]}
                   >
-                    {step === 1 ? "Cancel" : "Back"}
-                  </Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  onPress={handleNext}
-                  disabled={creating}
-                  activeOpacity={1}
-                  style={[
-                    styles.nextBtn,
-                    {
-                      backgroundColor: creating
-                        ? isDark
-                          ? "#4338CA"
-                          : "#9CA3AF"
-                        : colors.primary,
-                      opacity: creating ? 0.7 : 1,
-                      flex: 1
-                    },
-                  ]}
-                >
-                  {creating ? (
-                    <ActivityIndicator color="#fff" size="small" />
-                  ) : (
-                    <Text style={styles.nextBtnText}>
-                      {step === 3 ? "Create Group" : "Next"}
+                    <Text
+                      style={[
+                        styles.backBtnText,
+                        { color: isDark ? "#A5B4FC" : colors.text },
+                      ]}
+                    >
+                      {step === 1 ? "Cancel" : "Back"}
                     </Text>
-                  )}
-                </TouchableOpacity>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    onPress={handleNext}
+                    disabled={creating || !isCurrentStepComplete}
+                    activeOpacity={creating || !isCurrentStepComplete ? 1 : 0.78}
+                    style={[
+                      styles.nextBtn,
+                      {
+                        backgroundColor: creating
+                          ? isDark
+                            ? "#4338CA"
+                            : "#9CA3AF"
+                          : isCurrentStepComplete
+                            ? colors.primary
+                            : colors.border,
+                        opacity: creating || !isCurrentStepComplete ? 0.6 : 1,
+                        flex: 1,
+                      },
+                    ]}
+                  >
+                    {creating ? (
+                      <ActivityIndicator color="#fff" size="small" />
+                    ) : (
+                      <Text
+                        style={[
+                          styles.nextBtnText,
+                          { color: isCurrentStepComplete ? "#FFFFFF" : colors.textSecondary },
+                        ]}
+                      >
+                        {step === 3 ? "Create Group" : "Next"}
+                      </Text>
+                    )}
+                  </TouchableOpacity>
+                </View>
               </View>
             )}
           </ScrollView>
         </KeyboardAvoidingView>
+        </View>
 
         {!isKeyboardVisible && <Navbar />}
       </View>
@@ -1569,6 +1820,7 @@ export default function AddGroupScreen() {
         message={`"${groupName}" has been successfully created.`}
         buttonText={"Manage Group"}
         onClose={handleSuccessRedirect}
+        showCancelButton={false}
       />
 
       <Modal
@@ -1601,7 +1853,7 @@ export default function AddGroupScreen() {
       {groupTypeModalVisible && (
         <View style={StyleSheet.absoluteFillObject}>
           <TouchableOpacity
-            style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.5)" }}
+            style={{ flex: 1, minWidth: 150, backgroundColor: "rgba(0,0,0,0.5)" }}
             activeOpacity={1}
             onPress={() => setGroupTypeModalVisible(false)}
           />
@@ -1674,28 +1926,45 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
+  contentFrame: {
+    flex: 1,
+    width: "100%",
+    maxWidth: IS_WEB ? 1080 : undefined,
+    alignSelf: "center",
+    paddingHorizontal: IS_WEB ? 24 : 0,
+    paddingTop: IS_WEB ? 16 : 0,
+  },
   stepIndicatorContainer: {
-    paddingHorizontal: 24,
-    paddingTop: 24,
-    paddingBottom: 8,
+    paddingHorizontal: IS_WEB ? 22 : 16,
+    paddingTop: IS_WEB ? 18 : 24,
+    paddingBottom: IS_WEB ? 14 : 8,
+    borderRadius: IS_WEB ? 20 : 0,
+    borderWidth: IS_WEB ? 1 : 0,
+    marginBottom: IS_WEB ? 12 : 0,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: IS_WEB ? 0.08 : 0,
+    shadowRadius: IS_WEB ? 16 : 0,
+    elevation: IS_WEB ? 2 : 0,
   },
   stepIndicatorContent: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     position: "relative",
+    paddingHorizontal: IS_WEB ? 8 : 0,
   },
   progressLineBg: {
     position: "absolute",
-    left: 0,
-    right: 0,
+    left: IS_WEB ? 8 : 0,
+    right: IS_WEB ? 8 : 0,
     height: 4,
     top: 20,
     zIndex: 0,
   },
   activeProgressLine: {
     position: "absolute",
-    left: 0,
+    left: IS_WEB ? 8 : 0,
     height: 4,
     top: 20,
     zIndex: 0,
@@ -1703,54 +1972,67 @@ const styles = StyleSheet.create({
   stepItem: {
     alignItems: "center",
     zIndex: 10,
-    width: 80,
+    flex: 1,
+    minWidth: 0,
   },
   stepCircle: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: IS_WEB ? 44 : 40,
+    height: IS_WEB ? 44 : 40,
+    borderRadius: 999,
     alignItems: "center",
     justifyContent: "center",
     borderWidth: 4,
   },
   stepText: {
-    fontSize: 12,
+    fontSize: IS_WEB ? 13 : 11,
     marginTop: 8,
     textAlign: "center",
+    lineHeight: IS_WEB ? 18 : 15,
+    includeFontPadding: false,
+    width: "100%",
   },
   formContainer: {
     flex: 1,
-    paddingHorizontal: 24,
-    marginTop: 16,
+    marginTop: IS_WEB ? 0 : 16,
+    borderRadius: IS_WEB ? 20 : 0,
+    borderWidth: IS_WEB ? 1 : 0,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 14 },
+    shadowOpacity: IS_WEB ? 0.08 : 0,
+    shadowRadius: IS_WEB ? 22 : 0,
+    elevation: IS_WEB ? 3 : 0,
   },
   scrollContent: {
-    paddingBottom: 150,
+    paddingHorizontal: IS_WEB ? 28 : 24,
+    paddingTop: IS_WEB ? 26 : 0,
+    paddingBottom: IS_WEB ? 170 : 150,
   },
   sectionTitle: {
-    fontSize: 20,
-    marginBottom: 24,
-    textAlign: "center",
+    fontSize: IS_WEB ? 24 : 20,
+    marginBottom: IS_WEB ? 22 : 24,
+    textAlign: IS_WEB ? "left" : "center",
     fontFamily: "Poppins_600SemiBold",
   },
   inputContainer: {
-    marginBottom: 16,
+    marginBottom: 20,
   },
   inputLabel: {
-    marginBottom: 8,
+    marginBottom: 10,
     fontSize: 12,
     textTransform: "uppercase",
     letterSpacing: 1,
     fontFamily: "Poppins_600SemiBold",
   },
   inputWrapper: {
-    borderRadius: 12,
+    borderRadius: 14,
     borderWidth: 1,
     overflow: "hidden",
   },
   textInput: {
     paddingHorizontal: 16,
-    paddingVertical: 16, // added explicit vertical padding here too just in case
+    paddingVertical: IS_WEB ? 14 : 16,
     fontFamily: "Poppins_400Regular",
+    fontSize: 14,
     textAlign: "left",
     textAlignVertical: "center",
   },
@@ -1760,8 +2042,8 @@ const styles = StyleSheet.create({
     marginBottom: 24,
   },
   addBtn: {
-    width: 48,
-    height: 48,
+    width: IS_WEB ? 44 : 48,
+    height: IS_WEB ? 44 : 48,
     borderRadius: 12,
     alignItems: "center",
     justifyContent: "center",
@@ -1849,10 +2131,15 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
   },
   navigationButtons: {
-    marginTop: 32,
-    flexDirection: "row",
-    gap: 16,
+    marginTop: IS_WEB ? 30 : 32,
+    width: "100%",
+    gap: 12,
     marginBottom: 16,
+  },
+  navigationButtonRow: {
+    flexDirection: "row",
+    gap: 12,
+    width: "100%",
   },
   backBtn: {
     flex: 1,
@@ -1868,6 +2155,7 @@ const styles = StyleSheet.create({
     fontSize: 16,
   },
   nextBtn: {
+    flex: 1,
     paddingVertical: 16,
     paddingHorizontal: 24,
     borderRadius: 12,

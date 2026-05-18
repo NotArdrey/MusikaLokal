@@ -1,13 +1,13 @@
 import React from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Header from '../src/components/header';
 import Navbar from '../src/components/navbar';
+import { useBottomBarClearance } from '../src/hooks/useBottomBarClearance';
 import { useTheme } from '../src/context/ThemeContext';
 
 export default function TermsAndConditionsScreen() {
   const { colors } = useTheme();
-  const insets = useSafeAreaInsets();
+  const { contentBottomPadding } = useBottomBarClearance(24);
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
@@ -17,7 +17,7 @@ export default function TermsAndConditionsScreen() {
         showsVerticalScrollIndicator={false}
         contentContainerStyle={[
           styles.scrollContent,
-          { paddingBottom: 190 + insets.bottom },
+          { paddingBottom: contentBottomPadding },
         ]}
       >
         <View style={styles.contentContainer}>
@@ -34,9 +34,9 @@ export default function TermsAndConditionsScreen() {
             1. Booking & Payments (Escrow)
           </Text>
           <Text style={[styles.text, { color: colors.textSecondary }]}>
-            • All transactions are processed via the Musika Lokal Wallet.{"\n"}
-            • Funds are held in escrow and released 48–72 hours after event completion if no dispute is raised.{"\n"}
-            • Musika Lokal acts only as a facilitator and is not a party to the actual performance contract.
+            - All transactions are processed via the Musika Lokal Wallet.{"\n"}
+            - Funds are held in escrow and released 48-72 hours after event completion if no dispute is raised.{"\n"}
+            - Musika Lokal acts only as a facilitator and is not a party to the actual performance contract.
           </Text>
 
           {/* 2. CANCELLATION & FORCE MAJEURE */}
@@ -47,15 +47,15 @@ export default function TermsAndConditionsScreen() {
             Booking Cancellation Policy
           </Text>
           <Text style={[styles.text, { color: colors.textSecondary }]}>
-            • All booking cancellations are non-refundable.{"\n"}
-            • Any amount already paid (including downpayments and full payments) is forfeited upon cancellation.{"\n"}
-            • Forfeited amounts may be credited to the studio/provider wallet based on platform rules.
+            - All confirmed booking cancellations are non-refundable once payment has been made.{"\n"}
+            - Any amount already paid, including downpayments and full payments, is non-refundable and will not be returned after cancellation.{"\n"}
+            - Provider availability issues, admin-reviewed incidents, verified access issues, and approved force majeure cases may be handled through rescheduling or support review, but booking payments remain non-refundable.
           </Text>
           <Text style={[styles.smallHeader, { color: colors.text }]}>
             Force Majeure
           </Text>
           <Text style={[styles.text, { color: colors.textSecondary }]}>
-            In cases of extreme weather (typhoons), government-mandated lockdowns, or national emergencies, users may request rescheduling. Refunds are still not guaranteed and remain subject to this non-refundable cancellation policy.
+            In cases of extreme weather (typhoons), government-mandated lockdowns, or national emergencies, users may request rescheduling or review. Booking payments remain non-refundable.
           </Text>
 
           {/* 3. LIMITATION OF LIABILITY */}
@@ -63,10 +63,10 @@ export default function TermsAndConditionsScreen() {
             3. Limitation of Liability
           </Text>
           <Text style={[styles.text, { color: colors.textSecondary }]}>
-            Musika Lokal is provided "as-is." We are NOT liable for:{"\n"}
-            • Personal injury or property damage during a session/event.{"\n"}
-            • Technical failures of the GCash, Maya, or banking systems.{"\n"}
-            • Loss of income due to app downtime.
+            Musika Lokal is provided &quot;as-is.&quot; We are NOT liable for:{"\n"}
+            - Personal injury or property damage during a session/event.{"\n"}
+            - Technical failures of the GCash, Maya, or banking systems.{"\n"}
+            - Loss of income due to app downtime.
           </Text>
 
           {/* 4. INTELLECTUAL PROPERTY */}
@@ -83,9 +83,9 @@ export default function TermsAndConditionsScreen() {
           </Text>
           <Text style={[styles.text, { color: colors.textSecondary }]}>
             Users are strictly prohibited from:{"\n"}
-            • Circumventing the platform to pay "under the table."{"\n"}
-            • Harassing other users or posting defamatory content.{"\n"}
-            • Creating multiple accounts for fraudulent reviews.
+            - Circumventing the platform to pay &quot;under the table.&quot;{"\n"}
+            - Harassing other users or posting defamatory content.{"\n"}
+            - Creating multiple accounts for fraudulent reviews.
           </Text>
 
           {/* 6. GOVERNING LAW */}

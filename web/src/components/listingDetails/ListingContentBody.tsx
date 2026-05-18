@@ -1,5 +1,6 @@
 import React from "react";
 import { View } from "react-native";
+import SmoothTabTransition from "../SmoothTabTransition";
 
 interface ListingContentBodyProps {
   styles: any;
@@ -8,7 +9,9 @@ interface ListingContentBodyProps {
   activeTab: string;
   showTabs: boolean;
   renderGroupAbout: () => React.ReactNode;
+  renderGroupApply: () => React.ReactNode;
   renderGroupTimeline: () => React.ReactNode;
+  renderConnectionTab: () => React.ReactNode;
   renderReviews: () => React.ReactNode;
   renderStudioGigVenueAbout: () => React.ReactNode;
   renderStudioSetup: () => React.ReactNode;
@@ -24,7 +27,9 @@ const ListingContentBody = ({
   activeTab,
   showTabs,
   renderGroupAbout,
+  renderGroupApply,
   renderGroupTimeline,
+  renderConnectionTab,
   renderReviews,
   renderStudioGigVenueAbout,
   renderStudioSetup,
@@ -33,26 +38,31 @@ const ListingContentBody = ({
   renderGigApply,
 }: ListingContentBodyProps) => (
   <View style={[styles.contentBody, { backgroundColor: colors.background }]}>
-    {(group.type === "Group" || group.type === "Artist" || !group.type) && (
-      <>
-        {(activeTab === "About" || !showTabs) && renderGroupAbout()}
-        {activeTab === "Timeline" && renderGroupTimeline()}
-        {activeTab === "Review" && renderReviews()}
-      </>
-    )}
+    <SmoothTabTransition activeKey={showTabs ? activeTab : "About"}>
+      {(group.type === "Group" || group.type === "Artist" || !group.type) && (
+        <>
+          {(activeTab === "About" || !showTabs) && renderGroupAbout()}
+          {activeTab === "Connect" && renderConnectionTab()}
+          {group.type === "Group" && activeTab === "Apply" && renderGroupApply()}
+          {activeTab === "Timeline" && renderGroupTimeline()}
+          {activeTab === "Review" && renderReviews()}
+        </>
+      )}
 
-    {(group.type === "Studio" || group.type === "Gig" || group.type === "Venue") && (
-      <>
-        {activeTab === "About" && renderStudioGigVenueAbout()}
-        {group.type === "Gig" && activeTab === "About" && renderGigInfo()}
-        {activeTab === "Setup" && renderStudioSetup()}
-        {activeTab === "Specs" && renderStudioSetup()}
-        {activeTab === "Book" && renderStudioBook()}
-        {activeTab === "Info" && renderGigInfo()}
-        {activeTab === "Apply" && renderGigApply()}
-        {activeTab === "Review" && renderReviews()}
-      </>
-    )}
+      {(group.type === "Studio" || group.type === "Gig" || group.type === "Venue") && (
+        <>
+          {activeTab === "About" && renderStudioGigVenueAbout()}
+          {group.type === "Gig" && activeTab === "About" && renderGigInfo()}
+          {activeTab === "Connect" && renderConnectionTab()}
+          {activeTab === "Setup" && renderStudioSetup()}
+          {activeTab === "Specs" && renderStudioSetup()}
+          {activeTab === "Book" && renderStudioBook()}
+          {activeTab === "Info" && renderGigInfo()}
+          {activeTab === "Apply" && renderGigApply()}
+          {activeTab === "Review" && renderReviews()}
+        </>
+      )}
+    </SmoothTabTransition>
   </View>
 );
 

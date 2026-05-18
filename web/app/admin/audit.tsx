@@ -1,7 +1,7 @@
 
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Platform,
@@ -18,6 +18,11 @@ import Header from '../../src/components/header';
 import { useAuth } from '../../src/context/AuthContext';
 import { useTheme } from '../../src/context/ThemeContext';
 import { supabase } from '../../lib/supabase';
+import { getAdminPageCacheKey, readAdminPageCache, writeAdminPageCache } from './_cache';
+import {
+  fetchAdminPaymentTransactions,
+  normalizePaymentActionLabel,
+} from './_payments';
 
 const readErrorContextMessage = async (context: unknown): Promise<string | null> => {
   if (!context) return null;
@@ -89,19 +94,34 @@ const readErrorContextMessage = async (context: unknown): Promise<string | null>
   }
 };
 
-type Tab = 'dashboard' | 'permits' | 'users' | 'reports' | 'audit';
+type Tab = 'dashboard' | 'users' | 'reports' | 'audit' | 'posts' | 'products';
 
-type AuditEntityFilter = 'all' | 'studio' | 'gig';
+type AuditEntityFilter = 'all' | 'studio' | 'gig' | 'payment';
 
-type AuditActionFilter = 'all' | 'approved' | 'rejected' | 'submitted' | 'resubmitted';
+type AuditActionFilter =
+  | 'all'
+  | 'approved'
+  | 'rejected'
+  | 'submitted'
+  | 'resubmitted'
+  | 'payment_paid'
+  | 'payment_partial'
+  | 'payment_pending'
+  | 'payment_failed'
+  | 'payment_cancelled'
+  | 'payment_refunded'
+  | 'payment_refund_pending';
 
 const adminTabRoutes: Record<Tab, string> = {
   dashboard: '/admin',
-  permits: '/admin/permits',
   users: '/admin/users',
   reports: '/admin/reports',
   audit: '/admin/audit',
+  posts: '/admin/posts',
+  products: '/admin/products',
 };
+
+const AUDIT_CACHE_TTL_MS = 45_000;
 
 interface AuditEntry {
   id: string;
@@ -111,12 +131,31 @@ interface AuditEntry {
   entity_name?: string;
   rejection_reason?: string | null;
   admin_notes?: string | null;
+  amount?: number;
+  refund_amount?: number;
+  payment_status?: string | null;
+  booking_status?: string | null;
+  booking_id?: string | null;
+  reference?: string | null;
   created_at: string;
 }
 
-const auditEntityTypes: AuditEntityFilter[] = ['all', 'studio', 'gig'];
+const auditEntityTypes: AuditEntityFilter[] = ['all', 'studio', 'gig', 'payment'];
 
-const auditActions: AuditActionFilter[] = ['all', 'approved', 'rejected', 'submitted', 'resubmitted'];
+const auditActions: AuditActionFilter[] = [
+  'all',
+  'approved',
+  'rejected',
+  'submitted',
+  'resubmitted',
+  'payment_paid',
+  'payment_partial',
+  'payment_pending',
+  'payment_failed',
+  'payment_cancelled',
+  'payment_refunded',
+  'payment_refund_pending',
+];
 
 const formatDateTime = (value?: string | null) => {
   if (!value) return '-';
@@ -130,6 +169,20 @@ const formatDateTime = (value?: string | null) => {
     hour: '2-digit',
     minute: '2-digit',
   });
+};
+
+const formatCurrency = (value?: number | null) => {
+  const safeValue = Number(value || 0);
+  return `PHP ${safeValue.toLocaleString('en-PH', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
+};
+
+const formatAuditAction = (value?: string | null) => {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (normalized.startsWith('payment_')) return normalizePaymentActionLabel(normalized);
+  return normalized ? normalized.replace(/_/g, ' ') : '-';
 };
 
 const getErrorMessage = async (error: unknown, fallback: string) => {
@@ -251,18 +304,20 @@ const styles = StyleSheet.create({
   },
 });
 
-const tabItems: Array<{ key: Tab; label: string; icon: string }> = [
+const tabItems: { key: Tab; label: string; icon: string }[] = [
   { key: 'dashboard', label: 'Dashboard', icon: 'stats-chart-outline' },
-  { key: 'permits', label: 'Permits', icon: 'document-text-outline' },
   { key: 'users', label: 'Users', icon: 'people-outline' },
   { key: 'reports', label: 'Reports', icon: 'shield-checkmark-outline' },
   { key: 'audit', label: 'Audit', icon: 'time-outline' },
+  { key: 'posts', label: 'Posts', icon: 'newspaper-outline' },
+  { key: 'products', label: 'Products', icon: 'bag-handle-outline' },
 ];
 
 export default function AdminAuditPage() {
   const { colors, isDark } = useTheme();
   const { session, loading, isGuest, isAdmin, roleResolved } = useAuth();
   const { width } = useWindowDimensions();
+  const hasHydratedAuditRef = useRef(false);
 
   const [initializingAudit, setInitializingAudit] = useState(false);
   const [auditLoading, setAuditLoading] = useState(false);
@@ -287,6 +342,8 @@ export default function AdminAuditPage() {
   const showAlert = useCallback((type: AlertType, title: string, message: string) => {
     setAlertState({ visible: true, type, title, message });
   }, []);
+
+  const auditCacheKey = useMemo(() => getAdminPageCacheKey('audit'), []);
 
   const handleTabChange = useCallback((nextTab: Tab) => {
     if (nextTab === 'audit') return;
@@ -339,8 +396,11 @@ export default function AdminAuditPage() {
     });
   }, []);
 
-  const fetchAudit = useCallback(async () => {
-    setAuditLoading(true);
+  const fetchAudit = useCallback(async (options?: { silent?: boolean }) => {
+    if (!options?.silent) {
+      setAuditLoading(true);
+    }
+
     try {
       let rawItems: any[] = [];
 
@@ -367,38 +427,98 @@ export default function AdminAuditPage() {
         rawItems = Array.isArray(fallbackRows) ? fallbackRows : [];
       }
 
-      const mappedItems = await mapAuditRows(rawItems);
+      const mappedPermitItems = await mapAuditRows(rawItems);
+      let paymentAuditItems: AuditEntry[] = [];
+
+      try {
+        const paymentResult = await fetchAdminPaymentTransactions({
+          status: 'all',
+          dateRange: 'all',
+          limit: 200,
+        });
+
+        paymentAuditItems = paymentResult.transactions.map((transaction) => {
+          const customer = transaction.customer_name || transaction.customer_email || 'Unknown customer';
+          const studio = transaction.studio_name || 'Unknown studio';
+          const amountLabel = formatCurrency(transaction.amount);
+          const refundLabel = transaction.refund_amount > 0
+            ? ` | Refund ${formatCurrency(transaction.refund_amount)}`
+            : '';
+
+          return {
+            id: `payment-${transaction.booking_id}`,
+            entity_type: 'payment',
+            action: transaction.action,
+            performer_name: customer,
+            entity_name: `${studio} - ${customer}`,
+            rejection_reason: transaction.cancellation_reason || null,
+            admin_notes: `${amountLabel}${refundLabel}`,
+            amount: transaction.amount,
+            refund_amount: transaction.refund_amount,
+            payment_status: transaction.payment_status,
+            booking_status: transaction.booking_status,
+            booking_id: transaction.booking_id,
+            reference: transaction.reference || transaction.booking_id,
+            created_at: transaction.event_at || transaction.updated_at || transaction.created_at || '',
+          } as AuditEntry;
+        });
+      } catch {
+        paymentAuditItems = [];
+      }
+
+      const mappedItems = [...mappedPermitItems, ...paymentAuditItems].sort(
+        (a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime(),
+      );
       setAuditEntries(mappedItems);
+      writeAdminPageCache(auditCacheKey, mappedItems);
     } catch (error) {
-      const message = await getErrorMessage(error, 'Unable to fetch audit entries.');
-      showAlert('error', 'Failed to load audit log', message);
-      setAuditEntries([]);
+      if (!options?.silent) {
+        const message = await getErrorMessage(error, 'Unable to fetch audit entries.');
+        showAlert('error', 'Failed to load audit log', message);
+        setAuditEntries([]);
+      }
     } finally {
-      setAuditLoading(false);
+      if (!options?.silent) {
+        setAuditLoading(false);
+      }
     }
-  }, [showAlert, mapAuditRows]);
+  }, [auditCacheKey, showAlert, mapAuditRows]);
 
   useEffect(() => {
     if (loading || !roleResolved || !session || isGuest || !isAdmin) {
       setInitializingAudit(false);
+      hasHydratedAuditRef.current = false;
       return;
     }
 
     let isMounted = true;
-    setInitializingAudit(true);
+    const cachedAuditEntries = readAdminPageCache<AuditEntry[]>(auditCacheKey, AUDIT_CACHE_TTL_MS);
+
+    if (cachedAuditEntries) {
+      setAuditEntries(cachedAuditEntries);
+      setInitializingAudit(false);
+      hasHydratedAuditRef.current = true;
+    } else if (!hasHydratedAuditRef.current) {
+      setInitializingAudit(true);
+    } else {
+      setInitializingAudit(false);
+    }
 
     void (async () => {
       try {
-        await fetchAudit();
+        await fetchAudit({ silent: Boolean(cachedAuditEntries) });
       } finally {
-        if (isMounted) setInitializingAudit(false);
+        if (isMounted) {
+          setInitializingAudit(false);
+          hasHydratedAuditRef.current = true;
+        }
       }
     })();
 
     return () => {
       isMounted = false;
     };
-  }, [loading, roleResolved, session, isGuest, isAdmin, fetchAudit]);
+  }, [loading, roleResolved, session, isGuest, isAdmin, auditCacheKey, fetchAudit]);
 
   const filteredAuditEntries = useMemo(() => {
     const query = auditSearch.trim().toLowerCase();
@@ -424,6 +544,11 @@ export default function AdminAuditPage() {
         String(entry.performer_name || '').toLowerCase().includes(query) ||
         String(entry.rejection_reason || '').toLowerCase().includes(query) ||
         String(entry.admin_notes || '').toLowerCase().includes(query) ||
+        String(entry.payment_status || '').toLowerCase().includes(query) ||
+        String(entry.booking_status || '').toLowerCase().includes(query) ||
+        String(entry.booking_id || '').toLowerCase().includes(query) ||
+        String(entry.reference || '').toLowerCase().includes(query) ||
+        String(entry.amount || '').toLowerCase().includes(query) ||
         String(entry.created_at || '').toLowerCase().includes(query)
       );
     });
@@ -555,12 +680,33 @@ export default function AdminAuditPage() {
           ) : (
             <View style={styles.sectionGap}>
               {filteredAuditEntries.map((entry) => (
-                <View key={entry.id} style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}> 
+                <View
+                  key={entry.id}
+                  testID={`admin-audit-card-${entry.id}`}
+                  accessibilityLabel={`admin-audit-card-${entry.id}`}
+                  style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}
+                > 
                   <Text style={[styles.cardTitle, { color: colors.text }]}>{entry.entity_name || 'Unknown entity'}</Text>
-                  <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Action: {entry.action}</Text>
+                  <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Action: {formatAuditAction(entry.action)}</Text>
                   <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Type: {entry.entity_type}</Text>
                   <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>By: {entry.performer_name || 'System'}</Text>
                   <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>At: {formatDateTime(entry.created_at)}</Text>
+                  {entry.entity_type === 'payment' && (
+                    <>
+                      <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>
+                        Payment: {entry.payment_status || '-'} | Booking: {entry.booking_status || '-'}
+                      </Text>
+                      {!!entry.booking_id && (
+                        <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Booking ID: {entry.booking_id}</Text>
+                      )}
+                      <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>
+                        Amount: {formatCurrency(entry.amount)} | Refund: {formatCurrency(entry.refund_amount)}
+                      </Text>
+                      {!!entry.reference && (
+                        <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Ref: {entry.reference}</Text>
+                      )}
+                    </>
+                  )}
                   {!!entry.rejection_reason && (
                     <Text style={[styles.cardMeta, { color: '#EF4444' }]}>Reason: {entry.rejection_reason}</Text>
                   )}
@@ -584,3 +730,4 @@ export default function AdminAuditPage() {
     </View>
   );
 }
+

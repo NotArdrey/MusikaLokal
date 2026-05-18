@@ -4,16 +4,18 @@ import React, { useState } from 'react';
 import {
     ActivityIndicator,
     FlatList,
-    Image,
+    Platform,
     StyleSheet,
     Text,
     TouchableOpacity,
     View
 } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { DEFAULT_AVATAR } from '../constants/Images';
 import { useTheme } from '../context/ThemeContext';
-import { Conversation, useConversations } from '../hooks/useChat';
+import { emitToast } from '../events/toastBus';
+import { useBottomBarClearance } from '../hooks/useBottomBarClearance';
+import { Conversation, isConversationMuted, useConversations } from '../hooks/useChat';
+import Header from './header';
+import ProfileAvatar from './ProfileAvatar';
 import UserSearchModal from './UserSearchModal';
 
 interface ConversationsListProps {
@@ -28,8 +30,8 @@ const ConversationsList: React.FC<ConversationsListProps> = ({
     onNewConversation,
 }) => {
     const { colors, isDark } = useTheme();
-    const insets = useSafeAreaInsets();
-    const { conversations, loading, refetch } = useConversations(currentUserId);
+    const { contentBottomPadding } = useBottomBarClearance();
+    const { conversations, loading, refetch, toggleConversationMute } = useConversations(currentUserId);
     const [showNewMessageModal, setShowNewMessageModal] = useState(false);
 
     const handleSelectUserForNewMessage = (user: { id: string; full_name: string; avatar_url: string | null }) => {
@@ -62,10 +64,36 @@ const ConversationsList: React.FC<ConversationsListProps> = ({
         }
     };
 
+    const handleToggleMute = async (conversation: Conversation) => {
+        const nextMuted = !isConversationMuted(conversation);
+
+        try {
+            await toggleConversationMute(conversation.id, nextMuted);
+            emitToast({
+                dedupeKey: `conversation-mute:${conversation.id}:${nextMuted}`,
+                title: nextMuted ? 'Chat muted' : 'Chat unmuted',
+                message: nextMuted
+                    ? 'New messages stay in your list without pop-up alerts.'
+                    : 'New messages can show pop-up alerts again.',
+                type: 'info',
+                source: 'chat-mute',
+            });
+        } catch (err: any) {
+            emitToast({
+                dedupeKey: `conversation-mute-error:${conversation.id}`,
+                title: 'Mute failed',
+                message: err?.message || 'Could not update this chat.',
+                type: 'error',
+                source: 'chat-mute',
+            });
+        }
+    };
+
     const renderConversation = ({ item }: { item: Conversation }) => {
         const isGroup = item.is_group;
         const otherUser = item.other_participant;
         const lastMessage = item.last_message;
+        const muted = isConversationMuted(item);
         const hasUnread = (item.unread_count || 0) > 0;
         const isLastMessageFromMe = !!lastMessage && lastMessage.sender_id === currentUserId;
         const isLastMessageSeen = !isGroup && isLastMessageFromMe && !!lastMessage?.read_at;
@@ -102,22 +130,35 @@ const ConversationsList: React.FC<ConversationsListProps> = ({
                     hasUnread && { backgroundColor: isDark ? 'rgba(99,102,241,0.06)' : 'rgba(99,102,241,0.04)' },
                 ]}
                 onPress={() => onSelectConversation(item)}
-                activeOpacity={0.7}
+                onLongPress={() => {
+                    void handleToggleMute(item);
+                }}
+                delayLongPress={260}
+                accessibilityRole="button"
+                accessibilityLabel={`${displayName || 'Chat'}${muted ? ', muted' : ''}`}
+                accessibilityHint="Open chat. Long press to mute or unmute notifications."
+                activeOpacity={1}
             >
                 {/* Avatar */}
                 <View style={styles.avatarContainer}>
                     {isGroup ? (
                         <View style={[styles.groupAvatar, { backgroundColor: colors.primary }]}>
-                            {displayAvatar ? (
-                                <Image source={{ uri: displayAvatar }} style={styles.avatar} />
-                            ) : (
-                                <Ionicons name="people" size={26} color="#FFF" />
-                            )}
+                            <ProfileAvatar
+                                uri={displayAvatar}
+                                style={styles.avatar}
+                                iconName="people"
+                                iconSize={26}
+                                backgroundColor={colors.primary}
+                                iconColor="#FFF"
+                            />
                         </View>
-                    ) : displayAvatar ? (
-                        <Image source={{ uri: displayAvatar }} style={styles.avatar} />
                     ) : (
-                        <Image source={DEFAULT_AVATAR} style={styles.avatar} />
+                        <ProfileAvatar
+                            uri={displayAvatar}
+                            style={styles.avatar}
+                            backgroundColor={isDark ? '#374151' : '#E5E7EB'}
+                            iconColor={colors.textSecondary}
+                        />
                     )}
                     {hasUnread && (
                         <View style={styles.unreadDot} />
@@ -138,6 +179,14 @@ const ConversationsList: React.FC<ConversationsListProps> = ({
                             >
                                 {displayName || 'Chat'}
                             </Text>
+                            {muted && (
+                                <Ionicons
+                                    name="notifications-off-outline"
+                                    size={14}
+                                    color={colors.textSecondary}
+                                    style={styles.mutedIcon}
+                                />
+                            )}
                         </View>
                         <Text style={[styles.conversationTime, { color: hasUnread ? colors.primary : colors.textSecondary, fontWeight: hasUnread ? '700' : '400' }]}>
                             {lastMessage ? formatTime(lastMessage.created_at) : ''}
@@ -164,7 +213,13 @@ const ConversationsList: React.FC<ConversationsListProps> = ({
                         ) : showOutgoingStatus ? (
                             <View style={styles.outgoingStatusRow}>
                                 {isLastMessageSeen && otherUser?.avatar_url ? (
-                                    <Image source={{ uri: otherUser.avatar_url }} style={styles.seenAvatarIndicator} />
+                                    <ProfileAvatar
+                                        uri={otherUser.avatar_url}
+                                        style={styles.seenAvatarIndicator}
+                                        iconSize={8}
+                                        backgroundColor={isDark ? '#374151' : '#E5E7EB'}
+                                        iconColor={colors.textSecondary}
+                                    />
                                 ) : isLastMessageSeen ? (
                                     <Ionicons name="checkmark-done" size={15} color={colors.primary} />
                                 ) : (
@@ -180,37 +235,32 @@ const ConversationsList: React.FC<ConversationsListProps> = ({
 
     return (
         <View style={[styles.container, { backgroundColor: colors.background }]}>
-            {/* Header */}
             <View
                 style={[
-                    styles.header,
+                    styles.topSection,
                     {
                         backgroundColor: colors.background,
-                        paddingTop: (insets.top || 16) + 12,
                         borderBottomColor: isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.07)',
                     },
                 ]}
             >
-                <View style={styles.headerTopRow}>
-                    <Text style={[styles.headerTitle, { color: colors.text }]}>Messages</Text>
+                <Header
+                    title="Messages"
+                    rightIconName="create-outline"
+                    rightIconOnPress={() => setShowNewMessageModal(true)}
+                />
+                <View style={styles.searchBarContainer}>
                     <TouchableOpacity
-                        style={styles.composeBtn}
+                        style={[styles.searchBar, { backgroundColor: isDark ? '#374151' : '#F3F4F6' }]}
                         onPress={() => setShowNewMessageModal(true)}
-                        activeOpacity={0.7}
+                        activeOpacity={1}
                     >
-                        <Ionicons name="create-outline" size={26} color={colors.primary} />
+                        <Ionicons name="search" size={20} color={colors.textSecondary} />
+                        <Text style={[styles.searchBarText, { color: colors.textSecondary }]} numberOfLines={1}>
+                            Search or start new chat...
+                        </Text>
                     </TouchableOpacity>
                 </View>
-
-                {/* Search Bar */}
-                <TouchableOpacity
-                    style={[styles.searchBar, { backgroundColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.05)' }]}
-                    onPress={() => setShowNewMessageModal(true)}
-                    activeOpacity={0.7}
-                >
-                    <Ionicons name="search" size={17} color={colors.textSecondary} style={{ marginRight: 8 }} />
-                    <Text style={{ color: colors.textSecondary, fontSize: 15 }}>Search or start new chat…</Text>
-                </TouchableOpacity>
             </View>
 
             {/* Content */}
@@ -232,7 +282,7 @@ const ConversationsList: React.FC<ConversationsListProps> = ({
                     <TouchableOpacity
                         style={[styles.newMessageButton, { backgroundColor: colors.primary }]}
                         onPress={() => setShowNewMessageModal(true)}
-                        activeOpacity={0.85}
+                        activeOpacity={1}
                     >
                         <Ionicons name="create" size={18} color="#FFF" />
                         <Text style={styles.newMessageButtonText}>New Message</Text>
@@ -243,7 +293,11 @@ const ConversationsList: React.FC<ConversationsListProps> = ({
                     data={conversations}
                     keyExtractor={(item) => item.id}
                     renderItem={renderConversation}
-                    contentContainerStyle={[styles.list, { paddingBottom: Math.max(insets.bottom, 16) + 80 }]}
+                    contentContainerStyle={[styles.list, { paddingBottom: contentBottomPadding }]}
+                    initialNumToRender={14}
+                    maxToRenderPerBatch={20}
+                    windowSize={10}
+                    removeClippedSubviews={Platform.OS === 'android'}
                     refreshing={loading}
                     onRefresh={refetch}
                     ItemSeparatorComponent={() => (
@@ -268,32 +322,28 @@ const styles = StyleSheet.create({
     container: {
         flex: 1,
     },
-    header: {
-        paddingHorizontal: 20,
+    topSection: {
         paddingBottom: 12,
         borderBottomWidth: StyleSheet.hairlineWidth,
     },
-    headerTopRow: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        marginBottom: 12,
-    },
-    headerTitle: {
-        fontSize: 28,
-        fontWeight: '800',
-        letterSpacing: -0.5,
-    },
-    composeBtn: {
-        padding: 4,
+    searchBarContainer: {
+        paddingHorizontal: 20,
     },
     searchBar: {
         flexDirection: 'row',
         alignItems: 'center',
-        height: 44,
-        borderRadius: 22,
+        gap: 10,
+        height: 48,
+        borderRadius: 16,
         paddingHorizontal: 16,
         marginBottom: 2,
+    },
+    searchBarText: {
+        flex: 1,
+        fontSize: 15,
+        fontFamily: 'Poppins_500Medium',
+        lineHeight: 20,
+        includeFontPadding: false,
     },
     loadingContainer: {
         flex: 1,
@@ -379,6 +429,9 @@ const styles = StyleSheet.create({
     conversationName: {
         fontSize: 15.5,
         flex: 1,
+    },
+    mutedIcon: {
+        marginLeft: 6,
     },
     conversationTime: {
         fontSize: 12,

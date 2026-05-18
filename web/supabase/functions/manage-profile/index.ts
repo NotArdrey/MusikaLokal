@@ -67,8 +67,6 @@ serve(async (req: Request) => {
 
         // Log authorization header for debugging (remove in production)
         const authHeader = req.headers.get('Authorization')
-        console.log('Authorization header present:', !!authHeader)
-        console.log('Action requested:', action)
 
         // Allow 'create' action without auth header (for signup flow)
         // The create action uses service role key anyway
@@ -198,11 +196,20 @@ serve(async (req: Request) => {
 
         // 4. CREATE PROFILE (Bypass RLS for signup)
         if (action === 'create') {
-            const { userId, email, full_name, role, is_verified, verification_status, didit_session_id, display_name } = params
+            const { userId, email, full_name, role } = params
+            const normalizedEmail = String(email || '').trim().toLowerCase()
+            const normalizedRole = String(role || '').trim().toLowerCase()
 
             // Validate required parameters
-            if (!userId || !email || !role) {
+            if (!userId || !normalizedEmail || !normalizedRole) {
                 return new Response(JSON.stringify({ error: 'Missing required parameters: userId, email, role' }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 400,
+                })
+            }
+
+            if (!['fan', 'musician'].includes(normalizedRole)) {
+                return new Response(JSON.stringify({ error: 'Invalid signup role' }), {
                     headers: { ...corsHeaders, 'Content-Type': 'application/json' },
                     status: 400,
                 })
@@ -226,19 +233,17 @@ serve(async (req: Request) => {
                 })
             }
 
-            console.log('Creating profile for user:', userId, email)
 
             const { data, error } = await supabaseAdmin
                 .from('profiles')
                 .upsert({
                     id: userId,
-                    email,
+                    email: normalizedEmail,
                     full_name,
-                    role,
-                    is_verified,
-                    verification_status,
-                    didit_session_id,
-                    display_name // Save display_name correctly
+                    role: normalizedRole,
+                    is_verified: false,
+                    verification_status: 'PENDING',
+                    didit_session_id: null
                 })
                 .select()
                 .single()
@@ -248,7 +253,6 @@ serve(async (req: Request) => {
                 throw error
             }
 
-            console.log('Profile created successfully:', data?.id)
 
             return new Response(JSON.stringify(data), {
                 headers: { ...corsHeaders, 'Content-Type': 'application/json' },

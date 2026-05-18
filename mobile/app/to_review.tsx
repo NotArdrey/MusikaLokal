@@ -3,10 +3,12 @@ import React, { useEffect } from 'react';
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 import Header from '../src/components/header';
 import Navbar from '../src/components/navbar';
+import { useBottomBarClearance } from '../src/hooks/useBottomBarClearance';
 import { useTheme } from '../src/context/ThemeContext';
 
 export default function ToReviewScreen() {
   const { colors } = useTheme();
+  const { contentBottomPadding } = useBottomBarClearance(24);
 
   useEffect(() => {
     const timeoutId = setTimeout(() => {
@@ -20,7 +22,7 @@ export default function ToReviewScreen() {
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <Header title="Review" />
 
-      <View style={styles.content}>
+      <View style={[styles.content, { paddingBottom: contentBottomPadding }]}>
         <ActivityIndicator size="large" color={colors.primary} />
         <Text style={[styles.message, { color: colors.textSecondary }]}>
           Redirecting to your live review queue...

@@ -14,11 +14,11 @@ import {
 import { PH_MUSIC_GROUP_TYPES } from "../constants/groupTypes";
 import { useAuth } from "../context/AuthContext";
 import { useTheme } from "../context/ThemeContext";
+import { isFanUserRole } from "../utils/roleRouting";
 import CachedImage from "./CachedImage";
+import PagerView from "./PagerView";
 
 const debugLog = (..._args: unknown[]) => { };
-
-import PagerView from "./PagerView";
 
 interface ListingCardProps {
   item: any;
@@ -29,6 +29,8 @@ interface ListingCardProps {
   style?: any;
   hasGroups?: boolean;
   showGigSummary?: boolean;
+  cleanMode?: boolean;
+  verticalImageHeight?: number;
 }
 
 const ListingCard: React.FC<ListingCardProps> = ({
@@ -40,9 +42,12 @@ const ListingCard: React.FC<ListingCardProps> = ({
   style,
   hasGroups,
   showGigSummary = true,
+  cleanMode = false,
+  verticalImageHeight = 180,
 }) => {
   const { colors, isDark } = useTheme();
   const { userRole, userId } = useAuth(); // To avoid showing warning to owners
+  const isFan = isFanUserRole(userRole);
   const [isLiked, setIsLiked] = useState(false);
   const [pageIndex, setPageIndex] = useState(0);
   const horizontalWebScrollRef = useRef<ScrollView | null>(null);
@@ -136,7 +141,7 @@ const ListingCard: React.FC<ListingCardProps> = ({
       } else if (item.hourly_rate && item.hourly_rate !== "0") {
         nextPriceLabel = `₱${parseInt(item.hourly_rate).toLocaleString()} / hr`;
       } else {
-        nextPriceLabel = "Inquire for rates";
+        nextPriceLabel = "";
       }
     } else if (item.hourly_rate && item.hourly_rate !== "0") {
       nextPriceLabel = `₱${parseInt(item.hourly_rate).toLocaleString()} / hr`;
@@ -153,7 +158,7 @@ const ListingCard: React.FC<ListingCardProps> = ({
         nextPriceLabel = `₱${parseInt(item.rate).toLocaleString()}`;
       }
     } else {
-      nextPriceLabel = "Inquire for rates";
+      nextPriceLabel = "";
     }
 
     return {
@@ -194,6 +199,15 @@ const ListingCard: React.FC<ListingCardProps> = ({
     return { badgeLabel: nextBadgeLabel, badgeColor: nextBadgeColor };
   }, [item.hourly_rate, item.studio_type, item.type, item.group_type]);
 
+  const completionRate = useMemo(() => {
+    const parsed = Number(item?.completion_rate);
+    if (!Number.isFinite(parsed)) return null;
+    return Math.max(0, Math.min(100, Math.round(parsed)));
+  }, [item?.completion_rate]);
+  const showCompletionBadge =
+    completionRate !== null &&
+    ["Artist", "Group", "Studio", "Venue"].includes(String(item.type || ""));
+
   // Shared actions
   const handleShare = async () => {
     try {
@@ -227,8 +241,8 @@ const ListingCard: React.FC<ListingCardProps> = ({
 
   // Determine if chat button should be shown (not for own items)
   const canChat = useMemo(
-    () => onChat && item.owner_id !== userId && item.organizer_id !== userId,
-    [item.organizer_id, item.owner_id, onChat, userId],
+    () => !isFan && onChat && item.owner_id !== userId && item.organizer_id !== userId,
+    [isFan, item.organizer_id, item.owner_id, onChat, userId],
   );
 
   const shouldShowGigSummary = useMemo(
@@ -240,8 +254,10 @@ const ListingCard: React.FC<ListingCardProps> = ({
   );
 
   const showOpenApplicationsBadge = useMemo(
-    () => item.type === "Group" && item.open_group_applications !== false,
-    [item.open_group_applications, item.type],
+    () =>
+      (item.type === "Group" && item.open_group_applications !== false) ||
+      (item.type === "Production" && item.open_production_applications === true),
+    [item.open_group_applications, item.open_production_applications, item.type],
   );
 
   const gigSummary = useMemo(
@@ -265,6 +281,7 @@ const ListingCard: React.FC<ListingCardProps> = ({
     }
     return [];
   }, [item.image, item.images]);
+  const showProfileImagePlaceholder = item.type === "Artist";
   const hasMultipleImages = images.length > 1;
   const imageCacheVersion = useMemo(
     () => item.updated_at || item.created_at || item.id,
@@ -345,6 +362,15 @@ const ListingCard: React.FC<ListingCardProps> = ({
           ]}
         >
           {/* Full Background Image / Slideshow */}
+          {showProfileImagePlaceholder && (
+            <View style={[styles.profileImagePlaceholder, StyleSheet.absoluteFillObject]}>
+              <Ionicons
+                name="person"
+                size={84}
+                color={isDark ? "rgba(226,232,240,0.72)" : "rgba(71,85,105,0.5)"}
+              />
+            </View>
+          )}
           {hasMultipleImages ? (
             <View style={StyleSheet.absoluteFillObject}>
               {Platform.OS === "web" ? (
@@ -357,8 +383,6 @@ const ListingCard: React.FC<ListingCardProps> = ({
                   nestedScrollEnabled
                   directionalLockEnabled
                   scrollEnabled
-                  onStartShouldSetResponder={() => true}
-                  onMoveShouldSetResponder={() => true}
                   onMomentumScrollEnd={(e) => {
                     const newIndex = Math.round(
                       e.nativeEvent.contentOffset.x / cardWidth,
@@ -541,6 +565,11 @@ const ListingCard: React.FC<ListingCardProps> = ({
               <View style={[styles.tagBadge, { backgroundColor: badgeColor }]}>
                 <Text style={styles.tagText}>{badgeLabel}</Text>
               </View>
+              {showCompletionBadge && (
+                <View style={[styles.tagBadge, { backgroundColor: completionRate === 100 ? "#10B981" : "#2563EB" }]}>
+                  <Text style={styles.tagText}>Complete {completionRate}%</Text>
+                </View>
+              )}
               {item.pax && (item.type === "Studio" || item.hourly_rate) && (
                 <View style={[styles.tagBadge, { backgroundColor: "#10B981" }]}>
                   <Text style={styles.tagText}>{item.pax} pax</Text>
@@ -725,7 +754,7 @@ const ListingCard: React.FC<ListingCardProps> = ({
 
   // 2. STANDARD VERTICAL CARD (For Search / Lists)
   // Legacy Layout: Image Top, White Info Box Bottom
-  const imageHeight = 180;
+  const imageHeight = verticalImageHeight;
 
   return (
     <Pressable
@@ -736,8 +765,8 @@ const ListingCard: React.FC<ListingCardProps> = ({
           width: "100%", 
           backgroundColor: isDark ? "#1F2937" : "#FFFFFF",
           flex: Platform.OS === 'web' ? 1 : undefined,
-          minWidth: Platform.OS === 'web' ? 260 : undefined,
-          maxWidth: Platform.OS === 'web' ? 380 : undefined,
+          minWidth: Platform.OS === 'web' ? (cleanMode ? 320 : 260) : undefined,
+          maxWidth: Platform.OS === 'web' ? (cleanMode ? 520 : 380) : undefined,
           transform: [{ scale: pressed ? 0.99 : hovered ? 1.02 : 1 }],
           ...(hovered && Platform.OS === 'web' ? {
             shadowOpacity: 0.3,
@@ -756,6 +785,15 @@ const ListingCard: React.FC<ListingCardProps> = ({
       >
         {/* Image Section */}
         <View style={[styles.imageContainer, { height: imageHeight }]}>
+          {showProfileImagePlaceholder && (
+            <View style={[styles.profileImagePlaceholder, StyleSheet.absoluteFillObject]}>
+              <Ionicons
+                name="person"
+                size={72}
+                color={isDark ? "rgba(226,232,240,0.72)" : "rgba(71,85,105,0.5)"}
+              />
+            </View>
+          )}
           {hasMultipleImages ? (
             <View style={{ flex: 1 }}>
               {Platform.OS === "web" ? (
@@ -768,8 +806,6 @@ const ListingCard: React.FC<ListingCardProps> = ({
                   nestedScrollEnabled
                   directionalLockEnabled
                   scrollEnabled
-                  onStartShouldSetResponder={() => true}
-                  onMoveShouldSetResponder={() => true}
                   onMomentumScrollEnd={(e) => {
                     const containerWidth =
                       e.nativeEvent.layoutMeasurement.width;
@@ -929,12 +965,9 @@ const ListingCard: React.FC<ListingCardProps> = ({
             )}
 
           {/* Top Actions for Standard Card */}
-          <View style={[styles.topActions]}>
-            <View style={{ flex: 1 }} />
-
-            {/* Rating moved to right or kept at top? Keeping original rating logic but ensuring zIndex */}
+          <View style={[styles.topActions, cleanMode && styles.topActionsClean]}>
             {item.rating > 0 && (item.review_count || 0) > 0 ? (
-              <View style={[styles.ratingBadge, { marginRight: "auto" }]}>
+              <View style={[styles.ratingBadge, !cleanMode && { marginRight: "auto" }]}>
                 <Ionicons name="star" size={12} color="#FBBF24" />
                 <Text style={styles.ratingText}>{item.rating.toFixed(1)}</Text>
               </View>
@@ -944,7 +977,7 @@ const ListingCard: React.FC<ListingCardProps> = ({
                   styles.ratingBadge,
                   {
                     backgroundColor: "rgba(148, 163, 184, 0.9)",
-                    marginRight: "auto",
+                    marginRight: cleanMode ? 0 : "auto",
                   },
                 ]}
               >
@@ -952,33 +985,35 @@ const ListingCard: React.FC<ListingCardProps> = ({
               </View>
             )}
 
-            <View style={{ flexDirection: "row", gap: 8 }}>
-              {/* Invite Button Vertical */}
-              {canInvite && (
-                <TouchableOpacity activeOpacity={1}
-                  style={[styles.iconBtn, { backgroundColor: colors.primary }]}
-                  onPress={handleInviteAction}
-                >
-                  <Ionicons name="mail" size={20} color="#FFF" />
+            {!cleanMode && (
+              <View style={{ flexDirection: "row", gap: 8 }}>
+                {/* Invite Button Vertical */}
+                {canInvite && (
+                  <TouchableOpacity activeOpacity={1}
+                    style={[styles.iconBtn, { backgroundColor: colors.primary }]}
+                    onPress={handleInviteAction}
+                  >
+                    <Ionicons name="mail" size={20} color="#FFF" />
+                  </TouchableOpacity>
+                )}
+                {/* Chat Button Vertical */}
+                {canChat && (
+                  <TouchableOpacity activeOpacity={1}
+                    style={[styles.iconBtn, { backgroundColor: colors.primary }]}
+                    onPress={handleChatAction}
+                  >
+                    <Ionicons name="chatbubble-ellipses" size={18} color="#FFF" />
+                  </TouchableOpacity>
+                )}
+                <TouchableOpacity activeOpacity={1} style={styles.iconBtn} onPress={toggleLike}>
+                  <Ionicons
+                    name={isLiked ? "heart" : "heart-outline"}
+                    size={20}
+                    color={isLiked ? "#EF4444" : "#000"}
+                  />
                 </TouchableOpacity>
-              )}
-              {/* Chat Button Vertical */}
-              {canChat && (
-                <TouchableOpacity activeOpacity={1}
-                  style={[styles.iconBtn, { backgroundColor: colors.primary }]}
-                  onPress={handleChatAction}
-                >
-                  <Ionicons name="chatbubble-ellipses" size={18} color="#FFF" />
-                </TouchableOpacity>
-              )}
-              <TouchableOpacity activeOpacity={1} style={styles.iconBtn} onPress={toggleLike}>
-                <Ionicons
-                  name={isLiked ? "heart" : "heart-outline"}
-                  size={20}
-                  color={isLiked ? "#EF4444" : "#000"}
-                />
-              </TouchableOpacity>
-            </View>
+              </View>
+            )}
           </View>
         </View>
 
@@ -1009,6 +1044,23 @@ const ListingCard: React.FC<ListingCardProps> = ({
                 {badgeLabel}
               </Text>
             </View>
+            {showCompletionBadge && (
+              <View
+                style={[
+                  styles.tagBadge,
+                  {
+                    backgroundColor: completionRate === 100 ? "#10B981" : "#2563EB",
+                    paddingVertical: 3,
+                    paddingHorizontal: 8,
+                    marginBottom: 0,
+                  },
+                ]}
+              >
+                <Text style={[styles.tagText, { fontSize: 10 }]}>
+                  Complete {completionRate}%
+                </Text>
+              </View>
+            )}
             {item.pax && (item.type === "Studio" || item.hourly_rate) && (
               <View
                 style={[
@@ -1045,7 +1097,7 @@ const ListingCard: React.FC<ListingCardProps> = ({
                   </Text>
                 </View>
               )}
-            {showOpenApplicationsBadge && (
+            {showOpenApplicationsBadge && !cleanMode && (
               <View
                 style={[
                   styles.tagBadge,
@@ -1115,7 +1167,7 @@ const ListingCard: React.FC<ListingCardProps> = ({
           </View>
 
           {/* Hide entire price row for Groups */}
-          {!isGroup && (
+          {!isGroup && (priceLabel || secondaryPriceLabel || item.review_count > 0) && (
             <View
               style={[
                 styles.priceRow,
@@ -1127,9 +1179,11 @@ const ListingCard: React.FC<ListingCardProps> = ({
               ]}
             >
               <View style={{ flexDirection: "column" }}>
-                <Text style={[styles.price, { color: colors.primary }]}>
-                  {priceLabel}
-                </Text>
+                {priceLabel ? (
+                  <Text style={[styles.price, { color: colors.primary }]}>
+                    {priceLabel}
+                  </Text>
+                ) : null}
                 {secondaryPriceLabel && (
                   <Text
                     style={[
@@ -1298,6 +1352,11 @@ const styles = StyleSheet.create({
     backgroundColor: "#f3f4f6",
     position: "relative",
   },
+  profileImagePlaceholder: {
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#E5E7EB",
+  },
   image: {
     width: "100%",
     height: "100%",
@@ -1332,6 +1391,9 @@ const styles = StyleSheet.create({
     alignItems: "flex-start",
     zIndex: 10,
     gap: 12, // Added gap to separate rating and heart
+  },
+  topActionsClean: {
+    justifyContent: "flex-start",
   },
   ratingBadge: {
     backgroundColor: "rgba(255, 255, 255, 0.95)",

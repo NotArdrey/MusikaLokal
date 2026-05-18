@@ -1,0 +1,14 @@
+appId: ${APP_ID}
+---
+- launchApp
+- tapOn:
+    text: "Wait"
+    optional: true
+- tapOn:
+    text: "Close app"
+    optional: true
+- openLink: ${E2E_MOBILE_LOGIN_URL}
+- extendedWaitUntil:
+    visible:
+      id: "nav-profile"
+    timeout: 120000

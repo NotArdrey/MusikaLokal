@@ -31,12 +31,20 @@ const GroupTimelineTab = ({
 
       setLoading(true);
       try {
-        const { data, error } = await supabase
+        const isArtistProfile = String(group?.type || "").toLowerCase() === "artist";
+        let query = supabase
           .from("gig_applications")
-          .select("created_at, gigs(id,name,location,budget,event_date,status)")
-          .eq("group_id", group.id)
+          .select("created_at, gigs(id,name,location,event_date,status)")
           .eq("status", "accepted")
           .order("created_at", { ascending: false });
+
+        if (isArtistProfile) {
+          query = query.eq("applicant_id", group.id);
+        } else {
+          query = query.eq("group_id", group.id);
+        }
+
+        const { data, error } = await query;
 
         if (error) throw error;
 
@@ -51,7 +59,6 @@ const GroupTimelineTab = ({
 
         setGigs(Array.from(gigMap.values()));
       } catch (e) {
-        console.log("Error fetching group timeline gigs:", e);
         setGigs([]);
       } finally {
         setLoading(false);
@@ -162,12 +169,7 @@ const GroupTimelineTab = ({
           </Text>
         </View>
 
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-          <Ionicons name="cash-outline" size={14} color={colors.textSecondary} />
-          <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_500Medium", fontSize: 12 }}>
-            Budget: ₱{Number(gig.budget || 0).toLocaleString()}
-          </Text>
-        </View>
+
       </View>
     );
   };
@@ -209,7 +211,9 @@ const GroupTimelineTab = ({
   return (
     <View style={styles.tabContent}>
       <View style={styles.section}>
-        <Text style={[styles.sectionTitle, { color: colors.text }]}>Group Gig Timeline</Text>
+        <Text style={[styles.sectionTitle, { color: colors.text }]}>
+          {String(group?.type || "").toLowerCase() === "artist" ? "Gig Timeline" : "Group Gig Timeline"}
+        </Text>
 
         {loading ? (
           <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_500Medium", fontSize: 13 }}>

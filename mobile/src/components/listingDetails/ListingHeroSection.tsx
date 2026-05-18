@@ -9,11 +9,14 @@ interface ListingHeroSectionProps {
   colors: any;
   styles: any;
   isFavorited: boolean;
+  favoriteCount?: number;
+  showFavoriteButton?: boolean;
   showReportButton?: boolean;
   onClose: () => void;
   onToggleFavorite: () => void;
   onReport?: () => void;
   onShare?: () => void;
+  onChat?: () => void;
 }
 
 const ListingHeroSection = ({
@@ -21,11 +24,14 @@ const ListingHeroSection = ({
   colors,
   styles,
   isFavorited,
+  favoriteCount = 0,
+  showFavoriteButton = true,
   showReportButton = false,
   onClose,
   onToggleFavorite,
   onReport,
   onShare,
+  onChat,
 }: ListingHeroSectionProps) => {
   const actionIconStyle = {
     lineHeight: 22,
@@ -52,16 +58,14 @@ const ListingHeroSection = ({
       </TouchableOpacity>
 
       <View style={styles.rightActions}>
-        <TouchableOpacity activeOpacity={0.7} onPress={onShare} style={styles.roundBtn}>
-          <Ionicons
-            name="share-outline"
-            size={22}
-            color="#000"
-            style={actionIconStyle}
-          />
-        </TouchableOpacity>
         {showReportButton && onReport ? (
-          <TouchableOpacity activeOpacity={1} onPress={onReport} style={styles.roundBtn}>
+          <TouchableOpacity
+            activeOpacity={1}
+            onPress={onReport}
+            testID="listing-report-button"
+            accessibilityLabel="listing-report-button"
+            style={styles.roundBtn}
+          >
             <Ionicons
               name="flag-outline"
               size={22}
@@ -70,14 +74,34 @@ const ListingHeroSection = ({
             />
           </TouchableOpacity>
         ) : null}
-        <TouchableOpacity activeOpacity={1} onPress={onToggleFavorite} style={styles.roundBtn}>
+        {onChat ? (
+          <TouchableOpacity activeOpacity={1} onPress={onChat} style={styles.roundBtn}>
+            <Ionicons
+              name="chatbubble-ellipses-outline"
+              size={22}
+              color="#000"
+              style={actionIconStyle}
+            />
+          </TouchableOpacity>
+        ) : null}
+        <TouchableOpacity activeOpacity={1} onPress={onShare} style={styles.roundBtn}>
           <Ionicons
-            name={isFavorited ? "heart" : "heart-outline"}
+            name="share-outline"
             size={22}
-            color={isFavorited ? "#EF4444" : "#000"}
+            color="#000"
             style={actionIconStyle}
           />
         </TouchableOpacity>
+        {showFavoriteButton ? (
+          <TouchableOpacity activeOpacity={1} onPress={onToggleFavorite} style={styles.roundBtn}>
+            <Ionicons
+              name={isFavorited ? "bookmark" : "bookmark-outline"}
+              size={22}
+              color={isFavorited ? colors.primary : "#000"}
+              style={actionIconStyle}
+            />
+          </TouchableOpacity>
+        ) : null}
       </View>
     </View>
 
@@ -95,6 +119,20 @@ const ListingHeroSection = ({
         <Text style={styles.heroLocation}>{group.location || "Manila"}</Text>
         <Text style={[styles.heroLocation, { marginLeft: 12 }]}>• {group.genre || "Music"}</Text>
       </View>
+      {showFavoriteButton ? (
+        <View
+          style={{
+            flexDirection: "row",
+            alignItems: "center",
+            marginTop: 4,
+          }}
+        >
+          <Ionicons name="bookmark" size={13} color="#FFF" />
+          <Text style={[styles.heroLocation, { marginLeft: 6 }]}> 
+            {favoriteCount} bookmarked
+          </Text>
+        </View>
+      ) : null}
     </View>
   </View>
   );

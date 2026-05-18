@@ -1,16 +1,19 @@
-import { router, useLocalSearchParams } from 'expo-router';
-import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, View } from 'react-native';
+﻿import { router, useLocalSearchParams } from 'expo-router';
+import React, { useCallback, useEffect, useState } from 'react';
+import { ActivityIndicator, Platform, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { supabase } from '../lib/supabase';
 import ChatScreen from '../src/components/ChatScreen';
 import ConversationsList from '../src/components/ConversationsList';
+import GuestSignInGate from '../src/components/GuestSignInGate';
 import { useAuth } from '../src/context/AuthContext';
 import { useTheme } from '../src/context/ThemeContext';
-import { Conversation, useConversation, useGroupConversation } from '../src/hooks/useChat';
+import { Conversation, isConversationMuted, useConversation, useGroupConversation } from '../src/hooks/useChat';
 
 export default function ChatPage() {
     const { colors } = useTheme();
-    const { userId } = useAuth();
+    const { loading: authLoading, userId, isGuest } = useAuth();
+    const { width } = useWindowDimensions();
+    const isDesktopMessengerLayout = Platform.OS === 'web' && width >= 900;
     const params = useLocalSearchParams<{
         recipientId?: string;
         conversationId?: string;
@@ -32,6 +35,24 @@ export default function ChatPage() {
     const [isGroupChat, setIsGroupChat] = useState(false);
     const [loading, setLoading] = useState(true);
 
+    const withCurrentParticipantState = useCallback(async (conversation: Conversation): Promise<Conversation> => {
+        if (!userId) return conversation;
+
+        const { data: currentParticipant } = await supabase
+            .from('conversation_participants')
+            .select('*')
+            .eq('conversation_id', conversation.id)
+            .eq('user_id', userId)
+            .maybeSingle();
+
+        return {
+            ...conversation,
+            current_participant: currentParticipant || conversation.current_participant || null,
+            is_muted: isConversationMuted(currentParticipant || conversation),
+            muted_until: currentParticipant?.muted_until ?? conversation.muted_until ?? null,
+        };
+    }, [userId]);
+
     const { getOrCreateConversation } = useConversation(
         params.recipientId || null,
         userId || null
@@ -51,7 +72,7 @@ export default function ChatPage() {
                 const conversation = await getOrCreateGroupConversation();
                 
                 if (conversation) {
-                    setSelectedConversation(conversation);
+                    setSelectedConversation(await withCurrentParticipantState(conversation));
                     setIsGroupChat(true);
                 }
             }
@@ -66,7 +87,7 @@ export default function ChatPage() {
                 });
 
                 if (conversation) {
-                    setSelectedConversation(conversation);
+                    setSelectedConversation(await withCurrentParticipantState(conversation));
                     setIsGroupChat(false);
 
                     // Set other user info
@@ -111,7 +132,7 @@ export default function ChatPage() {
                         group_avatar_url: display?.group_avatar_url || null,
                     };
 
-                    setSelectedConversation(mergedConversation);
+                    setSelectedConversation(await withCurrentParticipantState(mergedConversation));
                     setIsGroupChat(conversation.is_group || false);
 
                     // For 1-on-1 chats, get other user
@@ -144,7 +165,16 @@ export default function ChatPage() {
         };
 
         initializeChat();
-    }, [params.recipientId, params.conversationId, params.groupChatId, params.isGroupChat, userId]);
+    }, [
+        params.recipientId,
+        params.conversationId,
+        params.groupChatId,
+        params.isGroupChat,
+        userId,
+        getOrCreateConversation,
+        getOrCreateGroupConversation,
+        withCurrentParticipantState,
+    ]);
 
     const handleSelectConversation = async (conversation: Conversation) => {
         setSelectedConversation(conversation);
@@ -152,6 +182,25 @@ export default function ChatPage() {
         if (!conversation.is_group) {
             setOtherUser(conversation.other_participant || null);
         }
+    };
+
+    const handleMuteChange = (muted: boolean, mutedUntil: string | null) => {
+        setSelectedConversation((conversation) => {
+            if (!conversation) return conversation;
+
+            return {
+                ...conversation,
+                is_muted: muted,
+                muted_until: mutedUntil,
+                current_participant: conversation.current_participant
+                    ? {
+                        ...conversation.current_participant,
+                        is_muted: muted,
+                        muted_until: mutedUntil,
+                    }
+                    : conversation.current_participant,
+            };
+        });
     };
 
     const handleBack = () => {
@@ -166,10 +215,87 @@ export default function ChatPage() {
         }
     };
 
-    if (loading) {
+    if (loading || authLoading) {
         return (
             <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.background }}>
                 <ActivityIndicator size="large" color={colors.primary} />
+            </View>
+        );
+    }
+
+    if (isGuest || !userId) {
+        return (
+            <View style={{ flex: 1, backgroundColor: colors.background }}>
+                <GuestSignInGate message="Sign in to view your messages." />
+            </View>
+        );
+    }
+
+    if (isDesktopMessengerLayout && userId) {
+        const renderSelectedChat = () => {
+            if (!selectedConversation) {
+                return (
+                    <View style={[styles.emptyChatPane, { backgroundColor: colors.background }]}>
+                        <View style={[styles.emptyBubble, { backgroundColor: colors.card, borderColor: colors.border }]}>
+                            <Text style={[styles.emptyChatTitle, { color: colors.text }]}>Select a conversation</Text>
+                            <Text style={[styles.emptyChatText, { color: colors.textSecondary }]}>
+                                Choose a message from the list or start a new chat.
+                            </Text>
+                        </View>
+                    </View>
+                );
+            }
+
+            if (isGroupChat || selectedConversation.is_group) {
+                return (
+                    <ChatScreen
+                        conversationId={selectedConversation.id}
+                        currentUserId={userId}
+                        isGroupChat={true}
+                        groupId={selectedConversation.group_id || params.groupChatId || null}
+                        groupName={selectedConversation.group_name || 'Group Chat'}
+                        groupAvatar={selectedConversation.group_avatar_url}
+                        isMuted={isConversationMuted(selectedConversation)}
+                        mutedUntil={selectedConversation.muted_until ?? null}
+                        onMuteChange={handleMuteChange}
+                    />
+                );
+            }
+
+            if (otherUser) {
+                return (
+                    <ChatScreen
+                        conversationId={selectedConversation.id}
+                        currentUserId={userId}
+                        otherUser={otherUser}
+                        isGroupChat={false}
+                        isMuted={isConversationMuted(selectedConversation)}
+                        mutedUntil={selectedConversation.muted_until ?? null}
+                        onMuteChange={handleMuteChange}
+                    />
+                );
+            }
+
+            return (
+                <View style={[styles.emptyChatPane, { backgroundColor: colors.background }]}>
+                    <ActivityIndicator size="large" color={colors.primary} />
+                </View>
+            );
+        };
+
+        return (
+            <View style={[styles.desktopShell, { backgroundColor: colors.background }]}>
+                <View style={[styles.desktopSidebar, { backgroundColor: colors.background, borderRightColor: colors.border }]}>
+                    <ConversationsList
+                        currentUserId={userId}
+                        onSelectConversation={handleSelectConversation}
+                        onNewConversation={() => router.push('/feed')}
+                        selectedConversationId={selectedConversation?.id ?? null}
+                    />
+                </View>
+                <View style={styles.desktopChatPane}>
+                    {renderSelectedChat()}
+                </View>
             </View>
         );
     }
@@ -186,6 +312,9 @@ export default function ChatPage() {
                     groupId={selectedConversation.group_id || params.groupChatId || null}
                     groupName={selectedConversation.group_name || 'Group Chat'}
                     groupAvatar={selectedConversation.group_avatar_url}
+                    isMuted={isConversationMuted(selectedConversation)}
+                    mutedUntil={selectedConversation.muted_until ?? null}
+                    onMuteChange={handleMuteChange}
                     onBack={handleBack}
                 />
             );
@@ -199,6 +328,9 @@ export default function ChatPage() {
                     currentUserId={userId}
                     otherUser={otherUser}
                     isGroupChat={false}
+                    isMuted={isConversationMuted(selectedConversation)}
+                    mutedUntil={selectedConversation.muted_until ?? null}
+                    onMuteChange={handleMuteChange}
                     onBack={handleBack}
                 />
             );
@@ -212,7 +344,7 @@ export default function ChatPage() {
                 <ConversationsList
                     currentUserId={userId}
                     onSelectConversation={handleSelectConversation}
-                    onNewConversation={() => router.push('/home')}
+                    onNewConversation={() => router.push('/feed')}
                 />
             </View>
         );
@@ -220,3 +352,46 @@ export default function ChatPage() {
 
     return null;
 }
+
+const styles = StyleSheet.create({
+    desktopShell: {
+        flex: 1,
+        flexDirection: 'row',
+        minHeight: 0,
+    },
+    desktopSidebar: {
+        width: 380,
+        maxWidth: 420,
+        borderRightWidth: StyleSheet.hairlineWidth,
+    },
+    desktopChatPane: {
+        flex: 1,
+        minWidth: 0,
+    },
+    emptyChatPane: {
+        flex: 1,
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: 32,
+    },
+    emptyBubble: {
+        alignItems: 'center',
+        justifyContent: 'center',
+        borderWidth: StyleSheet.hairlineWidth,
+        borderRadius: 18,
+        paddingHorizontal: 32,
+        paddingVertical: 28,
+        maxWidth: 360,
+    },
+    emptyChatTitle: {
+        fontSize: 20,
+        fontWeight: '700',
+        marginBottom: 8,
+    },
+    emptyChatText: {
+        fontSize: 14,
+        textAlign: 'center',
+        lineHeight: 20,
+    },
+});
+

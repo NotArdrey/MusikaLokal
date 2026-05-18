@@ -1,14 +1,21 @@
 export type SessionType = "Rehearsal" | "Recording" | null;
+export type CanonicalStudioType = "Rehearsal" | "Recording" | "Both" | null;
 
 export interface TimeSlot {
   start: string;
   end: string;
+  sessionType?: ScheduleSessionType;
+  session_type?: ScheduleSessionType;
+  reason?: string | null;
 }
 
 export interface DaySchedule {
   day: string;
   slots: TimeSlot[];
   isOverride?: boolean;
+  sessionType?: ScheduleSessionType;
+  session_type?: ScheduleSessionType;
+  reason?: string | null;
 }
 
 export interface DateOverride {
@@ -16,6 +23,10 @@ export interface DateOverride {
   is_open: boolean;
   open_time?: string | null;
   close_time?: string | null;
+  slot_order?: number | null;
+  sessionType?: ScheduleSessionType;
+  session_type?: ScheduleSessionType;
+  reason?: string | null;
 }
 
 export interface CartBooking {
@@ -58,6 +69,7 @@ export interface BuildAvailableSlotsResult {
 const DISABLED_TEXT_DARK = "#4B5563";
 const DISABLED_TEXT_LIGHT = "#D1D5DB";
 const OVERRIDE_DOT = "#F59E0B";
+type ScheduleSessionType = "rehearsal" | "recording" | "both";
 
 const toDateString = (date: Date) =>
   `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
@@ -65,12 +77,108 @@ const toDateString = (date: Date) =>
 export const isRecordingStudioMode = (
   studioType?: string | null,
   selectedSessionType?: SessionType,
-) =>
-  studioType === "Recording" ||
-  (studioType === "Both" && selectedSessionType === "Recording");
+) => {
+  const normalizedStudioType = normalizeStudioType(studioType);
+  return (
+    normalizedStudioType === "Recording" ||
+    (normalizedStudioType === "Both" && selectedSessionType === "Recording")
+  );
+};
+
+export const normalizeStudioType = (
+  studioType?: string | null,
+): CanonicalStudioType => {
+  if (typeof studioType !== "string") {
+    return null;
+  }
+
+  const normalized = studioType.trim().toLowerCase();
+  if (!normalized) {
+    return null;
+  }
+
+  const hasRehearsal = normalized.includes("rehearsal");
+  const hasRecording = normalized.includes("recording");
+
+  if (
+    normalized === "both" ||
+    normalized === "rehearsal & recording" ||
+    normalized === "rehearsal and recording" ||
+    (hasRehearsal && hasRecording)
+  ) {
+    return "Both";
+  }
+
+  if (normalized === "rehearsal" || hasRehearsal) {
+    return "Rehearsal";
+  }
+
+  if (normalized === "recording" || hasRecording) {
+    return "Recording";
+  }
+
+  return null;
+};
 
 const getDotColor = (isOverride: boolean | undefined, primaryColor: string) =>
   isOverride ? OVERRIDE_DOT : primaryColor;
+
+const normalizeScheduleSessionType = (
+  value: unknown,
+  fallback: ScheduleSessionType = "both",
+): ScheduleSessionType => {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (
+    normalized === "rehearsal" ||
+    normalized === "recording" ||
+    normalized === "both"
+  ) {
+    return normalized;
+  }
+  return fallback;
+};
+
+const parseScheduleSessionType = (
+  reason: unknown,
+  fallback: ScheduleSessionType = "both",
+): ScheduleSessionType => {
+  const match = String(reason || "").match(/session_type:(rehearsal|recording|both)/i);
+  return match ? normalizeScheduleSessionType(match[1], fallback) : fallback;
+};
+
+const getRequestedScheduleSessionType = (
+  studioType?: string | null,
+  selectedSessionType?: SessionType,
+): ScheduleSessionType | null => {
+  if (selectedSessionType === "Rehearsal") return "rehearsal";
+  if (selectedSessionType === "Recording") return "recording";
+
+  const normalizedStudioType = normalizeStudioType(studioType);
+  if (normalizedStudioType === "Rehearsal") return "rehearsal";
+  if (normalizedStudioType === "Recording") return "recording";
+  return null;
+};
+
+const getScheduleSessionType = (schedule: any): ScheduleSessionType =>
+  normalizeScheduleSessionType(
+    schedule?.sessionType ?? schedule?.session_type,
+    parseScheduleSessionType(schedule?.reason, "both"),
+  );
+
+const scheduleAllowsRequestedSession = (
+  schedule: any,
+  studioType?: string | null,
+  selectedSessionType?: SessionType,
+) => {
+  const requestedSessionType = getRequestedScheduleSessionType(
+    studioType,
+    selectedSessionType,
+  );
+  if (!requestedSessionType) return true;
+
+  const scheduleSessionType = getScheduleSessionType(schedule);
+  return scheduleSessionType === "both" || scheduleSessionType === requestedSessionType;
+};
 
 const buildAvailabilityMap = (availability: DaySchedule[]) => {
   const dayIndexes = [
@@ -96,14 +204,17 @@ const buildAvailabilityMap = (availability: DaySchedule[]) => {
 };
 
 const buildDateOverrideMap = (dateOverrides?: DateOverride[]) => {
-  const dateOverrideMap: Record<string, DateOverride> = {};
+  const dateOverrideMap: Record<string, DateOverride[]> = {};
 
   if (!Array.isArray(dateOverrides)) {
     return dateOverrideMap;
   }
 
   dateOverrides.forEach((override) => {
-    dateOverrideMap[override.override_date] = override;
+    if (!dateOverrideMap[override.override_date]) {
+      dateOverrideMap[override.override_date] = [];
+    }
+    dateOverrideMap[override.override_date].push(override);
   });
 
   return dateOverrideMap;
@@ -113,15 +224,32 @@ const resolveDaySchedule = (
   dateStr: string,
   date: Date,
   availabilityMap: Record<number, DaySchedule>,
-  dateOverrideMap: Record<string, DateOverride>,
+  dateOverrideMap: Record<string, DateOverride[]>,
+  studioType?: string | null,
+  selectedSessionType?: SessionType,
 ): DaySchedule | null => {
-  const dateOverride = dateOverrideMap[dateStr];
+  const dateOverrides = dateOverrideMap[dateStr];
 
-  if (dateOverride) {
-    if (dateOverride.is_open && dateOverride.open_time && dateOverride.close_time) {
+  if (dateOverrides) {
+    const openOverrides = dateOverrides
+      .filter((override) => override.is_open && override.open_time && override.close_time)
+      .filter((override) =>
+        scheduleAllowsRequestedSession(override, studioType, selectedSessionType),
+      )
+      .sort((a: any, b: any) => {
+        const orderDiff = Number(a?.slot_order ?? 0) - Number(b?.slot_order ?? 0);
+        if (orderDiff !== 0) return orderDiff;
+        return String(a?.open_time || "").localeCompare(String(b?.open_time || ""));
+      });
+
+    if (openOverrides.length > 0) {
       return {
         day: date.toLocaleDateString("en-US", { weekday: "long" }),
-        slots: [{ start: dateOverride.open_time, end: dateOverride.close_time }],
+        slots: openOverrides.map((override) => ({
+          start: override.open_time as string,
+          end: override.close_time as string,
+          sessionType: getScheduleSessionType(override),
+        })),
         isOverride: true,
       };
     }
@@ -129,7 +257,27 @@ const resolveDaySchedule = (
     return null;
   }
 
-  return availabilityMap[date.getDay()] || null;
+  const weeklySchedule = availabilityMap[date.getDay()];
+  if (!weeklySchedule) return null;
+
+  const sessionAllowedSlots = (weeklySchedule.slots || []).filter((slot) =>
+    scheduleAllowsRequestedSession(
+      {
+        ...slot,
+        sessionType: slot?.sessionType ?? slot?.session_type ?? weeklySchedule?.sessionType ?? weeklySchedule?.session_type,
+        reason: slot?.reason ?? weeklySchedule?.reason,
+      },
+      studioType,
+      selectedSessionType,
+    ),
+  );
+
+  if (sessionAllowedSlots.length === 0) return null;
+
+  return {
+    ...weeklySchedule,
+    slots: sessionAllowedSlots,
+  };
 };
 
 const getBlockedTimeStringsFromDbBookings = (dayBookings: any[]) => {
@@ -220,6 +368,8 @@ export const buildMarkedDates = ({
       date,
       availabilityMap,
       dateOverrideMap,
+      studioType,
+      selectedSessionType,
     );
 
     if (!daySchedule || !daySchedule.slots || daySchedule.slots.length === 0) {
@@ -320,7 +470,14 @@ export const buildAvailableSlots = ({
   const selectedDate = new Date(dateStr);
   const availabilityMap = buildAvailabilityMap(availability || []);
   const dateOverrideMap = buildDateOverrideMap(dateOverrides);
-  const daySchedule = resolveDaySchedule(dateStr, selectedDate, availabilityMap, dateOverrideMap);
+  const daySchedule = resolveDaySchedule(
+    dateStr,
+    selectedDate,
+    availabilityMap,
+    dateOverrideMap,
+    studioType,
+    selectedSessionType,
+  );
 
   if (!daySchedule || !daySchedule.slots) {
     return {

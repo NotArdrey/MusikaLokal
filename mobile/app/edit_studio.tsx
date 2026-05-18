@@ -1,5 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
-import * as FileSystem from "expo-file-system/legacy";
+import * as FileSystem from "expo-file-system/src/legacy";
 import * as ImagePicker from "expo-image-picker";
 import { router } from "expo-router";
 import React, { useCallback, useEffect, useRef, useState } from "react";
@@ -27,6 +27,15 @@ import LocationPicker from "../src/components/LocationPicker";
 import Modal from "../src/components/modal";
 import Navbar from "../src/components/navbar";
 import { useTheme } from "../src/context/ThemeContext";
+import { buildNotificationRouteMeta } from "../src/utils/notificationNavigation";
+import { formatDashedNumericDate } from "../src/utils/friendlyDateTime";
+import { invalidateListingCaches } from "../src/utils/listingCacheInvalidation";
+import { clearListingDetailsCache } from "../src/utils/listingDetailsCache";
+import {
+  formatRecordingRuleSentence,
+  formatRecordingRuleShort,
+} from "../src/utils/recordingRule";
+import { sanitizeStorageFileName, uploadStorageObject } from "../src/utils/storageUpload";
 
 // Decode base64 to Uint8Array without using fetch().arrayBuffer() which crashes on Android New Architecture
 const base64ToUint8Array = (base64: string): Uint8Array => {
@@ -93,6 +102,31 @@ const formatTimeInput = (text: string): string => {
 const TITLE_MAX_LENGTH = 120;
 const DESCRIPTION_MAX_LENGTH = 1000;
 
+const formatSupabaseError = (error: any): string => {
+  const parts = [
+    error?.message,
+    error?.details ? `Details: ${error.details}` : null,
+    error?.hint ? `Hint: ${error.hint}` : null,
+    error?.code ? `Code: ${error.code}` : null,
+  ].filter(Boolean);
+
+  return parts.join("\n") || "Unknown error";
+};
+
+const logActionError = (
+  context: string,
+  error: any,
+  extra?: Record<string, unknown>,
+) => {
+  console.error(`[${context}]`, {
+    message: error?.message || String(error),
+    code: error?.code,
+    details: error?.details,
+    hint: error?.hint,
+    extra,
+  });
+};
+
 const canonicalizeStudioType = (
   value: unknown,
 ): "Rehearsal" | "Recording" | null => {
@@ -113,6 +147,364 @@ const resolveStudioTypeRows = (value: unknown): ("Rehearsal" | "Recording")[] =>
   const singleType = canonicalizeStudioType(value);
   return singleType ? [singleType] : [];
 };
+
+const normalizeStudioTypeColumnValue = (
+  value: unknown,
+): "Rehearsal" | "Recording" | "Both" | null => {
+  if (typeof value === "string" && value.trim().toLowerCase() === "both") {
+    return "Both";
+  }
+
+  return canonicalizeStudioType(value);
+};
+
+const parsePositiveInteger = (value: unknown): number | null => {
+  if (value === null || value === undefined) return null;
+  const parsed = Number.parseInt(String(value).trim(), 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) return null;
+  return parsed;
+};
+
+const parsePositiveDecimal = (value: unknown): number | null => {
+  if (value === null || value === undefined) return null;
+  const parsed = Number.parseFloat(String(value).trim());
+  if (!Number.isFinite(parsed) || parsed <= 0) return null;
+  return parsed;
+};
+
+const isMissingStudioInstrumentDetailColumns = (error: any): boolean => {
+  const haystack = [
+    error?.code,
+    error?.message,
+    error?.details,
+    error?.hint,
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+
+  return (
+    haystack.includes("pgrst204") ||
+    (haystack.includes("studio_instruments") &&
+      (haystack.includes("quantity") || haystack.includes("description")) &&
+      (haystack.includes("schema cache") ||
+        haystack.includes("could not find") ||
+        haystack.includes("column")))
+  );
+};
+
+const isMissingWeeklyScheduleColumns = (error: any): boolean => {
+  const haystack = [
+    error?.code,
+    error?.message,
+    error?.details,
+    error?.hint,
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+
+  return (
+    haystack.includes("weekly_schedule_") &&
+    (haystack.includes("pgrst204") ||
+      haystack.includes("schema cache") ||
+      haystack.includes("could not find") ||
+      haystack.includes("column"))
+  );
+};
+
+const stripWeeklyScheduleColumns = (row: any) => {
+  const {
+    weekly_schedule_scope,
+    weekly_schedule_end_date,
+    weekly_schedule_dates,
+    ...rest
+  } = row;
+  return rest;
+};
+
+const buildStudioInstrumentRows = (
+  studioId: string,
+  instruments: any[] = [],
+  includeDetailColumns = true,
+) =>
+  instruments.map((item: any) => {
+    const baseRow: any = {
+      studio_id: studioId,
+      instrument_name: item.name,
+      image_url: item.image || null,
+    };
+
+    if (includeDetailColumns) {
+      baseRow.quantity = item.quantity || null;
+      baseRow.description = item.description || null;
+    }
+
+    return baseRow;
+  });
+
+const insertStudioInstrumentRows = async (
+  studioId: string,
+  instruments: any[] = [],
+) => {
+  if (instruments.length === 0) return null;
+
+  const { error } = await supabase
+    .from("studio_instruments")
+    .insert(buildStudioInstrumentRows(studioId, instruments, true));
+
+  if (!error || !isMissingStudioInstrumentDetailColumns(error)) {
+    return error;
+  }
+
+  const { error: fallbackError } = await supabase
+    .from("studio_instruments")
+    .insert(buildStudioInstrumentRows(studioId, instruments, false));
+
+  return fallbackError;
+};
+
+const PROMOTION_CRITERIA_PREFIX = "How to get promo:";
+const PROMOTION_MIN_HOURS_PREFIX = "Minimum booking hours:";
+const PROMOTION_MIN_SPEND_PREFIX = "Minimum spend:";
+
+const parsePromotionDescription = (value: unknown) => {
+  const raw = typeof value === "string" ? value : "";
+  if (!raw.trim()) {
+    return {
+      description: "",
+      criteria: "",
+      minimum_booking_hours: "",
+      minimum_spend: "",
+    };
+  }
+
+  const lines = raw.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const remaining: string[] = [];
+  let criteria = "";
+  let minimum_booking_hours = "";
+  let minimum_spend = "";
+
+  lines.forEach((line) => {
+    const lowerLine = line.toLowerCase();
+    if (lowerLine.startsWith(PROMOTION_CRITERIA_PREFIX.toLowerCase())) {
+      criteria = line.slice(PROMOTION_CRITERIA_PREFIX.length).trim();
+      return;
+    }
+    if (lowerLine.startsWith(PROMOTION_MIN_HOURS_PREFIX.toLowerCase())) {
+      minimum_booking_hours = line.slice(PROMOTION_MIN_HOURS_PREFIX.length).trim();
+      return;
+    }
+    if (lowerLine.startsWith(PROMOTION_MIN_SPEND_PREFIX.toLowerCase())) {
+      minimum_spend = line.slice(PROMOTION_MIN_SPEND_PREFIX.length).trim();
+      return;
+    }
+    remaining.push(line);
+  });
+
+  return {
+    description: remaining.join("\n"),
+    criteria,
+    minimum_booking_hours,
+    minimum_spend,
+  };
+};
+
+const buildPromotionDescription = (
+  description: string,
+): string => {
+  return description.trim();
+};
+
+const getAllowedPromotionTargets = (
+  type: "Rehearsal" | "Recording" | "Both",
+): ("rehearsal" | "recording" | "both")[] => {
+  if (type === "Rehearsal") return ["rehearsal"];
+  if (type === "Recording") return ["recording"];
+  return ["both", "rehearsal", "recording"];
+};
+
+const normalizePromotionTarget = (
+  target: "rehearsal" | "recording" | "both",
+  type: "Rehearsal" | "Recording" | "Both",
+): "rehearsal" | "recording" | "both" => {
+  const allowedTargets = getAllowedPromotionTargets(type);
+  if (allowedTargets.includes(target)) return target;
+  return type === "Rehearsal"
+    ? "rehearsal"
+    : type === "Recording"
+      ? "recording"
+      : "both";
+};
+
+type DateOverrideSessionType = "rehearsal" | "recording" | "both";
+type WeeklySessionType = DateOverrideSessionType;
+type WeeklyScheduleScope = "indefinite" | "until" | "specific_dates";
+type WeeklyScheduleFields = {
+  weeklyScheduleScope: WeeklyScheduleScope;
+  weeklyScheduleEndDate: string;
+  weeklyScheduleDates: Record<string, boolean>;
+};
+type WeeklyAvailabilityDay = {
+  day: string;
+  slots: { start: string; end: string }[];
+  sessionType?: WeeklySessionType;
+} & WeeklyScheduleFields;
+type ScheduleSlot = { start: string; end: string };
+type ProtectedDateOverrideMap = Record<
+  string,
+  {
+    slots: ScheduleSlot[];
+    sessionType?: DateOverrideSessionType;
+  }
+>;
+
+const ISO_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+
+const getLocalDateKey = (date = new Date()): string => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
+
+const parseLocalDateKey = (dateStr: string): Date => {
+  const [year, month, day] = dateStr.split("-").map(Number);
+  return new Date(year, (month || 1) - 1, day || 1);
+};
+
+const formatReadableDate = (dateStr: string): string => {
+  if (!ISO_DATE_PATTERN.test(dateStr)) return "";
+  return parseLocalDateKey(dateStr).toLocaleDateString("en-US", {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+};
+
+const normalizeWeeklyScheduleScope = (
+  value: unknown,
+): WeeklyScheduleScope => {
+  if (value === "until" || value === "indefinite") {
+    return value;
+  }
+  return "indefinite";
+};
+
+const weeklyScheduleDatesToMap = (
+  value: unknown,
+): Record<string, boolean> => {
+  if (!Array.isArray(value)) return {};
+  return value.reduce((acc: Record<string, boolean>, date) => {
+    if (typeof date === "string" && ISO_DATE_PATTERN.test(date)) {
+      acc[date] = true;
+    }
+    return acc;
+  }, {});
+};
+
+const toWeeklyScheduleDateList = (dates: Record<string, boolean>): string[] =>
+  Object.keys(dates)
+    .filter((date) => dates[date])
+    .sort((a, b) => a.localeCompare(b));
+
+const getDefaultWeeklyScheduleFields = (
+  fallback?: Partial<WeeklyScheduleFields>,
+): WeeklyScheduleFields => ({
+  weeklyScheduleScope: normalizeWeeklyScheduleScope(
+    fallback?.weeklyScheduleScope,
+  ),
+  weeklyScheduleEndDate:
+    typeof fallback?.weeklyScheduleEndDate === "string"
+      ? fallback.weeklyScheduleEndDate
+      : "",
+  weeklyScheduleDates: { ...(fallback?.weeklyScheduleDates || {}) },
+});
+
+const normalizeWeeklyAvailabilityDay = (
+  day: {
+    day: string;
+    slots: { start: string; end: string }[];
+    sessionType?: WeeklySessionType;
+  } & Partial<WeeklyScheduleFields>,
+  fallback?: Partial<WeeklyScheduleFields>,
+): WeeklyAvailabilityDay => ({
+  ...day,
+  ...getDefaultWeeklyScheduleFields({
+    weeklyScheduleScope:
+      day.weeklyScheduleScope ?? fallback?.weeklyScheduleScope,
+    weeklyScheduleEndDate:
+      day.weeklyScheduleEndDate ?? fallback?.weeklyScheduleEndDate,
+    weeklyScheduleDates:
+      day.weeklyScheduleDates ?? fallback?.weeklyScheduleDates,
+  }),
+});
+
+const getLocalDateTime = (dateStr: string, time24: string): Date => {
+  const date = parseLocalDateKey(dateStr);
+  const [hours, minutes] = time24.substring(0, 5).split(":").map(Number);
+  date.setHours(hours || 0, minutes || 0, 0, 0);
+  return date;
+};
+
+const getDefaultDateOverrideSessionType = (
+  type: "Rehearsal" | "Recording" | "Both",
+): DateOverrideSessionType => {
+  if (type === "Rehearsal") return "rehearsal";
+  if (type === "Recording") return "recording";
+  return "both";
+};
+
+const normalizeDateOverrideSessionType = (
+  value: unknown,
+  fallback: DateOverrideSessionType = "both",
+): DateOverrideSessionType => {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (
+    normalized === "rehearsal" ||
+    normalized === "recording" ||
+    normalized === "both"
+  ) {
+    return normalized;
+  }
+  return fallback;
+};
+
+const parseDateOverrideSessionType = (
+  reason: unknown,
+  fallback: DateOverrideSessionType = "both",
+): DateOverrideSessionType => {
+  const text = String(reason || "");
+  const match = text.match(/session_type:(rehearsal|recording|both)/i);
+  if (!match) return fallback;
+  return normalizeDateOverrideSessionType(match[1], fallback);
+};
+
+const buildDateOverrideReason = (
+  sessionType: DateOverrideSessionType,
+  isOpen: boolean,
+): string => {
+  const baseReason = isOpen ? "Custom schedule" : "Closed override";
+  return `${baseReason} [session_type:${sessionType}]`;
+};
+
+const buildWeeklyScheduleReason = (sessionType: WeeklySessionType): string =>
+  `Weekly schedule [session_type:${sessionType}]`;
+
+const getDefaultWeeklySessionType = (
+  type: "Rehearsal" | "Recording" | "Both",
+): WeeklySessionType => getDefaultDateOverrideSessionType(type);
+
+const normalizeWeeklySessionType = (
+  value: unknown,
+  fallback: WeeklySessionType = "both",
+): WeeklySessionType => normalizeDateOverrideSessionType(value, fallback);
+
+const parseWeeklySessionType = (
+  reason: unknown,
+  fallback: WeeklySessionType = "both",
+): WeeklySessionType => parseDateOverrideSessionType(reason, fallback);
 
 const inferStudioTypeFromRows = (
   rows: unknown[],
@@ -135,7 +527,16 @@ const inferStudioTypeFromRows = (
 
 export default function EditStudioScreen() {
   const { colors, isDark } = useTheme();
-  const { id } = useLocalSearchParams();
+  const { id } = useLocalSearchParams<{
+    id?: string | string[];
+  }>();
+  const returnTab = useLocalSearchParams<{
+    returnTab?: string | string[];
+  }>().returnTab;
+  const returnTabParam = Array.isArray(returnTab) ? returnTab[0] : returnTab;
+  const normalizedReturnTab = ["About", "Setup", "Bookings", "Review"].includes(returnTabParam || "")
+    ? returnTabParam || "About"
+    : "About";
   const [studioName, setStudioName] = useState("");
   const [description, setDescription] = useState("");
   const [address, setAddress] = useState("");
@@ -148,6 +549,8 @@ export default function EditStudioScreen() {
   const [studioType, setStudioType] = useState<
     "Rehearsal" | "Recording" | "Both"
   >("Both");
+  const [recordingSongsPerBlock, setRecordingSongsPerBlock] = useState("");
+  const [recordingHoursPerBlock, setRecordingHoursPerBlock] = useState("");
   const [pax, setPax] = useState("");
 
   // Promotions state
@@ -155,6 +558,9 @@ export default function EditStudioScreen() {
     id: string;
     name: string;
     description: string;
+    criteria: string;
+    minimum_booking_hours: string;
+    minimum_spend: string;
     discount_type: "percentage" | "fixed_amount";
     discount_value: string;
     is_permanent: boolean;
@@ -168,6 +574,9 @@ export default function EditStudioScreen() {
   const [promotionForm, setPromotionForm] = useState({
     name: "",
     description: "",
+    criteria: "",
+    minimum_booking_hours: "",
+    minimum_spend: "",
     discount_type: "percentage" as "percentage" | "fixed_amount",
     discount_value: "",
     is_permanent: true,
@@ -214,6 +623,19 @@ export default function EditStudioScreen() {
     setAlertVisible(true);
   };
 
+  const handleReturnToTabs = useCallback(() => {
+    const studioId = Array.isArray(id) ? id[0] : id;
+    if (studioId) {
+      router.replace({
+        pathname: "/manage_studio",
+        params: { id: studioId, tab: normalizedReturnTab },
+      });
+      return;
+    }
+
+    router.replace("/my_studio");
+  }, [id, normalizedReturnTab]);
+
   const handleAttemptLeave = useCallback(() => {
     if (saving) return;
 
@@ -223,12 +645,16 @@ export default function EditStudioScreen() {
       "Your current edits won't be saved unless you tap Save Changes.",
       [
         { text: "Stay", style: "cancel" },
-        { text: "Leave", style: "destructive", onPress: () => router.back() },
+        { text: "Leave", style: "destructive", onPress: handleReturnToTabs },
       ],
     );
-  }, [saving]);
+  }, [handleReturnToTabs, saving]);
 
   const toggleCalendarDate = (dateStr: string) => {
+    if (dateStr < getLocalDateKey()) {
+      return;
+    }
+
     setSelectedDates((prev) => {
       const next = { ...prev };
       if (next[dateStr]?.selected) {
@@ -237,6 +663,7 @@ export default function EditStudioScreen() {
         next[dateStr] = {
           selected: true,
           slots: [{ start: "09:00 AM", end: "05:00 PM" }],
+          sessionType: getDefaultDateOverrideSessionType(studioType),
         };
       }
       return next;
@@ -256,11 +683,11 @@ export default function EditStudioScreen() {
 
   // Business Permit state
   const [businessPermitUrl, setBusinessPermitUrl] = useState<string>("");
-  const [initialBusinessPermitUrl, setInitialBusinessPermitUrl] = useState<string>("");
   const [businessPermitFileName, setBusinessPermitFileName] = useState<string>("");
   const [uploadingBusinessPermit, setUploadingBusinessPermit] = useState(false);
   const businessPermitInputRef = useRef<HTMLInputElement>(null);
-  const [permitStatus, setPermitStatus] = useState<string>("pending_review");
+  const [permitStatus, setPermitStatus] = useState<string>("approved");
+  const [permitRejectionReason, setPermitRejectionReason] = useState<string>("");
 
   // Availability state
   const daysOfWeek = [
@@ -272,9 +699,13 @@ export default function EditStudioScreen() {
     "Saturday",
     "Sunday",
   ];
-  const [availability, setAvailability] = useState<
-    { day: string; slots: { start: string; end: string }[] }[]
-  >(daysOfWeek.map((day) => ({ day, slots: [] })));
+  const [availability, setAvailability] = useState<WeeklyAvailabilityDay[]>(
+    daysOfWeek.map((day) => normalizeWeeklyAvailabilityDay({
+      day,
+      slots: [],
+      sessionType: getDefaultWeeklySessionType("Both"),
+    })),
+  );
 
   // Instruments state
   const [selectedInstruments, setSelectedInstruments] = useState<
@@ -305,24 +736,166 @@ export default function EditStudioScreen() {
     [date: string]: {
       selected: boolean;
       slots: { start: string; end: string }[];
+      sessionType?: DateOverrideSessionType;
     };
   }>({});
-
+  const [activeWeeklyEndDatePickerDay, setActiveWeeklyEndDatePickerDay] =
+    useState<string | null>(null);
   // Conflict Resolution State
   const [conflictModalVisible, setConflictModalVisible] = useState(false);
   const [conflictingBookings, setConflictingBookings] = useState<
     ConflictingBooking[]
   >([]);
   const [pendingSavePayload, setPendingSavePayload] = useState<any>(null);
-  const originalAvailabilityRef = useRef<
-    { day: string; slots: { start: string; end: string }[] }[]
-  >(daysOfWeek.map((day) => ({ day, slots: [] })));
+  const originalAvailabilityRef = useRef<WeeklyAvailabilityDay[]>(
+    daysOfWeek.map((day) => normalizeWeeklyAvailabilityDay({
+      day,
+      slots: [],
+      sessionType: getDefaultWeeklySessionType("Both"),
+    })),
+  );
   const originalSelectedDatesRef = useRef<{
     [date: string]: {
       selected: boolean;
       slots: { start: string; end: string }[];
+      sessionType?: DateOverrideSessionType;
     };
   }>({});
+  const nearTermProtectedDateOverridesRef =
+    useRef<ProtectedDateOverrideMap>({});
+
+  const getWeeklyScheduleForDate = (
+    dateStr: string,
+    weeklySchedule: WeeklyAvailabilityDay[] = availability,
+  ) => {
+    const dayName = getDayOfWeekName(dateStr);
+    return weeklySchedule.find((daySchedule) => daySchedule.day === dayName);
+  };
+
+  const weeklyScheduleAllowsDate = (
+    dateStr: string,
+    daySchedule: WeeklyAvailabilityDay,
+  ): boolean => {
+    if (
+      daySchedule.weeklyScheduleScope === "until" &&
+      daySchedule.weeklyScheduleEndDate
+    ) {
+      return dateStr <= daySchedule.weeklyScheduleEndDate;
+    }
+    if (daySchedule.weeklyScheduleScope === "specific_dates") {
+      return Boolean(daySchedule.weeklyScheduleDates[dateStr]);
+    }
+    return true;
+  };
+
+  const isWeeklyScheduleDateAllowed = (
+    dateStr: string,
+    weeklySchedule: WeeklyAvailabilityDay[] = availability,
+  ): boolean => {
+    const daySchedule = getWeeklyScheduleForDate(dateStr, weeklySchedule);
+    return Boolean(
+      daySchedule &&
+        daySchedule.slots.length > 0 &&
+        weeklyScheduleAllowsDate(dateStr, daySchedule),
+    );
+  };
+
+  const updateWeeklyScheduleForDay = (
+    dayIndex: number,
+    patch: Partial<WeeklyScheduleFields>,
+  ) => {
+    setAvailability((prev) =>
+      prev.map((day, index) =>
+        index === dayIndex ? normalizeWeeklyAvailabilityDay({ ...day, ...patch }) : day,
+      ),
+    );
+  };
+
+  const isWeeklyScheduleScopeValid = (): boolean => {
+    const todayKey = getLocalDateKey();
+    const openDays = availability.filter((day) => day.slots.length > 0);
+
+    for (const daySchedule of openDays) {
+      if (daySchedule.weeklyScheduleScope === "until") {
+        if (!ISO_DATE_PATTERN.test(daySchedule.weeklyScheduleEndDate)) {
+          showAlert(
+            "warning",
+            `${daySchedule.day} Schedule End Date`,
+            `Choose a ${daySchedule.day} weekly schedule end date from the calendar.`,
+          );
+          return false;
+        }
+        if (daySchedule.weeklyScheduleEndDate < todayKey) {
+          showAlert(
+            "warning",
+            `${daySchedule.day} Schedule End Date`,
+            `The ${daySchedule.day} weekly schedule end date must be today or a future date.`,
+          );
+          return false;
+        }
+      }
+
+      if (daySchedule.weeklyScheduleScope === "specific_dates") {
+        const selectedWeeklyDates = toWeeklyScheduleDateList(
+          daySchedule.weeklyScheduleDates,
+        );
+        if (selectedWeeklyDates.length === 0) {
+          showAlert(
+            "warning",
+            `${daySchedule.day} Schedule Dates`,
+            `Select at least one ${daySchedule.day} date for this weekly schedule.`,
+          );
+          return false;
+        }
+
+        const unsupportedDate = selectedWeeklyDates.find(
+          (dateStr) =>
+            dateStr < todayKey || getDayOfWeekName(dateStr) !== daySchedule.day,
+        );
+        if (unsupportedDate) {
+          showAlert(
+            "warning",
+            `${daySchedule.day} Schedule Dates`,
+            `${unsupportedDate} is not a future ${daySchedule.day}. Remove it or choose the matching weekday.`,
+          );
+          return false;
+        }
+      }
+    }
+
+    return true;
+  };
+
+  const defaultPromotionAppliesTo =
+    studioType === "Rehearsal"
+      ? "rehearsal"
+      : studioType === "Recording"
+        ? "recording"
+        : "both";
+  const allowedPromotionTargets = getAllowedPromotionTargets(studioType);
+  const effectiveAppliesTo = allowedPromotionTargets.includes(promotionForm.applies_to)
+    ? promotionForm.applies_to
+    : allowedPromotionTargets[0];
+  const parsedRecordingSongsPerBlock = parsePositiveInteger(
+    recordingSongsPerBlock,
+  );
+  const parsedRecordingHoursPerBlock = parsePositiveDecimal(
+    recordingHoursPerBlock,
+  );
+  const hasRecordingRule =
+    parsedRecordingSongsPerBlock !== null && parsedRecordingHoursPerBlock !== null;
+  const currentRecordingRule = hasRecordingRule
+    ? {
+        songsPerBlock: parsedRecordingSongsPerBlock,
+        hoursPerBlock: parsedRecordingHoursPerBlock,
+      }
+    : null;
+  const recordingRulePreview = currentRecordingRule
+    ? formatRecordingRuleShort(currentRecordingRule)
+    : null;
+  const recordingRuleSentence = currentRecordingRule
+    ? formatRecordingRuleSentence(currentRecordingRule)
+    : null;
 
   // Predefined instruments with images
   const INSTRUMENT_OPTIONS = [
@@ -427,7 +1000,7 @@ export default function EditStudioScreen() {
 
       if (profile?.role !== "studio-owner") {
         showAlert(
-          "error",
+          "warning",
           "Unauthorized",
           "Only studio owners can edit studios.",
         );
@@ -454,6 +1027,76 @@ export default function EditStudioScreen() {
   }, [id, authorized]);
 
   useEffect(() => {
+    setAvailability((prev) => {
+      if (prev.length === 0) return prev;
+
+      const fallbackSessionType = getDefaultWeeklySessionType(studioType);
+      let changed = false;
+
+      const next = prev.map((day) => {
+        const normalizedCurrent = normalizeWeeklySessionType(
+          day.sessionType,
+          fallbackSessionType,
+        );
+        const nextSessionType =
+          studioType === "Both" ? normalizedCurrent : fallbackSessionType;
+
+        if (day.sessionType !== nextSessionType) changed = true;
+
+        return {
+          ...day,
+          sessionType: nextSessionType,
+        };
+      });
+
+      return changed ? next : prev;
+    });
+
+    setSelectedDates((prev) => {
+      if (Object.keys(prev).length === 0) return prev;
+
+      const fallbackSessionType = getDefaultDateOverrideSessionType(studioType);
+      let changed = false;
+      const next: typeof prev = {};
+
+      Object.entries(prev).forEach(([dateKey, dateValue]) => {
+        const normalizedCurrent = normalizeDateOverrideSessionType(
+          dateValue?.sessionType,
+          fallbackSessionType,
+        );
+        const nextSessionType =
+          studioType === "Both" ? normalizedCurrent : fallbackSessionType;
+
+        if (dateValue.sessionType !== nextSessionType) changed = true;
+
+        next[dateKey] = {
+          ...dateValue,
+          sessionType: nextSessionType,
+        };
+      });
+
+      return changed ? next : prev;
+    });
+
+    setPromotionForm((prev) => {
+      const nextAppliesTo = normalizePromotionTarget(prev.applies_to, studioType);
+      if (prev.applies_to === nextAppliesTo) return prev;
+      return { ...prev, applies_to: nextAppliesTo };
+    });
+
+    setPromotions((prev) => {
+      let changed = false;
+      const next = prev.map((promo) => {
+        const nextAppliesTo = normalizePromotionTarget(promo.applies_to, studioType);
+        if (nextAppliesTo === promo.applies_to) return promo;
+        changed = true;
+        return { ...promo, applies_to: nextAppliesTo };
+      });
+      return changed ? next : prev;
+    });
+  }, [studioType]);
+
+  useEffect(() => {
     const backSubscription = BackHandler.addEventListener(
       "hardwareBackPress",
       () => {
@@ -470,50 +1113,96 @@ export default function EditStudioScreen() {
     setPromotionForm({
       name: "",
       description: "",
+      criteria: "",
+      minimum_booking_hours: "",
+      minimum_spend: "",
       discount_type: "percentage",
       discount_value: "",
       is_permanent: true,
       start_date: "",
       end_date: "",
-      applies_to: "both",
+      applies_to: defaultPromotionAppliesTo,
     });
     setEditingPromotion(null);
   };
 
   const handleSavePromotion = () => {
-    const { name, discount_type, discount_value, is_permanent, start_date, end_date, applies_to, description } = promotionForm;
+    const {
+      name,
+      discount_type,
+      discount_value,
+      is_permanent,
+      start_date,
+      end_date,
+      applies_to,
+      description,
+      criteria,
+      minimum_booking_hours,
+      minimum_spend,
+    } = promotionForm;
     if (!name.trim()) {
-      showAlert("error", "Required", "Please enter a promotion name.");
+      showAlert("warning", "Required", "Please enter a promotion name.");
       return;
     }
     const val = parseFloat(discount_value);
     if (!val || val <= 0) {
-      showAlert("error", "Required", "Please enter a valid discount value.");
+      showAlert("warning", "Required", "Please enter a valid discount value.");
       return;
     }
     if (discount_type === "percentage" && val > 100) {
-      showAlert("error", "Invalid Value", "Percentage discount cannot exceed 100%.");
+      showAlert("warning", "Invalid Value", "Percentage discount cannot exceed 100%.");
       return;
     }
     if (!is_permanent && (!start_date || !end_date)) {
-      showAlert("error", "Required", "Please select both start and end dates for time-limited promotions.");
+      showAlert("warning", "Required", "Please select both start and end dates for time-limited promotions.");
       return;
     }
     if (!is_permanent && end_date < start_date) {
-      showAlert("error", "Invalid Dates", "End date must be on or after start date.");
+      showAlert("warning", "Invalid Dates", "End date must be on or after start date.");
       return;
     }
+
+    const minimumHoursValue = minimum_booking_hours.trim();
+    if (minimumHoursValue) {
+      const parsedHours = Number.parseFloat(minimumHoursValue);
+      if (!Number.isFinite(parsedHours) || parsedHours <= 0) {
+        showAlert(
+          "warning",
+          "Invalid Criteria",
+          "Minimum booking hours must be greater than 0.",
+        );
+        return;
+      }
+    }
+
+    const minimumSpendValue = minimum_spend.trim();
+    if (minimumSpendValue) {
+      const parsedSpend = Number.parseFloat(minimumSpendValue);
+      if (!Number.isFinite(parsedSpend) || parsedSpend <= 0) {
+        showAlert(
+          "warning",
+          "Invalid Criteria",
+          "Minimum spend must be greater than 0.",
+        );
+        return;
+      }
+    }
+
+    const normalizedAppliesTo = normalizePromotionTarget(applies_to, studioType);
 
     const promoItem: PromotionItem = {
       id: editingPromotion?.id || Date.now().toString(),
       name: name.trim(),
       description: description.trim(),
+      criteria: criteria.trim(),
+      minimum_booking_hours: minimumHoursValue,
+      minimum_spend: minimumSpendValue,
       discount_type,
       discount_value,
       is_permanent,
       start_date: is_permanent ? "" : start_date,
       end_date: is_permanent ? "" : end_date,
-      applies_to,
+      applies_to: normalizedAppliesTo,
     };
 
     if (editingPromotion) {
@@ -530,12 +1219,15 @@ export default function EditStudioScreen() {
     setPromotionForm({
       name: promo.name,
       description: promo.description,
+      criteria: promo.criteria,
+      minimum_booking_hours: promo.minimum_booking_hours,
+      minimum_spend: promo.minimum_spend,
       discount_type: promo.discount_type,
       discount_value: promo.discount_value,
       is_permanent: promo.is_permanent,
       start_date: promo.start_date,
       end_date: promo.end_date,
-      applies_to: promo.applies_to,
+      applies_to: normalizePromotionTarget(promo.applies_to, studioType),
     });
     setShowPromotionForm(true);
   };
@@ -545,20 +1237,13 @@ export default function EditStudioScreen() {
   };
 
   const fetchStudioDetails = async () => {
-    console.log("🔄 ===== FETCH STUDIO DETAILS STARTED =====");
-    console.log("🔄 Timestamp:", new Date().toISOString());
-    console.log("🔄 Studio ID (raw):", id);
-    console.log("🔄 Studio ID type:", typeof id);
-    console.log("🔄 Is Array?:", Array.isArray(id));
 
     try {
       setLoading(true);
-      console.log("🔄 Loading state set to true");
 
       const {
         data: { user },
       } = await supabase.auth.getUser();
-      console.log("👤 User fetched:", user?.id);
 
       if (!user) {
         console.error("❌ No user found, redirecting to login");
@@ -568,22 +1253,14 @@ export default function EditStudioScreen() {
 
       // Ensure id is a string, not an array
       const studioId = Array.isArray(id) ? id[0] : id;
-      console.log("🎯 Studio ID (processed):", studioId);
-      console.log("🎯 Studio ID type after processing:", typeof studioId);
 
       if (!studioId) {
         console.error("❌ Invalid studio ID after processing");
-        showAlert("error", "Error", "Invalid studio ID");
+        showAlert("warning", "Invalid Studio", "Invalid studio ID. Please try again.");
         router.replace("/home");
         return;
       }
 
-      console.log("📡 Calling edge function with params:", {
-        action: "fetch_one",
-        type: "studio",
-        id: studioId,
-        userId: user.id,
-      });
 
       // Base query + normalized child tables merge
       const { data: baseData, error: baseError } = await supabase
@@ -623,14 +1300,12 @@ export default function EditStudioScreen() {
           .order('created_at', { ascending: true }),
         supabase
           .from('studio_settings')
-          .select(
-            'lead_time_hours, weekend_multiplier, peak_season_multiplier, peak_season_dates, off_peak_multiplier, off_peak_dates',
-          )
+          .select('*')
           .eq('studio_id', studioId)
           .maybeSingle(),
         supabase
           .from('studio_operating_hours')
-          .select('day_of_week, is_open, open_time, close_time, slot_order')
+          .select('*')
           .eq('studio_id', studioId)
           .eq('is_open', true)
           .order('day_of_week', { ascending: true })
@@ -642,16 +1317,6 @@ export default function EditStudioScreen() {
           .order('created_at', { ascending: true }),
       ]);
 
-      console.log("� ===== EDGE FUNCTION RESPONSE =====");
-      console.log("📥 Response timestamp:", new Date().toISOString());
-      console.log("📥 Error object:", baseError);
-      console.log("📥 Data object:", baseData);
-      console.log("📥 Data type:", typeof baseData);
-      console.log("📥 Data is null?:", baseData === null);
-      console.log("📥 Data is undefined?:", baseData === undefined);
-      console.log("📥 Data is array?:", Array.isArray(baseData));
-      console.log("📥 Data keys:", baseData ? Object.keys(baseData) : "NO DATA");
-      console.log("📥 Data stringified:", JSON.stringify(baseData, null, 2));
 
       if (baseError) {
         console.error("❌ Base studio query returned error:", baseError);
@@ -664,6 +1329,7 @@ export default function EditStudioScreen() {
       if (studioMediaError) throw studioMediaError;
       if (studioSettingsError) throw studioSettingsError;
       if (operatingHoursError) throw operatingHoursError;
+      if (studioPromotionsError) throw studioPromotionsError;
 
       const dayIndexToName = [
         'Sunday',
@@ -675,21 +1341,6 @@ export default function EditStudioScreen() {
         'Saturday',
       ];
 
-      const availabilityByDay: Record<string, { start: string; end: string }[]> =
-        dayIndexToName.reduce((acc, day) => {
-          acc[day] = [];
-          return acc;
-        }, {} as Record<string, { start: string; end: string }[]>);
-
-      (operatingHoursData || []).forEach((row: any) => {
-        const dayName = dayIndexToName[row.day_of_week];
-        if (!dayName || !row.open_time || !row.close_time) return;
-        availabilityByDay[dayName].push({
-          start: row.open_time,
-          end: row.close_time,
-        });
-      });
-
       const normalizedTypes = Array.from(
         new Set(
           (studioTypesData || [])
@@ -697,6 +1348,80 @@ export default function EditStudioScreen() {
             .filter((type): type is "Rehearsal" | "Recording" => Boolean(type)),
         ),
       );
+
+      const inferredStudioType = inferStudioTypeFromRows(normalizedTypes);
+      const fallbackWeeklySessionType = getDefaultWeeklySessionType(
+        inferredStudioType,
+      );
+      const loadedGlobalWeeklySchedule = getDefaultWeeklyScheduleFields({
+        weeklyScheduleScope: normalizeWeeklyScheduleScope(
+          studioSettingsData?.weekly_schedule_scope,
+        ),
+        weeklyScheduleEndDate:
+          typeof studioSettingsData?.weekly_schedule_end_date === "string"
+            ? studioSettingsData.weekly_schedule_end_date
+            : "",
+        weeklyScheduleDates: weeklyScheduleDatesToMap(
+          studioSettingsData?.weekly_schedule_dates,
+        ),
+      });
+      const getWeeklyScheduleDatesForDay = (
+        dates: Record<string, boolean>,
+        dayName: string,
+      ) =>
+        Object.fromEntries(
+          Object.entries(dates).filter(
+            ([dateStr]) => getDayOfWeekName(dateStr) === dayName,
+          ),
+        );
+
+      const availabilityByDay: Record<string, WeeklyAvailabilityDay> =
+        dayIndexToName.reduce((acc, day) => {
+          acc[day] = normalizeWeeklyAvailabilityDay({
+            slots: [],
+            sessionType: fallbackWeeklySessionType,
+            ...loadedGlobalWeeklySchedule,
+            weeklyScheduleDates: getWeeklyScheduleDatesForDay(
+              loadedGlobalWeeklySchedule.weeklyScheduleDates,
+              day,
+            ),
+            day,
+          });
+          return acc;
+        }, {} as Record<string, WeeklyAvailabilityDay>);
+
+      (operatingHoursData || []).forEach((row: any) => {
+        const dayName = dayIndexToName[row.day_of_week];
+        if (!dayName || !row.open_time || !row.close_time) return;
+        availabilityByDay[dayName].slots.push({
+          start: row.open_time,
+          end: row.close_time,
+        });
+        availabilityByDay[dayName].sessionType = parseWeeklySessionType(
+          row.reason,
+          fallbackWeeklySessionType,
+        );
+        availabilityByDay[dayName] = normalizeWeeklyAvailabilityDay(
+          {
+            ...availabilityByDay[dayName],
+            weeklyScheduleScope: normalizeWeeklyScheduleScope(
+              row.weekly_schedule_scope ??
+                loadedGlobalWeeklySchedule.weeklyScheduleScope,
+            ),
+            weeklyScheduleEndDate:
+              typeof row.weekly_schedule_end_date === "string"
+                ? row.weekly_schedule_end_date
+                : loadedGlobalWeeklySchedule.weeklyScheduleEndDate,
+            weeklyScheduleDates: getWeeklyScheduleDatesForDay(
+              Array.isArray(row.weekly_schedule_dates)
+                ? weeklyScheduleDatesToMap(row.weekly_schedule_dates)
+                : loadedGlobalWeeklySchedule.weeklyScheduleDates,
+              dayName,
+            ),
+          },
+          loadedGlobalWeeklySchedule,
+        );
+      });
 
       const normalizedInstruments = (studioInstrumentsData || []).map(
         (row: any) => ({
@@ -718,14 +1443,19 @@ export default function EditStudioScreen() {
 
       const normalizedAvailability = dayIndexToName.map((day) => ({
         day,
-        slots: availabilityByDay[day] || [],
+        slots: availabilityByDay[day]?.slots || [],
+        sessionType:
+          availabilityByDay[day]?.sessionType || fallbackWeeklySessionType,
+        weeklyScheduleScope: availabilityByDay[day]?.weeklyScheduleScope,
+        weeklyScheduleEndDate: availabilityByDay[day]?.weeklyScheduleEndDate,
+        weeklyScheduleDates: availabilityByDay[day]?.weeklyScheduleDates || {},
       }));
 
       // If no data returned, user doesn't own this studio
       if (!baseData) {
         console.error("❌ No data returned from edge function");
         showAlert(
-          "error",
+          "warning",
           "Not Found",
           "Studio not found or you do not have permission to edit it.",
         );
@@ -741,7 +1471,7 @@ export default function EditStudioScreen() {
         availability: normalizedAvailability,
         calendar_availability: [],
         types: normalizedTypes,
-        type: inferStudioTypeFromRows(normalizedTypes),
+        type: inferredStudioType,
         lead_time_hours: studioSettingsData?.lead_time_hours ?? 24,
         weekend_multiplier: studioSettingsData?.weekend_multiplier ?? 1.0,
         peak_season_multiplier:
@@ -749,238 +1479,96 @@ export default function EditStudioScreen() {
         peak_season_dates: studioSettingsData?.peak_season_dates ?? [],
         off_peak_multiplier: studioSettingsData?.off_peak_multiplier ?? 1.0,
         off_peak_dates: studioSettingsData?.off_peak_dates ?? [],
+        min_booking_duration_hours:
+          studioSettingsData?.min_booking_duration_hours ?? 2,
+        recording_songs_per_block:
+          studioSettingsData?.recording_songs_per_block ?? 1,
+        recording_hours_per_block:
+          studioSettingsData?.recording_hours_per_block ??
+          studioSettingsData?.min_booking_duration_hours ??
+          3,
+        recording_rate_negotiable: false,
+        weekly_schedule_scope:
+          studioSettingsData?.weekly_schedule_scope ?? "indefinite",
+        weekly_schedule_end_date:
+          studioSettingsData?.weekly_schedule_end_date ?? "",
+        weekly_schedule_dates:
+          studioSettingsData?.weekly_schedule_dates ?? [],
       } as any;
 
-      console.log("✅ ===== DATA VALIDATION PASSED =====");
-      console.log(
-        "📦 Full studio data received:",
-        JSON.stringify(data, null, 2),
-      );
-      console.log("📦 Data field count:", Object.keys(data).length);
 
       // Log each critical field
-      console.log("📦 Field Analysis:");
-      console.log("  - name:", data.name, "(type:", typeof data.name, ")");
-      console.log(
-        "  - description:",
-        data.description?.substring(0, 50) + "...",
-        "(length:",
-        data.description?.length,
-        ")",
-      );
-      console.log("  - address:", data.address);
-      console.log(
-        "  - latitude:",
-        data.latitude,
-        "(type:",
-        typeof data.latitude,
-        ")",
-      );
-      console.log(
-        "  - longitude:",
-        data.longitude,
-        "(type:",
-        typeof data.longitude,
-        ")",
-      );
-      console.log(
-        "  - rehearsal_rate:",
-        data.rehearsal_rate,
-        "(type:",
-        typeof data.rehearsal_rate,
-        ")",
-      );
-      console.log(
-        "  - recording_rate:",
-        data.recording_rate,
-        "(type:",
-        typeof data.recording_rate,
-        ")",
-      );
-      console.log(
-        "  - hourly_rate (fallback):",
-        data.hourly_rate,
-        "(type:",
-        typeof data.hourly_rate,
-        ")",
-      );
-      console.log("  - type:", data.type, "(type:", typeof data.type, ")");
-      console.log("  - pax:", data.pax, "(type:", typeof data.pax, ")");
-      console.log(
-        "  - amenities:",
-        data.amenities,
-        "(is array:",
-        Array.isArray(data.amenities),
-        ", length:",
-        data.amenities?.length,
-        ")",
-      );
-      console.log(
-        "  - instruments:",
-        data.instruments,
-        "(is array:",
-        Array.isArray(data.instruments),
-        ", length:",
-        data.instruments?.length,
-        ")",
-      );
-      console.log(
-        "  - images:",
-        data.images,
-        "(is array:",
-        Array.isArray(data.images),
-        ", length:",
-        data.images?.length,
-        ")",
-      );
-      console.log("  - contract_url:", data.contract_url);
-      console.log(
-        "  - availability:",
-        data.availability,
-        "(is array:",
-        Array.isArray(data.availability),
-        ", length:",
-        data.availability?.length,
-        ")",
-      );
-      console.log(
-        "  - calendar_availability:",
-        data.calendar_availability,
-        "(is array:",
-        Array.isArray(data.calendar_availability),
-        ")",
-      );
-      console.log(
-        "  - lead_time_hours:",
-        data.lead_time_hours,
-        "(type:",
-        typeof data.lead_time_hours,
-        ")",
-      );
-      console.log(
-        "  - weekend_multiplier:",
-        data.weekend_multiplier,
-        "(type:",
-        typeof data.weekend_multiplier,
-        ")",
-      );
-      console.log("  - peak_season_multiplier:", data.peak_season_multiplier);
-      console.log("  - peak_season_dates:", data.peak_season_dates);
-      console.log("  - off_peak_multiplier:", data.off_peak_multiplier);
-      console.log("  - off_peak_dates:", data.off_peak_dates);
 
-      console.log("🔧 ===== SETTING STATE VALUES =====");
 
-      console.log("🔧 Setting studioName to:", data.name);
       setStudioName(data.name);
 
-      console.log(
-        "🔧 Setting description to:",
-        data.description?.substring(0, 50),
-      );
       setDescription(data.description);
 
-      console.log("🔧 Setting address to:", data.address);
       setAddress(data.address);
 
-      console.log("🔧 Setting latitude to:", data.latitude || null);
       setLatitude(data.latitude || null);
 
-      console.log("🔧 Setting longitude to:", data.longitude || null);
       setLongitude(data.longitude || null);
 
       // Load dynamic pricing
       const rehearsalValue =
         data.rehearsal_rate?.toString() || data.hourly_rate?.toString() || "";
-      console.log(
-        "🔧 Setting rehearsalRate to:",
-        rehearsalValue,
-        "(from rehearsal_rate:",
-        data.rehearsal_rate,
-        "or hourly_rate:",
-        data.hourly_rate,
-        ")",
-      );
       setRehearsalRate(rehearsalValue);
 
       const recordingValue = data.recording_rate?.toString() || "";
-      console.log("🔧 Setting recordingRate to:", recordingValue);
       setRecordingRate(recordingValue);
 
       const typeValue = data.type || "Both";
-      console.log("🔧 Setting studioType to:", typeValue);
       setStudioType(typeValue);
 
-      const paxValue = data.pax?.toString() || "";
-      console.log(
-        "🔧 Setting pax to:",
-        paxValue,
-        "(original value:",
-        data.pax,
-        ", type:",
-        typeof data.pax,
-        ")",
+      const loadedSongsPerBlock = parsePositiveInteger(
+        data.recording_songs_per_block,
       );
-      setPax(paxValue);
-      console.log("✅ setPax STATE UPDATE completed");
+      setRecordingSongsPerBlock(
+        loadedSongsPerBlock ? String(loadedSongsPerBlock) : "",
+      );
 
-      console.log("🔧 Setting amenities to:", data.amenities || []);
+      const loadedHoursPerBlock = parsePositiveDecimal(
+        data.recording_hours_per_block ?? data.min_booking_duration_hours,
+      );
+      setRecordingHoursPerBlock(
+        loadedHoursPerBlock ? String(loadedHoursPerBlock) : "",
+      );
+
+      const paxValue = data.pax?.toString() || "";
+      setPax(paxValue);
+
       setAmenities(data.amenities || []);
 
-      console.log("🔧 Setting contractUrl to:", data.contract_url || "");
       setContractUrl(data.contract_url || "");
       if (data.contract_url) {
         const fileName = data.contract_url.split("/").pop() || "Contract.pdf";
-        console.log("🔧 Setting contractFileName to:", fileName);
         setContractFileName(decodeURIComponent(fileName));
       }
 
-      console.log("🔧 Setting businessPermitUrl to:", data.business_permit_url || "");
       setBusinessPermitUrl(data.business_permit_url || "");
-      setInitialBusinessPermitUrl(data.business_permit_url || "");
-      setPermitStatus(data.permit_status || "pending_review");
+      setPermitStatus(String(data.permit_status || "approved").toLowerCase());
+      setPermitRejectionReason(data.permit_rejection_reason || "");
       if (data.business_permit_url) {
         const fileName = data.business_permit_url.split("/").pop() || "BusinessPermit.pdf";
-        console.log("🔧 Setting businessPermitFileName to:", fileName);
         setBusinessPermitFileName(decodeURIComponent(fileName));
       }
 
       // Load equipment/instruments from instruments JSONB
-      console.log("🎸 ===== PARSING INSTRUMENTS =====");
-      console.log("🎸 Raw data.instruments:", data.instruments);
-      console.log("🎸 Type of data.instruments:", typeof data.instruments);
-      console.log("🎸 Is Array?:", Array.isArray(data.instruments));
 
       const instrumentsData = Array.isArray(data.instruments)
         ? data.instruments
         : [];
-      console.log(
-        "🎸 Processed instrumentsData:",
-        JSON.stringify(instrumentsData, null, 2),
-      );
-      console.log("🎸 instrumentsData array length:", instrumentsData.length);
-      console.log("🎸 instrumentsData items:");
       instrumentsData.forEach((item: any, index: number) => {
-        console.log(`  [${index}]:`, {
-          name: item?.name,
-          image: item?.image,
-          quantity: item?.quantity,
-          description: item?.description,
-          hasQuantity: "quantity" in (item || {}),
-          hasDescription: "description" in (item || {}),
-          keys: item ? Object.keys(item) : "null",
-        });
       });
 
       const presetLookup = new Map(
         INSTRUMENT_OPTIONS.map((item) => [item.name, item.image]),
       );
 
-      console.log("🎸 ===== FILTERING EQUIPMENT ITEMS =====");
       const equipmentItems = instrumentsData
         .filter((item: any) => {
           if (!item || typeof item !== "object") {
-            console.log("🎸 Skipping invalid item:", item);
             return false;
           }
 
@@ -995,24 +1583,17 @@ export default function EditStudioScreen() {
             item.description.trim().length > 0;
 
           if (hasQuantity || hasDescription) {
-            console.log(
-              `🎸 Treating "${name}" as equipment (has quantity/description)`
-            );
             return true;
           }
 
           const presetImage = presetLookup.get(name);
           if (!presetImage) {
-            console.log(`🎸 Treating "${name}" as equipment (not a preset)`);
             return true;
           }
 
           const image = typeof item.image === "string" ? item.image.trim() : "";
           const isCustomImage = image.length > 0 && image !== presetImage;
           if (isCustomImage) {
-            console.log(
-              `🎸 Treating "${name}" as equipment (custom image)`
-            );
           }
           return isCustomImage;
         })
@@ -1027,37 +1608,22 @@ export default function EditStudioScreen() {
             description: eq.description || "",
             image: eq.image || "",
           };
-          console.log(`🎸 Mapped equipment [${index}]:`, mapped);
           return mapped;
         });
-      console.log(
-        "🎸 Final filtered equipment items count:",
-        equipmentItems.length,
-      );
-      console.log(
-        "🎸 Final filtered equipment items:",
-        JSON.stringify(equipmentItems, null, 2),
-      );
 
-      console.log("🎸 ===== FILTERING PRESET ITEMS =====");
       const presetItems = instrumentsData
         .filter((item: any) => {
           if (!item || typeof item !== "object") {
-            console.log("🎸 Preset: Skipping invalid item:", item);
             return false;
           }
           const name = typeof item.name === "string" ? item.name.trim() : "";
           if (!name) {
-            console.log("🎸 Preset: Skipping item without name:", item);
             return false;
           }
 
           const image = typeof item.image === "string" ? item.image.trim() : "";
           const presetImage = presetLookup.get(name);
           const willInclude = !!presetImage && image === presetImage;
-          console.log(
-            `🎸 Preset: Evaluating "${name}": willInclude=${willInclude}`,
-          );
           return willInclude;
         })
         .map((item: any) => {
@@ -1065,34 +1631,39 @@ export default function EditStudioScreen() {
             name: item.name,
             image: item.image,
           };
-          console.log("🎸 Preset: Mapped item:", mapped);
           return mapped;
         });
-      console.log("🎸 Final filtered preset items count:", presetItems.length);
-      console.log(
-        "🎸 Final filtered preset items:",
-        JSON.stringify(presetItems, null, 2),
-      );
 
       // Always set equipment even if length is 0 to clear old data
-      console.log(
-        "🔧 Setting equipment state with",
-        equipmentItems.length,
-        "items",
-      );
       setEquipment(equipmentItems);
-      console.log(
-        "✅ setEquipment STATE UPDATE completed with",
-        equipmentItems.length,
-        "items",
-      );
 
       // Load promotions
       if (!studioPromotionsError && studioPromotionsData && studioPromotionsData.length > 0) {
         const loadedPromos: PromotionItem[] = studioPromotionsData.map((p: any) => ({
+          ...(() => {
+            const parsedLegacyDescription = parsePromotionDescription(p.description);
+            const criteriaFromColumn =
+              typeof p.criteria === "string" ? p.criteria.trim() : "";
+            const minimumHoursFromColumn =
+              p.minimum_booking_hours !== null && p.minimum_booking_hours !== undefined
+                ? String(p.minimum_booking_hours)
+                : "";
+            const minimumSpendFromColumn =
+              p.minimum_spend !== null && p.minimum_spend !== undefined
+                ? String(p.minimum_spend)
+                : "";
+
+            return {
+              description: parsedLegacyDescription.description,
+              criteria: criteriaFromColumn || parsedLegacyDescription.criteria,
+              minimum_booking_hours:
+                minimumHoursFromColumn || parsedLegacyDescription.minimum_booking_hours,
+              minimum_spend:
+                minimumSpendFromColumn || parsedLegacyDescription.minimum_spend,
+            };
+          })(),
           id: p.id,
           name: p.name || "",
-          description: p.description || "",
           discount_type: p.discount_type || "percentage",
           discount_value: String(p.discount_value || ""),
           is_permanent: p.is_permanent ?? true,
@@ -1103,14 +1674,22 @@ export default function EditStudioScreen() {
         setPromotions(loadedPromos);
       }
 
+      const todayKey = getLocalDateKey();
+
       // Load calendar availability from date overrides table
       const { data: dateOverrides, error: overridesError } = await supabase
         .from("studio_date_overrides")
         .select("*")
         .eq("studio_id", studioId)
-        .gte("override_date", new Date().toISOString().split("T")[0]); // Only future dates
+        .order("override_date", { ascending: true })
+        .order("slot_order", { ascending: true })
+        .gte("override_date", todayKey); // Only today/future dates
 
-      if (!overridesError && dateOverrides && dateOverrides.length > 0) {
+      if (overridesError) {
+        throw overridesError;
+      }
+
+      if (dateOverrides && dateOverrides.length > 0) {
         // Helper function to convert 24-hour to 12-hour format
         const convertTo12Hour = (time24: string) => {
           if (!time24 || !time24.includes(":")) return "09:00 AM";
@@ -1125,29 +1704,37 @@ export default function EditStudioScreen() {
           [date: string]: {
             selected: boolean;
             slots: { start: string; end: string }[];
+            sessionType?: DateOverrideSessionType;
           };
         } = {};
+        const fallbackSessionType = getDefaultDateOverrideSessionType(
+          inferStudioTypeFromRows(normalizedTypes),
+        );
         dateOverrides.forEach((override: any) => {
           if (override.override_date) {
-            calendarDates[override.override_date] = {
-              selected: true,
-              slots:
-                override.is_open && override.open_time && override.close_time
-                  ? [
-                    {
-                      start: convertTo12Hour(override.open_time),
-                      end: convertTo12Hour(override.close_time),
-                    },
-                  ]
-                  : [],
-            };
+            if (!calendarDates[override.override_date]) {
+              calendarDates[override.override_date] = {
+                selected: true,
+                slots: [],
+                sessionType: parseDateOverrideSessionType(
+                  override.reason,
+                  fallbackSessionType,
+                ),
+              };
+            }
+
+            if (override.is_open && override.open_time && override.close_time) {
+              calendarDates[override.override_date].slots.push({
+                start: convertTo12Hour(override.open_time),
+                end: convertTo12Hour(override.close_time),
+              });
+            }
           }
         });
         setSelectedDates(calendarDates);
         originalSelectedDatesRef.current = JSON.parse(
           JSON.stringify(calendarDates),
         );
-        console.log("📅 Loaded date overrides:", calendarDates);
       } else if (
         data.calendar_availability &&
         Array.isArray(data.calendar_availability)
@@ -1157,16 +1744,24 @@ export default function EditStudioScreen() {
           [date: string]: {
             selected: boolean;
             slots: { start: string; end: string }[];
+            sessionType?: DateOverrideSessionType;
           };
         } = {};
+        const fallbackSessionType = getDefaultDateOverrideSessionType(
+          inferStudioTypeFromRows(normalizedTypes),
+        );
         data.calendar_availability.forEach((item: any) => {
-          if (item.date) {
+          if (item.date && item.date >= todayKey) {
             calendarDates[item.date] = {
               selected: true,
               slots:
                 item.is_open === false
                   ? []
                   : item.slots || [{ start: "09:00 AM", end: "05:00 PM" }],
+              sessionType: normalizeDateOverrideSessionType(
+                item.session_type,
+                fallbackSessionType,
+              ),
             };
           }
         });
@@ -1180,7 +1775,6 @@ export default function EditStudioScreen() {
       }
 
       // Load availability
-      console.log("📅 Loading availability from data:", data.availability);
       if (data.availability && Array.isArray(data.availability)) {
         // Helper function to convert 24-hour to 12-hour format
         const convertTo12Hour = (time24: string) => {
@@ -1194,7 +1788,7 @@ export default function EditStudioScreen() {
 
         const loadedAvailability = daysOfWeek.map((day) => {
           const dayData = data.availability.find((a: any) => a.day === day);
-          return {
+          return normalizeWeeklyAvailabilityDay({
             day,
             slots: dayData?.slots
               ? dayData.slots.map((slot: any) => ({
@@ -1202,20 +1796,34 @@ export default function EditStudioScreen() {
                 end: convertTo12Hour(slot.end),
               }))
               : [],
-          };
+            sessionType: normalizeWeeklySessionType(
+              dayData?.sessionType,
+              getDefaultWeeklySessionType(data.type || "Both"),
+            ),
+            weeklyScheduleScope: normalizeWeeklyScheduleScope(
+              dayData?.weeklyScheduleScope ?? dayData?.weekly_schedule_scope,
+            ),
+            weeklyScheduleEndDate:
+              typeof (dayData?.weeklyScheduleEndDate ?? dayData?.weekly_schedule_end_date) === "string"
+                ? dayData.weeklyScheduleEndDate
+                  ?? dayData.weekly_schedule_end_date
+                : "",
+            weeklyScheduleDates:
+              dayData?.weeklyScheduleDates ??
+              weeklyScheduleDatesToMap(dayData?.weekly_schedule_dates),
+          });
         });
-        console.log("📅 Loaded availability:", loadedAvailability);
         setAvailability(loadedAvailability);
         originalAvailabilityRef.current = JSON.parse(
           JSON.stringify(loadedAvailability),
         );
       } else {
-        console.log("📅 No availability data, using default empty schedule");
         // Initialize with empty schedule if no availability data
         const defaultAvailability = daysOfWeek.map((day) => ({
           day,
           slots: [],
-        }));
+          sessionType: getDefaultWeeklySessionType(data.type || "Both"),
+        })).map((day) => normalizeWeeklyAvailabilityDay(day));
         setAvailability(defaultAvailability);
         originalAvailabilityRef.current = JSON.parse(
           JSON.stringify(defaultAvailability),
@@ -1223,51 +1831,26 @@ export default function EditStudioScreen() {
       }
 
       // Load preset instruments
-      console.log("🔧 Checking preset items for selectedInstruments update");
       if (presetItems.length > 0) {
-        console.log(
-          "🔧 Setting selectedInstruments with",
-          presetItems.length,
-          "items:",
-          presetItems,
-        );
         setSelectedInstruments(presetItems);
-        console.log(
-          "✅ setSelectedInstruments STATE UPDATE completed with",
-          presetItems.length,
-          "items",
-        );
       } else {
-        console.log(
-          "⚠️ No preset items to set, selectedInstruments will remain empty",
-        );
       }
 
-      console.log("🔧 Setting images - raw data.images:", data.images);
-      console.log("🔧 Images array length:", data.images?.length || 0);
       setSelectedImages(data.images || []);
-      console.log(
-        "✅ setSelectedImages STATE UPDATE completed with",
-        (data.images || []).length,
-        "images",
-      );
 
       if (data.images && data.images.length > 0) {
-        console.log("🔧 Setting thumbnailIndex to 0");
         setThumbnailIndex(0);
-        console.log("✅ setThumbnailIndex STATE UPDATE completed");
       } else {
-        console.log("⚠️ No images available, thumbnailIndex not updated");
       }
-      console.log("✅ ===== FETCH STUDIO DETAILS COMPLETED SUCCESSFULLY =====");
-      console.log("✅ Timestamp:", new Date().toISOString());
     } catch (e) {
-      console.error("❌ ===== FETCH STUDIO DETAILS FAILED =====");
-      console.error("❌ Error timestamp:", new Date().toISOString());
-      console.error("❌ Error object:", e);
-      console.error("❌ Error message:", (e as any)?.message);
-      console.error("❌ Error stack:", (e as any)?.stack);
-      showAlert("error", "Error", "Failed to load studio details.");
+      logActionError("edit_studio.fetch_details_failed", e, {
+        studioId: Array.isArray(id) ? id[0] : id,
+      });
+      showAlert(
+        "warning",
+        "Couldn't Load Details",
+        `Failed to load studio details: ${formatSupabaseError(e)}`,
+      );
       router.replace("/home");
     } finally {
       setLoading(false);
@@ -1332,7 +1915,7 @@ export default function EditStudioScreen() {
       if (!daySchedule.slots.length) continue;
       const dayError = validateSlots(daySchedule.day, daySchedule.slots);
       if (dayError) {
-        showAlert("error", "Schedule Conflict", dayError);
+        showAlert("warning", "Schedule Conflict", dayError);
         return false;
       }
     }
@@ -1355,7 +1938,7 @@ export default function EditStudioScreen() {
       );
       const dateError = validateSlots(displayDate, dateData.slots);
       if (dateError) {
-        showAlert("error", "Schedule Conflict", dateError);
+        showAlert("warning", "Schedule Conflict", dateError);
         return false;
       }
     }
@@ -1365,16 +1948,16 @@ export default function EditStudioScreen() {
 
   const validateForm = (): boolean => {
     if (!studioName.trim()) {
-      showAlert("error", "Required Field", "Please enter a studio name");
+      showAlert("warning", "Required Field", "Please enter a studio name");
       return false;
     }
     if (!description.trim()) {
-      showAlert("error", "Required Field", "Please enter a description");
+      showAlert("warning", "Required Field", "Please enter a description");
       return false;
     }
     if (!address || !latitude || !longitude) {
       showAlert(
-        "error",
+        "warning",
         "Required Field",
         "Please select a location on the map",
       );
@@ -1384,7 +1967,7 @@ export default function EditStudioScreen() {
     if (studioType === "Both") {
       if (!rehearsalRate.trim() || parseFloat(rehearsalRate) <= 0) {
         showAlert(
-          "error",
+          "warning",
           "Required Field",
           "Please enter a valid rehearsal rate",
         );
@@ -1392,7 +1975,7 @@ export default function EditStudioScreen() {
       }
       if (!recordingRate.trim() || parseFloat(recordingRate) <= 0) {
         showAlert(
-          "error",
+          "warning",
           "Required Field",
           "Please enter a valid recording rate",
         );
@@ -1401,7 +1984,7 @@ export default function EditStudioScreen() {
     } else if (studioType === "Rehearsal") {
       if (!rehearsalRate.trim() || parseFloat(rehearsalRate) <= 0) {
         showAlert(
-          "error",
+          "warning",
           "Required Field",
           "Please enter a valid rehearsal rate",
         );
@@ -1410,19 +1993,44 @@ export default function EditStudioScreen() {
     } else {
       if (!recordingRate.trim() || parseFloat(recordingRate) <= 0) {
         showAlert(
-          "error",
+          "warning",
           "Required Field",
           "Please enter a valid recording rate",
         );
         return false;
       }
     }
+    if (
+      (studioType === "Recording" || studioType === "Both") &&
+      !parsePositiveInteger(recordingSongsPerBlock)
+    ) {
+      showAlert(
+        "warning",
+        "Invalid Recording Rule",
+        "Please enter how many songs are included in each recording time block.",
+      );
+      return false;
+    }
+    if (
+      (studioType === "Recording" || studioType === "Both") &&
+      !parsePositiveDecimal(recordingHoursPerBlock)
+    ) {
+      showAlert(
+        "warning",
+        "Invalid Recording Rule",
+        "Please enter how many hours each recording time block takes.",
+      );
+      return false;
+    }
     if (!validateScheduleConflicts()) {
+      return false;
+    }
+    if (!isWeeklyScheduleScopeValid()) {
       return false;
     }
     if (selectedImages.length === 0) {
       showAlert(
-        "error",
+        "warning",
         "Required Field",
         "Please upload at least one studio photo",
       );
@@ -1431,31 +2039,94 @@ export default function EditStudioScreen() {
     // Validate promotions if any
     for (const promo of promotions) {
       if (!promo.name.trim()) {
-        showAlert("error", "Invalid Promotion", "Each promotion must have a name.");
+        showAlert("warning", "Invalid Promotion", "Each promotion must have a name.");
         return false;
       }
       const val = parseFloat(promo.discount_value);
       if (!val || val <= 0) {
-        showAlert("error", "Invalid Promotion", `Promotion "${promo.name}" must have a positive discount value.`);
+        showAlert("warning", "Invalid Promotion", `Promotion "${promo.name}" must have a positive discount value.`);
         return false;
       }
       if (promo.discount_type === "percentage" && val > 100) {
-        showAlert("error", "Invalid Promotion", `Promotion "${promo.name}" percentage cannot exceed 100%.`);
+        showAlert("warning", "Invalid Promotion", `Promotion "${promo.name}" percentage cannot exceed 100%.`);
         return false;
       }
       if (!promo.is_permanent) {
         if (!promo.start_date || !promo.end_date) {
-          showAlert("error", "Invalid Promotion", `Time-limited promotion "${promo.name}" must have start and end dates.`);
+          showAlert("warning", "Invalid Promotion", `Time-limited promotion "${promo.name}" must have start and end dates.`);
           return false;
         }
         if (promo.end_date < promo.start_date) {
-          showAlert("error", "Invalid Promotion", `Promotion "${promo.name}" end date must be on or after start date.`);
+          showAlert("warning", "Invalid Promotion", `Promotion "${promo.name}" end date must be on or after start date.`);
+          return false;
+        }
+      }
+
+      const minimumHoursValue = promo.minimum_booking_hours?.trim();
+      if (minimumHoursValue) {
+        const parsedHours = Number.parseFloat(minimumHoursValue);
+        if (!Number.isFinite(parsedHours) || parsedHours <= 0) {
+          showAlert(
+            "warning",
+            "Invalid Promotion",
+            `Promotion "${promo.name}" minimum booking hours must be greater than 0.`,
+          );
+          return false;
+        }
+      }
+
+      const minimumSpendValue = promo.minimum_spend?.trim();
+      if (minimumSpendValue) {
+        const parsedSpend = Number.parseFloat(minimumSpendValue);
+        if (!Number.isFinite(parsedSpend) || parsedSpend <= 0) {
+          showAlert(
+            "warning",
+            "Invalid Promotion",
+            `Promotion "${promo.name}" minimum spend must be greater than 0.`,
+          );
           return false;
         }
       }
     }
     return true;
   };
+
+  const hasValidStudioPricing =
+    studioType === "Both"
+      ? Number.parseFloat(rehearsalRate) > 0 && Number.parseFloat(recordingRate) > 0
+      : studioType === "Rehearsal"
+        ? Number.parseFloat(rehearsalRate) > 0
+        : Number.parseFloat(recordingRate) > 0;
+  const hasValidRecordingRules =
+    studioType !== "Recording" && studioType !== "Both"
+      ? true
+      : Boolean(parsePositiveInteger(recordingSongsPerBlock)) &&
+        Boolean(parsePositiveDecimal(recordingHoursPerBlock));
+  const haveValidPromotions = promotions.every((promo) => {
+    const discountValue = Number.parseFloat(promo.discount_value);
+    const minimumHoursValue = promo.minimum_booking_hours?.trim();
+    const minimumSpendValue = promo.minimum_spend?.trim();
+
+    return (
+      promo.name.trim().length > 0 &&
+      discountValue > 0 &&
+      (promo.discount_type !== "percentage" || discountValue <= 100) &&
+      (promo.is_permanent ||
+        (Boolean(promo.start_date) &&
+          Boolean(promo.end_date) &&
+          promo.end_date >= promo.start_date)) &&
+      (!minimumHoursValue || Number.parseFloat(minimumHoursValue) > 0) &&
+      (!minimumSpendValue || Number.parseFloat(minimumSpendValue) > 0)
+    );
+  });
+  const isFormComplete =
+    studioName.trim().length > 0 &&
+    description.trim().length > 0 &&
+    Boolean(address && latitude && longitude) &&
+    hasValidStudioPricing &&
+    hasValidRecordingRules &&
+    selectedImages.length > 0 &&
+    haveValidPromotions;
 
   const convertTo24HourForSchedule = (time12: string): string => {
     const [time, modifier] = time12.split(" ");
@@ -1471,7 +2142,7 @@ export default function EditStudioScreen() {
   };
 
   const getDayOfWeekName = (dateStr: string): string => {
-    const date = new Date(dateStr);
+    const date = parseLocalDateKey(dateStr);
     const days = [
       "Sunday",
       "Monday",
@@ -1486,7 +2157,14 @@ export default function EditStudioScreen() {
 
   const getEditedAvailableSlotsForDate = (
     dateStr: string,
+    protectedDateOverrides: ProtectedDateOverrideMap =
+      nearTermProtectedDateOverridesRef.current,
   ): { start: string; end: string }[] => {
+    const protectedOverride = protectedDateOverrides[dateStr];
+    if (protectedOverride) {
+      return protectedOverride.slots;
+    }
+
     if (selectedDates[dateStr]?.selected) {
       if (!selectedDates[dateStr].slots.length) {
         return [];
@@ -1495,6 +2173,10 @@ export default function EditStudioScreen() {
         start: convertTo24HourForSchedule(slot.start),
         end: convertTo24HourForSchedule(slot.end),
       }));
+    }
+
+    if (!isWeeklyScheduleDateAllowed(dateStr)) {
+      return [];
     }
 
     const dayName = getDayOfWeekName(dateStr);
@@ -1529,8 +2211,12 @@ export default function EditStudioScreen() {
     });
   };
 
-  const findScheduleConflictsForEditedState = async (studioId: string) => {
-    const today = new Date().toISOString().split("T")[0];
+  const findScheduleConflictsForEditedState = async (
+    studioId: string,
+    protectedDateOverrides: ProtectedDateOverrideMap =
+      nearTermProtectedDateOverridesRef.current,
+  ) => {
+    const today = getLocalDateKey();
 
     const { data: existingBookings, error: bookingsError } = await supabase
       .from("studio_bookings")
@@ -1565,7 +2251,10 @@ export default function EditStudioScreen() {
         const bookingDate = booking.booking_date;
         const bookingStart = booking.start_time.substring(0, 5);
         const bookingEnd = booking.end_time.substring(0, 5);
-        const availableSlots = getEditedAvailableSlotsForDate(bookingDate);
+        const availableSlots = getEditedAvailableSlotsForDate(
+          bookingDate,
+          protectedDateOverrides,
+        );
 
         const bookingFits = bookingFitsInSlots(
           bookingStart,
@@ -1594,6 +2283,7 @@ export default function EditStudioScreen() {
             bookingDate,
             bookingStart,
             bookingEnd,
+            protectedDateOverrides,
           );
           conflict.newAvailableSlot = nextSlot;
           conflicts.push(conflict);
@@ -1617,7 +2307,10 @@ export default function EditStudioScreen() {
     const conflictingHoldCount = (activeHolds || []).filter((hold: any) => {
       const holdStart = hold.start_time.substring(0, 5);
       const holdEnd = hold.end_time.substring(0, 5);
-      const availableSlots = getEditedAvailableSlotsForDate(hold.booking_date);
+      const availableSlots = getEditedAvailableSlotsForDate(
+        hold.booking_date,
+        protectedDateOverrides,
+      );
       return !bookingFitsInSlots(holdStart, holdEnd, availableSlots);
     }).length;
 
@@ -1626,11 +2319,12 @@ export default function EditStudioScreen() {
 
   const getScheduleSlotsForDate = (
     dateStr: string,
-    weeklySchedule: { day: string; slots: { start: string; end: string }[] }[],
+    weeklySchedule: WeeklyAvailabilityDay[],
     dateOverrides: {
       [date: string]: {
         selected: boolean;
         slots: { start: string; end: string }[];
+        sessionType?: DateOverrideSessionType;
       };
     },
   ): { start: string; end: string }[] => {
@@ -1643,7 +2337,11 @@ export default function EditStudioScreen() {
 
     const dayName = getDayOfWeekName(dateStr);
     const daySchedule = weeklySchedule.find((a) => a.day === dayName);
-    if (!daySchedule || !daySchedule.slots.length) {
+    if (
+      !daySchedule ||
+      !daySchedule.slots.length ||
+      !weeklyScheduleAllowsDate(dateStr, daySchedule)
+    ) {
       return [];
     }
 
@@ -1653,8 +2351,8 @@ export default function EditStudioScreen() {
     }));
   };
 
-  const oldSlotsCoveredByNewSlots = (
-    oldSlots: { start: string; end: string }[],
+  const oldSlotCoveredByNewSlots = (
+    oldSlot: { start: string; end: string },
     newSlots: { start: string; end: string }[],
   ): boolean => {
     const toMinutes = (time: string) => {
@@ -1662,27 +2360,42 @@ export default function EditStudioScreen() {
       return h * 60 + m;
     };
 
-    return oldSlots.every((oldSlot) => {
-      const oldStart = toMinutes(oldSlot.start);
-      const oldEnd = toMinutes(oldSlot.end);
-      return newSlots.some((newSlot) => {
-        const newStart = toMinutes(newSlot.start);
-        const newEnd = toMinutes(newSlot.end);
-        return newStart <= oldStart && newEnd >= oldEnd;
-      });
+    const oldStart = toMinutes(oldSlot.start);
+    const oldEnd = toMinutes(oldSlot.end);
+    return newSlots.some((newSlot) => {
+      const newStart = toMinutes(newSlot.start);
+      const newEnd = toMinutes(newSlot.end);
+      return newStart <= oldStart && newEnd >= oldEnd;
     });
+  };
+
+  const slotOverlapsLockWindow = (
+    dateStr: string,
+    slot: { start: string; end: string },
+    windowStart: Date,
+    windowEnd: Date,
+  ): boolean => {
+    const slotStart = getLocalDateTime(dateStr, slot.start);
+    const slotEnd = getLocalDateTime(dateStr, slot.end);
+    return slotEnd > windowStart && slotStart < windowEnd;
   };
 
   const detectNearTermScheduleReduction = (
     lockHours: number,
-  ): { blocked: boolean; affectedDate?: string } => {
+  ): {
+    blocked: boolean;
+    affectedDate?: string;
+    protectedDateOverrides: ProtectedDateOverrideMap;
+  } => {
     const now = new Date();
     const horizon = new Date(now.getTime() + lockHours * 60 * 60 * 1000);
-    const iterDate = new Date(now);
+    const horizonKey = getLocalDateKey(horizon);
+    const iterDate = parseLocalDateKey(getLocalDateKey(now));
     const datesToCheck = new Set<string>();
+    const protectedDateOverrides: ProtectedDateOverrideMap = {};
 
-    while (iterDate <= horizon) {
-      datesToCheck.add(iterDate.toISOString().split("T")[0]);
+    while (getLocalDateKey(iterDate) <= horizonKey) {
+      datesToCheck.add(getLocalDateKey(iterDate));
       iterDate.setDate(iterDate.getDate() + 1);
     }
 
@@ -1698,13 +2411,41 @@ export default function EditStudioScreen() {
         continue;
       }
 
-      const stillCovered = oldSlotsCoveredByNewSlots(oldSlots, newSlots);
-      if (!stillCovered) {
-        return { blocked: true, affectedDate: dateStr };
+      const reducedLockedSlot = oldSlots.some(
+        (oldSlot) =>
+          slotOverlapsLockWindow(dateStr, oldSlot, now, horizon) &&
+          !oldSlotCoveredByNewSlots(oldSlot, newSlots),
+      );
+      if (!reducedLockedSlot) {
+        continue;
       }
+
+      const oldHadDateOverride =
+        originalSelectedDatesRef.current[dateStr]?.selected;
+      const newHasDateOverride = selectedDates[dateStr]?.selected;
+
+      if (oldHadDateOverride || newHasDateOverride) {
+        return {
+          blocked: true,
+          affectedDate: dateStr,
+          protectedDateOverrides: {},
+        };
+      }
+
+      const dayName = getDayOfWeekName(dateStr);
+      const originalDaySchedule = originalAvailabilityRef.current.find(
+        (a) => a.day === dayName,
+      );
+      protectedDateOverrides[dateStr] = {
+        slots: oldSlots,
+        sessionType: normalizeDateOverrideSessionType(
+          originalDaySchedule?.sessionType,
+          getDefaultDateOverrideSessionType(studioType),
+        ),
+      };
     }
 
-    return { blocked: false };
+    return { blocked: false, protectedDateOverrides };
   };
 
   const performSave = async () => {
@@ -1723,7 +2464,7 @@ export default function EditStudioScreen() {
       // Ensure id is a string, not an array
       const studioId = Array.isArray(id) ? id[0] : id;
       if (!studioId) {
-        showAlert("error", "Error", "Invalid studio ID");
+        showAlert("warning", "Invalid Studio", "Invalid studio ID. Please try again.");
         setSaving(false);
         return;
       }
@@ -1738,15 +2479,18 @@ export default function EditStudioScreen() {
         setSaving(false);
         return;
       }
+      nearTermProtectedDateOverridesRef.current =
+        reductionCheck.protectedDateOverrides;
 
       // Check for booking conflicts before saving
-      console.log("🔍 Checking for booking conflicts...");
 
       const { conflicts, conflictingHoldCount } =
-        await findScheduleConflictsForEditedState(studioId);
+        await findScheduleConflictsForEditedState(
+          studioId,
+          reductionCheck.protectedDateOverrides,
+        );
 
       if (conflicts.length > 0) {
-        console.log("⚠️ Found conflicts:", conflicts.length);
         setConflictingBookings(conflicts);
         setConflictModalVisible(true);
         setSaving(false);
@@ -1763,13 +2507,15 @@ export default function EditStudioScreen() {
         return;
       }
 
-      await executeSave();
+      await executeSave(reductionCheck.protectedDateOverrides);
     } catch (e: any) {
-      console.error("❌ Error checking bookings:", e);
+      logActionError("edit_studio.preflight_failed", e, {
+        studioId: Array.isArray(id) ? id[0] : id,
+      });
       showAlert(
-        "error",
-        "Error",
-        `Failed to save: ${e?.message || "Unknown error"}`,
+        "warning",
+        "Couldn't Save Studio",
+        `Failed to save: ${formatSupabaseError(e)}`,
       );
       setSaving(false);
     }
@@ -1781,6 +2527,8 @@ export default function EditStudioScreen() {
     currentDate: string,
     bookingStart: string,
     bookingEnd: string,
+    protectedDateOverrides: ProtectedDateOverrideMap =
+      nearTermProtectedDateOverridesRef.current,
   ): Promise<{ date: string; start_time: string; end_time: string } | null> => {
     const bookingDuration = (() => {
       const [sH, sM] = bookingStart.split(":").map(Number);
@@ -1799,7 +2547,7 @@ export default function EditStudioScreen() {
     };
 
     const getDayOfWeek = (dateStr: string): string => {
-      const date = new Date(dateStr);
+      const date = parseLocalDateKey(dateStr);
       const days = [
         "Sunday",
         "Monday",
@@ -1813,19 +2561,21 @@ export default function EditStudioScreen() {
     };
 
     // Search for next 30 days
-    const startDate = new Date(currentDate);
+    const startDate = parseLocalDateKey(currentDate);
     startDate.setDate(startDate.getDate() + 1); // Start from next day
 
     for (let i = 0; i < 30; i++) {
       const checkDate = new Date(startDate);
       checkDate.setDate(checkDate.getDate() + i);
-      const dateStr = checkDate.toISOString().split("T")[0];
+      const dateStr = getLocalDateKey(checkDate);
 
       // Get available slots for this date
       let availableSlots: { start: string; end: string }[] = [];
 
       // Check date overrides first
-      if (
+      if (protectedDateOverrides[dateStr]) {
+        availableSlots = protectedDateOverrides[dateStr].slots;
+      } else if (
         selectedDates[dateStr]?.selected &&
         selectedDates[dateStr]?.slots.length > 0
       ) {
@@ -1835,13 +2585,15 @@ export default function EditStudioScreen() {
         }));
       } else {
         // Check weekly schedule
-        const dayName = getDayOfWeek(dateStr);
-        const daySchedule = availability.find((a) => a.day === dayName);
-        if (daySchedule && daySchedule.slots.length > 0) {
-          availableSlots = daySchedule.slots.map((slot) => ({
-            start: convertTo24Hour(slot.start),
-            end: convertTo24Hour(slot.end),
-          }));
+        if (isWeeklyScheduleDateAllowed(dateStr)) {
+          const dayName = getDayOfWeek(dateStr);
+          const daySchedule = availability.find((a) => a.day === dayName);
+          if (daySchedule && daySchedule.slots.length > 0) {
+            availableSlots = daySchedule.slots.map((slot) => ({
+              start: convertTo24Hour(slot.start),
+              end: convertTo24Hour(slot.end),
+            }));
+          }
         }
       }
 
@@ -1949,13 +2701,24 @@ export default function EditStudioScreen() {
             (c) => c.id === resolution.bookingId,
           );
           if (conflict) {
-            await supabase.from("notifications").insert({
+            const { error: notificationError } = await supabase.from("notifications").insert({
               user_id: conflict.user_id,
               type: "warning",
               title: "Booking Cancelled",
-              message: `Your booking at ${studioName} on ${new Date(conflict.booking_date).toLocaleDateString()} has been cancelled due to schedule changes. You will receive a refund.`,
-              meta: { bookingId: resolution.bookingId, studioId },
+              message: `Your booking at ${studioName} on ${formatDashedNumericDate(conflict.booking_date)} has been cancelled due to schedule changes. You will receive a refund.`,
+              meta: buildNotificationRouteMeta("/bookings", undefined, {
+                bookingId: resolution.bookingId,
+                studioId,
+              }),
             });
+            if (notificationError) {
+              logActionError("edit_studio.cancel_booking_notification_failed", notificationError, {
+                bookingId: resolution.bookingId,
+                studioId,
+                userId: conflict.user_id,
+              });
+              throw new Error(`Failed to notify booking customer: ${formatSupabaseError(notificationError)}`);
+            }
           }
         } else if (resolution.action === "move" && resolution.newSlot) {
           const targetSlots = getEditedAvailableSlotsForDate(
@@ -2043,7 +2806,7 @@ export default function EditStudioScreen() {
 
           if (hasHoldOverlap) {
             throw new Error(
-              "Selected move slot is currently reserved in another user's checkout hold.",
+              "Selected move slot is currently held in another user's checkout.",
             );
           }
 
@@ -2075,12 +2838,12 @@ export default function EditStudioScreen() {
             (c) => c.id === resolution.bookingId,
           );
           if (conflict) {
-            await supabase.from("notifications").insert({
+            const { error: notificationError } = await supabase.from("notifications").insert({
               user_id: conflict.user_id,
               type: "warning",
               title: "Booking Relocation Request",
-              message: `Your booking at ${studioName} needs relocation to ${new Date(resolution.newSlot.date).toLocaleDateString()} at ${resolution.newSlot.start_time}. Please accept within 24 hours or your booking will be cancelled and refunded.`,
-              meta: {
+              message: `Your booking at ${studioName} needs relocation to ${formatDashedNumericDate(resolution.newSlot.date)} at ${resolution.newSlot.start_time}. Please accept within 24 hours or your booking will be cancelled and refunded.`,
+              meta: buildNotificationRouteMeta("/bookings", undefined, {
                 bookingId: resolution.bookingId,
                 studioId,
                 relocation: {
@@ -2090,8 +2853,16 @@ export default function EditStudioScreen() {
                   proposed_end_time: resolution.newSlot.end_time,
                   expires_at: relocationExpiresAt,
                 },
-              },
+              }),
             });
+            if (notificationError) {
+              logActionError("edit_studio.relocation_notification_failed", notificationError, {
+                bookingId: resolution.bookingId,
+                studioId,
+                userId: conflict.user_id,
+              });
+              throw new Error(`Failed to notify booking customer: ${formatSupabaseError(notificationError)}`);
+            }
           }
         }
       }
@@ -2103,17 +2874,22 @@ export default function EditStudioScreen() {
       // Now save the studio changes
       await executeSave();
     } catch (e: any) {
-      console.error("Error resolving conflicts:", e);
+      logActionError("edit_studio.resolve_conflicts_failed", e, {
+        studioId: Array.isArray(id) ? id[0] : id,
+      });
       showAlert(
-        "error",
-        "Error",
-        `Failed to resolve conflicts: ${e?.message || "Unknown error"}`,
+        "warning",
+        "Couldn't Save Studio",
+        `Failed to resolve conflicts: ${formatSupabaseError(e)}`,
       );
       setSaving(false);
     }
   };
 
-  const executeSave = async () => {
+  const executeSave = async (
+    protectedDateOverrides: ProtectedDateOverrideMap =
+      nearTermProtectedDateOverridesRef.current,
+  ) => {
     try {
       const {
         data: { user },
@@ -2126,14 +2902,17 @@ export default function EditStudioScreen() {
       // Ensure id is a string, not an array
       const studioId = Array.isArray(id) ? id[0] : id;
       if (!studioId) {
-        showAlert("error", "Error", "Invalid studio ID");
+        showAlert("warning", "Invalid Studio", "Invalid studio ID. Please try again.");
         setSaving(false);
         return;
       }
 
       // Final preflight: re-check right before writing to reduce stale-state races.
       const { conflicts: latestConflicts, conflictingHoldCount } =
-        await findScheduleConflictsForEditedState(studioId);
+        await findScheduleConflictsForEditedState(
+          studioId,
+          protectedDateOverrides,
+        );
 
       if (latestConflicts.length > 0) {
         setConflictingBookings(latestConflicts);
@@ -2169,17 +2948,45 @@ export default function EditStudioScreen() {
         return `${hours}:${minutes}`;
       };
 
-      // Convert calendar-based availability to the payload format
-      const calendarAvailability = Object.entries(selectedDates)
-        .filter(([_, data]) => data.selected)
+      const todayKey = getLocalDateKey();
+
+      // Convert calendar-based availability to the payload format.
+      // Past overrides are intentionally omitted from the edit payload and left
+      // untouched in the database for history/audit context.
+      const selectedDateAvailability = Object.entries(selectedDates)
+        .filter(([date, data]) => data.selected && date >= todayKey)
         .map(([date, data]) => ({
           date,
+          session_type:
+            studioType === "Both"
+              ? normalizeDateOverrideSessionType(
+                data.sessionType,
+                getDefaultDateOverrideSessionType(studioType),
+              )
+              : getDefaultDateOverrideSessionType(studioType),
           is_open: data.slots.length > 0,
           slots: data.slots.map((slot) => ({
             start: convertTo24Hour(slot.start),
             end: convertTo24Hour(slot.end),
           })),
         }));
+
+      const protectedDateAvailability = Object.entries(protectedDateOverrides)
+        .filter(([date]) => date >= todayKey && !selectedDates[date]?.selected)
+        .map(([date, data]) => ({
+          date,
+          session_type: normalizeDateOverrideSessionType(
+            data.sessionType,
+            getDefaultDateOverrideSessionType(studioType),
+          ),
+          is_open: data.slots.length > 0,
+          slots: data.slots,
+        }));
+
+      const calendarAvailability = [
+        ...selectedDateAvailability,
+        ...protectedDateAvailability,
+      ].sort((a, b) => a.date.localeCompare(b.date));
 
       const equipmentPayload = equipment.map((e) => ({
         name: e.name,
@@ -2229,13 +3036,32 @@ export default function EditStudioScreen() {
         business_permit_url: businessPermitUrl || null,
         availability: availability
           .filter((day) => day.slots.length > 0)
-          .map((day) => ({
-            ...day,
-            slots: day.slots.map((slot) => ({
-              start: convertTo24Hour(slot.start),
-              end: convertTo24Hour(slot.end),
-            })),
-          })),
+          .map((day) => {
+            const dayWeeklyScope = normalizeWeeklyScheduleScope(
+              day.weeklyScheduleScope,
+            );
+            return {
+              day: day.day,
+              session_type:
+                studioType === "Both"
+                  ? normalizeWeeklySessionType(
+                      day.sessionType,
+                      getDefaultWeeklySessionType(studioType),
+                    )
+                  : getDefaultWeeklySessionType(studioType),
+              weekly_schedule_scope: dayWeeklyScope,
+              weekly_schedule_end_date:
+                dayWeeklyScope === "until" ? day.weeklyScheduleEndDate : null,
+              weekly_schedule_dates:
+                dayWeeklyScope === "specific_dates"
+                  ? toWeeklyScheduleDateList(day.weeklyScheduleDates)
+                  : [],
+              slots: day.slots.map((slot) => ({
+                start: convertTo24Hour(slot.start),
+                end: convertTo24Hour(slot.end),
+              })),
+            };
+          }),
         calendar_availability: calendarAvailability,
         // Booking settings - default 24hr advance booking
         booking_settings: {
@@ -2245,35 +3071,21 @@ export default function EditStudioScreen() {
           peak_season_dates: [],
           off_peak_multiplier: 1.0,
           off_peak_dates: [],
+          min_booking_duration_hours:
+            studioType === "Recording" || studioType === "Both"
+              ? parsePositiveDecimal(recordingHoursPerBlock) || 3
+              : 2,
+          recording_songs_per_block:
+            parsePositiveInteger(recordingSongsPerBlock) || 1,
+          recording_hours_per_block:
+            parsePositiveDecimal(recordingHoursPerBlock) || 3,
+          recording_rate_negotiable: false,
+          weekly_schedule_scope: "indefinite",
+          weekly_schedule_end_date: null,
+          weekly_schedule_dates: [],
         },
       };
 
-      console.log(
-        " RAW availability state:",
-        JSON.stringify(availability, null, 2),
-      );
-      console.log(
-        "📅 FILTERED availability (days with slots):",
-        payload.availability,
-      );
-      console.log(
-        "📅 Number of days with availability:",
-        payload.availability.length,
-      );
-      console.log(
-        "🔵 Updating studio with payload:",
-        JSON.stringify(
-          {
-            action: "update",
-            type: "studio",
-            id: studioId,
-            userId: user.id,
-            payload,
-          },
-          null,
-          2,
-        ),
-      );
 
       // Direct update to studios table
       const { data: studioData, error: updateError } = await supabase
@@ -2290,46 +3102,42 @@ export default function EditStudioScreen() {
           longitude: payload.longitude,
           contract_url: payload.contract_url,
           business_permit_url: payload.business_permit_url,
+          permit_status: 'approved',
+          permit_rejection_reason: null,
+          permit_admin_notes: null,
+          permit_reviewed_by: null,
+          permit_reviewed_at: null,
+          studio_type: normalizeStudioTypeColumnValue(payload.type),
         })
         .eq('id', studioId)
         .eq('owner_id', user.id)
         .select()
         .single();
 
-      console.log("🔵 Response data:", studioData);
-      console.log("🔵 Response error:", updateError);
 
       if (updateError) {
-        console.error("❌ Error details:", JSON.stringify(updateError, null, 2));
+        logActionError("edit_studio.update_base_failed", updateError, {
+          studioId,
+          userId: user.id,
+          studioType: payload.type,
+        });
         let alertMessage = `Failed to update studio: ${updateError.message}`;
         if (updateError.hint) alertMessage += `\n\nHint: ${updateError.hint}`;
         if (updateError.details) alertMessage += `\n\nDetails: ${updateError.details}`;
         throw new Error(alertMessage);
       }
 
-      const shouldMarkResubmitted =
-        permitStatus === "rejected" &&
-        !!businessPermitUrl &&
-        businessPermitUrl !== initialBusinessPermitUrl;
+      setPermitStatus("approved");
+      setPermitRejectionReason("");
 
-      if (shouldMarkResubmitted) {
-        const { error: permitStatusError } = await supabase
-          .from("studios")
-          .update({
-            permit_status: "resubmitted",
-            permit_rejection_reason: null,
-          })
-          .eq("id", studioId)
-          .eq("owner_id", user.id);
-
-        if (permitStatusError) {
-          throw new Error(`Failed to update permit status: ${permitStatusError.message}`);
-        }
-
-        setPermitStatus("resubmitted");
+      const { error: deleteTypesError } = await supabase
+        .from('studio_types')
+        .delete()
+        .eq('studio_id', studioId);
+      if (deleteTypesError) {
+        logActionError("edit_studio.clear_types_failed", deleteTypesError, { studioId });
+        throw new Error(`Failed to clear studio types: ${formatSupabaseError(deleteTypesError)}`);
       }
-
-      await supabase.from('studio_types').delete().eq('studio_id', studioId);
       const normalizedTypes = resolveStudioTypeRows(payload.type);
       if (normalizedTypes.length > 0) {
         const { error: typeError } = await supabase
@@ -2341,11 +3149,22 @@ export default function EditStudioScreen() {
             })),
           );
         if (typeError) {
-          throw new Error(`Failed to sync studio types: ${typeError.message}`);
+          logActionError("edit_studio.save_types_failed", typeError, {
+            studioId,
+            types: normalizedTypes,
+          });
+          throw new Error(`Failed to sync studio types: ${formatSupabaseError(typeError)}`);
         }
       }
 
-      await supabase.from('studio_amenities').delete().eq('studio_id', studioId);
+      const { error: deleteAmenitiesError } = await supabase
+        .from('studio_amenities')
+        .delete()
+        .eq('studio_id', studioId);
+      if (deleteAmenitiesError) {
+        logActionError("edit_studio.clear_amenities_failed", deleteAmenitiesError, { studioId });
+        throw new Error(`Failed to clear studio amenities: ${formatSupabaseError(deleteAmenitiesError)}`);
+      }
       if ((payload.amenities || []).length > 0) {
         const { error: amenitiesError } = await supabase
           .from('studio_amenities')
@@ -2356,27 +3175,45 @@ export default function EditStudioScreen() {
             })),
           );
         if (amenitiesError) {
-          throw new Error(`Failed to sync studio amenities: ${amenitiesError.message}`);
+          logActionError("edit_studio.save_amenities_failed", amenitiesError, {
+            studioId,
+            amenities: payload.amenities,
+          });
+          throw new Error(`Failed to sync studio amenities: ${formatSupabaseError(amenitiesError)}`);
         }
       }
 
-      await supabase.from('studio_instruments').delete().eq('studio_id', studioId);
+      const { error: deleteInstrumentsError } = await supabase
+        .from('studio_instruments')
+        .delete()
+        .eq('studio_id', studioId);
+      if (deleteInstrumentsError) {
+        logActionError("edit_studio.clear_instruments_failed", deleteInstrumentsError, { studioId });
+        throw new Error(`Failed to clear studio instruments: ${formatSupabaseError(deleteInstrumentsError)}`);
+      }
       if ((payload.instruments || []).length > 0) {
-        const { error: instrumentsError } = await supabase
-          .from('studio_instruments')
-          .insert(
-            payload.instruments.map((item: any) => ({
-              studio_id: studioId,
-              instrument_name: item.name,
-              image_url: item.image || null,
-            })),
-          );
+        const instrumentsError = await insertStudioInstrumentRows(
+          studioId,
+          payload.instruments,
+        );
         if (instrumentsError) {
-          throw new Error(`Failed to sync studio instruments: ${instrumentsError.message}`);
+          logActionError("edit_studio.save_instruments_failed", instrumentsError, {
+            studioId,
+            count: payload.instruments.length,
+          });
+          throw new Error(`Failed to sync studio instruments: ${formatSupabaseError(instrumentsError)}`);
         }
       }
 
-      await supabase.from('studio_media').delete().eq('studio_id', studioId).eq('media_type', 'image');
+      const { error: deleteMediaError } = await supabase
+        .from('studio_media')
+        .delete()
+        .eq('studio_id', studioId)
+        .eq('media_type', 'image');
+      if (deleteMediaError) {
+        logActionError("edit_studio.clear_images_failed", deleteMediaError, { studioId });
+        throw new Error(`Failed to clear studio images: ${formatSupabaseError(deleteMediaError)}`);
+      }
       if ((payload.images || []).length > 0) {
         const { error: mediaError } = await supabase
           .from('studio_media')
@@ -2389,25 +3226,75 @@ export default function EditStudioScreen() {
             })),
           );
         if (mediaError) {
-          throw new Error(`Failed to sync studio images: ${mediaError.message}`);
+          logActionError("edit_studio.save_images_failed", mediaError, {
+            studioId,
+            imageCount: payload.images.length,
+          });
+          throw new Error(`Failed to sync studio images: ${formatSupabaseError(mediaError)}`);
         }
       }
 
       // Update studio settings
-      await supabase
+      const settingsRow = {
+        studio_id: studioId,
+        lead_time_hours: payload.booking_settings.lead_time_hours || 24,
+        weekend_multiplier: payload.booking_settings.weekend_multiplier || 1.0,
+        peak_season_multiplier: payload.booking_settings.peak_season_multiplier || 1.0,
+        peak_season_dates: payload.booking_settings.peak_season_dates || [],
+        off_peak_multiplier: payload.booking_settings.off_peak_multiplier || 1.0,
+        off_peak_dates: payload.booking_settings.off_peak_dates || [],
+        min_booking_duration_hours:
+          parsePositiveDecimal(
+            payload.booking_settings.min_booking_duration_hours,
+          ) ||
+          (studioType === 'Recording' || studioType === 'Both' ? 3 : 2),
+        recording_songs_per_block:
+          parsePositiveInteger(payload.booking_settings.recording_songs_per_block) || 1,
+        recording_hours_per_block:
+          parsePositiveDecimal(payload.booking_settings.recording_hours_per_block) ||
+          parsePositiveDecimal(payload.booking_settings.min_booking_duration_hours) ||
+          3,
+        recording_rate_negotiable: false,
+        weekly_schedule_scope: normalizeWeeklyScheduleScope(
+          payload.booking_settings.weekly_schedule_scope,
+        ),
+        weekly_schedule_end_date:
+          payload.booking_settings.weekly_schedule_scope === "until"
+            ? payload.booking_settings.weekly_schedule_end_date
+            : null,
+        weekly_schedule_dates: Array.isArray(
+          payload.booking_settings.weekly_schedule_dates,
+        )
+          ? payload.booking_settings.weekly_schedule_dates
+          : [],
+      };
+      let { error: settingsError } = await supabase
         .from('studio_settings')
-        .upsert({
-          studio_id: studioId,
-          lead_time_hours: payload.booking_settings.lead_time_hours || 24,
-          weekend_multiplier: payload.booking_settings.weekend_multiplier || 1.0,
-          peak_season_multiplier: payload.booking_settings.peak_season_multiplier || 1.0,
-          peak_season_dates: payload.booking_settings.peak_season_dates || [],
-          off_peak_multiplier: payload.booking_settings.off_peak_multiplier || 1.0,
-          off_peak_dates: payload.booking_settings.off_peak_dates || [],
-        }, { onConflict: 'studio_id' });
+        .upsert(settingsRow, { onConflict: 'studio_id' });
+
+      if (settingsError && isMissingWeeklyScheduleColumns(settingsError)) {
+        logActionError("edit_studio.save_settings_weekly_columns_missing", settingsError, { studioId });
+        ({ error: settingsError } = await supabase
+          .from('studio_settings')
+          .upsert(stripWeeklyScheduleColumns(settingsRow), {
+            onConflict: 'studio_id',
+          }));
+      }
+
+      if (settingsError) {
+        logActionError("edit_studio.save_settings_failed", settingsError, { studioId });
+        throw new Error(`Failed to save booking settings: ${formatSupabaseError(settingsError)}`);
+      }
 
       // Update promotions (delete-and-re-insert)
-      await supabase.from('studio_promotions').delete().eq('studio_id', studioId);
+      const { error: deletePromotionsError } = await supabase
+        .from('studio_promotions')
+        .delete()
+        .eq('studio_id', studioId);
+      if (deletePromotionsError) {
+        logActionError("edit_studio.clear_promotions_failed", deletePromotionsError, { studioId });
+        throw new Error(`Failed to clear promotions: ${formatSupabaseError(deletePromotionsError)}`);
+      }
       if (promotions.length > 0) {
         const { error: promosError } = await supabase
           .from('studio_promotions')
@@ -2415,7 +3302,12 @@ export default function EditStudioScreen() {
             promotions.map((promo) => ({
               studio_id: studioId,
               name: promo.name,
-              description: promo.description || null,
+              description: buildPromotionDescription(promo.description) || null,
+              criteria: promo.criteria.trim() || null,
+              minimum_booking_hours: parsePositiveDecimal(
+                promo.minimum_booking_hours,
+              ),
+              minimum_spend: parsePositiveDecimal(promo.minimum_spend),
               discount_type: promo.discount_type,
               discount_value: parseFloat(promo.discount_value),
               is_permanent: promo.is_permanent,
@@ -2426,12 +3318,25 @@ export default function EditStudioScreen() {
             })),
           );
         if (promosError) {
-          console.warn("Failed to save promotions:", promosError.message);
+          logActionError("edit_studio.save_promotions_failed", promosError, {
+            studioId,
+            count: promotions.length,
+          });
+          throw new Error(`Failed to save promotions: ${formatSupabaseError(promosError)}`);
         }
       }
 
       // Update operating hours
-      await supabase.from('studio_operating_hours').delete().eq('studio_id', studioId);
+      const { error: deleteOperatingHoursError } = await supabase
+        .from('studio_operating_hours')
+        .delete()
+        .eq('studio_id', studioId);
+      if (deleteOperatingHoursError) {
+        logActionError("edit_studio.clear_operating_hours_failed", deleteOperatingHoursError, { studioId });
+        throw new Error(
+          `Failed to clear weekly schedule: ${formatSupabaseError(deleteOperatingHoursError)}`,
+        );
+      }
 
       const dayMap: { [key: string]: number } = {
         'Sunday': 0, 'Monday': 1, 'Tuesday': 2, 'Wednesday': 3, 'Thursday': 4, 'Friday': 5, 'Saturday': 6
@@ -2449,7 +3354,25 @@ export default function EditStudioScreen() {
                 is_open: true,
                 open_time: slot.start,
                 close_time: slot.end,
-                slot_order: slotIndex
+                slot_order: slotIndex,
+                weekly_schedule_scope: normalizeWeeklyScheduleScope(
+                  daySchedule.weekly_schedule_scope,
+                ),
+                weekly_schedule_end_date:
+                  daySchedule.weekly_schedule_scope === "until"
+                    ? daySchedule.weekly_schedule_end_date
+                    : null,
+                weekly_schedule_dates: Array.isArray(
+                  daySchedule.weekly_schedule_dates,
+                )
+                  ? daySchedule.weekly_schedule_dates
+                  : [],
+                reason: buildWeeklyScheduleReason(
+                  normalizeWeeklySessionType(
+                    daySchedule.session_type,
+                    getDefaultWeeklySessionType(studioType),
+                  ),
+                ),
               });
             });
           }
@@ -2457,29 +3380,80 @@ export default function EditStudioScreen() {
       }
 
       if (operatingHours.length > 0) {
-        await supabase.from('studio_operating_hours').insert(operatingHours);
+        let { error: operatingHoursError } = await supabase
+          .from('studio_operating_hours')
+          .insert(operatingHours);
+
+        if (operatingHoursError && isMissingWeeklyScheduleColumns(operatingHoursError)) {
+          logActionError("edit_studio.save_operating_hours_weekly_columns_missing", operatingHoursError, {
+            studioId,
+            rowCount: operatingHours.length,
+          });
+          ({ error: operatingHoursError } = await supabase
+            .from('studio_operating_hours')
+            .insert(operatingHours.map(stripWeeklyScheduleColumns)));
+        }
+
+        if (operatingHoursError) {
+          logActionError("edit_studio.save_operating_hours_failed", operatingHoursError, {
+            studioId,
+            rowCount: operatingHours.length,
+          });
+          throw new Error(
+            `Failed to save weekly schedule: ${formatSupabaseError(operatingHoursError)}`,
+          );
+        }
       }
 
       // Update calendar date overrides
-      await supabase.from('studio_date_overrides').delete().eq('studio_id', studioId);
+      const { error: deleteDateOverridesError } = await supabase
+        .from('studio_date_overrides')
+        .delete()
+        .eq('studio_id', studioId)
+        .gte('override_date', todayKey);
+      if (deleteDateOverridesError) {
+        logActionError("edit_studio.clear_date_overrides_failed", deleteDateOverridesError, { studioId });
+        throw new Error(
+          `Failed to clear future calendar availability: ${formatSupabaseError(deleteDateOverridesError)}`,
+        );
+      }
 
       if (payload.calendar_availability && Array.isArray(payload.calendar_availability) && payload.calendar_availability.length > 0) {
         const dateOverrides = payload.calendar_availability
-          .filter((entry: any) => entry.date)
-          .map((entry: any) => {
+          .filter((entry: any) => entry.date && entry.date >= todayKey)
+          .flatMap((entry: any) => {
             const hasSlots = Array.isArray(entry.slots) && entry.slots.length > 0;
-            return {
+            const slots = hasSlots ? entry.slots : [null];
+            return slots.map((slot: any, slotIndex: number) => ({
               studio_id: studioId,
               override_date: entry.date,
-              is_open: hasSlots,
-              open_time: hasSlots ? entry.slots[0].start : null,
-              close_time: hasSlots ? entry.slots[0].end : null,
-              reason: hasSlots ? 'Custom schedule' : 'Closed override'
-            };
+              is_open: Boolean(slot),
+              open_time: slot ? slot.start : null,
+              close_time: slot ? slot.end : null,
+              slot_order: slotIndex,
+              reason: buildDateOverrideReason(
+                parseDateOverrideSessionType(
+                  entry.session_type,
+                  getDefaultDateOverrideSessionType(studioType),
+                ),
+                Boolean(slot),
+              ),
+            }));
           });
 
         if (dateOverrides.length > 0) {
-          await supabase.from('studio_date_overrides').insert(dateOverrides);
+          const { error: dateOverridesError } = await supabase
+            .from('studio_date_overrides')
+            .insert(dateOverrides);
+          if (dateOverridesError) {
+            logActionError("edit_studio.save_date_overrides_failed", dateOverridesError, {
+              studioId,
+              rowCount: dateOverrides.length,
+            });
+            throw new Error(
+              `Failed to save calendar availability: ${formatSupabaseError(dateOverridesError)}`,
+            );
+          }
         }
       }
 
@@ -2490,31 +3464,27 @@ export default function EditStudioScreen() {
         throw new Error("No data returned from server");
       }
 
-      console.log("✅ Studio Updated successfully");
-      showAlert("success", "Success", "Studio updated successfully!", [
+      clearListingDetailsCache(studioId);
+      invalidateListingCaches(user.id, ["details", "home", "search", "bookings"]);
+
+      const successMessage = "Studio updated successfully!";
+
+      showAlert("success", "Success", successMessage, [
         {
           text: "OK",
           onPress: () => {
-            if (router.canGoBack()) {
-              router.back();
-            } else {
-              router.push("/manage_studio");
-            }
+            handleReturnToTabs();
           },
         },
       ]);
     } catch (e: any) {
-      console.error("❌ Error updating studio:", e);
-      console.error("❌ Error message:", e?.message);
-      console.error("❌ Error stack:", e?.stack);
-      console.error(
-        "❌ Full error object:",
-        JSON.stringify(e, Object.getOwnPropertyNames(e), 2),
-      );
+      logActionError("edit_studio.save_failed", e, {
+        studioId: Array.isArray(id) ? id[0] : id,
+      });
       showAlert(
-        "error",
-        "Error",
-        `Failed to update studio: ${e?.message || "Unknown error"}`,
+        "warning",
+        "Couldn't Save Studio",
+        `Failed to update studio: ${formatSupabaseError(e)}`,
       );
     } finally {
       setSaving(false);
@@ -2584,21 +3554,20 @@ export default function EditStudioScreen() {
         data: { session },
       } = await supabase.auth.getSession();
       if (!session) {
-        showAlert("error", "Error", "Session expired. Please log in again.");
+        showAlert("warning", "Session Expired", "Your session has expired. Please log in again.");
         setUploadingContract(false);
         return;
       }
 
-      const base64 = await FileSystem.readAsStringAsync(fileUri, { encoding: FileSystem.EncodingType.Base64 });
-      const bytes = base64ToUint8Array(base64);
-
-      const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
-      const { data, error } = await supabase.storage
-        .from("documents")
-        .upload(filePath, bytes, {
-          contentType: "application/pdf",
-          upsert: false,
-        });
+      const safeFileName = sanitizeStorageFileName(fileName, "contract.pdf");
+      const filePath = `contracts/${session.user.id}/${Date.now()}_${safeFileName}`;
+      const { error } = await uploadStorageObject({
+        bucket: "documents",
+        path: filePath,
+        uri: fileUri,
+        contentType: "application/pdf",
+        upsert: false,
+      });
 
       if (error) throw error;
 
@@ -2612,8 +3581,8 @@ export default function EditStudioScreen() {
     } catch (error) {
       console.error("Error uploading contract:", error);
       showAlert(
-        "error",
-        "Error",
+        "warning",
+        "Upload Failed",
         "Failed to upload contract. Please try again.",
       );
     } finally {
@@ -2659,25 +3628,24 @@ export default function EditStudioScreen() {
         data: { session },
       } = await supabase.auth.getSession();
       if (!session) {
-        showAlert("error", "Error", "Session expired. Please log in again.");
+        showAlert("warning", "Session Expired", "Your session has expired. Please log in again.");
         setUploadingBusinessPermit(false);
         return;
       }
-
-      const base64 = await FileSystem.readAsStringAsync(fileUri, { encoding: FileSystem.EncodingType.Base64 });
-      const bytes = base64ToUint8Array(base64);
 
       const contentType = fileName.toLowerCase().endsWith('.pdf')
         ? 'application/pdf'
         : `image/${fileName.split('.').pop()?.toLowerCase() || 'jpeg'}`;
 
-      const filePath = `business-permits/${session.user.id}/${Date.now()}_${fileName}`;
-      const { data, error } = await supabase.storage
-        .from("documents")
-        .upload(filePath, bytes, {
-          contentType,
-          upsert: false,
-        });
+      const safeFileName = sanitizeStorageFileName(fileName, "business-permit.pdf");
+      const filePath = `business-permits/${session.user.id}/${Date.now()}_${safeFileName}`;
+      const { error } = await uploadStorageObject({
+        bucket: "documents",
+        path: filePath,
+        uri: fileUri,
+        contentType,
+        upsert: false,
+      });
 
       if (error) throw error;
 
@@ -2691,8 +3659,8 @@ export default function EditStudioScreen() {
     } catch (error) {
       console.error("Error uploading business permit:", error);
       showAlert(
-        "error",
-        "Error",
+        "warning",
+        "Upload Failed",
         "Failed to upload business permit. Please try again.",
       );
     } finally {
@@ -2717,7 +3685,7 @@ export default function EditStudioScreen() {
         data: { session },
       } = await supabase.auth.getSession();
       if (!session) {
-        showAlert("error", "Error", "Session expired. Please log in again.");
+        showAlert("warning", "Session Expired", "Your session has expired. Please log in again.");
         setUploadingBusinessPermit(false);
         return;
       }
@@ -2726,13 +3694,15 @@ export default function EditStudioScreen() {
         ? 'application/pdf'
         : file.type || 'image/jpeg';
 
-      const filePath = `business-permits/${session.user.id}/${Date.now()}_${fileName}`;
-      const { data, error } = await supabase.storage
-        .from("documents")
-        .upload(filePath, file, {
-          contentType,
-          upsert: false,
-        });
+      const safeFileName = sanitizeStorageFileName(fileName, "business-permit.pdf");
+      const filePath = `business-permits/${session.user.id}/${Date.now()}_${safeFileName}`;
+      const { error } = await uploadStorageObject({
+        bucket: "documents",
+        path: filePath,
+        body: file,
+        contentType,
+        upsert: false,
+      });
 
       if (error) throw error;
 
@@ -2745,7 +3715,7 @@ export default function EditStudioScreen() {
       showAlert("success", "Success", "Business permit uploaded successfully!");
     } catch (error) {
       console.error("Error uploading business permit:", error);
-      showAlert("error", "Error", "Failed to upload business permit. Please try again.");
+      showAlert("warning", "Upload Failed", "Failed to upload business permit. Please try again.");
     } finally {
       setUploadingBusinessPermit(false);
       if (event.target) {
@@ -2764,7 +3734,7 @@ export default function EditStudioScreen() {
         data: { session },
       } = await supabase.auth.getSession();
       if (!session) {
-        showAlert("error", "Error", "Session expired. Please log in again.");
+        showAlert("warning", "Session Expired", "Your session has expired. Please log in again.");
         return;
       }
 
@@ -2772,7 +3742,7 @@ export default function EditStudioScreen() {
         await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (!permissionResult.granted) {
         showAlert(
-          "error",
+          "warning",
           "Permission Needed",
           "Please allow access to your photos.",
         );
@@ -2780,10 +3750,10 @@ export default function EditStudioScreen() {
       }
 
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: "images",
-        allowsEditing: true,
-        aspect: [1, 1],
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: false,
         quality: 0.8,
+        base64: Platform.OS !== 'web',
       });
 
       if (result.canceled || !result.assets || result.assets.length === 0)
@@ -2793,30 +3763,43 @@ export default function EditStudioScreen() {
       const asset = result.assets[0];
       const fileExt = asset.uri.split(".").pop()?.toLowerCase() || "jpg";
       const fileName = `${session.user.id}/equipment/${Date.now()}_${Math.random().toString(36).substring(7)}.${fileExt}`;
+      const contentType = `image/${fileExt}`;
 
-      const base64 = await FileSystem.readAsStringAsync(asset.uri, {
-        encoding: FileSystem.EncodingType.Base64,
-      });
-      const bytes = base64ToUint8Array(base64);
-      const { data, error } = await supabase.storage
-        .from("listings")
-        .upload(fileName, bytes, {
-          contentType: `image/${fileExt}`,
-          upsert: false,
-        });
+      if (Platform.OS === 'web') {
+        // On web, asset.uri is a blob URI, which can be fetched and converted to a blob
+        const response = await fetch(asset.uri);
+        const blob = await response.blob();
+        const { data, error } = await supabase.storage
+          .from("listings")
+          .upload(fileName, blob, { contentType, upsert: false });
 
-      if (error) {
-        throw error;
+        if (error) throw error;
+
+        const { data: urlData } = supabase.storage
+          .from("listings")
+          .getPublicUrl(data.path);
+        setEquipmentForm({ ...equipmentForm, image: urlData.publicUrl });
+
+      } else {
+        // On native, use the base64 string
+        if (!asset.base64) {
+          throw new Error("Image base64 data is missing on native platform.");
+        }
+        const bytes = base64ToUint8Array(asset.base64);
+        const { data, error } = await supabase.storage
+          .from("listings")
+          .upload(fileName, bytes, { contentType, upsert: false });
+
+        if (error) throw error;
+
+        const { data: urlData } = supabase.storage
+          .from("listings")
+          .getPublicUrl(data.path);
+        setEquipmentForm({ ...equipmentForm, image: urlData.publicUrl });
       }
-
-      const { data: urlData } = supabase.storage
-        .from("listings")
-        .getPublicUrl(data.path);
-
-      setEquipmentForm({ ...equipmentForm, image: urlData.publicUrl });
     } catch (error) {
       console.error("Error uploading equipment image:", error);
-      showAlert("error", "Error", "Failed to upload image. Please try again.");
+      showAlert("warning", "Upload Failed", "Failed to upload image. Please try again.");
     } finally {
       setUploadingEquipmentImage(false);
     }
@@ -2834,18 +3817,19 @@ export default function EditStudioScreen() {
         data: { session },
       } = await supabase.auth.getSession();
       if (!session) {
-        showAlert("error", "Error", "Session expired. Please log in again.");
+        showAlert("warning", "Session Expired", "Your session has expired. Please log in again.");
         setUploadingContract(false);
         return;
       }
-
-      const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
-      const { data, error } = await supabase.storage
-        .from("documents")
-        .upload(filePath, file, {
-          contentType: "application/pdf",
-          upsert: false,
-        });
+      const safeFileName = sanitizeStorageFileName(fileName, "contract.pdf");
+      const filePath = `contracts/${session.user.id}/${Date.now()}_${safeFileName}`;
+      const { error } = await uploadStorageObject({
+        bucket: "documents",
+        path: filePath,
+        body: file,
+        contentType: "application/pdf",
+        upsert: false,
+      });
 
       if (error) throw error;
 
@@ -2859,8 +3843,8 @@ export default function EditStudioScreen() {
     } catch (error) {
       console.error("Error uploading contract:", error);
       showAlert(
-        "error",
-        "Error",
+        "warning",
+        "Upload Failed",
         "Failed to upload contract. Please try again.",
       );
     } finally {
@@ -2871,8 +3855,12 @@ export default function EditStudioScreen() {
     }
   };
 
-  const renderSectionHeader = (title: string, icon: string) => (
-    <View style={styles.sectionHeader}>
+  const renderSectionHeader = (
+    title: string,
+    icon: string,
+    isFirstSection = false,
+  ) => (
+    <View style={[styles.sectionHeader, isFirstSection && styles.firstSectionHeader]}>
       <Ionicons name={icon as any} size={18} color={colors.primary} />
       <Text style={[styles.sectionTitle, { color: colors.text }]}>{title}</Text>
     </View>
@@ -2891,11 +3879,19 @@ export default function EditStudioScreen() {
       : normalizedLabel.includes("name") || normalizedLabel.includes("title")
         ? TITLE_MAX_LENGTH
         : undefined;
+    const isRequiredLabel =
+      normalizedLabel.includes("name") ||
+      normalizedLabel.includes("title") ||
+      normalizedLabel.includes("description") ||
+      normalizedLabel.includes("payout");
 
     return (
       <View style={styles.inputContainer}>
       <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>
         {label}
+        {isRequiredLabel ? (
+          <Text style={{ color: "#EF4444" }}> *</Text>
+        ) : null}
       </Text>
       <View
         style={[
@@ -2921,6 +3917,7 @@ export default function EditStudioScreen() {
               height: multiline ? 120 : "auto",
               textAlign: "left",
               textAlignVertical: multiline ? "top" : "center",
+              paddingVertical: multiline ? 12 : 16,
             },
           ]}
         />
@@ -2928,6 +3925,257 @@ export default function EditStudioScreen() {
       </View>
     );
   };
+
+  const renderWeeklyScheduleDurationCard = (
+    daySchedule: WeeklyAvailabilityDay,
+    dayIndex: number,
+  ) => (
+    <View
+      style={[
+        styles.weeklyScopeInline,
+        { borderTopColor: colors.border },
+      ]}
+    >
+      <Text
+        style={{
+          color: colors.textSecondary,
+          fontSize: 11,
+          marginBottom: 8,
+          fontFamily: "Poppins_600SemiBold",
+        }}
+      >
+        {daySchedule.day.toUpperCase()} WEEKLY HOURS APPLY
+      </Text>
+      <Text
+        style={{
+          color: colors.textSecondary,
+          fontSize: 12,
+          marginBottom: 10,
+          fontFamily: "Poppins_400Regular",
+        }}
+      >
+        Choose how long {daySchedule.day} weekly hours should stay active. Date overrides still take priority.
+      </Text>
+      <View style={styles.sessionTypeOptions}>
+        {([
+          { value: "indefinite", label: "Every week" },
+          { value: "until", label: "Until a date" },
+        ] as const).map((option) => {
+          const isSelected = daySchedule.weeklyScheduleScope === option.value;
+          return (
+            <TouchableOpacity
+              key={option.value}
+              activeOpacity={1}
+              onPress={() => {
+                const nextScope = normalizeWeeklyScheduleScope(option.value);
+                updateWeeklyScheduleForDay(dayIndex, {
+                  weeklyScheduleScope: nextScope,
+                });
+                setActiveWeeklyEndDatePickerDay(
+                  nextScope === "until" ? daySchedule.day : null,
+                );
+              }}
+              style={[
+                styles.sessionTypeChip,
+                {
+                  borderColor: isSelected ? colors.primary : colors.border,
+                  backgroundColor: isSelected
+                    ? `${colors.primary}20`
+                    : "transparent",
+                },
+              ]}
+            >
+              <Text
+                style={{
+                  color: isSelected ? colors.primary : colors.textSecondary,
+                  fontSize: 11,
+                  lineHeight: 16,
+                  includeFontPadding: false,
+                  fontFamily: "Poppins_500Medium",
+                }}
+              >
+                {option.label}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+
+      {daySchedule.weeklyScheduleScope === "until" && (
+        <View style={{ marginTop: 12 }}>
+          <TouchableOpacity
+            activeOpacity={0.8}
+            onPress={() =>
+              setActiveWeeklyEndDatePickerDay(
+                activeWeeklyEndDatePickerDay === daySchedule.day
+                  ? null
+                  : daySchedule.day,
+              )
+            }
+            style={{
+              borderWidth: 1,
+              borderColor: daySchedule.weeklyScheduleEndDate
+                ? `${colors.primary}80`
+                : colors.border,
+              borderRadius: 12,
+              padding: 12,
+              backgroundColor: isDark ? "#111827" : "#FFFFFF",
+              flexDirection: "row",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 10,
+            }}
+          >
+            <View
+              style={{
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 10,
+                flex: 1,
+                minWidth: 0,
+              }}
+            >
+              <View
+                style={{
+                  width: 34,
+                  height: 34,
+                  borderRadius: 17,
+                  alignItems: "center",
+                  justifyContent: "center",
+                  backgroundColor: `${colors.primary}18`,
+                }}
+              >
+                <Ionicons
+                  name="calendar-outline"
+                  size={18}
+                  color={colors.primary}
+                />
+              </View>
+              <View style={{ flex: 1, minWidth: 0 }}>
+                <Text
+                  style={{
+                    color: colors.textSecondary,
+                    fontSize: 10,
+                    fontFamily: "Poppins_600SemiBold",
+                    textTransform: "uppercase",
+                  }}
+                >
+                  {daySchedule.day} hours end on
+                </Text>
+                <Text
+                  numberOfLines={1}
+                  style={{
+                    color: daySchedule.weeklyScheduleEndDate
+                      ? colors.text
+                      : colors.textSecondary,
+                    fontSize: 14,
+                    marginTop: 2,
+                    fontFamily: "Poppins_600SemiBold",
+                  }}
+                >
+                  {daySchedule.weeklyScheduleEndDate
+                    ? formatReadableDate(daySchedule.weeklyScheduleEndDate)
+                    : "Pick from calendar"}
+                </Text>
+              </View>
+            </View>
+            <Ionicons
+              name={
+                activeWeeklyEndDatePickerDay === daySchedule.day
+                  ? "chevron-up"
+                  : "chevron-down"
+              }
+              size={18}
+              color={colors.textSecondary}
+            />
+          </TouchableOpacity>
+
+          {daySchedule.weeklyScheduleEndDate ? (
+            <TouchableOpacity
+              activeOpacity={0.8}
+              onPress={() => {
+                updateWeeklyScheduleForDay(dayIndex, {
+                  weeklyScheduleEndDate: "",
+                });
+                setActiveWeeklyEndDatePickerDay(daySchedule.day);
+              }}
+              style={{
+                alignSelf: "flex-start",
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 6,
+                marginTop: 8,
+                paddingVertical: 6,
+                paddingHorizontal: 2,
+              }}
+            >
+              <Ionicons
+                name="close-circle-outline"
+                size={15}
+                color={colors.textSecondary}
+              />
+              <Text
+                style={{
+                  color: colors.textSecondary,
+                  fontSize: 12,
+                  fontFamily: "Poppins_500Medium",
+                }}
+              >
+                Clear date
+              </Text>
+            </TouchableOpacity>
+          ) : null}
+
+          {activeWeeklyEndDatePickerDay === daySchedule.day && (
+            <View
+              style={{
+                marginTop: 10,
+                borderRadius: 12,
+                borderWidth: 1,
+                borderColor: colors.border,
+                overflow: "hidden",
+                backgroundColor: isDark ? "#111827" : "#FFFFFF",
+              }}
+            >
+              <Calendar
+                current={daySchedule.weeklyScheduleEndDate || getLocalDateKey()}
+                minDate={getLocalDateKey()}
+                onDayPress={(day) => {
+                  updateWeeklyScheduleForDay(dayIndex, {
+                    weeklyScheduleEndDate: day.dateString,
+                  });
+                  setActiveWeeklyEndDatePickerDay(null);
+                }}
+                markedDates={
+                  ISO_DATE_PATTERN.test(daySchedule.weeklyScheduleEndDate)
+                    ? {
+                        [daySchedule.weeklyScheduleEndDate]: {
+                          selected: true,
+                          selectedColor: colors.primary,
+                          selectedTextColor: "#FFFFFF",
+                        },
+                      }
+                    : {}
+                }
+                theme={{
+                  backgroundColor: "transparent",
+                  calendarBackground: "transparent",
+                  textSectionTitleColor: colors.textSecondary,
+                  selectedDayBackgroundColor: colors.primary,
+                  selectedDayTextColor: "#FFFFFF",
+                  todayTextColor: colors.primary,
+                  dayTextColor: colors.text,
+                  textDisabledColor: isDark ? "#4B5563" : "#D1D5DB",
+                  monthTextColor: colors.text,
+                  arrowColor: colors.primary,
+                }}
+              />
+            </View>
+          )}
+        </View>
+      )}
+    </View>
+  );
 
   // Show loading while checking authorization
   if (checkingAuth) {
@@ -2993,15 +4241,6 @@ export default function EditStudioScreen() {
           style={{ display: "none" }}
         />
       )}
-      {Platform.OS === "web" && (
-        <input
-          ref={businessPermitInputRef as any}
-          type="file"
-          accept="application/pdf,image/*"
-          onChange={handleWebBusinessPermitSelect}
-          style={{ display: "none" }}
-        />
-      )}
       <View style={[styles.flex1, { backgroundColor: colors.background }]}>
         <Header title="Edit Studio" onBackPress={handleAttemptLeave} />
 
@@ -3010,7 +4249,7 @@ export default function EditStudioScreen() {
           contentContainerStyle={styles.scrollContent}
           style={styles.flex1}
         >
-          {renderSectionHeader("Studio Details", "business")}
+          {renderSectionHeader("Studio Details", "business", true)}
           {renderInput("Studio Name", studioName, setStudioName)}
 
           {/* Studio Type Selection */}
@@ -3018,7 +4257,7 @@ export default function EditStudioScreen() {
             <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>
               Studio Type
             </Text>
-            <View style={{ flexDirection: "row", gap: 12 }}>
+            <View style={{ flexDirection: "row", gap: 12 , flexWrap: "wrap", minWidth: "100%" }}>
               {(["Rehearsal", "Recording", "Both"] as const).map((type) => (
                 <TouchableOpacity activeOpacity={1}
                   key={type}
@@ -3073,7 +4312,7 @@ export default function EditStudioScreen() {
               ]}
             >
               <View
-                style={{ flexDirection: "row", alignItems: "center", gap: 8 }}
+                style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8 }}
               >
                 <Ionicons
                   name="location-outline"
@@ -3125,7 +4364,7 @@ export default function EditStudioScreen() {
                       alignItems: "center",
                       gap: 8,
                       flex: 1,
-                    }}
+                    minWidth: 150 }}
                   >
                     <Ionicons
                       name="musical-notes"
@@ -3164,6 +4403,7 @@ export default function EditStudioScreen() {
                       minWidth: 80,
                       textAlign: "center",
                       paddingVertical: 16,
+                      textAlignVertical: "center",
                     }}
                   />
                   <Text
@@ -3200,7 +4440,7 @@ export default function EditStudioScreen() {
                       alignItems: "center",
                       gap: 8,
                       flex: 1,
-                    }}
+                    minWidth: 150 }}
                   >
                     <Ionicons name="mic" size={20} color="#EF4444" />
                     <Text
@@ -3235,6 +4475,7 @@ export default function EditStudioScreen() {
                       minWidth: 80,
                       textAlign: "center",
                       paddingVertical: 16,
+                      textAlignVertical: "center",
                     }}
                   />
                   <Text
@@ -3245,6 +4486,140 @@ export default function EditStudioScreen() {
                     }}
                   >
                     /song
+                  </Text>
+                </View>
+
+                <View style={{ marginTop: 10 }}>
+                  <Text
+                    style={{
+                      color: colors.textSecondary,
+                      fontFamily: "Poppins_500Medium",
+                      fontSize: 12,
+                      marginBottom: 6,
+                    }}
+                  >
+                    Songs Per Time Block
+                  </Text>
+                  <View
+                    style={[
+                      styles.inputWrapper,
+                      {
+                        backgroundColor: colors.inputBackground,
+                        borderColor: isDark ? "#374151" : "#E5E7EB",
+                        flexDirection: "row",
+                        alignItems: "center",
+                        paddingHorizontal: 16,
+                      },
+                    ]}
+                  >
+                    <Ionicons
+                      name="musical-notes-outline"
+                      size={20}
+                      color="#EF4444"
+                      style={{ marginRight: 10 }}
+                    />
+                    <TextInput
+                      value={recordingSongsPerBlock}
+                      onChangeText={(text) =>
+                        setRecordingSongsPerBlock(text.replace(/[^0-9]/g, ""))
+                      }
+                      placeholder="e.g. 5"
+                      placeholderTextColor={colors.textSecondary}
+                      keyboardType="numeric"
+                      style={{
+                        flex: 1,
+                        color: colors.text,
+                        fontFamily: "Poppins_500Medium",
+                        fontSize: 15,
+                        paddingVertical: 14,
+                        textAlignVertical: "center",
+                      }}
+                    />
+                    <Text
+                      style={{
+                        color: colors.textSecondary,
+                        fontFamily: "Poppins_400Regular",
+                      }}
+                    >
+                      songs
+                    </Text>
+                  </View>
+                </View>
+
+                <View style={{ marginTop: 10 }}>
+                  <Text
+                    style={{
+                      color: colors.textSecondary,
+                      fontFamily: "Poppins_500Medium",
+                      fontSize: 12,
+                      marginBottom: 6,
+                    }}
+                  >
+                    Hours Per Time Block
+                  </Text>
+                  <View
+                    style={[
+                      styles.inputWrapper,
+                      {
+                        backgroundColor: colors.inputBackground,
+                        borderColor: isDark ? "#374151" : "#E5E7EB",
+                        flexDirection: "row",
+                        alignItems: "center",
+                        paddingHorizontal: 16,
+                      },
+                    ]}
+                  >
+                    <Ionicons
+                      name="time-outline"
+                      size={20}
+                      color="#EF4444"
+                      style={{ marginRight: 10 }}
+                    />
+                    <TextInput
+                      value={recordingHoursPerBlock}
+                      onChangeText={(text) => {
+                        const sanitized = text.replace(/[^0-9.]/g, "");
+                        const firstDot = sanitized.indexOf(".");
+                        const normalized =
+                          firstDot === -1
+                            ? sanitized
+                            : `${sanitized.slice(0, firstDot + 1)}${sanitized
+                                .slice(firstDot + 1)
+                                .replace(/\./g, "")}`;
+                        setRecordingHoursPerBlock(normalized);
+                      }}
+                      placeholder="e.g. 2"
+                      placeholderTextColor={colors.textSecondary}
+                      keyboardType="decimal-pad"
+                      style={{
+                        flex: 1,
+                        color: colors.text,
+                        fontFamily: "Poppins_500Medium",
+                        fontSize: 15,
+                        paddingVertical: 14,
+                        textAlignVertical: "center",
+                      }}
+                    />
+                    <Text
+                      style={{
+                        color: colors.textSecondary,
+                        fontFamily: "Poppins_400Regular",
+                      }}
+                    >
+                      hrs
+                    </Text>
+                  </View>
+                  <Text
+                    style={{
+                      color: colors.textSecondary,
+                      fontFamily: "Poppins_400Regular",
+                      fontSize: 11,
+                      marginTop: 6,
+                    }}
+                  >
+                    {recordingRulePreview && recordingRuleSentence
+                      ? `Example: ${recordingRulePreview}. ${recordingRuleSentence}. Musicians can still split the required hours across available dates and time slots.`
+                      : "Set songs and hours per time block to define your recording minimum. Musicians can still split the required hours across available dates and time slots."}
                   </Text>
                 </View>
               </View>
@@ -3264,7 +4639,7 @@ export default function EditStudioScreen() {
               </View>
               {!showPromotionForm && promotions.length < 5 && (
                 <TouchableOpacity
-                  activeOpacity={0.8}
+                  activeOpacity={1}
                   onPress={() => {
                     resetPromotionForm();
                     setShowPromotionForm(true);
@@ -3301,8 +4676,8 @@ export default function EditStudioScreen() {
                 }}
               >
                 <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start" }}>
-                  <View style={{ flex: 1, marginRight: 8 }}>
-                    <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                  <View style={{ flex: 1, minWidth: 150, marginRight: 8 }}>
+                    <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 6 }}>
                       <Ionicons name="pricetag-outline" size={14} color={colors.primary} />
                       <Text style={{ fontFamily: "Poppins_600SemiBold", color: colors.text, fontSize: 14 }}>
                         {promo.name}
@@ -3312,17 +4687,28 @@ export default function EditStudioScreen() {
                       {promo.discount_type === "percentage" ? `${promo.discount_value}% off` : `₱${promo.discount_value}/hr off`}
                       {" "}on {promo.applies_to === "both" ? "all" : promo.applies_to} bookings
                     </Text>
+                    {(promo.criteria || promo.minimum_booking_hours || promo.minimum_spend) && (
+                      <Text style={{ fontFamily: "Poppins_400Regular", color: colors.textSecondary, fontSize: 11, marginTop: 2 }}>
+                        {[
+                          promo.criteria ? `How to get promo: ${promo.criteria}` : null,
+                          promo.minimum_booking_hours ? `Min ${promo.minimum_booking_hours} hr(s)` : null,
+                          promo.minimum_spend ? `Min spend ₱${promo.minimum_spend}` : null,
+                        ]
+                          .filter(Boolean)
+                          .join(" | ")}
+                      </Text>
+                    )}
                     <Text style={{ fontFamily: "Poppins_400Regular", color: colors.textSecondary, fontSize: 11, marginTop: 2 }}>
                       {promo.is_permanent
                         ? "Always available"
-                        : `${new Date(promo.start_date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })} – ${new Date(promo.end_date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}`}
+                        : `${new Date(promo.start_date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })} - ${new Date(promo.end_date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}`}
                     </Text>
                   </View>
-                  <View style={{ flexDirection: "row", gap: 8 }}>
-                    <TouchableOpacity activeOpacity={0.8} onPress={() => handleEditPromotion(promo)}>
+                  <View style={{ flexDirection: "row", gap: 8 , flexWrap: "wrap", minWidth: "100%" }}>
+                    <TouchableOpacity activeOpacity={1} onPress={() => handleEditPromotion(promo)}>
                       <Ionicons name="create-outline" size={18} color={colors.primary} />
                     </TouchableOpacity>
-                    <TouchableOpacity activeOpacity={0.8} onPress={() => handleRemovePromotion(promo.id)}>
+                    <TouchableOpacity activeOpacity={1} onPress={() => handleRemovePromotion(promo.id)}>
                       <Ionicons name="trash-outline" size={18} color="#EF4444" />
                     </TouchableOpacity>
                   </View>
@@ -3371,6 +4757,7 @@ export default function EditStudioScreen() {
                     fontFamily: "Poppins_500Medium",
                     fontSize: 14,
                     marginBottom: 12,
+                    textAlignVertical: "center",
                   }}
                 />
 
@@ -3399,15 +4786,96 @@ export default function EditStudioScreen() {
                   }}
                 />
 
+                <Text style={{ fontFamily: "Poppins_500Medium", color: colors.textSecondary, fontSize: 12, marginBottom: 4 }}>
+                  How to Get This Promo (Optional)
+                </Text>
+                <TextInput
+                  value={promotionForm.criteria}
+                  onChangeText={(t) => setPromotionForm((p) => ({ ...p, criteria: t }))}
+                  placeholder="e.g. Minimum 2-hour booking and full payment"
+                  placeholderTextColor={colors.textSecondary}
+                  style={{
+                    backgroundColor: isDark ? "#111827" : "#FFF",
+                    borderWidth: 1,
+                    borderColor: isDark ? "#374151" : "#E5E7EB",
+                    borderRadius: 10,
+                    padding: 12,
+                    color: colors.text,
+                    fontFamily: "Poppins_500Medium",
+                    fontSize: 14,
+                    marginBottom: 12,
+                    textAlignVertical: "center",
+                  }}
+                />
+
+                <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 12 }}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ fontFamily: "Poppins_500Medium", color: colors.textSecondary, fontSize: 12, marginBottom: 4 }}>
+                      Min Hours (Optional)
+                    </Text>
+                    <TextInput
+                      value={promotionForm.minimum_booking_hours}
+                      onChangeText={(t) =>
+                        setPromotionForm((p) => ({
+                          ...p,
+                          minimum_booking_hours: t.replace(/[^0-9.]/g, ""),
+                        }))
+                      }
+                      placeholder="e.g. 2"
+                      placeholderTextColor={colors.textSecondary}
+                      keyboardType="numeric"
+                      style={{
+                        backgroundColor: isDark ? "#111827" : "#FFF",
+                        borderWidth: 1,
+                        borderColor: isDark ? "#374151" : "#E5E7EB",
+                        borderRadius: 10,
+                        padding: 12,
+                        color: colors.text,
+                        fontFamily: "Poppins_500Medium",
+                        fontSize: 14,
+                        textAlignVertical: "center",
+                      }}
+                    />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ fontFamily: "Poppins_500Medium", color: colors.textSecondary, fontSize: 12, marginBottom: 4 }}>
+                      Min Spend (Optional)
+                    </Text>
+                    <TextInput
+                      value={promotionForm.minimum_spend}
+                      onChangeText={(t) =>
+                        setPromotionForm((p) => ({
+                          ...p,
+                          minimum_spend: t.replace(/[^0-9.]/g, ""),
+                        }))
+                      }
+                      placeholder="e.g. 3000"
+                      placeholderTextColor={colors.textSecondary}
+                      keyboardType="numeric"
+                      style={{
+                        backgroundColor: isDark ? "#111827" : "#FFF",
+                        borderWidth: 1,
+                        borderColor: isDark ? "#374151" : "#E5E7EB",
+                        borderRadius: 10,
+                        padding: 12,
+                        color: colors.text,
+                        fontFamily: "Poppins_500Medium",
+                        fontSize: 14,
+                        textAlignVertical: "center",
+                      }}
+                    />
+                  </View>
+                </View>
+
                 {/* Discount Type Toggle */}
                 <Text style={{ fontFamily: "Poppins_500Medium", color: colors.textSecondary, fontSize: 12, marginBottom: 6 }}>
                   Discount Type
                 </Text>
-                <View style={{ flexDirection: "row", gap: 8, marginBottom: 12 }}>
+                <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 12 }}>
                   {(["percentage", "fixed_amount"] as const).map((dt) => (
                     <TouchableOpacity
                       key={dt}
-                      activeOpacity={0.8}
+                      activeOpacity={1}
                       onPress={() => setPromotionForm((p) => ({ ...p, discount_type: dt }))}
                       style={{
                         flex: 1,
@@ -3463,6 +4931,7 @@ export default function EditStudioScreen() {
                       color: colors.text,
                       fontFamily: "Poppins_500Medium",
                       fontSize: 14,
+                      textAlignVertical: "center",
                     }}
                   />
                   {promotionForm.discount_type === "percentage" && (
@@ -3477,14 +4946,14 @@ export default function EditStudioScreen() {
                 <Text style={{ fontFamily: "Poppins_500Medium", color: colors.textSecondary, fontSize: 12, marginBottom: 6 }}>
                   Duration
                 </Text>
-                <View style={{ flexDirection: "row", gap: 8, marginBottom: 12 }}>
+                <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 12 }}>
                   {([
                     { key: true, label: "Regular (Always)" },
                     { key: false, label: "Time-Limited" },
                   ] as const).map((opt) => (
                     <TouchableOpacity
                       key={String(opt.key)}
-                      activeOpacity={0.8}
+                      activeOpacity={1}
                       onPress={() => setPromotionForm((p) => ({ ...p, is_permanent: opt.key as boolean }))}
                       style={{
                         flex: 1,
@@ -3512,9 +4981,9 @@ export default function EditStudioScreen() {
                 {/* Date pickers for time-limited */}
                 {!promotionForm.is_permanent && (
                   <View style={{ marginBottom: 12 }}>
-                    <View style={{ flexDirection: "row", gap: 8 }}>
+                    <View style={{ flexDirection: "row", gap: 8 , flexWrap: "wrap", minWidth: "100%" }}>
                       <TouchableOpacity
-                        activeOpacity={0.8}
+                        activeOpacity={1}
                         onPress={() => { setShowPromoStartCalendar(!showPromoStartCalendar); setShowPromoEndCalendar(false); }}
                         style={{
                           flex: 1,
@@ -3536,7 +5005,7 @@ export default function EditStudioScreen() {
                         </Text>
                       </TouchableOpacity>
                       <TouchableOpacity
-                        activeOpacity={0.8}
+                        activeOpacity={1}
                         onPress={() => { setShowPromoEndCalendar(!showPromoEndCalendar); setShowPromoStartCalendar(false); }}
                         style={{
                           flex: 1,
@@ -3566,7 +5035,7 @@ export default function EditStudioScreen() {
                             setShowPromoStartCalendar(false);
                           }}
                           markedDates={promotionForm.start_date ? { [promotionForm.start_date]: { selected: true, selectedColor: colors.primary } } : {}}
-                          minDate={new Date().toISOString().split("T")[0]}
+                          minDate={getLocalDateKey()}
                           theme={{
                             backgroundColor: "transparent",
                             calendarBackground: "transparent",
@@ -3588,7 +5057,7 @@ export default function EditStudioScreen() {
                             setShowPromoEndCalendar(false);
                           }}
                           markedDates={promotionForm.end_date ? { [promotionForm.end_date]: { selected: true, selectedColor: colors.primary } } : {}}
-                          minDate={promotionForm.start_date || new Date().toISOString().split("T")[0]}
+                          minDate={promotionForm.start_date || getLocalDateKey()}
                           theme={{
                             backgroundColor: "transparent",
                             calendarBackground: "transparent",
@@ -3609,19 +5078,19 @@ export default function EditStudioScreen() {
                 <Text style={{ fontFamily: "Poppins_500Medium", color: colors.textSecondary, fontSize: 12, marginBottom: 6 }}>
                   Applies To
                 </Text>
-                <View style={{ flexDirection: "row", gap: 8, marginBottom: 16 }}>
-                  {(["both", "rehearsal", "recording"] as const).map((at) => (
+                <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 16 }}>
+                  {allowedPromotionTargets.map((at) => (
                     <TouchableOpacity
                       key={at}
-                      activeOpacity={0.8}
+                      activeOpacity={1}
                       onPress={() => setPromotionForm((p) => ({ ...p, applies_to: at }))}
                       style={{
                         flex: 1,
                         paddingVertical: 10,
                         borderRadius: 10,
                         borderWidth: 1.5,
-                        borderColor: promotionForm.applies_to === at ? colors.primary : (isDark ? "#374151" : "#E5E7EB"),
-                        backgroundColor: promotionForm.applies_to === at ? colors.primary + "15" : "transparent",
+                        borderColor: effectiveAppliesTo === at ? colors.primary : (isDark ? "#374151" : "#E5E7EB"),
+                        backgroundColor: effectiveAppliesTo === at ? colors.primary + "15" : "transparent",
                         alignItems: "center",
                       }}
                     >
@@ -3629,7 +5098,7 @@ export default function EditStudioScreen() {
                         style={{
                           fontFamily: "Poppins_600SemiBold",
                           fontSize: 11,
-                          color: promotionForm.applies_to === at ? colors.primary : colors.textSecondary,
+                          color: effectiveAppliesTo === at ? colors.primary : colors.textSecondary,
                         }}
                       >
                         {at === "both" ? "Both" : at === "rehearsal" ? "Rehearsal" : "Recording"}
@@ -3639,9 +5108,9 @@ export default function EditStudioScreen() {
                 </View>
 
                 {/* Save / Cancel */}
-                <View style={{ flexDirection: "row", gap: 10 }}>
+                <View style={{ flexDirection: "row", gap: 10 , flexWrap: "wrap", minWidth: "100%" }}>
                   <TouchableOpacity
-                    activeOpacity={0.8}
+                    activeOpacity={1}
                     onPress={() => { resetPromotionForm(); setShowPromotionForm(false); }}
                     style={{
                       flex: 1,
@@ -3655,7 +5124,7 @@ export default function EditStudioScreen() {
                     <Text style={{ fontFamily: "Poppins_600SemiBold", fontSize: 13, color: colors.textSecondary }}>Cancel</Text>
                   </TouchableOpacity>
                   <TouchableOpacity
-                    activeOpacity={0.8}
+                    activeOpacity={1}
                     onPress={handleSavePromotion}
                     style={{
                       flex: 1,
@@ -3715,6 +5184,7 @@ export default function EditStudioScreen() {
                   fontSize: 16,
                   textAlign: "left",
                   paddingVertical: 16,
+                  textAlignVertical: "center",
                 }}
               />
               <Text
@@ -3752,7 +5222,7 @@ export default function EditStudioScreen() {
                     alignItems: "center",
                     gap: 12,
                     flex: 1,
-                  }}
+                  minWidth: 150 }}
                 >
                   <View
                     style={[
@@ -3790,7 +5260,7 @@ export default function EditStudioScreen() {
               <TouchableOpacity
                 onPress={handleContractUpload}
                 disabled={uploadingContract}
-                activeOpacity={1}
+                activeOpacity={uploadingContract ? 1 : 0.78}
                 style={[
                   styles.uploadContractBtn,
                   {
@@ -3824,104 +5294,6 @@ export default function EditStudioScreen() {
               </TouchableOpacity>
             )}
           </View>
-
-          {/* Business Permit Upload */}
-          {renderSectionHeader("Business Permit", "shield-checkmark")}
-          <View style={styles.inputContainer}>
-            <Text
-              style={[styles.inputSubLabel, { color: colors.textSecondary }]}
-            >
-              Upload your business permit (PDF or Image)
-            </Text>
-            {businessPermitUrl ? (
-              <View
-                style={[
-                  styles.contractPreview,
-                  {
-                    backgroundColor: isDark ? "#1F2937" : "#F3F4F6",
-                    borderColor: isDark ? "#374151" : "#E5E7EB",
-                  },
-                ]}
-              >
-                <View
-                  style={{
-                    flexDirection: "row",
-                    alignItems: "center",
-                    gap: 12,
-                    flex: 1,
-                  }}
-                >
-                  <View
-                    style={[
-                      styles.pdfIcon,
-                      { backgroundColor: "#10B981" },
-                    ]}
-                  >
-                    <Ionicons name="shield-checkmark" size={24} color="#fff" />
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text
-                      style={[styles.contractFileName, { color: colors.text }]}
-                      numberOfLines={1}
-                    >
-                      {businessPermitFileName}
-                    </Text>
-                    <Text
-                      style={[
-                        styles.contractFileSize,
-                        { color: colors.textSecondary },
-                      ]}
-                    >
-                      Business Permit
-                    </Text>
-                  </View>
-                </View>
-                <TouchableOpacity activeOpacity={1}
-                  onPress={removeBusinessPermit}
-                  style={styles.removeContractBtn}
-                >
-                  <Ionicons name="trash-outline" size={20} color="#EF4444" />
-                </TouchableOpacity>
-              </View>
-            ) : (
-              <TouchableOpacity
-                onPress={handleBusinessPermitUpload}
-                disabled={uploadingBusinessPermit}
-                activeOpacity={1}
-                style={[
-                  styles.uploadContractBtn,
-                  {
-                    backgroundColor: colors.inputBackground,
-                    borderColor: isDark ? "#374151" : "#E5E7EB",
-                  },
-                ]}
-              >
-                {uploadingBusinessPermit ? (
-                  <ActivityIndicator size="small" color={colors.primary} />
-                ) : (
-                  <>
-                    <Ionicons
-                      name="shield-checkmark-outline"
-                      size={32}
-                      color={colors.textSecondary}
-                    />
-                    <Text style={[styles.uploadText, { color: colors.text }]}>
-                      Upload Business Permit
-                    </Text>
-                    <Text
-                      style={[
-                        styles.uploadSubText,
-                        { color: colors.textSecondary },
-                      ]}
-                    >
-                      PDF or Image format
-                    </Text>
-                  </>
-                )}
-              </TouchableOpacity>
-            )}
-          </View>
-
           {renderSectionHeader("Facilities & Equipment", "mic")}
           <View style={styles.addAmenityContainer}>
             <View
@@ -4035,7 +5407,7 @@ export default function EditStudioScreen() {
                     },
                   ]}
                 >
-                  <View style={{ flexDirection: "row", gap: 12 }}>
+                  <View style={{ flexDirection: "row", gap: 12 , flexWrap: "wrap", minWidth: "100%" }}>
                     {item.image ? (
                       <Image
                         source={{ uri: item.image }}
@@ -4088,7 +5460,7 @@ export default function EditStudioScreen() {
                         </Text>
                       )}
                     </View>
-                    <View style={{ flexDirection: "row", gap: 8 }}>
+                    <View style={{ flexDirection: "row", gap: 8 , flexWrap: "wrap", minWidth: "100%" }}>
                       <TouchableOpacity activeOpacity={1}
                         onPress={() => {
                           setEditingEquipment(item);
@@ -4211,7 +5583,7 @@ export default function EditStudioScreen() {
               { color: colors.textSecondary, marginBottom: 16 },
             ]}
           >
-            Set your regular weekly schedule and/or select specific dates
+            Set your regular weekly schedule and optional date overrides
           </Text>
 
           {/* Calendar Date Selection */}
@@ -4226,7 +5598,7 @@ export default function EditStudioScreen() {
             >
               <Ionicons name="calendar" size={16} color={colors.primary} />
               <Text style={[styles.sectionSubtitle, { color: colors.text }]}>
-                Specific Dates
+                Date Overrides
               </Text>
             </View>
             <Text
@@ -4237,7 +5609,7 @@ export default function EditStudioScreen() {
                 marginBottom: 12,
               }}
             >
-              Tap on dates to set special hours or override weekly schedule
+              Use these for one-off changes like closures, holidays, or special hours. These override the regular weekly schedule.
             </Text>
 
             <View
@@ -4250,12 +5622,12 @@ export default function EditStudioScreen() {
               ]}
             >
               <Calendar
-                current={new Date().toISOString().split("T")[0]}
-                minDate={new Date().toISOString().split("T")[0]}
+                current={getLocalDateKey()}
+                minDate={getLocalDateKey()}
                 maxDate={(() => {
                   const maxDate = new Date();
                   maxDate.setDate(maxDate.getDate() + 90);
-                  return maxDate.toISOString().split("T")[0];
+                  return getLocalDateKey(maxDate);
                 })()}
                 markedDates={Object.entries(selectedDates).reduce(
                   (acc, [dateStr, data]) => {
@@ -4279,7 +5651,11 @@ export default function EditStudioScreen() {
                   return (
                     <TouchableOpacity
                       activeOpacity={1}
-                      onPress={() => toggleCalendarDate(date.dateString)}
+                      onPress={() => {
+                        if (!isDisabled) {
+                          toggleCalendarDate(date.dateString);
+                        }
+                      }}
                       style={{
                         width: 32,
                         height: 32,
@@ -4302,6 +5678,10 @@ export default function EditStudioScreen() {
                               : colors.text,
                           fontFamily: "Poppins_500Medium",
                           fontSize: 14,
+                          lineHeight: 32,
+                          textAlign: "center",
+                          textAlignVertical: "center",
+                          includeFontPadding: false,
                         }}
                       >
                         {date.day}
@@ -4378,12 +5758,18 @@ export default function EditStudioScreen() {
                       marginBottom: 8,
                     }}
                   >
-                    SELECTED DATES (OVERRIDES WEEKLY SCHEDULE)
+                    SELECTED DATE OVERRIDES
                   </Text>
-                  {Object.entries(selectedDates)
-                    .filter(([_, data]) => data.selected)
-                    .sort(([a], [b]) => a.localeCompare(b))
-                    .map(([dateStr, data]) => {
+                  <ScrollView
+                    style={styles.selectedDateOverridesList}
+                    contentContainerStyle={styles.selectedDateOverridesContent}
+                    nestedScrollEnabled
+                    showsVerticalScrollIndicator
+                  >
+                    {Object.entries(selectedDates)
+                      .filter(([_, data]) => data.selected)
+                      .sort(([a], [b]) => a.localeCompare(b))
+                      .map(([dateStr, data]) => {
                       const date = new Date(dateStr + "T00:00:00");
                       const dayName = date.toLocaleDateString("en-US", {
                         weekday: "long",
@@ -4474,18 +5860,84 @@ export default function EditStudioScreen() {
                             </TouchableOpacity>
                           </View>
 
+                          {studioType === "Both" && (
+                            <View style={{ marginTop: 10 }}>
+                              <Text
+                                style={{
+                                  color: colors.textSecondary,
+                                  fontSize: 11,
+                                  marginBottom: 6,
+                                  fontFamily: "Poppins_600SemiBold",
+                                }}
+                              >
+                                SESSION TYPE FOR THIS DATE
+                              </Text>
+                              <View style={styles.sessionTypeOptions}>
+                                {([
+                                  { value: "both", label: "Both" },
+                                  { value: "rehearsal", label: "Rehearsal" },
+                                  { value: "recording", label: "Recording" },
+                                ] as const).map((option) => {
+                                  const selectedSessionType =
+                                    normalizeDateOverrideSessionType(
+                                      data.sessionType,
+                                      "both",
+                                    );
+                                  const isSelected =
+                                    selectedSessionType === option.value;
+
+                                  return (
+                                    <TouchableOpacity
+                                      key={option.value}
+                                      activeOpacity={1}
+                                      onPress={() => {
+                                        setSelectedDates((prev) => ({
+                                          ...prev,
+                                          [dateStr]: {
+                                            ...prev[dateStr],
+                                            sessionType: option.value,
+                                          },
+                                        }));
+                                      }}
+                                      style={[
+                                        styles.sessionTypeChip,
+                                        {
+                                          borderColor: isSelected
+                                            ? colors.primary
+                                            : colors.border,
+                                          backgroundColor: isSelected
+                                            ? `${colors.primary}20`
+                                            : "transparent",
+                                        },
+                                      ]}
+                                    >
+                                      <Text
+                                        style={{
+                                          color: isSelected
+                                            ? colors.primary
+                                            : colors.textSecondary,
+                                          fontSize: 11,
+                                          lineHeight: 16,
+                                          includeFontPadding: false,
+                                          fontFamily: "Poppins_500Medium",
+                                        }}
+                                      >
+                                        {option.label}
+                                      </Text>
+                                    </TouchableOpacity>
+                                  );
+                                })}
+                              </View>
+                            </View>
+                          )}
+
                           {/* Editable Time Slots for Specific Date */}
                           {data.slots.map((slot, slotIndex) => (
                             <View
                               key={slotIndex}
-                              style={{
-                                flexDirection: "row",
-                                alignItems: "center",
-                                gap: 8,
-                                marginTop: 12,
-                              }}
+                              style={styles.timeSlotRow}
                             >
-                              <View style={{ flex: 1 }}>
+                              <View style={styles.timeSlotGroup}>
                                 <Text
                                   style={{
                                     color: colors.textSecondary,
@@ -4496,13 +5948,7 @@ export default function EditStudioScreen() {
                                 >
                                   START
                                 </Text>
-                                <View
-                                  style={{
-                                    flexDirection: "row",
-                                    alignItems: "center",
-                                    gap: 4,
-                                  }}
-                                >
+                                <View style={styles.timeInputRow}>
                                   <TextInput
                                     value={slot.start.split(" ")[0]}
                                     onChangeText={(text) => {
@@ -4545,13 +5991,7 @@ export default function EditStudioScreen() {
                                       },
                                     ]}
                                   >
-                                    <Text
-                                      style={{
-                                        fontSize: 12,
-                                        fontFamily: "Poppins_600SemiBold",
-                                        color: colors.text,
-                                      }}
-                                    >
+                                    <Text style={[styles.ampmBtnText, { color: colors.text }]}>
                                       {slot.start.split(" ")[1] || "AM"}
                                     </Text>
                                   </TouchableOpacity>
@@ -4561,9 +6001,9 @@ export default function EditStudioScreen() {
                                 name="arrow-forward"
                                 size={20}
                                 color={colors.textSecondary}
-                                style={{ marginTop: 20 }}
+                                style={styles.timeSlotArrow}
                               />
-                              <View style={{ flex: 1 }}>
+                              <View style={styles.timeSlotGroup}>
                                 <Text
                                   style={{
                                     color: colors.textSecondary,
@@ -4574,13 +6014,7 @@ export default function EditStudioScreen() {
                                 >
                                   END
                                 </Text>
-                                <View
-                                  style={{
-                                    flexDirection: "row",
-                                    alignItems: "center",
-                                    gap: 4,
-                                  }}
-                                >
+                                <View style={styles.timeInputRow}>
                                   <TextInput
                                     value={slot.end.split(" ")[0]}
                                     onChangeText={(text) => {
@@ -4623,13 +6057,7 @@ export default function EditStudioScreen() {
                                       },
                                     ]}
                                   >
-                                    <Text
-                                      style={{
-                                        fontSize: 12,
-                                        fontFamily: "Poppins_600SemiBold",
-                                        color: colors.text,
-                                      }}
-                                    >
+                                    <Text style={[styles.ampmBtnText, { color: colors.text }]}>
                                       {slot.end.split(" ")[1] || "PM"}
                                     </Text>
                                   </TouchableOpacity>
@@ -4642,7 +6070,7 @@ export default function EditStudioScreen() {
                                     newDates[dateStr].slots.splice(slotIndex, 1);
                                     setSelectedDates(newDates);
                                   }}
-                                  style={{ marginTop: 20 }}
+                                  style={styles.timeSlotDeleteButton}
                                 >
                                   <Ionicons
                                     name="trash-outline"
@@ -4698,14 +6126,15 @@ export default function EditStudioScreen() {
                                 marginTop: 8,
                               }}
                             >
-                              ⚠️ This overrides weekly {dayName} schedule (
+                              Warning: This overrides weekly {dayName} schedule (
                               {weeklySchedule.slots[0]?.start} -{" "}
                               {weeklySchedule.slots[0]?.end})
                             </Text>
                           )}
                         </View>
                       );
-                    })}
+                      })}
+                  </ScrollView>
                 </View>
               )}
           </View>
@@ -4766,6 +6195,11 @@ export default function EditStudioScreen() {
                         start: "09:00 AM",
                         end: "05:00 PM",
                       });
+                      newAvailability[dayIndex].sessionType =
+                        normalizeWeeklySessionType(
+                          newAvailability[dayIndex].sessionType,
+                          getDefaultWeeklySessionType(studioType),
+                        );
                     } else {
                       newAvailability[dayIndex].slots = [];
                     }
@@ -4798,6 +6232,74 @@ export default function EditStudioScreen() {
                 </TouchableOpacity>
               </View>
 
+              {studioType === "Both" && daySchedule.slots.length > 0 && (
+                <View style={{ marginBottom: 8 }}>
+                  <Text
+                    style={{
+                      color: colors.textSecondary,
+                      fontSize: 11,
+                      marginBottom: 6,
+                      fontFamily: "Poppins_600SemiBold",
+                    }}
+                  >
+                    SESSION TYPE FOR THIS DAY
+                  </Text>
+                  <View style={styles.sessionTypeOptions}>
+                    {([
+                      { value: "both", label: "Both" },
+                      { value: "rehearsal", label: "Rehearsal" },
+                      { value: "recording", label: "Recording" },
+                    ] as const).map((option) => {
+                      const selectedWeeklySessionType =
+                        normalizeWeeklySessionType(daySchedule.sessionType, "both");
+                      const isSelected =
+                        selectedWeeklySessionType === option.value;
+
+                      return (
+                        <TouchableOpacity
+                          key={option.value}
+                          activeOpacity={1}
+                          onPress={() => {
+                            setAvailability((prev) =>
+                              prev.map((day, index) =>
+                                index === dayIndex
+                                  ? { ...day, sessionType: option.value }
+                                  : day,
+                              ),
+                            );
+                          }}
+                          style={[
+                            styles.sessionTypeChip,
+                            {
+                              borderColor: isSelected
+                                ? colors.primary
+                                : colors.border,
+                              backgroundColor: isSelected
+                                ? `${colors.primary}20`
+                                : "transparent",
+                            },
+                          ]}
+                        >
+                          <Text
+                            style={{
+                              color: isSelected
+                                ? colors.primary
+                                : colors.textSecondary,
+                              fontSize: 11,
+                              lineHeight: 16,
+                              includeFontPadding: false,
+                              fontFamily: "Poppins_500Medium",
+                            }}
+                          >
+                            {option.label}
+                          </Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+                </View>
+              )}
+
               {daySchedule.slots.map((slot, slotIndex) => {
                 const toggleAmPm = (timeStr: string) => {
                   const [time, period] = timeStr.split(" ");
@@ -4807,14 +6309,9 @@ export default function EditStudioScreen() {
                 return (
                   <View
                     key={slotIndex}
-                    style={{
-                      flexDirection: "row",
-                      alignItems: "center",
-                      gap: 8,
-                      marginTop: 8,
-                    }}
+                    style={styles.weeklyTimeSlotRow}
                   >
-                    <View style={{ flex: 1 }}>
+                    <View style={styles.timeSlotGroup}>
                       <Text
                         style={{
                           color: colors.textSecondary,
@@ -4825,13 +6322,7 @@ export default function EditStudioScreen() {
                       >
                         START
                       </Text>
-                      <View
-                        style={{
-                          flexDirection: "row",
-                          alignItems: "center",
-                          gap: 4,
-                        }}
-                      >
+                      <View style={styles.timeInputRow}>
                         <TextInput
                           value={slot.start.split(" ")[0]}
                           onChangeText={(text) => {
@@ -4867,13 +6358,7 @@ export default function EditStudioScreen() {
                             { backgroundColor: isDark ? "#374151" : "#E5E7EB" },
                           ]}
                         >
-                          <Text
-                            style={{
-                              fontSize: 12,
-                              fontFamily: "Poppins_600SemiBold",
-                              color: colors.text,
-                            }}
-                          >
+                          <Text style={[styles.ampmBtnText, { color: colors.text }]}>
                             {slot.start.split(" ")[1]}
                           </Text>
                         </TouchableOpacity>
@@ -4883,9 +6368,9 @@ export default function EditStudioScreen() {
                       name="arrow-forward"
                       size={20}
                       color={colors.textSecondary}
-                      style={{ marginTop: 20 }}
+                      style={styles.timeSlotArrow}
                     />
-                    <View style={{ flex: 1 }}>
+                    <View style={styles.timeSlotGroup}>
                       <Text
                         style={{
                           color: colors.textSecondary,
@@ -4896,13 +6381,7 @@ export default function EditStudioScreen() {
                       >
                         END
                       </Text>
-                      <View
-                        style={{
-                          flexDirection: "row",
-                          alignItems: "center",
-                          gap: 4,
-                        }}
-                      >
+                      <View style={styles.timeInputRow}>
                         <TextInput
                           value={slot.end.split(" ")[0]}
                           onChangeText={(text) => {
@@ -4938,13 +6417,7 @@ export default function EditStudioScreen() {
                             { backgroundColor: isDark ? "#374151" : "#E5E7EB" },
                           ]}
                         >
-                          <Text
-                            style={{
-                              fontSize: 12,
-                              fontFamily: "Poppins_600SemiBold",
-                              color: colors.text,
-                            }}
-                          >
+                          <Text style={[styles.ampmBtnText, { color: colors.text }]}>
                             {slot.end.split(" ")[1]}
                           </Text>
                         </TouchableOpacity>
@@ -4957,7 +6430,7 @@ export default function EditStudioScreen() {
                           newAvailability[dayIndex].slots.splice(slotIndex, 1);
                           setAvailability(newAvailability);
                         }}
-                        style={{ marginTop: 20 }}
+                        style={styles.timeSlotDeleteButton}
                       >
                         <Ionicons
                           name="trash-outline"
@@ -4999,10 +6472,12 @@ export default function EditStudioScreen() {
                       fontFamily: "Poppins_500Medium",
                     }}
                   >
-                    Add Time Slot
-                  </Text>
-                </TouchableOpacity>
+                  Add Time Slot
+                </Text>
+              </TouchableOpacity>
               )}
+              {daySchedule.slots.length > 0 &&
+                renderWeeklyScheduleDurationCard(daySchedule, dayIndex)}
             </View>
           ))}
 
@@ -5025,18 +6500,21 @@ export default function EditStudioScreen() {
                 {
                   backgroundColor: saving
                     ? colors.textSecondary
-                    : colors.primary,
+                    : isFormComplete
+                      ? colors.primary
+                      : colors.border,
+                  opacity: saving || !isFormComplete ? 0.6 : 1,
                   shadowColor: colors.primary,
                 },
               ]}
               onPress={handleSave}
-              disabled={saving}
-              activeOpacity={1}
+              disabled={saving || !isFormComplete}
+              activeOpacity={saving || !isFormComplete ? 1 : 0.78}
             >
               {saving ? (
                 <ActivityIndicator size="small" color="#fff" />
               ) : (
-                <Text style={styles.saveButtonText}>Save Changes</Text>
+                <Text style={[styles.saveButtonText, { color: isFormComplete ? "#FFFFFF" : colors.textSecondary }]}>Save Changes</Text>
               )}
             </TouchableOpacity>
 
@@ -5177,6 +6655,7 @@ export default function EditStudioScreen() {
                     fontFamily: "Poppins_400Regular",
                     borderWidth: 1,
                     borderColor: isDark ? "#374151" : "#E5E7EB",
+                    textAlignVertical: "center",
                   }}
                 />
               </View>
@@ -5212,6 +6691,7 @@ export default function EditStudioScreen() {
                     fontFamily: "Poppins_400Regular",
                     borderWidth: 1,
                     borderColor: isDark ? "#374151" : "#E5E7EB",
+                    textAlignVertical: "center",
                   }}
                 />
               </View>
@@ -5289,7 +6769,7 @@ export default function EditStudioScreen() {
                   <TouchableOpacity
                     onPress={pickEquipmentImage}
                     disabled={uploadingEquipmentImage}
-                    activeOpacity={1}
+                    activeOpacity={uploadingEquipmentImage ? 1 : 0.78}
                     style={{
                       backgroundColor: colors.inputBackground,
                       borderRadius: 12,
@@ -5329,7 +6809,7 @@ export default function EditStudioScreen() {
                 onPress={() => {
                   if (!equipmentForm.name.trim()) {
                     showAlert(
-                      "error",
+                      "warning",
                       "Required",
                       "Please enter equipment name",
                     );
@@ -5405,17 +6885,21 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
+    marginTop: 24,
     marginBottom: 16,
+  },
+  firstSectionHeader: {
+    marginTop: 0,
   },
   sectionTitle: {
     fontFamily: "Poppins_600SemiBold",
     fontSize: 16,
   },
   inputContainer: {
-    marginBottom: 16,
+    marginBottom: 20,
   },
   inputLabel: {
-    marginBottom: 8,
+    marginBottom: 10,
     fontSize: 12,
     textTransform: "uppercase",
     letterSpacing: 1,
@@ -5428,6 +6912,12 @@ const styles = StyleSheet.create({
   },
   input: {
     padding: 16,
+    textAlign: "left",
+    textAlignVertical: "center",
+  },
+  textInput: {
+    padding: 16,
+    fontFamily: "Poppins_400Regular",
     textAlign: "left",
     textAlignVertical: "center",
   },
@@ -5515,6 +7005,25 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontFamily: "Poppins_400Regular",
   },
+  permitWarningBox: {
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginBottom: 12,
+    gap: 6,
+  },
+  permitWarningTitle: {
+    color: "#B91C1C",
+    fontSize: 13,
+    fontFamily: "Poppins_600SemiBold",
+  },
+  permitWarningText: {
+    color: "#991B1B",
+    fontSize: 12,
+    lineHeight: 18,
+    fontFamily: "Poppins_400Regular",
+  },
   contractPreview: {
     flexDirection: "row",
     alignItems: "center",
@@ -5557,19 +7066,33 @@ const styles = StyleSheet.create({
     borderRadius: 8,
   },
   timeInput: {
-    paddingVertical: 8,
+    height: 44,
+    minWidth: 74,
+    paddingVertical: 0,
     paddingHorizontal: 12,
     borderRadius: 8,
     borderWidth: 1,
     fontFamily: "Poppins_500Medium",
     fontSize: 14,
+    textAlign: "center",
+    textAlignVertical: "center",
+    includeFontPadding: false,
   },
   ampmBtn: {
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    width: 52,
+    height: 44,
+    paddingHorizontal: 0,
+    paddingVertical: 0,
     borderRadius: 8,
-    minWidth: 50,
     alignItems: "center",
+    justifyContent: "center",
+  },
+  ampmBtnText: {
+    fontSize: 12,
+    lineHeight: 16,
+    fontFamily: "Poppins_600SemiBold",
+    textAlign: "center",
+    includeFontPadding: false,
   },
   subtitle: {
     fontSize: 13,
@@ -5664,8 +7187,70 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     marginBottom: 8,
   },
+  selectedDateOverridesList: {
+    maxHeight: 420,
+  },
+  selectedDateOverridesContent: {
+    paddingBottom: 4,
+  },
+  sessionTypeOptions: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+  },
+  sessionTypeChip: {
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    borderRadius: 999,
+    borderWidth: 1,
+    minHeight: 32,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  weeklyScopeInline: {
+    borderTopWidth: 1,
+    marginTop: 14,
+    paddingTop: 14,
+  },
+  weeklyScopeCard: {
+    borderRadius: 12,
+    borderWidth: 1,
+    padding: 12,
+    marginTop: 4,
+    marginBottom: 12,
+  },
+  timeSlotRow: {
+    flexDirection: "row",
+    alignItems: "flex-end",
+    flexWrap: "wrap",
+    gap: 8,
+    marginTop: 12,
+  },
+  weeklyTimeSlotRow: {
+    flexDirection: "row",
+    alignItems: "flex-end",
+    flexWrap: "wrap",
+    gap: 8,
+    marginTop: 8,
+  },
+  timeSlotGroup: {
+    flex: 1,
+    minWidth: 130,
+  },
+  timeInputRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+  },
+  timeSlotArrow: {
+    marginBottom: 12,
+  },
+  timeSlotDeleteButton: {
+    marginBottom: 12,
+  },
   sectionSubtitle: {
     fontSize: 14,
     fontFamily: "Poppins_600SemiBold",
   },
 });
+

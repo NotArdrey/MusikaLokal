@@ -3,6 +3,7 @@ import * as DocumentPicker from 'expo-document-picker';
 import React, { useState } from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useTheme } from '../context/ThemeContext';
+import { createE2EDocumentFixture, isE2EFixtureMode } from '../utils/e2eFixtures';
 import CustomAlert, { AlertType } from './CustomAlert';
 
 interface DocumentUploaderProps {
@@ -13,7 +14,8 @@ interface DocumentUploaderProps {
 
 const DocumentUploader: React.FC<DocumentUploaderProps> = ({ onFileSelect, label = 'Upload Document', existingUrl }) => {
     const { colors, isDark } = useTheme();
-    const [fileName, setFileName] = useState<string | null>(existingUrl ? 'Current CV' : null);
+    const [fileName, setFileName] = useState<string | null>(existingUrl ? 'Current document' : null);
+    const [checking, setChecking] = useState(false);
     const [alertVisible, setAlertVisible] = useState(false);
     const [alertConfig, setAlertConfig] = useState<{
         type: AlertType;
@@ -33,6 +35,14 @@ const DocumentUploader: React.FC<DocumentUploaderProps> = ({ onFileSelect, label
 
     const pickDocument = async () => {
         try {
+            setChecking(true);
+            if (isE2EFixtureMode()) {
+                const fixture = createE2EDocumentFixture();
+                setFileName(fixture.name);
+                onFileSelect(fixture);
+                return;
+            }
+
             const result = await DocumentPicker.getDocumentAsync({
                 type: 'application/pdf', // Limit to PDFs for now, or '*/*'
                 copyToCacheDirectory: true,
@@ -43,9 +53,12 @@ const DocumentUploader: React.FC<DocumentUploaderProps> = ({ onFileSelect, label
             const file = result.assets[0];
             setFileName(file.name);
             onFileSelect(file);
-        } catch (error) {
+        } catch (error: any) {
             console.error('Error picking document:', error);
-            showAlert('error', 'Error', 'Error picking document');
+            const message = error?.message || 'Error picking document';
+            showAlert('error', 'Upload failed', message);
+        } finally {
+            setChecking(false);
         }
     };
 
@@ -60,11 +73,16 @@ const DocumentUploader: React.FC<DocumentUploaderProps> = ({ onFileSelect, label
 
             {!fileName ? (
                 <TouchableOpacity activeOpacity={1}
+                    testID="e2e-document-upload-button"
+                    accessibilityLabel="e2e-document-upload-button"
                     style={[styles.uploadBtn, { borderColor: colors.border, backgroundColor: isDark ? '#374151' : '#F9FAFB' }]}
                     onPress={pickDocument}
+                    disabled={checking}
                 >
                     <Ionicons name="cloud-upload-outline" size={24} color={colors.primary} />
-                    <Text style={[styles.uploadText, { color: colors.text }]}>Select PDF Resume/CV</Text>
+                    <Text style={[styles.uploadText, { color: colors.text }]}>
+                        {checking ? 'Opening documents...' : 'Select PDF Document'}
+                    </Text>
                 </TouchableOpacity>
             ) : (
                 <View style={[styles.fileContainer, { backgroundColor: isDark ? '#374151' : '#F3F4F6', borderColor: colors.primary }]}>

@@ -1,8 +1,16 @@
 import { Ionicons } from "@expo/vector-icons";
-import { BlurView } from "expo-blur";
-import React from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Modal, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import Animated, {
+  interpolate,
+  runOnJS,
+  useAnimatedStyle,
+  useSharedValue,
+  withTiming,
+} from "react-native-reanimated";
+import { emitToast } from "../events/toastBus";
 import { useTheme } from "../context/ThemeContext";
+import { motion } from "../utils/motion";
 
 export type AlertType = "error" | "success" | "warning" | "info";
 
@@ -18,6 +26,7 @@ interface CustomAlertProps {
   title: string;
   message: string;
   buttons?: AlertButton[];
+  forceModal?: boolean;
   onClose: () => void;
 }
 
@@ -54,10 +63,96 @@ export default function CustomAlert({
   title,
   message,
   buttons = [{ text: "OK", style: "default" }],
+  forceModal = false,
   onClose,
 }: CustomAlertProps) {
   const { colors, isDark } = useTheme();
   const config = alertConfig[type];
+  const [rendered, setRendered] = useState(visible);
+  const progress = useSharedValue(visible ? 1 : 0);
+  const hasStructuredMessage = useMemo(() => {
+    return message.includes("\n") || message.includes("•") || message.includes("- ");
+  }, [message]);
+
+  const shouldUseTopToast = useMemo(() => {
+    const firstButton = buttons[0];
+    const hasSingleButton = buttons.length === 1;
+    const isDefaultOkButton =
+      !!firstButton &&
+      firstButton.text.trim().toLowerCase() === "ok" &&
+      !firstButton.onPress &&
+      (!firstButton.style || firstButton.style === "default");
+
+    return (
+      !forceModal &&
+      (type === "success" || type === "info") &&
+      !hasStructuredMessage &&
+      hasSingleButton &&
+      isDefaultOkButton
+    );
+  }, [buttons, forceModal, hasStructuredMessage, type]);
+
+  useEffect(() => {
+    if (!visible || !shouldUseTopToast) return;
+
+    emitToast({
+      type,
+      title,
+      message,
+    });
+
+    onClose();
+  }, [message, onClose, shouldUseTopToast, title, type, visible]);
+
+  const finishDismiss = useCallback(() => {
+    setRendered(false);
+  }, []);
+
+  useEffect(() => {
+    if (shouldUseTopToast) {
+      return;
+    }
+
+    if (visible) {
+      setRendered(true);
+      progress.value = 0;
+      progress.value = withTiming(1, {
+        duration: 220,
+        easing: motion.easing.standard,
+      });
+      return;
+    }
+
+    progress.value = withTiming(0, {
+      duration: 180,
+      easing: motion.easing.exit,
+    }, (finished) => {
+      if (finished) {
+        runOnJS(finishDismiss)();
+      }
+    });
+  }, [finishDismiss, progress, shouldUseTopToast, visible]);
+
+  const overlayAnimatedStyle = useAnimatedStyle(() => ({
+    opacity: interpolate(progress.value, [0, 1], [0, 1]),
+  }));
+
+  const modalAnimatedStyle = useAnimatedStyle(() => ({
+    opacity: interpolate(progress.value, [0, 1], [0, 1]),
+  }));
+
+  if (shouldUseTopToast) {
+    return null;
+  }
+
+  if (!rendered) {
+    return null;
+  }
+
+  const usesStackedButtons = buttons.length > 2;
+  const normalizeTestId = (value: string) => (
+    value.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'action'
+  );
 
   const handleButtonPress = (button: AlertButton) => {
     // Call the onPress callback first, then close the alert
@@ -93,14 +188,17 @@ export default function CustomAlert({
       transparent
       statusBarTranslucent
       navigationBarTranslucent
-      visible={visible}
-      animationType="fade"
+      presentationStyle="overFullScreen"
+      hardwareAccelerated
+      visible={rendered}
+      animationType="none"
       onRequestClose={onClose}
     >
-      <BlurView intensity={60} tint="dark" style={styles.overlay}>
-        <View
+      <Animated.View style={[styles.overlay, overlayAnimatedStyle]}>
+        <Animated.View
           style={[
             styles.container,
+            modalAnimatedStyle,
             {
               backgroundColor: isDark ? "#1F2937" : "#FFFFFF",
             },
@@ -123,28 +221,41 @@ export default function CustomAlert({
           <Text style={[styles.title, { color: colors.text }]}>{title}</Text>
 
           {/* Message */}
-          <Text style={[styles.message, { color: colors.textSecondary }]}>
+          <Text
+            style={[
+              styles.message,
+              { color: colors.textSecondary },
+              hasStructuredMessage ? styles.messageStructured : null,
+            ]}
+          >
             {message}
           </Text>
 
           {/* Buttons */}
-          <View style={styles.buttonContainer}>
+          <View style={[styles.buttonContainer, usesStackedButtons && styles.buttonContainerStacked]}>
             {buttons.map((button, index) => {
               const btnStyle = getButtonStyle(button.style);
               return (
                 <TouchableOpacity
                   key={index}
+                  testID={`custom-alert-button-${normalizeTestId(button.text)}`}
+                  accessibilityLabel={`custom-alert-button-${normalizeTestId(button.text)}`}
                   onPress={() => handleButtonPress(button)}
                   style={[
                     styles.button,
                     { backgroundColor: btnStyle.backgroundColor },
-                    buttons.length > 1 && { flex: 1 },
-                    index > 0 && { marginLeft: 12 },
+                    buttons.length === 1 || usesStackedButtons ? styles.fullWidthButton : null,
+                    buttons.length === 2 && { flex: 1 },
+                    usesStackedButtons && index > 0 && { marginTop: 10 },
+                    !usesStackedButtons && index > 0 && { marginLeft: 12 },
                   ]}
                   activeOpacity={1}
                 >
                   <Text
                     style={[styles.buttonText, { color: btnStyle.textColor }]}
+                    numberOfLines={1}
+                    adjustsFontSizeToFit
+                    minimumFontScale={0.85}
                   >
                     {button.text}
                   </Text>
@@ -152,8 +263,8 @@ export default function CustomAlert({
               );
             })}
           </View>
-        </View>
-      </BlurView>
+        </Animated.View>
+      </Animated.View>
     </Modal>
   );
 }
@@ -164,6 +275,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     padding: 24,
+    backgroundColor: 'rgba(15,23,42,0.62)',
   },
   container: {
     width: '100%',
@@ -200,10 +312,17 @@ const styles = StyleSheet.create({
     marginBottom: 24,
     fontFamily: 'Poppins_400Regular',
   },
+  messageStructured: {
+    width: '100%',
+    textAlign: 'left',
+  },
   buttonContainer: {
     flexDirection: 'row',
     width: '100%',
     justifyContent: 'center',
+  },
+  buttonContainerStacked: {
+    flexDirection: 'column',
   },
   button: {
     paddingVertical: 14,
@@ -212,6 +331,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     minWidth: 100,
+    minHeight: 52,
+  },
+  fullWidthButton: {
+    width: '100%',
   },
   buttonText: {
     fontSize: 15,

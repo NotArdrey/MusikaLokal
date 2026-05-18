@@ -1,13 +1,16 @@
 import { Ionicons } from '@expo/vector-icons';
 import React, { useState } from 'react';
 import { LayoutAnimation, Linking, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, UIManager, View } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Header from '../src/components/header';
 import Navbar from '../src/components/navbar';
+import { useBottomBarClearance } from '../src/hooks/useBottomBarClearance';
 import { useTheme } from '../src/context/ThemeContext';
+
+const isFabricEnabled = Boolean((globalThis as { nativeFabricUIManager?: unknown }).nativeFabricUIManager);
 
 if (
     Platform.OS === 'android' &&
+    !isFabricEnabled &&
     UIManager.setLayoutAnimationEnabledExperimental
 ) {
     UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -15,7 +18,7 @@ if (
 
 export default function HelpSupportScreen() {
     const { colors, isDark } = useTheme();
-    const insets = useSafeAreaInsets();
+    const { contentBottomPadding } = useBottomBarClearance(24);
     const [expandedId, setExpandedId] = useState<number | null>(null);
 
     const toggleExpand = (id: number) => {
@@ -54,7 +57,7 @@ export default function HelpSupportScreen() {
                 showsVerticalScrollIndicator={false}
                 contentContainerStyle={[
                     styles.scrollContent,
-                    { paddingBottom: 190 + insets.bottom },
+                    { paddingBottom: contentBottomPadding },
                 ]}
             >
 

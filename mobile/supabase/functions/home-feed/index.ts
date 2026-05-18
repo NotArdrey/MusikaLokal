@@ -11,37 +11,36 @@ declare const Deno: {
 
 const corsHeaders = {
     "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-groq-api-key",
+    "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform",
 };
 
 const GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions";
 const ENV_GROQ_API_KEY = Deno.env.get("GROQ_API_KEY")?.trim() || "";
+const GROQ_MODEL_CANDIDATES = [
+    "llama-3.3-70b-versatile",
+    "llama-3.1-8b-instant",
+    "openai/gpt-oss-120b",
+    "openai/gpt-oss-20b",
+];
+const GROQ_RETRYABLE_STATUS_CODES = new Set([403, 404, 408, 409, 429, 498, 500, 502, 503, 504]);
+const LOCAL_ONLY_MODE = true;
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY") ?? "";
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
 
 interface GroqProviderStatus {
     envConfigured: boolean;
-    requestConfigured: boolean;
     active: boolean;
 }
 
-const resolveGroqApiKey = (req: Request): string => {
-    if (ENV_GROQ_API_KEY) {
-        return ENV_GROQ_API_KEY;
-    }
+const resolveGroqApiKey = (): string => ENV_GROQ_API_KEY;
 
-    return req.headers.get("x-groq-api-key")?.trim() || "";
-};
-
-const getGroqProviderStatus = (req: Request): GroqProviderStatus => {
-    const requestConfigured = Boolean(req.headers.get("x-groq-api-key")?.trim());
+const getGroqProviderStatus = (): GroqProviderStatus => {
     const envConfigured = Boolean(ENV_GROQ_API_KEY);
 
     return {
         envConfigured,
-        requestConfigured,
-        active: envConfigured || requestConfigured,
+        active: LOCAL_ONLY_MODE ? false : envConfigured,
     };
 };
 
@@ -263,10 +262,8 @@ const rankWithGroq = async (
         `Candidates: ${JSON.stringify(compactCandidates)}`,
     ].join("\n");
 
-    const modelCandidates = ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"];
-
     try {
-        for (const model of modelCandidates) {
+        for (const model of GROQ_MODEL_CANDIDATES) {
             for (const useJsonMode of [true, false]) {
                 const requestPayload: Record<string, unknown> = {
                     model,
@@ -275,7 +272,7 @@ const rankWithGroq = async (
                         { role: "user", content: userPrompt },
                     ],
                     temperature: 0.4,
-                    max_tokens: 1200,
+                    max_completion_tokens: 1200,
                 };
 
                 if (useJsonMode) {
@@ -294,6 +291,9 @@ const rankWithGroq = async (
                 if (!response.ok) {
                     const errorBody = await response.text();
                     console.error("home-feed groq error:", { model, useJsonMode, status: response.status, errorBody });
+                    if (!GROQ_RETRYABLE_STATUS_CODES.has(response.status)) {
+                        return null;
+                    }
                     continue;
                 }
 
@@ -342,7 +342,10 @@ const rankWithGroq = async (
                     ranked.push(fallback);
                 }
 
-                return ranked.slice(0, limit);
+                return {
+                    ranked: ranked.slice(0, limit),
+                    provider: model,
+                };
             }
         }
 
@@ -419,11 +422,13 @@ const fetchCandidates = async (supabaseClient: any): Promise<CandidateItem[]> =>
         supabaseClient
             .from("studios_with_stats")
             .select("id, name, images, address, type, hourly_rate, rehearsal_rate, recording_rate, rating, review_count, owner_id, created_at")
+            .eq("permit_status", "approved")
             .limit(60),
         supabaseClient
             .from("gigs_with_stats")
             .select("id, name, images, location, budget, rate, requirements, rating, review_count, organizer_id, created_at, status")
             .eq("status", "open")
+            .eq("permit_status", "approved")
             .limit(60),
     ]);
 
@@ -543,13 +548,23 @@ const getRecommendations = async (
         .sort((a, b) => b.score - a.score)
         .slice(0, Math.max(20, limit));
 
+    if (LOCAL_ONLY_MODE) {
+        const fallbackRank = deterministicRank.slice(0, limit);
+        return {
+            recommendations: buildRecommendationResponse(fallbackRank, false, "Local Ranker"),
+            aiPowered: false,
+            aiProvider: "Local Ranker",
+            message: "Local-only recommendation mode is active (no external AI provider calls).",
+        };
+    }
+
     const aiRank = await rankWithGroq(groqApiKey, profile, mode, deterministicRank, limit);
 
-    if (aiRank && aiRank.length > 0) {
+    if (aiRank && aiRank.ranked.length > 0) {
         return {
-            recommendations: buildRecommendationResponse(aiRank, true, "Groq Llama 3.3"),
+            recommendations: buildRecommendationResponse(aiRank.ranked, true, aiRank.provider),
             aiPowered: true,
-            aiProvider: "Groq Llama 3.3",
+            aiProvider: aiRank.provider,
             message: mode === "for-you"
                 ? "AI-ranked For You feed is active."
                 : "AI-ranked skill suggestions are active.",
@@ -576,11 +591,14 @@ const getFeaturedPayload = async (supabaseClient: any) => {
         supabaseClient
             .from("gigs_with_stats")
             .select("*")
+            .eq("status", "open")
+            .eq("permit_status", "approved")
             .order("created_at", { ascending: false })
             .limit(5),
         supabaseClient
             .from("studios_with_stats")
             .select("*")
+            .eq("permit_status", "approved")
             .order("rating", { ascending: false })
             .limit(5),
         supabaseClient
@@ -651,6 +669,101 @@ const getFeaturedPayload = async (supabaseClient: any) => {
     };
 };
 
+const getMobileProfileSummary = async (supabaseClient: any, userId?: string | null) => {
+    if (!userId) {
+        return {
+            userName: "Guest",
+            hasGroups: false,
+        };
+    }
+
+    const [profileResult, groupCountResult] = await Promise.all([
+        supabaseClient
+            .from("profiles")
+            .select("full_name")
+            .eq("id", userId)
+            .maybeSingle(),
+        supabaseClient
+            .from("groups")
+            .select("id", { count: "exact", head: true })
+            .eq("owner_id", userId),
+    ]);
+
+    if (profileResult.error) {
+        console.error("home-feed mobile profile summary error:", profileResult.error);
+    }
+
+    if (groupCountResult.error) {
+        console.error("home-feed mobile group count error:", groupCountResult.error);
+    }
+
+    return {
+        userName: profileResult.data?.full_name
+            ? String(profileResult.data.full_name).split(" ")[0]
+            : "Guest",
+        hasGroups: (groupCountResult.count || 0) > 0,
+    };
+};
+
+const shuffleItems = <T,>(items: T[]): T[] => {
+    return [...items].sort(() => Math.random() - 0.5);
+};
+
+const getMobileHomePayload = async (
+    supabaseClient: any,
+    body: FeedRequestBody & { isGuest?: boolean; userRole?: string | null },
+    groqApiKey: string,
+) => {
+    const fetchedAt = Date.now();
+    const userId = body.userId || null;
+    const limit = Math.max(10, Math.min(Number(body.limit || 20), 30));
+
+    const [featuredPayload, profileSummary] = await Promise.all([
+        getFeaturedPayload(supabaseClient),
+        getMobileProfileSummary(supabaseClient, userId),
+    ]);
+
+    const candidates = await fetchCandidates(supabaseClient);
+    const randomRecommendations = shuffleItems(candidates).slice(0, limit);
+    let aiRecommendations: RecommendationItem[] = [];
+    let aiFeedProvider = "Normal Feed";
+    let aiFeedMessage = "";
+
+    if (userId) {
+        const recommendations = await getRecommendations(
+            supabaseClient,
+            userId,
+            "for-you",
+            groqApiKey,
+            limit,
+        );
+
+        aiRecommendations = recommendations.recommendations || [];
+        aiFeedProvider = recommendations.aiProvider || aiFeedProvider;
+        aiFeedMessage = recommendations.message || "";
+    }
+
+    const featured = aiRecommendations.length > 0
+        ? aiRecommendations.slice(0, 10)
+        : randomRecommendations.slice(0, 10);
+    const discover = aiRecommendations.length > 10
+        ? aiRecommendations.slice(10, 20)
+        : randomRecommendations.slice(10, 20);
+
+    return {
+        fetchedAt,
+        profile: profileSummary,
+        featured,
+        discover,
+        newArrivals: featuredPayload.newArrivals || [],
+        randomRecommendations,
+        aiRecommendations,
+        aiFeedProvider,
+        aiFeedMessage,
+        providerStatus: getGroqProviderStatus(),
+    };
+};
+
 serve(async (req: Request) => {
     if (req.method === "OPTIONS") {
         return new Response("ok", { headers: corsHeaders });
@@ -670,23 +783,34 @@ serve(async (req: Request) => {
 
         const action = body.action || "featured";
         const limit = Math.max(4, Math.min(Number(body.limit || 20), 30));
-        const groqApiKey = resolveGroqApiKey(req);
-        const providerStatus = getGroqProviderStatus(req);
+        const groqApiKey = resolveGroqApiKey();
+        const providerStatus = getGroqProviderStatus();
 
         if (action === "ai-status") {
             return new Response(
                 JSON.stringify({
                     aiProvidersConfigured: providerStatus.active,
                     providerStatus,
-                    message: providerStatus.active
-                        ? "Groq provider is configured for home-feed recommendations."
-                        : "Groq provider is not configured. Set GROQ_API_KEY in function secrets or pass x-groq-api-key.",
+                    message: LOCAL_ONLY_MODE
+                        ? "Local-only mode is active. External AI providers are disabled for home-feed recommendations."
+                        : providerStatus.active
+                            ? "Groq provider is configured for home-feed recommendations."
+                            : "Groq provider is not configured. Set GROQ_API_KEY in function secrets.",
                 }),
                 {
                     headers: { ...corsHeaders, "Content-Type": "application/json" },
                     status: 200,
                 },
             );
+        }
+
+        if (action === "mobile_home") {
+            const payload = await getMobileHomePayload(supabaseClient, body, groqApiKey);
+
+            return new Response(JSON.stringify(payload), {
+                headers: { ...corsHeaders, "Content-Type": "application/json" },
+                status: 200,
+            });
         }
 
         if (action === "for-you" || action === "skill-suggestions") {

@@ -13,6 +13,7 @@ import {
     Text,
     TextInput,
     TouchableOpacity,
+  useWindowDimensions,
     View
 } from "react-native";
 import { supabase } from "../lib/supabase";
@@ -23,6 +24,7 @@ import Modal from "../src/components/modal";
 import Navbar from "../src/components/navbar";
 import { DEFAULT_AVATAR } from "../src/constants/Images";
 import { useTheme } from "../src/context/ThemeContext";
+import { ensureUploadPassesSafetyScreening } from "../src/services/uploadSafetyScreen";
 
 
 
@@ -93,6 +95,28 @@ const GENRES = [
 
 export default function EditProfileScreen() {
   const { colors, isDark } = useTheme();
+  const { width } = useWindowDimensions();
+  const isWebDesktop = Platform.OS === "web" && width >= 768;
+  const pageBackground = isWebDesktop
+    ? isDark
+      ? "#0A1224"
+      : "#E9EEF8"
+    : colors.background;
+  const pageCardBackground = isWebDesktop
+    ? isDark
+      ? "#0F172A"
+      : "#FFFFFF"
+    : colors.card;
+  const surfaceBackground = isWebDesktop
+    ? isDark
+      ? "#13213A"
+      : "#F4F7FE"
+    : colors.inputBackground;
+  const borderSoft = isWebDesktop
+    ? isDark
+      ? "#1E2C48"
+      : "#D8E3F2"
+    : colors.border;
 
   const [userId, setUserId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -158,6 +182,16 @@ export default function EditProfileScreen() {
     [contactNumber, location, bio, selectedRoles, selectedGenres],
   );
 
+  const hasIncompleteRequiredFields = useMemo(
+    () =>
+      !contactNumber.trim() ||
+      !location.trim() ||
+      selectedRoles.length === 0 ||
+      selectedGenres.length === 0 ||
+      !bio.trim(),
+    [contactNumber, location, selectedRoles, selectedGenres, bio],
+  );
+
   const hasUnsavedChanges = useMemo(() => {
     const initial = initialSnapshotRef.current;
     if (!initial) return false;
@@ -185,7 +219,7 @@ export default function EditProfileScreen() {
         {
           text: "Leave",
           style: "destructive",
-          onPress: () => router.back(),
+          onPress: () => router.replace("/profile"),
         },
       ],
     );
@@ -203,7 +237,7 @@ export default function EditProfileScreen() {
       } = await supabase.auth.getUser();
       if (!user) {
         showAlert("error", "Error", "Please log in first");
-        router.back();
+        router.replace("/");
         return;
       }
 
@@ -295,7 +329,7 @@ export default function EditProfileScreen() {
     );
   }
 
-  async function handleChangePhoto() {
+  async function chooseAvatarFromLibrary() {
     if (!userId) return;
 
     try {
@@ -328,6 +362,18 @@ export default function EditProfileScreen() {
       }
 
       const ext = asset.uri.split(".").pop()?.toLowerCase() || "jpg";
+      const mimeType = `image/${ext === "jpg" ? "jpeg" : ext}`;
+      await ensureUploadPassesSafetyScreening(
+        {
+          name: (asset as any)?.fileName || `profile-photo.${ext}`,
+          mimeType,
+          size: Math.floor((asset.base64.length * 3) / 4),
+          uri: asset.uri,
+          contentDataUrl: `data:${mimeType};base64,${asset.base64}`,
+          kind: "photo",
+        },
+        "edit_profile_avatar",
+      );
       setPendingAvatar({ base64: asset.base64, ext });
       setAvatarUrl(asset.uri);
       showAlert("info", "Photo selected", "Tap Save Profile to apply your new photo.");
@@ -336,6 +382,75 @@ export default function EditProfileScreen() {
       console.error("❌ Error:", err);
       showAlert("error", "Error", err.message || "Failed to upload photo");
     }
+  }
+
+  async function captureAvatarWithCamera() {
+    if (!userId) return;
+
+    try {
+      const { status } = await ImagePicker.requestCameraPermissionsAsync();
+      if (status !== "granted") {
+        showAlert(
+          "warning",
+          "Permission Required",
+          "Please allow camera access to take a profile photo.",
+        );
+        return;
+      }
+
+      const result = await ImagePicker.launchCameraAsync({
+        mediaTypes: ["images"],
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.5,
+        base64: true,
+      });
+
+      if (result.canceled || !result.assets?.[0]) return;
+
+      const asset = result.assets[0];
+
+      if (!asset.base64) {
+        showAlert("error", "Error", "Could not read captured image data");
+        return;
+      }
+
+      const ext = asset.uri.split(".").pop()?.toLowerCase() || "jpg";
+      const mimeType = `image/${ext === "jpg" ? "jpeg" : ext}`;
+      await ensureUploadPassesSafetyScreening(
+        {
+          name: (asset as any)?.fileName || `profile-photo.${ext}`,
+          mimeType,
+          size: Math.floor((asset.base64.length * 3) / 4),
+          uri: asset.uri,
+          contentDataUrl: `data:${mimeType};base64,${asset.base64}`,
+          kind: "photo",
+        },
+        "edit_profile_avatar",
+      );
+      setPendingAvatar({ base64: asset.base64, ext });
+      setAvatarUrl(asset.uri);
+      showAlert("info", "Photo selected", "Tap Save Profile to apply your new photo.");
+    } catch (err: any) {
+      setUploadingPhoto(false);
+      console.error("Camera capture error:", err);
+      showAlert("error", "Error", err.message || "Failed to capture photo");
+    }
+  }
+
+  function handleChangePhoto() {
+    if (!userId) return;
+
+    showAlert(
+      "info",
+      "Update Profile Photo",
+      "Take a new photo or choose one from your gallery.",
+      [
+        { text: "Take Photo", onPress: () => void captureAvatarWithCamera() },
+        { text: "Choose from Gallery", onPress: () => void chooseAvatarFromLibrary() },
+        { text: "Cancel", style: "cancel" },
+      ],
+    );
   }
 
   async function handleSave() {
@@ -499,7 +614,7 @@ export default function EditProfileScreen() {
       };
 
       showAlert("success", "Success", "Profile updated!", [
-        { text: "OK", onPress: () => router.back() },
+        { text: "OK", onPress: () => router.replace("/profile") },
       ]);
     } catch (error: any) {
       showAlert("error", "Error", error?.message || "Failed to save");
@@ -511,7 +626,7 @@ export default function EditProfileScreen() {
 
   if (loading) {
     return (
-      <View style={[styles.centered, { backgroundColor: colors.background }]}>
+      <View style={[styles.centered, { backgroundColor: pageBackground }]}>
         <ActivityIndicator size="large" color={colors.primary} />
         <Text style={[styles.loadingText, { color: colors.textSecondary }]}>
           Loading...
@@ -521,14 +636,22 @@ export default function EditProfileScreen() {
   }
 
   return (
-    <View style={[styles.container, { backgroundColor: colors.background }]}>
-      <Header title="Edit Profile" onBackPress={handleAttemptLeave} />
+    <View style={[styles.container, { backgroundColor: pageBackground }]}>
+      <View style={[styles.pageFrame, isWebDesktop && styles.pageFrameWeb]}>
+        <Header title="Edit Profile" cardStyle onBackPress={() => router.replace('/manage')} />
 
-      <ScrollView
-        style={styles.scroll}
-        contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}
-      >
+        <ScrollView
+          style={styles.scroll}
+          contentContainerStyle={[styles.scrollContent, isWebDesktop && styles.scrollContentWeb]}
+          showsVerticalScrollIndicator={false}
+        >
+          <View
+            style={[
+              styles.formCard,
+              isWebDesktop && styles.webSectionCard,
+              { backgroundColor: pageCardBackground, borderColor: borderSoft },
+            ]}
+          >
         {/* Avatar */}
         <View style={styles.avatarContainer}>
           <View style={styles.avatarWrapper}>
@@ -539,10 +662,10 @@ export default function EditProfileScreen() {
               style={[styles.avatar, { borderColor: colors.primary }]}
             />
             <TouchableOpacity
-              style={[styles.cameraBtn, { backgroundColor: colors.primary }]}
+              style={[styles.cameraBtn, { backgroundColor: colors.primary, opacity: uploadingPhoto ? 0.6 : 1 }]}
               onPress={handleChangePhoto}
               disabled={uploadingPhoto}
-              activeOpacity={1}
+              activeOpacity={uploadingPhoto ? 1 : 0.78}
             >
               {uploadingPhoto ? (
                 <ActivityIndicator size="small" color="#fff" />
@@ -557,7 +680,13 @@ export default function EditProfileScreen() {
         </View>
 
         {/* Display Name (read-only) */}
-        <View style={styles.field}>
+            <View
+              style={[
+                styles.field,
+                isWebDesktop && styles.fieldWeb,
+                { backgroundColor: isWebDesktop ? surfaceBackground : "transparent", borderColor: borderSoft },
+              ]}
+            >
           <Text style={[styles.label, { color: colors.textSecondary }]}>
             DISPLAY NAME
           </Text>
@@ -565,8 +694,8 @@ export default function EditProfileScreen() {
             style={[
               styles.disabledInput,
               {
-                backgroundColor: colors.inputBackground,
-                borderColor: colors.border,
+                backgroundColor: isWebDesktop ? pageCardBackground : colors.inputBackground,
+                borderColor: borderSoft,
               },
             ]}
           >
@@ -580,7 +709,13 @@ export default function EditProfileScreen() {
         </View>
 
         {/* Contact Number */}
-        <View style={styles.field}>
+            <View
+              style={[
+                styles.field,
+                isWebDesktop && styles.fieldWeb,
+                { backgroundColor: isWebDesktop ? surfaceBackground : "transparent", borderColor: borderSoft },
+              ]}
+            >
           <Text style={[styles.label, { color: colors.textSecondary }]}>
             CONTACT NUMBER <Text style={{ color: "#ef4444" }}>*</Text>
           </Text>
@@ -588,8 +723,8 @@ export default function EditProfileScreen() {
             style={[
               styles.input,
               {
-                backgroundColor: colors.inputBackground,
-                borderColor: colors.border,
+                backgroundColor: isWebDesktop ? pageCardBackground : colors.inputBackground,
+                borderColor: borderSoft,
                 color: colors.text,
               },
             ]}
@@ -602,7 +737,13 @@ export default function EditProfileScreen() {
         </View>
 
         {/* Address */}
-        <View style={styles.field}>
+            <View
+              style={[
+                styles.field,
+                isWebDesktop && styles.fieldWeb,
+                { backgroundColor: isWebDesktop ? surfaceBackground : "transparent", borderColor: borderSoft },
+              ]}
+            >
           <Text style={[styles.label, { color: colors.textSecondary }]}>
             ADDRESS <Text style={{ color: "#ef4444" }}>*</Text>
           </Text>
@@ -614,7 +755,13 @@ export default function EditProfileScreen() {
         </View>
 
         {/* Roles */}
-        <View style={styles.field}>
+            <View
+              style={[
+                styles.field,
+                isWebDesktop && styles.fieldWeb,
+                { backgroundColor: isWebDesktop ? surfaceBackground : "transparent", borderColor: borderSoft },
+              ]}
+            >
           <Text style={[styles.label, { color: colors.textSecondary }]}>
             ROLES & INSTRUMENTS <Text style={{ color: "#ef4444" }}>*</Text>
           </Text>
@@ -630,15 +777,15 @@ export default function EditProfileScreen() {
                     {
                       borderColor: colors.primary,
                       backgroundColor: isDark
-                        ? "rgba(124, 58, 237, 0.3)"
-                        : "#EEF2FF",
+                        ? "#1E2C48"
+                        : "#E7EEFD",
                     },
                   ]}
                 >
                   <Text
                     style={[
                       styles.chipTextCompact,
-                      { color: isDark ? "#A78BFA" : colors.primary },
+                      { color: isDark ? "#9CC0FF" : colors.primary },
                     ]}
                   >
                     {role}
@@ -646,7 +793,7 @@ export default function EditProfileScreen() {
                   <Ionicons
                     name="close-circle"
                     size={14}
-                    color={isDark ? "#A78BFA" : colors.primary}
+                    color={isDark ? "#9CC0FF" : colors.primary}
                     style={{ marginLeft: 4 }}
                   />
                 </TouchableOpacity>
@@ -658,8 +805,8 @@ export default function EditProfileScreen() {
             style={[
               styles.searchInput,
               {
-                backgroundColor: colors.inputBackground,
-                borderColor: colors.border,
+                backgroundColor: isWebDesktop ? pageCardBackground : colors.inputBackground,
+                borderColor: borderSoft,
                 color: colors.text,
               },
             ]}
@@ -683,7 +830,7 @@ export default function EditProfileScreen() {
                   style={[
                     styles.chipCompact,
                     {
-                      borderColor: colors.border,
+                      borderColor: borderSoft,
                       backgroundColor: "transparent",
                     },
                   ]}
@@ -707,7 +854,13 @@ export default function EditProfileScreen() {
         </View>
 
         {/* Genres */}
-        <View style={styles.field}>
+            <View
+              style={[
+                styles.field,
+                isWebDesktop && styles.fieldWeb,
+                { backgroundColor: isWebDesktop ? surfaceBackground : "transparent", borderColor: borderSoft },
+              ]}
+            >
           <Text style={[styles.label, { color: colors.textSecondary }]}>
             GENRES <Text style={{ color: "#ef4444" }}>*</Text>
           </Text>
@@ -723,15 +876,15 @@ export default function EditProfileScreen() {
                     {
                       borderColor: colors.primary,
                       backgroundColor: isDark
-                        ? "rgba(124, 58, 237, 0.3)"
-                        : "#EEF2FF",
+                        ? "#1E2C48"
+                        : "#E7EEFD",
                     },
                   ]}
                 >
                   <Text
                     style={[
                       styles.chipTextCompact,
-                      { color: isDark ? "#A78BFA" : colors.primary },
+                      { color: isDark ? "#9CC0FF" : colors.primary },
                     ]}
                   >
                     {genre}
@@ -739,7 +892,7 @@ export default function EditProfileScreen() {
                   <Ionicons
                     name="close-circle"
                     size={14}
-                    color={isDark ? "#A78BFA" : colors.primary}
+                    color={isDark ? "#9CC0FF" : colors.primary}
                     style={{ marginLeft: 4 }}
                   />
                 </TouchableOpacity>
@@ -751,8 +904,8 @@ export default function EditProfileScreen() {
             style={[
               styles.searchInput,
               {
-                backgroundColor: colors.inputBackground,
-                borderColor: colors.border,
+                backgroundColor: isWebDesktop ? pageCardBackground : colors.inputBackground,
+                borderColor: borderSoft,
                 color: colors.text,
               },
             ]}
@@ -776,7 +929,7 @@ export default function EditProfileScreen() {
                   style={[
                     styles.chipCompact,
                     {
-                      borderColor: colors.border,
+                      borderColor: borderSoft,
                       backgroundColor: "transparent",
                     },
                   ]}
@@ -800,7 +953,13 @@ export default function EditProfileScreen() {
         </View>
 
         {/* Bio */}
-        <View style={styles.field}>
+            <View
+              style={[
+                styles.field,
+                isWebDesktop && styles.fieldWeb,
+                { backgroundColor: isWebDesktop ? surfaceBackground : "transparent", borderColor: borderSoft },
+              ]}
+            >
           <Text style={[styles.label, { color: colors.textSecondary }]}>
             BIO <Text style={{ color: "#ef4444" }}>*</Text>
           </Text>
@@ -808,8 +967,8 @@ export default function EditProfileScreen() {
             style={[
               styles.textArea,
               {
-                backgroundColor: colors.inputBackground,
-                borderColor: colors.border,
+                backgroundColor: isWebDesktop ? pageCardBackground : colors.inputBackground,
+                borderColor: borderSoft,
                 color: colors.text,
               },
             ]}
@@ -819,6 +978,7 @@ export default function EditProfileScreen() {
             placeholderTextColor={colors.textSecondary}
             multiline
             numberOfLines={4}
+            textAlign="left"
             textAlignVertical="top"
           />
         </View>
@@ -826,14 +986,33 @@ export default function EditProfileScreen() {
 
 
         {/* Buttons */}
+        {hasIncompleteRequiredFields && (
+          <Text
+            style={{
+              color: "#F59E0B",
+              fontFamily: "Poppins_500Medium",
+              fontSize: 12,
+              marginBottom: 10,
+              textAlign: "center",
+            }}
+          >
+            Complete required fields marked * before saving.
+          </Text>
+        )}
         <TouchableOpacity
           style={[
             styles.saveBtn,
-            { backgroundColor: saving ? colors.textSecondary : colors.primary },
+            {
+              backgroundColor:
+                saving || hasIncompleteRequiredFields
+                  ? colors.textSecondary
+                  : colors.primary,
+              opacity: saving || hasIncompleteRequiredFields ? 0.6 : 1,
+            },
           ]}
           onPress={handleSave}
-          disabled={saving}
-          activeOpacity={1}
+          disabled={saving || hasIncompleteRequiredFields}
+          activeOpacity={saving || hasIncompleteRequiredFields ? 1 : 0.78}
         >
           {saving ? (
             <ActivityIndicator size="small" color="#fff" />
@@ -843,20 +1022,22 @@ export default function EditProfileScreen() {
         </TouchableOpacity>
 
         <TouchableOpacity
-          style={[styles.cancelBtn, { borderColor: colors.border }]}
+          style={[styles.cancelBtn, { borderColor: borderSoft }]}
           onPress={handleAttemptLeave}
           disabled={saving}
-          activeOpacity={1}
+          activeOpacity={saving ? 1 : 0.78}
         >
           <Text style={[styles.cancelBtnText, { color: colors.text }]}>
             Cancel
           </Text>
         </TouchableOpacity>
+          </View>
 
         <View style={{ height: 40 }} />
-      </ScrollView>
+        </ScrollView>
 
-      <Navbar />
+        <Navbar />
+      </View>
 
       <Modal
         visible={saving}
@@ -880,6 +1061,17 @@ export default function EditProfileScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1 },
   centered: { flex: 1, justifyContent: "center", alignItems: "center" },
+  pageFrame: {
+    flex: 1,
+    width: "100%",
+  },
+  pageFrameWeb: {
+    maxWidth: 1240,
+    alignSelf: "center",
+    width: "100%",
+    paddingHorizontal: 20,
+    paddingTop: 12,
+  },
   loadingText: {
     marginTop: 12,
     fontSize: 14,
@@ -887,6 +1079,24 @@ const styles = StyleSheet.create({
   },
   scroll: { flex: 1 },
   scrollContent: { padding: 20, paddingBottom: 150 },
+  scrollContentWeb: {
+    maxWidth: 1120,
+    width: "100%",
+    alignSelf: "center",
+    paddingTop: 12,
+  },
+  formCard: {
+    borderRadius: 20,
+    borderWidth: 1,
+    padding: 20,
+  },
+  webSectionCard: {
+    shadowColor: "#0F172A",
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.08,
+    shadowRadius: 16,
+    elevation: 3,
+  },
 
   avatarContainer: { alignItems: "center", marginBottom: 24 },
   avatarWrapper: { position: "relative" },
@@ -917,18 +1127,28 @@ const styles = StyleSheet.create({
   },
 
   field: { marginBottom: 20 },
+  fieldWeb: {
+    borderWidth: 1,
+    borderRadius: 14,
+    padding: 14,
+  },
   label: {
     fontSize: 11,
     fontFamily: "Poppins_600SemiBold",
     letterSpacing: 0.5,
-    marginBottom: 6,
+    marginBottom: 10,
   },
   input: {
     borderWidth: 1,
     borderRadius: 10,
-    padding: 14,
+    height: 52,
+    paddingHorizontal: 14,
+    paddingVertical: 0,
     fontSize: 15,
+    lineHeight: 20,
+    includeFontPadding: false,
     fontFamily: "Poppins_400Regular",
+    textAlignVertical: "center",
   },
   disabledInput: { borderWidth: 1, borderRadius: 10, padding: 14 },
   disabledText: { fontSize: 15, fontFamily: "Poppins_500Medium" },
@@ -936,10 +1156,15 @@ const styles = StyleSheet.create({
   textArea: {
     borderWidth: 1,
     borderRadius: 10,
-    padding: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
     fontSize: 15,
+    lineHeight: 20,
+    includeFontPadding: false,
     fontFamily: "Poppins_400Regular",
     minHeight: 100,
+    textAlign: "left",
+    textAlignVertical: "top",
   },
   chips: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   chip: {
@@ -973,10 +1198,15 @@ const styles = StyleSheet.create({
   searchInput: {
     borderWidth: 1,
     borderRadius: 8,
-    padding: 10,
+    height: 48,
+    paddingHorizontal: 10,
+    paddingVertical: 0,
     fontSize: 14,
+    lineHeight: 18,
+    includeFontPadding: false,
     fontFamily: "Poppins_400Regular",
     textAlign: "left",
+    textAlignVertical: "center",
   },
   moreText: {
     fontSize: 12,

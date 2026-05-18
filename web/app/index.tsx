@@ -1,8 +1,9 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, Image, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, Dimensions, ImageBackground } from 'react-native';
+import { ActivityIndicator, Image, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, Dimensions } from 'react-native';
 import { supabase } from '../lib/supabase';
+import AuthMusicHero from '../src/components/AuthMusicHero';
 import CustomAlert, { AlertType } from '../src/components/CustomAlert';
 import VerificationModal from '../src/components/VerificationModal';
 import { useAuth } from '../src/context/AuthContext';
@@ -20,15 +21,29 @@ interface AlertState {
 
 export default function LoginScreen() {
   const { colors, isDark } = useTheme();
-  const { setGuestMode } = useAuth();
-  const { verified, accountCreated, email: createdEmail, verification_error } = useLocalSearchParams();
+  const { session, loading: authLoading, roleResolved, userRole } = useAuth();
+  const { verified, accountCreated, email: createdEmail, verification_error, verificationPendingReview, diditPendingReview, diditVerified } = useLocalSearchParams();
   const { width } = Dimensions.get('window');
   const isWebDesktop = Platform.OS === 'web' && width >= 768;
 
-  const resolvePostLoginRoute = (role?: string | null) => {
+  const resolvePostLoginRoute = (role: unknown) => {
     const normalizedRole = typeof role === 'string' ? role.trim().toLowerCase() : '';
-    return normalizedRole === 'admin' ? '/admin' : '/home';
+    if (normalizedRole === 'admin') return '/admin';
+    return '/feed';
   };
+
+  useEffect(() => {
+    if (!authLoading && session) {
+      if (!roleResolved) return;
+
+      const route = resolvePostLoginRoute(
+        userRole ||
+        session.user?.user_metadata?.role ||
+        session.user?.app_metadata?.role,
+      );
+      router.replace(route as any);
+    }
+  }, [authLoading, roleResolved, session, userRole]);
 
   const isSchemaQueryError = (errorLike: unknown) => {
     const error = errorLike as { message?: string; details?: string; hint?: string; code?: string } | null;
@@ -132,75 +147,111 @@ export default function LoginScreen() {
     setAlertState(prev => ({ ...prev, visible: false }));
   };
 
+  const showValidationAlert = (nextErrors: { email?: string; password?: string }) => {
+    const issues: string[] = [];
+
+    if (nextErrors.email) {
+      issues.push(nextErrors.email === 'Email is required.' ? 'Enter your email address.' : nextErrors.email);
+    }
+
+    if (nextErrors.password) {
+      issues.push(nextErrors.password === 'Password is required.' ? 'Enter your password.' : nextErrors.password);
+    }
+
+    const title = issues.length > 1
+      ? 'Complete Required Fields'
+      : nextErrors.email
+        ? 'Check Your Email'
+        : 'Password Required';
+
+    const message = issues.length > 1
+      ? `We need a few details before you can sign in:\n- ${issues.join('\n- ')}`
+      : issues[0] || 'Please review your login details and try again.';
+
+    showAlert('warning', title, message, [{ text: 'OK', style: 'default' }]);
+  };
+
+  const showLoginError = (title: string, message: string) => {
+    setLoginMessage({ type: 'error', text: message });
+    showAlert('error', title, message, [{ text: 'OK', style: 'default' }]);
+  };
+
   // Check for Account Created success (New User)
   useEffect(() => {
     if (accountCreated === 'true') {
+      if (diditPendingReview === 'true') {
+        showAlert(
+          'success',
+          'Verification In Review',
+          `Your identity is now under manual review.\n\nWe will send the email confirmation link to ${createdEmail || 'your email'} after the review is approved.`
+        );
+        return;
+      }
+
+      if (verificationPendingReview === 'true') {
+        showAlert(
+          'success',
+          'Manual Review Submitted',
+          `Your requirements were submitted and your account is under manual review.\n\nWe will send the email confirmation link to ${createdEmail || 'you'} after the review is approved.`
+        );
+        return;
+      }
+
+      if (diditVerified === 'true') {
+        showAlert(
+          'success',
+          'Check Your Inbox',
+          `Your identity has been verified.\n\nPlease confirm the email link we sent to ${createdEmail || 'your email'} before logging in.`
+        );
+        return;
+      }
+
       showAlert(
         'success',
         'Check Your Inbox',
         `We have sent a verification link to ${createdEmail || 'your email'}.\n\nPlease confirm your email address to log in.`
       );
     } else if (verified === 'true') {
-      // Only show this 'Identity Verified' alert if we are NOT coming from a fresh signup creation
-      // (which handles its own flow via accountCreated)
       showAlert(
         'success',
-        'Verification Successful! 🎉',
-        'Your identity has been verified. You can now log in.'
+        'Account Ready',
+        'Your email has been confirmed and your identity is verified. You can now log in.'
       );
-    }
-  }, [verified, accountCreated, createdEmail]);
-
-  const handleLogin = async () => {
-    setErrors({}); // Clear previous errors
-    setLoginMessage(null);
-    const newErrors: { email?: string; password?: string } = {};
-
-    if (!email) {
-      newErrors.email = 'Email is required.';
-    } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      newErrors.email = 'Please enter a valid email address.';
-    }
-
-    if (!password) {
-      newErrors.password = 'Password is required.';
-    }
-
-    if (Object.keys(newErrors).length > 0) {
-      setErrors(newErrors);
       return;
     }
+  }, [verified, accountCreated, createdEmail, verificationPendingReview, diditPendingReview, diditVerified]);
 
+  const signInWithCredentials = async (loginEmail: string, loginPassword: string) => {
     setLoading(true);
     try {
       // Clear any stale session first to prevent refresh token errors
       console.log('Clearing any existing session...');
       await supabase.auth.signOut({ scope: 'local' });
 
-      console.log('Attempting login for:', email);
+      console.log('Attempting login for:', loginEmail);
       const { error } = await supabase.auth.signInWithPassword({
-        email,
-        password,
+        email: loginEmail,
+        password: loginPassword,
       });
 
       if (error) {
         console.log('Login error:', error.message);
         // Handle specific error cases
         if (error.message.includes('Invalid login credentials')) {
-          setLoginMessage({ type: 'error', text: 'Invalid email or password.' });
+          showLoginError('Invalid Login', 'Invalid email or password.');
         } else if (error.message.includes('Email not confirmed')) {
-          setLoginMessage({ type: 'error', text: 'Email not confirmed. Check your inbox.' });
+          showLoginError('Email Not Confirmed', 'Email not confirmed. Check your inbox.');
         } else if (error.message.includes('rate') || error.status === 429) {
-          setLoginMessage({ type: 'error', text: 'Too many attempts. Please wait.' });
+          showLoginError('Too Many Attempts', 'Too many attempts. Please wait before trying again.');
         } else if (error.message.includes('refresh') || error.message.includes('token')) {
           // Clear storage and retry once
           console.log('Token error detected, clearing storage and retrying...');
           await supabase.auth.signOut({ scope: 'local' });
-          setLoginMessage({ type: 'error', text: 'Session expired. Please try again.' });
+          showLoginError('Session Expired', 'Session expired. Please try again.');
         } else if (isSchemaQueryError(error)) {
-          setLoginMessage({ type: 'error', text: schemaErrorLoginMessage });
+          showLoginError('Database Setup Required', schemaErrorLoginMessage);
         } else {
-          setLoginMessage({ type: 'error', text: error.message });
+          showLoginError('Sign In Failed', error.message);
         }
       } else {
         // Login succeeded - VALIDATE VERIFICATION STATUS
@@ -209,7 +260,7 @@ export default function LoginScreen() {
 
         if (!user) {
           console.error('Failed to retrieve user after login:', getUserError?.message || 'user is null');
-          setLoginMessage({ type: 'error', text: 'Unable to verify your account. Please try again.' });
+          showLoginError('Verification Failed', 'Unable to verify your account. Please try again.');
         } else if (user) {
           // 1. Check Metadata (Fastest)
           const metaVerified = user.user_metadata?.is_verified;
@@ -251,16 +302,17 @@ export default function LoginScreen() {
             console.error('Profile check failed:', profileError);
           }
 
-          // SELF-HEALING: If profile is missing but Auth Metadata says verified, recreate the profile
-          if (!profile && metaVerified) {
-            console.log('Profile missing but Metadata Verified. Attempting to repair profile...');
+          // SELF-HEALING: After the email confirmation link creates a valid auth session,
+          // promote the Didit-approved profile from pending to verified.
+          if ((!profile || !profile.is_verified) && metaVerified) {
+            console.log('Profile pending/missing but Metadata Verified. Attempting to repair profile...');
             const { error: upsertError } = await supabase
               .from('profiles')
               .upsert({
                 id: user.id,
                 email: user.email,
                 full_name: user.user_metadata?.full_name || user.user_metadata?.name || '',
-                role: user.user_metadata?.role || 'musician',
+                role: profile?.role || user.user_metadata?.role || 'musician',
                 is_verified: true,
                 verification_status: 'APPROVED',
                 didit_session_id: user.user_metadata?.didit_session_id
@@ -310,31 +362,17 @@ export default function LoginScreen() {
             );
           } else if (profile?.id_document_expiry && new Date(profile.id_document_expiry) < new Date()) {
             // Check for expired ID
-            await supabase.auth.signOut();
-
-            showAlert(
-              'warning',
-              'ID Document Expired',
-              'Your identification document has expired. Please update your verification documents to continue using the app.',
-              [
-                {
-                  text: 'Update Now',
-                  onPress: () => startVerification(user.id),
-                  style: 'default'
-                },
-                {
-                  text: 'Cancel',
-                  style: 'cancel'
-                }
-              ]
-            );
+            setLoginMessage({ type: 'error', text: 'ID expired. Please upload a new document to continue.' });
+            router.replace('/identity_verification' as any);
+            return;
           } else {
-            // Verified & Profile Exists -> Allow Entry
-            const postLoginRoute = resolvePostLoginRoute(
-              profile?.role || user.user_metadata?.role,
+            const route = resolvePostLoginRoute(
+              profile?.role ||
+              user.user_metadata?.role ||
+              user.app_metadata?.role,
             );
-            console.log('Verification passed. Redirecting to:', postLoginRoute);
-            router.replace(postLoginRoute as any);
+            console.log('Verification passed. Redirecting to:', route);
+            router.replace(route as any);
           }
         }
       }
@@ -351,7 +389,29 @@ export default function LoginScreen() {
     }
   };
 
+  const handleLogin = async () => {
+    setErrors({});
+    setLoginMessage(null);
+    const newErrors: { email?: string; password?: string } = {};
 
+    if (!email) {
+      newErrors.email = 'Email is required.';
+    } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      newErrors.email = 'Please enter a valid email address.';
+    }
+
+    if (!password) {
+      newErrors.password = 'Password is required.';
+    }
+
+    if (Object.keys(newErrors).length > 0) {
+      setErrors(newErrors);
+      showValidationAlert(newErrors);
+      return;
+    }
+
+    await signInWithCredentials(email, password);
+  };
 
   const startVerification = async (userId: string) => {
     try {
@@ -379,12 +439,6 @@ export default function LoginScreen() {
     // Silent
   };
 
-  const handleContinueAsGuest = async () => {
-    await supabase.auth.signOut({ scope: 'local' });
-    await setGuestMode(true);
-    router.replace('/home' as any);
-  };
-
   // Derived styles based on theme
   const themeStyles = {
     container: { backgroundColor: colors.background },
@@ -404,45 +458,30 @@ export default function LoginScreen() {
       style={[styles.flex1, themeStyles.container]}
     >
       <ScrollView contentContainerStyle={isWebDesktop ? styles.webScrollContent : styles.scrollContent}>
-        <ImageBackground 
-            source={isWebDesktop ? { uri: 'https://images.unsplash.com/photo-1540039155732-68473638c4b0?q=80&w=2070&auto=format&fit=crop' } : undefined} 
-            style={isWebDesktop ? {flex: 1, width: '100%'} : {}}
-            imageStyle={isWebDesktop ? {} : {display: 'none'}}
-        >
-          <View style={isWebDesktop ? [styles.webContainer, { backgroundColor: 'transparent' }] : styles.contentContainer}>
-            {/* Left Side Branding (Web Desktop Only) */}
-            {isWebDesktop && (
-              <View style={[styles.webLeftPanel, { backgroundColor: 'rgba(0,0,0,0.4)' }]}>
-                <View style={styles.webHeroOverlay}>
-                  <View style={[styles.logoWrapper, styles.shadow, { marginBottom: 32 }]}>
-                    <Image
-                      source={require('../assets/images/Musika-lokal-logo.png')}
-                      style={styles.logoImage}
-                      resizeMode="contain"
-                    />
-                  </View>
-                  <Text style={styles.webHeroTitle}>Welcome back{'\n'}to MusikaLokal.</Text>
-                  <Text style={styles.webHeroSubtitle}>Discover, connect, and collaborate with the local music scene.</Text>
-                </View>
-              </View>
-            )}
+        <View style={isWebDesktop ? styles.webContainer : styles.contentContainer}>
+          {/* Left Side Branding (Web Desktop Only) */}
+          {isWebDesktop && (
+            <View style={styles.webLeftPanel}>
+              <AuthMusicHero
+                title={`Welcome back\nto MusikaLokal.`}
+                subtitle="Discover, connect, and collaborate with the local music scene."
+              />
+            </View>
+          )}
 
-            {/* Right Side Form */}
-            <View style={isWebDesktop ? [styles.webRightPanel, { backgroundColor: isDark ? 'rgba(31, 41, 55, 0.85)' : 'rgba(255, 255, 255, 0.85)' }] : null}>
-              <View style={isWebDesktop ? styles.webFormWrapper : null}>
+          {/* Right Side Form */}
+          <View style={isWebDesktop ? [styles.webRightPanel, { backgroundColor: isDark ? 'rgba(31, 41, 55, 0.85)' : 'rgba(255, 255, 255, 0.85)' }] : null}>
+            <View style={isWebDesktop ? styles.webFormWrapper : null}>
               {/* Logo Section (Mobile Only) */}
               {!isWebDesktop && (
                 <View style={styles.logoSection}>
-                  <View style={[styles.logoWrapper, styles.shadow]}>
+                  <View style={styles.logoWrapper}>
                     <Image
-                      source={require('../assets/images/Musika-lokal-logo.png')}
+                      source={require('../assets/images/Musika-lokal-logo-theme.png')}
                       style={styles.logoImage}
                       resizeMode="contain"
                     />
                   </View>
-                  <Text style={[styles.appName, themeStyles.text]}>
-                    MusikaLokal
-                  </Text>
                   <Text style={[styles.appTagline, themeStyles.textSecondary]}>
                     Connect with the local music scene
                   </Text>
@@ -451,126 +490,143 @@ export default function LoginScreen() {
 
               {/* Form Section */}
               <View style={styles.formContainer}>
-                
+
                 {isWebDesktop && (
-                   <View style={{ marginBottom: 32 }}>
-                      <Text style={[styles.appName, themeStyles.text, { textAlign: 'left', fontSize: 36, marginBottom: 8 }]}>Sign In</Text>
-                      <Text style={[themeStyles.textSecondary, { fontFamily: 'Poppins_400Regular', fontSize: 18 }]}>Please enter your details to continue.</Text>
-                   </View>
+                  <View style={styles.webFormHeader}>
+                    <Image
+                      source={require('../assets/images/Musika-lokal-logo-theme.png')}
+                      style={styles.webFormLogo}
+                      resizeMode="contain"
+                    />
+                    <Text style={[styles.appName, themeStyles.text, { textAlign: 'left', fontSize: 36, marginBottom: 8 }]}>Sign In</Text>
+                    <Text style={[themeStyles.textSecondary, { fontFamily: 'Poppins_400Regular', fontSize: 18 }]}>Please enter your details to continue.</Text>
+                  </View>
                 )}
 
 
-            <View>
-              <Text style={[styles.label, themeStyles.textSecondary]}>
-                Email Address
-              </Text>
-              <View style={[
-                styles.inputContainer,
-                themeStyles.inputContainer,
-                errors.email ? { borderColor: '#EF4444' } : null
-              ]}>
-                <Ionicons name="mail-outline" size={20} color={colors.textSecondary} />
-                <TextInput
-                  style={[styles.input, themeStyles.text]}
-                  placeholder="name@email.com"
-                  placeholderTextColor={colors.textSecondary}
-                  value={email}
-                  onChangeText={(text) => {
-                    setEmail(text);
-                    if (errors.email) setErrors({ ...errors, email: undefined });
-                  }}
-                  autoCapitalize="none"
-                  keyboardType="email-address"
-                />
-              </View>
-              {errors.email && (
-                <Text style={styles.errorText}>{errors.email}</Text>
-              )}
-            </View>
-
-            <View>
-              <Text style={[styles.label, themeStyles.textSecondary]}>
-                Password
-              </Text>
-              <View style={[
-                styles.inputContainer,
-                themeStyles.inputContainer,
-                errors.password ? { borderColor: '#EF4444' } : null
-              ]}>
-                <Ionicons name="lock-closed-outline" size={20} color={colors.textSecondary} />
-                <TextInput
-                  style={[styles.input, themeStyles.text]}
-                  placeholder="Enter your password"
-                  placeholderTextColor={colors.textSecondary}
-                  value={password}
-                  onChangeText={(text) => {
-                    setPassword(text);
-                    if (errors.password) setErrors({ ...errors, password: undefined });
-                  }}
-                  secureTextEntry={!showPassword}
-                />
-                <TouchableOpacity activeOpacity={1} onPress={() => setShowPassword(!showPassword)}>
-                  <Ionicons name={showPassword ? "eye-off-outline" : "eye-outline"} size={20} color={colors.textSecondary} />
-                </TouchableOpacity>
-              </View>
-              {errors.password ? (
-                <Text style={styles.errorText}>{errors.password}</Text>
-              ) : (
-                <TouchableOpacity activeOpacity={1} onPress={() => router.push('/forget_password' as any)} style={styles.forgotPasswordButton}>
-                  <Text style={[styles.forgotPasswordText, themeStyles.primaryText]}>
-                    Forgot Password?
+                <View>
+                  <Text style={[styles.label, themeStyles.textSecondary]}>
+                    Email Address
                   </Text>
+                  <View style={[
+                    styles.inputContainer,
+                    themeStyles.inputContainer,
+                    errors.email ? { borderColor: '#EF4444' } : null
+                  ]}>
+                    <Ionicons name="mail-outline" size={20} color={colors.textSecondary} />
+                    <TextInput
+                      testID="auth-email-input"
+                      accessibilityLabel="auth-email-input"
+                      style={[styles.input, themeStyles.text]}
+                      placeholder="name@email.com"
+                      placeholderTextColor={colors.textSecondary}
+                      value={email}
+                      onChangeText={(text) => {
+                        setEmail(text);
+                        if (errors.email) setErrors({ ...errors, email: undefined });
+                      }}
+                      autoCapitalize="none"
+                      keyboardType="email-address"
+                    />
+                  </View>
+                  {errors.email && (
+                    <Text style={styles.errorText}>{errors.email}</Text>
+                  )}
+                </View>
+
+                <View>
+                  <Text style={[styles.label, themeStyles.textSecondary]}>
+                    Password
+                  </Text>
+                  <View style={[
+                    styles.inputContainer,
+                    themeStyles.inputContainer,
+                    errors.password ? { borderColor: '#EF4444' } : null
+                  ]}>
+                    <Ionicons name="lock-closed-outline" size={20} color={colors.textSecondary} />
+                    <TextInput
+                      testID="auth-password-input"
+                      accessibilityLabel="auth-password-input"
+                      style={[styles.input, themeStyles.text]}
+                      placeholder="Enter your password"
+                      placeholderTextColor={colors.textSecondary}
+                      value={password}
+                      onChangeText={(text) => {
+                        setPassword(text);
+                        if (errors.password) setErrors({ ...errors, password: undefined });
+                      }}
+                      secureTextEntry={!showPassword}
+                    />
+                    <TouchableOpacity
+                      activeOpacity={1}
+                      testID="auth-toggle-password-button"
+                      accessibilityLabel="auth-toggle-password-button"
+                      onPress={() => setShowPassword(!showPassword)}
+                    >
+                      <Ionicons name={showPassword ? "eye-off-outline" : "eye-outline"} size={20} color={colors.textSecondary} />
+                    </TouchableOpacity>
+                  </View>
+                  {errors.password ? (
+                    <Text style={styles.errorText}>{errors.password}</Text>
+                  ) : (
+                    <TouchableOpacity
+                      activeOpacity={1}
+                      testID="auth-forgot-password-link"
+                      accessibilityLabel="auth-forgot-password-link"
+                      onPress={() => router.push('/forget_password' as any)}
+                      style={styles.forgotPasswordButton}
+                    >
+                      <Text style={[styles.forgotPasswordText, themeStyles.primaryText]}>
+                        Forgot Password?
+                      </Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+
+                <TouchableOpacity
+                  testID="auth-sign-in-button"
+                  accessibilityLabel="auth-sign-in-button"
+                  onPress={handleLogin}
+                  disabled={loading}
+                  activeOpacity={loading ? 1 : 0.78}
+                  style={[styles.loginButton, themeStyles.primaryButton, styles.shadow, { opacity: loading ? 0.6 : 1 }]}
+                >
+                  {loading ? (
+                    <ActivityIndicator color="white" />
+                  ) : (
+                    <Text style={styles.loginButtonText}>
+                      Sign In
+                    </Text>
+                  )}
                 </TouchableOpacity>
-              )}
-            </View>
 
-            <TouchableOpacity
-              onPress={handleLogin}
-              disabled={loading}
-              activeOpacity={1}
-              style={[styles.loginButton, themeStyles.primaryButton, styles.shadow]}
-            >
-              {loading ? (
-                <ActivityIndicator color="white" />
-              ) : (
-                <Text style={styles.loginButtonText}>
-                  Sign In
-                </Text>
-              )}
-            </TouchableOpacity>
+                {loginMessage && (
+                  <View style={{ marginTop: 16, backgroundColor: loginMessage.type === 'error' ? 'rgba(239, 68, 68, 0.1)' : 'rgba(16, 185, 129, 0.1)', padding: 12, borderRadius: 8 }}>
+                    <Text style={{ color: loginMessage.type === 'error' ? '#EF4444' : '#10B981', textAlign: 'center', fontFamily: 'Poppins_500Medium' }}>
+                      {loginMessage.text}
+                    </Text>
+                  </View>
+                )}
 
-            <TouchableOpacity
-              onPress={handleContinueAsGuest}
-              activeOpacity={1}
-              style={[styles.guestButton, { borderColor: colors.border }]}
-            >
-              <Text style={[styles.guestButtonText, { color: colors.text }]}>Continue as Guest</Text>
-            </TouchableOpacity>
-
-            {loginMessage && (
-              <View style={{ marginTop: 16, backgroundColor: loginMessage.type === 'error' ? 'rgba(239, 68, 68, 0.1)' : 'rgba(16, 185, 129, 0.1)', padding: 12, borderRadius: 8 }}>
-                <Text style={{ color: loginMessage.type === 'error' ? '#EF4444' : '#10B981', textAlign: 'center', fontFamily: 'Poppins_500Medium' }}>
-                  {loginMessage.text}
-                </Text>
+                <View style={styles.signupLinkContainer}>
+                  <Text style={[styles.signupLinkText, themeStyles.textSecondary]}>
+                    Don&apos;t have an account?{' '}
+                  </Text>
+                  <TouchableOpacity
+                    activeOpacity={0.65}
+                    testID="auth-register-link"
+                    accessibilityLabel="auth-register-link"
+                    onPress={() => router.push('/signup' as any)}
+                    style={styles.signupLinkPressable}
+                  >
+                    <Text style={[styles.signupLinkHighlight, themeStyles.primaryText]}>Register here</Text>
+                  </TouchableOpacity>
+                </View>
               </View>
-            )}
-
-            <View style={styles.signupLinkContainer}>
-              <Text style={[styles.signupLinkText, themeStyles.textSecondary]}>
-                Don't have an account?{' '}
-              </Text>
-              <TouchableOpacity activeOpacity={1} onPress={() => router.push('/signup' as any)}>
-                <Text style={[styles.signupLinkHighlight, themeStyles.primaryText]}>
-                  Create Account
-                </Text>
-              </TouchableOpacity>
             </View>
           </View>
         </View>
-      </View>
-    </View>
-  </ImageBackground>
-</ScrollView>
+      </ScrollView>
 
       <VerificationModal
         visible={showVerification}
@@ -652,24 +708,32 @@ const styles = StyleSheet.create({
     width: '100%',
     maxWidth: 500,
   },
+  webFormHeader: {
+    alignItems: 'flex-start',
+    marginBottom: 32,
+  },
+  webFormLogo: {
+    width: 132,
+    height: 132,
+    marginBottom: 24,
+  },
   logoSection: {
     alignItems: 'center',
     marginBottom: 48, // mb-12
   },
   logoWrapper: {
-    width: 96, // w-24
-    height: 96, // h-24
+    width: 220,
+    height: 220,
     borderRadius: 24, // rounded-3xl
-    backgroundColor: '#4F46E5', // primary color fallback/base
+    backgroundColor: 'transparent',
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 24, // mb-6
     // Shadow props
   },
   logoImage: {
-    width: 100,
-    height: 100,
-    tintColor: 'white',
+    width: 196,
+    height: 196,
   },
   appName: {
     fontSize: 30, // text-3xl
@@ -706,6 +770,7 @@ const styles = StyleSheet.create({
     height: '100%',
     fontFamily: 'Poppins_400Regular',
     fontSize: 16,
+    includeFontPadding: false,
     textAlignVertical: 'center',
     paddingVertical: 0,
   },
@@ -729,18 +794,6 @@ const styles = StyleSheet.create({
     color: 'white',
     fontSize: 18,
   },
-  guestButton: {
-    height: 64,
-    borderRadius: 20,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    marginTop: 8,
-  },
-  guestButtonText: {
-    fontFamily: 'Poppins_500Medium',
-    fontSize: 16,
-  },
   shadow: {
     shadowColor: "#4F46E5", // shadow-primary
     shadowOffset: {
@@ -753,14 +806,23 @@ const styles = StyleSheet.create({
   },
   signupLinkContainer: {
     flexDirection: 'row',
+    alignItems: 'center',
     justifyContent: 'center',
+    flexWrap: 'wrap',
     marginTop: 24, // mt-6
   },
   signupLinkText: {
     fontFamily: 'Poppins_400Regular',
+    fontSize: 14,
+  },
+  signupLinkPressable: {
+    paddingVertical: 4,
+    paddingHorizontal: 2,
   },
   signupLinkHighlight: {
     fontFamily: 'Poppins_600SemiBold',
+    fontSize: 14,
+    textAlign: 'center',
   },
   errorText: {
     color: '#EF4444',

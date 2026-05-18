@@ -1,9 +1,8 @@
 import { Ionicons } from '@expo/vector-icons';
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
     ActivityIndicator,
     FlatList,
-    Image,
     Modal,
     StyleSheet,
     Text,
@@ -14,6 +13,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { supabase } from '../../lib/supabase';
 import { useTheme } from '../context/ThemeContext';
+import ProfileAvatar from './ProfileAvatar';
 
 interface User {
     id: string;
@@ -41,6 +41,7 @@ const UserSearchModal: React.FC<UserSearchModalProps> = ({
     const [users, setUsers] = useState<User[]>([]);
     const [loading, setLoading] = useState(false);
     const [recentUsers, setRecentUsers] = useState<User[]>([]);
+    const searchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     // Search users
     const searchUsers = useCallback(async (query: string) => {
@@ -71,13 +72,39 @@ const UserSearchModal: React.FC<UserSearchModalProps> = ({
     // Debounced search
     const handleSearchChange = (text: string) => {
         setSearchQuery(text);
-        // Simple debounce
-        setTimeout(() => {
-            if (text === searchQuery || text.length >= 2) {
-                searchUsers(text);
-            }
+        if (searchTimeoutRef.current) {
+            clearTimeout(searchTimeoutRef.current);
+        }
+
+        const trimmed = text.trim();
+        if (trimmed.length < 2) {
+            setUsers([]);
+            setLoading(false);
+            return;
+        }
+
+        searchTimeoutRef.current = setTimeout(() => {
+            void searchUsers(trimmed);
         }, 300);
     };
+
+    useEffect(() => {
+        return () => {
+            if (searchTimeoutRef.current) {
+                clearTimeout(searchTimeoutRef.current);
+            }
+        };
+    }, []);
+
+    useEffect(() => {
+        if (visible || !searchTimeoutRef.current) {
+            return;
+        }
+
+        clearTimeout(searchTimeoutRef.current);
+        searchTimeoutRef.current = null;
+        setLoading(false);
+    }, [visible]);
 
     // Load recent conversations' users when modal opens
     React.useEffect(() => {
@@ -153,13 +180,12 @@ const UserSearchModal: React.FC<UserSearchModalProps> = ({
             style={styles.userItem}
             onPress={() => handleSelectUser(item)}
         >
-            {item.avatar_url ? (
-                <Image source={{ uri: item.avatar_url }} style={styles.avatar} />
-            ) : (
-                <View style={[styles.avatar, styles.avatarPlaceholder, { backgroundColor: colors.primary }]}>
-                    <Ionicons name="person" size={20} color="#FFF" />
-                </View>
-            )}
+            <ProfileAvatar
+                uri={item.avatar_url}
+                style={styles.avatar}
+                backgroundColor={isDark ? '#374151' : '#E5E7EB'}
+                iconColor={colors.textSecondary}
+            />
             <View style={styles.userInfo}>
                 <Text style={[styles.userName, { color: colors.text }]}>
                     {item.full_name || 'Unknown User'}
@@ -172,9 +198,11 @@ const UserSearchModal: React.FC<UserSearchModalProps> = ({
         </TouchableOpacity>
     );
 
+    if (!visible) return null;
+
     return (
         <Modal
-            visible={visible}
+            visible
             animationType="slide"
             presentationStyle="fullScreen"
             onRequestClose={onClose}
@@ -201,8 +229,12 @@ const UserSearchModal: React.FC<UserSearchModalProps> = ({
                         autoFocus
                     />
                     {searchQuery.length > 0 && (
-                        <TouchableOpacity activeOpacity={1} onPress={() => setSearchQuery('')}>
-                            <Ionicons name="close-circle" size={20} color={colors.textSecondary} />
+                        <TouchableOpacity
+                            activeOpacity={1}
+                            onPress={() => setSearchQuery('')}
+                            hitSlop={{ top: 10, right: 10, bottom: 10, left: 10 }}
+                        >
+                            <Ionicons name="close-circle" size={18} color={colors.textSecondary} />
                         </TouchableOpacity>
                     )}
                 </View>
@@ -281,15 +313,21 @@ const styles = StyleSheet.create({
     searchContainer: {
         flexDirection: 'row',
         alignItems: 'center',
+        gap: 10,
         margin: 16,
-        paddingHorizontal: 12,
-        paddingVertical: 10,
-        borderRadius: 12,
+        paddingHorizontal: 16,
+        height: 48,
+        borderRadius: 16,
     },
     searchInput: {
         flex: 1,
-        marginLeft: 8,
-        fontSize: 16,
+        height: 24,
+        fontSize: 15,
+        fontFamily: 'Poppins_500Medium',
+        lineHeight: 20,
+        includeFontPadding: false,
+        padding: 0,
+        textAlignVertical: 'center',
     },
     loadingContainer: {
         flex: 1,

@@ -2,19 +2,19 @@ import { Ionicons } from "@expo/vector-icons";
 import {
     BottomSheetBackdrop,
     BottomSheetModal,
-    useBottomSheetTimingConfigs,
+    useBottomSheetSpringConfigs,
 } from "@gorhom/bottom-sheet";
+import { router } from "expo-router";
 import React, {
     forwardRef,
     useCallback,
     useEffect,
-    useMemo,
-    useRef,
+  useMemo,
     useState,
 } from "react";
 import {
     ActivityIndicator,
-    FlatList,
+  InteractionManager,
     Keyboard,
     LayoutAnimation,
     Platform,
@@ -24,19 +24,39 @@ import {
     TextInput,
     TouchableOpacity,
     UIManager,
+    useWindowDimensions,
     View,
 } from "react-native";
-import { Easing } from "react-native-reanimated";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { supabase } from "../../lib/supabase";
 import { useAuth } from "../context/AuthContext";
+import {
+  RADIO_MINI_PLAYER_HEIGHT,
+  RADIO_MINI_PLAYER_STACK_GAP,
+  useRadioPlayerPresence,
+} from "../context/RadioPlayerContext";
+import { emitToast } from "../events/toastBus";
 import { useTheme } from "../context/ThemeContext";
+import { useSearchResultsQuery } from "../data/hooks";
+import {
+  buildSocialFollowKey,
+  getListingSocialFollowTarget,
+} from "../utils/socialFollow";
+import { usePageLoadLogger } from "../utils/loadTimeLogger";
+import { bottomSheetSpringConfig } from "../utils/motion";
+import { NAVBAR_BOTTOM_OFFSET } from "./navbar";
 import ListingCard from "./ListingCard";
+import SafeBottomSheetFlatList from "./SafeBottomSheetFlatList";
+import TrackedBottomSheetModal from "./TrackedBottomSheetModal";
 
 const debugLog = (..._args: unknown[]) => {};
+
+const isFabricEnabled = Boolean((globalThis as { nativeFabricUIManager?: unknown }).nativeFabricUIManager);
 
 // Enable LayoutAnimation on Android
 if (
   Platform.OS === "android" &&
+  !isFabricEnabled &&
   UIManager.setLayoutAnimationEnabledExperimental
 ) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -76,21 +96,58 @@ const SORT_OPTIONS = [
 
 const PAGE_SIZE = 10;
 
+const getSearchResultIdentity = (item: any) => {
+  const typeKey =
+    typeof item?.type === "string" && item.type.length > 0 ? item.type : "item";
+  const idKey =
+    item?.id !== null && item?.id !== undefined && String(item.id).length > 0
+      ? String(item.id)
+      : "";
+
+  return idKey ? `${typeKey}-${idKey}` : null;
+};
+
+const getSearchResultKey = (item: any, index: number) => {
+  return getSearchResultIdentity(item) || `item-${index}`;
+};
+
+const dedupeSearchResults = (items: any[]) => {
+  const seenKeys = new Set<string>();
+
+  return items.filter((item) => {
+    const key = getSearchResultIdentity(item);
+    if (!key) return true;
+    if (seenKeys.has(key)) return false;
+
+    seenKeys.add(key);
+    return true;
+  });
+};
+
 interface SearchBottomSheetProps {
   onClose?: () => void;
   onItemPress?: (listingId: string) => void;
+  onProductionTeamPress?: (teamId: string) => void;
   onChat?: (item: any) => void;
+  onFollowChanged?: () => void;
 }
 
 const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
-  function SearchBottomSheet({ onClose, onItemPress, onChat }, ref) {
+  function SearchBottomSheet(
+    { onClose, onItemPress, onProductionTeamPress, onChat, onFollowChanged },
+    ref,
+  ) {
     const { colors, isDark } = useTheme();
-    const { userRole, isGuest } = useAuth();
+    const { userRole, isGuest, userId } = useAuth();
+    const insets = useSafeAreaInsets();
+    const { height: windowHeight } = useWindowDimensions();
+    const { activeStation } = useRadioPlayerPresence();
     const snapPoints = useMemo(() => ["90%"], []);
-    const animationConfigs = useBottomSheetTimingConfigs({
-      duration: 320,
-      easing: Easing.inOut(Easing.cubic),
-    });
+    const animationConfigs = useBottomSheetSpringConfigs(bottomSheetSpringConfig);
+    const filterPanelMaxHeight = useMemo(
+      () => Math.max(160, Math.min(240, windowHeight * 0.32)),
+      [windowHeight],
+    );
 
     // Filter Chips - safely handle null userRole
     const isOwner = userRole === "venue-owner" || userRole === "studio-owner";
@@ -99,24 +156,18 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
         isGuest
           ? []
           : isOwner
-            ? ["All", "Musician"]
-            : ["All", "Musician", "Studio", "Gig"],
+            ? ["All", "Musician", "Production Team"]
+            : ["All", "Musician", "Studio", "Gig", "Production Team"],
       [isGuest, isOwner],
     );
 
     // Basic State
     const [activeFilter, setActiveFilter] = useState("All");
     const [searchQuery, setSearchQuery] = useState("");
-    const [data, setData] = useState<any[]>([]);
-    const [loading, setLoading] = useState(true);
-    const [loadingMore, setLoadingMore] = useState(false);
-    const [currentPage, setCurrentPage] = useState(0);
-    const [hasMore, setHasMore] = useState(true);
-    const [spillover, setSpillover] = useState<any[]>([]);
-    const [refreshTrigger, setRefreshTrigger] = useState(0);
-    const requestIdRef = useRef(0);
-    const dataRef = useRef<any[]>([]);
-    const spilloverRef = useRef<any[]>([]);
+    const [debouncedSearchQuery, setDebouncedSearchQuery] = useState("");
+    const [isSheetOpen, setIsSheetOpen] = useState(false);
+    const [followingKeys, setFollowingKeys] = useState<Set<string>>(new Set());
+    const [followBusyByKey, setFollowBusyByKey] = useState<Record<string, boolean>>({});
 
     // Advanced Filter State
     const [showFilters, setShowFilters] = useState(false);
@@ -132,23 +183,60 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
     // Count active filters (excluding defaults)
     const activeFilterCount = useMemo(() => {
       let count = 0;
+      if (TYPE_FILTERS.length > 0 && activeFilter !== "All") count++;
       if (selectedGenre !== "All") count++;
       if (minRating > 0) count++;
       if (priceRange !== "all") count++;
       if (sortBy !== "newest") count++;
       return count;
-    }, [selectedGenre, minRating, priceRange, sortBy]);
+    }, [TYPE_FILTERS.length, activeFilter, selectedGenre, minRating, priceRange, sortBy]);
 
-    useEffect(() => {
-      dataRef.current = data;
-    }, [data]);
+    const searchResultsQuery = useSearchResultsQuery({
+      activeFilter,
+      enabled: isSheetOpen,
+      isGuest,
+      isOwner,
+      minRating,
+      pageSize: PAGE_SIZE,
+      priceRange,
+      query: debouncedSearchQuery,
+      selectedGenre,
+      sortBy,
+    });
 
-    useEffect(() => {
-      spilloverRef.current = spillover;
-    }, [spillover]);
+    const queriedResults = useMemo(
+      () => {
+        const items = (searchResultsQuery.data?.pages || []).flatMap((page: any) =>
+          Array.isArray(page?.items) ? page.items : Array.isArray(page?.data) ? page.data : [],
+        );
 
-    const visibleData = data;
-    const hasMoreResults = hasMore || spillover.length > 0;
+        return dedupeSearchResults(items);
+      },
+      [searchResultsQuery.data],
+    );
+
+    const visibleData = queriedResults;
+    const loading = searchResultsQuery.isLoading && queriedResults.length === 0;
+    const loadingMore = searchResultsQuery.isFetchingNextPage;
+    const hasMoreResults = Boolean(searchResultsQuery.hasNextPage);
+
+    usePageLoadLogger({
+      counts: {
+        results: visibleData.length,
+      },
+      details: {
+        activeFilter,
+        hasMore: hasMoreResults,
+        queryLength: debouncedSearchQuery.trim().length,
+        selectedGenre,
+        sortBy,
+      },
+      loading,
+      page: "SearchBottomSheet",
+      queries: { searchResults: searchResultsQuery },
+      ready: !loading,
+      enabled: isSheetOpen,
+    });
 
     const renderBackdrop = useCallback(
       (props: any) => (
@@ -162,10 +250,22 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
       [],
     );
 
+    const dismissSheet = useCallback(() => {
+      if (ref && typeof ref !== "function") {
+        ref.current?.dismiss();
+      }
+    }, [ref]);
+
     const handleClose = useCallback(() => {
+      setIsSheetOpen(false);
       Keyboard.dismiss();
       onClose?.();
     }, [onClose]);
+
+    const handleSheetChange = useCallback((index: number) => {
+      const nextOpen = index >= 0;
+      setIsSheetOpen(nextOpen);
+    }, []);
 
     // Toggle filter panel with animation
     const toggleFilters = useCallback(() => {
@@ -175,407 +275,261 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
 
     // Reset all filters
     const resetFilters = useCallback(() => {
+      setActiveFilter("All");
       setSelectedGenre("All");
       setMinRating(0);
       setPriceRange("all");
       setSortBy("newest");
     }, []);
 
-    // Search effect with filters
-    const fetchSearchPage = useCallback(
-      async (page: number, mode: "reset" | "append") => {
-        const isReset = mode === "reset";
-        const requestId = ++requestIdRef.current;
-
-        if (isReset) {
-          setLoading(true);
-          setHasMore(true);
-          setCurrentPage(0);
-          setSpillover([]);
-        } else {
-          setLoadingMore(true);
-        }
-
-        try {
-          let results: any[] = [];
-          let tables: string[] = [];
-          const fetchedCountsByTable = new Map<string, number>();
-
-          if (isGuest) {
-            tables = ["groups_with_stats", "profiles"];
-          } else if (isOwner) {
-            tables = ["groups_with_stats"];
-          } else {
-            if (activeFilter === "All") {
-              tables = ["groups_with_stats", "studios_with_stats", "gigs_with_stats"];
-            } else if (activeFilter === "Musician") {
-              tables = ["groups_with_stats"];
-            } else if (activeFilter === "Studio") {
-              tables = ["studios_with_stats"];
-            } else if (activeFilter === "Gig") {
-              tables = ["gigs_with_stats"];
-            }
-          }
-
-          for (const table of tables) {
-            const tablePageSize = PAGE_SIZE;
-
-            let query = supabase.from(table).select("*");
-
-            if (table === "profiles") {
-              query = query
-                .select(
-                  "id, full_name, avatar_url, address, created_at, role, genres, skills, show_gig_statuses",
-                )
-                .eq("role", "musician");
-            }
-
-            if (searchQuery.trim().length > 0) {
-              if (table === "profiles") {
-                query = query.or(
-                  `full_name.ilike.%${searchQuery}%,address.ilike.%${searchQuery}%`,
-                );
-              } else {
-                query = query.or(
-                  `name.ilike.%${searchQuery}%,location.ilike.%${searchQuery}%`,
-                );
-              }
-            }
-
-            if (table === "gigs_with_stats") {
-              query = query.eq("status", "open");
-            }
-
-            if (
-              selectedGenre !== "All" &&
-              (table === "groups_with_stats" || table === "gigs_with_stats")
-            ) {
-              query = query.ilike("genre", `%${selectedGenre}%`);
-            }
-
-            if (minRating > 0) {
-              query = query.gte("rating", minRating);
-            }
-
-            if (priceRange !== "all") {
-              const priceField = table.includes("studio")
-                ? "hourly_rate"
-                : table.includes("gig")
-                  ? "budget"
-                  : "rate";
-
-              if (priceRange === "low") {
-                query = query.lte(priceField, 5000);
-              } else if (priceRange === "mid") {
-                query = query.gte(priceField, 5000).lte(priceField, 15000);
-              } else if (priceRange === "high") {
-                query = query.gte(priceField, 15000);
-              }
-            }
-
-            if (sortBy === "rating") {
-              query = query.order("rating", { ascending: false });
-            } else if (sortBy === "price_low") {
-              const priceField = table.includes("studio")
-                ? "hourly_rate"
-                : table.includes("gig")
-                  ? "budget"
-                  : "rate";
-              query = query.order(priceField, {
-                ascending: true,
-                nullsFirst: false,
-              });
-            } else if (sortBy === "price_high") {
-              const priceField = table.includes("studio")
-                ? "hourly_rate"
-                : table.includes("gig")
-                  ? "budget"
-                  : "rate";
-              query = query.order(priceField, {
-                ascending: false,
-                nullsFirst: false,
-              });
-            } else {
-              query = query.order("created_at", { ascending: false });
-            }
-
-            const from = page * tablePageSize;
-            const to = from + tablePageSize - 1;
-            const { data: qData } = await query.range(from, to);
-            const fetchedCount = qData?.length || 0;
-            fetchedCountsByTable.set(table, fetchedCount);
-
-            if (qData) {
-              const type = table.includes("group")
-                ? "Group"
-                : table.includes("studio")
-                  ? "Studio"
-                  : table === "profiles"
-                    ? "Artist"
-                    : "Gig";
-
-              const mapped = qData.map((item: any) => ({
-                ...item,
-                type,
-                studio_type:
-                  type === "Studio"
-                    ? item.type || item.studio_type || null
-                    : item.studio_type || null,
-                name: item.name || item.full_name,
-                location: item.location || item.address,
-                image: item.images?.[0] || item.image || item.avatar_url,
-                genre:
-                  item.genre ||
-                  (Array.isArray(item.genres) ? item.genres.join(", ") : ""),
-                rate: (item.rate || item.hourly_rate || item.budget)?.toString(),
-                show_gig_statuses: item.show_gig_statuses,
-              }));
-
-              const genreFiltered =
-                selectedGenre !== "All" && table === "profiles"
-                  ? mapped.filter((item: any) =>
-                      String(item.genre || "")
-                        .toLowerCase()
-                        .includes(selectedGenre.toLowerCase()),
-                    )
-                  : mapped;
-
-              results.push(...genreFiltered);
-            }
-          }
-
-          const groupIds = Array.from(
-            new Set(
-              results
-                .filter((item) => item.type === "Group" && item.id)
-                .map((item) => item.id),
-            ),
-          );
-
-          if (groupIds.length > 0) {
-            const { data: groupVisibilityRows } = await supabase
-              .from("groups")
-              .select("id, open_group_applications")
-              .in("id", groupIds);
-
-            const visibilityMap = new Map<string, boolean>();
-            (groupVisibilityRows || []).forEach((row: any) => {
-              visibilityMap.set(row.id, row.open_group_applications === true);
-            });
-
-            results = results.map((item) =>
-              item.type === "Group"
-                ? {
-                    ...item,
-                    open_group_applications:
-                      visibilityMap.get(item.id) ??
-                      item.open_group_applications === true,
-                  }
-                : item,
-            );
-          }
-
-          // Fetch active promotions for studios
-          const studioIds = Array.from(
-            new Set(
-              results
-                .filter((item) => item.type === "Studio" && item.id)
-                .map((item) => item.id),
-            ),
-          );
-
-          if (studioIds.length > 0) {
-            const todayStr = new Date().toISOString().split("T")[0];
-            const { data: studioPromos } = await supabase
-              .from("studio_promotions")
-              .select("studio_id")
-              .in("studio_id", studioIds)
-              .eq("is_active", true)
-              .or(`is_permanent.eq.true,and(start_date.lte.${todayStr},end_date.gte.${todayStr})`);
-
-            if (studioPromos) {
-              const promoStudioIds = new Set(studioPromos.map((p: any) => p.studio_id));
-              results = results.map((item) =>
-                item.type === "Studio"
-                  ? { ...item, has_active_promotion: promoStudioIds.has(item.id) }
-                  : item,
-              );
-            }
-          }
-
-          if (sortBy === "rating") {
-            results.sort((a, b) => (b.rating || 0) - (a.rating || 0));
-          } else if (sortBy === "price_low") {
-            results.sort((a, b) => {
-              const aPrice = parseFloat(a.rate?.replace(/,/g, "") || "0");
-              const bPrice = parseFloat(b.rate?.replace(/,/g, "") || "0");
-              return aPrice - bPrice;
-            });
-          } else if (sortBy === "price_high") {
-            results.sort((a, b) => {
-              const aPrice = parseFloat(a.rate?.replace(/,/g, "") || "0");
-              const bPrice = parseFloat(b.rate?.replace(/,/g, "") || "0");
-              return bPrice - aPrice;
-            });
-          }
-
-          if (requestId !== requestIdRef.current) {
-            return;
-          }
-
-          const hasNextPage = tables.some(
-            (table) => (fetchedCountsByTable.get(table) || 0) === PAGE_SIZE,
-          );
-
-          const existingKeys = new Set<string>();
-          if (!isReset) {
-            dataRef.current.forEach((item: any, index: number) => {
-              existingKeys.add(`${item.type || "item"}-${item.id || index}`);
-            });
-          }
-
-          const pooledMap = new Map<string, any>();
-          [...spilloverRef.current, ...results].forEach((item: any, index: number) => {
-            const key = `${item.type || "item"}-${item.id || index}`;
-            if (existingKeys.has(key) || pooledMap.has(key)) {
-              return;
-            }
-            pooledMap.set(key, item);
-          });
-
-          const pooledResults = Array.from(pooledMap.values());
-          const nextChunk = pooledResults.slice(0, PAGE_SIZE);
-          const nextSpillover = pooledResults.slice(PAGE_SIZE);
-
-          setHasMore(hasNextPage);
-          setCurrentPage(page);
-          setSpillover(nextSpillover);
-
-          if (isReset) {
-            setData(nextChunk);
-          } else {
-            setData((prev) => [...prev, ...nextChunk]);
-          }
-        } catch (e) {
-          debugLog("Search error:", e);
-        } finally {
-          if (requestId === requestIdRef.current) {
-            if (isReset) {
-              setLoading(false);
-            } else {
-              setLoadingMore(false);
-            }
-          }
-        }
-      },
-      [
-        activeFilter,
-        isGuest,
-        isOwner,
-        minRating,
-        priceRange,
-        searchQuery,
-        selectedGenre,
-        sortBy,
-      ],
-    );
-
     useEffect(() => {
+      if (!isSheetOpen) {
+        return;
+      }
+
       const timeout = setTimeout(() => {
-        fetchSearchPage(0, "reset");
+        setDebouncedSearchQuery(searchQuery);
       }, 300);
 
       return () => clearTimeout(timeout);
-    }, [fetchSearchPage, refreshTrigger]);
+    }, [isSheetOpen, searchQuery]);
 
-    // Realtime Search Updates
-    useEffect(() => {
-      const channel = supabase
-        .channel("public:search_updates")
-        .on(
-          "postgres_changes",
-          { event: "*", schema: "public", table: "gigs" },
-          () => setRefreshTrigger((prev) => prev + 1),
-        )
-        .on(
-          "postgres_changes",
-          { event: "*", schema: "public", table: "studios" },
-          () => setRefreshTrigger((prev) => prev + 1),
-        )
-        .on(
-          "postgres_changes",
-          { event: "*", schema: "public", table: "groups" },
-          () => setRefreshTrigger((prev) => prev + 1),
-        )
-        .subscribe();
-
-      return () => {
-        supabase.removeChannel(channel);
-      };
-    }, []);
+    // Search invalidation is handled by the shared RootLayout query channel.
 
     const handleItemPress = useCallback(
       (item: any) => {
-        // Dismiss first for smoother transition to details sheet
-        // @ts-ignore
-        ref?.current?.dismiss();
-        setTimeout(() => {
-          onItemPress?.(item.id);
-        }, 120);
+        const listingId = item?.id;
+        if (!listingId) return;
+
+        dismissSheet();
+
+        InteractionManager.runAfterInteractions(() => {
+          requestAnimationFrame(() => {
+            setTimeout(() => {
+              if (item?.type === "Production") {
+                if (onProductionTeamPress) {
+                  onProductionTeamPress(listingId);
+                  return;
+                }
+
+                router.push({ pathname: "/production_team", params: { teamId: listingId } });
+                return;
+              }
+
+              onItemPress?.(listingId);
+            }, 220);
+          });
+        });
       },
-      [onItemPress, ref],
+      [dismissSheet, onItemPress, onProductionTeamPress],
     );
 
     const clearSearch = () => setSearchQuery("");
+
+    const getFollowTarget = useCallback(
+      (item: any) => getListingSocialFollowTarget(item, userId),
+      [userId],
+    );
+
+    const loadFollowingKeys = useCallback(async () => {
+      if (isGuest || !userId) {
+        setFollowingKeys(new Set());
+        return;
+      }
+
+      try {
+        const { data: followingResponse, error } = await supabase.functions.invoke("manage-social-feed", {
+          body: { action: "get_following" },
+        });
+
+        if (error) {
+          throw error;
+        }
+
+        const nextFollowedKeys = new Set<string>(
+          (Array.isArray(followingResponse?.data) ? followingResponse.data : [])
+            .map((row: any) =>
+              buildSocialFollowKey(row?.followed_type, row?.followed_id),
+            )
+            .filter((value: string) => value.length > 0),
+        );
+
+        setFollowingKeys(nextFollowedKeys);
+      } catch {
+        // Keep existing follow state when lookup fails.
+      }
+    }, [isGuest, userId]);
+
+    useEffect(() => {
+      if (!isSheetOpen) return;
+      loadFollowingKeys();
+    }, [isSheetOpen, loadFollowingKeys]);
 
     const handleChatPress = useCallback(
       (item: any) => {
         // Dismiss the modal first, then trigger chat
         // @ts-ignore
-        ref?.current?.dismiss();
+        dismissSheet();
         // Small delay to let modal close
         setTimeout(() => {
           onChat?.(item);
         }, 100);
       },
-      [onChat, ref],
+      [dismissSheet, onChat],
+    );
+
+    const handleFollowToggle = useCallback(
+      async (item: any) => {
+        const target = getFollowTarget(item);
+        if (!target || isGuest) {
+          return;
+        }
+
+        const targetKey = buildSocialFollowKey(target.type, target.id);
+
+        if (!targetKey || followBusyByKey[targetKey]) {
+          return;
+        }
+
+        const wasFollowing = followingKeys.has(targetKey);
+        setFollowBusyByKey((prev) => ({ ...prev, [targetKey]: true }));
+        setFollowingKeys((prev) => {
+          const next = new Set(prev);
+          if (wasFollowing) {
+            next.delete(targetKey);
+          } else {
+            next.add(targetKey);
+          }
+          return next;
+        });
+
+        try {
+          const { error } = await supabase.functions.invoke("manage-social-feed", {
+            body: {
+              action: wasFollowing ? "unfollow" : "follow",
+              target_id: target.id,
+              target_type: target.type,
+            },
+          });
+
+          if (error) {
+            throw error;
+          }
+
+          emitToast({
+            type: "success",
+            title: wasFollowing ? "Unfollowed" : "Following",
+            message: "",
+          });
+
+          onFollowChanged?.();
+        } catch (error: any) {
+          setFollowingKeys((prev) => {
+            const next = new Set(prev);
+            if (wasFollowing) {
+              next.add(targetKey);
+            } else {
+              next.delete(targetKey);
+            }
+            return next;
+          });
+
+          emitToast({
+            type: "error",
+            title: "Follow failed",
+            message: error?.message || "Please try again.",
+          });
+        } finally {
+          setFollowBusyByKey((prev) => {
+            const next = { ...prev };
+            delete next[targetKey];
+            return next;
+          });
+        }
+      },
+      [followBusyByKey, followingKeys, getFollowTarget, isGuest, onFollowChanged],
     );
 
     const renderItem = useCallback(
-      ({ item }: { item: any }) => (
-        <ListingCard
-          item={item}
-          onPress={handleItemPress}
-          onChat={onChat ? handleChatPress : undefined}
-          showGigSummary={false}
-          variant="vertical"
-          style={{ width: "100%" }}
-        />
-      ),
-      [handleItemPress, handleChatPress, onChat],
+      ({ item }: { item: any }) => {
+        const followTarget = getFollowTarget(item);
+        const followKey = followTarget
+          ? buildSocialFollowKey(followTarget.type, followTarget.id)
+          : "";
+        const canFollow = Boolean(followKey) && !isGuest;
+        const isFollowing = followKey ? followingKeys.has(followKey) : false;
+        const isFollowBusy = followKey ? followBusyByKey[followKey] === true : false;
+
+        return (
+          <View style={styles.resultCardWrap}>
+            <ListingCard
+              item={item}
+              onPress={handleItemPress}
+              onChat={onChat ? handleChatPress : undefined}
+              showGigSummary={false}
+              variant="feed"
+              style={styles.resultListingCard}
+              actionSlot={
+                canFollow ? (
+                  <TouchableOpacity
+                    activeOpacity={1}
+                    disabled={isFollowBusy}
+                    onPress={() => handleFollowToggle(item)}
+                    style={[
+                      styles.followBadgeBtn,
+                      {
+                        backgroundColor: isFollowing ? (isDark ? "#111827" : "#FFFFFF") : colors.primary,
+                        borderColor: isFollowing ? (isDark ? "#374151" : "#CBD5E1") : colors.primary,
+                        opacity: isFollowBusy ? 0.7 : 1,
+                      },
+                    ]}
+                  >
+                    {isFollowBusy ? (
+                      <ActivityIndicator size="small" color={isFollowing ? colors.textSecondary : "#FFFFFF"} />
+                    ) : (
+                      <Text
+                        style={[
+                          styles.followBadgeText,
+                          { color: isFollowing ? colors.textSecondary : "#FFFFFF" },
+                        ]}
+                      >
+                        {isFollowing ? "Following" : "Follow"}
+                      </Text>
+                    )}
+                  </TouchableOpacity>
+                ) : null
+              }
+            />
+          </View>
+        );
+      },
+      [
+        colors.primary,
+        colors.textSecondary,
+        followBusyByKey,
+        followingKeys,
+        getFollowTarget,
+        handleChatPress,
+        handleFollowToggle,
+        handleItemPress,
+        isDark,
+        isGuest,
+        onChat,
+      ],
     );
 
     const keyExtractor = useCallback(
-      (item: any, index: number) => item.id?.toString?.() || String(index),
+      (item: any, index: number) => getSearchResultKey(item, index),
       [],
     );
 
-    const itemSeparator = useCallback(() => <View style={{ height: 24 }} />, []);
+    const itemSeparator = useCallback(() => <View style={styles.resultSeparator} />, []);
 
     const handleLoadMore = useCallback(() => {
       if (loading || loadingMore || !hasMoreResults) return;
 
-      const buffered = spilloverRef.current;
-      if (buffered.length > 0) {
-        const nextChunk = buffered.slice(0, PAGE_SIZE);
-        const remaining = buffered.slice(PAGE_SIZE);
-        setData((prev) => [...prev, ...nextChunk]);
-        setSpillover(remaining);
-        return;
-      }
-
-      fetchSearchPage(currentPage + 1, "append");
-    }, [currentPage, fetchSearchPage, hasMoreResults, loading, loadingMore]);
+      void searchResultsQuery.fetchNextPage();
+    }, [hasMoreResults, loading, loadingMore, searchResultsQuery.fetchNextPage]);
 
     const listFooter = useMemo(() => {
       if (loadingMore) {
@@ -586,7 +540,7 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
         );
       }
 
-      if (!hasMoreResults || data.length === 0) {
+      if (!hasMoreResults || visibleData.length === 0) {
         return <View style={styles.paginationFooterSpacer} />;
       }
 
@@ -597,15 +551,15 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
           </Text>
         </View>
       );
-    }, [colors.primary, colors.textSecondary, data.length, hasMoreResults, loadingMore]);
+    }, [colors.primary, colors.textSecondary, visibleData.length, hasMoreResults, loadingMore]);
 
     const resultsLabelText = useMemo(() => {
-      if (data.length === 0) return "Top Results";
+      if (visibleData.length === 0) return "Top Results";
       if (hasMoreResults) {
-        return `${data.length}+ Result${data.length !== 1 ? "s" : ""}`;
+        return `${visibleData.length}+ Result${visibleData.length !== 1 ? "s" : ""}`;
       }
-      return `${data.length} Result${data.length !== 1 ? "s" : ""}`;
-    }, [data.length, hasMoreResults]);
+      return `${visibleData.length} Result${visibleData.length !== 1 ? "s" : ""}`;
+    }, [visibleData.length, hasMoreResults]);
 
     // Filter Section Component
     const renderFilterSection = useMemo(() => {
@@ -619,188 +573,233 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
               backgroundColor: isDark ? "#1F2937" : "#FFFFFF",
               borderColor: isDark ? "#374151" : "#E5E7EB",
             },
+            { maxHeight: filterPanelMaxHeight },
           ]}
         >
-          {/* Genre Filter */}
-          <View style={styles.filterSection}>
-            <Text style={[styles.filterLabel, { color: colors.text }]}>
-              Genre
-            </Text>
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.filterChipsScroll}
-            >
-              {GENRE_OPTIONS.map((genre) => (
-                <TouchableOpacity activeOpacity={1}
-                  key={genre}
-                  style={[
-                    styles.filterChip,
-                    selectedGenre === genre
-                      ? { backgroundColor: colors.primary }
-                      : { backgroundColor: isDark ? "#374151" : "#F3F4F6" },
-                  ]}
-                  onPress={() => setSelectedGenre(genre)}
-                >
-                  <Text
-                    style={[
-                      styles.filterChipText,
-                      selectedGenre === genre
-                        ? { color: "#FFF" }
-                        : { color: isDark ? "#D1D5DB" : "#4B5563" },
-                    ]}
-                  >
-                    {genre}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-          </View>
+          <ScrollView
+            nestedScrollEnabled
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+            contentContainerStyle={styles.filterPanelContent}
+          >
+            {TYPE_FILTERS.length > 0 && (
+              <View style={styles.filterSection}>
+                <Text style={[styles.filterLabel, { color: colors.text }]}>
+                  Type
+                </Text>
+                <View style={styles.filterRow}>
+                  {TYPE_FILTERS.map((filter) => (
+                    <TouchableOpacity activeOpacity={1}
+                      key={filter}
+                      style={[
+                        styles.filterChip,
+                        activeFilter === filter
+                          ? { backgroundColor: colors.primary }
+                          : { backgroundColor: isDark ? "#374151" : "#F3F4F6" },
+                      ]}
+                      onPress={() => setActiveFilter(filter)}
+                    >
+                      <Text
+                        style={[
+                          styles.filterChipText,
+                          activeFilter === filter
+                            ? { color: "#FFF" }
+                            : { color: isDark ? "#D1D5DB" : "#4B5563" },
+                        ]}
+                      >
+                        {filter}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+            )}
 
-          {/* Rating Filter */}
-          <View style={styles.filterSection}>
-            <Text style={[styles.filterLabel, { color: colors.text }]}>
-              Min Rating
-            </Text>
-            <View style={styles.filterRow}>
-              {RATING_OPTIONS.map((option) => (
-                <TouchableOpacity activeOpacity={1}
-                  key={option.value}
-                  style={[
-                    styles.filterChip,
-                    minRating === option.value
-                      ? { backgroundColor: colors.primary }
-                      : { backgroundColor: isDark ? "#374151" : "#F3F4F6" },
-                  ]}
-                  onPress={() => setMinRating(option.value)}
-                >
-                  {option.value > 0 && (
+            {/* Genre Filter */}
+            <View style={styles.filterSection}>
+              <Text style={[styles.filterLabel, { color: colors.text }]}>
+                Genre
+              </Text>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.filterChipsScroll}
+              >
+                {GENRE_OPTIONS.map((genre) => (
+                  <TouchableOpacity activeOpacity={1}
+                    key={genre}
+                    style={[
+                      styles.filterChip,
+                      selectedGenre === genre
+                        ? { backgroundColor: colors.primary }
+                        : { backgroundColor: isDark ? "#374151" : "#F3F4F6" },
+                    ]}
+                    onPress={() => setSelectedGenre(genre)}
+                  >
+                    <Text
+                      style={[
+                        styles.filterChipText,
+                        selectedGenre === genre
+                          ? { color: "#FFF" }
+                          : { color: isDark ? "#D1D5DB" : "#4B5563" },
+                      ]}
+                    >
+                      {genre}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            </View>
+
+            {/* Rating Filter */}
+            <View style={styles.filterSection}>
+              <Text style={[styles.filterLabel, { color: colors.text }]}>
+                Min Rating
+              </Text>
+              <View style={styles.filterRow}>
+                {RATING_OPTIONS.map((option) => (
+                  <TouchableOpacity activeOpacity={1}
+                    key={option.value}
+                    style={[
+                      styles.filterChip,
+                      minRating === option.value
+                        ? { backgroundColor: colors.primary }
+                        : { backgroundColor: isDark ? "#374151" : "#F3F4F6" },
+                    ]}
+                    onPress={() => setMinRating(option.value)}
+                  >
+                    {option.value > 0 && (
+                      <Ionicons
+                        name="star"
+                        size={12}
+                        color={minRating === option.value ? "#FFF" : "#FBBF24"}
+                        style={{ marginRight: 4 }}
+                      />
+                    )}
+                    <Text
+                      style={[
+                        styles.filterChipText,
+                        minRating === option.value
+                          ? { color: "#FFF" }
+                          : { color: isDark ? "#D1D5DB" : "#4B5563" },
+                      ]}
+                    >
+                      {option.label}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+
+            {/* Price Range Filter */}
+            <View style={styles.filterSection}>
+              <Text style={[styles.filterLabel, { color: colors.text }]}>
+                Price Range
+              </Text>
+              <View style={styles.filterRow}>
+                {PRICE_OPTIONS.map((option) => (
+                  <TouchableOpacity activeOpacity={1}
+                    key={option.value}
+                    style={[
+                      styles.filterChip,
+                      priceRange === option.value
+                        ? { backgroundColor: colors.primary }
+                        : { backgroundColor: isDark ? "#374151" : "#F3F4F6" },
+                    ]}
+                    onPress={() => setPriceRange(option.value as any)}
+                  >
+                    <Text
+                      style={[
+                        styles.filterChipText,
+                        priceRange === option.value
+                          ? { color: "#FFF" }
+                          : { color: isDark ? "#D1D5DB" : "#4B5563" },
+                      ]}
+                    >
+                      {option.label}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+
+            {/* Sort By */}
+            <View style={styles.filterSection}>
+              <Text style={[styles.filterLabel, { color: colors.text }]}>
+                Sort By
+              </Text>
+              <View style={styles.filterRow}>
+                {SORT_OPTIONS.map((option) => (
+                  <TouchableOpacity activeOpacity={1}
+                    key={option.value}
+                    style={[
+                      styles.filterChip,
+                      sortBy === option.value
+                        ? { backgroundColor: colors.primary }
+                        : { backgroundColor: isDark ? "#374151" : "#F3F4F6" },
+                    ]}
+                    onPress={() => setSortBy(option.value as any)}
+                  >
                     <Ionicons
-                      name="star"
-                      size={12}
-                      color={minRating === option.value ? "#FFF" : "#FBBF24"}
+                      name={option.icon as any}
+                      size={14}
+                      color={
+                        sortBy === option.value
+                          ? "#FFF"
+                          : isDark
+                            ? "#D1D5DB"
+                            : "#4B5563"
+                      }
                       style={{ marginRight: 4 }}
                     />
-                  )}
-                  <Text
-                    style={[
-                      styles.filterChipText,
-                      minRating === option.value
-                        ? { color: "#FFF" }
-                        : { color: isDark ? "#D1D5DB" : "#4B5563" },
-                    ]}
-                  >
-                    {option.label}
-                  </Text>
-                </TouchableOpacity>
-              ))}
+                    <Text
+                      style={[
+                        styles.filterChipText,
+                        sortBy === option.value
+                          ? { color: "#FFF" }
+                          : { color: isDark ? "#D1D5DB" : "#4B5563" },
+                      ]}
+                    >
+                      {option.label}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
             </View>
-          </View>
 
-          {/* Price Range Filter */}
-          <View style={styles.filterSection}>
-            <Text style={[styles.filterLabel, { color: colors.text }]}>
-              Price Range
-            </Text>
-            <View style={styles.filterRow}>
-              {PRICE_OPTIONS.map((option) => (
-                <TouchableOpacity activeOpacity={1}
-                  key={option.value}
-                  style={[
-                    styles.filterChip,
-                    priceRange === option.value
-                      ? { backgroundColor: colors.primary }
-                      : { backgroundColor: isDark ? "#374151" : "#F3F4F6" },
-                  ]}
-                  onPress={() => setPriceRange(option.value as any)}
-                >
-                  <Text
-                    style={[
-                      styles.filterChipText,
-                      priceRange === option.value
-                        ? { color: "#FFF" }
-                        : { color: isDark ? "#D1D5DB" : "#4B5563" },
-                    ]}
-                  >
-                    {option.label}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-          </View>
-
-          {/* Sort By */}
-          <View style={styles.filterSection}>
-            <Text style={[styles.filterLabel, { color: colors.text }]}>
-              Sort By
-            </Text>
-            <View style={styles.filterRow}>
-              {SORT_OPTIONS.map((option) => (
-                <TouchableOpacity activeOpacity={1}
-                  key={option.value}
-                  style={[
-                    styles.filterChip,
-                    sortBy === option.value
-                      ? { backgroundColor: colors.primary }
-                      : { backgroundColor: isDark ? "#374151" : "#F3F4F6" },
-                  ]}
-                  onPress={() => setSortBy(option.value as any)}
-                >
-                  <Ionicons
-                    name={option.icon as any}
-                    size={14}
-                    color={
-                      sortBy === option.value
-                        ? "#FFF"
-                        : isDark
-                          ? "#D1D5DB"
-                          : "#4B5563"
-                    }
-                    style={{ marginRight: 4 }}
-                  />
-                  <Text
-                    style={[
-                      styles.filterChipText,
-                      sortBy === option.value
-                        ? { color: "#FFF" }
-                        : { color: isDark ? "#D1D5DB" : "#4B5563" },
-                    ]}
-                  >
-                    {option.label}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-          </View>
-
-          {/* Reset Button */}
-          {activeFilterCount > 0 && (
-            <TouchableOpacity activeOpacity={1}
-              style={[styles.resetButton, { borderColor: colors.primary }]}
-              onPress={resetFilters}
-            >
-              <Ionicons
-                name="refresh-outline"
-                size={16}
-                color={colors.primary}
-              />
-              <Text style={[styles.resetButtonText, { color: colors.primary }]}>
-                Reset Filters
-              </Text>
-            </TouchableOpacity>
-          )}
+            {/* Reset Button */}
+            {activeFilterCount > 0 && (
+              <TouchableOpacity activeOpacity={1}
+                style={[styles.resetButton, { borderColor: colors.primary }]}
+                onPress={resetFilters}
+              >
+                <Ionicons
+                  name="refresh-outline"
+                  size={16}
+                  color={colors.primary}
+                />
+                <Text style={[styles.resetButtonText, { color: colors.primary }]}>
+                  Reset Filters
+                </Text>
+              </TouchableOpacity>
+            )}
+          </ScrollView>
         </View>
       );
     }, [
       showFilters,
+      activeFilter,
       colors,
       isDark,
+      isOwner,
+      TYPE_FILTERS,
       selectedGenre,
       minRating,
       priceRange,
       sortBy,
       activeFilterCount,
       resetFilters,
+      filterPanelMaxHeight,
     ]);
 
     // Header Component
@@ -809,7 +808,7 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
         <View style={{ backgroundColor: colors.background }}>
           <View style={styles.headerContainer}>
             <Text style={[styles.headerTitle, { color: colors.text }]}>
-              Discover
+              Search
             </Text>
 
             <View style={{ flexDirection: "column", gap: 8 }}>
@@ -835,8 +834,8 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
                     style={[styles.searchInput, { color: colors.text }]}
                     placeholder={
                       isOwner
-                        ? "Find musicians, bands..."
-                        : "Find studios, gigs, venues..."
+                        ? "Search musicians and teams"
+                        : "Search artists, studios, gigs"
                     }
                     placeholderTextColor={colors.textSecondary}
                     value={searchQuery}
@@ -906,41 +905,6 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
               ) : null}
             </View>
 
-            {/* Type Filter Chips */}
-            {!isOwner && TYPE_FILTERS.length > 0 && (
-              <View style={styles.chipsRow}>
-                {TYPE_FILTERS.map((filter) => {
-                  const isActive = filter === activeFilter;
-                  return (
-                    <TouchableOpacity
-                      key={filter}
-                      style={[
-                        styles.chip,
-                        isActive
-                          ? { backgroundColor: colors.primary, borderWidth: 0 }
-                          : {
-                              backgroundColor: isDark ? "#374151" : "#F3F4F6",
-                              borderWidth: 0,
-                            },
-                      ]}
-                      onPress={() => setActiveFilter(filter)}
-                      activeOpacity={1}
-                    >
-                      <Text
-                        style={[
-                          styles.chipText,
-                          isActive
-                            ? { color: "#FFF" }
-                            : { color: isDark ? "#D1D5DB" : "#4B5563" },
-                        ]}
-                      >
-                        {filter}
-                      </Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </View>
-            )}
           </View>
 
           {/* Filter Panel */}
@@ -953,6 +917,8 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
               styles.resultsLabel,
               { color: colors.textSecondary },
               !showFilters && activeFilterCount === 0 && styles.resultsLabelCompact,
+              !showFilters && activeFilterCount > 0 && styles.resultsLabelWithAppliedFilters,
+              showFilters && styles.resultsLabelWithFilters,
             ]}
           >
             {resultsLabelText}
@@ -1014,8 +980,9 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
     );
 
     return (
-      <BottomSheetModal
+      <TrackedBottomSheetModal
         ref={ref}
+        overlayLabel="SearchBottomSheet"
         index={0}
         snapPoints={snapPoints}
         animationConfigs={animationConfigs}
@@ -1024,6 +991,7 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
         enableContentPanningGesture={false}
         enableOverDrag={false}
         backdropComponent={renderBackdrop}
+        onChange={handleSheetChange}
         onDismiss={handleClose}
         backgroundStyle={{
           backgroundColor: colors.background,
@@ -1046,7 +1014,8 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
             <ActivityIndicator size="large" color={colors.primary} />
           </View>
         ) : (
-          <FlatList
+          <SafeBottomSheetFlatList
+            style={styles.resultsList}
             data={visibleData}
             renderItem={renderItem}
             keyExtractor={keyExtractor}
@@ -1055,7 +1024,7 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
             ListFooterComponent={listFooter}
             contentContainerStyle={[
               styles.listContent,
-              { paddingHorizontal: 24 },
+              { paddingHorizontal: 16 },
             ]}
             keyboardShouldPersistTaps="handled"
             showsVerticalScrollIndicator={false}
@@ -1066,10 +1035,9 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
             nestedScrollEnabled
             onEndReached={handleLoadMore}
             onEndReachedThreshold={0.35}
-            removeClippedSubviews={Platform.OS === "android"}
           />
         )}
-      </BottomSheetModal>
+      </TrackedBottomSheetModal>
     );
   },
 );
@@ -1080,6 +1048,12 @@ const styles = StyleSheet.create({
     paddingBottom: 16,
     paddingHorizontal: 24,
     gap: 16,
+  },
+  resultListingCard: {
+    width: "100%",
+  },
+  resultSeparator: {
+    height: 10,
   },
   headerTitle: {
     fontSize: 24,
@@ -1098,7 +1072,11 @@ const styles = StyleSheet.create({
     flex: 1,
     fontFamily: "Poppins_500Medium",
     fontSize: 15,
+    lineHeight: 20,
+    height: 24,
     padding: 0,
+    includeFontPadding: false,
+    textAlignVertical: "center",
   },
   filterButton: {
     width: 48,
@@ -1124,52 +1102,60 @@ const styles = StyleSheet.create({
     fontFamily: "Poppins_600SemiBold",
   },
   filterPanel: {
-    marginHorizontal: 24,
-    marginBottom: 16,
-    padding: 16,
-    borderRadius: 16,
+    marginHorizontal: 16,
+    marginBottom: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 14,
     borderWidth: 1,
+    overflow: "hidden",
+  },
+  filterPanelContent: {
+    paddingBottom: 2,
   },
   filterSection: {
-    marginBottom: 16,
+    marginBottom: 10,
   },
   filterLabel: {
     fontFamily: "Poppins_600SemiBold",
-    fontSize: 13,
-    marginBottom: 10,
+    fontSize: 12,
+    marginBottom: 6,
   },
   filterRow: {
     flexDirection: "row",
     flexWrap: "wrap",
-    gap: 8,
+    gap: 6,
   },
   filterChipsScroll: {
-    gap: 8,
+    gap: 6,
+    paddingRight: 4,
   },
   filterChip: {
     flexDirection: "row",
     alignItems: "center",
-    paddingHorizontal: 14,
-    paddingVertical: 8,
+    minHeight: 32,
+    paddingHorizontal: 11,
+    paddingVertical: 6,
     borderRadius: 100,
   },
   filterChipText: {
     fontFamily: "Poppins_500Medium",
-    fontSize: 13,
+    fontSize: 12,
+    lineHeight: 16,
   },
   resetButton: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    paddingVertical: 10,
+    paddingVertical: 8,
     borderRadius: 12,
     borderWidth: 1,
     gap: 6,
-    marginTop: 4,
+    marginTop: 0,
   },
   resetButtonText: {
     fontFamily: "Poppins_500Medium",
-    fontSize: 13,
+    fontSize: 12,
   },
   chipsRow: {
     flexDirection: "row",
@@ -1189,6 +1175,28 @@ const styles = StyleSheet.create({
     height: 1,
     width: "100%",
     opacity: 0.1,
+  },
+  resultCardWrap: {
+    position: "relative",
+  },
+  resultsList: {
+    flex: 1,
+  },
+  followBadgeBtn: {
+    minHeight: 40,
+    borderRadius: 14,
+    borderWidth: 1,
+    paddingHorizontal: 14,
+    alignItems: "center",
+    justifyContent: "center",
+    alignSelf: "stretch",
+  },
+  followBadgeText: {
+    fontFamily: "Poppins_600SemiBold",
+    fontSize: 12,
+    lineHeight: 16,
+    includeFontPadding: false,
+    textAlignVertical: "center",
   },
   listContent: {
     paddingBottom: 100,
@@ -1247,6 +1255,14 @@ const styles = StyleSheet.create({
   },
   resultsLabelCompact: {
     marginTop: 2,
+    marginBottom: 8,
+  },
+  resultsLabelWithAppliedFilters: {
+    marginTop: 8,
+    marginBottom: 8,
+  },
+  resultsLabelWithFilters: {
+    marginTop: 10,
     marginBottom: 8,
   },
   paginationFooter: {

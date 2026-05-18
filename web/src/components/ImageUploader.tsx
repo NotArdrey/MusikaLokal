@@ -1,12 +1,174 @@
 import { Ionicons } from '@expo/vector-icons';
+import * as FileSystem from 'expo-file-system/src/legacy';
 import * as ImagePicker from 'expo-image-picker';
-import React, { useState } from 'react';
-import { ActivityIndicator, Image, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import React, { useEffect, useRef, useState } from 'react';
+import { ActivityIndicator, Image, Modal, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { supabase } from '../../lib/supabase';
 import { useTheme } from '../context/ThemeContext';
+import { createE2EImageFixtureUrls, isE2EFixtureMode } from '../utils/e2eFixtures';
 import CustomAlert, { AlertType } from './CustomAlert';
 
 const debugLog = (..._args: unknown[]) => {};
+
+const sanitizeExtension = (rawExt?: string | null): string => {
+  const cleaned = (rawExt || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+  return cleaned || 'jpg';
+};
+
+const getExtensionFromName = (name: string): string => {
+  const cleanedName = name.split('?')[0];
+  const ext = cleanedName.includes('.') ? cleanedName.split('.').pop() : '';
+  return sanitizeExtension(ext);
+};
+
+const mimeFromExtension = (ext: string): string => {
+  const normalized = sanitizeExtension(ext);
+  const map: Record<string, string> = {
+    jpg: 'image/jpeg',
+    jpeg: 'image/jpeg',
+    png: 'image/png',
+    webp: 'image/webp',
+    gif: 'image/gif',
+    bmp: 'image/bmp',
+    heic: 'image/heic',
+    heif: 'image/heif',
+  };
+  return map[normalized] || 'image/jpeg';
+};
+
+const resolveMimeType = (asset: ImagePicker.ImagePickerAsset, ext: string): string => {
+  const maybeMime = (asset as any)?.mimeType;
+  if (typeof maybeMime === 'string') {
+    const normalized = maybeMime.trim().toLowerCase();
+    if (/^image\/[a-z0-9.+-]+$/.test(normalized)) {
+      return normalized;
+    }
+  }
+  return mimeFromExtension(ext);
+};
+
+const estimateBase64Bytes = (base64: string): number => {
+  let padding = 0;
+  if (base64.endsWith('==')) padding = 2;
+  else if (base64.endsWith('=')) padding = 1;
+  return Math.max(0, Math.floor((base64.length * 3) / 4) - padding);
+};
+
+const base64ToUint8Array = (base64: string): Uint8Array => {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+  const lookup = new Uint8Array(256);
+  for (let i = 0; i < chars.length; i += 1) {
+    lookup[chars.charCodeAt(i)] = i;
+  }
+
+  let bufferLength = base64.length * 0.75;
+  if (base64[base64.length - 1] === '=') bufferLength -= 1;
+  if (base64[base64.length - 2] === '=') bufferLength -= 1;
+
+  const bytes = new Uint8Array(Math.floor(bufferLength));
+  let p = 0;
+
+  for (let i = 0; i < base64.length; i += 4) {
+    const e1 = lookup[base64.charCodeAt(i)];
+    const e2 = lookup[base64.charCodeAt(i + 1)];
+    const e3 = lookup[base64.charCodeAt(i + 2)];
+    const e4 = lookup[base64.charCodeAt(i + 3)];
+
+    if (p < bytes.length) bytes[p++] = (e1 << 2) | (e2 >> 4);
+    if (p < bytes.length) bytes[p++] = ((e2 & 15) << 4) | (e3 >> 2);
+    if (p < bytes.length) bytes[p++] = ((e3 & 3) << 6) | (e4 & 63);
+  }
+
+  return bytes;
+};
+
+const arrayBufferToBase64 = (buffer: ArrayBuffer): string => {
+  const bytes = new Uint8Array(buffer);
+  const chunkSize = 0x8000;
+  let binary = '';
+
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    const chunk = bytes.subarray(i, i + chunkSize);
+    binary += String.fromCharCode(...chunk);
+  }
+
+  return btoa(binary);
+};
+
+interface PreparedImageUpload {
+  asset: ImagePicker.ImagePickerAsset;
+  originalName: string;
+  extension: string;
+  mimeType: string;
+  size: number;
+  uploadBody: ArrayBuffer | Blob | Uint8Array;
+}
+
+interface SkippedImageFeedback {
+  name: string;
+  reason: string;
+}
+
+const getAssetDisplayName = (asset: ImagePicker.ImagePickerAsset, index: number): string => {
+  const fallbackName = asset.uri.split('/').pop() || `Selected image ${index + 1}`;
+  return typeof (asset as any)?.fileName === 'string' ? (asset as any).fileName : fallbackName;
+};
+
+const formatSkippedImageFeedback = (skippedItems: SkippedImageFeedback[]): string => {
+  if (skippedItems.length === 0) {
+    return '';
+  }
+
+  const visibleItems = skippedItems.slice(0, 4);
+  const details = visibleItems
+    .map((item) => `${item.name}: ${item.reason}`)
+    .join('\n');
+  const remainingCount = skippedItems.length - visibleItems.length;
+  const remainingText =
+    remainingCount > 0 ? `\n+ ${remainingCount} more image(s) skipped.` : '';
+
+  return `\n\nBlocked/skipped:\n${details}${remainingText}`;
+};
+
+const prepareImageForUpload = async (
+  asset: ImagePicker.ImagePickerAsset,
+): Promise<PreparedImageUpload> => {
+  const fallbackName = asset.uri.split('/').pop() || 'image-upload.jpg';
+  const originalName =
+    typeof (asset as any)?.fileName === 'string' ? (asset as any).fileName : fallbackName;
+  const extension = getExtensionFromName(originalName || fallbackName);
+  const mimeType = resolveMimeType(asset, extension);
+  let base64 = '';
+  let size = typeof (asset as any)?.fileSize === 'number' ? (asset as any).fileSize : 0;
+  let uploadBody: ArrayBuffer | Blob | Uint8Array;
+
+  const webFile = Platform.OS === 'web' ? (asset as any)?.file : null;
+  if (typeof Blob !== 'undefined' && webFile instanceof Blob) {
+    const arrayBuffer = await webFile.arrayBuffer();
+    base64 = arrayBufferToBase64(arrayBuffer);
+    size = webFile.size || arrayBuffer.byteLength;
+    uploadBody = webFile;
+  } else {
+    base64 = await FileSystem.readAsStringAsync(asset.uri, {
+      encoding: 'base64',
+    });
+    size = size || estimateBase64Bytes(base64);
+    uploadBody = base64ToUint8Array(base64);
+  }
+
+  if (!base64 || size <= 0) {
+    throw new Error('Could not read the selected image. Please try a different photo.');
+  }
+
+  return {
+    asset,
+    originalName: originalName || fallbackName,
+    extension,
+    mimeType,
+    size,
+    uploadBody,
+  };
+};
 
 interface ImageUploaderProps {
   images: string[];
@@ -17,7 +179,15 @@ interface ImageUploaderProps {
   bucketName?: string;
   userId: string;
   folder?: string;
+  safetyContext?: string;
 }
+
+type ImageUploadAlertConfig = {
+  type: AlertType;
+  title: string;
+  message: string;
+  buttons?: any[];
+};
 
 export default function ImageUploader({
   images,
@@ -27,26 +197,45 @@ export default function ImageUploader({
   maxImages = 10,
   bucketName = 'listings',
   userId,
-  folder = 'general'
+  folder = 'general',
 }: ImageUploaderProps) {
   const { colors, isDark } = useTheme();
+  const uploadingRef = useRef(false);
   const [uploading, setUploading] = useState(false);
+  const [uploadMessage, setUploadMessage] = useState('Preparing photos...');
+  const [pendingAlert, setPendingAlert] = useState<ImageUploadAlertConfig | null>(null);
   const [alertVisible, setAlertVisible] = useState(false);
-  const [alertConfig, setAlertConfig] = useState<{
-    type: AlertType;
-    title: string;
-    message: string;
-    buttons?: any[];
-  }>({
+  const [alertConfig, setAlertConfig] = useState<ImageUploadAlertConfig>({
     type: 'info',
     title: '',
     message: '',
   });
 
   const showAlert = (type: AlertType, title: string, message: string, buttons?: any[]) => {
-    setAlertConfig({ type, title, message, buttons });
+    const nextAlert = { type, title, message, buttons };
+    if (uploadingRef.current) {
+      setPendingAlert(nextAlert);
+      return;
+    }
+
+    setAlertConfig(nextAlert);
     setAlertVisible(true);
   };
+
+  useEffect(() => {
+    if (uploading || !pendingAlert) {
+      return;
+    }
+
+    const nextAlert = pendingAlert;
+    const timeoutId = setTimeout(() => {
+      setAlertConfig(nextAlert);
+      setAlertVisible(true);
+      setPendingAlert(null);
+    }, 50);
+
+    return () => clearTimeout(timeoutId);
+  }, [pendingAlert, uploading]);
 
   const pickAndUploadImages = async () => {
     try {
@@ -54,7 +243,19 @@ export default function ImageUploader({
       const { data: { session }, error: authError } = await supabase.auth.getSession();
       if (authError || !session) {
         showAlert('warning', 'Authentication Required', 'Please log in to upload images.');
-        console.error('Auth check failed:', authError?.message || 'No session');
+        debugLog('Auth check failed:', authError?.message || 'No session');
+        return;
+      }
+
+      if (isE2EFixtureMode()) {
+        if (images.length >= maxImages) {
+          showAlert('error', 'Limit Reached', `You can only upload up to ${maxImages} images.`);
+          return;
+        }
+
+        const fixtureUrls = createE2EImageFixtureUrls(Math.min(1, maxImages - images.length));
+        onImagesChange([...images, ...fixtureUrls]);
+        showAlert('success', 'Upload Complete', `${fixtureUrls.length} E2E fixture image(s) added.`);
         return;
       }
 
@@ -78,37 +279,58 @@ export default function ImageUploader({
         return;
       }
 
+      uploadingRef.current = true;
       setUploading(true);
-      const uploadedUrls: string[] = [];
-      const errors: string[] = [];
+      setUploadMessage('Preparing photos...');
 
-      for (const asset of result.assets) {
+      const preparedResults = await Promise.allSettled(
+        result.assets.map((asset) => prepareImageForUpload(asset)),
+      );
+      const preparedUploads = preparedResults
+        .filter((result): result is PromiseFulfilledResult<PreparedImageUpload> => result.status === 'fulfilled')
+        .map((result) => result.value);
+      const skippedBeforeScreening = preparedResults
+        .map((settledResult, index): SkippedImageFeedback | null => {
+          if (settledResult.status !== 'rejected') {
+            return null;
+          }
+
+          return {
+            name: getAssetDisplayName(result.assets[index], index),
+            reason: settledResult.reason?.message || 'Could not prepare this selected image.',
+          };
+        })
+        .filter((item): item is SkippedImageFeedback => item !== null);
+
+      if (preparedUploads.length === 0) {
+        showAlert(
+          'error',
+          'Upload Failed',
+          `Could not upload the selected images.${formatSkippedImageFeedback(skippedBeforeScreening)}`,
+        );
+        return;
+      }
+
+      setUploadMessage('Uploading photos...');
+      const uploadedUrls: string[] = [];
+      const skippedImages: SkippedImageFeedback[] = [...skippedBeforeScreening];
+
+      for (const item of preparedUploads) {
         try {
-          const fileExt = asset.uri.split('.').pop()?.toLowerCase() || 'jpg';
-          const fileName = `${userId}/${folder}/${Date.now()}_${Math.random().toString(36).substring(7)}.${fileExt}`;
+          const fileName = `${userId}/${folder}/${Date.now()}_${Math.random().toString(36).substring(7)}.${item.extension}`;
 
           debugLog(`📤 Uploading to: ${bucketName}/${fileName}`);
-          debugLog(`📍 Source URI: ${asset.uri}`);
+          debugLog(`📍 Source URI: ${item.asset.uri}`);
+          debugLog(`📦 File size: ${(item.size / 1024).toFixed(2)} KB`);
 
-          // For React Native, we need to use FormData or ArrayBuffer
-          const response = await fetch(asset.uri);
-          if (!response.ok) {
-            throw new Error(`Failed to fetch image: ${response.statusText}`);
-          }
-          
-          const arrayBuffer = await response.arrayBuffer();
-          const fileSize = arrayBuffer.byteLength;
-          debugLog(`📦 File size: ${(fileSize / 1024).toFixed(2)} KB`);
-
-          if (fileSize === 0) {
+          if (item.size === 0) {
             throw new Error('File is empty');
           }
 
-          // Upload using ArrayBuffer for better React Native compatibility
           const { data, error } = await supabase.storage
             .from(bucketName)
-            .upload(fileName, arrayBuffer, { 
-              contentType: `image/${fileExt}`, 
+            .upload(fileName, item.uploadBody, {
+              contentType: item.mimeType,
               upsert: false 
             });
 
@@ -126,7 +348,7 @@ export default function ImageUploader({
               errorMsg = 'Network error. Check your internet connection.';
             }
             
-            errors.push(errorMsg);
+            skippedImages.push({ name: item.originalName, reason: errorMsg });
             continue;
           }
 
@@ -139,23 +361,39 @@ export default function ImageUploader({
           uploadedUrls.push(urlData.publicUrl);
         } catch (e: any) {
           console.error('❌ Error processing image:', e.message || e);
-          errors.push(e.message || 'Processing error');
+          skippedImages.push({
+            name: item.originalName,
+            reason: e.message || 'Processing error',
+          });
         }
       }
 
       if (uploadedUrls.length > 0) {
         onImagesChange([...images, ...uploadedUrls]);
-        const message = uploadedUrls.length === result.assets.length
+        const totalSkipped = skippedImages.length;
+        const message = totalSkipped === 0
           ? `${uploadedUrls.length} image(s) uploaded successfully!`
-          : `${uploadedUrls.length} of ${result.assets.length} image(s) uploaded. ${errors.length} failed.`;
-        showAlert('success', 'Upload Complete', message);
+          : `${uploadedUrls.length} image(s) uploaded. ${totalSkipped} selected image(s) were skipped.${formatSkippedImageFeedback(skippedImages)}`;
+        showAlert(
+          totalSkipped === 0 ? 'success' : 'warning',
+          totalSkipped === 0 ? 'Upload Complete' : 'Some Photos Skipped',
+          message,
+        );
       } else {
-        showAlert('error', 'Upload Failed', errors.length > 0 ? errors[0] : 'Please check your internet connection and try again.');
+        showAlert(
+          'error',
+          'Upload Failed',
+          skippedImages.length > 0
+            ? `No images were uploaded.${formatSkippedImageFeedback(skippedImages)}`
+            : 'Please check your internet connection and try again.',
+        );
       }
     } catch (e: any) {
       console.error('❌ Upload error:', e.message || e);
-      showAlert('error', 'Error', e.message || 'Failed to upload images');
+      const message = e.message || 'Failed to upload images';
+      showAlert('error', 'Upload failed', message);
     } finally {
+      uploadingRef.current = false;
       setUploading(false);
     }
   };
@@ -183,14 +421,27 @@ export default function ImageUploader({
 
   return (
     <View style={styles.container}>
+      <Modal visible={uploading} transparent animationType="fade" statusBarTranslucent>
+        <View style={styles.loadingOverlay}>
+          <View style={[styles.loadingCard, { backgroundColor: colors.surface }]}>
+            <ActivityIndicator size="large" color={colors.primary} />
+            <Text style={[styles.loadingTitle, { color: colors.text }]}>{uploadMessage}</Text>
+            <Text style={[styles.loadingSubtitle, { color: colors.textSecondary }]}>
+              Please wait while your media is uploaded.
+            </Text>
+          </View>
+        </View>
+      </Modal>
+
       <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.scrollView}>
         <View style={styles.imagesRow}>
           {/* Add Image Button */}
-          <TouchableOpacity activeOpacity={1}
-            style={[styles.addImageButton, { borderColor: colors.border, backgroundColor: isDark ? colors.card : '#F3F4F6' }]}
+          <TouchableOpacity activeOpacity={uploading || images.length >= maxImages ? 1 : 0.78}
+            testID="e2e-image-upload-button"
+            accessibilityLabel="e2e-image-upload-button"
+            style={[styles.addImageButton, { borderColor: colors.border, backgroundColor: isDark ? colors.card : '#F3F4F6', opacity: uploading || images.length >= maxImages ? 0.6 : 1 }]}
             onPress={pickAndUploadImages}
             disabled={uploading || images.length >= maxImages}
-            activeOpacity={1}
           >
             {uploading ? (
               <ActivityIndicator size="small" color={colors.primary} />
@@ -214,6 +465,8 @@ export default function ImageUploader({
                 )}
               </TouchableOpacity>
               <TouchableOpacity activeOpacity={1}
+                testID={`e2e-image-remove-${index}`}
+                accessibilityLabel={`e2e-image-remove-${index}`}
                 style={[styles.removeImageButton, { backgroundColor: 'rgba(0,0,0,0.6)' }]}
                 onPress={() => removeImage(index)}
               >
@@ -301,6 +554,38 @@ const styles = StyleSheet.create({
   },
   helpText: {
     fontSize: 12,
+    fontFamily: 'Poppins_400Regular',
+    textAlign: 'center',
+  },
+  loadingOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(15,23,42,0.48)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 24,
+  },
+  loadingCard: {
+    width: '100%',
+    maxWidth: 320,
+    borderRadius: 18,
+    padding: 24,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOpacity: 0.22,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 10,
+  },
+  loadingTitle: {
+    marginTop: 14,
+    fontSize: 15,
+    fontFamily: 'Poppins_600SemiBold',
+    textAlign: 'center',
+  },
+  loadingSubtitle: {
+    marginTop: 6,
+    fontSize: 12,
+    lineHeight: 18,
     fontFamily: 'Poppins_400Regular',
     textAlign: 'center',
   },

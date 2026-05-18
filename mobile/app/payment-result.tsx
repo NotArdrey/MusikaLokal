@@ -1,393 +1,161 @@
-import { Ionicons } from '@expo/vector-icons';
-import { router, useLocalSearchParams } from 'expo-router';
-import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { supabase } from '../lib/supabase';
-import { useAuth } from '../src/context/AuthContext';
-import { useTheme } from '../src/context/ThemeContext';
+import { Ionicons } from "@expo/vector-icons";
+import { router, useLocalSearchParams } from "expo-router";
+import { useEffect, useMemo, useState } from "react";
+import { ActivityIndicator, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { supabase } from "../lib/supabase";
+import { useTheme } from "../src/context/ThemeContext";
+
+type VerificationState = "idle" | "checking" | "verified" | "delayed" | "failed";
 
 export default function PaymentResultScreen() {
   const { colors } = useTheme();
-  const { checkSubscription } = useAuth();
-  const params = useLocalSearchParams<{ status?: string; booking_id?: string; type?: string; plan_id?: string }>();
-  const [loading, setLoading] = useState(true);
-  const [bookingDetails, setBookingDetails] = useState<any>(null);
-  const [subscriptionDetails, setSubscriptionDetails] = useState<any>(null);
-  const [subscriptionActive, setSubscriptionActive] = useState(false);
+  const params = useLocalSearchParams<{
+    status?: string;
+    booking_id?: string;
+    type?: string;
+    amount?: string;
+  }>();
 
-  const paymentStatus = params.status || 'pending';
-  const isSuccess = paymentStatus === 'success';
-  const isCancelled = paymentStatus === 'cancelled';
-  const isSubscription = params.type === 'subscription';
+  const normalizedStatus = String(params.status || "pending").toLowerCase();
+  const isSuccess =
+    normalizedStatus === "success" ||
+    normalizedStatus === "paid" ||
+    normalizedStatus === "completed";
+  const isPending = normalizedStatus === "pending";
+  const isDeposit = params.type === "deposit";
+  const bookingId = typeof params.booking_id === "string" ? params.booking_id : "";
+  const [verificationState, setVerificationState] = useState<VerificationState>("idle");
+  const [verifiedPaymentStatus, setVerifiedPaymentStatus] = useState<string | null>(null);
+  const shouldVerifyBookingPayment = isSuccess && !isDeposit && Boolean(bookingId);
+  const isCheckingBookingPayment = verificationState === "checking";
 
   useEffect(() => {
-    const fetchDetails = async () => {
-      if (isSubscription && params.plan_id) {
-        // Fetch subscription plan details
-        // NOTE: Subscription creation/update is handled by the Edge Function (subscription_success)
-        // using supabaseAdmin to bypass RLS. Client only fetches display data.
-        try {
-          const { data, error } = await supabase
-            .from('subscription_plans')
-            .select('*')
-            .eq('id', params.plan_id)
-            .single();
+    if (!shouldVerifyBookingPayment) return;
 
-          if (data && !error) {
-            setSubscriptionDetails(data);
-          }
+    let cancelled = false;
+    const verifyPayment = async () => {
+      setVerificationState("checking");
 
-          // If payment callback is not cancelled, poll until subscription activation is visible.
-          // The Edge Function already handled activating the subscription with admin privileges.
-          // However, there might be a slight delay. We'll poll a few times to ensure we get the latest status.
-          if (!isCancelled) {
-            console.log('✅ Subscription callback received - polling for active status...');
-
-            // Polling loop
-            const maxRetries = 5;
-            let retries = 0;
-            let isActive = false;
-
-            while (retries < maxRetries && !isActive) {
-              console.log(`🔄 Polling subscription status (Attempt ${retries + 1}/${maxRetries})...`);
-
-              if (checkSubscription) {
-                await checkSubscription();
-              }
-
-              // Check if it's updated in the database directly to be sure
-              const { data: profile } = await supabase
-                .from('profiles')
-                .select('subscription_status')
-                .eq('id', (await supabase.auth.getUser()).data.user?.id)
-                .single();
-
-              if (profile?.subscription_status === 'active') {
-                console.log('✅ Polling confirmed active subscription!');
-                isActive = true;
-                setSubscriptionActive(true);
-                // Force one last update to context
-                if (checkSubscription) await checkSubscription();
-                break;
-              }
-
-              // Wait 1.5 seconds before next retry
-              await new Promise(resolve => setTimeout(resolve, 1500));
-              retries++;
-            }
-
-            if (!isActive) {
-              setSubscriptionActive(false);
-              console.log('⚠️ Polling finished but status might still be pending. User can refresh manually.');
-            }
-          }
-        } catch (e) {
-          console.error('Error fetching subscription plan:', e);
+      for (let attempt = 1; attempt <= 4; attempt += 1) {
+        if (attempt > 1) {
+          await new Promise((resolve) => setTimeout(resolve, 1200 * attempt));
         }
-      } else if (params.booking_id) {
-        try {
-          if (isSuccess) {
-            const maxRetries = 4;
-            for (let attempt = 1; attempt <= maxRetries; attempt++) {
-              const { data: checkData, error: checkError } = await supabase.functions.invoke('paymongo', {
-                body: {
-                  action: 'check_payment',
-                  booking_id: params.booking_id
-                }
-              });
 
-              if (checkError) {
-                console.error('Error checking payment status:', checkError);
-              }
+        const { data, error } = await supabase.functions.invoke("paymongo", {
+          body: {
+            action: "check_payment",
+            booking_id: bookingId,
+          },
+        });
 
-              if (checkData?.payment_status === 'paid' || checkData?.payment_status === 'partial') {
-                break;
-              }
+        if (cancelled) return;
+        if (error) throw error;
 
-              await new Promise(resolve => setTimeout(resolve, 1200 * attempt));
-            }
-          }
+        const paymentStatus = String(data?.payment_status || "").toLowerCase();
+        setVerifiedPaymentStatus(paymentStatus || null);
 
-          const { data, error } = await supabase
-            .from('studio_bookings')
-            .select(`
-              id,
-              booking_date,
-              payment_status,
-              status,
-              final_price,
-              remaining_balance,
-              payment_type,
-              studio:studios(name)
-            `)
-            .eq('id', params.booking_id)
-            .single();
-
-          if (data && !error) {
-            setBookingDetails(data);
-          }
-        } catch (e) {
-          console.error('Error fetching booking:', e);
+        if (paymentStatus === "paid" || paymentStatus === "partial") {
+          setVerificationState("verified");
+          return;
         }
       }
-      setLoading(false);
+
+      setVerificationState("delayed");
     };
 
-    fetchDetails();
-  }, [params.booking_id, params.plan_id, isSubscription, isSuccess, isCancelled]);
-
-  const handleGoToBookings = () => {
-    router.replace({
-      pathname: '/bookings',
-      params: {
-        tab: isSuccess ? 'Upcoming' : 'Pending',
-        payment_result: params.status,
-        booking_id: params.booking_id
-      }
+    verifyPayment().catch((error) => {
+      if (cancelled) return;
+      console.error("Payment verification error:", error);
+      setVerificationState("failed");
     });
-  };
 
-  const handleGoToWallet = () => {
-    router.replace('/wallet');
-  };
+    return () => {
+      cancelled = true;
+    };
+  }, [bookingId, shouldVerifyBookingPayment]);
 
-  const handleRetryPayment = async () => {
-    if (params.booking_id) {
-      router.replace({
-        pathname: '/bookings',
-        params: {
-          tab: 'Pending',
-          retry_payment: params.booking_id
-        }
-      });
-    }
-  };
+  const bookingsTab = useMemo(
+    () => (verifiedPaymentStatus === "partial" ? "Pending" : "Upcoming"),
+    [verifiedPaymentStatus],
+  );
 
-  if (loading) {
-    return (
-      <View style={[styles.container, { backgroundColor: colors.background }]}>
-        <ActivityIndicator size="large" color={colors.primary} />
-        <Text style={[styles.loadingText, { color: colors.textSecondary }]}>
-          Processing payment result...
-        </Text>
-      </View>
-    );
-  }
-
-  const subscriptionState = isSubscription
-    ? (isCancelled ? 'cancelled' : (subscriptionActive ? 'active' : 'processing'))
-    : (isSuccess ? 'success' : 'cancelled');
-
-  const statusColor = subscriptionState === 'cancelled'
-    ? '#EF4444'
-    : subscriptionState === 'processing'
-      ? '#F59E0B'
-      : '#10B981';
-
-  const statusIcon = subscriptionState === 'cancelled'
-    ? 'close-circle'
-    : subscriptionState === 'processing'
-      ? 'time'
-      : 'checkmark-circle';
+  const title = isPending || isCheckingBookingPayment
+    ? "Processing Payment"
+    : isSuccess
+      ? isDeposit
+        ? "Wallet Topped Up!"
+        : "Payment Successful!"
+      : isDeposit
+        ? "Top-Up Cancelled"
+        : "Payment Cancelled";
+  const message = isPending || isCheckingBookingPayment
+    ? "We are checking your payment status. Please wait a moment."
+    : isSuccess
+      ? isDeposit
+        ? `₱${params.amount || "0"} has been added to your wallet.`
+        : verificationState === "delayed"
+          ? "Your payment was received. The booking may take a few more seconds to update."
+          : verificationState === "failed"
+            ? "Your payment was received, but the booking check did not finish. Refresh Bookings in a moment."
+            : "Your payment was processed successfully."
+      : isDeposit
+        ? "Your wallet balance was not changed."
+        : "Your payment was not completed. You can try again anytime.";
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <View style={[styles.card, { backgroundColor: colors.surface }]}>
-        {/* Status Icon */}
-        <View style={[
-          styles.iconContainer,
-          { backgroundColor: statusColor }
-        ]}>
-          <Ionicons
-            name={statusIcon as any}
-            size={64}
-            color="white"
-          />
+        <View
+          style={[
+            styles.iconContainer,
+            { backgroundColor: isPending || isCheckingBookingPayment ? "#F59E0B" : isSuccess ? "#10B981" : "#EF4444" },
+          ]}
+        >
+          {isPending || isCheckingBookingPayment ? (
+            <ActivityIndicator color="white" size="large" />
+          ) : (
+            <Ionicons
+              name={isSuccess ? "checkmark-circle" : "close-circle"}
+              size={64}
+              color="white"
+            />
+          )}
         </View>
 
-        {/* Status Title */}
-        <Text style={[styles.title, { color: colors.text }]}>
-          {isSubscription
-            ? (subscriptionState === 'active'
-              ? 'Subscription Activated!'
-              : subscriptionState === 'processing'
-                ? 'Subscription Processing'
-                : 'Subscription Cancelled')
-            : (isSuccess ? 'Payment Successful!' : 'Payment Cancelled')}
-        </Text>
+        <Text style={[styles.title, { color: colors.text }]}>{title}</Text>
+        <Text style={[styles.description, { color: colors.textSecondary }]}>{message}</Text>
 
-        {/* Status Description */}
-        <Text style={[styles.description, { color: colors.textSecondary }]}>
-          {isSubscription
-            ? (subscriptionState === 'active'
-              ? `Your ${subscriptionDetails?.name || 'subscription'} is now active! Enjoy all the premium features.`
-              : subscriptionState === 'processing'
-                ? 'Your payment was received. We are finalizing activation in the background. Please wait a moment, then check your wallet.'
-                : 'Your subscription was cancelled. You can subscribe anytime from your Wallet & Subscription page.')
-            : (isSuccess
-              ? (bookingDetails?.payment_status === 'partial' || (bookingDetails?.payment_type === 'downpayment' && bookingDetails?.remaining_balance > 0)
-                ? `Downpayment received! Your booking is confirmed. Remaining balance: ₱${bookingDetails?.remaining_balance?.toLocaleString() || 0}`
-                : 'Your studio booking has been confirmed and moved to Upcoming bookings.')
-              : 'Your payment was cancelled. The booking is still in Pending - you can try again anytime.')}
-        </Text>
-
-        {/* Subscription Details */}
-        {isSubscription && subscriptionDetails && (
-          <View style={[styles.detailsContainer, { backgroundColor: colors.background }]}>
-            <Text style={[styles.detailsTitle, { color: colors.text }]}>
-              Subscription Details
-            </Text>
-
-            <View style={styles.detailRow}>
-              <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>Plan</Text>
-              <Text style={[styles.detailValue, { color: colors.text }]}>
-                {subscriptionDetails.name}
-              </Text>
-            </View>
-
-            <View style={styles.detailRow}>
-              <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>Price</Text>
-              <Text style={[styles.detailValue, { color: colors.text }]}>
-                ₱{subscriptionDetails.price?.toLocaleString() || '0'}/month
-              </Text>
-            </View>
-
-            <View style={styles.detailRow}>
-              <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>Duration</Text>
-              <Text style={[styles.detailValue, { color: colors.text }]}>
-                {subscriptionDetails.duration_days} days
-              </Text>
-            </View>
-
-            <View style={styles.detailRow}>
-              <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>Status</Text>
-              <View style={[
-                styles.statusBadge,
+        <View style={styles.buttonContainer}>
+          {bookingId ? (
+            <TouchableOpacity
+              activeOpacity={1}
+              disabled={isCheckingBookingPayment}
+              style={[
+                styles.primaryButton,
                 {
-                  backgroundColor:
-                    subscriptionState === 'active'
-                      ? '#10B98120'
-                      : subscriptionState === 'processing'
-                        ? '#F59E0B20'
-                        : '#EF444420'
-                }
-              ]}>
-                <Text style={[
-                  styles.statusText,
-                  {
-                    color:
-                      subscriptionState === 'active'
-                        ? '#10B981'
-                        : subscriptionState === 'processing'
-                          ? '#F59E0B'
-                          : '#EF4444'
-                  }
-                ]}>
-                  {subscriptionState === 'active'
-                    ? 'Active'
-                    : subscriptionState === 'processing'
-                      ? 'Processing'
-                      : 'Cancelled'}
-                </Text>
-              </View>
-            </View>
-          </View>
-        )}
-
-        {/* Booking Details */}
-        {!isSubscription && bookingDetails && (
-          <View style={[styles.detailsContainer, { backgroundColor: colors.background }]}>
-            <Text style={[styles.detailsTitle, { color: colors.text }]}>
-              Booking Details
+                  backgroundColor: colors.primary,
+                  opacity: isCheckingBookingPayment ? 0.65 : 1,
+                },
+              ]}
+              onPress={() =>
+                router.replace({
+                  pathname: "/bookings",
+                  params: { tab: isSuccess ? bookingsTab : "Pending" },
+                } as any)
+              }
+            >
+              <Text style={styles.primaryButtonText}>View Activity</Text>
+            </TouchableOpacity>
+          ) : null}
+          <TouchableOpacity
+            activeOpacity={1}
+            style={[styles.secondaryButton, { borderColor: colors.border }]}
+            onPress={() => router.replace(isDeposit ? "/wallet" : "/home")}
+          >
+            <Text style={[styles.secondaryButtonText, { color: colors.text }]}>
+              {isDeposit ? "View Wallet" : "Go Home"}
             </Text>
-
-            <View style={styles.detailRow}>
-              <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>Studio</Text>
-              <Text style={[styles.detailValue, { color: colors.text }]}>
-                {bookingDetails.studio?.name || 'Studio'}
-              </Text>
-            </View>
-
-            <View style={styles.detailRow}>
-              <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>Date</Text>
-              <Text style={[styles.detailValue, { color: colors.text }]}>
-                {bookingDetails.booking_date}
-              </Text>
-            </View>
-
-            <View style={styles.detailRow}>
-              <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>Amount</Text>
-              <Text style={[styles.detailValue, { color: colors.text }]}>
-                ₱{bookingDetails.final_price?.toLocaleString() || '0'}
-              </Text>
-            </View>
-
-            <View style={styles.detailRow}>
-              <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>Status</Text>
-              <View style={[
-                styles.statusBadge,
-                { backgroundColor: isSuccess ? '#10B98120' : '#F59E0B20' }
-              ]}>
-                <Text style={[
-                  styles.statusText,
-                  { color: isSuccess ? '#10B981' : '#F59E0B' }
-                ]}>
-                  {isSuccess ? 'Confirmed' : 'Pending Payment'}
-                </Text>
-              </View>
-            </View>
-          </View>
-        )}
-
-        {/* Action Buttons */}
-        <View style={styles.buttonsContainer}>
-          {isSubscription ? (
-            <>
-              <TouchableOpacity activeOpacity={1}
-                style={[styles.primaryButton, { backgroundColor: colors.primary }]}
-                onPress={handleGoToWallet}
-              >
-                <Ionicons name="wallet" size={20} color="white" />
-                <Text style={styles.primaryButtonText}>
-                  View Wallet & Subscription
-                </Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity activeOpacity={1}
-                style={[styles.secondaryButton, { borderColor: colors.primary }]}
-                onPress={() => router.replace('/home')}
-              >
-                <Ionicons name="home" size={20} color={colors.primary} />
-                <Text style={[styles.secondaryButtonText, { color: colors.primary }]}>
-                  Go to Home
-                </Text>
-              </TouchableOpacity>
-            </>
-          ) : (
-            <>
-              <TouchableOpacity activeOpacity={1}
-                style={[styles.primaryButton, { backgroundColor: colors.primary }]}
-                onPress={handleGoToBookings}
-              >
-                <Ionicons name="calendar" size={20} color="white" />
-                <Text style={styles.primaryButtonText}>
-                  {isSuccess ? 'View Upcoming Bookings' : 'View Pending Bookings'}
-                </Text>
-              </TouchableOpacity>
-
-              {!isSuccess && (
-                <TouchableOpacity activeOpacity={1}
-                  style={[styles.secondaryButton, { borderColor: colors.primary }]}
-                  onPress={handleRetryPayment}
-                >
-                  <Ionicons name="refresh" size={20} color={colors.primary} />
-                  <Text style={[styles.secondaryButtonText, { color: colors.primary }]}>
-                    Retry Payment
-                  </Text>
-                </TouchableOpacity>
-              )}
-            </>
-          )}
+          </TouchableOpacity>
         </View>
       </View>
     </View>
@@ -396,108 +164,61 @@ export default function PaymentResultScreen() {
 
 const styles = StyleSheet.create({
   container: {
+    alignItems: "center",
     flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
+    justifyContent: "center",
     padding: 20,
   },
-  loadingText: {
-    marginTop: 16,
-    fontSize: 16,
-  },
   card: {
-    width: '100%',
-    maxWidth: 400,
-    borderRadius: 20,
-    padding: 24,
-    alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.1,
-    shadowRadius: 12,
-    elevation: 5,
+    alignItems: "center",
+    borderRadius: 24,
+    maxWidth: 420,
+    padding: 32,
+    width: "100%",
   },
   iconContainer: {
-    width: 100,
-    height: 100,
+    alignItems: "center",
     borderRadius: 50,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 20,
+    height: 100,
+    justifyContent: "center",
+    marginBottom: 24,
+    width: 100,
   },
   title: {
+    fontFamily: "Poppins_700Bold",
     fontSize: 24,
-    fontWeight: '700',
     marginBottom: 12,
-    textAlign: 'center',
+    textAlign: "center",
   },
   description: {
+    fontFamily: "Poppins_400Regular",
     fontSize: 15,
-    textAlign: 'center',
     lineHeight: 22,
-    marginBottom: 24,
+    marginBottom: 28,
+    textAlign: "center",
   },
-  detailsContainer: {
-    width: '100%',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 24,
-  },
-  detailsTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    marginBottom: 12,
-  },
-  detailRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: 8,
-  },
-  detailLabel: {
-    fontSize: 14,
-  },
-  detailValue: {
-    fontSize: 14,
-    fontWeight: '500',
-  },
-  statusBadge: {
-    paddingHorizontal: 12,
-    paddingVertical: 4,
-    borderRadius: 12,
-  },
-  statusText: {
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  buttonsContainer: {
-    width: '100%',
+  buttonContainer: {
     gap: 12,
+    width: "100%",
   },
   primaryButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 16,
-    borderRadius: 12,
-    gap: 8,
+    alignItems: "center",
+    borderRadius: 14,
+    paddingVertical: 14,
   },
   primaryButtonText: {
-    color: 'white',
+    color: "white",
+    fontFamily: "Poppins_600SemiBold",
     fontSize: 16,
-    fontWeight: '600',
   },
   secondaryButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 16,
-    borderRadius: 12,
-    borderWidth: 2,
-    gap: 8,
+    alignItems: "center",
+    borderRadius: 14,
+    borderWidth: 1,
+    paddingVertical: 14,
   },
   secondaryButtonText: {
+    fontFamily: "Poppins_600SemiBold",
     fontSize: 16,
-    fontWeight: '600',
   },
 });

@@ -5,6 +5,10 @@ import {
   hasNavigationDestination,
   openNavigationDirections,
 } from "../../utils/navigation";
+import {
+  formatRecordingHours,
+  resolveRecordingRule,
+} from "../../utils/recordingRule";
 import CachedImage from "../CachedImage";
 import ListingMediaCarousel from "./ListingMediaCarousel";
 
@@ -19,8 +23,9 @@ interface StudioGigVenueAboutTabProps {
   displayRate: string;
   labels: { aboutTitle: string };
   currentUserId: string | null;
-  calculateCompletion: () => number;
+  completionRate: number | null;
   handleProfileNavigation: () => void;
+  connectionPanel?: React.ReactNode;
 }
 
 const StudioGigVenueAboutTab = ({
@@ -34,14 +39,10 @@ const StudioGigVenueAboutTab = ({
   displayRate,
   labels,
   currentUserId,
-  calculateCompletion,
+  completionRate,
   handleProfileNavigation,
+  connectionPanel,
 }: StudioGigVenueAboutTabProps) => {
-  const parsedCompletionRate = Number(group.completion_rate);
-  const baseCompletionRate = Number.isFinite(parsedCompletionRate)
-    ? parsedCompletionRate
-    : calculateCompletion();
-  const completionRate = Math.max(0, Math.min(100, Math.round(baseCompletionRate)));
   const managerId = group.owner_id || group.organizer_id;
   const destinationText =
     group?.location || group?.address || group?.name || "Destination";
@@ -51,6 +52,30 @@ const StudioGigVenueAboutTab = ({
     destinationText,
   });
   const isStudioOrVenue = group.type === "Studio" || group.type === "Venue";
+  const normalizedStudioType =
+    typeof group?.studio_type === "string"
+      ? group.studio_type.toLowerCase()
+      : "";
+  const supportsRecordingPricing =
+    Boolean(recordingRate) || normalizedStudioType.includes("recording");
+  const supportsRecording = group.type === "Studio" && supportsRecordingPricing;
+  const recordingRule = supportsRecording
+    ? resolveRecordingRule(group?.settings)
+    : null;
+  const recordingBlockHoursLabel = recordingRule
+    ? `${formatRecordingHours(recordingRule.hoursPerBlock)} hr${recordingRule.hoursPerBlock === 1 ? "" : "s"}`
+    : "";
+  const recordingSongBlockLabel = recordingRule
+    ? `${recordingRule.songsPerBlock} song${recordingRule.songsPerBlock === 1 ? "" : "s"}`
+    : "";
+  const recordingExtraBlockLabel = recordingRule
+    ? recordingRule.songsPerBlock === 1
+      ? `Each additional song adds another ${recordingBlockHoursLabel}.`
+      : `Each additional ${recordingSongBlockLabel} adds another ${recordingBlockHoursLabel}.`
+    : "";
+  const recordingMinimumLabel = recordingRule
+    ? `${recordingBlockHoursLabel} minimum for up to ${recordingSongBlockLabel}`
+    : "";
   const isMediaCarouselType =
     group.type === "Studio" || group.type === "Venue" || group.type === "Gig";
   const mediaItems = useMemo(() => {
@@ -110,6 +135,7 @@ const StudioGigVenueAboutTab = ({
 
   return (
     <View style={styles.tabContent}>
+    {connectionPanel ? <View style={{ marginBottom: 24 }}>{connectionPanel}</View> : null}
     {group.type === "Gig" && (
       <View style={styles.section}>
         <Text style={[styles.sectionTitle, { color: colors.text }]}>{labels.aboutTitle}</Text>
@@ -118,7 +144,7 @@ const StudioGigVenueAboutTab = ({
         </Text>
         {canNavigate && (
           <TouchableOpacity
-            activeOpacity={0.9}
+            activeOpacity={1}
             style={{
               marginTop: 12,
               alignSelf: "flex-start",
@@ -211,7 +237,7 @@ const StudioGigVenueAboutTab = ({
         </Text>
         {canNavigate && (
           <TouchableOpacity
-            activeOpacity={0.9}
+            activeOpacity={1}
             style={{
               marginTop: 12,
               alignSelf: "flex-start",
@@ -327,7 +353,7 @@ const StudioGigVenueAboutTab = ({
           >
             <Text style={[styles.statLabel, { color: colors.textSecondary }]}>Completion</Text>
             <Text style={[styles.statValue, { color: colors.text }]} numberOfLines={1}>
-              {`${completionRate}%`}
+              {completionRate !== null ? `${completionRate}%` : "N/A"}
             </Text>
           </View>
         </View>
@@ -366,6 +392,88 @@ const StudioGigVenueAboutTab = ({
                 </Text>
               </View>
             )}
+          </View>
+        )}
+
+        {supportsRecording && recordingRule && (
+          <View
+            style={{
+              backgroundColor: isDark ? "#111827" : "#F8FAFC",
+              borderColor: isDark ? "#374151" : "#E5E7EB",
+              borderRadius: 12,
+              borderWidth: 1,
+              gap: 12,
+              padding: 14,
+            }}
+          >
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
+              <View
+                style={{
+                  alignItems: "center",
+                  backgroundColor: isDark ? colors.primary + "22" : colors.primary + "14",
+                  borderRadius: 10,
+                  height: 40,
+                  justifyContent: "center",
+                  width: 40,
+                }}
+              >
+                <Ionicons name="time-outline" size={20} color={colors.primary} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.statLabel, { color: colors.textSecondary }]}>
+                  Recording time minimum
+                </Text>
+                <Text
+                  style={[styles.statValue, { color: colors.text }]}
+                  numberOfLines={2}
+                  adjustsFontSizeToFit
+                >
+                  {recordingMinimumLabel}
+                </Text>
+              </View>
+            </View>
+
+            <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+              {[
+                ["Minimum", recordingBlockHoursLabel],
+                ["Covers", recordingSongBlockLabel],
+                ["Rate", "Per song"],
+              ].map(([label, value]) => (
+                <View
+                  key={label}
+                  style={{
+                    backgroundColor: isDark ? "#1F2937" : "#FFFFFF",
+                    borderColor: isDark ? "#374151" : "#E5E7EB",
+                    borderRadius: 10,
+                    borderWidth: 1,
+                    flexGrow: 1,
+                    minWidth: 104,
+                    paddingHorizontal: 12,
+                    paddingVertical: 10,
+                  }}
+                >
+                  <Text style={[styles.statLabel, { color: colors.textSecondary, marginBottom: 2 }]}>
+                    {label}
+                  </Text>
+                  <Text style={[styles.statValue, { color: colors.text, fontSize: 14 }]}>
+                    {value}
+                  </Text>
+                </View>
+              ))}
+            </View>
+
+            <Text
+              style={[
+                styles.description,
+                {
+                  color: colors.textSecondary,
+                  fontSize: 12,
+                  lineHeight: 18,
+                },
+              ]}
+            >
+              Musicians can split the minimum across available dates and time slots. {recordingExtraBlockLabel}
+            </Text>
           </View>
         )}
       </View>
@@ -413,43 +521,45 @@ const StudioGigVenueAboutTab = ({
             </View>
           </View>
 
-          <View
-            style={{
-              marginTop: 12,
-              flexDirection: "row",
-              alignItems: "center",
-              gap: 8,
-            }}
-          >
+          {completionRate !== null ? (
             <View
               style={{
-                flex: 1,
-                height: 6,
-                backgroundColor: isDark ? "#374151" : "#E5E7EB",
-                borderRadius: 3,
-                overflow: "hidden",
+                marginTop: 12,
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 8,
               }}
             >
               <View
                 style={{
-                  width: `${completionRate}%`,
-                  height: "100%",
-                  backgroundColor:
-                    completionRate === 100 ? "#10B981" : colors.primary,
+                  flex: 1,
+                  height: 6,
+                  backgroundColor: isDark ? "#374151" : "#E5E7EB",
+                  borderRadius: 3,
+                  overflow: "hidden",
                 }}
-              />
+              >
+                <View
+                  style={{
+                    width: `${completionRate}%`,
+                    height: "100%",
+                    backgroundColor:
+                      completionRate === 100 ? "#10B981" : colors.primary,
+                  }}
+                />
+              </View>
+              <Text
+                style={{
+                  fontSize: 11,
+                  fontFamily: "Poppins_600SemiBold",
+                  color:
+                    completionRate === 100 ? "#10B981" : colors.textSecondary,
+                }}
+              >
+                {`${completionRate}% Complete`}
+              </Text>
             </View>
-            <Text
-              style={{
-                fontSize: 11,
-                fontFamily: "Poppins_600SemiBold",
-                color:
-                  completionRate === 100 ? "#10B981" : colors.textSecondary,
-              }}
-            >
-              {`${completionRate}% Complete`}
-            </Text>
-          </View>
+          ) : null}
         </View>
 
         <TouchableOpacity
@@ -506,47 +616,49 @@ const StudioGigVenueAboutTab = ({
             </View>
           </View>
 
-          <View
-            style={{
-              marginTop: 12,
-              flexDirection: "row",
-              alignItems: "center",
-              gap: 8,
-            }}
-          >
+          {completionRate !== null ? (
             <View
               style={{
-                flex: 1,
-                height: 6,
-                backgroundColor: isDark ? "#374151" : "#E5E7EB",
-                borderRadius: 3,
-                overflow: "hidden",
+                marginTop: 12,
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 8,
               }}
             >
               <View
                 style={{
-                  width: `${completionRate}%`,
-                  height: "100%",
-                  backgroundColor:
+                  flex: 1,
+                  height: 6,
+                  backgroundColor: isDark ? "#374151" : "#E5E7EB",
+                  borderRadius: 3,
+                  overflow: "hidden",
+                }}
+              >
+                <View
+                  style={{
+                    width: `${completionRate}%`,
+                    height: "100%",
+                    backgroundColor:
+                      completionRate === 100
+                        ? "#10B981"
+                        : colors.primary,
+                  }}
+                />
+              </View>
+              <Text
+                style={{
+                  fontSize: 11,
+                  fontFamily: "Poppins_600SemiBold",
+                  color:
                     completionRate === 100
                       ? "#10B981"
-                      : colors.primary,
+                      : colors.textSecondary,
                 }}
-              />
+              >
+                {`${completionRate}% Complete`}
+              </Text>
             </View>
-            <Text
-              style={{
-                fontSize: 11,
-                fontFamily: "Poppins_600SemiBold",
-                color:
-                  completionRate === 100
-                    ? "#10B981"
-                    : colors.textSecondary,
-              }}
-            >
-              {`${completionRate}% Complete`}
-            </Text>
-          </View>
+          ) : null}
         </View>
 
         <TouchableOpacity
@@ -564,46 +676,6 @@ const StudioGigVenueAboutTab = ({
             {managerId === currentUserId ? "Manage Profile" : "Visit Profile"}
           </Text>
         </TouchableOpacity>
-      </View>
-    )}
-
-    {group.type === "Gig" && (
-      <View
-        style={[
-          styles.dealCard,
-          {
-            backgroundColor: isDark ? "#1e293b" : "#ECFDF5",
-            borderColor: isDark ? "#064e3b" : "#10B981",
-          },
-        ]}
-      >
-        <Text
-          style={{
-            fontFamily: "Poppins_600SemiBold",
-            color: isDark ? "#6ee7b7" : "#047857",
-            marginBottom: 8,
-          }}
-        >
-          The Deal
-        </Text>
-        <Text
-          style={{
-            fontFamily: "Poppins_500Medium",
-            color: isDark ? "#d1fae5" : "#065F46",
-          }}
-        >
-          Guarantee + Door Split
-        </Text>
-        <Text
-          style={{
-            fontFamily: "Poppins_400Regular",
-            color: isDark ? "#d1fae5" : "#065F46",
-            fontSize: 13,
-            marginTop: 4,
-          }}
-        >
-          45 min set • Meal Included
-        </Text>
       </View>
     )}
 

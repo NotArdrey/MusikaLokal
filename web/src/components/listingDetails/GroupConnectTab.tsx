@@ -1,4 +1,4 @@
-﻿import { Ionicons } from "@expo/vector-icons";
+import { Ionicons } from "@expo/vector-icons";
 import React from "react";
 import {
     ActivityIndicator,
@@ -27,6 +27,7 @@ interface GroupConnectTabProps {
   renderBookingControls: () => React.ReactNode;
   group: any;
   handleConfirm: (action: () => void, title: string, message: string) => void;
+  connectionPanel?: React.ReactNode;
 }
 
 const GroupConnectTab = ({
@@ -45,9 +46,10 @@ const GroupConnectTab = ({
   renderBookingControls,
   group,
   handleConfirm,
+  connectionPanel,
 }: GroupConnectTabProps) => (
   <View style={styles.tabContent}>
-    {(!currentUserRole || currentUserRole === "venue-owner") && (
+    {currentUserRole === "venue-owner" && (
       <View style={styles.section}>
         <View style={{ marginTop: 0 }}>
           {renderBookingControls()}
@@ -57,7 +59,7 @@ const GroupConnectTab = ({
               <Text style={[styles.label, { color: colors.textSecondary }]}>Select Venue</Text>
               <ScrollView horizontal showsHorizontalScrollIndicator={false}>
                 {userVenues.map((v) => (
-                  <TouchableOpacity
+                  <TouchableOpacity activeOpacity={1}
                     key={v.id}
                     style={[
                       styles.groupSelectChip,
@@ -138,7 +140,7 @@ const GroupConnectTab = ({
             />
           </View>
 
-          <TouchableOpacity
+          <TouchableOpacity activeOpacity={1}
             style={[
               styles.uploadBox,
               { borderColor: colors.border, height: 80, marginBottom: 16 },
@@ -151,10 +153,10 @@ const GroupConnectTab = ({
           </TouchableOpacity>
 
           <TouchableOpacity
-            style={[styles.primaryBtn, { backgroundColor: colors.primary }]}
+            style={[styles.primaryBtn, { backgroundColor: colors.primary, opacity: checkingVenue || isSendingRequest ? 0.6 : 1 }]}
             onPress={handleSendBookingRequest}
             disabled={checkingVenue || isSendingRequest}
-            activeOpacity={0.8}
+            activeOpacity={checkingVenue || isSendingRequest ? 1 : 0.78}
           >
             {isSendingRequest ? (
               <ActivityIndicator color="#FFF" />
@@ -168,14 +170,11 @@ const GroupConnectTab = ({
       </View>
     )}
 
-    {(!currentUserRole || currentUserRole === "musician") &&
+    {currentUserRole === "musician" &&
       group.requirements?.audition && (
         <View
           style={[
             styles.section,
-            (!currentUserRole || currentUserRole === "venue-owner") && {
-              marginTop: 32,
-            },
           ]}
         >
           {currentUserRole === "musician" && (
@@ -226,7 +225,7 @@ const GroupConnectTab = ({
                       `Confirm your application for the ${group.requirements.audition_role || "Musician"} position?`,
                     )
                   }
-                  activeOpacity={0.85}
+                  activeOpacity={1}
                 >
                   <View style={{ flexDirection: "row", alignItems: "center", flex: 1 }}>
                     <View
@@ -272,6 +271,21 @@ const GroupConnectTab = ({
           )}
         </View>
       )}
+
+    {connectionPanel ? (
+      <View
+        style={{
+          marginTop:
+            ((currentUserRole === "venue-owner") ||
+              ((currentUserRole === "musician") &&
+                group?.requirements?.audition))
+              ? 32
+              : 0,
+        }}
+      >
+        {connectionPanel}
+      </View>
+    ) : null}
   </View>
 );
 

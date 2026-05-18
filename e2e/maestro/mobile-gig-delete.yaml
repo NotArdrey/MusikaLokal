@@ -1,0 +1,26 @@
+appId: ${APP_ID}
+---
+- openLink: "musikalokal://my_venue"
+- scrollUntilVisible:
+    element:
+      id: ${E2E_GIG_CARD_ID}
+    direction: DOWN
+- assertVisible:
+    id: ${E2E_GIG_CARD_ID}
+- tapOn:
+    id: ${E2E_GIG_DELETE_ID}
+- tapOn:
+    id: "app-modal-input"
+- inputText: "Gig delete cleanup"
+- hideKeyboard
+- waitForAnimationToEnd:
+    timeout: 2000
+- extendedWaitUntil:
+    visible:
+      id: "app-modal-confirm-button"
+    timeout: 60000
+- tapOn:
+    id: "app-modal-confirm-button"
+- tapOn:
+    id: "app-modal-confirm-button"
+    optional: true

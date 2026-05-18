@@ -252,9 +252,22 @@ export default function LocationPicker({ visible, onClose, onSelect, initialLoca
 
     const [currentSelection, setCurrentSelection] = useState<{ address: string; lat: number; lng: number } | null>(null);
 
+    if (!visible) {
+        return alertVisible ? (
+            <CustomAlert
+                visible
+                type={alertConfig.type}
+                title={alertConfig.title}
+                message={alertConfig.message}
+                buttons={alertConfig.buttons}
+                onClose={() => setAlertVisible(false)}
+            />
+        ) : null;
+    }
+
     return (
         <>
-        <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
+        <Modal visible animationType="slide" onRequestClose={onClose}>
             <View style={styles.container}>
                 {/* Header */}
                 <View style={styles.header}>
@@ -280,7 +293,7 @@ export default function LocationPicker({ visible, onClose, onSelect, initialLoca
                         {loading && <ActivityIndicator size="small" color="#666" style={{ marginLeft: 8 }} />}
                     </View>
                     <TouchableOpacity
-                        activeOpacity={1}
+                        activeOpacity={gettingLocation ? 1 : 0.78}
                         onPress={handleGetCurrentAddress}
                         style={styles.currentLocationBtn}
                         disabled={gettingLocation}
@@ -311,8 +324,8 @@ export default function LocationPicker({ visible, onClose, onSelect, initialLoca
                     <Text style={styles.addressPreview} numberOfLines={2}>
                         {currentSelection ? currentSelection.address : 'Loading location...'}
                     </Text>
-                    <TouchableOpacity activeOpacity={1}
-                        style={[styles.confirmBtn, !currentSelection && styles.disabledBtn]}
+                    <TouchableOpacity activeOpacity={!currentSelection ? 1 : 0.78}
+                        style={[styles.confirmBtn, !currentSelection && styles.disabledBtn, { opacity: currentSelection ? 1 : 0.6 }]}
                         onPress={() => currentSelection && onSelect(currentSelection)}
                         disabled={!currentSelection}
                     >
@@ -366,10 +379,11 @@ const styles = StyleSheet.create({
     searchBox: {
         flexDirection: 'row',
         alignItems: 'center',
-        backgroundColor: '#fff',
-        borderRadius: 8,
-        paddingHorizontal: 12,
-        paddingVertical: 10,
+        gap: 10,
+        backgroundColor: '#F3F4F6',
+        borderRadius: 16,
+        paddingHorizontal: 16,
+        height: 48,
         shadowColor: "#000",
         shadowOffset: { width: 0, height: 2 },
         shadowOpacity: 0.2,
@@ -399,8 +413,13 @@ const styles = StyleSheet.create({
     },
     searchInput: {
         flex: 1,
-        marginLeft: 8,
-        fontSize: 14,
+        height: 24,
+        fontSize: 15,
+        fontFamily: 'Poppins_500Medium',
+        lineHeight: 20,
+        includeFontPadding: false,
+        padding: 0,
+        textAlignVertical: 'center',
     },
     webview: {
         flex: 1,
@@ -422,6 +441,7 @@ const styles = StyleSheet.create({
         paddingVertical: 14,
         borderRadius: 12,
         alignItems: 'center',
+        justifyContent: 'center',
     },
     disabledBtn: {
         backgroundColor: '#a5b4fc',

@@ -1,5 +1,4 @@
 import { Ionicons } from "@expo/vector-icons";
-import * as FileSystem from "expo-file-system/legacy";
 import * as Linking from "expo-linking";
 import { router, useLocalSearchParams } from "expo-router";
 import React, { useEffect, useRef, useState } from "react";
@@ -23,27 +22,8 @@ import Modal from "../src/components/modal";
 import Navbar from "../src/components/navbar";
 import { PH_MUSIC_GROUP_TYPES } from "../src/constants/groupTypes";
 import { useTheme } from "../src/context/ThemeContext";
-
-// Decode base64 to Uint8Array without using fetch().arrayBuffer() which crashes on Android New Architecture
-const base64ToUint8Array = (base64: string): Uint8Array => {
-  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-  const lookup = new Uint8Array(256);
-  for (let i = 0; i < chars.length; i++) lookup[chars.charCodeAt(i)] = i;
-  const b64 = base64.replace(/=/g, "");
-  let bufLen = Math.floor(b64.length * 0.75);
-  const bytes = new Uint8Array(bufLen);
-  let p = 0;
-  for (let i = 0; i < b64.length; i += 4) {
-    const e1 = lookup[b64.charCodeAt(i)];
-    const e2 = lookup[b64.charCodeAt(i + 1)];
-    const e3 = lookup[b64.charCodeAt(i + 2)];
-    const e4 = lookup[b64.charCodeAt(i + 3)];
-    if (p < bufLen) bytes[p++] = (e1 << 2) | (e2 >> 4);
-    if (p < bufLen) bytes[p++] = ((e2 & 15) << 4) | (e3 >> 2);
-    if (p < bufLen) bytes[p++] = ((e3 & 3) << 6) | (e4 & 63);
-  }
-  return bytes;
-};
+import { createE2EImageFixtureUrls, isE2EFixtureMode } from "../src/utils/e2eFixtures";
+import { sanitizeStorageFileName, uploadStorageObject } from "../src/utils/storageUpload";
 
 // Helper function to format time input
 const formatTimeInput = (text: string): string => {
@@ -85,6 +65,41 @@ const formatTimeInput = (text: string): string => {
 
 const TITLE_MAX_LENGTH = 120;
 const DESCRIPTION_MAX_LENGTH = 1000;
+const normalizeE2ETestId = (value: string) => value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+const getE2EEventDate = () => new Date(Date.now() + 8 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+
+const GENRES = [
+  "Rock",
+  "Pop",
+  "Jazz",
+  "Blues",
+  "Hip Hop",
+  "R&B",
+  "Country",
+  "Electronic",
+  "Classical",
+  "Reggae",
+  "Metal",
+  "Punk",
+  "Folk",
+  "Soul",
+  "Funk",
+  "Disco",
+  "Indie",
+  "Alternative",
+  "Latin",
+  "World Music",
+  "Gospel",
+  "EDM",
+  "House",
+  "Techno",
+  "Dubstep",
+  "Acoustic",
+  "Instrumental",
+  "Ambient",
+  "Lo-Fi",
+  "OPM",
+];
 
 type EventSchedule = {
   date: string;
@@ -159,12 +174,30 @@ export default function AddGigScreen() {
   const businessPermitInputRef = useRef<HTMLInputElement>(null);
   const documentPickerInProgressRef = useRef(false);
 
+  useEffect(() => {
+    if (!isE2EFixtureMode()) return;
+    const e2eEventDate = getE2EEventDate();
+    setImages((current) => current.length > 0 ? current : createE2EImageFixtureUrls(1));
+    setAddress((current) => current.trim() ? current : "E2E Venue Address");
+    setLatitude((current) => current ?? 14.5995);
+    setLongitude((current) => current ?? 120.9842);
+    setAddressVerified(true);
+    setAddressVerificationStatus("verified");
+    setCost((current) => current.trim() ? current : "5000");
+    setEventDate((current) => current.trim() ? current : e2eEventDate);
+    setEventSchedules((current) => current.length > 0 ? current : [{
+      date: e2eEventDate,
+      start_time: "06:00 PM",
+      end_time: "11:00 PM",
+    }]);
+  }, []);
+
   // Requirements state
   const [requiredGenres, setRequiredGenres] = useState<string[]>([]);
   const [newGenre, setNewGenre] = useState("");
+  const [genreSearch, setGenreSearch] = useState("");
   const [requiredInstruments, setRequiredInstruments] = useState<string[]>([]);
   const [newInstrument, setNewInstrument] = useState("");
-  const [experienceLevel, setExperienceLevel] = useState("");
   const [musicianType, setMusicianType] = useState<"solo" | "group" | "both">(
     "both",
   );
@@ -204,7 +237,7 @@ export default function AddGigScreen() {
   // Form Steps Configuration
   const steps = [
     { id: 1, title: "Gig Details", icon: "information-circle" },
-    { id: 2, title: "Needs", icon: "list" },
+    { id: 2, title: "Amenities", icon: "list" },
     { id: 3, title: "Review", icon: "checkmark-circle" },
   ];
 
@@ -232,7 +265,7 @@ export default function AddGigScreen() {
       if (profileError) throw profileError;
 
       if (profile?.role !== "venue-owner") {
-        showAlert("error", "Unauthorized", "Only venue owners can create gigs.");
+        showAlert("warning", "Unauthorized", "Only venue owners can create gigs.");
         router.replace("/home");
         return;
       }
@@ -276,21 +309,24 @@ export default function AddGigScreen() {
   };
 
   const handleAddEventCondition = () => {
-    if (!eventDate.trim()) {
-      showAlert("error", "Required Field", "Please select an event date first");
+    const nextEventDate = eventDate.trim() || (isE2EFixtureMode() ? getE2EEventDate() : "");
+
+    if (!nextEventDate) {
+      showAlert("warning", "Required Field", "Please select an event date first");
       return;
     }
 
     if (!eventStartTime || !eventEndTime) {
-      showAlert("error", "Required Field", "Please set both start and end time first");
+      showAlert("warning", "Required Field", "Please set both start and end time first");
       return;
     }
 
     const newCondition: EventSchedule = {
-      date: eventDate,
+      date: nextEventDate,
       start_time: eventStartTime,
       end_time: eventEndTime,
     };
+    if (!eventDate.trim()) setEventDate(nextEventDate);
 
     const alreadyExists = eventSchedules.some(
       (item) =>
@@ -344,16 +380,16 @@ export default function AddGigScreen() {
       const schedules = getNormalizedEventSchedules();
 
       if (!gigName.trim()) {
-        showAlert("error", "Required Field", "Please enter a gig name");
+        showAlert("warning", "Required Field", "Please enter a gig name");
         return false;
       }
       if (!description.trim()) {
-        showAlert("error", "Required Field", "Please enter a description");
+        showAlert("warning", "Required Field", "Please enter a description");
         return false;
       }
       if (!address.trim()) {
         showAlert(
-          "error",
+          "warning",
           "Required Field",
           "Please enter a venue address",
         );
@@ -361,7 +397,7 @@ export default function AddGigScreen() {
       }
       if (!cost.trim() || parseFloat(cost) <= 0) {
         showAlert(
-          "error",
+          "warning",
           "Required Field",
           "Please enter a valid payout amount",
         );
@@ -369,7 +405,7 @@ export default function AddGigScreen() {
       }
       if (images.length === 0) {
         showAlert(
-          "error",
+          "warning",
           "Required Field",
           "Please upload at least one event photo",
         );
@@ -377,7 +413,7 @@ export default function AddGigScreen() {
       }
       if (schedules.length === 0) {
         showAlert(
-          "error",
+          "warning",
           "Required Field",
           "Please add at least one event date and time condition",
         );
@@ -386,6 +422,16 @@ export default function AddGigScreen() {
     }
     return true;
   };
+
+  const isCurrentStepComplete =
+    step !== 1 ||
+    (gigName.trim().length > 0 &&
+      description.trim().length > 0 &&
+      address.trim().length > 0 &&
+      cost.trim().length > 0 &&
+      Number.parseFloat(cost) > 0 &&
+      images.length > 0 &&
+      getNormalizedEventSchedules().length > 0);
 
   const handleNext = async () => {
     if (!validateStep(step)) {
@@ -410,12 +456,14 @@ export default function AddGigScreen() {
 
   const handleBack = () => {
     if (step > 1) setStep(step - 1);
-    else router.back();
+    else router.replace("/my_venue");
   };
 
   const createGig = async () => {
     if (creating) return;
     setCreating(true);
+    let createdGigId: string | null = null;
+    let createdGigOwnerId: string | null = null;
 
     try {
       // Get current session (auto-refresh is handled by Supabase client)
@@ -424,11 +472,15 @@ export default function AddGigScreen() {
         error: sessionError,
       } = await supabase.auth.getSession();
       if (sessionError || !session || !session.user) {
-        showAlert("error", "Session Expired", "Please log in again.");
+        showAlert("warning", "Session Expired", "Please log in again.");
         router.replace("/");
         return;
       }
+      createdGigOwnerId = session.user.id;
 
+      const orderedImages = images.length > 0 && images[thumbnailIndex]
+        ? [images[thumbnailIndex], ...images.filter((_, i) => i !== thumbnailIndex)]
+        : images;
       const normalizedSchedules = getNormalizedEventSchedules();
       const primarySchedule = normalizedSchedules[0];
 
@@ -438,9 +490,8 @@ export default function AddGigScreen() {
         location: address,
         budget: parseFloat(cost) || 0,
         status: "open",
-        images: images,
+        images: orderedImages,
         contract_url: contractUrl || null,
-        business_permit_url: businessPermitUrl || null,
         latitude,
         longitude,
         event_date: primarySchedule?.date || eventDate,
@@ -448,7 +499,6 @@ export default function AddGigScreen() {
         requirements: {
           genres: requiredGenres,
           instruments: requiredInstruments,
-          experience_level: experienceLevel || null,
           event_start_time: primarySchedule?.start_time || eventStartTime,
           event_end_time: primarySchedule?.end_time || eventEndTime,
           event_schedules: normalizedSchedules,
@@ -479,14 +529,6 @@ export default function AddGigScreen() {
         },
       };
 
-      console.log(
-        "🔵 Creating gig with payload:",
-        JSON.stringify(
-          { action: "create", type: "gig", userId: session.user.id, payload },
-          null,
-          2,
-        ),
-      );
 
       // Insert base gig row (3NF-safe)
       const { data, error } = await supabase
@@ -499,27 +541,26 @@ export default function AddGigScreen() {
           budget: payload.budget,
           status: payload.status,
           contract_url: payload.contract_url,
-          business_permit_url: payload.business_permit_url,
+          business_permit_url: null,
           latitude: payload.latitude,
           longitude: payload.longitude,
           event_date: payload.event_date,
           reapplication_cooldown_days: payload.reapplication_cooldown_days,
-          permit_status: 'pending_review',
+          permit_status: 'approved',
         })
         .select()
         .single();
 
-      console.log("🔵 Response data:", JSON.stringify(data, null, 2));
-      console.log("🔵 Response error:", error);
 
       if (error) {
         console.error("❌ Error details:", JSON.stringify(error, null, 2));
         let alertMessage = `Failed to create gig: ${error.message}`;
         if (error.hint) alertMessage += `\n\nHint: ${error.hint}`;
         if (error.details) alertMessage += `\n\nDetails: ${error.details}`;
-        showAlert("error", "Error", alertMessage);
+        showAlert("warning", "Couldn't Create Gig", alertMessage);
         return;
       }
+      createdGigId = data.id;
 
       const requirementRows = Object.entries(payload.requirements || {})
         .filter(([, requirement_value]) => requirement_value !== null && requirement_value !== undefined)
@@ -556,8 +597,25 @@ export default function AddGigScreen() {
 
       setNewGigId(data.id);
       setModalVisible(true);
-      console.log("✅ Gig Created successfully");
     } catch (e: any) {
+      if (createdGigId && createdGigOwnerId) {
+        const { error: rollbackError } = await supabase
+          .from('gigs')
+          .delete()
+          .eq('id', createdGigId)
+          .eq('organizer_id', createdGigOwnerId);
+
+        if (rollbackError) {
+          console.error("Failed to roll back partial gig create", {
+            gigId: createdGigId,
+            ownerId: createdGigOwnerId,
+            message: rollbackError.message,
+            code: rollbackError.code,
+            details: rollbackError.details,
+            hint: rollbackError.hint,
+          });
+        }
+      }
       console.error("❌ Error creating gig:", e);
       console.error("❌ Error message:", e?.message);
       console.error("❌ Error stack:", e?.stack);
@@ -566,8 +624,8 @@ export default function AddGigScreen() {
         JSON.stringify(e, Object.getOwnPropertyNames(e), 2),
       );
       showAlert(
-        "error",
-        "Error",
+        "warning",
+        "Couldn't Create Gig",
         `Failed to create gig: ${e?.message || "Unknown error"}`,
       );
     } finally {
@@ -577,7 +635,20 @@ export default function AddGigScreen() {
 
   const handleSuccessRedirect = () => {
     setModalVisible(false);
-    router.push({ pathname: "/bookings", params: { tab: "Pending" } });
+    router.replace({ pathname: "/my_venue", params: { refresh: String(Date.now()) } });
+  };
+
+  const handleLocationSelectPress = () => {
+    if (isE2EFixtureMode()) {
+      setAddress("E2E Venue Address");
+      setLatitude(14.5995);
+      setLongitude(120.9842);
+      setAddressVerified(true);
+      setAddressVerificationStatus("verified");
+      return;
+    }
+
+    setLocationPickerVisible(true);
   };
 
   // Start address verification (before gig creation)
@@ -586,7 +657,7 @@ export default function AddGigScreen() {
     try {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session?.user) {
-        showAlert("error", "Error", "Session expired. Please log in again.");
+        showAlert("warning", "Session Expired", "Your session has expired. Please log in again.");
         return;
       }
 
@@ -609,7 +680,6 @@ export default function AddGigScreen() {
         }
       });
 
-      console.log('Address verification response:', { data, error });
 
       // For Supabase functions, the error body is sometimes returned in data even when there's an error
       if (error || (data && data.error)) {
@@ -621,18 +691,13 @@ export default function AddGigScreen() {
           if (data.message) {
             errorMessage += `: ${data.message}`;
           }
-          console.log('Error from data:', errorMessage);
         } else if (error) {
-          console.log('Error object:', error);
-          console.log('Error name:', error.name);
-          console.log('Error message:', error.message);
 
           // Try to get the response body from FunctionsHttpError
           try {
             // FunctionsHttpError has a context with the Response object
             if (error.context && typeof error.context.json === 'function') {
               const errorBody = await error.context.json();
-              console.log('Error body from context.json():', errorBody);
               if (errorBody?.error) {
                 errorMessage = errorBody.error;
                 if (errorBody.message) {
@@ -658,7 +723,7 @@ export default function AddGigScreen() {
     } catch (e: any) {
       console.error('Address verification error:', e);
       showAlert(
-        "error",
+        "warning",
         "Verification Error",
         e.message || "Could not start address verification. Please try again."
       );
@@ -745,13 +810,12 @@ export default function AddGigScreen() {
     } catch (e: any) {
       console.error("Address verification error:", e);
       showAlert(
-        "error",
+        "warning",
         "Verification Error",
-        "Could not start address verification. You can verify your venue address later from settings."
+        "Could not start address verification. You can verify your venue address later from My Venue."
       );
       setAddressVerificationModalVisible(false);
-      // Navigate to manage gig anyway
-      router.replace({ pathname: "/manage_gig", params: { id: newGigId! } });
+      router.replace({ pathname: "/my_venue", params: { refresh: String(Date.now()) } });
     } finally {
       setAddressVerificationLoading(false);
     }
@@ -806,11 +870,19 @@ export default function AddGigScreen() {
       : normalizedLabel.includes("name") || normalizedLabel.includes("title")
         ? TITLE_MAX_LENGTH
         : undefined;
+    const isRequiredLabel =
+      normalizedLabel.includes("name") ||
+      normalizedLabel.includes("title") ||
+      normalizedLabel.includes("description") ||
+      normalizedLabel.includes("payout");
 
     return (
       <View style={styles.inputContainer}>
       <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>
         {label}
+        {isRequiredLabel ? (
+          <Text style={{ color: "#EF4444" }}> *</Text>
+        ) : null}
       </Text>
       <View
         style={[
@@ -822,6 +894,8 @@ export default function AddGigScreen() {
         ]}
       >
         <TextInput
+          testID={`mobile-add-gig-${normalizeE2ETestId(label)}-input`}
+          accessibilityLabel={`mobile-add-gig-${normalizeE2ETestId(label)}-input`}
           value={value}
           onChangeText={setValue}
           maxLength={inputMaxLength}
@@ -830,6 +904,8 @@ export default function AddGigScreen() {
           multiline={multiline}
           numberOfLines={multiline ? 4 : 1}
           keyboardType={keyboardType}
+          autoCapitalize={isE2EFixtureMode() ? "none" : "sentences"}
+          autoCorrect={!isE2EFixtureMode()}
           style={[
             styles.textInput,
             {
@@ -837,6 +913,7 @@ export default function AddGigScreen() {
               height: multiline ? 120 : "auto",
               textAlign: "left",
               textAlignVertical: multiline ? "top" : "center",
+              paddingVertical: multiline ? 12 : 16,
             },
           ]}
         />
@@ -883,21 +960,20 @@ export default function AddGigScreen() {
         data: { session },
       } = await supabase.auth.getSession();
       if (!session) {
-        showAlert("error", "Error", "Session expired. Please log in again.");
+        showAlert("warning", "Session Expired", "Your session has expired. Please log in again.");
         setUploadingContract(false);
         return;
       }
 
-      const base64 = await FileSystem.readAsStringAsync(fileUri, { encoding: FileSystem.EncodingType.Base64 });
-      const bytes = base64ToUint8Array(base64);
-
-      const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
-      const { data, error } = await supabase.storage
-        .from("documents")
-        .upload(filePath, bytes, {
-          contentType: "application/pdf",
-          upsert: false,
-        });
+      const safeFileName = sanitizeStorageFileName(fileName, "contract.pdf");
+      const filePath = `contracts/${session.user.id}/${Date.now()}_${safeFileName}`;
+      const { error } = await uploadStorageObject({
+        bucket: "documents",
+        path: filePath,
+        uri: fileUri,
+        contentType: "application/pdf",
+        upsert: false,
+      });
 
       if (error) throw error;
 
@@ -912,8 +988,8 @@ export default function AddGigScreen() {
       documentPickerInProgressRef.current = false;
       console.error("Error uploading contract:", error);
       showAlert(
-        "error",
-        "Error",
+        "warning",
+        "Upload Failed",
         "Failed to upload contract. Please try again.",
       );
     } finally {
@@ -965,25 +1041,24 @@ export default function AddGigScreen() {
         data: { session },
       } = await supabase.auth.getSession();
       if (!session) {
-        showAlert("error", "Error", "Session expired. Please log in again.");
+        showAlert("warning", "Session Expired", "Your session has expired. Please log in again.");
         setUploadingBusinessPermit(false);
         return;
       }
-
-      const base64 = await FileSystem.readAsStringAsync(fileUri, { encoding: FileSystem.EncodingType.Base64 });
-      const bytes = base64ToUint8Array(base64);
 
       const contentType = fileName.toLowerCase().endsWith('.pdf')
         ? 'application/pdf'
         : `image/${fileName.split('.').pop()?.toLowerCase() || 'jpeg'}`;
 
-      const filePath = `business-permits/${session.user.id}/${Date.now()}_${fileName}`;
-      const { data, error } = await supabase.storage
-        .from("documents")
-        .upload(filePath, bytes, {
-          contentType,
-          upsert: false,
-        });
+      const safeFileName = sanitizeStorageFileName(fileName, "business-permit.pdf");
+      const filePath = `business-permits/${session.user.id}/${Date.now()}_${safeFileName}`;
+      const { error } = await uploadStorageObject({
+        bucket: "documents",
+        path: filePath,
+        uri: fileUri,
+        contentType,
+        upsert: false,
+      });
 
       if (error) throw error;
 
@@ -998,8 +1073,8 @@ export default function AddGigScreen() {
       documentPickerInProgressRef.current = false;
       console.error("Error uploading business permit:", error);
       showAlert(
-        "error",
-        "Error",
+        "warning",
+        "Upload Failed",
         "Failed to upload business permit. Please try again.",
       );
     } finally {
@@ -1024,7 +1099,7 @@ export default function AddGigScreen() {
         data: { session },
       } = await supabase.auth.getSession();
       if (!session) {
-        showAlert("error", "Error", "Session expired. Please log in again.");
+        showAlert("warning", "Session Expired", "Your session has expired. Please log in again.");
         setUploadingBusinessPermit(false);
         return;
       }
@@ -1033,13 +1108,15 @@ export default function AddGigScreen() {
         ? 'application/pdf'
         : file.type || 'image/jpeg';
 
-      const filePath = `business-permits/${session.user.id}/${Date.now()}_${fileName}`;
-      const { data, error } = await supabase.storage
-        .from("documents")
-        .upload(filePath, file, {
-          contentType,
-          upsert: false,
-        });
+      const safeFileName = sanitizeStorageFileName(fileName, "business-permit.pdf");
+      const filePath = `business-permits/${session.user.id}/${Date.now()}_${safeFileName}`;
+      const { error } = await uploadStorageObject({
+        bucket: "documents",
+        path: filePath,
+        body: file,
+        contentType,
+        upsert: false,
+      });
 
       if (error) throw error;
 
@@ -1052,7 +1129,7 @@ export default function AddGigScreen() {
       showAlert("success", "Success", "Business permit uploaded successfully!");
     } catch (error) {
       console.error("Error uploading business permit:", error);
-      showAlert("error", "Error", "Failed to upload business permit. Please try again.");
+      showAlert("warning", "Upload Failed", "Failed to upload business permit. Please try again.");
     } finally {
       setUploadingBusinessPermit(false);
       if (event.target) {
@@ -1073,18 +1150,19 @@ export default function AddGigScreen() {
         data: { session },
       } = await supabase.auth.getSession();
       if (!session) {
-        showAlert("error", "Error", "Session expired. Please log in again.");
+        showAlert("warning", "Session Expired", "Your session has expired. Please log in again.");
         setUploadingContract(false);
         return;
       }
-
-      const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
-      const { data, error } = await supabase.storage
-        .from("documents")
-        .upload(filePath, file, {
-          contentType: "application/pdf",
-          upsert: false,
-        });
+      const safeFileName = sanitizeStorageFileName(fileName, "contract.pdf");
+      const filePath = `contracts/${session.user.id}/${Date.now()}_${safeFileName}`;
+      const { error } = await uploadStorageObject({
+        bucket: "documents",
+        path: filePath,
+        body: file,
+        contentType: "application/pdf",
+        upsert: false,
+      });
 
       if (error) throw error;
 
@@ -1097,7 +1175,7 @@ export default function AddGigScreen() {
       showAlert("success", "Success", "Contract uploaded successfully!");
     } catch (error) {
       console.error("Error uploading contract:", error);
-      showAlert("error", "Error", "Failed to upload contract. Please try again.");
+      showAlert("warning", "Upload Failed", "Failed to upload contract. Please try again.");
     } finally {
       setUploadingContract(false);
       if (event.target) {
@@ -1117,17 +1195,12 @@ export default function AddGigScreen() {
           style={{ display: "none" }}
         />
       )}
-      {Platform.OS === "web" && (
-        <input
-          ref={businessPermitInputRef as any}
-          type="file"
-          accept="application/pdf,image/*"
-          onChange={handleWebBusinessPermitSelect}
-          style={{ display: "none" }}
-        />
-      )}
-      <View style={[styles.flex1, { backgroundColor: colors.background }]}>
-        <Header title="Create Gig" />
+      <View
+        testID="mobile-add-gig-page"
+        accessibilityLabel="mobile-add-gig-page"
+        style={[styles.flex1, { backgroundColor: colors.background }]}
+      >
+        <Header title="Create Gig" onBackPress={handleBack} />
 
         {/* Enhanced Step Indicator (Fixed at top) */}
         <View style={styles.stepIndicatorContainer}>
@@ -1180,6 +1253,9 @@ export default function AddGigScreen() {
                     />
                   </View>
                   <Text
+                    numberOfLines={1}
+                    adjustsFontSizeToFit
+                    minimumFontScale={0.82}
                     style={[
                       styles.stepText,
                       {
@@ -1249,8 +1325,11 @@ export default function AddGigScreen() {
                 >
                   Venue Address
                 </Text>
-                <TouchableOpacity activeOpacity={1}
-                  onPress={() => setLocationPickerVisible(true)}
+                <TouchableOpacity
+                  activeOpacity={1}
+                  testID="mobile-add-gig-location-button"
+                  accessibilityLabel="mobile-add-gig-location-button"
+                  onPress={handleLocationSelectPress}
                   style={[
                     styles.inputWrapper,
                     {
@@ -1312,7 +1391,7 @@ export default function AddGigScreen() {
                       },
                     ]}
                   >
-                    <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+                    <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 10 }}>
                       <View style={{
                         backgroundColor: colors.primary,
                         borderRadius: 20,
@@ -1332,7 +1411,7 @@ export default function AddGigScreen() {
                     </View>
                   </View>
                 ) : (
-                  <TouchableOpacity activeOpacity={1}
+                  <TouchableOpacity activeOpacity={addressVerificationLoading ? 1 : 0.78}
                     onPress={startAddressVerification}
                     disabled={addressVerificationLoading}
                     style={[
@@ -1376,7 +1455,7 @@ export default function AddGigScreen() {
 
 
               {renderInput(
-                "Payout (PHP)",
+                "Payout (₱)",
                 cost,
                 setCost,
                 "e.g. 5000",
@@ -1485,14 +1564,8 @@ export default function AddGigScreen() {
                     },
                   ]}
                 >
-                  <View
-                    style={{
-                      flexDirection: "row",
-                      alignItems: "center",
-                      gap: 8,
-                    }}
-                  >
-                    <View style={{ flex: 1 }}>
+                  <View style={styles.timeSlotRow}>
+                    <View style={styles.timeSlotGroup}>
                       <Text
                         style={{
                           color: colors.textSecondary,
@@ -1503,13 +1576,7 @@ export default function AddGigScreen() {
                       >
                         START TIME
                       </Text>
-                      <View
-                        style={{
-                          flexDirection: "row",
-                          alignItems: "center",
-                          gap: 4,
-                        }}
-                      >
+                      <View style={styles.timeInputRow}>
                         <TextInput
                           value={eventStartTime.split(" ")[0]}
                           onChangeText={(text) => {
@@ -1543,13 +1610,7 @@ export default function AddGigScreen() {
                             { backgroundColor: isDark ? "#374151" : "#E5E7EB" },
                           ]}
                         >
-                          <Text
-                            style={{
-                              fontSize: 12,
-                              fontFamily: "Poppins_600SemiBold",
-                              color: colors.text,
-                            }}
-                          >
+                          <Text style={[styles.ampmBtnText, { color: colors.text }]}>
                             {eventStartTime.split(" ")[1]}
                           </Text>
                         </TouchableOpacity>
@@ -1559,9 +1620,9 @@ export default function AddGigScreen() {
                       name="arrow-forward"
                       size={20}
                       color={colors.textSecondary}
-                      style={{ marginTop: 20 }}
+                      style={styles.timeSlotArrow}
                     />
-                    <View style={{ flex: 1 }}>
+                    <View style={styles.timeSlotGroup}>
                       <Text
                         style={{
                           color: colors.textSecondary,
@@ -1572,13 +1633,7 @@ export default function AddGigScreen() {
                       >
                         END TIME
                       </Text>
-                      <View
-                        style={{
-                          flexDirection: "row",
-                          alignItems: "center",
-                          gap: 4,
-                        }}
-                      >
+                      <View style={styles.timeInputRow}>
                         <TextInput
                           value={eventEndTime.split(" ")[0]}
                           onChangeText={(text) => {
@@ -1612,13 +1667,7 @@ export default function AddGigScreen() {
                             { backgroundColor: isDark ? "#374151" : "#E5E7EB" },
                           ]}
                         >
-                          <Text
-                            style={{
-                              fontSize: 12,
-                              fontFamily: "Poppins_600SemiBold",
-                              color: colors.text,
-                            }}
-                          >
+                          <Text style={[styles.ampmBtnText, { color: colors.text }]}>
                             {eventEndTime.split(" ")[1]}
                           </Text>
                         </TouchableOpacity>
@@ -1627,6 +1676,8 @@ export default function AddGigScreen() {
                   </View>
 
                   <TouchableOpacity activeOpacity={1}
+                    testID="mobile-add-gig-add-schedule-button"
+                    accessibilityLabel="mobile-add-gig-add-schedule-button"
                     onPress={handleAddEventCondition}
                     style={{
                       marginTop: 12,
@@ -1667,7 +1718,7 @@ export default function AddGigScreen() {
                         key={`${item.date}-${item.start_time}-${item.end_time}-${index}`}
                         style={[styles.dayCard, { backgroundColor: isDark ? "#1F2937" : "#F9FAFB", borderColor: colors.border, padding: 12, flexDirection: "row", alignItems: "center", justifyContent: "space-between" }]}
                       >
-                        <View style={{ flex: 1, paddingRight: 8 }}>
+                        <View style={{ flex: 1, minWidth: 150, paddingRight: 8 }}>
                           <Text style={{ color: colors.text, fontFamily: "Poppins_600SemiBold", fontSize: 12 }}>
                             {new Date(item.date).toLocaleDateString("en-US", {
                               weekday: "short",
@@ -1720,7 +1771,7 @@ export default function AddGigScreen() {
                         alignItems: "center",
                         gap: 12,
                         flex: 1,
-                      }}
+                      minWidth: 150 }}
                     >
                       <View
                         style={[
@@ -1765,7 +1816,7 @@ export default function AddGigScreen() {
                   <TouchableOpacity
                     onPress={handleContractUpload}
                     disabled={uploadingContract}
-                    activeOpacity={1}
+                    activeOpacity={uploadingContract ? 1 : 0.78}
                     style={[
                       styles.uploadContractBtn,
                       {
@@ -1801,119 +1852,6 @@ export default function AddGigScreen() {
                   </TouchableOpacity>
                 )}
               </View>
-
-              {/* Business Permit Upload */}
-              <View style={styles.inputContainer}>
-                <Text
-                  style={[styles.inputLabel, { color: colors.textSecondary }]}
-                >
-                  Business Permit
-                </Text>
-                <Text
-                  style={[
-                    styles.inputSubLabel,
-                    { color: colors.textSecondary },
-                  ]}
-                >
-                  Upload your business permit (PDF or Image)
-                </Text>
-                {businessPermitUrl ? (
-                  <View
-                    style={[
-                      styles.contractPreview,
-                      {
-                        backgroundColor: isDark ? "#1F2937" : "#F3F4F6",
-                        borderColor: isDark ? "#374151" : "#E5E7EB",
-                      },
-                    ]}
-                  >
-                    <View
-                      style={{
-                        flexDirection: "row",
-                        alignItems: "center",
-                        gap: 12,
-                        flex: 1,
-                      }}
-                    >
-                      <View
-                        style={[
-                          styles.pdfIcon,
-                          { backgroundColor: "#10B981" },
-                        ]}
-                      >
-                        <Ionicons name="shield-checkmark" size={24} color="#fff" />
-                      </View>
-                      <View style={{ flex: 1 }}>
-                        <Text
-                          style={[
-                            styles.contractFileName,
-                            { color: colors.text },
-                          ]}
-                          numberOfLines={1}
-                        >
-                          {businessPermitFileName}
-                        </Text>
-                        <Text
-                          style={[
-                            styles.contractFileSize,
-                            { color: colors.textSecondary },
-                          ]}
-                        >
-                          Business Permit
-                        </Text>
-                      </View>
-                    </View>
-                    <TouchableOpacity activeOpacity={1}
-                      onPress={removeBusinessPermit}
-                      style={styles.removeContractBtn}
-                    >
-                      <Ionicons
-                        name="trash-outline"
-                        size={20}
-                        color="#EF4444"
-                      />
-                    </TouchableOpacity>
-                  </View>
-                ) : (
-                  <TouchableOpacity
-                    onPress={handleBusinessPermitUpload}
-                    disabled={uploadingBusinessPermit}
-                    activeOpacity={1}
-                    style={[
-                      styles.uploadContractBtn,
-                      {
-                        backgroundColor: colors.inputBackground,
-                        borderColor: isDark ? "#374151" : "#E5E7EB",
-                      },
-                    ]}
-                  >
-                    {uploadingBusinessPermit ? (
-                      <ActivityIndicator size="small" color={colors.primary} />
-                    ) : (
-                      <>
-                        <Ionicons
-                          name="shield-checkmark-outline"
-                          size={32}
-                          color={colors.textSecondary}
-                        />
-                        <Text
-                          style={[styles.uploadText, { color: colors.text }]}
-                        >
-                          Upload Business Permit
-                        </Text>
-                        <Text
-                          style={[
-                            styles.uploadSubText,
-                            { color: colors.textSecondary },
-                          ]}
-                        >
-                          PDF or Image format
-                        </Text>
-                      </>
-                    )}
-                  </TouchableOpacity>
-                )}
-              </View>
             </View>
           )}
 
@@ -1923,83 +1861,54 @@ export default function AddGigScreen() {
                 Needs
               </Text>
 
-              {/* Genre Requirements */}
+              {/* Genre Requirements (searchable chips) */}
               <View style={styles.inputContainer}>
-                <Text
-                  style={[styles.inputLabel, { color: colors.textSecondary }]}
-                >
-                  Genres
-                </Text>
-                <View style={[styles.addMemberRow, { marginBottom: 8 }]}>
-                  <View
-                    style={[
-                      styles.inputWrapper,
-                      styles.flex1,
-                      {
-                        backgroundColor: colors.inputBackground,
-                        borderColor: isDark ? "#374151" : "#E5E7EB",
-                      },
-                    ]}
-                  >
-                    <TextInput
-                      value={newGenre}
-                      onChangeText={setNewGenre}
-                      placeholder="Add genre (e.g., Rock, Jazz)..."
-                      placeholderTextColor={colors.textSecondary}
-                      style={[styles.textInput, { color: colors.text }]}
-                      onSubmitEditing={() => {
-                        if (newGenre.trim()) {
-                          setRequiredGenres([
-                            ...requiredGenres,
-                            newGenre.trim(),
-                          ]);
-                          setNewGenre("");
-                        }
-                      }}
-                    />
-                  </View>
-                  <TouchableOpacity activeOpacity={1}
-                    onPress={() => {
-                      if (newGenre.trim()) {
-                        setRequiredGenres([...requiredGenres, newGenre.trim()]);
-                        setNewGenre("");
-                      }
-                    }}
-                    style={[styles.addBtn, { backgroundColor: colors.primary }]}
-                  >
-                    <Ionicons name="add" size={24} color="#fff" />
-                  </TouchableOpacity>
-                </View>
+                <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Genres</Text>
                 {requiredGenres.length > 0 && (
-                  <View style={styles.chipContainer}>
-                    {requiredGenres.map((genre, index) => (
-                      <View
-                        key={index}
+                  <View style={styles.selectedChips}>
+                    {requiredGenres.map((genre) => (
+                      <TouchableOpacity activeOpacity={1}
+                        key={genre}
+                        onPress={() => setRequiredGenres(requiredGenres.filter((g) => g !== genre))}
                         style={[
-                          styles.chip,
-                          { backgroundColor: isDark ? "#1F2937" : "#F3F4F6" },
+                          styles.chipCompact,
+                          { borderColor: colors.primary, backgroundColor: isDark ? "rgba(124, 58, 237, 0.3)" : "#EEF2FF" },
                         ]}
                       >
-                        <Text style={[styles.chipText, { color: colors.text }]}>
-                          {genre}
-                        </Text>
-                        <TouchableOpacity activeOpacity={1}
-                          onPress={() =>
-                            setRequiredGenres(
-                              requiredGenres.filter((_, i) => i !== index),
-                            )
-                          }
-                        >
-                          <Ionicons
-                            name="close-circle"
-                            size={16}
-                            color={colors.textSecondary}
-                          />
-                        </TouchableOpacity>
-                      </View>
+                        <Text style={[styles.chipTextCompact, { color: isDark ? "#A78BFA" : colors.primary }]}>{genre}</Text>
+                        <Ionicons name="close-circle" size={14} color={isDark ? "#A78BFA" : colors.primary} style={{ marginLeft: 4 }} />
+                      </TouchableOpacity>
                     ))}
                   </View>
                 )}
+
+                <View style={[styles.searchInputWrap, { backgroundColor: isDark ? "#374151" : "#F3F4F6" }]}>
+                  <Ionicons name="search" size={20} color={colors.textSecondary} />
+                  <TextInput
+                    style={[styles.searchInput, { color: colors.text }]}
+                    value={genreSearch}
+                    onChangeText={setGenreSearch}
+                    placeholder="Search genres..."
+                    placeholderTextColor={colors.textSecondary}
+                  />
+                </View>
+
+                <View style={styles.chipsCompact}>
+                  {GENRES.filter((g) => !requiredGenres.includes(g) && g.toLowerCase().includes(genreSearch.toLowerCase()))
+                    .slice(0, genreSearch ? 20 : 8)
+                    .map((g) => (
+                      <TouchableOpacity activeOpacity={1}
+                        key={g}
+                        onPress={() => setRequiredGenres([...requiredGenres, g])}
+                        style={[styles.chipCompact, { borderColor: colors.border, backgroundColor: "transparent" }]}
+                      >
+                        <Text style={[styles.chipTextCompact, { color: colors.textSecondary }]}>{g}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  {!genreSearch && GENRES.filter((g) => !requiredGenres.includes(g)).length > 8 && (
+                    <Text style={[styles.moreText, { color: colors.textSecondary }]}>Search for more...</Text>
+                  )}
+                </View>
               </View>
 
               {/* Equipment Requirements */}
@@ -2007,7 +1916,7 @@ export default function AddGigScreen() {
                 <Text
                   style={[styles.inputLabel, { color: colors.textSecondary }]}
                 >
-                  Equipments
+                  Provided equipments
                 </Text>
                 <View style={[styles.addMemberRow, { marginBottom: 8 }]}>
                   <View
@@ -2084,56 +1993,6 @@ export default function AddGigScreen() {
                 )}
               </View>
 
-              {/* Experience Level */}
-              <View style={styles.inputContainer}>
-                <Text
-                  style={[styles.inputLabel, { color: colors.textSecondary }]}
-                >
-                  Experience Level
-                </Text>
-                <View style={styles.experienceLevelContainer}>
-                  {["Beginner", "Intermediate", "Advanced", "Professional"].map(
-                    (level) => (
-                      <TouchableOpacity activeOpacity={1}
-                        key={level}
-                        onPress={() => setExperienceLevel(level)}
-                        style={[
-                          styles.experienceButton,
-                          {
-                            backgroundColor:
-                              experienceLevel === level
-                                ? colors.primary
-                                : isDark
-                                  ? "#1F2937"
-                                  : "#F9FAFB",
-                            borderColor:
-                              experienceLevel === level
-                                ? colors.primary
-                                : isDark
-                                  ? "#374151"
-                                  : "#E5E7EB",
-                          },
-                        ]}
-                      >
-                        <Text
-                          style={[
-                            styles.experienceButtonText,
-                            {
-                              color:
-                                experienceLevel === level
-                                  ? "#fff"
-                                  : colors.text,
-                            },
-                          ]}
-                        >
-                          {level}
-                        </Text>
-                      </TouchableOpacity>
-                    ),
-                  )}
-                </View>
-              </View>
-
               {/* Looking For */}
               <View style={styles.inputContainer}>
                 <Text
@@ -2161,7 +2020,7 @@ export default function AddGigScreen() {
 
                 <View style={[styles.slotCard, { backgroundColor: isDark ? "#1F2937" : "#F9FAFB", borderColor: isDark ? "#374151" : "#E5E7EB" }]}>
                   <View style={styles.slotHeader}>
-                    <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                    <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
                       <Ionicons name="person" size={20} color="#EC4899" />
                       <Text style={[styles.slotTitle, { color: colors.text }]}>Solo Artists</Text>
                     </View>
@@ -2343,7 +2202,7 @@ export default function AddGigScreen() {
                 {/* Duo Slots */}
                 <View style={[styles.slotCard, { backgroundColor: isDark ? "#1F2937" : "#F9FAFB", borderColor: isDark ? "#374151" : "#E5E7EB", marginTop: 12 }]}>
                   <View style={styles.slotHeader}>
-                    <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                    <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
                       <Ionicons name="people" size={20} color="#8B5CF6" />
                       <Text style={[styles.slotTitle, { color: colors.text }]}>Duos (2 members)</Text>
                     </View>
@@ -2525,7 +2384,7 @@ export default function AddGigScreen() {
                 {/* Preferred Group Type Slots */}
                 <View style={[styles.slotCard, { backgroundColor: isDark ? "#1F2937" : "#F9FAFB", borderColor: isDark ? "#374151" : "#E5E7EB", marginTop: 12 }]}>
                   <View style={styles.slotHeader}>
-                    <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                    <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
                       <Ionicons name="musical-notes" size={20} color="#3B82F6" />
                       <Text style={[styles.slotTitle, { color: colors.text }]}>Preferred Group Type</Text>
                     </View>
@@ -2581,7 +2440,7 @@ export default function AddGigScreen() {
                               {type.label}
                             </Text>
                             {typeCount > 0 && (
-                              <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+                              <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 4 }}>
                                 <View
                                   style={{
                                     minWidth: 20,
@@ -2598,7 +2457,7 @@ export default function AddGigScreen() {
                                   </Text>
                                 </View>
                                 <TouchableOpacity
-                                  activeOpacity={0.8}
+                                  activeOpacity={1}
                                   onPress={(event) => {
                                     event.stopPropagation();
                                     setPreferredGroupTypes((prev) => {
@@ -2806,7 +2665,7 @@ export default function AddGigScreen() {
                 </Text>
                 <View style={[styles.slotCard, { backgroundColor: isDark ? "#1F2937" : "#F9FAFB", borderColor: isDark ? "#374151" : "#E5E7EB" }]}>
                   <View style={styles.slotHeader}>
-                    <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                    <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
                       <Ionicons name="time-outline" size={20} color={colors.primary} />
                       <Text style={[styles.slotTitle, { color: colors.text }]}>Cooldown Period</Text>
                     </View>
@@ -2911,8 +2770,7 @@ export default function AddGigScreen() {
                 </View>
 
                 {(requiredGenres.length > 0 ||
-                  requiredInstruments.length > 0 ||
-                  experienceLevel) && (
+                  requiredInstruments.length > 0) && (
                     <>
                       <View
                         style={[
@@ -2921,7 +2779,7 @@ export default function AddGigScreen() {
                         ]}
                       />
                       <View>
-                        <Text style={styles.reviewLabel}>Needs</Text>
+                        <Text style={styles.reviewLabel}>Amenities</Text>
                         {requiredGenres.length > 0 && (
                           <View style={{ marginBottom: 8 }}>
                             <Text
@@ -2945,25 +2803,10 @@ export default function AddGigScreen() {
                                 { color: colors.textSecondary },
                               ]}
                             >
-                              Equipments:
+                              Provided equipments:
                             </Text>
                             <Text style={{ color: colors.text }}>
                               {requiredInstruments.join(", ")}
-                            </Text>
-                          </View>
-                        )}
-                        {experienceLevel && (
-                          <View>
-                            <Text
-                              style={[
-                                styles.requirementSubLabel,
-                                { color: colors.textSecondary },
-                              ]}
-                            >
-                              Experience Level:
-                            </Text>
-                            <Text style={{ color: colors.text }}>
-                              {experienceLevel}
                             </Text>
                           </View>
                         )}
@@ -2984,7 +2827,7 @@ export default function AddGigScreen() {
                       <Text style={styles.reviewLabel}>Looking For</Text>
                       <View style={{ gap: 8 }}>
                         {soloSlotsNeeded > 0 && (
-                          <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                          <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
                             <Ionicons name="person" size={16} color="#EC4899" />
                             <Text style={{ color: colors.text, fontFamily: "Poppins_500Medium" }}>
                               {soloSlotsNeeded} Solo Artist{soloSlotsNeeded > 1 ? "s" : ""}
@@ -2995,12 +2838,12 @@ export default function AddGigScreen() {
                         {soloSlotsNeeded > 0 && (soloPreferredGenres.length > 0 || soloPreferredInstruments.length > 0) && (
                           <Text style={{ color: colors.textSecondary, fontSize: 12, marginLeft: 24 }}>
                             {soloPreferredGenres.length > 0 ? `Genres: ${soloPreferredGenres.join(", ")}` : ""}
-                            {soloPreferredGenres.length > 0 && soloPreferredInstruments.length > 0 ? " • " : ""}
+                            {soloPreferredGenres.length > 0 && soloPreferredInstruments.length > 0 ? " | " : ""}
                             {soloPreferredInstruments.length > 0 ? `Instruments: ${soloPreferredInstruments.join(", ")}` : ""}
                           </Text>
                         )}
                         {duoSlotsNeeded > 0 && (
-                          <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                          <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
                             <Ionicons name="people" size={16} color="#8B5CF6" />
                             <Text style={{ color: colors.text, fontFamily: "Poppins_500Medium" }}>
                               {duoSlotsNeeded} Duo{duoSlotsNeeded > 1 ? "s" : ""}
@@ -3011,12 +2854,12 @@ export default function AddGigScreen() {
                         {duoSlotsNeeded > 0 && (duoPreferredGenres.length > 0 || duoPreferredInstruments.length > 0) && (
                           <Text style={{ color: colors.textSecondary, fontSize: 12, marginLeft: 24 }}>
                             {duoPreferredGenres.length > 0 ? `Genres: ${duoPreferredGenres.join(", ")}` : ""}
-                            {duoPreferredGenres.length > 0 && duoPreferredInstruments.length > 0 ? " • " : ""}
+                            {duoPreferredGenres.length > 0 && duoPreferredInstruments.length > 0 ? " | " : ""}
                             {duoPreferredInstruments.length > 0 ? `Instruments: ${duoPreferredInstruments.join(", ")}` : ""}
                           </Text>
                         )}
                         {bandSlotsNeeded > 0 && (
-                          <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                          <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
                             <Ionicons name="people-circle" size={16} color="#3B82F6" />
                             <Text style={{ color: colors.text, fontFamily: "Poppins_500Medium" }}>
                               {bandSlotsNeeded} Group{bandSlotsNeeded > 1 ? "s" : ""}
@@ -3027,7 +2870,7 @@ export default function AddGigScreen() {
                         {bandSlotsNeeded > 0 && (bandPreferredGenres.length > 0 || bandPreferredInstruments.length > 0) && (
                           <Text style={{ color: colors.textSecondary, fontSize: 12, marginLeft: 24 }}>
                             {bandPreferredGenres.length > 0 ? `Genres: ${bandPreferredGenres.join(", ")}` : ""}
-                            {bandPreferredGenres.length > 0 && bandPreferredInstruments.length > 0 ? " • " : ""}
+                            {bandPreferredGenres.length > 0 && bandPreferredInstruments.length > 0 ? " | " : ""}
                             {bandPreferredInstruments.length > 0 ? `Instruments: ${bandPreferredInstruments.join(", ")}` : ""}
                           </Text>
                         )}
@@ -3045,10 +2888,12 @@ export default function AddGigScreen() {
 
           {/* Navigation Buttons */}
           <View style={styles.navigationButtons}>
-            <TouchableOpacity
-              onPress={handleBack}
+              <TouchableOpacity
+                testID="mobile-add-gig-back-button"
+                accessibilityLabel="mobile-add-gig-back-button"
+                onPress={handleBack}
               disabled={creating}
-              activeOpacity={1}
+              activeOpacity={creating ? 1 : 0.78}
               style={[
                 styles.backBtn,
                 {
@@ -3062,24 +2907,26 @@ export default function AddGigScreen() {
                 {step === 1 ? "Cancel" : "Back"}
               </Text>
             </TouchableOpacity>
-            <TouchableOpacity
-              onPress={handleNext}
-              disabled={creating}
-              activeOpacity={1}
+              <TouchableOpacity
+                testID="mobile-add-gig-next-button"
+                accessibilityLabel="mobile-add-gig-next-button"
+                onPress={handleNext}
+              disabled={creating || !isCurrentStepComplete}
+              activeOpacity={creating || !isCurrentStepComplete ? 1 : 0.78}
               style={[
                 styles.nextBtn,
                 {
                   flex: 1,
-                  backgroundColor: colors.primary,
+                  backgroundColor: isCurrentStepComplete ? colors.primary : colors.border,
                   shadowColor: colors.primary,
-                  opacity: creating ? 0.7 : 1,
+                  opacity: creating || !isCurrentStepComplete ? 0.6 : 1,
                 },
               ]}
             >
               {creating ? (
                 <ActivityIndicator color="#fff" size="small" />
               ) : (
-                <Text style={styles.nextBtnText}>
+                <Text style={[styles.nextBtnText, { color: isCurrentStepComplete ? "#FFFFFF" : colors.textSecondary }]}>
                   {step === 3 ? "Create Gig" : "Next"}
                 </Text>
               )}
@@ -3096,6 +2943,7 @@ export default function AddGigScreen() {
         message={`Gig "${gigName}" has been successfully posted!`}
         buttonText="Go to Gig"
         onClose={handleSuccessRedirect}
+        showCancelButton={false}
       />
 
       <Modal
@@ -3148,7 +2996,6 @@ export default function AddGigScreen() {
                     onMessage={(event) => {
                       try {
                         const data = JSON.parse(event.nativeEvent.data);
-                        console.log('Smile Wink Widget message:', data);
                         if (data.eventName === 'UPLOADS_CREATED' || 
                             data.eventName === 'LINK_CLOSED' ||
                             data.type === 'close' ||
@@ -3224,7 +3071,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   stepIndicatorContainer: {
-    paddingHorizontal: 24,
+    paddingHorizontal: 16,
     paddingTop: 24,
     paddingBottom: 8,
   },
@@ -3252,7 +3099,8 @@ const styles = StyleSheet.create({
   stepItem: {
     alignItems: "center",
     zIndex: 10,
-    width: 80,
+    flex: 1,
+    minWidth: 0,
   },
   stepCircle: {
     width: 40,
@@ -3263,9 +3111,12 @@ const styles = StyleSheet.create({
     borderWidth: 4,
   },
   stepText: {
-    fontSize: 12,
+    fontSize: 11,
     marginTop: 8,
     textAlign: "center",
+    lineHeight: 15,
+    includeFontPadding: false,
+    width: "100%",
   },
   formContainer: {
     flex: 1,
@@ -3282,10 +3133,10 @@ const styles = StyleSheet.create({
     fontFamily: "Poppins_600SemiBold",
   },
   inputContainer: {
-    marginBottom: 16,
+    marginBottom: 20,
   },
   inputLabel: {
-    marginBottom: 8,
+    marginBottom: 10,
     fontSize: 12,
     textTransform: "uppercase",
     letterSpacing: 1,
@@ -3365,6 +3216,56 @@ const styles = StyleSheet.create({
     gap: 8,
     marginTop: 8,
   },
+  selectedChips: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 6,
+    marginBottom: 8,
+  },
+  chipsCompact: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 6,
+    marginTop: 8,
+  },
+  chipCompact: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 14,
+    borderWidth: 1,
+  },
+  chipTextCompact: {
+    fontSize: 12,
+    fontFamily: "Poppins_500Medium",
+  },
+  searchInputWrap: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    borderRadius: 16,
+    height: 48,
+    paddingHorizontal: 16,
+    marginTop: 8,
+  },
+  searchInput: {
+    flex: 1,
+    height: 24,
+    padding: 0,
+    fontSize: 15,
+    lineHeight: 20,
+    includeFontPadding: false,
+    fontFamily: "Poppins_500Medium",
+    textAlign: "left",
+    textAlignVertical: "center",
+  },
+  moreText: {
+    fontSize: 12,
+    fontFamily: "Poppins_400Regular",
+    fontStyle: "italic",
+    marginTop: 4,
+  },
   chip: {
     flexDirection: "row",
     alignItems: "center",
@@ -3377,24 +3278,6 @@ const styles = StyleSheet.create({
   chipText: {
     fontSize: 13,
     fontFamily: "Poppins_400Regular",
-  },
-  experienceLevelContainer: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 8,
-  },
-  experienceButton: {
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    borderRadius: 12,
-    borderWidth: 1,
-    flex: 1,
-    minWidth: "45%",
-    alignItems: "center",
-  },
-  experienceButtonText: {
-    fontSize: 13,
-    fontFamily: "Poppins_500Medium",
   },
   termsText: {
     textAlign: "center",
@@ -3413,6 +3296,7 @@ const styles = StyleSheet.create({
     paddingVertical: 16,
     borderRadius: 12,
     alignItems: "center",
+    justifyContent: "center",
     borderWidth: 1,
   },
   backBtnText: {
@@ -3423,6 +3307,7 @@ const styles = StyleSheet.create({
     paddingVertical: 16,
     borderRadius: 12,
     alignItems: "center",
+    justifyContent: "center",
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 8,
@@ -3488,20 +3373,51 @@ const styles = StyleSheet.create({
     padding: 16,
   },
   timeInput: {
-    paddingVertical: 10,
+    height: 44,
+    minWidth: 74,
+    paddingVertical: 0,
     paddingHorizontal: 12,
     borderRadius: 8,
     borderWidth: 1,
     fontSize: 14,
     fontFamily: "Poppins_500Medium",
+    textAlign: "center",
+    textAlignVertical: "center",
+    includeFontPadding: false,
   },
   ampmBtn: {
-    paddingVertical: 10,
-    paddingHorizontal: 16,
+    width: 52,
+    height: 44,
+    paddingVertical: 0,
+    paddingHorizontal: 0,
     borderRadius: 8,
     alignItems: "center",
     justifyContent: "center",
-    minWidth: 60,
+  },
+  ampmBtnText: {
+    fontSize: 12,
+    lineHeight: 16,
+    fontFamily: "Poppins_600SemiBold",
+    textAlign: "center",
+    includeFontPadding: false,
+  },
+  timeSlotRow: {
+    flexDirection: "row",
+    alignItems: "flex-end",
+    flexWrap: "wrap",
+    gap: 8,
+  },
+  timeSlotGroup: {
+    flex: 1,
+    minWidth: 130,
+  },
+  timeInputRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+  },
+  timeSlotArrow: {
+    marginBottom: 12,
   },
   calendarContainer: {
     borderRadius: 12,
@@ -3590,6 +3506,7 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     borderRadius: 12,
     alignItems: 'center',
+    justifyContent: 'center',
   },
   verificationCompleteBtnText: {
     color: '#fff',
@@ -3645,3 +3562,4 @@ const styles = StyleSheet.create({
     fontFamily: "Poppins_600SemiBold",
   },
 });
+

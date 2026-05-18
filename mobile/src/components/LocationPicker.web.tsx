@@ -132,9 +132,22 @@ export default function LocationPicker({ visible, onClose, onSelect, initialLoca
         }
     };
 
+    if (!visible) {
+        return alertVisible ? (
+            <CustomAlert
+                visible
+                type={alertConfig.type}
+                title={alertConfig.title}
+                message={alertConfig.message}
+                buttons={alertConfig.buttons}
+                onClose={() => setAlertVisible(false)}
+            />
+        ) : null;
+    }
+
     return (
         <>
-        <Modal visible={visible} animationType="fade" transparent={true} onRequestClose={onClose}>
+        <Modal visible animationType="fade" transparent={true} onRequestClose={onClose}>
             <View style={styles.overlay}>
                 <View style={styles.container}>
                     {/* Header */}
@@ -168,7 +181,7 @@ export default function LocationPicker({ visible, onClose, onSelect, initialLoca
                             <Text style={styles.searchBtnText}>Search</Text>
                         </TouchableOpacity>
                         <TouchableOpacity
-                            activeOpacity={1}
+                            activeOpacity={gettingLocation ? 1 : 0.78}
                             onPress={handleGetCurrentAddress}
                             style={styles.currentLocationBtn}
                             disabled={gettingLocation}
@@ -194,8 +207,8 @@ export default function LocationPicker({ visible, onClose, onSelect, initialLoca
 
                     {/* Footer */}
                     <View style={styles.footer}>
-                        <TouchableOpacity activeOpacity={1}
-                            style={[styles.confirmBtn, !currentSelection && styles.disabledBtn]}
+                        <TouchableOpacity activeOpacity={!currentSelection ? 1 : 0.78}
+                            style={[styles.confirmBtn, !currentSelection && styles.disabledBtn, { opacity: currentSelection ? 1 : 0.6 }]}
                             onPress={() => currentSelection && onSelect(currentSelection)}
                             disabled={!currentSelection}
                         >
@@ -261,22 +274,27 @@ const styles = StyleSheet.create({
     searchBox: {
         flexDirection: 'row',
         alignItems: 'center',
-        backgroundColor: '#f3f4f6',
-        borderRadius: 8,
-        paddingHorizontal: 12,
-        paddingVertical: 10,
-        borderWidth: 1,
-        borderColor: '#e5e7eb',
+        gap: 10,
+        backgroundColor: '#F3F4F6',
+        borderRadius: 16,
+        paddingHorizontal: 16,
+        height: 48,
     },
     searchInput: {
         flex: 1,
-        marginLeft: 8,
-        fontSize: 14,
+        height: 24,
+        fontSize: 15,
+        fontFamily: 'Poppins_500Medium',
+        lineHeight: 20,
+        includeFontPadding: false,
+        padding: 0,
+        textAlignVertical: 'center',
         outlineStyle: 'none', // Web specific
     } as any,
     searchBtn: {
         marginTop: 12,
         alignItems: 'center',
+        justifyContent: 'center',
         padding: 10,
     },
     searchBtnText: {
@@ -333,6 +351,7 @@ const styles = StyleSheet.create({
         paddingVertical: 14,
         borderRadius: 12,
         alignItems: 'center',
+        justifyContent: 'center',
     },
     disabledBtn: {
         backgroundColor: '#a5b4fc',

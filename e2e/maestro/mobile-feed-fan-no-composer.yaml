@@ -1,0 +1,9 @@
+appId: ${APP_ID}
+---
+- openLink: "musikalokal://feed"
+- extendedWaitUntil:
+    visible:
+      id: "nav-profile"
+    timeout: 120000
+- assertNotVisible:
+    id: "mobile-feed-create-post-button"

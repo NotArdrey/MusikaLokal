@@ -29,8 +29,8 @@ const configuredSupabaseAnonKey = readEnv(
 const hasSupabaseConfig = Boolean(configuredSupabaseUrl && configuredSupabaseAnonKey);
 
 // Avoid hard crashes on import when environment variables are missing.
-const supabaseUrl = configuredSupabaseUrl || 'https://placeholder.supabase.co';
-const supabaseAnonKey = configuredSupabaseAnonKey || 'missing-anon-key';
+export const supabaseUrl = configuredSupabaseUrl || 'https://placeholder.supabase.co';
+export const supabaseAnonKey = configuredSupabaseAnonKey || 'missing-anon-key';
 
 const projectRef = (() => {
     try {
@@ -223,6 +223,17 @@ export const invalidateTokenCache = () => {
     _refreshInFlight = null;
 };
 
+const isInvalidRefreshTokenError = (rawError: any): boolean => {
+    const message = String(rawError?.message || '').toLowerCase();
+    const errorCode = String(rawError?.code || rawError?.error_code || '').toLowerCase();
+
+    return (
+        message.includes('invalid refresh token') ||
+        message.includes('refresh token not found') ||
+        errorCode === 'refresh_token_not_found'
+    );
+};
+
 const refreshAccessToken = async (): Promise<string | null> => {
     if (_refreshInFlight) {
         return _refreshInFlight;
@@ -252,6 +263,13 @@ const refreshAccessToken = async (): Promise<string | null> => {
             }
 
             const refreshStatus = Number((refreshError as any)?.status || 0);
+
+            if (isInvalidRefreshTokenError(refreshError)) {
+                await clearSupabaseAuthStorage();
+                _refreshCooldownUntil = Date.now() + REFRESH_FAILURE_COOLDOWN_MS;
+                return null;
+            }
+
             _refreshCooldownUntil =
                 Date.now() +
                 (refreshStatus === 429 ? REFRESH_RATE_LIMIT_COOLDOWN_MS : REFRESH_FAILURE_COOLDOWN_MS);
@@ -261,7 +279,10 @@ const refreshAccessToken = async (): Promise<string | null> => {
             }
 
             return null;
-        } catch {
+        } catch (refreshException) {
+            if (isInvalidRefreshTokenError(refreshException)) {
+                await clearSupabaseAuthStorage();
+            }
             _refreshCooldownUntil = Date.now() + REFRESH_FAILURE_COOLDOWN_MS;
             return null;
         } finally {
@@ -349,6 +370,20 @@ const getFreshAccessToken = async (): Promise<string | null> => {
     return null;
 };
 
+export const prepareRealtimeAuth = async (): Promise<boolean> => {
+    try {
+        const token = await getFreshAccessToken();
+        if (!token) {
+            return false;
+        }
+
+        supabase.realtime.setAuth(token);
+        return true;
+    } catch {
+        return false;
+    }
+};
+
 const normalizeFunctionsError = (
     rawError: any,
     fallbackMessage: string,
@@ -429,6 +464,15 @@ const hasAuthorizationHeader = (options?: InvokeOptions): boolean => {
     }
 
     return Object.keys(options.headers).some((header) => header.toLowerCase() === 'authorization');
+};
+
+const shouldSkipSessionAuthorization = (functionName: string, options?: InvokeOptions): boolean => {
+    const action = typeof options?.body?.action === 'string' ? options.body.action : '';
+
+    return (
+        (functionName === 'manage-profile' && action === 'create') ||
+        (functionName === 'manual-identity-review' && action === 'submit_manual_review_signup')
+    );
 };
 
 const withoutAuthorizationHeader = (options?: InvokeOptions): InvokeOptions | undefined => {
@@ -518,14 +562,15 @@ const withSessionAuthorization = async (
     }
 
     try {
-        const invokeOptions = await withSessionAuthorization(options);
+        const skipSessionAuthorization = shouldSkipSessionAuthorization(functionName, options);
+        const invokeOptions = skipSessionAuthorization ? options : await withSessionAuthorization(options);
         const firstAttemptHadAuthorization = hasAuthorizationHeader(invokeOptions);
         let result = (await originalInvoke(functionName, invokeOptions)) as {
             data: T | null;
             error: any;
         };
 
-        if (result.error && firstAttemptHadAuthorization && isAuthUnauthorizedError(result.error)) {
+        if (result.error && !skipSessionAuthorization && isAuthUnauthorizedError(result.error)) {
             const firstAttemptToken = getAuthorizationToken(invokeOptions);
             const errorStatus = getFunctionsErrorStatus(result.error);
             console.warn('[supabase.functions.invoke] Authorization failed, retrying once with refreshed session', {
@@ -534,6 +579,7 @@ const withSessionAuthorization = async (
                 status: errorStatus,
                 code: result.error?.code,
                 contextUrl: result.error?.context?.url,
+                hadUserAuthorizationHeader: firstAttemptHadAuthorization,
                 tokenExpiresInSeconds: getJwtExpiresInSeconds(firstAttemptToken),
             });
 

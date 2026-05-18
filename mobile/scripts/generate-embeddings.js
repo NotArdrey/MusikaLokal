@@ -15,11 +15,9 @@ if (!SUPABASE_URL || !SUPABASE_KEY) {
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
 async function generateEmbeddings() {
-    console.log('Loading AI Model (all-MiniLM-L6-v2)...');
     // Singleton for feature extraction
     const extractor = await pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2');
 
-    console.log('Model loaded. Processing listings...');
 
     // 1. Groups
     await processTable('groups', extractor, (item) => {
@@ -36,11 +34,9 @@ async function generateEmbeddings() {
         return `${item.name} ${item.requirements ? JSON.stringify(item.requirements) : ''} ${item.description || ''} ${item.location || ''}`;
     });
 
-    console.log('Done generating embeddings!');
 }
 
 async function processTable(tableName, extractor, textFn) {
-    console.log(`\n--- Processing ${tableName} ---`);
 
     // Fetch items with NULL embeddings
     // Note: We select * to get fields for text generation
@@ -55,17 +51,14 @@ async function processTable(tableName, extractor, textFn) {
     }
 
     if (!items || items.length === 0) {
-        console.log(`No items in ${tableName} need embeddings.`);
         return;
     }
 
-    console.log(`Found ${items.length} items to process.`);
 
     for (const item of items) {
         const textToEmbed = textFn(item).replace(/\n/g, ' ').trim();
 
         if (!textToEmbed) {
-            console.log(`Skipping ${item.id} (empty text)`);
             continue;
         }
 
@@ -81,7 +74,6 @@ async function processTable(tableName, extractor, textFn) {
             if (updateError) {
                 console.error(`Failed to update ${item.id}:`, updateError);
             } else {
-                console.log(`Updated embedding for: ${item.name}`);
             }
         } catch (e) {
             console.error(`Error processing ${item.id}:`, e);

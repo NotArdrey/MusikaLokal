@@ -1,3 +1,4 @@
+import * as Linking from 'expo-linking';
 import { router } from 'expo-router';
 import React, { useState } from 'react';
 import { StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
@@ -35,6 +36,23 @@ export default function ChangeEmailScreen() {
     };
 
     const isValidEmail = (value: string) => /\S+@\S+\.\S+/.test(value);
+    const canSubmit = isValidEmail(email.trim().toLowerCase());
+    const isSubmitDisabled = loading || !canSubmit;
+
+    const validateEmailBeforeConfirm = () => {
+        const trimmedEmail = email.trim().toLowerCase();
+        if (!trimmedEmail) {
+            showAlert('error', 'Email Required', 'Please enter a new email address.');
+            return false;
+        }
+
+        if (!isValidEmail(trimmedEmail)) {
+            showAlert('error', 'Invalid Email', 'Please enter a valid email address.');
+            return false;
+        }
+
+        return true;
+    };
 
     const handleConfirmEmailChange = async () => {
         if (loading) return;
@@ -53,16 +71,23 @@ export default function ChangeEmailScreen() {
 
         setLoading(true);
         try {
-            const { error } = await supabase.auth.updateUser({ email: trimmedEmail });
-            if (error) {
-                showAlert('error', 'Update Failed', error.message || 'Failed to update email.');
+            const redirectTo = Linking.createURL('account_details');
+            const { data, error } = await supabase.functions.invoke('account-email', {
+                body: {
+                    action: 'send_email_change',
+                    newEmail: trimmedEmail,
+                    redirectTo,
+                },
+            });
+            if (error || data?.error) {
+                showAlert('error', 'Update Failed', data?.error || error?.message || 'Failed to update email.');
                 return;
             }
 
             showAlert(
                 'success',
                 'Verification Sent',
-                'We sent a verification link to your new email. Please verify it to complete the change.',
+                'We sent verification instructions to your current and new email addresses. Follow the link or links to complete the change.',
                 [{ text: 'OK', onPress: () => router.back() }],
             );
         } catch (e: any) {
@@ -107,19 +132,23 @@ export default function ChangeEmailScreen() {
                 </View>
 
                 <View style={styles.buttonContainer}>
-                    <TouchableOpacity activeOpacity={1}
+                    <TouchableOpacity activeOpacity={isSubmitDisabled ? 1 : 0.78}
                         style={[
                             styles.button,
                             {
-                                backgroundColor: colors.primary,
+                                backgroundColor: canSubmit ? colors.primary : colors.border,
                                 shadowColor: '#6366F1', // indigo-500
                             },
-                            loading && { opacity: 0.7 }
+                            isSubmitDisabled && { opacity: 0.6 }
                         ]}
-                        disabled={loading}
-                        onPress={() => setModalVisible(true)}
+                        disabled={isSubmitDisabled}
+                        onPress={() => {
+                            if (validateEmailBeforeConfirm()) {
+                                setModalVisible(true);
+                            }
+                        }}
                     >
-                        <Text style={styles.buttonText}>
+                        <Text style={[styles.buttonText, { color: canSubmit ? "#FFFFFF" : colors.textSecondary }]}>
                             {loading ? 'Updating...' : 'Update Email'}
                         </Text>
                     </TouchableOpacity>

@@ -85,19 +85,20 @@ export default function ForgetPasswordScreen() {
       const redirectUrl = getRedirectUrl();
       console.log("Password reset redirect URL:", redirectUrl);
 
-      const { error } = await supabase.auth.resetPasswordForEmail(
-        email.trim(),
-        {
+      const { data, error } = await supabase.functions.invoke("account-email", {
+        body: {
+          action: "send_password_reset",
+          email: email.trim(),
           redirectTo: redirectUrl,
         },
-      );
+      });
 
-      if (error) {
-        console.error("Password reset error:", error);
+      if (error || data?.error) {
+        console.error("Password reset error:", error || data?.error);
         showAlert(
           "error",
           "Error",
-          error.message || "Failed to send reset link. Please try again.",
+          data?.error || error?.message || "Failed to send reset link. Please try again.",
         );
       } else {
         setSuccessModalVisible(true);
@@ -114,6 +115,8 @@ export default function ForgetPasswordScreen() {
     setSuccessModalVisible(false);
     router.back();
   };
+  const canSubmitReset = validateEmail(email.trim());
+  const isSubmitDisabled = loading || !canSubmitReset;
 
   return (
     <>
@@ -140,19 +143,6 @@ export default function ForgetPasswordScreen() {
             {isWebDesktop && (
               <View style={[styles.webLeftPanel, { backgroundColor: 'rgba(0,0,0,0.4)' }]}>
                 <View style={styles.webHeroOverlay}>
-                  <View
-                    style={[
-                      styles.logoWrapper,
-                      styles.shadow,
-                      { marginBottom: 32 },
-                    ]}
-                  >
-                    <Image
-                      source={require("../assets/images/Musika-lokal-logo.png")}
-                      style={styles.logoImage}
-                      resizeMode="contain"
-                    />
-                  </View>
                   <Text style={styles.webHeroTitle}>
                     Reset{"\n"}Password.
                   </Text>
@@ -173,11 +163,16 @@ export default function ForgetPasswordScreen() {
             >
               <View style={isWebDesktop ? styles.webFormWrapper : null}>
                 {isWebDesktop ? (
-                   <View style={{ marginBottom: 32 }}>
+                   <View style={styles.webFormHeader}>
                      <TouchableOpacity activeOpacity={1} onPress={() => router.replace('/')} style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 24, paddingVertical: 8, paddingRight: 16, alignSelf: 'flex-start' }}>
                        <Ionicons name="arrow-back" size={24} color={colors.text} />
                        <Text style={{ marginLeft: 8, fontSize: 16, fontFamily: 'Poppins_500Medium', color: colors.text }}>Back</Text>
                      </TouchableOpacity>
+                     <Image
+                       source={require("../assets/images/Musika-lokal-logo-theme.png")}
+                       style={styles.webFormLogo}
+                       resizeMode="contain"
+                     />
                      <Text style={{ textAlign: 'left', fontSize: 36, marginBottom: 8, color: colors.text, fontFamily: 'Poppins_700Bold' }}>Forgot Password</Text>
                      <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 18, color: colors.textSecondary }}>Reset your password below.</Text>
                    </View>
@@ -215,12 +210,12 @@ export default function ForgetPasswordScreen() {
                 </View>
 
                 <View style={styles.buttonSection}>
-                  <TouchableOpacity
-                    activeOpacity={1}
+                    <TouchableOpacity
+                    activeOpacity={isSubmitDisabled ? 1 : 0.78}
                     style={[
                       styles.button,
-                      { backgroundColor: colors.primary },
-                      loading && styles.buttonDisabled,
+                      { backgroundColor: canSubmitReset ? colors.primary : colors.border },
+                      isSubmitDisabled && styles.buttonDisabled,
                     ]}
                     onPress={() => {
                       if (!email.trim()) {
@@ -237,12 +232,12 @@ export default function ForgetPasswordScreen() {
                       }
                       setModalVisible(true);
                     }}
-                    disabled={loading}
+                    disabled={isSubmitDisabled}
                   >
                     {loading ? (
                       <ActivityIndicator color="white" />
                     ) : (
-                      <Text style={styles.buttonText}>Send Reset Link</Text>
+                      <Text style={[styles.buttonText, { color: canSubmitReset ? "white" : colors.textSecondary }]}>Send Reset Link</Text>
                     )}
                   </TouchableOpacity>
                 </View>
@@ -352,17 +347,26 @@ const styles = StyleSheet.create({
     maxWidth: 500,
     paddingHorizontal: 32,
   },
+  webFormHeader: {
+    alignItems: "flex-start",
+    marginBottom: 32,
+  },
+  webFormLogo: {
+    width: 132,
+    height: 132,
+    marginBottom: 24,
+  },
   logoWrapper: {
-    width: 64,
-    height: 64,
-    borderRadius: 16,
-    backgroundColor: "white",
+    width: 220,
+    height: 220,
+    borderRadius: 24,
+    backgroundColor: "#FAF8F0",
     justifyContent: "center",
     alignItems: "center",
   },
   logoImage: {
-    width: 40,
-    height: 40,
+    width: 196,
+    height: 196,
   },
   shadow: {
     shadowColor: "#000",

@@ -1,6 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
+import * as Linking from 'expo-linking';
 import { router, useLocalSearchParams } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Image, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { supabase } from '../lib/supabase';
 import CustomAlert, { AlertType } from '../src/components/CustomAlert';
@@ -16,16 +17,33 @@ interface AlertState {
   title: string;
   message: string;
   buttons: { text: string; onPress?: () => void; style?: 'default' | 'cancel' | 'destructive' }[];
+  forceModal: boolean;
 }
 
 const isAdminRole = (role: unknown): boolean => {
   return typeof role === 'string' && role.toLowerCase() === 'admin';
 };
 
+const createEmailConfirmationRedirectUrl = () => {
+  const baseUrl = Linking.createURL('/');
+  return `${baseUrl}${baseUrl.includes('?') ? '&' : '?'}verified=true`;
+};
+
 export default function LoginScreen() {
   const { colors, isDark } = useTheme();
-  const { setGuestMode } = useAuth();
-  const { verified, accountCreated, email: createdEmail, verification_error } = useLocalSearchParams();
+  const { session, loading: authLoading, roleResolved, userRole } = useAuth();
+  const { verified, accountCreated, email: createdEmail, verification_error, verificationPendingReview, diditPendingReview, diditVerified } = useLocalSearchParams();
+
+  const resolvePostLoginRoute = () => '/feed';
+
+  useEffect(() => {
+    if (!authLoading && session) {
+      if (!roleResolved) return;
+
+      const route = resolvePostLoginRoute();
+      router.replace(route as any);
+    }
+  }, [authLoading, roleResolved, session, userRole]);
 
   // ... (existing initializeAuth is fine)
 
@@ -36,12 +54,10 @@ export default function LoginScreen() {
         try {
           const savedState = await import('@react-native-async-storage/async-storage').then(m => m.default.getItem('signup_current_session'));
           if (savedState) {
-            console.log('Pending signup detected, redirecting to signup flow...');
             router.replace({ pathname: '/signup', params: { verified: 'true' } } as any);
             return;
           }
         } catch (e) {
-          console.log('Error checking pending signup:', e);
         }
       };
       checkPendingSignup();
@@ -80,11 +96,16 @@ export default function LoginScreen() {
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [errors, setErrors] = useState<{ email?: string; password?: string }>({});
+  const [canResendConfirmation, setCanResendConfirmation] = useState(false);
+  const [resendingConfirmation, setResendingConfirmation] = useState(false);
+  const [resendCooldownSeconds, setResendCooldownSeconds] = useState(0);
+  const emailInputRef = useRef<TextInput>(null);
+  const passwordInputRef = useRef<TextInput>(null);
 
   // Verification Modal State
   const [showVerification, setShowVerification] = useState(false);
   const [verificationUrl, setVerificationUrl] = useState('');
-  const [loginMessage, setLoginMessage] = useState<{ type: 'error' | 'success', text: string } | null>(null);
+  const [loginMessage, setLoginMessage] = useState<{ type: 'error' | 'success' | 'info', text: string } | null>(null);
 
   // Custom Alert State
   const [alertState, setAlertState] = useState<AlertState>({
@@ -93,6 +114,7 @@ export default function LoginScreen() {
     title: '',
     message: '',
     buttons: [{ text: 'OK' }],
+    forceModal: false,
   });
 
   // Helper function to show alert
@@ -100,7 +122,8 @@ export default function LoginScreen() {
     type: AlertType,
     title: string,
     message: string,
-    buttons?: AlertState['buttons']
+    buttons?: AlertState['buttons'],
+    forceModal = false,
   ) => {
     setAlertState({
       visible: true,
@@ -108,6 +131,7 @@ export default function LoginScreen() {
       title,
       message,
       buttons: buttons || [{ text: 'OK' }],
+      forceModal,
     });
   };
 
@@ -115,82 +139,163 @@ export default function LoginScreen() {
     setAlertState(prev => ({ ...prev, visible: false }));
   };
 
+  useEffect(() => {
+    if (resendCooldownSeconds <= 0) return;
+
+    const timer = setInterval(() => {
+      setResendCooldownSeconds((seconds) => Math.max(0, seconds - 1));
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, [resendCooldownSeconds]);
+
+  const focusField = (field: 'email' | 'password') => {
+    setTimeout(() => {
+      if (field === 'password') {
+        passwordInputRef.current?.focus();
+        return;
+      }
+
+      emailInputRef.current?.focus();
+    }, 0);
+  };
+
+  const showValidationAlert = (nextErrors: { email?: string; password?: string }) => {
+    const issues: string[] = [];
+    let primaryField: 'email' | 'password' = 'email';
+
+    if (nextErrors.email) {
+      issues.push(nextErrors.email === 'Email is required.' ? 'Enter your email address.' : nextErrors.email);
+      primaryField = 'email';
+    }
+
+    if (nextErrors.password) {
+      issues.push(nextErrors.password === 'Password is required.' ? 'Enter your password.' : nextErrors.password);
+      if (!nextErrors.email) {
+        primaryField = 'password';
+      }
+    }
+
+    const title = issues.length > 1
+      ? 'Complete Required Fields'
+      : nextErrors.email
+        ? 'Check Your Email'
+        : 'Password Required';
+
+    const message = issues.length > 1
+      ? `We need a few details before you can sign in:\n• ${issues.join('\n• ')}`
+      : issues[0] || 'Please review your login details and try again.';
+
+    showAlert(
+      'warning',
+      title,
+      message,
+      [
+        {
+          text: 'Review fields',
+          onPress: () => focusField(primaryField),
+          style: 'default',
+        },
+      ],
+      true,
+    );
+  };
+
+  const showLoginError = (title: string, message: string) => {
+    setLoginMessage({ type: 'error', text: message });
+    showAlert('error', title, message, [{ text: 'OK', style: 'default' }], true);
+  };
+
   // Check for Account Created success (New User)
   useEffect(() => {
     if (accountCreated === 'true') {
+      if (diditPendingReview === 'true') {
+        showAlert(
+          'success',
+          'Verification In Review',
+          `Your identity is now under manual review.\n\nWe will send the email confirmation link to ${createdEmail || 'your email'} after the review is approved.`
+        );
+        return;
+      }
+
+      if (verificationPendingReview === 'true') {
+        showAlert(
+          'success',
+          'Manual Review Submitted',
+          `Your requirements were submitted and your account is under manual review.\n\nWe will send the email confirmation link to ${createdEmail || 'you'} after the review is approved.`
+        );
+        return;
+      }
+
+      if (diditVerified === 'true') {
+        showAlert(
+          'success',
+          'Check Your Inbox',
+          `Your identity has been verified.\n\nPlease confirm the email link we sent to ${createdEmail || 'your email'} before logging in.`
+        );
+        return;
+      }
+
       showAlert(
         'success',
         'Check Your Inbox',
         `We have sent a verification link to ${createdEmail || 'your email'}.\n\nPlease confirm your email address to log in.`
       );
     } else if (verified === 'true') {
-      // Only show this 'Identity Verified' alert if we are NOT coming from a fresh signup creation
-      // (which handles its own flow via accountCreated)
       showAlert(
         'success',
-        'Verification Successful! 🎉',
-        'Your identity has been verified. You can now log in.'
+        'Account Ready',
+        'Your email has been confirmed and your identity is verified. You can now log in.'
       );
-    }
-  }, [verified, accountCreated, createdEmail]);
-
-  const handleLogin = async () => {
-    setErrors({}); // Clear previous errors
-    setLoginMessage(null);
-    const newErrors: { email?: string; password?: string } = {};
-
-    if (!email) {
-      newErrors.email = 'Email is required.';
-    } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      newErrors.email = 'Please enter a valid email address.';
-    }
-
-    if (!password) {
-      newErrors.password = 'Password is required.';
-    }
-
-    if (Object.keys(newErrors).length > 0) {
-      setErrors(newErrors);
       return;
     }
+  }, [verified, accountCreated, createdEmail, verificationPendingReview, diditPendingReview, diditVerified]);
 
+  const signInWithCredentials = async (loginEmail: string, loginPassword: string) => {
     setLoading(true);
+    setCanResendConfirmation(false);
     try {
       // Clear any stale session first to prevent refresh token errors
-      console.log('Clearing any existing session...');
       await supabase.auth.signOut({ scope: 'local' });
 
-      console.log('Attempting login for:', email);
       const { error } = await supabase.auth.signInWithPassword({
-        email,
-        password,
+        email: loginEmail,
+        password: loginPassword,
       });
 
       if (error) {
-        console.log('Login error:', error.message);
         // Handle specific error cases
         if (error.message.includes('Invalid login credentials')) {
-          setLoginMessage({ type: 'error', text: 'Invalid email or password.' });
+          showLoginError('Invalid Login', 'Invalid email or password.');
         } else if (error.message.includes('Email not confirmed')) {
-          setLoginMessage({ type: 'error', text: 'Email not confirmed. Check your inbox.' });
+          setCanResendConfirmation(true);
+          setLoginMessage({ type: 'error', text: 'Email not confirmed. Check your inbox or resend the confirmation email.' });
+          showAlert(
+            'warning',
+            'Email Not Confirmed',
+            'Email not confirmed. Check your inbox or resend the confirmation email.',
+            [
+              { text: 'Resend Email', onPress: () => void handleResendConfirmationEmail(), style: 'default' },
+              { text: 'OK', style: 'cancel' },
+            ],
+            true,
+          );
         } else if (error.message.includes('rate') || error.status === 429) {
-          setLoginMessage({ type: 'error', text: 'Too many attempts. Please wait.' });
+          showLoginError('Too Many Attempts', 'Too many attempts. Please wait before trying again.');
         } else if (error.message.includes('refresh') || error.message.includes('token')) {
           // Clear storage and retry once
-          console.log('Token error detected, clearing storage and retrying...');
           await supabase.auth.signOut({ scope: 'local' });
-          setLoginMessage({ type: 'error', text: 'Session expired. Please try again.' });
+          showLoginError('Session Expired', 'Session expired. Please try again.');
         } else {
-          setLoginMessage({ type: 'error', text: error.message });
+          showLoginError('Sign In Failed', error.message);
         }
       } else {
         // Login succeeded - VALIDATE VERIFICATION STATUS
-        console.log('Auth success. Validating verification status...');
         const { data: { user }, error: getUserError } = await supabase.auth.getUser();
 
         if (!user) {
           console.error('Failed to retrieve user after login:', getUserError?.message || 'user is null');
-          setLoginMessage({ type: 'error', text: 'Unable to verify your account. Please try again.' });
+          showLoginError('Verification Failed', 'Unable to verify your account. Please try again.');
         } else if (user) {
           const blockAdminAccess = async () => {
             await supabase.auth.signOut({ scope: 'local' });
@@ -204,17 +309,14 @@ export default function LoginScreen() {
           };
 
           if (isAdminRole(user.user_metadata?.role)) {
-            console.log('Blocked admin login from metadata role.');
             await blockAdminAccess();
             return;
           }
 
           // 1. Check Metadata (Fastest)
           const metaVerified = user.user_metadata?.is_verified;
-          console.log('Metadata check:', { metaVerified });
 
           if (metaVerified === false) {
-            console.log('Blocked by metadata check.');
             await supabase.auth.signOut();
             setLoginMessage({ type: 'error', text: 'Account not verified. Please complete verification.' });
             showAlert(
@@ -236,24 +338,26 @@ export default function LoginScreen() {
             .eq('id', user.id)
             .maybeSingle();
 
-          console.log('Profile check:', { profile, profileError });
 
           if (isAdminRole(profile?.role)) {
-            console.log('Blocked admin login from profile role.');
             await blockAdminAccess();
             return;
           }
 
-          // SELF-HEALING: If profile is missing but Auth Metadata says verified, recreate the profile
-          if (!profile && metaVerified) {
-            console.log('Profile missing but Metadata Verified. Attempting to repair profile...');
+          // SELF-HEALING: After the email confirmation link creates a valid auth session,
+          // promote the Didit-approved profile from pending to verified.
+          const metadataDiditSessionId = typeof user.user_metadata?.didit_session_id === 'string'
+            ? user.user_metadata.didit_session_id.trim()
+            : '';
+
+          if ((!profile || !profile.is_verified) && metaVerified && !metadataDiditSessionId) {
             const { error: upsertError } = await supabase
               .from('profiles')
               .upsert({
                 id: user.id,
                 email: user.email,
                 full_name: user.user_metadata?.full_name || user.user_metadata?.name || '',
-                role: user.user_metadata?.role || 'musician',
+                role: profile?.role || user.user_metadata?.role || 'musician',
                 is_verified: true,
                 verification_status: 'APPROVED',
                 didit_session_id: user.user_metadata?.didit_session_id
@@ -262,7 +366,6 @@ export default function LoginScreen() {
             if (upsertError) {
               console.error('Failed to repair profile:', upsertError);
             } else {
-              console.log('Profile repaired successfully. Re-fetching...');
               const { data: newProfile } = await supabase
                 .from('profiles')
                 .select('is_verified, id_document_expiry, role')
@@ -273,14 +376,12 @@ export default function LoginScreen() {
           }
 
           if (isAdminRole(profile?.role)) {
-            console.log('Blocked admin login from repaired profile role.');
             await blockAdminAccess();
             return;
           }
 
           // If profile is STILL missing OR unverified -> BLOCK
           if (!profile || !profile.is_verified) {
-            console.log('Blocked by profile check. Profile Missing:', !profile, 'Verified:', profile?.is_verified);
             await supabase.auth.signOut();
 
             setLoginMessage({ type: 'error', text: !profile ? 'Account setup incomplete. Verify identity.' : 'Identity verification required.' });
@@ -303,28 +404,12 @@ export default function LoginScreen() {
             );
           } else if (profile?.id_document_expiry && new Date(profile.id_document_expiry) < new Date()) {
             // Check for expired ID
-            await supabase.auth.signOut();
-
-            showAlert(
-              'warning',
-              'ID Document Expired',
-              'Your identification document has expired. Please update your verification documents to continue using the app.',
-              [
-                {
-                  text: 'Update Now',
-                  onPress: () => startVerification(user.id),
-                  style: 'default'
-                },
-                {
-                  text: 'Cancel',
-                  style: 'cancel'
-                }
-              ]
-            );
+            setLoginMessage({ type: 'error', text: 'ID expired. Please upload a new document to continue.' });
+            router.replace('/identity_verification' as any);
+            return;
           } else {
-            // Verified & Profile Exists -> Allow Entry
-            console.log('Verification passed. Redirecting to Home.');
-            router.replace('/home' as any);
+            const route = resolvePostLoginRoute();
+            router.replace(route as any);
           }
         }
       }
@@ -335,13 +420,89 @@ export default function LoginScreen() {
         'Unable to connect to the server. Please check your internet connection and try again.',
         [{ text: 'OK', style: 'default' }]
       );
-      console.log(e);
     } finally {
       setLoading(false);
     }
   };
 
+  const handleResendConfirmationEmail = async () => {
+    const normalizedEmail = email.trim().toLowerCase();
 
+    if (!normalizedEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
+      setErrors((prev) => ({ ...prev, email: 'Please enter a valid email address.' }));
+      showAlert('warning', 'Check Your Email', 'Enter the email address you used to sign up.', [{ text: 'OK' }], true);
+      return;
+    }
+
+    if (resendingConfirmation || resendCooldownSeconds > 0) {
+      return;
+    }
+
+    setResendingConfirmation(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('create-unverified-user', {
+        body: {
+          action: 'resend_confirmation_email',
+          email: normalizedEmail,
+          redirectTo: createEmailConfirmationRedirectUrl(),
+        },
+      });
+
+      if (error) {
+        throw error;
+      }
+
+      if ((data as any)?.alreadyConfirmed) {
+        setCanResendConfirmation(false);
+        setLoginMessage({ type: 'success', text: 'Email already confirmed. You can sign in now.' });
+        showAlert('success', 'Email Confirmed', 'Your email is already confirmed. You can sign in now.', [{ text: 'OK' }], true);
+        return;
+      }
+
+      if ((data as any)?.emailConfirmationDeferred || (data as any)?.emailDelivery?.skipped) {
+        const message = (data as any)?.message || 'Email confirmation will be sent after identity review is approved.';
+        setCanResendConfirmation(false);
+        setLoginMessage({ type: 'info', text: message });
+        showAlert('info', 'Verification In Review', message, [{ text: 'OK' }], true);
+        return;
+      }
+
+      setResendCooldownSeconds(60);
+      setCanResendConfirmation(true);
+      setLoginMessage({ type: 'success', text: 'A new confirmation email has been sent.' });
+      showAlert('success', 'Email Sent', 'A new confirmation link has been sent to your email.', [{ text: 'OK' }], true);
+    } catch (e: any) {
+      const message = e?.message || 'Could not resend the confirmation email. Please try again.';
+      setLoginMessage({ type: 'error', text: message });
+      showAlert('error', 'Resend Failed', message, [{ text: 'OK' }], true);
+    } finally {
+      setResendingConfirmation(false);
+    }
+  };
+
+  const handleLogin = async () => {
+    setErrors({});
+    setLoginMessage(null);
+    const newErrors: { email?: string; password?: string } = {};
+
+    if (!email) {
+      newErrors.email = 'Email is required.';
+    } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      newErrors.email = 'Please enter a valid email address.';
+    }
+
+    if (!password) {
+      newErrors.password = 'Password is required.';
+    }
+
+    if (Object.keys(newErrors).length > 0) {
+      setErrors(newErrors);
+      showValidationAlert(newErrors);
+      return;
+    }
+
+    await signInWithCredentials(email, password);
+  };
 
   const startVerification = async (userId: string) => {
     try {
@@ -359,7 +520,6 @@ export default function LoginScreen() {
 
       // Success alert handled by Modal onSuccess
     } catch (e) {
-      console.log('Verification error:', e);
       showAlert('error', 'Error', 'Failed to start verification.');
     }
   };
@@ -367,12 +527,6 @@ export default function LoginScreen() {
   const handleVerificationSuccess = () => {
     setShowVerification(false);
     // Silent
-  };
-
-  const handleContinueAsGuest = async () => {
-    await supabase.auth.signOut({ scope: 'local' });
-    await setGuestMode(true);
-    router.replace('/home' as any);
   };
 
   // Derived styles based on theme
@@ -397,16 +551,13 @@ export default function LoginScreen() {
         <View style={styles.contentContainer}>
           {/* Logo Section */}
           <View style={styles.logoSection}>
-            <View style={[styles.logoWrapper, styles.shadow]}>
+            <View style={styles.logoWrapper}>
               <Image
-                source={require('../assets/images/Musika-lokal-logo.png')}
+                source={require('../assets/images/Musika-lokal-logo-theme.png')}
                 style={styles.logoImage}
                 resizeMode="contain"
               />
             </View>
-            <Text style={[styles.appName, themeStyles.text]}>
-              MusikaLokal
-            </Text>
             <Text style={[styles.appTagline, themeStyles.textSecondary]}>
               Connect with the local music scene
             </Text>
@@ -427,12 +578,16 @@ export default function LoginScreen() {
               ]}>
                 <Ionicons name="mail-outline" size={20} color={colors.textSecondary} />
                 <TextInput
+                  ref={emailInputRef}
+                  testID="auth-email-input"
+                  accessibilityLabel="auth-email-input"
                   style={[styles.input, themeStyles.text]}
                   placeholder="name@email.com"
                   placeholderTextColor={colors.textSecondary}
                   value={email}
                   onChangeText={(text) => {
                     setEmail(text);
+                    setCanResendConfirmation(false);
                     if (errors.email) setErrors({ ...errors, email: undefined });
                   }}
                   autoCapitalize="none"
@@ -455,6 +610,9 @@ export default function LoginScreen() {
               ]}>
                 <Ionicons name="lock-closed-outline" size={20} color={colors.textSecondary} />
                 <TextInput
+                  ref={passwordInputRef}
+                  testID="auth-password-input"
+                  accessibilityLabel="auth-password-input"
                   style={[styles.input, themeStyles.text]}
                   placeholder="Enter your password"
                   placeholderTextColor={colors.textSecondary}
@@ -465,14 +623,25 @@ export default function LoginScreen() {
                   }}
                   secureTextEntry={!showPassword}
                 />
-                <TouchableOpacity activeOpacity={1} onPress={() => setShowPassword(!showPassword)}>
+                <TouchableOpacity
+                  activeOpacity={1}
+                  testID="auth-toggle-password-button"
+                  accessibilityLabel="auth-toggle-password-button"
+                  onPress={() => setShowPassword(!showPassword)}
+                >
                   <Ionicons name={showPassword ? "eye-off-outline" : "eye-outline"} size={20} color={colors.textSecondary} />
                 </TouchableOpacity>
               </View>
               {errors.password ? (
                 <Text style={styles.errorText}>{errors.password}</Text>
               ) : (
-                <TouchableOpacity activeOpacity={1} onPress={() => router.push('/forget_password' as any)} style={styles.forgotPasswordButton}>
+                <TouchableOpacity
+                  activeOpacity={1}
+                  testID="auth-forgot-password-link"
+                  accessibilityLabel="auth-forgot-password-link"
+                  onPress={() => router.push('/forget_password' as any)}
+                  style={styles.forgotPasswordButton}
+                >
                   <Text style={[styles.forgotPasswordText, themeStyles.primaryText]}>
                     Forgot Password?
                   </Text>
@@ -481,10 +650,12 @@ export default function LoginScreen() {
             </View>
 
             <TouchableOpacity
+              testID="auth-sign-in-button"
+              accessibilityLabel="auth-sign-in-button"
               onPress={handleLogin}
               disabled={loading}
-              activeOpacity={1}
-              style={[styles.loginButton, themeStyles.primaryButton, styles.shadow]}
+              activeOpacity={loading ? 1 : 0.78}
+              style={[styles.loginButton, themeStyles.primaryButton, styles.shadow, { opacity: loading ? 0.6 : 1 }]}
             >
               {loading ? (
                 <ActivityIndicator color="white" />
@@ -495,30 +666,51 @@ export default function LoginScreen() {
               )}
             </TouchableOpacity>
 
-            <TouchableOpacity
-              onPress={handleContinueAsGuest}
-              activeOpacity={1}
-              style={[styles.guestButton, { borderColor: colors.border }]}
-            >
-              <Text style={[styles.guestButtonText, { color: colors.text }]}>Continue as Guest</Text>
-            </TouchableOpacity>
-
             {loginMessage && (
-              <View style={{ marginTop: 16, backgroundColor: loginMessage.type === 'error' ? 'rgba(239, 68, 68, 0.1)' : 'rgba(16, 185, 129, 0.1)', padding: 12, borderRadius: 8 }}>
-                <Text style={{ color: loginMessage.type === 'error' ? '#EF4444' : '#10B981', textAlign: 'center', fontFamily: 'Poppins_500Medium' }}>
+              <View style={{ marginTop: 16, backgroundColor: loginMessage.type === 'error' ? 'rgba(239, 68, 68, 0.1)' : loginMessage.type === 'info' ? 'rgba(59, 130, 246, 0.1)' : 'rgba(16, 185, 129, 0.1)', padding: 12, borderRadius: 8 }}>
+                <Text style={{ color: loginMessage.type === 'error' ? '#EF4444' : loginMessage.type === 'info' ? '#3B82F6' : '#10B981', textAlign: 'center', fontFamily: 'Poppins_500Medium' }}>
                   {loginMessage.text}
                 </Text>
               </View>
             )}
 
+            {canResendConfirmation && (
+              <TouchableOpacity
+                onPress={handleResendConfirmationEmail}
+                disabled={resendingConfirmation || resendCooldownSeconds > 0}
+                activeOpacity={resendingConfirmation || resendCooldownSeconds > 0 ? 1 : 0.78}
+                style={[
+                  styles.resendConfirmationButton,
+                  {
+                    borderColor: colors.primary,
+                    opacity: resendingConfirmation || resendCooldownSeconds > 0 ? 0.65 : 1,
+                  },
+                ]}
+              >
+                {resendingConfirmation ? (
+                  <ActivityIndicator color={colors.primary} />
+                ) : (
+                  <Text style={[styles.resendConfirmationText, { color: colors.primary }]}>
+                    {resendCooldownSeconds > 0
+                      ? `Resend available in ${resendCooldownSeconds}s`
+                      : 'Resend confirmation email'}
+                  </Text>
+                )}
+              </TouchableOpacity>
+            )}
+
             <View style={styles.signupLinkContainer}>
               <Text style={[styles.signupLinkText, themeStyles.textSecondary]}>
-                Don't have an account?{' '}
+                Don&apos;t have an account?{' '}
               </Text>
-              <TouchableOpacity activeOpacity={1} onPress={() => router.push('/signup' as any)}>
-                <Text style={[styles.signupLinkHighlight, themeStyles.primaryText]}>
-                  Create Account
-                </Text>
+              <TouchableOpacity
+                activeOpacity={0.65}
+                testID="auth-register-link"
+                accessibilityLabel="auth-register-link"
+                onPress={() => router.push('/signup' as any)}
+                style={styles.signupLinkPressable}
+              >
+                <Text style={[styles.signupLinkHighlight, themeStyles.primaryText]}>Register here</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -538,6 +730,7 @@ export default function LoginScreen() {
         title={alertState.title}
         message={alertState.message}
         buttons={alertState.buttons}
+        forceModal={alertState.forceModal}
         onClose={closeAlert}
       />
     </KeyboardAvoidingView>
@@ -562,19 +755,18 @@ const styles = StyleSheet.create({
     marginBottom: 48, // mb-12
   },
   logoWrapper: {
-    width: 96, // w-24
-    height: 96, // h-24
+    width: 220,
+    height: 220,
     borderRadius: 24, // rounded-3xl
-    backgroundColor: '#4F46E5', // primary color fallback/base
+    backgroundColor: 'transparent',
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 24, // mb-6
     // Shadow props
   },
   logoImage: {
-    width: 100,
-    height: 100,
-    tintColor: 'white',
+    width: 196,
+    height: 196,
   },
   appName: {
     fontSize: 30, // text-3xl
@@ -610,6 +802,7 @@ const styles = StyleSheet.create({
     marginLeft: 12, // ml-3
     height: '100%',
     fontFamily: 'Poppins_400Regular',
+    includeFontPadding: false,
     textAlignVertical: 'center',
     paddingVertical: 0,
   },
@@ -633,17 +826,6 @@ const styles = StyleSheet.create({
     color: 'white',
     fontSize: 16,
   },
-  guestButton: {
-    height: 52,
-    borderRadius: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-  },
-  guestButtonText: {
-    fontFamily: 'Poppins_500Medium',
-    fontSize: 15,
-  },
   shadow: {
     shadowColor: "#4F46E5", // shadow-primary
     shadowOffset: {
@@ -656,14 +838,23 @@ const styles = StyleSheet.create({
   },
   signupLinkContainer: {
     flexDirection: 'row',
+    alignItems: 'center',
     justifyContent: 'center',
+    flexWrap: 'wrap',
     marginTop: 24, // mt-6
   },
   signupLinkText: {
     fontFamily: 'Poppins_400Regular',
+    fontSize: 14,
+  },
+  signupLinkPressable: {
+    paddingVertical: 4,
+    paddingHorizontal: 2,
   },
   signupLinkHighlight: {
     fontFamily: 'Poppins_600SemiBold',
+    fontSize: 14,
+    textAlign: 'center',
   },
   errorText: {
     color: '#EF4444',
@@ -671,5 +862,16 @@ const styles = StyleSheet.create({
     marginTop: 4,
     marginLeft: 4,
     fontFamily: 'Poppins_400Regular',
+  },
+  resendConfirmationButton: {
+    height: 48,
+    borderRadius: 14,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  resendConfirmationText: {
+    fontFamily: 'Poppins_600SemiBold',
+    fontSize: 14,
   },
 });

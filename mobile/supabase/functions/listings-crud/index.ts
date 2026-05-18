@@ -2,6 +2,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 // @ts-ignore
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { withNotificationRouteMeta } from "../_shared/notificationRoutes.ts";
 
 const corsHeaders = {
     'Access-Control-Allow-Origin': '*',
@@ -18,19 +19,81 @@ const syncGig3NF = async (client: any, gigId: string) => {
     if (error) throw error
 }
 
-function decodeJwtPayload(token: string): { sub?: string; email?: string } | null {
-    try {
-        const parts = token.replace('Bearer ', '').split('.')
-        if (parts.length !== 3) return null
-        let base64 = parts[1].replace(/-/g, '+').replace(/_/g, '/')
-        while (base64.length % 4) {
-            base64 += '='
-        }
-        const payload = JSON.parse(atob(base64))
-        return payload
-    } catch (e) {
-        console.error('JWT decode error:', e)
-        return null
+const normalizeScheduleSessionType = (value: any): string => {
+    const normalized = String(value || '').trim().toLowerCase()
+    return ['rehearsal', 'recording', 'both'].includes(normalized) ? normalized : 'both'
+}
+
+const buildWeeklyScheduleReason = (source: any): string =>
+    `Weekly schedule [session_type:${normalizeScheduleSessionType(source?.session_type ?? source?.sessionType)}]`
+
+const buildDateOverrideReason = (source: any): string =>
+    `Custom schedule [session_type:${normalizeScheduleSessionType(source?.session_type ?? source?.sessionType)}]`
+
+const normalizeWeeklyScheduleScope = (value: any): string => {
+    const normalized = String(value || '').trim().toLowerCase()
+    return ['indefinite', 'until', 'specific_dates'].includes(normalized) ? normalized : 'indefinite'
+}
+
+const normalizeWeeklyScheduleDates = (value: any): string[] =>
+    Array.isArray(value) ? value.filter((date) => typeof date === 'string') : []
+
+const weeklyScheduleColumnNames = [
+    'weekly_schedule_scope',
+    'weekly_schedule_end_date',
+    'weekly_schedule_dates',
+]
+
+const isMissingWeeklyScheduleColumns = (error: any): boolean => {
+    const message = String(error?.message || '')
+    return (
+        error?.code === 'PGRST204' &&
+        weeklyScheduleColumnNames.some((column) => message.includes(column))
+    )
+}
+
+const stripWeeklyScheduleColumns = (row: any) => {
+    const {
+        weekly_schedule_scope,
+        weekly_schedule_end_date,
+        weekly_schedule_dates,
+        ...rest
+    } = row || {}
+
+    return rest
+}
+
+const buildWeeklyScheduleScopeColumns = (source: any) => {
+    const scope = normalizeWeeklyScheduleScope(source?.weekly_schedule_scope ?? source?.weeklyScheduleScope)
+    return {
+        weekly_schedule_scope: scope,
+        weekly_schedule_end_date:
+            scope === 'until'
+                ? source?.weekly_schedule_end_date ?? source?.weeklyScheduleEndDate ?? null
+                : null,
+        weekly_schedule_dates:
+            scope === 'specific_dates'
+                ? normalizeWeeklyScheduleDates(source?.weekly_schedule_dates ?? source?.weeklyScheduleDates)
+                : [],
+    }
+}
+
+const insertStudioOperatingHours = async (client: any, operatingHours: any[]) => {
+    if (!operatingHours.length) return
+
+    let { error } = await client
+        .from('studio_operating_hours')
+        .insert(operatingHours)
+
+    if (error && isMissingWeeklyScheduleColumns(error)) {
+        console.warn('studio_operating_hours weekly schedule columns are not available yet; retrying without them.', error)
+        ;({ error } = await client
+            .from('studio_operating_hours')
+            .insert(operatingHours.map(stripWeeklyScheduleColumns)))
+    }
+
+    if (error) {
+        console.warn('Could not save studio operating hours:', error)
     }
 }
 
@@ -48,20 +111,9 @@ serve(async (req: Request) => {
             })
         }
 
-        const jwtPayload = decodeJwtPayload(authHeader)
-        if (!jwtPayload || !jwtPayload.sub) {
-            return new Response(JSON.stringify({ error: 'Invalid token' }), {
-                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-                status: 401,
-            })
-        }
-
-        const authenticatedUserId = jwtPayload.sub
-
         const sbUrl = Deno.env.get('SUPABASE_URL');
         const sbKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 
-        console.log(`[listings-crud] Req received. Action: ${(await req.clone().json()).action}, User: ${(await req.clone().json()).userId}`);
 
         if (!sbUrl || !sbKey) {
             console.error('[listings-crud] Missing Supabase env vars');
@@ -72,12 +124,25 @@ serve(async (req: Request) => {
         }
 
         const supabaseClient = createClient(sbUrl, sbKey)
+        const token = authHeader.replace(/^Bearer\s+/i, '')
+        const {
+            data: { user: authUser },
+            error: authUserError,
+        } = await supabaseClient.auth.getUser(token)
+
+        if (authUserError || !authUser) {
+            return new Response(JSON.stringify({ error: 'Invalid token' }), {
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                status: 401,
+            })
+        }
+
+        const authenticatedUserId = authUser.id
 
         const body = await req.json()
         const { action, ...params } = body
         const { userId } = params
 
-        console.log(`[listings-crud] Processing action: ${action}`);
 
         if (userId && userId !== authenticatedUserId) {
             console.error(`[listings-crud] Forbidden: userId mismatch. Req: ${userId}, Auth: ${authenticatedUserId}`);
@@ -108,7 +173,7 @@ serve(async (req: Request) => {
                     title,
                     message,
                     image: image || null,
-                    meta: meta || null,
+                    meta: withNotificationRouteMeta(meta),
                     read: false
                 })
                 .select()
@@ -140,7 +205,7 @@ serve(async (req: Request) => {
                     title: n.title,
                     message: n.message,
                     image: n.image || null,
-                    meta: n.meta || null,
+                    meta: withNotificationRouteMeta(n.meta),
                     read: false
                 }))
 
@@ -278,6 +343,7 @@ serve(async (req: Request) => {
                         const dayHours = operatingHours.filter((h: any) => h.day_of_week === index && h.is_open);
                         return {
                             day: dayName,
+                            ...buildWeeklyScheduleScopeColumns(dayHours[0]),
                             slots: dayHours.map((h: any) => ({
                                 start: h.open_time,
                                 end: h.close_time
@@ -287,11 +353,23 @@ serve(async (req: Request) => {
                     data.availability = availability;
                 }
 
-                const { data: studioSettings, error: settingsError } = await supabaseClient
+                const extendedStudioSettingsSelect = 'lead_time_hours, weekend_multiplier, peak_season_multiplier, peak_season_dates, off_peak_multiplier, off_peak_dates, weekly_schedule_scope, weekly_schedule_end_date, weekly_schedule_dates'
+                const legacyStudioSettingsSelect = 'lead_time_hours, weekend_multiplier, peak_season_multiplier, peak_season_dates, off_peak_multiplier, off_peak_dates'
+                let studioSettingsResult = await supabaseClient
                     .from('studio_settings')
-                    .select('lead_time_hours, weekend_multiplier, peak_season_multiplier, peak_season_dates, off_peak_multiplier, off_peak_dates')
+                    .select(extendedStudioSettingsSelect)
                     .eq('studio_id', id)
                     .maybeSingle();
+
+                if (studioSettingsResult.error && isMissingWeeklyScheduleColumns(studioSettingsResult.error)) {
+                    studioSettingsResult = await supabaseClient
+                        .from('studio_settings')
+                        .select(legacyStudioSettingsSelect)
+                        .eq('studio_id', id)
+                        .maybeSingle();
+                }
+
+                const { data: studioSettings, error: settingsError } = studioSettingsResult
 
                 if (!settingsError && studioSettings) {
                     data.lead_time_hours = studioSettings.lead_time_hours;
@@ -306,7 +384,10 @@ serve(async (req: Request) => {
                         peak_season_multiplier: studioSettings.peak_season_multiplier,
                         peak_season_dates: studioSettings.peak_season_dates,
                         off_peak_multiplier: studioSettings.off_peak_multiplier,
-                        off_peak_dates: studioSettings.off_peak_dates
+                        off_peak_dates: studioSettings.off_peak_dates,
+                        weekly_schedule_scope: studioSettings.weekly_schedule_scope,
+                        weekly_schedule_end_date: studioSettings.weekly_schedule_end_date,
+                        weekly_schedule_dates: studioSettings.weekly_schedule_dates
                     };
                 }
             }
@@ -333,10 +414,10 @@ serve(async (req: Request) => {
 
             if (type === 'studio') {
                 const validStudioColumns = [
-                    'name', 'address', 'hourly_rate', 'description', 'amenities',
-                    'images', 'latitude', 'longitude', 'rate', 'contract_url',
-                    'availability', 'instruments', 'type', 'types', 'rehearsal_rate',
-                    'recording_rate', 'open_dates', 'pax', 'business_permit_url'
+                    'name', 'address', 'hourly_rate', 'description',
+                    'latitude', 'longitude', 'rate', 'contract_url',
+                    'availability', 'rehearsal_rate',
+                    'recording_rate', 'pax', 'business_permit_url'
                 ];
                 const filteredPayload: any = {};
                 for (const key of validStudioColumns) {
@@ -355,26 +436,47 @@ serve(async (req: Request) => {
 
                 const { data: gigData, error: gigError } = await supabaseClient
                     .from('gigs')
-                    .select('reapplication_cooldown_days, requirements, slots_filled, total_slots_filled, status')
+                    .select('reapplication_cooldown_days, total_slots_filled, status')
                     .eq('id', gig_id)
                     .single();
 
                 if (gigError) throw gigError;
 
+                const { data: gigLegacyProjection, error: gigLegacyProjectionError } = await supabaseClient
+                    .from('gigs_legacy_projection')
+                    .select('requirements')
+                    .eq('id', gig_id)
+                    .single();
+
+                if (gigLegacyProjectionError) throw gigLegacyProjectionError;
+                const gigRequirements = gigLegacyProjection?.requirements || {};
+
                 if (gigData.status !== 'open') {
                     throw new Error('This gig is no longer accepting applications.');
                 }
 
-                const totalSlotsNeeded = gigData.requirements?.total_slots_needed || 999;
+                const totalSlotsNeeded = gigRequirements?.total_slots_needed || 999;
                 const totalSlotsFilled = gigData.total_slots_filled || 0;
 
                 if (totalSlotsFilled >= totalSlotsNeeded) {
                     throw new Error('All performer slots for this gig have been filled.');
                 }
 
-                if (slot_type && gigData.requirements?.slots?.[slot_type]) {
-                    const slotNeeded = gigData.requirements.slots[slot_type]?.needed || 0;
-                    const slotFilled = gigData.slots_filled?.[slot_type]?.accepted || 0;
+                if (slot_type && gigRequirements?.slots?.[slot_type]) {
+                    const slotNeeded = gigRequirements.slots[slot_type]?.needed || 0;
+                    let slotFilled = 0;
+
+                    if (slotNeeded > 0) {
+                        const { data: slotSummary, error: slotSummaryError } = await supabaseClient
+                            .from('gig_slot_fill_summary')
+                            .select('accepted_count')
+                            .eq('gig_id', gig_id)
+                            .eq('slot_type', slot_type)
+                            .maybeSingle();
+
+                        if (slotSummaryError) throw slotSummaryError;
+                        slotFilled = slotSummary?.accepted_count || 0;
+                    }
 
                     if (slotNeeded > 0 && slotFilled >= slotNeeded) {
                         throw new Error(`All ${slot_type} slots have been filled. Try applying for a different slot type.`);
@@ -444,7 +546,7 @@ serve(async (req: Request) => {
             if (type === 'gig') {
                 const validGigColumns = [
                     'name', 'location', 'budget', 'description', 'event_date',
-                    'requirements', 'images', 'documents', 'status', 'latitude',
+                    'status', 'latitude',
                     'longitude', 'contract_url', 'business_permit_url',
                     'reapplication_cooldown_days'
                 ];
@@ -504,7 +606,9 @@ serve(async (req: Request) => {
                                     is_open: true,
                                     open_time: slot.start,
                                     close_time: slot.end,
-                                    slot_order: slotIndex
+                                    slot_order: slotIndex,
+                                    ...buildWeeklyScheduleScopeColumns(daySchedule),
+                                    reason: buildWeeklyScheduleReason(daySchedule)
                                 });
                             });
                         }
@@ -518,27 +622,28 @@ serve(async (req: Request) => {
                             day_of_week: day,
                             is_open: true,
                             open_time: '09:00',
-                            close_time: '22:00'
+                            close_time: '22:00',
+                            reason: 'Weekly schedule [session_type:both]'
                         })
                     }
                 }
 
-                await supabaseClient.from('studio_operating_hours').insert(operatingHours)
+                await insertStudioOperatingHours(supabaseClient, operatingHours)
 
                 if (calendarAvailability && Array.isArray(calendarAvailability) && calendarAvailability.length > 0) {
                     const dateOverrides: any[] = [];
 
                     for (const dateEntry of calendarAvailability) {
                         if (dateEntry.date && dateEntry.slots && dateEntry.slots.length > 0) {
-                            const firstSlot = dateEntry.slots[0];
-                            dateOverrides.push({
+                            dateEntry.slots.forEach((slot: any, slotIndex: number) => dateOverrides.push({
                                 studio_id: studioId,
                                 override_date: dateEntry.date,
                                 is_open: true,
-                                open_time: firstSlot.start,
-                                close_time: firstSlot.end,
-                                reason: 'Custom schedule'
-                            });
+                                open_time: slot.start,
+                                close_time: slot.end,
+                                slot_order: slotIndex,
+                                reason: buildDateOverrideReason(dateEntry)
+                            }));
                         }
                     }
 
@@ -602,10 +707,10 @@ serve(async (req: Request) => {
 
             if (type === 'studio') {
                 const validStudioColumns = [
-                    'name', 'address', 'hourly_rate', 'description', 'amenities',
-                    'images', 'latitude', 'longitude', 'rate', 'contract_url',
-                    'availability', 'instruments', 'type', 'types', 'rehearsal_rate',
-                    'recording_rate', 'open_dates', 'pax', 'business_permit_url'
+                    'name', 'address', 'hourly_rate', 'description',
+                    'latitude', 'longitude', 'rate', 'contract_url',
+                    'availability', 'rehearsal_rate',
+                    'recording_rate', 'pax', 'business_permit_url'
                 ];
                 const filteredPayload: any = {};
                 for (const key of validStudioColumns) {
@@ -620,6 +725,7 @@ serve(async (req: Request) => {
 
             if (type === 'studio' && updatePayload.availability) {
                 studioAvailability = updatePayload.availability;
+                delete updatePayload.availability;
             }
 
             if (type === 'studio' && updatePayload.calendar_availability) {
@@ -635,7 +741,7 @@ serve(async (req: Request) => {
             if (type === 'gig') {
                 const validGigColumns = [
                     'name', 'location', 'budget', 'description', 'event_date',
-                    'requirements', 'images', 'documents', 'status', 'latitude',
+                    'status', 'latitude',
                     'longitude', 'contract_url', 'business_permit_url',
                     'reapplication_cooldown_days'
                 ];
@@ -707,15 +813,15 @@ serve(async (req: Request) => {
                                 is_open: true,
                                 open_time: slot.start,
                                 close_time: slot.end,
-                                slot_order: slotIndex
+                                slot_order: slotIndex,
+                                ...buildWeeklyScheduleScopeColumns(daySchedule),
+                                reason: buildWeeklyScheduleReason(daySchedule)
                             });
                         });
                     }
                 }
 
-                if (operatingHours.length > 0) {
-                    await supabaseClient.from('studio_operating_hours').insert(operatingHours);
-                }
+                await insertStudioOperatingHours(supabaseClient, operatingHours);
             }
 
             // Update studio date overrides
@@ -731,15 +837,15 @@ serve(async (req: Request) => {
 
                 for (const dateEntry of calendarAvailability) {
                     if (dateEntry.date && dateEntry.slots && dateEntry.slots.length > 0) {
-                        const firstSlot = dateEntry.slots[0];
-                        dateOverrides.push({
+                        dateEntry.slots.forEach((slot: any, slotIndex: number) => dateOverrides.push({
                             studio_id: studioId,
                             override_date: dateEntry.date,
                             is_open: true,
-                            open_time: firstSlot.start,
-                            close_time: firstSlot.end,
-                            reason: 'Custom schedule'
-                        });
+                            open_time: slot.start,
+                            close_time: slot.end,
+                            slot_order: slotIndex,
+                            reason: buildDateOverrideReason(dateEntry)
+                        }));
                     }
                 }
 
@@ -820,10 +926,61 @@ serve(async (req: Request) => {
         // DELETE ENTITY
         if (action === 'delete') {
             const { type, id } = params
+            const rpcClient = createClient(sbUrl, Deno.env.get('SUPABASE_ANON_KEY') ?? sbKey, {
+                global: {
+                    headers: {
+                        Authorization: authHeader,
+                    },
+                },
+            })
 
             if (type === 'gig') {
-                const { data: rpcData, error: rpcError } = await supabaseClient.rpc('delete_gig_safely', {
+                const { data: rpcData, error: rpcError } = await rpcClient.rpc('delete_gig_safely', {
                     p_gig_id: id,
+                    p_reason: 'Deleted via listings-crud edge function',
+                });
+
+                if (rpcError) throw rpcError;
+
+                const rpcResult: any = rpcData;
+                if (!rpcResult?.success) {
+                    return new Response(JSON.stringify(rpcResult), {
+                        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                        status: 409,
+                    });
+                }
+
+                return new Response(JSON.stringify({ success: true, ...rpcResult }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 200,
+                });
+            }
+
+            if (type === 'group') {
+                const { data: rpcData, error: rpcError } = await rpcClient.rpc('delete_group_safely', {
+                    p_group_id: id,
+                    p_reason: 'Deleted via listings-crud edge function',
+                });
+
+                if (rpcError) throw rpcError;
+
+                const rpcResult: any = rpcData;
+                if (!rpcResult?.success) {
+                    return new Response(JSON.stringify(rpcResult), {
+                        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                        status: 409,
+                    });
+                }
+
+                return new Response(JSON.stringify({ success: true, ...rpcResult }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 200,
+                });
+            }
+
+            if (type === 'studio') {
+                const { data: rpcData, error: rpcError } = await rpcClient.rpc('delete_studio_safely', {
+                    p_studio_id: id,
                     p_reason: 'Deleted via listings-crud edge function',
                 });
 

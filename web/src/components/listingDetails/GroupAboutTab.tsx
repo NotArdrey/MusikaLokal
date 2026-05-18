@@ -17,9 +17,10 @@ interface GroupAboutTabProps {
   styles: any;
   currentUserId: string | null;
   onProfilePress: () => void;
-  calculateCompletion: () => number;
+  completionRate: number | null;
   sheetRef?: any;
   listingId?: string | null;
+  connectionPanel?: React.ReactNode;
 }
 
 const GroupAboutTab = ({
@@ -29,11 +30,11 @@ const GroupAboutTab = ({
   styles,
   currentUserId,
   onProfilePress,
-  calculateCompletion,
+  completionRate,
   sheetRef,
   listingId,
+  connectionPanel,
 }: GroupAboutTabProps) => {
-  const completionRate = calculateCompletion();
   const managerId = group.owner_id || group.organizer_id;
   const destinationText =
     group?.location || group?.address || group?.name || "Destination";
@@ -136,7 +137,7 @@ const GroupAboutTab = ({
         </Text>
         {canNavigate && (
           <TouchableOpacity
-            activeOpacity={0.9}
+            activeOpacity={1}
             style={{
               marginTop: 12,
               alignSelf: "flex-start",
@@ -163,6 +164,8 @@ const GroupAboutTab = ({
           </TouchableOpacity>
         )}
       </View>
+
+      {connectionPanel ? <View style={{ marginBottom: 24 }}>{connectionPanel}</View> : null}
 
       <View style={{ flexDirection: "row", gap: 12, marginBottom: 24 }}>
         <View
@@ -403,43 +406,56 @@ const GroupAboutTab = ({
             </View>
           </View>
 
-          <View
-            style={{
-              marginTop: 12,
-              flexDirection: "row",
-              alignItems: "center",
-              gap: 8,
-            }}
-          >
+          {completionRate !== null ? (
             <View
               style={{
-                flex: 1,
-                height: 6,
-                backgroundColor: isDark ? "#374151" : "#E5E7EB",
-                borderRadius: 3,
-                overflow: "hidden",
+                marginTop: 12,
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 8,
               }}
             >
               <View
                 style={{
-                  width: `${completionRate}%`,
-                  height: "100%",
-                  backgroundColor:
-                    completionRate === 100 ? "#10B981" : colors.primary,
+                  flex: 1,
+                  height: 6,
+                  backgroundColor: isDark ? "#374151" : "#E5E7EB",
+                  borderRadius: 3,
+                  overflow: "hidden",
                 }}
-              />
+              >
+                <View
+                  style={{
+                    width: `${completionRate}%`,
+                    height: "100%",
+                    backgroundColor:
+                      completionRate === 100 ? "#10B981" : colors.primary,
+                  }}
+                />
+              </View>
+              <Text
+                style={{
+                  fontSize: 11,
+                  fontFamily: "Poppins_600SemiBold",
+                  color:
+                    completionRate === 100 ? "#10B981" : colors.textSecondary,
+                }}
+              >
+                {`${completionRate}% Complete`}
+              </Text>
             </View>
+          ) : (
             <Text
               style={{
+                marginTop: 12,
                 fontSize: 11,
-                fontFamily: "Poppins_600SemiBold",
-                color:
-                  completionRate === 100 ? "#10B981" : colors.textSecondary,
+                fontFamily: "Poppins_500Medium",
+                color: colors.textSecondary,
               }}
             >
-              {`${completionRate}% Complete`}
+              Completion rate unavailable
             </Text>
-          </View>
+          )}
         </View>
 
         <TouchableOpacity activeOpacity={1}

@@ -1,4 +1,4 @@
-import { Dimensions, StyleSheet } from "react-native";
+﻿import { Dimensions, StyleSheet } from "react-native";
 
 export const { width, height } = Dimensions.get("window");
 export const IMG_HEIGHT = height < 700 ? height * 0.3 : height * 0.35;
@@ -146,7 +146,7 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontFamily: "Poppins_600SemiBold",
   },
-  dealCard: {
+  offerCard: {
     padding: 16,
     borderRadius: 16,
     borderWidth: 1,
@@ -340,6 +340,18 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     borderWidth: 1,
   },
+  amenityChip: {
+    minWidth: 124,
+    maxWidth: "100%",
+    minHeight: 44,
+    paddingHorizontal: 14,
+    paddingVertical: 0,
+    borderRadius: 14,
+    borderWidth: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "flex-start",
+  },
   inputContainer: {
     marginBottom: moderateScale(16),
   },
@@ -357,6 +369,7 @@ const styles = StyleSheet.create({
     fontFamily: "Poppins_400Regular",
     fontSize: moderateScale(14),
     padding: 0,
+    textAlignVertical: "center",
   },
   dateBtn: {
     flex: 1,
@@ -387,6 +400,7 @@ const styles = StyleSheet.create({
     paddingVertical: moderateScale(16),
     borderRadius: moderateScale(16),
     alignItems: "center",
+    justifyContent: "center",
   },
   primaryBtnText: {
     color: "#FFF",
@@ -619,6 +633,7 @@ const styles = StyleSheet.create({
   },
   timeButton: {
     alignItems: "center",
+    justifyContent: "center",
   },
   slotGrid: {
     flexDirection: "row",
@@ -632,6 +647,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     minWidth: 80,
     alignItems: "center",
+    justifyContent: "center",
   },
   sectionHeader: {
     flexDirection: "row",
@@ -776,3 +792,4 @@ const styles = StyleSheet.create({
 });
 
 export default styles;
+

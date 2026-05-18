@@ -212,6 +212,13 @@ export default function ChangePasswordScreen() {
     </View>
   );
 
+  const canSubmit =
+    (isResetFlow || currentPassword.length > 0) &&
+    newPassword.length > 0 &&
+    confirmPassword.length > 0 &&
+    newPassword === confirmPassword;
+  const isSubmitDisabled = loading || !canSubmit;
+
   return (
     <>
       <View style={[styles.container, { backgroundColor: colors.background }]}>
@@ -249,14 +256,14 @@ export default function ChangePasswordScreen() {
         </View>
 
         <View style={styles.buttonContainer}>
-          <TouchableOpacity activeOpacity={1}
+          <TouchableOpacity activeOpacity={isSubmitDisabled ? 1 : 0.78}
             style={[
               styles.button,
               {
-                backgroundColor: colors.primary,
+                backgroundColor: canSubmit ? colors.primary : colors.border,
                 shadowColor: "#6366F1",
               },
-              loading && styles.buttonDisabled,
+              isSubmitDisabled && styles.buttonDisabled,
             ]}
             onPress={() => {
               // Validate before showing modal
@@ -278,12 +285,12 @@ export default function ChangePasswordScreen() {
               }
               setModalVisible(true);
             }}
-            disabled={loading}
+            disabled={isSubmitDisabled}
           >
             {loading ? (
               <ActivityIndicator color="white" />
             ) : (
-              <Text style={styles.buttonText}>
+              <Text style={[styles.buttonText, { color: canSubmit ? "#FFFFFF" : colors.textSecondary }]}>
                 {isResetFlow ? "Reset Password" : "Update Password"}
               </Text>
             )}
