@@ -939,7 +939,7 @@ const GigApplyTab = ({
               <Text style={[gigApplyStyles.termsBody, { color: colors.textSecondary }]}>Cancellation rules, refunds, and force majeure exceptions follow the current Musika Lokal policy shown in the full terms page.</Text>
 
               <Text style={[gigApplyStyles.termsSectionTitle, { color: colors.text }]}>3. User Conduct</Text>
-              <Text style={[gigApplyStyles.termsBody, { color: colors.textSecondary }]}>Users must not bypass platform payments, harass others, submit fraudulent information, or upload content they do not have permission to use.</Text>
+              <Text style={[gigApplyStyles.termsBody, { color: colors.textSecondary }]}>Users must not bypass platform payments, harass others, submit fraudulent information, upload content they do not have permission to use, or submit repetitive, duplicate, misleading, or abusive applications, booking requests, production-team requests, gig applications, or studio bookings. Musika Lokal may block duplicate active requests, restrict repeated cancellations or reapplications, reject invalid or overlapping studio bookings, and require unpaid bookings to be settled before new bookings are made.</Text>
 
               <Text style={[gigApplyStyles.termsSectionTitle, { color: colors.text }]}>4. Liability</Text>
               <Text style={[gigApplyStyles.termsBody, { color: colors.textSecondary }]}>Musika Lokal acts as a facilitator and is not liable for personal injury, property damage, external payment network failures, or loss of income due to app downtime.</Text>

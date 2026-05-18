@@ -476,7 +476,7 @@ export default function GigDetailsScreen() {
 
         if (!user || !session) return;
 
-        const { error } = await supabase.functions.invoke("gig-applications", {
+        const { data, error } = await supabase.functions.invoke("gig-applications", {
           body: {
             action: "update_application_status",
             applicationId,
@@ -487,16 +487,29 @@ export default function GigDetailsScreen() {
             Authorization: `Bearer ${session.access_token}`,
           },
         });
-        if (error) throw error;
+        if (error) {
+          let message = error.message || "Failed to update application status";
+          const context = (error as any)?.context;
+          if (context && typeof context.json === "function") {
+            try {
+              const body = await context.json();
+              message = body?.error || body?.message || message;
+            } catch {
+              // Keep the client error message when the response body is unavailable.
+            }
+          }
+          throw new Error(message);
+        }
+        if (data?.error) throw new Error(data.error);
 
         setApplications(
           applications.map((a) =>
-            a.id === applicationId ? { ...a, status } : a,
+            a.id === applicationId ? { ...a, ...data, status: data?.status || status } : a,
           ),
         );
         setModalVisible(false);
-      } catch (e) {
-        Alert.alert("Error", "Failed to update application status");
+      } catch (e: any) {
+        Alert.alert("Error", e?.message || "Failed to update application status");
       }
     });
     setModalVisible(true);
@@ -1322,14 +1335,20 @@ export default function GigDetailsScreen() {
                     const statusMeta = getApplicationStatusMeta(app.status);
                     const rosterProfile = app.production_roster?.roster_profile;
                     const rosterGroup = app.production_roster?.roster_group;
+                    const performerSnapshot =
+                      app.performer_snapshot && typeof app.performer_snapshot === "object"
+                        ? app.performer_snapshot
+                        : {};
                     const displayGroup = app.group || rosterGroup;
                     const displayApplicant = rosterProfile || app.applicant;
                     const displayName =
                       displayGroup?.name ||
+                      performerSnapshot.display_name ||
                       displayApplicant?.full_name ||
                       "Unknown Applicant";
                     const displayGenres =
                       displayGroup?.genre ||
+                      performerSnapshot.group_genre ||
                       displayApplicant?.genres?.join(", ") ||
                       (app.production_team?.name ? "Production submission" : "Musician");
                     const displayLocation =
@@ -1339,6 +1358,7 @@ export default function GigDetailsScreen() {
                     const displayAvatar =
                       displayGroup?.images?.[0] ||
                       displayApplicant?.avatar_url ||
+                      performerSnapshot.avatar_url ||
                       app.production_team?.logo_url ||
                       "https://i.pravatar.cc/100";
 

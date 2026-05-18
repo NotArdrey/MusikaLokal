@@ -1345,13 +1345,17 @@ const ListingDetailsSheet = forwardRef<
     }
 
     try {
-      // Check for any existing application to this specific gig
-      // Once rejected, musician cannot re-apply to the same gig
+      // Active direct applications block only the direct path. Group and production paths stay separate.
       const { data, error } = await supabase
         .from("gig_applications")
         .select("id, status, group_id, cv_url")
         .eq("applicant_id", userId)
         .eq("gig_id", listingId)
+        .is("group_id", null)
+        .is("production_team_id", null)
+        .in("status", ["pending", "accepted", "approved"])
+        .order("created_at", { ascending: false })
+        .limit(1)
         .maybeSingle();
 
       if (error) {
@@ -1565,7 +1569,9 @@ const ListingDetailsSheet = forwardRef<
         .select("id, applicant_id, status, profiles:applicant_id(full_name)")
         .eq("gig_id", listingId)
         .eq("group_id", groupId)
-        .neq("status", "rejected")
+        .in("status", ["pending", "accepted", "approved"])
+        .order("created_at", { ascending: false })
+        .limit(1)
         .maybeSingle();
 
       if (error) {
@@ -1622,7 +1628,7 @@ const ListingDetailsSheet = forwardRef<
       if (data) {
         debugLog("📋 User has an unpaid booking for this studio:", data);
         setHasExistingStudioBooking(true);
-        setExistingStudioBookingStatus("unpaid");
+        setExistingStudioBookingStatus(data.payment_status || "unpaid");
       } else {
         setHasExistingStudioBooking(false);
         setExistingStudioBookingStatus(null);
@@ -1639,7 +1645,13 @@ const ListingDetailsSheet = forwardRef<
       const { data, error } = await supabase.functions.invoke(
         "gig-applications",
         {
-          body: { action: "check_eligibility", userId, gigId: targetGigId },
+          body: {
+            action: "check_eligibility",
+            userId,
+            gigId: targetGigId,
+            groupId: selectedGroupId || null,
+            productionTeamId: userRole === "producer" ? selectedProductionTeamId || null : null,
+          },
         },
       );
 
@@ -1855,11 +1867,14 @@ const ListingDetailsSheet = forwardRef<
     ) {
       checkExistingStudioBooking();
     }
-    // Check eligibility if Gig (uses gig_id)
+  }, [group, userId]);
+
+  // Re-check the cancellation limit when the applicant entity changes.
+  useEffect(() => {
     if (group && userId && group.type === "Gig") {
       checkEligibility(group.id);
     }
-  }, [group, userId]);
+  }, [group?.id, group?.type, selectedGroupId, selectedProductionTeamId, userId, userRole]);
 
   // Check if selected group has already applied (group-level deduplication)
   useEffect(() => {

@@ -8,7 +8,7 @@ import {
     TouchableOpacity,
     View,
 } from "react-native";
-import styles from "../ListingDetailsSheet.styles";
+import styles, { moderateScale } from "../ListingDetailsSheet.styles";
 import {
   formatRecordingHours,
   formatRecordingRuleShort,
@@ -187,6 +187,20 @@ const StudioBookTab = ({
     group?.studio_type,
     selectedSessionType,
   );
+  const normalizedExistingStudioPaymentStatus = String(
+    existingStudioBookingStatus || "",
+  ).toLowerCase();
+  const hasBlockingPaymentBooking =
+    hasExistingStudioBooking &&
+    ["unpaid", "pending", "failed"].includes(normalizedExistingStudioPaymentStatus);
+  const blockingPaymentTitle =
+    normalizedExistingStudioPaymentStatus === "failed"
+      ? "Payment Failed"
+      : "Payment Pending";
+  const blockingPaymentMessage =
+    normalizedExistingStudioPaymentStatus === "failed"
+      ? "Retry payment for your existing booking to unlock new sessions."
+      : "Complete payment for your existing booking to unlock new sessions.";
   const [recordingSongCountInput, setRecordingSongCountInput] = React.useState("1");
   const [editingBookingDraft, setEditingBookingDraft] = React.useState<{
     booking: any;
@@ -1216,7 +1230,7 @@ const StudioBookTab = ({
 
   return (
     <View style={styles.tabContent}>
-      {hasExistingStudioBooking && existingStudioBookingStatus === "unpaid" && (
+      {hasBlockingPaymentBooking && (
         <View
           style={{
             backgroundColor: isDark ? "#1F2937" : "#FFF7ED",
@@ -1260,7 +1274,7 @@ const StudioBookTab = ({
                   color: isDark ? "#F59700" : "#D97706",
                 }}
               >
-                Payment Pending
+                {blockingPaymentTitle}
               </Text>
             </View>
             <Text
@@ -1271,7 +1285,7 @@ const StudioBookTab = ({
                 lineHeight: 18,
               }}
             >
-              Complete payment for your existing booking to unlock new sessions.
+              {blockingPaymentMessage}
             </Text>
           </View>
 
@@ -1637,7 +1651,7 @@ const StudioBookTab = ({
         </View>
       )}
 
-      {!(hasExistingStudioBooking && existingStudioBookingStatus === "unpaid") &&
+      {!hasBlockingPaymentBooking &&
         (showAddBooking || bookings.length === 0) ? (
         <>
           {isEditingBooking && (
@@ -2127,7 +2141,7 @@ const StudioBookTab = ({
             )}
           </TouchableOpacity>
         </>
-      ) : !(hasExistingStudioBooking && existingStudioBookingStatus === "unpaid") ? (
+      ) : !hasBlockingPaymentBooking ? (
         <TouchableOpacity activeOpacity={1}
           style={[
             styles.secondaryBtn,
@@ -2173,7 +2187,7 @@ const StudioBookTab = ({
       </View>
 
       {firstRecordingDurationIssue &&
-        !(hasExistingStudioBooking && existingStudioBookingStatus === "unpaid") && (
+        !hasBlockingPaymentBooking && (
         <View
           style={{
             alignItems: "flex-start",
@@ -2213,7 +2227,7 @@ const StudioBookTab = ({
         </View>
       )}
 
-      {bookings.length > 0 && !(hasExistingStudioBooking && existingStudioBookingStatus === "unpaid") && (
+      {bookings.length > 0 && !hasBlockingPaymentBooking && (
         <View
           style={[
             styles.paymentSummary,
@@ -2257,7 +2271,7 @@ const StudioBookTab = ({
         </View>
       )}
 
-      {!(hasExistingStudioBooking && existingStudioBookingStatus === "unpaid") && (
+      {!hasBlockingPaymentBooking && (
         <>
           <TouchableOpacity
             style={[
@@ -2831,9 +2845,12 @@ const StudioBookTab = ({
                   styles.primaryBtnText,
                   {
                     color: canSubmitBookings ? "#FFFFFF" : colors.textSecondary,
+                    lineHeight: moderateScale(22),
+                    paddingHorizontal: moderateScale(10),
+                    textAlign: "center",
                   },
                 ]}
-                numberOfLines={1}
+                numberOfLines={2}
                 adjustsFontSizeToFit
               >
                 {firstRecordingDurationIssue

@@ -232,23 +232,41 @@ async function fireActiveProductionRosterApplications(
   const cancellationReason =
     toNonEmptyString(reason) || "Removed from production roster by the production team.";
 
-  const { data, error } = await supabaseAdmin
+  const nowIso = new Date().toISOString();
+
+  const { data: cancelledRows, error: cancelError } = await supabaseAdmin
+    .from("gig_applications")
+    .update({
+      status: "cancelled",
+      cancellation_reason: cancellationReason,
+      updated_at: nowIso,
+    })
+    .eq("production_team_id", teamId)
+    .in("production_roster_id", uniqueRosterIds)
+    .eq("status", "pending")
+    .select("id");
+
+  if (cancelError) {
+    throw cancelError;
+  }
+
+  const { data: firedRows, error: fireError } = await supabaseAdmin
     .from("gig_applications")
     .update({
       status: "fired",
       cancellation_reason: cancellationReason,
-      updated_at: new Date().toISOString(),
+      updated_at: nowIso,
     })
     .eq("production_team_id", teamId)
     .in("production_roster_id", uniqueRosterIds)
-    .eq("status", "accepted")
+    .in("status", ["accepted", "approved"])
     .select("id");
 
-  if (error) {
-    throw error;
+  if (fireError) {
+    throw fireError;
   }
 
-  return data?.length || 0;
+  return (cancelledRows?.length || 0) + (firedRows?.length || 0);
 }
 
 async function retireAcceptedProductionInviteRequests(
@@ -666,6 +684,10 @@ async function materializeAcceptedVenueGigInvite(
     throw new Error("Venue invite is missing an invited performer");
   }
 
+  if (!requestRow.sender_id) {
+    throw new Error("Venue invite is missing the venue owner reference");
+  }
+
   const slotType = getVenueGigInviteSlotType(eventDetails, groupRecord);
   const pitchMessage =
     readEventString(eventDetails, "pitch_message") ||
@@ -676,11 +698,12 @@ async function materializeAcceptedVenueGigInvite(
     .from("gig_applications")
     .select("id, status, group_id")
     .eq("gig_id", gigId)
-    .is("production_team_id", null);
+    .is("production_team_id", null)
+    .in("status", ["pending", "accepted", "approved"]);
 
   existingQuery = groupId
-    ? existingQuery.or(`group_id.eq.${groupId},applicant_id.eq.${applicantId}`)
-    : existingQuery.eq("applicant_id", applicantId);
+    ? existingQuery.eq("group_id", groupId)
+    : existingQuery.eq("applicant_id", applicantId).is("group_id", null);
 
   const { data: existingApplication, error: existingError } = await existingQuery
     .order("created_at", { ascending: false })
@@ -699,7 +722,7 @@ async function materializeAcceptedVenueGigInvite(
     const { data: updatedApplication, error: updateError } = await supabaseAdmin
       .from("gig_applications")
       .update({
-        status: "accepted",
+        status: "pending",
         pitch_message: pitchMessage,
         slot_type: slotType,
         submitted_by_user_id: requestRow.receiver_id,
@@ -712,14 +735,25 @@ async function materializeAcceptedVenueGigInvite(
       .maybeSingle();
 
     if (updateError) throw updateError;
-    return { application: updatedApplication || existingApplication, created: false };
+
+    const { data: acceptedApplication, error: acceptError } = await supabaseAdmin.rpc(
+      "accept_gig_application_safely",
+      {
+        p_application_id: existingApplication.id,
+        p_actor_user_id: requestRow.sender_id,
+        p_new_status: "accepted",
+      },
+    );
+
+    if (acceptError) throw acceptError;
+    return { application: acceptedApplication || updatedApplication || existingApplication, created: false };
   }
 
   const insertPayload: Record<string, unknown> = {
     gig_id: gigId,
     applicant_id: applicantId,
     group_id: groupId,
-    status: "accepted",
+    status: "pending",
     pitch_message: pitchMessage,
     slot_type: slotType,
     submitted_by_user_id: requestRow.receiver_id,
@@ -738,7 +772,29 @@ async function materializeAcceptedVenueGigInvite(
     throw insertError;
   }
 
-  return { application: insertedApplication, created: true };
+  if (!insertedApplication?.id) {
+    throw new Error("Failed to create gig application for venue invite");
+  }
+
+  const { data: acceptedApplication, error: acceptError } = await supabaseAdmin.rpc(
+    "accept_gig_application_safely",
+    {
+      p_application_id: insertedApplication.id,
+      p_actor_user_id: requestRow.sender_id,
+      p_new_status: "accepted",
+    },
+  );
+
+  if (acceptError) {
+    await supabaseAdmin
+      .from("gig_applications")
+      .delete()
+      .eq("id", insertedApplication.id)
+      .eq("status", "pending");
+    throw acceptError;
+  }
+
+  return { application: acceptedApplication || insertedApplication, created: true };
 }
 
 function isMissingOpenProductionApplicationsColumnError(error: any) {
@@ -1943,7 +1999,12 @@ serve(async (req: Request) => {
       }
 
       const roster = await getTeamRosterEntries(supabaseAdmin, team_id);
-      return jsonResponse({ success: true, roster, fired_applications_updated: firedApplications });
+      return jsonResponse({
+        success: true,
+        roster,
+        affected_applications_updated: firedApplications,
+        fired_applications_updated: firedApplications,
+      });
     }
 
     if (action === "respond_to_production_team_invite") {
