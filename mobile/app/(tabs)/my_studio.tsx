@@ -16,6 +16,7 @@ import { useTheme } from '../../src/context/ThemeContext';
 import { getActionErrorMessage, getResultErrorMessage, logActionError } from '../../src/utils/actionError';
 import { isE2EFixtureMode } from '../../src/utils/e2eFixtures';
 import { invalidateListingCaches } from '../../src/utils/listingCacheInvalidation';
+import { clearListingDetailsCache } from '../../src/utils/listingDetailsCache';
 
 const normalizePermitStatus = (permitStatus: string | null | undefined) => {
     const normalizedPermitStatus = String(permitStatus || '').trim().toLowerCase();
@@ -282,6 +283,7 @@ export default function MyStudioScreen() {
 
                 if (result?.code === 'STUDIO_NOT_FOUND') {
                     showAlert('warning', 'Not Found', 'Studio was not found. It may have already been removed.');
+                    clearListingDetailsCache(selectedId);
                     setStudios(prev => prev.filter(s => s.id !== selectedId));
                     closeDeleteModal();
                     return;
@@ -291,6 +293,7 @@ export default function MyStudioScreen() {
             }
 
             setStudios(prev => prev.filter(s => s.id !== selectedId));
+            clearListingDetailsCache(selectedId);
             invalidateListingCaches(userId, ['bookings', 'details', 'home', 'search', 'wallet']);
             closeDeleteModal();
             showAlert('success', 'Studio Deleted', 'Studio deleted successfully.');

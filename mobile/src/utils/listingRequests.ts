@@ -1,5 +1,7 @@
 ﻿import { supabase } from "../../lib/supabase";
 
+import { sanitizeStorageFileName, uploadStorageObject } from "./storageUpload";
+
 type EntityType = "musician" | "group" | "venue" | "production_team";
 
 type RouteParams = Record<string, string | number | null | undefined>;
@@ -347,18 +349,17 @@ export const uploadListingRequestDocument = async (
   file: any,
   folder: "contracts" | "applications" = "applications",
 ) => {
-  const response = await fetch(file.uri);
-  const arrayBuffer = await response.arrayBuffer();
-
   const fileExt = file.name?.split(".").pop() || "pdf";
-  const storagePath = `${userId}/${folder}/${Date.now()}_${folder}.${fileExt}`;
+  const safeFileName = sanitizeStorageFileName(file.name || `${folder}.${fileExt}`, `${folder}.${fileExt}`);
+  const storagePath = `${userId}/${folder}/${Date.now()}_${safeFileName}`;
 
-  const { data, error } = await supabase.storage
-    .from("documents")
-    .upload(storagePath, arrayBuffer, {
-      contentType: file.mimeType || "application/pdf",
-      upsert: false,
-    });
+  const { data, error } = await uploadStorageObject({
+    bucket: "documents",
+    path: storagePath,
+    uri: file.uri,
+    contentType: file.mimeType || "application/pdf",
+    upsert: false,
+  });
 
   if (error) {
     throw error;

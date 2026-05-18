@@ -1,5 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
-import * as FileSystem from "expo-file-system/legacy";
+import * as FileSystem from "expo-file-system/src/legacy";
 import * as Linking from "expo-linking";
 import { router, useLocalSearchParams } from "expo-router";
 import React, { useEffect, useRef, useState } from "react";
@@ -3022,6 +3022,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
         message={`Gig "${gigName}" has been successfully posted!`}
         buttonText="Go to Gig"
         onClose={handleSuccessRedirect}
+        showCancelButton={false}
       />
 
       <Modal

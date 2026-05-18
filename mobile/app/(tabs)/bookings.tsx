@@ -176,6 +176,50 @@ const formatBookingCardDateTime = (value: unknown) => {
   return formatFriendlyDateTime(raw, { fallback: raw });
 };
 
+const getLocalEventDayEndTimestamp = (value: unknown) => {
+  const raw = String(value ?? "").trim();
+  if (!raw || raw.toLowerCase() === "tba") return null;
+
+  const datePart = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (datePart) {
+    const [, year, month, day] = datePart;
+    const endOfDay = new Date(
+      Number(year),
+      Number(month) - 1,
+      Number(day),
+      23,
+      59,
+      59,
+      999,
+    );
+
+    return Number.isNaN(endOfDay.getTime()) ? null : endOfDay.getTime();
+  }
+
+  const parsed = new Date(raw);
+  if (Number.isNaN(parsed.getTime())) return null;
+  parsed.setHours(23, 59, 59, 999);
+  return parsed.getTime();
+};
+
+const getGigApplicationEventEndTimestamp = (item: any) => {
+  const candidates = [item?.raw_date, item?.date, item?.start_time];
+
+  for (const candidate of candidates) {
+    const timestamp = getLocalEventDayEndTimestamp(candidate);
+    if (timestamp !== null) return timestamp;
+  }
+
+  return null;
+};
+
+const isGigApplicationEventFinished = (item: any, referenceDate = new Date()) => {
+  if (item?.type_id !== "gig_application") return false;
+
+  const eventEndTimestamp = getGigApplicationEventEndTimestamp(item);
+  return eventEndTimestamp !== null && eventEndTimestamp < referenceDate.getTime();
+};
+
 const formatApplicationReceivedDateTime = (item: any) => {
   const raw =
     toNonEmptyString(item?.submitted_at) ||
@@ -320,6 +364,34 @@ const getBookingPaidAmount = (item: any) => {
   return 0;
 };
 
+const formatPesoAmount = (value: unknown) =>
+  `\u20B1${toPaymentAmount(value).toLocaleString()}`;
+
+const getBookingDisplayPaidAmount = (item: any) => {
+  const paidAmount = getBookingPaidAmount(item);
+  const paymentAmount = toPaymentAmount(item?.payment_amount);
+  const paymentStatus = getBookingPaymentStatus(item);
+
+  if (paidAmount > 0) return paidAmount;
+
+  if (["paid", "partial", "refunded", "refund_pending"].includes(paymentStatus)) {
+    return paymentAmount > 0 ? paymentAmount : getPaymentItemTotalAmount(item);
+  }
+
+  return 0;
+};
+
+const getBookingPaidAmountLabel = (item: any) => {
+  const paidAmount = getBookingDisplayPaidAmount(item);
+  const totalAmount = getPaymentItemTotalAmount(item);
+
+  if (totalAmount > 0 && paidAmount < totalAmount) {
+    return `${formatPesoAmount(paidAmount)} of ${formatPesoAmount(totalAmount)}`;
+  }
+
+  return formatPesoAmount(paidAmount);
+};
+
 const isDownpaymentBalanceItem = (item: any) =>
   item?.payment_type === "downpayment" && getBookingRemainingBalance(item) > 0;
 
@@ -351,6 +423,20 @@ const shouldShowBalanceDueBadge = (item: any) =>
 
 const shouldShowPaidBalanceBadge = (item: any) =>
   item?.payment_type === "downpayment" && isBookingPaymentSettled(item);
+
+const getBookingRefundAmount = (item: any) =>
+  toPaymentAmount(item?.refund_amount);
+
+const isRefundedStudioBooking = (item: any) =>
+  item?.type_id === "studio_booking" &&
+  String(item?.raw_status || "").toLowerCase() === "cancelled" &&
+  (
+    getBookingPaymentStatus(item) === "refunded" ||
+    getBookingRefundAmount(item) > 0
+  );
+
+const getStudioBookingStatusLabel = (item: any) =>
+  isRefundedStudioBooking(item) ? "Refunded" : item?.status;
 
 const getPendingStudioBatchKey = (item: any) => {
   if (item?.type_id !== "studio_booking") return null;
@@ -1439,7 +1525,9 @@ export default function BookingsScreen() {
                 : b.status === "checked_in"
                   ? "In Progress"
                   : b.status === "cancelled"
-                    ? "Declined"
+                    ? String(b.payment_status || "").toLowerCase() === "refunded" || toPaymentAmount(b.refund_amount) > 0
+                      ? "Refunded"
+                      : "Declined"
                     : b.status,
         type: "Studio Booking",
         isCancelled: b.status === "cancelled",
@@ -1470,6 +1558,8 @@ export default function BookingsScreen() {
           b.payment_amount ?? (b.payment_status === "paid" ? b.final_price : 0),
         payment_type: b.payment_type || null,
         remaining_balance: b.remaining_balance || 0,
+        refund_amount: toPaymentAmount(b.refund_amount),
+        refunded_at: b.refunded_at || null,
         studio_owner_id: b.studio?.owner_id || null,
         relocation_requested_at: b.relocation_requested_at,
         relocation_expires_at: b.relocation_expires_at,
@@ -5587,14 +5677,13 @@ export default function BookingsScreen() {
                                       setModalMode("confirm");
                                       setModalVisible(true);
                                     }}
-                                    style={{
-                                      flex: 1,
-                                      backgroundColor: "#10B981",
-                                      borderRadius: 100,
-                                      alignItems: "center",
-                                      justifyContent: "center",
-                                      paddingVertical: moderateScale(8),
-                                    }}
+                                    style={[
+                                      styles.actionButton,
+                                      {
+                                        flex: 1,
+                                        backgroundColor: "#10B981",
+                                      },
+                                    ]}
                                   >
                                     <Text
                                       style={[styles.actionButtonText, { color: "white" }]}
@@ -5790,61 +5879,68 @@ export default function BookingsScreen() {
                               </View>
                             </>
                           ) : renderActiveTab === "Active Musicians" ? (
-                            // FIRE & COMPLETE BUTTONS
-                            <View style={{ flexDirection: "row", gap: 8, flex: 1 }}>
-                              <TouchableOpacity activeOpacity={1}
-                                onPress={() => {
-                                  setSelectedItem(item);
-                                  setModalMode("fire");
-                                  setCancellationReason("");
-                                  setModalVisible(true);
-                                }}
-                                style={{
-                                  flex: 1,
-                                  backgroundColor: isDark
-                                    ? "rgba(239, 68, 68, 0.2)"
-                                    : "#FEF2F2",
-                                  padding: 10,
-                                  borderRadius: 100,
-                                  alignItems: "center",
-                                }}
-                              >
-                                <Text
-                                  style={{
-                                    color: "#EF4444",
-                                    fontFamily: "Poppins_700Bold",
-                                    fontSize: 12,
-                                  }}
-                                >
-                                  FIRE
-                                </Text>
-                              </TouchableOpacity>
+                            (() => {
+                              const canCompleteActiveGig = isGigApplicationEventFinished(item);
 
-                              <TouchableOpacity activeOpacity={1}
-                                onPress={() => {
-                                  setSelectedItem(item);
-                                  setModalMode("complete");
-                                  setModalVisible(true);
-                                }}
-                                style={{
-                                  flex: 1,
-                                  backgroundColor: "#10B981",
-                                  padding: 10,
-                                  borderRadius: 100,
-                                  alignItems: "center",
-                                }}
-                              >
-                                <Text
-                                  style={{
-                                    color: "white",
-                                    fontFamily: "Poppins_700Bold",
-                                    fontSize: 12,
-                                  }}
-                                >
-                                  COMPLETE
-                                </Text>
-                              </TouchableOpacity>
-                            </View>
+                              return (
+                                <View style={{ flexDirection: "row", gap: 8, flex: 1 }}>
+                                  <TouchableOpacity activeOpacity={1}
+                                    onPress={() => {
+                                      setSelectedItem(item);
+                                      setModalMode("fire");
+                                      setCancellationReason("");
+                                      setModalVisible(true);
+                                    }}
+                                    style={{
+                                      flex: 1,
+                                      backgroundColor: isDark
+                                        ? "rgba(239, 68, 68, 0.2)"
+                                        : "#FEF2F2",
+                                      padding: 10,
+                                      borderRadius: 100,
+                                      alignItems: "center",
+                                    }}
+                                  >
+                                    <Text
+                                      style={{
+                                        color: "#EF4444",
+                                        fontFamily: "Poppins_700Bold",
+                                        fontSize: 12,
+                                      }}
+                                    >
+                                      FIRE
+                                    </Text>
+                                  </TouchableOpacity>
+
+                                  {canCompleteActiveGig ? (
+                                    <TouchableOpacity activeOpacity={1}
+                                      onPress={() => {
+                                        setSelectedItem(item);
+                                        setModalMode("complete");
+                                        setModalVisible(true);
+                                      }}
+                                      style={{
+                                        flex: 1,
+                                        backgroundColor: "#10B981",
+                                        padding: 10,
+                                        borderRadius: 100,
+                                        alignItems: "center",
+                                      }}
+                                    >
+                                      <Text
+                                        style={{
+                                          color: "white",
+                                          fontFamily: "Poppins_700Bold",
+                                          fontSize: 12,
+                                        }}
+                                      >
+                                        COMPLETE
+                                      </Text>
+                                    </TouchableOpacity>
+                                  ) : null}
+                                </View>
+                              );
+                            })()
                           ) : renderActiveTab === "Review" ? (
                             // History tab: completed contracts can be renewed by venue owners.
                             <View style={{ flexDirection: "row", gap: 8, flex: 1 }}>
@@ -6006,8 +6102,15 @@ export default function BookingsScreen() {
 
                     {item.isCancelled && (
                       <View style={styles.cancelledOverlay}>
-                        <View style={styles.cancelledBadge}>
-                          <Text style={styles.cancelledText}>Cancelled</Text>
+                        <View
+                          style={[
+                            styles.cancelledBadge,
+                            isRefundedStudioBooking(item) && { backgroundColor: "#0EA5E9" },
+                          ]}
+                        >
+                          <Text style={styles.cancelledText}>
+                            {getStudioBookingStatusLabel(item) === "Refunded" ? "Refunded" : "Cancelled"}
+                          </Text>
                         </View>
                       </View>
                     )}
@@ -6328,6 +6431,10 @@ export default function BookingsScreen() {
                               selectedTotalHours + 1e-9 < requiredTotalHours
                                 ? "#F59E0B"
                                 : colors.textSecondary;
+                            const paidAmountLabel =
+                              item.type_id === "studio_booking"
+                                ? getBookingPaidAmountLabel(item)
+                                : null;
 
                             return (
                               <>
@@ -6350,6 +6457,14 @@ export default function BookingsScreen() {
                                     <Ionicons name="albums-outline" size={14} color={colors.textSecondary} />
                                     <Text style={[styles.cardDetailText, { color: colors.textSecondary }]}>
                                       {item.batch_count} sessions in this payment
+                                    </Text>
+                                  </View>
+                                ) : null}
+                                {paidAmountLabel ? (
+                                  <View style={styles.cardDetailRow}>
+                                    <Ionicons name="cash-outline" size={14} color={colors.textSecondary} />
+                                    <Text style={[styles.cardDetailText, { color: colors.textSecondary }]}>
+                                      Amount paid | {paidAmountLabel}
                                     </Text>
                                   </View>
                                 ) : null}
@@ -6450,7 +6565,13 @@ export default function BookingsScreen() {
                             { marginBottom: 0, flex: 1, flexWrap: "wrap" },
                           ]}
                         >
-                          {item.isCancelled ? (
+                          {isRefundedStudioBooking(item) ? (
+                            <Ionicons
+                              name="cash-outline"
+                              size={16}
+                              color="#0EA5E9"
+                            />
+                          ) : item.isCancelled ? (
                             <Ionicons
                               name="close-circle"
                               size={16}
@@ -6486,7 +6607,9 @@ export default function BookingsScreen() {
                             style={[
                               styles.statusText,
                               {
-                                color: item.isCancelled
+                                color: isRefundedStudioBooking(item)
+                                  ? "#0EA5E9"
+                                  : item.isCancelled
                                   ? "#EF4444"
                                   : renderActiveTab === "Pending"
                                     ? "#F59E0B"
@@ -6499,8 +6622,31 @@ export default function BookingsScreen() {
                             ]}
                             numberOfLines={2}
                           >
-                            {item.status}
+                            {getStudioBookingStatusLabel(item)}
                           </Text>
+
+                          {isHistoryTabView && isRefundedStudioBooking(item) && getBookingRefundAmount(item) > 0 && (
+                            <View
+                              style={[
+                                styles.downpaymentBadge,
+                                { backgroundColor: "#0EA5E920" },
+                              ]}
+                            >
+                              <Ionicons
+                                name="cash-outline"
+                                size={12}
+                                color="#0EA5E9"
+                              />
+                              <Text
+                                style={[
+                                  styles.downpaymentText,
+                                  { color: "#0EA5E9" },
+                                ]}
+                              >
+                                Refunded amount ₱{getBookingRefundAmount(item).toLocaleString()}
+                              </Text>
+                            </View>
+                          )}
 
                           {shouldShowPaidBalanceBadge(item) && (
                             <View
@@ -7396,7 +7542,7 @@ export default function BookingsScreen() {
                                   ? "downpayment"
                                   : "paid amount";
 
-                              return `Cancellation Policy: Booking cancellations are non-refundable. Your ${paidLabel} of ₱${paidAmount.toLocaleString()} will be forfeited.`;
+                              return `Cancellation Policy: Booking cancellations are non-refundable. Your ${paidLabel} of ₱${paidAmount.toLocaleString()} is non-refundable.`;
                             }
 
                             return "Cancellation Policy: Booking cancellations are non-refundable. No paid amount has been recorded for this booking yet.";
@@ -7517,6 +7663,15 @@ export default function BookingsScreen() {
               await handleReportAccessIssue(
                 selectedItem,
                 normalizeVisibleInput(cancellationReason),
+              );
+              return;
+            }
+
+            if (modalMode === "complete" && !isGigApplicationEventFinished(selectedItem)) {
+              showAlert(
+                "warning",
+                "Event Not Finished",
+                "You can complete this contract after the event date has passed.",
               );
               return;
             }

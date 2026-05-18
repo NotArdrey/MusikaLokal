@@ -918,13 +918,13 @@ export default function SidebarNav() {
                                                                 notification.type === 'warning' ? '#F59E0B' :
                                                                     notification.type === 'error' ? '#EF4444' : '#3B82F6',
                                                     }]} />
-                                                    <Text style={[styles.notificationItemTitle, { color: colors.text }]} numberOfLines={1}>
+                                                    <Text style={[styles.notificationItemTitle, { color: colors.text }]}>
                                                         {notification.title || 'Notification'}
                                                     </Text>
                                                     {!notification.read && <View style={[styles.notificationUnreadDot, { backgroundColor: colors.primary }]} />}
                                                 </View>
 
-                                                <Text style={[styles.notificationItemMessage, { color: colors.textSecondary }]} numberOfLines={isTransfer ? undefined : 2}>
+                                                <Text style={[styles.notificationItemMessage, { color: colors.textSecondary }]}>
                                                     {notification.message || 'You have a new update.'}
                                                 </Text>
 
@@ -1491,7 +1491,7 @@ const styles = StyleSheet.create({
     },
     notificationItemHeader: {
         flexDirection: 'row',
-        alignItems: 'center',
+        alignItems: 'flex-start',
         gap: 8,
     },
     notificationTypeDot: {
@@ -1501,6 +1501,7 @@ const styles = StyleSheet.create({
     },
     notificationItemTitle: {
         flex: 1,
+        flexShrink: 1,
         fontSize: 13,
         fontFamily: 'Poppins_600SemiBold',
     },

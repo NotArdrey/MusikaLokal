@@ -19,7 +19,7 @@ import { GestureHandlerRootView } from "react-native-gesture-handler";
 import "../global.css";
 import { clearSupabaseAuthStorage, prepareRealtimeAuth, supabase } from "../lib/supabase";
 import { AuthProvider, useAuth } from "../src/context/AuthContext";
-import { BottomOverlayProvider } from "../src/context/BottomOverlayContext";
+import { BottomOverlayProvider, useBottomOverlay } from "../src/context/BottomOverlayContext";
 import { usePushNotifications } from "../src/hooks/usePushNotifications";
 import {
   GlobalRadioMiniPlayer,
@@ -692,6 +692,7 @@ function RootContent() {
       "settings",
       "account_details",
       "identity_verification",
+      "notifications",
       "notification_settings",
       "change_email",
       "change_password",
@@ -818,6 +819,7 @@ function RootContent() {
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
+      <BottomOverlayRouteReset routeName={routeName} />
       <Stack
         screenOptions={{
           headerShown: false,
@@ -839,4 +841,20 @@ function RootContent() {
       <GlobalRadioMiniPlayer />
     </View>
   );
+}
+
+function BottomOverlayRouteReset({ routeName }: { routeName: string }) {
+  const { clearBottomOverlays } = useBottomOverlay();
+  const previousRouteNameRef = useRef(routeName);
+
+  useEffect(() => {
+    if (previousRouteNameRef.current === routeName) {
+      return;
+    }
+
+    previousRouteNameRef.current = routeName;
+    clearBottomOverlays();
+  }, [clearBottomOverlays, routeName]);
+
+  return null;
 }

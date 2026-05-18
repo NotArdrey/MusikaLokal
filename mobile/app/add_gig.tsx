@@ -1,5 +1,4 @@
 import { Ionicons } from "@expo/vector-icons";
-import * as FileSystem from "expo-file-system/legacy";
 import * as Linking from "expo-linking";
 import { router, useLocalSearchParams } from "expo-router";
 import React, { useEffect, useRef, useState } from "react";
@@ -24,27 +23,7 @@ import Navbar from "../src/components/navbar";
 import { PH_MUSIC_GROUP_TYPES } from "../src/constants/groupTypes";
 import { useTheme } from "../src/context/ThemeContext";
 import { createE2EImageFixtureUrls, isE2EFixtureMode } from "../src/utils/e2eFixtures";
-
-// Decode base64 to Uint8Array without using fetch().arrayBuffer() which crashes on Android New Architecture
-const base64ToUint8Array = (base64: string): Uint8Array => {
-  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-  const lookup = new Uint8Array(256);
-  for (let i = 0; i < chars.length; i++) lookup[chars.charCodeAt(i)] = i;
-  const b64 = base64.replace(/=/g, "");
-  let bufLen = Math.floor(b64.length * 0.75);
-  const bytes = new Uint8Array(bufLen);
-  let p = 0;
-  for (let i = 0; i < b64.length; i += 4) {
-    const e1 = lookup[b64.charCodeAt(i)];
-    const e2 = lookup[b64.charCodeAt(i + 1)];
-    const e3 = lookup[b64.charCodeAt(i + 2)];
-    const e4 = lookup[b64.charCodeAt(i + 3)];
-    if (p < bufLen) bytes[p++] = (e1 << 2) | (e2 >> 4);
-    if (p < bufLen) bytes[p++] = ((e2 & 15) << 4) | (e3 >> 2);
-    if (p < bufLen) bytes[p++] = ((e3 & 3) << 6) | (e4 & 63);
-  }
-  return bytes;
-};
+import { sanitizeStorageFileName, uploadStorageObject } from "../src/utils/storageUpload";
 
 // Helper function to format time input
 const formatTimeInput = (text: string): string => {
@@ -986,16 +965,15 @@ export default function AddGigScreen() {
         return;
       }
 
-      const base64 = await FileSystem.readAsStringAsync(fileUri, { encoding: FileSystem.EncodingType.Base64 });
-      const bytes = base64ToUint8Array(base64);
-
-      const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
-      const { data, error } = await supabase.storage
-        .from("documents")
-        .upload(filePath, bytes, {
-          contentType: "application/pdf",
-          upsert: false,
-        });
+      const safeFileName = sanitizeStorageFileName(fileName, "contract.pdf");
+      const filePath = `contracts/${session.user.id}/${Date.now()}_${safeFileName}`;
+      const { error } = await uploadStorageObject({
+        bucket: "documents",
+        path: filePath,
+        uri: fileUri,
+        contentType: "application/pdf",
+        upsert: false,
+      });
 
       if (error) throw error;
 
@@ -1068,20 +1046,19 @@ export default function AddGigScreen() {
         return;
       }
 
-      const base64 = await FileSystem.readAsStringAsync(fileUri, { encoding: FileSystem.EncodingType.Base64 });
-      const bytes = base64ToUint8Array(base64);
-
       const contentType = fileName.toLowerCase().endsWith('.pdf')
         ? 'application/pdf'
         : `image/${fileName.split('.').pop()?.toLowerCase() || 'jpeg'}`;
 
-      const filePath = `business-permits/${session.user.id}/${Date.now()}_${fileName}`;
-      const { data, error } = await supabase.storage
-        .from("documents")
-        .upload(filePath, bytes, {
-          contentType,
-          upsert: false,
-        });
+      const safeFileName = sanitizeStorageFileName(fileName, "business-permit.pdf");
+      const filePath = `business-permits/${session.user.id}/${Date.now()}_${safeFileName}`;
+      const { error } = await uploadStorageObject({
+        bucket: "documents",
+        path: filePath,
+        uri: fileUri,
+        contentType,
+        upsert: false,
+      });
 
       if (error) throw error;
 
@@ -1131,13 +1108,15 @@ export default function AddGigScreen() {
         ? 'application/pdf'
         : file.type || 'image/jpeg';
 
-      const filePath = `business-permits/${session.user.id}/${Date.now()}_${fileName}`;
-      const { data, error } = await supabase.storage
-        .from("documents")
-        .upload(filePath, file, {
-          contentType,
-          upsert: false,
-        });
+      const safeFileName = sanitizeStorageFileName(fileName, "business-permit.pdf");
+      const filePath = `business-permits/${session.user.id}/${Date.now()}_${safeFileName}`;
+      const { error } = await uploadStorageObject({
+        bucket: "documents",
+        path: filePath,
+        body: file,
+        contentType,
+        upsert: false,
+      });
 
       if (error) throw error;
 
@@ -1175,13 +1154,15 @@ export default function AddGigScreen() {
         setUploadingContract(false);
         return;
       }
-const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
-      const { data, error } = await supabase.storage
-        .from("documents")
-        .upload(filePath, file, {
-          contentType: "application/pdf",
-          upsert: false,
-        });
+      const safeFileName = sanitizeStorageFileName(fileName, "contract.pdf");
+      const filePath = `contracts/${session.user.id}/${Date.now()}_${safeFileName}`;
+      const { error } = await uploadStorageObject({
+        bucket: "documents",
+        path: filePath,
+        body: file,
+        contentType: "application/pdf",
+        upsert: false,
+      });
 
       if (error) throw error;
 
@@ -2962,6 +2943,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
         message={`Gig "${gigName}" has been successfully posted!`}
         buttonText="Go to Gig"
         onClose={handleSuccessRedirect}
+        showCancelButton={false}
       />
 
       <Modal

@@ -37,6 +37,7 @@ import {
     useChat,
     useGroupParticipants,
 } from '../hooks/useChat';
+import { sanitizeStorageFileName, uploadStorageObject } from '../utils/storageUpload';
 import { resolveSupabaseMediaUrl } from '../utils/supabaseMedia';
 import BottomModal from './BottomModal';
 import CustomAlert, { AlertType } from './CustomAlert';
@@ -498,18 +499,16 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
 
             setUploading(true);
             const fileExt = asset.name.split('.').pop()?.toLowerCase() || 'bin';
-            const fileName = `chat/${conversationId}/${Date.now()}_${Math.random().toString(36).substring(7)}.${fileExt}`;
+            const safeFileName = sanitizeStorageFileName(asset.name || `attachment.${fileExt}`, `attachment.${fileExt}`);
+            const fileName = `chat/${conversationId}/${Date.now()}_${Math.random().toString(36).substring(7)}_${safeFileName}`;
 
-            // Upload to Supabase storage
-            const response = await fetch(asset.uri);
-            const arrayBuffer = await response.arrayBuffer();
-
-            const { error } = await supabase.storage
-                .from('chat-attachments')
-                .upload(fileName, arrayBuffer, {
-                    contentType: asset.mimeType || 'application/octet-stream',
-                    upsert: false,
-                });
+            const { error } = await uploadStorageObject({
+                bucket: 'chat-attachments',
+                path: fileName,
+                uri: asset.uri,
+                contentType: asset.mimeType || 'application/octet-stream',
+                upsert: false,
+            });
 
             if (error) {
                 console.error('Upload error:', error);

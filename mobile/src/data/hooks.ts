@@ -70,7 +70,6 @@ export const useSearchResultsQuery = <TItem = any>(params: {
     getNextPageParam: (lastPage: PaginatedResponse<TItem>) => lastPage.nextCursor || undefined,
     initialPageParam: null as string | null,
     meta: { persist: true },
-    placeholderData: keepPreviousData,
     queryFn: ({ pageParam }) =>
       invokeEdgeFunction<PaginatedResponse<TItem>>("search-content", {
         body: {
@@ -249,6 +248,7 @@ export const useFeedQuery = <TItem = any>(params: {
         action: "get_feed",
         cursor: pageParam,
         feed_type: feedType,
+        include_entities: true,
         limit: params.limit,
         personalize,
         ...(resolvedUserId ? { userId: resolvedUserId } : {}),
@@ -265,6 +265,7 @@ export const useFeedQuery = <TItem = any>(params: {
           action: "get_feed",
           cursor: undefined,
           feed_type: "public",
+          include_entities: true,
           limit: params.limit,
           personalize: false,
           ...(resolvedUserId ? { userId: resolvedUserId } : {}),

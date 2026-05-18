@@ -1139,13 +1139,30 @@ Deno.serve(async (req: Request) => {
         return jsonResponse({ error: "Post not found" }, 404);
       }
 
-      const { data: comments } = await supabaseAdmin
+      let commentsResult = await supabaseAdmin
         .from("post_comments")
         .select("*, author:profiles!author_id(id, full_name, avatar_url)")
         .eq("post_id", post_id)
-        .eq("is_hidden", false)
+        .or("is_hidden.eq.false,is_hidden.is.null")
         .eq("moderation_status", "approved")
         .order("created_at", { ascending: true });
+
+      if (
+        commentsResult.error &&
+        (commentsResult.error.code === "42703" ||
+          String(commentsResult.error.message || "").includes("moderation_status"))
+      ) {
+        commentsResult = await supabaseAdmin
+          .from("post_comments")
+          .select("*, author:profiles!author_id(id, full_name, avatar_url)")
+          .eq("post_id", post_id)
+          .or("is_hidden.eq.false,is_hidden.is.null")
+          .order("created_at", { ascending: true });
+      }
+
+      if (commentsResult.error) {
+        return jsonResponse({ error: commentsResult.error.message }, 500);
+      }
 
       // User's reaction
       const { data: userReaction } = await supabaseAdmin
@@ -1159,7 +1176,7 @@ Deno.serve(async (req: Request) => {
         success: true,
         data: {
           ...post,
-          comments: comments || [],
+          comments: commentsResult.data || [],
           user_reaction: userReaction?.reaction_type || null,
         },
       });
@@ -1413,28 +1430,64 @@ Deno.serve(async (req: Request) => {
 
     // ── report_post ─────────────────────────────────────────────────
     if (action === "report_post") {
-      const { post_id, reason } = params;
+      const { post_id, reason, details } = params;
       if (!post_id) return jsonResponse({ error: "post_id is required" }, 400);
+      const normalizedReason =
+        typeof reason === "string" && reason.trim()
+          ? reason.trim().slice(0, 180)
+          : "Inappropriate content";
+      const normalizedDetails =
+        typeof details === "string" && details.trim()
+          ? details.trim().slice(0, 1000)
+          : null;
 
       await supabaseAdmin
         .from("feed_posts")
         .update({ is_reported: true })
         .eq("id", post_id);
 
+      const { data: existingPendingReport, error: existingPendingReportError } = await supabaseAdmin
+        .from("reports")
+        .select("id")
+        .eq("reporter_id", uid)
+        .eq("target_type", "feed_post")
+        .eq("target_id", post_id)
+        .eq("reason", normalizedReason)
+        .eq("status", "pending")
+        .limit(1)
+        .maybeSingle();
+
+      if (existingPendingReportError) {
+        return jsonResponse({ error: existingPendingReportError.message }, 500);
+      }
+
+      if (existingPendingReport?.id) {
+        return jsonResponse({
+          success: true,
+          already_reported: true,
+          report_id: existingPendingReport.id,
+        });
+      }
+
       // Insert into existing reports table
-      await supabaseAdmin.from("reports").insert({
+      const { error: reportInsertError } = await supabaseAdmin.from("reports").insert({
         reporter_id: uid,
         target_type: "feed_post",
         target_id: post_id,
-        reason: reason || "Inappropriate content",
+        reason: normalizedReason,
+        details: normalizedDetails,
         status: "pending",
       });
+
+      if (reportInsertError) {
+        return jsonResponse({ error: reportInsertError.message }, 500);
+      }
 
       await supabaseAdmin.from("social_activity_events").insert({
         event_type: "post_reported",
         actor_id: uid,
         post_id,
-        metadata: { reason: reason || null },
+        metadata: { reason: normalizedReason, details: normalizedDetails },
       });
 
       return jsonResponse({ success: true });

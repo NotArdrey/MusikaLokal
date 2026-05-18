@@ -7,8 +7,6 @@ import {
 } from "../../utils/navigation";
 import {
   formatRecordingHours,
-  formatRecordingRuleSentence,
-  formatRecordingRuleShort,
   resolveRecordingRule,
 } from "../../utils/recordingRule";
 import CachedImage from "../CachedImage";
@@ -64,15 +62,20 @@ const StudioGigVenueAboutTab = ({
   const recordingRule = supportsRecording
     ? resolveRecordingRule(group?.settings)
     : null;
-  const recordingRuleSummary = recordingRule
-    ? formatRecordingRuleShort(recordingRule)
-    : null;
-  const recordingRuleSentence = recordingRule
-    ? formatRecordingRuleSentence(recordingRule)
-    : null;
-  const recordingRuleScaling = recordingRule
-    ? `+${formatRecordingHours(recordingRule.hoursPerBlock)} hr${recordingRule.hoursPerBlock === 1 ? "" : "s"} for every ${recordingRule.songsPerBlock} song${recordingRule.songsPerBlock === 1 ? "" : "s"}`
-    : null;
+  const recordingBlockHoursLabel = recordingRule
+    ? `${formatRecordingHours(recordingRule.hoursPerBlock)} hr${recordingRule.hoursPerBlock === 1 ? "" : "s"}`
+    : "";
+  const recordingSongBlockLabel = recordingRule
+    ? `${recordingRule.songsPerBlock} song${recordingRule.songsPerBlock === 1 ? "" : "s"}`
+    : "";
+  const recordingExtraBlockLabel = recordingRule
+    ? recordingRule.songsPerBlock === 1
+      ? `Each additional song adds another ${recordingBlockHoursLabel}.`
+      : `Each additional ${recordingSongBlockLabel} adds another ${recordingBlockHoursLabel}.`
+    : "";
+  const recordingMinimumLabel = recordingRule
+    ? `${recordingBlockHoursLabel} minimum for up to ${recordingSongBlockLabel}`
+    : "";
   const isMediaCarouselType =
     group.type === "Studio" || group.type === "Venue" || group.type === "Gig";
   const mediaItems = useMemo(() => {
@@ -392,46 +395,86 @@ const StudioGigVenueAboutTab = ({
           </View>
         )}
 
-        {supportsRecording && (
-          <>
-            <View style={{ flexDirection: "row", gap: 12 }}>
+        {supportsRecording && recordingRule && (
+          <View
+            style={{
+              backgroundColor: isDark ? "#111827" : "#F8FAFC",
+              borderColor: isDark ? "#374151" : "#E5E7EB",
+              borderRadius: 12,
+              borderWidth: 1,
+              gap: 12,
+              padding: 14,
+            }}
+          >
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
               <View
-                style={[
-                  styles.statCard,
-                  { backgroundColor: isDark ? "#1F2937" : "#F3F4F6", flex: 1 },
-                ]}
+                style={{
+                  alignItems: "center",
+                  backgroundColor: isDark ? colors.primary + "22" : colors.primary + "14",
+                  borderRadius: 10,
+                  height: 40,
+                  justifyContent: "center",
+                  width: 40,
+                }}
               >
-                <Text style={[styles.statLabel, { color: colors.textSecondary }]}>
-                  Recording Rule
-                </Text>
-                <Text style={[styles.statValue, { color: colors.text }]} numberOfLines={1}>
-                  {recordingRuleSummary}
-                </Text>
+                <Ionicons name="time-outline" size={20} color={colors.primary} />
               </View>
-
-              <View
-                style={[
-                  styles.statCard,
-                  { backgroundColor: isDark ? "#1F2937" : "#F3F4F6", flex: 1 },
-                ]}
-              >
+              <View style={{ flex: 1 }}>
                 <Text style={[styles.statLabel, { color: colors.textSecondary }]}>
-                  How Time Scales
+                  Recording time minimum
                 </Text>
-                <Text style={[styles.statValue, { color: colors.text }]} numberOfLines={2}>
-                  {recordingRuleScaling}
+                <Text
+                  style={[styles.statValue, { color: colors.text }]}
+                  numberOfLines={2}
+                  adjustsFontSizeToFit
+                >
+                  {recordingMinimumLabel}
                 </Text>
               </View>
             </View>
+
+            <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+              {[
+                ["Minimum", recordingBlockHoursLabel],
+                ["Covers", recordingSongBlockLabel],
+                ["Rate", "Per song"],
+              ].map(([label, value]) => (
+                <View
+                  key={label}
+                  style={{
+                    backgroundColor: isDark ? "#1F2937" : "#FFFFFF",
+                    borderColor: isDark ? "#374151" : "#E5E7EB",
+                    borderRadius: 10,
+                    borderWidth: 1,
+                    flexGrow: 1,
+                    minWidth: 104,
+                    paddingHorizontal: 12,
+                    paddingVertical: 10,
+                  }}
+                >
+                  <Text style={[styles.statLabel, { color: colors.textSecondary, marginBottom: 2 }]}>
+                    {label}
+                  </Text>
+                  <Text style={[styles.statValue, { color: colors.text, fontSize: 14 }]}>
+                    {value}
+                  </Text>
+                </View>
+              ))}
+            </View>
+
             <Text
               style={[
                 styles.description,
-                { color: colors.textSecondary, marginTop: 10, marginBottom: 0 },
+                {
+                  color: colors.textSecondary,
+                  fontSize: 12,
+                  lineHeight: 18,
+                },
               ]}
             >
-              {recordingRuleSentence}. Musicians can split the required hours across any available dates and time slots.
+              Musicians can split the minimum across available dates and time slots. {recordingExtraBlockLabel}
             </Text>
-          </>
+          </View>
         )}
       </View>
     )}

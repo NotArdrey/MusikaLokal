@@ -1,10 +1,10 @@
 import { Ionicons } from "@expo/vector-icons";
-import { FlashList } from "@shopify/flash-list";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Share,
   StyleSheet,
+  ScrollView,
   Text,
   TextInput,
   TouchableOpacity,
@@ -19,6 +19,7 @@ import { emitToast } from "../events/toastBus";
 import BottomModal from "./BottomModal";
 import CachedImage from "./CachedImage";
 import CustomAlert, { AlertType } from "./CustomAlert";
+import ReportModal from "./ReportModal";
 import ProfileAvatar from "./ProfileAvatar";
 
 const KNOWN_FEED_MEDIA_BUCKETS = [
@@ -88,6 +89,18 @@ const formatTimestamp = (raw: string | null | undefined) => {
 
 const formatCountLabel = (count: number, singular: string, plural = `${singular}s`) =>
   `${count} ${count === 1 ? singular : plural}`;
+
+const getCommentKey = (comment: any, index: number) => {
+  const id = typeof comment?.id === "string" && comment.id.length > 0 ? comment.id : "";
+  if (id) return `comment:${id}`;
+  return `comment:${comment?.created_at || "unknown"}:${index}`;
+};
+
+const getMediaKey = (media: any, index: number) => {
+  const id = typeof media?.id === "string" && media.id.length > 0 ? media.id : "";
+  if (id) return `media:${id}`;
+  return `media:${media?.url || media?.thumbnail_url || "unknown"}:${index}`;
+};
 
 type CachedPostDetails = {
   post: any;
@@ -176,6 +189,7 @@ export default function PostDetailsModal({
   const [submitting, setSubmitting] = useState(false);
   const [alert, setAlert] = useState<{ type: AlertType; title: string; message: string } | null>(null);
   const [postOptionsVisible, setPostOptionsVisible] = useState(false);
+  const [reportModalVisible, setReportModalVisible] = useState(false);
   const [deleteConfirmVisible, setDeleteConfirmVisible] = useState(false);
 
   const cardBg = isDark ? "#1E293B" : "#FFFFFF";
@@ -184,7 +198,7 @@ export default function PostDetailsModal({
   const bubbleBg = isDark ? "#334155" : "#F1F5F9";
   const mediaWidth = Math.min(Math.max(width - 32, 240), 420);
 
-  const fetchPost = useCallback(async () => {
+  const fetchPost = useCallback(async (forceRefresh = false) => {
     if (!postId) return;
     const cached = postDetailsCache.get(postId);
     const cacheIsFresh =
@@ -195,14 +209,17 @@ export default function PostDetailsModal({
       setComments(cached.comments);
     }
 
-    if (cacheIsFresh) {
+    if (cacheIsFresh && !forceRefresh) {
       setLoading(false);
-      return;
+      return { post: cached.post, comments: cached.comments };
     }
 
     setLoading(!cached?.post);
     try {
-      const inFlight = cached?.inFlight || fetchPostDetailsPayload(postId);
+      const inFlight =
+        !forceRefresh && cached?.inFlight
+          ? cached.inFlight
+          : fetchPostDetailsPayload(postId);
       postDetailsCache.set(postId, {
         post: cached?.post,
         comments: cached?.comments || [],
@@ -217,6 +234,7 @@ export default function PostDetailsModal({
       });
       setPost(nextDetails.post);
       setComments(nextDetails.comments);
+      return nextDetails;
     } catch (e: any) {
       const currentCache = postDetailsCache.get(postId);
       if (currentCache?.inFlight) {
@@ -249,8 +267,9 @@ export default function PostDetailsModal({
     setCommentText("");
     setAlert(null);
     setPostOptionsVisible(false);
+    setReportModalVisible(false);
     setDeleteConfirmVisible(false);
-    void fetchPost();
+    void fetchPost(true);
   }, [fetchPost, postId, visible]);
 
   const handleReaction = async () => {
@@ -315,15 +334,15 @@ export default function PostDetailsModal({
       if (data?.pending_review || data?.status === "pending_review") {
         setCommentText("");
         emitToast({ type: "info", title: "Comment sent for review", message: "It will appear if approved." });
-        await fetchPost();
-        onCommentChanged?.(post.id, comments.length);
+        const nextDetails = await fetchPost(true);
+        onCommentChanged?.(post.id, nextDetails?.comments.length ?? comments.length);
         return;
       }
 
       if (data?.success) {
-        const nextCount = comments.length + 1;
         setCommentText("");
-        await fetchPost();
+        const nextDetails = await fetchPost(true);
+        const nextCount = nextDetails?.comments.length ?? comments.length + 1;
         onCommentChanged?.(post.id, nextCount);
       } else {
         setAlert({ type: "error", title: "Comment Failed", message: data?.error || "Failed to add comment." });
@@ -345,9 +364,9 @@ export default function PostDetailsModal({
       if (error) throw error;
 
       if (data?.success) {
-        const nextCount = Math.max(comments.length - 1, 0);
         emitToast({ type: "info", title: "Deleted", message: "Comment deleted." });
-        await fetchPost();
+        const nextDetails = await fetchPost(true);
+        const nextCount = nextDetails?.comments.length ?? Math.max(comments.length - 1, 0);
         onCommentChanged?.(post.id, nextCount);
       }
     } catch (e: any) {
@@ -383,8 +402,9 @@ export default function PostDetailsModal({
     onEditPost(post);
   };
 
-  const handleReportPost = async () => {
+  const handleReportPost = () => {
     if (!post) return;
+    setPostOptionsVisible(false);
 
     if (!session) {
       setAlert({ type: "warning", title: "Sign In Required", message: "Sign in to report this post." });
@@ -396,21 +416,26 @@ export default function PostDetailsModal({
       return;
     }
 
+    setReportModalVisible(true);
+  };
+
+  const submitPostReport = async (reason: string, details?: string) => {
+    if (!post) throw new Error("Missing post details.");
+
     try {
       const { data, error } = await supabase.functions.invoke("manage-social-feed", {
         body: {
           action: "report_post",
           post_id: post.id,
-          reason: "Inappropriate content",
+          reason,
+          details: details || null,
         },
       });
 
       if (error) throw error;
       if (data?.error) throw new Error(String(data.error));
-
-      emitToast({ type: "info", title: "Reported", message: "Post has been reported for review." });
     } catch (e: any) {
-      setAlert({ type: "error", title: "Report Failed", message: e?.message || "Please try again." });
+      throw new Error(e?.message || "Please try again.");
     }
   };
 
@@ -483,62 +508,59 @@ export default function PostDetailsModal({
         </View>
       ) : (
         <>
-          <FlashList
-            data={comments}
-            keyExtractor={(comment: any) => String(comment.id)}
+          <ScrollView
             style={styles.scroll}
             contentContainerStyle={styles.scrollContent}
             showsVerticalScrollIndicator={false}
-            drawDistance={520}
-            ListHeaderComponent={
-              <>
-                <View style={styles.authorRow}>
-                  <ProfileAvatar
-                    uri={post.author_avatar}
-                    style={styles.avatar}
-                    backgroundColor={isDark ? "#374151" : "#E5E7EB"}
-                    iconColor={colors.textSecondary}
+            keyboardShouldPersistTaps="handled"
+          >
+            <View style={styles.authorRow}>
+              <ProfileAvatar
+                uri={post.author_avatar}
+                style={styles.avatar}
+                backgroundColor={isDark ? "#374151" : "#E5E7EB"}
+                iconColor={colors.textSecondary}
+              />
+              <View style={styles.authorText}>
+                <Text style={[styles.authorName, { color: colors.text }]} numberOfLines={1}>
+                  {post.author_name}
+                </Text>
+                <View style={styles.authorMetaRow}>
+                  <Text style={[styles.authorMetaText, { color: colors.textSecondary }]}>
+                    {formatTimestamp(post.created_at)}
+                  </Text>
+                  <Text style={[styles.dot, { color: colors.textSecondary }]}>|</Text>
+                  <Ionicons
+                    name={post.visibility === "followers" ? "people" : "earth"}
+                    size={12}
+                    color={colors.textSecondary}
                   />
-                  <View style={styles.authorText}>
-                    <Text style={[styles.authorName, { color: colors.text }]} numberOfLines={1}>
-                      {post.author_name}
-                    </Text>
-                    <View style={styles.authorMetaRow}>
-                      <Text style={[styles.authorMetaText, { color: colors.textSecondary }]}>
-                        {formatTimestamp(post.created_at)}
-                      </Text>
-                      <Text style={[styles.dot, { color: colors.textSecondary }]}>|</Text>
-                      <Ionicons
-                        name={post.visibility === "followers" ? "people" : "earth"}
-                        size={12}
-                        color={colors.textSecondary}
-                      />
-                    </View>
-                  </View>
+                </View>
+              </View>
               <TouchableOpacity
                 activeOpacity={0.78}
                 onPress={handleMoreOptions}
                 style={[styles.iconCircle, { backgroundColor: subtleBg }]}
                 accessibilityLabel="Post actions"
               >
-              <Ionicons name="ellipsis-horizontal" size={20} color={colors.textSecondary} />
-            </TouchableOpacity>
-          </View>
+                <Ionicons name="ellipsis-horizontal" size={20} color={colors.textSecondary} />
+              </TouchableOpacity>
+            </View>
 
-          {post.body ? <Text style={[styles.postBody, { color: colors.text }]}>{post.body}</Text> : null}
+            {post.body ? <Text style={[styles.postBody, { color: colors.text }]}>{post.body}</Text> : null}
 
-          {post.media?.length > 0 ? (
-                  <FlashList
-                    horizontal
-                    data={post.media}
-                    keyExtractor={(media: any, index: number) => String(media.id || index)}
-                    showsHorizontalScrollIndicator={false}
-                    contentContainerStyle={styles.mediaScroll}
-                    drawDistance={mediaWidth * 2}
-                    renderItem={({ item: media }: { item: any }) => {
+            {post.media?.length > 0 ? (
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.mediaScroll}
+              >
+                {post.media.map((media: any, index: number) => {
                   const previewUrl = media.thumbnail_url || media.url;
-                  return previewUrl ? (
-                        <View style={[styles.mediaFrame, { width: mediaWidth }]}>
+                  if (!previewUrl) return null;
+
+                  return (
+                    <View key={getMediaKey(media, index)} style={[styles.mediaFrame, { width: mediaWidth }]}>
                       <CachedImage
                         uri={previewUrl}
                         style={styles.mediaImg}
@@ -552,9 +574,9 @@ export default function PostDetailsModal({
                         </View>
                       ) : null}
                     </View>
-                  ) : null;
-                    }}
-                  />
+                  );
+                })}
+              </ScrollView>
             ) : null}
 
             <View style={styles.countsRow}>
@@ -601,45 +623,45 @@ export default function PostDetailsModal({
 
             <View style={styles.commentsSection}>
               <Text style={[styles.commentsTitle, { color: colors.text }]}>Comments</Text>
-                </View>
-              </>
-            }
-            ListEmptyComponent={
-                <View style={styles.emptyComments}>
-                  <Text style={[styles.noComments, { color: colors.textSecondary }]}>
-                    No comments yet. Be the first to comment.
-                  </Text>
-                </View>
-            }
-            renderItem={({ item: comment }: { item: any }) => (
-              <View style={styles.commentRow}>
-                <ProfileAvatar
-                  uri={comment.author_avatar}
-                  style={styles.commentAvatar}
-                  backgroundColor={isDark ? "#374151" : "#E5E7EB"}
-                  iconColor={colors.textSecondary}
-                />
-                <View style={styles.commentBodyWrap}>
-                  <View style={[styles.commentBubble, { backgroundColor: bubbleBg }]}>
-                    <Text style={[styles.commentAuthor, { color: colors.text }]} numberOfLines={1}>
-                      {comment.author_name}
-                    </Text>
-                    <Text style={[styles.commentBody, { color: colors.text }]}>{comment.body}</Text>
-                  </View>
-                  <View style={styles.commentMetaRow}>
-                    <Text style={[styles.commentMeta, { color: colors.textSecondary }]}>
-                      {formatTimestamp(comment.created_at)}
-                    </Text>
-                    {comment.author_id === userId ? (
-                      <TouchableOpacity activeOpacity={0.78} onPress={() => handleDeleteComment(comment.id)}>
-                        <Text style={[styles.commentMeta, { color: "#ef4444" }]}>Delete</Text>
-                      </TouchableOpacity>
-                    ) : null}
-                  </View>
-                </View>
+            </View>
+
+            {comments.length === 0 ? (
+              <View style={styles.emptyComments}>
+                <Text style={[styles.noComments, { color: colors.textSecondary }]}>
+                  No comments yet. Be the first to comment.
+                </Text>
               </View>
+            ) : (
+              comments.map((comment: any, index: number) => (
+                <View key={getCommentKey(comment, index)} style={styles.commentRow}>
+                  <ProfileAvatar
+                    uri={comment.author_avatar}
+                    style={styles.commentAvatar}
+                    backgroundColor={isDark ? "#374151" : "#E5E7EB"}
+                    iconColor={colors.textSecondary}
+                  />
+                  <View style={styles.commentBodyWrap}>
+                    <View style={[styles.commentBubble, { backgroundColor: bubbleBg }]}>
+                      <Text style={[styles.commentAuthor, { color: colors.text }]} numberOfLines={1}>
+                        {comment.author_name}
+                      </Text>
+                      <Text style={[styles.commentBody, { color: colors.text }]}>{comment.body}</Text>
+                    </View>
+                    <View style={styles.commentMetaRow}>
+                      <Text style={[styles.commentMeta, { color: colors.textSecondary }]}>
+                        {formatTimestamp(comment.created_at)}
+                      </Text>
+                      {comment.author_id === userId ? (
+                        <TouchableOpacity activeOpacity={0.78} onPress={() => handleDeleteComment(comment.id)}>
+                          <Text style={[styles.commentMeta, { color: "#ef4444" }]}>Delete</Text>
+                        </TouchableOpacity>
+                      ) : null}
+                    </View>
+                  </View>
+                </View>
+              ))
             )}
-          />
+          </ScrollView>
 
           <View
             style={[
@@ -713,6 +735,17 @@ export default function PostDetailsModal({
         />
       )}
 
+      {reportModalVisible && post && (
+        <ReportModal
+          visible
+          onClose={() => setReportModalVisible(false)}
+          onSubmit={submitPostReport}
+          targetName={post.author_name ? `${post.author_name}'s post` : "this post"}
+          title="Report Post"
+          reportType="post"
+        />
+      )}
+
       {deleteConfirmVisible && post && (
         <CustomAlert
           visible
@@ -772,7 +805,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   centered: { paddingVertical: 72, alignItems: "center", justifyContent: "center" },
-  scroll: { flexGrow: 0 },
+  scroll: { flexGrow: 0, flexShrink: 1 },
   scrollContent: { paddingHorizontal: 16, paddingBottom: 20 },
   authorRow: {
     flexDirection: "row",

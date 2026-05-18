@@ -92,6 +92,23 @@ const inferNotificationRoute = (
   const senderEntityType = readString(meta.sender_entity_type, meta.senderEntityType)?.toLowerCase();
   const requestKind = readString(meta.request_kind, meta.requestKind)?.toLowerCase();
 
+  if (eventType?.includes("booking_request")) {
+    const status = readString(meta.status)?.toLowerCase();
+    const isTerminal =
+      eventType.includes("cancelled") ||
+      eventType.includes("canceled") ||
+      eventType.includes("declined") ||
+      eventType.includes("rejected") ||
+      ["cancelled", "canceled", "declined", "rejected"].includes(status || "");
+
+    return {
+      pathname: "/bookings",
+      routeParams: {
+        tab: isTerminal || (status && status !== "pending") ? "History" : "Pending",
+      },
+    };
+  }
+
   if (
     eventType === "listing_connection_request" &&
     (senderEntityType === "production_team" || requestKind === "invite")

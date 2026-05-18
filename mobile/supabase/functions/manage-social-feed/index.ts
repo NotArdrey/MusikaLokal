@@ -1003,6 +1003,7 @@ Deno.serve(async (req: Request) => {
       const pageSize = Math.min(Number(lim) || 20, 50);
       const pageOffset = Number(offset) || 0;
       const shouldPersonalize = params?.personalize !== false && Boolean(uid);
+      const includeEntityCards = params?.include_entities === true;
       const feedPostSelect =
         "id, author_id, post_type, content, visibility, is_pinned, linked_playlist_id, linked_product_id, reaction_count, comment_count, share_count, created_at, updated_at, author:profiles!author_id(id, full_name, avatar_url, role), media:post_media(id, post_id, media_type, storage_path, thumbnail_path, is_cover, mime_type, width, height, duration_seconds, display_order, safety_status, safety_metadata)";
       const cursorCreatedAt =
@@ -1010,70 +1011,425 @@ Deno.serve(async (req: Request) => {
           ? cursor.trim()
           : null;
 
-      let query;
+      const sourceLimit =
+        params.cursor !== undefined ? pageSize + 1 : pageOffset + pageSize + 1;
+      const withCursorAndLimit = (query: any) => {
+        const ordered = query.order("created_at", { ascending: false });
+        return (cursorCreatedAt ? ordered.lt("created_at", cursorCreatedAt) : ordered)
+          .limit(sourceLimit);
+      };
+      const emptyResult = () => Promise.resolve({ data: [], error: null });
+      const resultRows = (result: any) => Array.isArray(result?.data) ? result.data : [];
+      const getSortTime = (item: any) => {
+        const value = typeof item?.created_at === "string" ? item.created_at : "";
+        const time = value ? Date.parse(value) : 0;
+        return Number.isFinite(time) ? time : 0;
+      };
+      const dedupeMixedFeedItems = (items: any[]) => {
+        const seen = new Set<string>();
+
+        return items.filter((item) => {
+          const kind = item?.__feedKind === "ai_card" ? "card" : "post";
+          const type = typeof item?.type === "string" ? item.type : "item";
+          const id = typeof item?.id === "string" ? item.id : "";
+          const key = id ? `${kind}:${type}:${id}` : "";
+          if (!key) return true;
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        });
+      };
+      const normalizePostFeedItem = (post: any) => ({
+        ...post,
+        social_follow_target_id: post?.author_id || null,
+        social_follow_target_type: "profile",
+      });
+      const normalizeGroupFeedCard = (item: any) => {
+        const images = Array.isArray(item?.images) ? item.images : [];
+        return {
+          __feedKind: "ai_card",
+          id: item?.id,
+          type: "Group",
+          name: item?.name || "Unnamed Group",
+          image: images[0] || null,
+          images,
+          rating: Number(item?.rating || 0),
+          review_count: Number(item?.review_count || 0),
+          location: item?.location || "",
+          latitude: item?.latitude ?? null,
+          longitude: item?.longitude ?? null,
+          genre: item?.genre || "",
+          group_type: item?.group_type || null,
+          description: item?.description || "Newly created group on MusikaLokal.",
+          created_at: item?.created_at || null,
+          updated_at: item?.updated_at || null,
+          owner_id: item?.owner_id || null,
+          social_follow_target_id: item?.id || null,
+          social_follow_target_type: "group",
+        };
+      };
+      const normalizeStudioFeedCard = (item: any) => {
+        const images = Array.isArray(item?.images) ? item.images : [];
+        return {
+          __feedKind: "ai_card",
+          id: item?.id,
+          type: "Studio",
+          name: item?.name || "Unnamed Studio",
+          image: images[0] || null,
+          images,
+          rating: Number(item?.rating || 0),
+          review_count: Number(item?.review_count || 0),
+          location: item?.address || item?.location || "",
+          latitude: item?.latitude ?? null,
+          longitude: item?.longitude ?? null,
+          genre: item?.type || "Studio",
+          description: item?.description || "Newly created studio on MusikaLokal.",
+          created_at: item?.created_at || null,
+          updated_at: item?.updated_at || null,
+          owner_id: item?.owner_id || null,
+          hourly_rate: item?.hourly_rate?.toString?.() || null,
+          rehearsal_rate: item?.rehearsal_rate?.toString?.() || null,
+          recording_rate: item?.recording_rate?.toString?.() || null,
+          studio_type: item?.type || null,
+          social_follow_target_id: item?.owner_id || null,
+          social_follow_target_type: "profile",
+        };
+      };
+      const normalizeVenueFeedCard = (item: any) => {
+        const images = Array.isArray(item?.images) ? item.images : [];
+        const requirements = item?.requirements || {};
+        return {
+          __feedKind: "ai_card",
+          id: item?.id,
+          type: "Gig",
+          name: item?.name || "Untitled Venue",
+          image: images[0] || null,
+          images,
+          rating: Number(item?.rating || 0),
+          review_count: Number(item?.review_count || 0),
+          location: item?.location || "",
+          latitude: item?.latitude ?? null,
+          longitude: item?.longitude ?? null,
+          genre: Array.isArray(requirements?.genres)
+            ? requirements.genres.join(", ")
+            : requirements?.genre || "",
+          description: item?.description || "Newly created venue listing on MusikaLokal.",
+          created_at: item?.created_at || null,
+          updated_at: item?.updated_at || null,
+          organizer_id: item?.organizer_id || null,
+          budget: item?.budget?.toString?.() || null,
+          rate: item?.rate?.toString?.() || null,
+          requirements,
+          social_follow_target_id: item?.organizer_id || null,
+          social_follow_target_type: "profile",
+        };
+      };
+      const normalizeArtistFeedCard = (item: any) => ({
+        __feedKind: "ai_card",
+        id: item?.id,
+        type: "Artist",
+        name: item?.full_name || "Musician",
+        image: item?.avatar_url || null,
+        images: item?.avatar_url ? [item.avatar_url] : [],
+        rating: 0,
+        review_count: 0,
+        location: item?.address || item?.location || "",
+        genre: "",
+        description: "Newly joined musician on MusikaLokal.",
+        created_at: item?.created_at || null,
+        updated_at: item?.updated_at || null,
+        owner_id: item?.id || null,
+        social_follow_target_id: item?.id || null,
+        social_follow_target_type: "profile",
+      });
+      const normalizeProductionFeedCard = (item: any) => ({
+        __feedKind: "ai_card",
+        id: item?.id,
+        type: "Production",
+        name: item?.name || "Production Team",
+        image: item?.logo_url || null,
+        images: item?.logo_url ? [item.logo_url] : [],
+        rating: 0,
+        review_count: 0,
+        location: item?.description || "Production Team",
+        genre: "",
+        description: item?.description || "Newly created production team on MusikaLokal.",
+        created_at: item?.created_at || null,
+        updated_at: item?.updated_at || null,
+        owner_id: item?.owner_id || null,
+        logo_url: item?.logo_url || null,
+        open_production_applications: item?.open_production_applications === true,
+        social_follow_target_id: item?.owner_id || null,
+        social_follow_target_type: "profile",
+      });
+
+      let mixedRows: any[] = [];
+      let sourceHadExtra = false;
       let followingListMs = 0;
       if (feed_type === "following") {
-        // Get posts from followed users
+        if (!uid) {
+          return jsonResponse({ success: true, data: [], items: [], nextCursor: null });
+        }
+
         const followingListStartedAt = performance.now();
-        const { data: following } = await supabaseAdmin
+        const { data: following, error: followingError } = await supabaseAdmin
           .from("follows")
-          .select("followed_id")
-          .eq("follower_id", uid)
-          .eq("followed_type", "profile");
+          .select("followed_id, followed_type")
+          .eq("follower_id", uid);
         followingListMs = Math.round(performance.now() - followingListStartedAt);
 
-        const followedIds = (following || []).map((f: any) => f.followed_id);
-        followedIds.push(uid); // Include own posts
+        if (followingError) return jsonResponse({ error: followingError.message }, 500);
 
-        query = supabaseAdmin
+        const followedProfileIds = Array.from(
+          new Set(
+            (following || [])
+              .filter((row: any) => normalizeFollowTargetType(row?.followed_type) === "profile")
+              .map((row: any) => row?.followed_id)
+              .filter((value: any): value is string => typeof value === "string" && value.length > 0),
+          ),
+        );
+        const followedGroupIds = Array.from(
+          new Set(
+            (following || [])
+              .filter((row: any) => normalizeFollowTargetType(row?.followed_type) === "group")
+              .map((row: any) => row?.followed_id)
+              .filter((value: any): value is string => typeof value === "string" && value.length > 0),
+          ),
+        );
+
+        if (includeEntityCards && followedProfileIds.length === 0 && followedGroupIds.length === 0) {
+          return jsonResponse({ success: true, data: [], items: [], nextCursor: null });
+        }
+
+        const postAuthorIds = includeEntityCards
+          ? followedProfileIds
+          : Array.from(new Set([...followedProfileIds, uid].filter(Boolean)));
+        let followedPostsQuery = supabaseAdmin
           .from("feed_posts")
           .select(feedPostSelect)
-          .in("author_id", followedIds)
-          .eq("is_hidden", false)
-          .or(`visibility.in.(public,followers),author_id.eq.${uid}`)
-          .order("created_at", { ascending: false });
+          .in("author_id", postAuthorIds)
+          .eq("is_hidden", false);
+        followedPostsQuery = includeEntityCards
+          ? followedPostsQuery.in("visibility", ["public", "followers"])
+          : followedPostsQuery.or(`visibility.in.(public,followers),author_id.eq.${uid}`);
+
+        const [
+          postsResult,
+          artistsResult,
+          groupsByOwnerResult,
+          followedGroupsResult,
+          studiosResult,
+          venuesResult,
+          productionTeamsResult,
+        ] = await Promise.all([
+          postAuthorIds.length > 0
+            ? withCursorAndLimit(followedPostsQuery)
+            : emptyResult(),
+          includeEntityCards && followedProfileIds.length > 0
+            ? withCursorAndLimit(
+                supabaseAdmin
+                  .from("profiles")
+                  .select("id, full_name, avatar_url, address, location, role, created_at")
+                  .eq("role", "musician")
+                  .in("id", followedProfileIds),
+              )
+            : emptyResult(),
+          includeEntityCards && followedProfileIds.length > 0
+            ? withCursorAndLimit(
+                supabaseAdmin
+                  .from("groups_with_stats")
+                  .select("*")
+                  .in("owner_id", followedProfileIds),
+              )
+            : emptyResult(),
+          includeEntityCards && followedGroupIds.length > 0
+            ? withCursorAndLimit(
+                supabaseAdmin
+                  .from("groups_with_stats")
+                  .select("*")
+                  .in("id", followedGroupIds),
+              )
+            : emptyResult(),
+          includeEntityCards && followedProfileIds.length > 0
+            ? withCursorAndLimit(
+                supabaseAdmin
+                  .from("studios_with_stats")
+                  .select("*")
+                  .eq("permit_status", "approved")
+                  .in("owner_id", followedProfileIds),
+              )
+            : emptyResult(),
+          includeEntityCards && followedProfileIds.length > 0
+            ? withCursorAndLimit(
+                supabaseAdmin
+                  .from("gigs_with_stats")
+                  .select("*")
+                  .eq("status", "open")
+                  .eq("permit_status", "approved")
+                  .in("organizer_id", followedProfileIds),
+              )
+            : emptyResult(),
+          includeEntityCards && followedProfileIds.length > 0
+            ? withCursorAndLimit(
+                supabaseAdmin
+                  .from("production_teams")
+                  .select("*")
+                  .in("owner_id", followedProfileIds),
+              )
+            : emptyResult(),
+        ]);
+
+        const sourceError = [
+          postsResult,
+          artistsResult,
+          groupsByOwnerResult,
+          followedGroupsResult,
+          studiosResult,
+          venuesResult,
+          productionTeamsResult,
+        ].find((result: any) => result?.error)?.error;
+        if (sourceError) return jsonResponse({ error: sourceError.message }, 500);
+        sourceHadExtra = [
+          postsResult,
+          artistsResult,
+          groupsByOwnerResult,
+          followedGroupsResult,
+          studiosResult,
+          venuesResult,
+          productionTeamsResult,
+        ].some((result: any) => resultRows(result).length >= sourceLimit);
+
+        mixedRows = [
+          ...resultRows(postsResult).map(normalizePostFeedItem),
+          ...resultRows(artistsResult).map(normalizeArtistFeedCard),
+          ...resultRows(groupsByOwnerResult).map(normalizeGroupFeedCard),
+          ...resultRows(followedGroupsResult).map(normalizeGroupFeedCard),
+          ...resultRows(studiosResult).map(normalizeStudioFeedCard),
+          ...resultRows(venuesResult).map(normalizeVenueFeedCard),
+          ...resultRows(productionTeamsResult).map(normalizeProductionFeedCard),
+        ];
       } else {
-        // Public feed
-        query = supabaseAdmin
-          .from("feed_posts")
-          .select(feedPostSelect)
-          .eq("visibility", "public")
-          .eq("is_hidden", false)
-          .order("created_at", { ascending: false });
+        let artistsQuery = supabaseAdmin
+          .from("profiles")
+          .select("id, full_name, avatar_url, address, location, role, created_at")
+          .eq("role", "musician");
+        if (uid) {
+          artistsQuery = artistsQuery.neq("id", uid);
+        }
+
+        const [
+          postsResult,
+          artistsResult,
+          groupsResult,
+          studiosResult,
+          venuesResult,
+          productionTeamsResult,
+        ] = await Promise.all([
+          withCursorAndLimit(
+            supabaseAdmin
+              .from("feed_posts")
+              .select(feedPostSelect)
+              .eq("visibility", "public")
+              .eq("is_hidden", false),
+          ),
+          includeEntityCards ? withCursorAndLimit(artistsQuery) : emptyResult(),
+          includeEntityCards
+            ? withCursorAndLimit(
+                supabaseAdmin
+                  .from("groups_with_stats")
+                  .select("*"),
+              )
+            : emptyResult(),
+          includeEntityCards
+            ? withCursorAndLimit(
+                supabaseAdmin
+                  .from("studios_with_stats")
+                  .select("*")
+                  .eq("permit_status", "approved"),
+              )
+            : emptyResult(),
+          includeEntityCards
+            ? withCursorAndLimit(
+                supabaseAdmin
+                  .from("gigs_with_stats")
+                  .select("*")
+                  .eq("status", "open")
+                  .eq("permit_status", "approved"),
+              )
+            : emptyResult(),
+          includeEntityCards
+            ? withCursorAndLimit(
+                supabaseAdmin
+                  .from("production_teams")
+                  .select("*"),
+              )
+            : emptyResult(),
+        ]);
+
+        const sourceError = [
+          postsResult,
+          artistsResult,
+          groupsResult,
+          studiosResult,
+          venuesResult,
+          productionTeamsResult,
+        ].find((result: any) => result?.error)?.error;
+        if (sourceError) return jsonResponse({ error: sourceError.message }, 500);
+        sourceHadExtra = [
+          postsResult,
+          artistsResult,
+          groupsResult,
+          studiosResult,
+          venuesResult,
+          productionTeamsResult,
+        ].some((result: any) => resultRows(result).length >= sourceLimit);
+
+        mixedRows = [
+          ...resultRows(postsResult).map(normalizePostFeedItem),
+          ...resultRows(artistsResult).map(normalizeArtistFeedCard),
+          ...resultRows(groupsResult).map(normalizeGroupFeedCard),
+          ...resultRows(studiosResult).map(normalizeStudioFeedCard),
+          ...resultRows(venuesResult).map(normalizeVenueFeedCard),
+          ...resultRows(productionTeamsResult).map(normalizeProductionFeedCard),
+        ];
       }
 
-      if (cursorCreatedAt) {
-        query = query.lt("created_at", cursorCreatedAt).limit(pageSize + 1);
-      } else if (params.cursor !== undefined) {
-        query = query.limit(pageSize + 1);
-      } else {
-        query = query.range(pageOffset, pageOffset + pageSize - 1);
-      }
-
-      const postsStartedAt = performance.now();
-      const { data, error } = await query;
-      if (error) return jsonResponse({ error: error.message }, 500);
-      const postsMs = Math.round(performance.now() - postsStartedAt);
-
-      const rows = data || [];
-      const pageRows = params.cursor !== undefined ? rows.slice(0, pageSize) : rows;
+      const postsMs = Math.round(performance.now() - feedStartedAt);
+      const rows = dedupeMixedFeedItems(mixedRows)
+        .sort((a, b) => getSortTime(b) - getSortTime(a));
+      const pageRows = params.cursor !== undefined
+        ? rows.slice(0, pageSize)
+        : rows.slice(pageOffset, pageOffset + pageSize);
       const nextCursor =
-        params.cursor !== undefined && rows.length > pageSize
+        params.cursor !== undefined && (rows.length > pageSize || sourceHadExtra)
           ? pageRows[pageRows.length - 1]?.created_at || null
           : null;
 
       const enrichmentStartedAt = performance.now();
-      // Fetch user's reactions and follow state for these posts
-      const postIds = pageRows.map((p: any) => p.id);
-      const authorIds = Array.from(
+      // Fetch user's reactions and follow state for these mixed feed items.
+      const postRows = pageRows.filter((p: any) => p?.__feedKind !== "ai_card");
+      const postIds = postRows.map((p: any) => p.id);
+      const profileTargetIds = Array.from(
         new Set(
           pageRows
-            .map((p: any) => p?.author_id)
+            .map((p: any) =>
+              p?.social_follow_target_type === "profile"
+                ? p?.social_follow_target_id
+                : p?.author_id,
+            )
+            .filter((value: any): value is string => typeof value === "string" && value.length > 0),
+        ),
+      );
+      const groupTargetIds = Array.from(
+        new Set(
+          pageRows
+            .filter((p: any) => p?.social_follow_target_type === "group")
+            .map((p: any) => p?.social_follow_target_id)
             .filter((value: any): value is string => typeof value === "string" && value.length > 0),
         ),
       );
 
-      const [userReactionsResult, followingRowsResult] = await Promise.all([
+      const [userReactionsResult, followingProfileRowsResult, followingGroupRowsResult] = await Promise.all([
         shouldPersonalize && postIds.length > 0
           ? supabaseAdmin
               .from("post_reactions")
@@ -1081,13 +1437,21 @@ Deno.serve(async (req: Request) => {
               .eq("user_id", uid)
               .in("post_id", postIds)
           : Promise.resolve({ data: [] }),
-        shouldPersonalize && authorIds.length > 0
+        shouldPersonalize && profileTargetIds.length > 0
           ? supabaseAdmin
               .from("follows")
               .select("followed_id")
               .eq("follower_id", uid)
               .eq("followed_type", "profile")
-              .in("followed_id", authorIds)
+              .in("followed_id", profileTargetIds)
+          : Promise.resolve({ data: [] }),
+        shouldPersonalize && groupTargetIds.length > 0
+          ? supabaseAdmin
+              .from("follows")
+              .select("followed_id")
+              .eq("follower_id", uid)
+              .eq("followed_type", "group")
+              .in("followed_id", groupTargetIds)
           : Promise.resolve({ data: [] }),
       ]);
 
@@ -1096,18 +1460,36 @@ Deno.serve(async (req: Request) => {
         reactionMap.set(r.post_id, r.reaction_type);
       }
 
-      const followingAuthorIds = new Set(
-        (followingRowsResult.data || []).map((row: any) => row?.followed_id).filter(Boolean),
+      const followingProfileIds = new Set(
+        (followingProfileRowsResult.data || []).map((row: any) => row?.followed_id).filter(Boolean),
+      );
+      const followingGroupIds = new Set(
+        (followingGroupRowsResult.data || []).map((row: any) => row?.followed_id).filter(Boolean),
       );
       const enrichmentMs = Math.round(performance.now() - enrichmentStartedAt);
 
-      const enriched = pageRows.map((p: any) => ({
-        ...p,
-        user_reaction: reactionMap.get(p.id) || null,
-        is_following: followingAuthorIds.has(p.author_id),
-        social_follow_target_id: p.author_id || null,
-        social_follow_target_type: "profile",
-      }));
+      const enriched = pageRows.map((p: any) => {
+        const followTargetType = normalizeFollowTargetType(p?.social_follow_target_type);
+        const followTargetId = p?.social_follow_target_id || p?.author_id || null;
+        const isFollowing = followTargetType === "group"
+          ? followingGroupIds.has(followTargetId)
+          : followingProfileIds.has(followTargetId);
+
+        if (p?.__feedKind === "ai_card") {
+          return {
+            ...p,
+            is_following: isFollowing,
+          };
+        }
+
+        return {
+          ...p,
+          user_reaction: reactionMap.get(p.id) || null,
+          is_following: isFollowing,
+          social_follow_target_id: p.author_id || null,
+          social_follow_target_type: "profile",
+        };
+      });
 
       console.info("[LoadTime][Edge:manage-social-feed:get_feed] stages", {
         enrichmentMs,
@@ -1139,13 +1521,30 @@ Deno.serve(async (req: Request) => {
         return jsonResponse({ error: "Post not found" }, 404);
       }
 
-      const { data: comments } = await supabaseAdmin
+      let commentsResult = await supabaseAdmin
         .from("post_comments")
         .select("*, author:profiles!author_id(id, full_name, avatar_url)")
         .eq("post_id", post_id)
-        .eq("is_hidden", false)
+        .or("is_hidden.eq.false,is_hidden.is.null")
         .eq("moderation_status", "approved")
         .order("created_at", { ascending: true });
+
+      if (
+        commentsResult.error &&
+        (commentsResult.error.code === "42703" ||
+          String(commentsResult.error.message || "").includes("moderation_status"))
+      ) {
+        commentsResult = await supabaseAdmin
+          .from("post_comments")
+          .select("*, author:profiles!author_id(id, full_name, avatar_url)")
+          .eq("post_id", post_id)
+          .or("is_hidden.eq.false,is_hidden.is.null")
+          .order("created_at", { ascending: true });
+      }
+
+      if (commentsResult.error) {
+        return jsonResponse({ error: commentsResult.error.message }, 500);
+      }
 
       // User's reaction
       const { data: userReaction } = await supabaseAdmin
@@ -1159,7 +1558,7 @@ Deno.serve(async (req: Request) => {
         success: true,
         data: {
           ...post,
-          comments: comments || [],
+          comments: commentsResult.data || [],
           user_reaction: userReaction?.reaction_type || null,
         },
       });
@@ -1413,28 +1812,64 @@ Deno.serve(async (req: Request) => {
 
     // ── report_post ─────────────────────────────────────────────────
     if (action === "report_post") {
-      const { post_id, reason } = params;
+      const { post_id, reason, details } = params;
       if (!post_id) return jsonResponse({ error: "post_id is required" }, 400);
+      const normalizedReason =
+        typeof reason === "string" && reason.trim()
+          ? reason.trim().slice(0, 180)
+          : "Inappropriate content";
+      const normalizedDetails =
+        typeof details === "string" && details.trim()
+          ? details.trim().slice(0, 1000)
+          : null;
 
       await supabaseAdmin
         .from("feed_posts")
         .update({ is_reported: true })
         .eq("id", post_id);
 
+      const { data: existingPendingReport, error: existingPendingReportError } = await supabaseAdmin
+        .from("reports")
+        .select("id")
+        .eq("reporter_id", uid)
+        .eq("target_type", "feed_post")
+        .eq("target_id", post_id)
+        .eq("reason", normalizedReason)
+        .eq("status", "pending")
+        .limit(1)
+        .maybeSingle();
+
+      if (existingPendingReportError) {
+        return jsonResponse({ error: existingPendingReportError.message }, 500);
+      }
+
+      if (existingPendingReport?.id) {
+        return jsonResponse({
+          success: true,
+          already_reported: true,
+          report_id: existingPendingReport.id,
+        });
+      }
+
       // Insert into existing reports table
-      await supabaseAdmin.from("reports").insert({
+      const { error: reportInsertError } = await supabaseAdmin.from("reports").insert({
         reporter_id: uid,
         target_type: "feed_post",
         target_id: post_id,
-        reason: reason || "Inappropriate content",
+        reason: normalizedReason,
+        details: normalizedDetails,
         status: "pending",
       });
+
+      if (reportInsertError) {
+        return jsonResponse({ error: reportInsertError.message }, 500);
+      }
 
       await supabaseAdmin.from("social_activity_events").insert({
         event_type: "post_reported",
         actor_id: uid,
         post_id,
-        metadata: { reason: reason || null },
+        metadata: { reason: normalizedReason, details: normalizedDetails },
       });
 
       return jsonResponse({ success: true });

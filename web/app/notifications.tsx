@@ -609,7 +609,6 @@ export default function NotificationsScreen() {
                                         fontFamily: isRead ? 'Poppins_500Medium' : 'Poppins_600SemiBold'
                                     }
                                 ]}
-                                numberOfLines={1}
                             >
                                 {item.title}
                             </Text>
@@ -623,7 +622,6 @@ export default function NotificationsScreen() {
                                 styles.messageText,
                                 { color: colors.textSecondary }
                             ]}
-                            numberOfLines={isTransfer ? undefined : 2}
                         >
                             {item.message}
                         </Text>
@@ -768,13 +766,14 @@ const styles = StyleSheet.create({
     },
     notificationContent: {
         flexDirection: 'row',
-        alignItems: 'center',
+        alignItems: 'flex-start',
     },
     leftContent: {
         marginRight: 16,
     },
     rightContent: {
         flex: 1,
+        flexShrink: 1,
     },
     avatarContainer: {
         width: 44,
@@ -792,17 +791,19 @@ const styles = StyleSheet.create({
     headerRow: {
         flexDirection: 'row',
         justifyContent: 'space-between',
-        alignItems: 'center',
+        alignItems: 'flex-start',
         marginBottom: 4,
     },
     titleText: {
         fontSize: 14,
         flex: 1,
+        flexShrink: 1,
         marginRight: 8,
     },
     timeText: {
         fontSize: 11,
         fontFamily: 'Poppins_400Regular',
+        flexShrink: 0,
     },
     messageText: {
         fontSize: 13,

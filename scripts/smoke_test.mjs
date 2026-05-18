@@ -1,5 +1,5 @@
 /**
- * Smoke test: manage-details edge function + favorites/bookmarks/settings/profile flows
+ * Smoke test: manage-details edge function + favorites/bookmarks/profile flows
  * Run: node scripts/smoke_test.mjs
  */
 
@@ -204,58 +204,9 @@ async function testProfileBookmarksQuery() {
   }
 }
 
-// ─── 7. Settings history keys (static / shape check) ─────────────────────────
-function testSettingsHistoryKeyConventions() {
-  console.log('\n[7] Settings history key conventions (static check)');
-
-  const RECENTLY_VIEWED_STORAGE_KEY = 'recently_viewed_items';
-  const PENDING_REOPEN_LISTING_STORAGE_KEY = 'pending_reopen_listing_id';
-  const MAX_SETTINGS_HISTORY_ITEMS = 6;
-
-  // Simulate parsing stored history
-  const mockStored = JSON.stringify([
-    { id: 'abc', name: 'Test Studio', type: 'Studio', location: 'Makati' },
-    { id: 'xyz', name: 'Test Gig', type: 'Gig', location: 'BGC' },
-  ]);
-
-  const parsed = JSON.parse(mockStored);
-  if (Array.isArray(parsed)) ok(`settings history – parsed array (${parsed.length} items)`);
-  else fail('settings history – parse failed');
-
-  const sliced = parsed.slice(0, MAX_SETTINGS_HISTORY_ITEMS);
-  if (sliced.length === parsed.length) ok(`settings history – slice(0,${MAX_SETTINGS_HISTORY_ITEMS}) correct`);
-  else fail('settings history – slice count wrong');
-
-  // Simulate getHistoryIcon
-  function getHistoryIcon(itemType) {
-    const normalized = String(itemType || '').toLowerCase();
-    if (normalized === 'studio' || normalized === 'venue') return 'business-outline';
-    if (normalized === 'gig') return 'mic-outline';
-    if (normalized === 'artist') return 'person-outline';
-    if (normalized === 'group') return 'people-outline';
-    return 'albums-outline';
-  }
-
-  const iconCases = [
-    ['Studio', 'business-outline'],
-    ['Gig', 'mic-outline'],
-    ['group', 'people-outline'],
-    ['artist', 'person-outline'],
-    ['unknown', 'albums-outline'],
-  ];
-  for (const [type, expected] of iconCases) {
-    const got = getHistoryIcon(type);
-    if (got === expected) ok(`  getHistoryIcon("${type}") → "${got}"`);
-    else fail(`  getHistoryIcon("${type}") expected "${expected}" got "${got}"`);
-  }
-
-  ok(`settings history key: "${RECENTLY_VIEWED_STORAGE_KEY}"`);
-  ok(`pending reopen key: "${PENDING_REOPEN_LISTING_STORAGE_KEY}"`);
-}
-
-// ─── 8. Deployed function version check ──────────────────────────────────────
+// ─── 7. Deployed function version check ──────────────────────────────────────
 async function testDeployedFunctionVersion() {
-  console.log('\n[8] Deployed function version check');
+  console.log('\n[7] Deployed function version check');
   // Verify the live function includes favorites_count by making a fetch call
   const { status, data } = await edgeCall({ action: 'fetch', type: 'studio', id: TEST_IDS.studio, userId: null });
   if (status === 200 && 'favorites_count' in data) {
@@ -269,7 +220,7 @@ async function testDeployedFunctionVersion() {
 async function main() {
   console.log('═══════════════════════════════════════════════════════');
   console.log('  MusikaLokal Smoke Tests');
-  console.log('  manage-details v41 + bookmark/share/settings/profile');
+  console.log('  manage-details v41 + bookmark/share/profile');
   console.log('═══════════════════════════════════════════════════════');
 
   await testFetchReturnsFavoritesCount();
@@ -278,7 +229,6 @@ async function main() {
   await testFavoritesTableSchema();
   await testViewsExist();
   await testProfileBookmarksQuery();
-  testSettingsHistoryKeyConventions();
   await testDeployedFunctionVersion();
 
   console.log('\n═══════════════════════════════════════════════════════');

@@ -3,6 +3,7 @@ import Constants from "expo-constants";
 import type {
   ExperienceLevel,
   InstrumentSuggestion,
+  StarterBudget,
   SuggestionPurpose,
 } from "../types/instruments";
 import { getOfflineInstrumentSuggestions } from "../utils/offlineInstrumentRecommender";
@@ -13,6 +14,8 @@ interface GenerateOfflineSuggestionsWithLlmInput {
   userRoles: string[];
   experienceLevel: ExperienceLevel;
   purpose: SuggestionPurpose;
+  starterBudget?: StarterBudget;
+  customStarterBudgetPhp?: number;
   limit: number;
 }
 
@@ -48,6 +51,8 @@ interface InstrumentSuggestionFollowupInput {
   userRoles?: string[];
   experienceLevel?: ExperienceLevel;
   purpose?: SuggestionPurpose;
+  starterBudget?: StarterBudget;
+  customStarterBudgetPhp?: number;
 }
 
 interface InstrumentSuggestionFollowupResult {
@@ -103,6 +108,9 @@ interface GroqSuggestionRec {
   whyThisFits?: unknown;
   proTip?: unknown;
   perfectFor?: unknown;
+  recommendedRole?: unknown;
+  roleFitReason?: unknown;
+  nextMission?: unknown;
 }
 
 interface GroqHomeRec {
@@ -165,6 +173,33 @@ const compactText = (value: unknown, maxLength: number) => {
   }
 
   return `${normalizedValue.slice(0, Math.max(0, maxLength - 1)).trim()}~`;
+};
+
+const sanitizePhpBudgetAmount = (value: unknown) => {
+  const amount = Number(value);
+  if (!Number.isFinite(amount) || amount <= 0) {
+    return null;
+  }
+
+  return Math.round(amount);
+};
+
+const formatPhpBudgetAmount = (value: unknown) => {
+  const amount = sanitizePhpBudgetAmount(value);
+  return amount ? `\u20b1${amount.toLocaleString("en-US")}` : "";
+};
+
+const formatStartingBudgetForPrompt = (
+  starterBudget?: StarterBudget,
+  customStarterBudgetPhp?: number,
+  fallback = "not_sure",
+) => {
+  const customBudgetLabel = formatPhpBudgetAmount(customStarterBudgetPhp);
+  if (starterBudget === "custom" && customBudgetLabel) {
+    return `${customBudgetLabel} exact budget`;
+  }
+
+  return starterBudget || fallback;
 };
 
 const normalizeWhitespace = (value: string) => value.replace(/\s+/g, " ").trim();
@@ -260,6 +295,11 @@ const buildFollowupChatCacheKey = (input: InstrumentSuggestionFollowupInput) => 
     roles: (input.userRoles || []).map(normalize).sort(),
     experienceLevel: input.experienceLevel || "",
     purpose: input.purpose || "",
+    starterBudget: input.starterBudget || "",
+    customStarterBudgetPhp:
+      input.starterBudget === "custom"
+        ? sanitizePhpBudgetAmount(input.customStarterBudgetPhp)
+        : null,
   };
 
   return `${FOLLOWUP_CHAT_CACHE_PREFIX}${hashString(JSON.stringify(payload))}`;
@@ -786,6 +826,11 @@ const buildSuggestionCacheKey = (
     userRoles: [...input.userRoles].map(normalize).sort(),
     experienceLevel: input.experienceLevel,
     purpose: input.purpose,
+    starterBudget: input.starterBudget || "not_sure",
+    customStarterBudgetPhp:
+      input.starterBudget === "custom"
+        ? sanitizePhpBudgetAmount(input.customStarterBudgetPhp)
+        : null,
     limit: input.limit,
     providerLabel,
     names: baseSuggestions.map((item) => normalize(item.name)),
@@ -825,6 +870,11 @@ const buildSuggestionPrompt = (
     score: item.score,
     matchReason: compactText(item.matchReason, 140),
     perfectFor: compactText(item.perfectFor, 24),
+    recommendedRole: compactText(item.recommendedRole, 40),
+    budgetFit: item.budgetFit,
+    estimatedStarterBudget: item.estimatedStarterBudget,
+    starterGear: (item.starterGear || []).slice(0, 5),
+    nextMission: compactText(item.nextMission, 80),
   }));
 
   return {
@@ -837,13 +887,16 @@ const buildSuggestionPrompt = (
       `User roles: ${input.userRoles.join(", ") || "none"}`,
       `Experience level: ${input.experienceLevel}`,
       `Purpose: ${input.purpose}`,
+      `Starting budget: ${formatStartingBudgetForPrompt(input.starterBudget, input.customStarterBudgetPhp)}`,
       "Return JSON with shape:",
-      '{"recommendations":[{"name":"candidate name","score":0-100,"headline":"short line","whyThisFits":"1-2 short sentences","proTip":"actionable tip","perfectFor":"short tag","scoreDelta":-8..10}]}',
+      '{"recommendations":[{"name":"candidate name","score":0-100,"headline":"short line","whyThisFits":"1-2 short sentences","recommendedRole":"music role","roleFitReason":"one sentence","proTip":"actionable tip","perfectFor":"short tag","nextMission":"short next task","scoreDelta":-8..10}]}',
       "Rules:",
       "- Use only candidate names.",
       `- Return up to ${Math.min(input.limit, baseSuggestions.length)} items sorted best to worst.`,
+      "- Respect budgetFit and estimatedStarterBudget from the candidates. Do not invent exact prices.",
       "- Keep headline under 80 chars.",
       "- Keep whyThisFits under 220 chars.",
+      "- Keep roleFitReason under 140 chars and nextMission under 100 chars.",
       "- Keep proTip under 140 chars.",
       `Candidates: ${JSON.stringify(candidates)}`,
     ].join("\n"),
@@ -897,6 +950,18 @@ const applySuggestionEnhancements = (
         sanitizeVisibleAiText(suggestion?.perfectFor, 32).length > 0
           ? sanitizeVisibleAiText(suggestion?.perfectFor, 32)
           : base.perfectFor,
+      recommendedRole:
+        sanitizeVisibleAiText(suggestion?.recommendedRole, 48).length > 0
+          ? sanitizeVisibleAiText(suggestion?.recommendedRole, 48)
+          : base.recommendedRole,
+      roleFitReason:
+        sanitizeVisibleAiText(suggestion?.roleFitReason, 140).length > 0
+          ? sanitizeVisibleAiText(suggestion?.roleFitReason, 140)
+          : base.roleFitReason,
+      nextMission:
+        sanitizeVisibleAiText(suggestion?.nextMission, 100).length > 0
+          ? sanitizeVisibleAiText(suggestion?.nextMission, 100)
+          : base.nextMission,
       aiPowered: true,
       aiProvider,
     });
@@ -1007,6 +1072,8 @@ export const generateInstrumentSuggestionsWithGroq = async (
     userRoles: input.userRoles,
     experienceLevel: input.experienceLevel,
     purpose: input.purpose,
+    starterBudget: input.starterBudget,
+    customStarterBudgetPhp: input.customStarterBudgetPhp,
     limit: Math.max(safeLimit, 10),
   }).slice(0, safeLimit);
 
@@ -1281,9 +1348,14 @@ export const askInstrumentSuggestionFollowupWithGroq = async (
 
   const compactSuggestions = scopedSuggestions.map((item) => ({
     name: item.name,
+    recommendedRole: compactText(item.recommendedRole, 40),
     category: item.category,
     difficulty: item.difficulty,
     perfectFor: compactText(item.perfectFor, 24),
+    budget: item.estimatedStarterBudget,
+    budgetFit: item.budgetFit,
+    starterGear: (item.starterGear || []).slice(0, 5),
+    nextMission: compactText(item.nextMission, 80),
     reason: compactText(item.matchReason, 110),
   }));
 
@@ -1305,6 +1377,7 @@ export const askInstrumentSuggestionFollowupWithGroq = async (
     `Selected genres: ${(input.selectedGenres || []).join(", ") || "none"}`,
     `Experience level: ${input.experienceLevel || "unknown"}`,
     `Purpose: ${input.purpose || "unknown"}`,
+    `Starting budget: ${formatStartingBudgetForPrompt(input.starterBudget, input.customStarterBudgetPhp, "unknown")}`,
     `Question: ${normalizedQuestion}`,
     "Answer with direct final guidance only. Do not include hidden reasoning, planning, analysis, prompt instructions, or <think> tags.",
   ].join("\n");

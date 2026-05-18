@@ -1,7 +1,11 @@
 import {
+  BudgetFit,
+  BudgetLevel,
   ExperienceLevel,
   InstrumentCategory,
   InstrumentSuggestion,
+  MusicJourneyStep,
+  StarterBudget,
   SuggestionPurpose,
 } from "../types/instruments";
 
@@ -22,6 +26,8 @@ interface OfflineSuggestionInput {
   userRoles: string[];
   experienceLevel: ExperienceLevel;
   purpose: SuggestionPurpose;
+  starterBudget?: StarterBudget;
+  customStarterBudgetPhp?: number;
   limit: number;
 }
 
@@ -203,6 +209,17 @@ const LOCAL_CATALOG: LocalInstrumentProfile[] = [
     famousPlayers: ["Freddie Mercury", "Whitney Houston"],
   },
   {
+    name: "Voice",
+    image:
+      "https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=200&h=200&fit=crop",
+    genres: ["Pop", "R&B", "Rock", "Worship", "Acoustic", "Folk", "Soul"],
+    difficulty: "beginner",
+    category: "vocals",
+    description: "The lowest-cost way to start making music and collaborate immediately.",
+    relatedInstruments: ["Microphone", "Keyboard", "Acoustic Guitar"],
+    famousPlayers: ["Lea Salonga", "Bruno Mars"],
+  },
+  {
     name: "Vocal Processor",
     image:
       "https://images.unsplash.com/photo-1461784180009-21121b2f204c?w=200&h=200&fit=crop",
@@ -212,6 +229,17 @@ const LOCAL_CATALOG: LocalInstrumentProfile[] = [
     description: "Adds harmony, pitch effects, and consistent vocal polish.",
     relatedInstruments: ["Microphone", "Audio Interface"],
     famousPlayers: ["Bon Iver", "Imogen Heap"],
+  },
+  {
+    name: "Music Production Apps",
+    image:
+      "https://images.unsplash.com/photo-1511379938547-c1f69419868d?w=200&h=200&fit=crop",
+    genres: ["Electronic", "EDM", "Hip-Hop", "Pop", "R&B", "Recording", "All Genres"],
+    difficulty: "beginner",
+    category: "electronic",
+    description: "Start arranging beats, loops, and demos on a phone or laptop before buying hardware.",
+    relatedInstruments: ["MIDI Controller", "Audio Interface", "Studio Monitors"],
+    famousPlayers: ["Finneas", "Metro Boomin"],
   },
   {
     name: "Audio Interface",
@@ -273,6 +301,177 @@ const CATEGORY_PRO_TIPS: Record<InstrumentCategory, string> = {
   vocals: "Record dry takes and listen back to improve pitch and control.",
   amplification: "Keep gain staging clean to avoid unwanted clipping or noise.",
   recording: "Use reference tracks and level-match before making EQ decisions.",
+};
+
+interface StarterBudgetEstimate {
+  minPhp: number;
+  maxPhp: number;
+  includes: string[];
+  searchBasis: string[];
+}
+
+const PHP = "\u20b1";
+const BUDGET_ESTIMATE_NOTE =
+  "Prices are estimates from online PH music-store and marketplace results; brand, sale price, and used condition can change the range.";
+
+const BUDGET_LEVEL_BY_SELECTION: Record<StarterBudget, BudgetLevel> = {
+  none: "no_budget",
+  below_3000: "low",
+  "3000_7000": "medium",
+  "7000_15000": "medium",
+  "15000_plus": "high",
+  custom: "unknown",
+  not_sure: "unknown",
+};
+
+const BUDGET_FIT_SCORE: Record<BudgetFit, number> = {
+  fits: 14,
+  stretch: 4,
+  save_first: -18,
+  no_spend: 16,
+  unknown: 0,
+};
+
+const DEFAULT_BUDGET_ESTIMATE: StarterBudgetEstimate = {
+  minPhp: 3000,
+  maxPhp: 12000,
+  includes: ["Starter instrument", "Basic accessory set", "Tuner or app"],
+  searchBasis: ["Recent online PH store and marketplace starter listings"],
+};
+
+const STARTER_BUDGET_ESTIMATES: Record<string, StarterBudgetEstimate> = {
+  "Acoustic Guitar": {
+    minPhp: 4000,
+    maxPhp: 8000,
+    includes: ["Entry-level acoustic guitar", "Clip-on tuner or tuner app", "Picks", "Strap"],
+    searchBasis: ["JB Music and other PH acoustic guitar listings"],
+  },
+  "Electric Guitar": {
+    minPhp: 9000,
+    maxPhp: 22000,
+    includes: ["Entry-level electric guitar", "Practice amplifier", "Instrument cable", "Tuner", "Strap"],
+    searchBasis: ["PH electric guitar, amp, and cable listings"],
+  },
+  "Bass Guitar": {
+    minPhp: 7000,
+    maxPhp: 18000,
+    includes: ["Entry-level bass guitar", "Practice amplifier", "Instrument cable", "Tuner", "Strap"],
+    searchBasis: ["Audiophile bass listings", "JB Music bass amplifier listing", "PH used-market bass bundles"],
+  },
+  Ukulele: {
+    minPhp: 1500,
+    maxPhp: 5000,
+    includes: ["Soprano or concert ukulele", "Tuner app", "Soft case", "Extra strings"],
+    searchBasis: ["JB Music ukulele listings", "PH marketplace ukulele listings"],
+  },
+  Piano: {
+    minPhp: 15000,
+    maxPhp: 40000,
+    includes: ["Digital piano or weighted keyboard", "Power adaptor", "Stand", "Sustain pedal"],
+    searchBasis: ["JB Music, Audiophile, and Lazer Music digital piano listings"],
+  },
+  Keyboard: {
+    minPhp: 5000,
+    maxPhp: 15000,
+    includes: ["61-key beginner keyboard", "Power adaptor", "Basic stand", "Headphones"],
+    searchBasis: ["JB Music and Lazer Music keyboard listings"],
+  },
+  Synthesizer: {
+    minPhp: 12000,
+    maxPhp: 35000,
+    includes: ["Entry-level synthesizer", "Headphones", "Audio cable", "Power adaptor"],
+    searchBasis: ["PH synthesizer and keyboard listings"],
+  },
+  "MIDI Controller": {
+    minPhp: 2500,
+    maxPhp: 10000,
+    includes: ["25- or 37-key MIDI controller", "USB cable", "Free DAW or mobile production app"],
+    searchBasis: ["PH MIDI controller and USB keyboard listings"],
+  },
+  "DJ Controller": {
+    minPhp: 8000,
+    maxPhp: 22000,
+    includes: ["Beginner DJ controller", "Laptop or phone app", "Headphones", "USB cable"],
+    searchBasis: ["PH DJ controller listings"],
+  },
+  "Drum Kit": {
+    minPhp: 18000,
+    maxPhp: 45000,
+    includes: ["Entry drum kit or compact electronic kit", "Sticks", "Throne", "Practice pad"],
+    searchBasis: ["PH beginner drum kit and electronic drum listings"],
+  },
+  Cajon: {
+    minPhp: 2500,
+    maxPhp: 6000,
+    includes: ["Beginner cajon", "Carry bag if bundled", "Metronome app"],
+    searchBasis: ["Lazer Music cajon listings", "PH marketplace cajon listings"],
+  },
+  Violin: {
+    minPhp: 4500,
+    maxPhp: 15000,
+    includes: ["Student violin outfit", "Bow", "Rosin", "Case", "Tuner app"],
+    searchBasis: ["PH student violin listings"],
+  },
+  Saxophone: {
+    minPhp: 18000,
+    maxPhp: 45000,
+    includes: ["Student alto saxophone", "Mouthpiece", "Reeds", "Neck strap", "Case"],
+    searchBasis: ["PH student saxophone listings"],
+  },
+  Trumpet: {
+    minPhp: 9000,
+    maxPhp: 28000,
+    includes: ["Student trumpet", "Mouthpiece", "Valve oil", "Case"],
+    searchBasis: ["PH student trumpet listings"],
+  },
+  Flute: {
+    minPhp: 2500,
+    maxPhp: 12000,
+    includes: ["Student flute", "Cleaning rod", "Case", "Tuner app"],
+    searchBasis: ["PH student flute listings"],
+  },
+  Microphone: {
+    minPhp: 1000,
+    maxPhp: 6000,
+    includes: ["Dynamic or USB microphone", "Cable or USB lead", "Stand or clip", "Pop filter"],
+    searchBasis: ["Swee Lee and PH microphone listings"],
+  },
+  Voice: {
+    minPhp: 0,
+    maxPhp: 1000,
+    includes: ["Phone recorder", "Free vocal warmups", "Earbuds or headphones"],
+    searchBasis: ["No dedicated instrument purchase required"],
+  },
+  "Vocal Processor": {
+    minPhp: 8000,
+    maxPhp: 22000,
+    includes: ["Entry vocal processor", "Microphone cable", "Power adaptor", "Microphone"],
+    searchBasis: ["PH vocal processor and effects listings"],
+  },
+  "Music Production Apps": {
+    minPhp: 0,
+    maxPhp: 3500,
+    includes: ["Free or low-cost DAW/mobile app", "Phone or laptop", "Earbuds", "Starter sample packs"],
+    searchBasis: ["Free DAW/mobile app options", "PH budget audio accessory listings"],
+  },
+  "Audio Interface": {
+    minPhp: 3500,
+    maxPhp: 12000,
+    includes: ["USB audio interface", "USB cable", "Headphones", "Free recording software"],
+    searchBasis: ["Swee Lee and PH audio-interface listings"],
+  },
+  "Studio Monitors": {
+    minPhp: 8000,
+    maxPhp: 22000,
+    includes: ["Pair of entry studio monitors", "TRS or RCA cables", "Basic isolation pads"],
+    searchBasis: ["PH studio monitor listings"],
+  },
+  "Looper Pedal": {
+    minPhp: 4500,
+    maxPhp: 12000,
+    includes: ["Looper pedal", "Instrument cables", "Power supply", "Existing guitar or microphone setup"],
+    searchBasis: ["PH guitar pedal and looper listings"],
+  },
 };
 
 const ROLE_CATEGORY_COMPLEMENTS: Array<{ keywords: string[]; categories: InstrumentCategory[] }> = [
@@ -381,6 +580,205 @@ const buildPerfectFor = (item: LocalInstrumentProfile, purpose: SuggestionPurpos
   return item.category === "electronic" ? "beat production" : "home production";
 };
 
+const formatPhpAmount = (value: number) => `${PHP}${value.toLocaleString("en-US")}`;
+
+const formatBudgetRange = (estimate: StarterBudgetEstimate) =>
+  `${formatPhpAmount(estimate.minPhp)}-${formatPhpAmount(estimate.maxPhp)}`;
+
+const getBudgetEstimate = (item: LocalInstrumentProfile) =>
+  STARTER_BUDGET_ESTIMATES[item.name] || DEFAULT_BUDGET_ESTIMATE;
+
+const sanitizeCustomBudgetPhp = (value?: number) => {
+  const amount = Number(value);
+  if (!Number.isFinite(amount) || amount <= 0) {
+    return undefined;
+  }
+
+  return Math.round(amount);
+};
+
+const getBudgetLevelForAmount = (amount?: number): BudgetLevel => {
+  if (!amount) return "unknown";
+  if (amount < 3000) return "low";
+  if (amount <= 15000) return "medium";
+  return "high";
+};
+
+const getBudgetLevel = (
+  starterBudget: StarterBudget,
+  customBudgetPhp?: number,
+): BudgetLevel => {
+  if (starterBudget === "custom") {
+    return getBudgetLevelForAmount(customBudgetPhp);
+  }
+
+  return BUDGET_LEVEL_BY_SELECTION[starterBudget] || "unknown";
+};
+
+const getBudgetFit = (
+  starterBudget: StarterBudget,
+  estimate: StarterBudgetEstimate,
+  customBudgetPhp?: number,
+): BudgetFit => {
+  if (starterBudget === "custom") {
+    const amount = sanitizeCustomBudgetPhp(customBudgetPhp);
+    if (!amount) return "unknown";
+    if (estimate.maxPhp <= amount * 1.25) return "fits";
+    return estimate.minPhp <= amount ? "stretch" : "save_first";
+  }
+
+  if (starterBudget === "not_sure") return "unknown";
+  if (starterBudget === "none") return estimate.minPhp <= 0 ? "no_spend" : "save_first";
+  if (starterBudget === "below_3000") return estimate.minPhp <= 3000 ? "fits" : "save_first";
+  if (starterBudget === "3000_7000") {
+    if (estimate.maxPhp <= 8750) return "fits";
+    return estimate.minPhp <= 7000 ? "stretch" : "save_first";
+  }
+  if (starterBudget === "7000_15000") {
+    if (estimate.maxPhp <= 22500) return "fits";
+    return estimate.minPhp <= 15000 ? "stretch" : "save_first";
+  }
+
+  if (estimate.minPhp <= 25000) return "fits";
+  return "stretch";
+};
+
+const buildBudgetNote = (
+  fit: BudgetFit,
+  estimate: StarterBudgetEstimate,
+): string => {
+  const range = formatBudgetRange(estimate);
+  if (fit === "no_spend") {
+    return `You can start now with little or no spend. Estimated starter range: ${range}.`;
+  }
+  if (fit === "fits") {
+    return `This is realistic for your stated budget. Estimated starter range: ${range}.`;
+  }
+  if (fit === "stretch") {
+    return `This may need used gear or buying essentials first. Estimated starter range: ${range}.`;
+  }
+  if (fit === "save_first") {
+    return `This setup usually costs above your stated budget. Estimated starter range: ${range}.`;
+  }
+  return `Use this as a planning range: ${range}.`;
+};
+
+const RECOMMENDED_ROLE_BY_INSTRUMENT: Record<string, string> = {
+  "Acoustic Guitar": "Singer-songwriter / Rhythm Guitarist",
+  "Electric Guitar": "Lead or Rhythm Guitarist",
+  "Bass Guitar": "Bassist",
+  Ukulele: "Acoustic Companion",
+  Piano: "Keys Player",
+  Keyboard: "Keys Player",
+  Synthesizer: "Synth Player",
+  "MIDI Controller": "Producer",
+  "DJ Controller": "DJ / Live Selector",
+  "Drum Kit": "Drummer",
+  Cajon: "Acoustic Percussionist",
+  Violin: "String Lead",
+  Saxophone: "Horn Lead",
+  Trumpet: "Brass Lead",
+  Flute: "Melody Player",
+  Microphone: "Vocalist",
+  Voice: "Vocalist",
+  "Vocal Processor": "Vocal Performer",
+  "Music Production Apps": "Producer",
+  "Audio Interface": "Home Recording Artist",
+  "Studio Monitors": "Mixing Producer",
+  "Looper Pedal": "Looping Soloist",
+};
+
+const getRecommendedRole = (item: LocalInstrumentProfile, purpose: SuggestionPurpose) => {
+  const role = RECOMMENDED_ROLE_BY_INSTRUMENT[item.name];
+  if (role) return role;
+  if (purpose === "production") return "Producer";
+  if (item.category === "vocals") return "Vocalist";
+  if (item.category === "percussion") return "Rhythm Player";
+  return "Musician";
+};
+
+const buildRoleFitReason = (
+  item: LocalInstrumentProfile,
+  purpose: SuggestionPurpose,
+  genreMatches: string[],
+) => {
+  const role = getRecommendedRole(item, purpose);
+  const genreCopy = genreMatches.length > 0 ? ` for ${genreMatches.slice(0, 2).join(" and ")}` : "";
+  if (purpose === "band") {
+    return `${role} fits because it gives a group a clear musical job${genreCopy}.`;
+  }
+  if (purpose === "solo") {
+    return `${role} fits because it can carry a personal practice or performance path${genreCopy}.`;
+  }
+  if (purpose === "studio") {
+    return `${role} fits because it creates useful parts for recording sessions${genreCopy}.`;
+  }
+  return `${role} fits because it helps you build tracks and demos${genreCopy}.`;
+};
+
+const PRACTICE_FOCUS_BY_CATEGORY: Record<InstrumentCategory, string> = {
+  strings: "clean fretting, simple chord changes, and two-song rhythm practice",
+  keyboards: "major chords, left-right coordination, and a four-chord progression",
+  percussion: "steady 4/4 time, kick/snare patterns, and dynamics",
+  wind: "breath support, long tones, and one short melody",
+  electronic: "one beat loop, one bass line, and one simple arrangement",
+  vocals: "breath control, pitch matching, and one recorded chorus",
+  amplification: "clean signal flow, timing, and one looped arrangement",
+  recording: "gain staging, one clean take, and a simple rough mix",
+};
+
+const buildLearningPlan = (
+  item: LocalInstrumentProfile,
+  purpose: SuggestionPurpose,
+): MusicJourneyStep[] => {
+  const focus = PRACTICE_FOCUS_BY_CATEGORY[item.category];
+  return [
+    {
+      title: "Days 1-7",
+      detail: `Set up the basics and spend 15 minutes daily on ${focus}.`,
+    },
+    {
+      title: "Days 8-21",
+      detail: `Practice with a metronome or backing track and learn one ${purpose === "production" ? "16-bar idea" : "complete song section"}.`,
+    },
+    {
+      title: "Days 22-30",
+      detail: "Record a short clip, review timing and tone, then share it for feedback.",
+    },
+  ];
+};
+
+const buildNextMission = (item: LocalInstrumentProfile) => {
+  if (item.name === "Music Production Apps" || item.category === "electronic") {
+    return "Create and upload your first 16-bar loop.";
+  }
+  if (item.category === "percussion") {
+    return "Upload your first 30-second steady groove clip.";
+  }
+  if (item.category === "vocals") {
+    return "Upload your first 30-second verse or chorus clip.";
+  }
+  if (item.category === "recording") {
+    return "Record and upload one clean 30-second demo take.";
+  }
+  return "Upload your first 30-second practice clip.";
+};
+
+const ownsRelatedInstrument = (
+  item: LocalInstrumentProfile,
+  normalizedCurrent: string[],
+) => {
+  const itemKeywords = [item.name, ...item.relatedInstruments, getRecommendedRole(item, "band")]
+    .join(" ")
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter((word) => word.length >= 4);
+
+  return normalizedCurrent.some((owned) =>
+    itemKeywords.some((keyword) => owned.includes(keyword) || keyword.includes(owned)),
+  );
+};
+
 const diversifyByCategory = (
   rankedItems: InstrumentSuggestion[],
   limit: number,
@@ -439,12 +837,16 @@ export const getOfflineInstrumentSuggestions = ({
   userRoles,
   experienceLevel,
   purpose,
+  starterBudget = "not_sure",
+  customStarterBudgetPhp,
   limit,
 }: OfflineSuggestionInput): InstrumentSuggestion[] => {
   const normalizedGenres = genres.map(normalize);
   const normalizedCurrent = currentInstruments.map(normalize);
   const normalizedRoles = userRoles.map(normalize);
   const purposeBoostCategories = PURPOSE_CATEGORY_BOOST[purpose];
+  const safeCustomBudgetPhp = sanitizeCustomBudgetPhp(customStarterBudgetPhp);
+  const budgetLevel = getBudgetLevel(starterBudget, safeCustomBudgetPhp);
 
   const ranked = LOCAL_CATALOG
     .filter((item) => {
@@ -454,6 +856,9 @@ export const getOfflineInstrumentSuggestions = ({
     .map((item) => {
       const itemGenresNormalized = item.genres.map(normalize);
       const genreMatches = normalizedGenres.filter((genre) => itemGenresNormalized.includes(genre));
+      const budgetEstimate = getBudgetEstimate(item);
+      const budgetFit = getBudgetFit(starterBudget, budgetEstimate, safeCustomBudgetPhp);
+      const alreadyOwnsRelated = ownsRelatedInstrument(item, normalizedCurrent);
 
       let score = 52;
       score += Math.min(36, genreMatches.length * 12);
@@ -469,11 +874,15 @@ export const getOfflineInstrumentSuggestions = ({
       else score -= 5;
 
       score += computeRoleBoost([item.category], normalizedRoles);
+      score += alreadyOwnsRelated
+        ? Math.max(0, Math.min(6, BUDGET_FIT_SCORE[budgetFit]))
+        : BUDGET_FIT_SCORE[budgetFit];
       score += hashString(item.name) % 5;
 
       const safeScore = clamp(Math.round(score), 40, 98);
       const learningCurve = inferLearningCurve(experienceLevel, item.difficulty);
       const timeToBasics = estimateTimeToBasics(learningCurve, experienceLevel);
+      const recommendedRole = getRecommendedRole(item, purpose);
 
       const reasons: string[] = [];
       if (genreMatches.length > 0) {
@@ -481,6 +890,13 @@ export const getOfflineInstrumentSuggestions = ({
       }
       if (normalizedRoles.length > 0) {
         reasons.push(`Complements your current role setup as ${userRoles.slice(0, 2).join(" / ")}.`);
+      }
+      if (budgetFit === "fits" || budgetFit === "no_spend") {
+        reasons.push(`Your budget can realistically start this path.`);
+      } else if (budgetFit === "stretch") {
+        reasons.push(`Your budget can work if you buy used gear or start with essentials.`);
+      } else if (budgetFit === "save_first") {
+        reasons.push(`It is useful long-term, but the starter setup is above your current budget.`);
       }
       reasons.push(item.description);
 
@@ -502,6 +918,20 @@ export const getOfflineInstrumentSuggestions = ({
         relatedInstruments: item.relatedInstruments,
         aiPowered: false,
         aiProvider: "Local Ranker",
+        recommendedRole,
+        roleFitReason: buildRoleFitReason(item, purpose, genreMatches),
+        budgetLevel,
+        starterBudget,
+        customStarterBudgetPhp: starterBudget === "custom" ? safeCustomBudgetPhp : undefined,
+        estimatedStarterBudget: formatBudgetRange(budgetEstimate),
+        starterBudgetMinPhp: budgetEstimate.minPhp,
+        starterBudgetMaxPhp: budgetEstimate.maxPhp,
+        starterGear: budgetEstimate.includes,
+        budgetFit,
+        budgetNote: `${buildBudgetNote(budgetFit, budgetEstimate)} ${BUDGET_ESTIMATE_NOTE}`,
+        budgetSearchBasis: budgetEstimate.searchBasis,
+        learningPlan: buildLearningPlan(item, purpose),
+        nextMission: buildNextMission(item),
       } satisfies InstrumentSuggestion;
     })
     .sort((a, b) => b.score - a.score);

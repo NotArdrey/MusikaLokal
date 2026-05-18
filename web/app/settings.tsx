@@ -1,5 +1,4 @@
 import { Ionicons } from '@expo/vector-icons';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router, useFocusEffect } from 'expo-router';
 import React, { useCallback, useState } from 'react';
 import { Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
@@ -10,10 +9,6 @@ import Navbar from '../src/components/navbar';
 import { useAuth } from '../src/context/AuthContext';
 import { useTheme } from '../src/context/ThemeContext';
 import { isFanUserRole } from '../src/utils/roleRouting';
-
-const RECENTLY_VIEWED_STORAGE_KEY = 'recently_viewed_items';
-const PENDING_REOPEN_LISTING_STORAGE_KEY = 'pending_reopen_listing_id';
-const MAX_SETTINGS_HISTORY_ITEMS = 6;
 
 export default function SettingsScreen() {
   const [modalVisible, setModalVisible] = useState(false);
@@ -45,7 +40,6 @@ export default function SettingsScreen() {
       : '#D8E3F2'
     : colors.border;
   const [userRole, setUserRole] = useState<string | null>(null);
-  const [recentPreviewHistory, setRecentPreviewHistory] = useState<any[]>([]);
 
   // Fetch user role on mount
   useFocusEffect(
@@ -68,60 +62,9 @@ export default function SettingsScreen() {
         }
       };
 
-      const fetchRecentPreviewHistory = async () => {
-        try {
-          const storedHistory = await AsyncStorage.getItem(RECENTLY_VIEWED_STORAGE_KEY);
-          if (!storedHistory) {
-            setRecentPreviewHistory([]);
-            return;
-          }
-
-          const parsedHistory = JSON.parse(storedHistory);
-          if (!Array.isArray(parsedHistory)) {
-            setRecentPreviewHistory([]);
-            return;
-          }
-
-          setRecentPreviewHistory(parsedHistory.slice(0, MAX_SETTINGS_HISTORY_ITEMS));
-        } catch {
-          setRecentPreviewHistory([]);
-        }
-      };
-
       fetchUserRole();
-      fetchRecentPreviewHistory();
     }, [isGuest])
   );
-
-  const getHistoryIcon = (itemType?: string) => {
-    const normalized = String(itemType || '').toLowerCase();
-    if (normalized === 'studio' || normalized === 'venue') return 'business-outline';
-    if (normalized === 'gig') return 'mic-outline';
-    if (normalized === 'artist') return 'person-outline';
-    if (normalized === 'group') return 'people-outline';
-    return 'albums-outline';
-  };
-
-  const openRecentPreviewItem = async (item: any) => {
-    if (!item?.id) return;
-
-    try {
-      await AsyncStorage.setItem(PENDING_REOPEN_LISTING_STORAGE_KEY, String(item.id));
-    } catch {
-      // Continue even if cache write fails.
-    }
-
-    router.push('/feed');
-  };
-
-  const clearRecentPreviewHistory = async () => {
-    try {
-      await AsyncStorage.removeItem(RECENTLY_VIEWED_STORAGE_KEY);
-      setRecentPreviewHistory([]);
-    } catch {
-      // No-op if clear fails.
-    }
-  };
 
   const handleLogout = async () => {
     setModalVisible(false);
@@ -131,10 +74,10 @@ export default function SettingsScreen() {
 
   const isFan = isFanUserRole(userRole);
 
-  const settingsSections: Array<{
+  const settingsSections: {
     title: string;
-    items: Array<{ label: string; icon: string; route: string }>;
-  }> = [];
+    items: { label: string; icon: string; route: string }[];
+  }[] = [];
 
   if (!isGuest) {
     settingsSections.push({
@@ -229,59 +172,6 @@ export default function SettingsScreen() {
                   )
                 })}
               </View>
-            </View>
-          </View>
-
-          <View style={styles.sectionContainer}>
-            <View style={styles.historyHeaderRow}>
-              <Text style={[styles.sectionHeader, { color: colors.textSecondary, marginBottom: 0 }]}>History Preview</Text>
-              {recentPreviewHistory.length > 0 && (
-                <TouchableOpacity activeOpacity={1} onPress={clearRecentPreviewHistory}>
-                  <Text style={[styles.clearHistoryText, { color: colors.primary }]}>Clear</Text>
-                </TouchableOpacity>
-              )}
-            </View>
-            <View
-              style={[
-                styles.cardOverflow,
-                isWebDesktop && styles.webSectionCard,
-                { backgroundColor: pageCardBackground, borderColor: borderSoft },
-              ]}
-            >
-              {recentPreviewHistory.length === 0 ? (
-                <View style={[styles.historyEmptyState, { borderColor: borderSoft }]}> 
-                  <Ionicons name="time-outline" size={18} color={colors.textSecondary} />
-                  <Text style={[styles.historyEmptyText, { color: colors.textSecondary }]}>No previews yet. Open cards from Home to see them here.</Text>
-                </View>
-              ) : (
-                recentPreviewHistory.map((item, index) => (
-                  <TouchableOpacity
-                    activeOpacity={1}
-                    key={`${item?.id || index}-${index}`}
-                    onPress={() => openRecentPreviewItem(item)}
-                    style={[
-                      styles.menuItem,
-                      {
-                        borderBottomWidth: index === recentPreviewHistory.length - 1 ? 0 : 1,
-                        borderBottomColor: borderSoft,
-                      },
-                    ]}
-                  >
-                    <View style={[styles.iconContainer, { backgroundColor: surfaceBackground }]}>
-                      <Ionicons name={getHistoryIcon(item?.type) as any} size={18} color={colors.text} />
-                    </View>
-                    <View style={styles.historyTextBlock}>
-                      <Text numberOfLines={1} ellipsizeMode="tail" style={[styles.menuText, { color: colors.text, marginRight: 0 }]}>
-                        {item?.name || 'Untitled Listing'}
-                      </Text>
-                      <Text numberOfLines={1} ellipsizeMode="tail" style={[styles.historyMetaText, { color: colors.textSecondary }]}>
-                        {(item?.type || 'Listing')} • {item?.location || 'Location not set'}
-                      </Text>
-                    </View>
-                    <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
-                  </TouchableOpacity>
-                ))
-              )}
             </View>
           </View>
 
@@ -438,29 +328,6 @@ const styles = StyleSheet.create({
     paddingLeft: 4,
     fontFamily: 'Poppins_600SemiBold',
   },
-  historyHeaderRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  clearHistoryText: {
-    fontSize: 12,
-    fontFamily: 'Poppins_600SemiBold',
-  },
-  historyEmptyState: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-  },
-  historyEmptyText: {
-    flex: 1,
-    fontSize: 12,
-    fontFamily: 'Poppins_400Regular',
-    lineHeight: 18,
-  },
   card: {
     padding: 16,
     borderRadius: 16,
@@ -512,15 +379,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontFamily: 'Poppins_500Medium',
     marginRight: 8,
-  },
-  historyTextBlock: {
-    flex: 1,
-    marginRight: 8,
-  },
-  historyMetaText: {
-    fontSize: 11,
-    fontFamily: 'Poppins_400Regular',
-    marginTop: 2,
   },
   footerContainer: {
     paddingHorizontal: 24,

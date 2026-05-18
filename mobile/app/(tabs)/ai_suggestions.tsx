@@ -36,6 +36,8 @@ import {
     InstrumentSuggestion,
     MUSIC_GENRES,
     PURPOSE_OPTIONS,
+    STARTER_BUDGET_OPTIONS,
+    StarterBudget,
     SuggestionPurpose,
 } from '../../src/types/instruments';
 
@@ -43,6 +45,27 @@ const OFFLINE_PROFILE_CACHE_KEY = 'offline_instrument_profile_v1';
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 const MAX_CHAT_PANEL_HEIGHT_RATIO = 0.78;
 const MAX_CHAT_MESSAGE_HEIGHT_RATIO = 0.42;
+const PHP_SYMBOL = '\u20b1';
+
+const formatBudgetAmountInput = (value: string) => {
+    const digits = value.replace(/[^\d]/g, '').slice(0, 9);
+    if (!digits) return '';
+
+    const normalizedDigits = digits.replace(/^0+(?=\d)/, '');
+    const amount = Number(normalizedDigits);
+    return Number.isFinite(amount) ? amount.toLocaleString('en-US') : normalizedDigits;
+};
+
+const parseBudgetAmountInput = (value: string) => {
+    const digits = value.replace(/[^\d]/g, '');
+    if (!digits) return undefined;
+
+    const amount = Number(digits);
+    return Number.isFinite(amount) && amount > 0 ? amount : undefined;
+};
+
+const formatBudgetAmountLabel = (amount: number) =>
+    `${PHP_SYMBOL}${amount.toLocaleString('en-US')}`;
 
 interface CachedOfflineProfile {
     full_name: string;
@@ -55,6 +78,16 @@ interface FollowupChatMessage {
     role: 'user' | 'assistant';
     text: string;
     blocked?: boolean;
+}
+
+interface CommunityMatch {
+    id: string;
+    kind: 'person' | 'duo' | 'group';
+    name: string;
+    subtitle: string;
+    image?: string | null;
+    reason: string;
+    score: number;
 }
 
 const FOLLOWUP_SCOPE_NOTICE = 'I can only help with your suggested instruments and related music guidance.';
@@ -106,6 +139,8 @@ export default function AiSuggestionsScreen() {
     const [genreSearch, setGenreSearch] = useState('');
     const [experienceLevel, setExperienceLevel] = useState<ExperienceLevel>('beginner');
     const [purpose, setPurpose] = useState<SuggestionPurpose>('band');
+    const [starterBudget, setStarterBudget] = useState<StarterBudget>('not_sure');
+    const [customBudgetAmount, setCustomBudgetAmount] = useState('');
     const [suggestions, setSuggestions] = useState<InstrumentSuggestion[]>([]);
     const [loading, setLoading] = useState(false);
     const [loadingProfile, setLoadingProfile] = useState(true);
@@ -118,13 +153,22 @@ export default function AiSuggestionsScreen() {
     const [followupQuestion, setFollowupQuestion] = useState('');
     const [followupMessages, setFollowupMessages] = useState<FollowupChatMessage[]>([]);
     const [followupLoading, setFollowupLoading] = useState(false);
+    const [communityMatches, setCommunityMatches] = useState<CommunityMatch[]>([]);
+    const [loadingCommunity, setLoadingCommunity] = useState(false);
     const suggestionRequestIdRef = React.useRef(0);
     const resultsScrollRef = React.useRef<ScrollView | null>(null);
     const followupSectionYRef = React.useRef(0);
     const followupMessagesScrollRef = React.useRef<ScrollView | null>(null);
     const groqInfo = getGroqModelInfo();
     const groqConfigured = groqInfo.configured;
-    const isSuggestionFormReady = selectedGenres.length > 0 && Boolean(experienceLevel) && Boolean(purpose);
+    const isCustomBudgetSelected = starterBudget === 'custom';
+    const selectedCustomBudgetPhp = isCustomBudgetSelected ? parseBudgetAmountInput(customBudgetAmount) : undefined;
+    const isSuggestionFormReady =
+        selectedGenres.length > 0 &&
+        Boolean(experienceLevel) &&
+        Boolean(purpose) &&
+        Boolean(starterBudget) &&
+        (!isCustomBudgetSelected || Boolean(selectedCustomBudgetPhp));
     const isSuggestionSubmitDisabled = loading || !isSuggestionFormReady;
 
     // User profile data
@@ -136,6 +180,162 @@ export default function AiSuggestionsScreen() {
         if (!message) return false;
         return /out of api calls|rate limit|too many requests|insufficient[_ -]?quota|quota|credits|\b429\b/i.test(message);
     };
+
+    const normalizeMatchText = (value: unknown) => String(value ?? '').trim().toLowerCase();
+
+    const getSelectedBudgetLabel = () => {
+        if (starterBudget === 'custom') {
+            return selectedCustomBudgetPhp ? formatBudgetAmountLabel(selectedCustomBudgetPhp) : 'Specific amount';
+        }
+
+        return STARTER_BUDGET_OPTIONS.find((option) => option.value === starterBudget)?.label || 'Not sure';
+    };
+
+    const formatBudgetLevel = (value: InstrumentSuggestion['budgetLevel']) => {
+        if (value === 'no_budget') return 'No budget yet';
+        if (value === 'low') return 'Low';
+        if (value === 'medium') return 'Medium';
+        if (value === 'high') return 'High';
+        return 'Flexible';
+    };
+
+    const buildCommunityReason = (
+        kind: CommunityMatch['kind'],
+        matchedTerms: string[],
+    ) => {
+        const target = kind === 'person' ? 'Profile' : kind === 'duo' ? 'Duo' : 'Group';
+        if (matchedTerms.length > 0) {
+            return `${target} match for ${matchedTerms.slice(0, 2).join(' and ')}.`;
+        }
+        return `${target} match based on your journey preferences.`;
+    };
+
+    const loadCommunityMatches = useCallback(
+        async (nextSuggestions: InstrumentSuggestion[]) => {
+            if (!nextSuggestions.length) {
+                setCommunityMatches([]);
+                return;
+            }
+
+            setLoadingCommunity(true);
+            try {
+                const { data: { user } } = await supabase.auth.getUser();
+                const currentUserId = user?.id || null;
+                const topSuggestions = nextSuggestions.slice(0, 3);
+                const targetTerms = [
+                    ...topSuggestions.map((item) => item.name),
+                    ...topSuggestions.map((item) => item.recommendedRole || ''),
+                    ...selectedGenres,
+                ]
+                    .map(normalizeMatchText)
+                    .filter(Boolean);
+
+                let profileQuery = supabase
+                    .from('profiles')
+                    .select('id, full_name, avatar_url, location, address, role')
+                    .eq('role', 'musician')
+                    .limit(30);
+
+                let groupQuery = supabase
+                    .from('groups_with_stats')
+                    .select('id, owner_id, name, images, group_type, genre, location, description')
+                    .in('group_type', ['duo', 'band'])
+                    .limit(30);
+
+                if (currentUserId) {
+                    profileQuery = profileQuery.neq('id', currentUserId);
+                    groupQuery = groupQuery.neq('owner_id', currentUserId);
+                }
+
+                const [profileResult, groupResult] = await Promise.all([profileQuery, groupQuery]);
+                const profiles = profileResult.error ? [] : (profileResult.data || []);
+                const groups = groupResult.error ? [] : (groupResult.data || []);
+                const profileIds = profiles
+                    .map((profile: any) => profile.id)
+                    .filter((value: unknown): value is string => typeof value === 'string' && value.length > 0);
+
+                const [skillsResult, genresResult] = profileIds.length > 0
+                    ? await Promise.all([
+                        supabase.from('profile_skills').select('profile_id, skill').in('profile_id', profileIds),
+                        supabase.from('profile_genres').select('profile_id, genre').in('profile_id', profileIds),
+                    ])
+                    : [{ data: [], error: null }, { data: [], error: null }] as any[];
+
+                const skillsByProfile = new Map<string, string[]>();
+                const genresByProfile = new Map<string, string[]>();
+
+                (skillsResult.data || []).forEach((row: any) => {
+                    const values = skillsByProfile.get(row.profile_id) || [];
+                    if (typeof row.skill === 'string') values.push(row.skill);
+                    skillsByProfile.set(row.profile_id, values);
+                });
+
+                (genresResult.data || []).forEach((row: any) => {
+                    const values = genresByProfile.get(row.profile_id) || [];
+                    if (typeof row.genre === 'string') values.push(row.genre);
+                    genresByProfile.set(row.profile_id, values);
+                });
+
+                const peopleMatches: CommunityMatch[] = profiles.map((profile: any) => {
+                    const skills = skillsByProfile.get(profile.id) || [];
+                    const genres = genresByProfile.get(profile.id) || [];
+                    const haystack = [...skills, ...genres, profile.full_name, profile.location, profile.address]
+                        .map(normalizeMatchText)
+                        .join(' ');
+                    const matchedTerms = targetTerms.filter((term) => haystack.includes(term));
+                    const genreHits = selectedGenres.filter((genre) =>
+                        genres.some((profileGenre) => normalizeMatchText(profileGenre) === normalizeMatchText(genre)),
+                    );
+                    const score = 45 + Math.min(35, matchedTerms.length * 10) + Math.min(20, genreHits.length * 10);
+
+                    return {
+                        id: `person:${profile.id}`,
+                        kind: 'person',
+                        name: profile.full_name || 'MusikaLokal musician',
+                        subtitle: [skills.slice(0, 2).join(', '), genres.slice(0, 2).join(', '), profile.location || profile.address]
+                            .filter(Boolean)
+                            .join(' - '),
+                        image: profile.avatar_url || null,
+                        reason: buildCommunityReason('person', [...matchedTerms, ...genreHits]),
+                        score,
+                    };
+                });
+
+                const groupMatches: CommunityMatch[] = groups.map((group: any) => {
+                    const kind: CommunityMatch['kind'] = group.group_type === 'duo' ? 'duo' : 'group';
+                    const haystack = [group.name, group.genre, group.location, group.description]
+                        .map(normalizeMatchText)
+                        .join(' ');
+                    const matchedTerms = targetTerms.filter((term) => haystack.includes(term));
+                    const genreHit = selectedGenres.some((genre) => normalizeMatchText(group.genre) === normalizeMatchText(genre));
+                    const score = 48 + Math.min(32, matchedTerms.length * 8) + (genreHit ? 18 : 0);
+                    const images = Array.isArray(group.images) ? group.images : [];
+
+                    return {
+                        id: `${kind}:${group.id}`,
+                        kind,
+                        name: group.name || (kind === 'duo' ? 'MusikaLokal duo' : 'MusikaLokal group'),
+                        subtitle: [kind === 'duo' ? 'Duo' : 'Group', group.genre, group.location].filter(Boolean).join(' - '),
+                        image: images[0] || null,
+                        reason: buildCommunityReason(kind, matchedTerms.length > 0 ? matchedTerms : group.genre ? [group.genre] : []),
+                        score,
+                    };
+                });
+
+                const rankedPeople = peopleMatches.sort((a, b) => b.score - a.score).slice(0, 4);
+                const rankedDuos = groupMatches.filter((match) => match.kind === 'duo').sort((a, b) => b.score - a.score).slice(0, 3);
+                const rankedGroups = groupMatches.filter((match) => match.kind === 'group').sort((a, b) => b.score - a.score).slice(0, 3);
+
+                setCommunityMatches([...rankedPeople, ...rankedDuos, ...rankedGroups]);
+            } catch (err) {
+                console.error('Error loading AI journey community matches:', err);
+                setCommunityMatches([]);
+            } finally {
+                setLoadingCommunity(false);
+            }
+        },
+        [selectedGenres],
+    );
 
     const createFollowupMessageId = () =>
         `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
@@ -216,6 +416,8 @@ export default function AiSuggestionsScreen() {
                     userRoles,
                     experienceLevel,
                     purpose,
+                    starterBudget,
+                    customStarterBudgetPhp: selectedCustomBudgetPhp,
                     conversation,
                 });
 
@@ -251,6 +453,8 @@ export default function AiSuggestionsScreen() {
             purpose,
             scrollToFollowupChat,
             selectedGenres,
+            selectedCustomBudgetPhp,
+            starterBudget,
             suggestions,
             userRoles,
         ],
@@ -297,6 +501,8 @@ export default function AiSuggestionsScreen() {
             setIsFollowupChatOpen(false);
             setFollowupQuestion('');
             setFollowupLoading(false);
+            setCommunityMatches([]);
+            setLoadingCommunity(false);
             return;
         }
 
@@ -428,6 +634,8 @@ export default function AiSuggestionsScreen() {
             userRoles,
             experienceLevel,
             purpose,
+            starterBudget,
+            customStarterBudgetPhp: selectedCustomBudgetPhp,
             limit: 10,
         };
 
@@ -437,6 +645,7 @@ export default function AiSuggestionsScreen() {
             setIsAIPowered(false);
             setSuggestionMessage(groqConfigured ? 'Showing smart local suggestions while AI refreshes.' : null);
             setStep('results');
+            void loadCommunityMatches(localSuggestions);
         }
 
         try {
@@ -467,6 +676,7 @@ export default function AiSuggestionsScreen() {
                 setIsAIPowered(generated.aiPowered);
                 setSuggestionMessage(generated.message || null);
                 setStep('results');
+                void loadCommunityMatches(generated.suggestions);
                 return;
             }
 
@@ -475,6 +685,7 @@ export default function AiSuggestionsScreen() {
                 setIsAIPowered(false);
                 setSuggestionMessage(generated.message || null);
                 setStep('results');
+                void loadCommunityMatches(localSuggestions);
             } else {
                 setSuggestions([]);
                 setIsAIPowered(false);
@@ -509,6 +720,7 @@ export default function AiSuggestionsScreen() {
                 setIsAIPowered(false);
                 setSuggestionMessage('We could not refresh right now. Showing local suggestions.');
                 setStep('results');
+                void loadCommunityMatches(localSuggestions);
             } else {
                 setError('Failed to generate suggestions right now. Please try again.');
                 setSuggestionMessage(null);
@@ -770,6 +982,258 @@ export default function AiSuggestionsScreen() {
         </View>
     );
 
+    const renderBudgetSelector = () => {
+        const isSelected = starterBudget === 'custom';
+
+        return (
+            <View style={styles.selectorContainer}>
+                <Text style={[styles.sectionTitle, { color: colors.text }]}>
+                    What is your starting budget?
+                </Text>
+                <Text style={[styles.sectionSubtitle, { color: colors.textSecondary }]}>
+                    This helps rank realistic instruments and starter gear.
+                </Text>
+                <View style={styles.budgetGrid}>
+                    {STARTER_BUDGET_OPTIONS.map((option) => {
+                        const isOptionSelected = starterBudget === option.value;
+                        return (
+                            <TouchableOpacity
+                                activeOpacity={1}
+                                key={option.value}
+                                onPress={() => setStarterBudget(option.value)}
+                                style={[
+                                    styles.budgetCard,
+                                    {
+                                        backgroundColor: isOptionSelected ? colors.primary + '20' : (isDark ? '#1F2937' : '#FFFFFF'),
+                                        borderColor: isOptionSelected ? colors.primary : colors.border,
+                                    },
+                                ]}
+                            >
+                                <View style={styles.budgetCardHeader}>
+                                    <Ionicons
+                                        name={isOptionSelected ? 'checkmark-circle' : 'wallet-outline'}
+                                        size={18}
+                                        color={isOptionSelected ? colors.primary : colors.textSecondary}
+                                    />
+                                    <Text style={[styles.budgetLabel, { color: isOptionSelected ? colors.primary : colors.text }]}>
+                                        {option.label}
+                                    </Text>
+                                </View>
+                                <Text style={[styles.budgetDescription, { color: colors.textSecondary }]}>
+                                    {option.description}
+                                </Text>
+                            </TouchableOpacity>
+                        );
+                    })}
+                </View>
+                <TouchableOpacity
+                    activeOpacity={1}
+                    onPress={() => setStarterBudget('custom')}
+                    style={[
+                        styles.budgetCard,
+                        styles.customBudgetCard,
+                        {
+                            backgroundColor: isSelected ? colors.primary + '20' : (isDark ? '#1F2937' : '#FFFFFF'),
+                            borderColor: isSelected ? colors.primary : colors.border,
+                        },
+                    ]}
+                >
+                    <View style={styles.budgetCardHeader}>
+                        <Ionicons
+                            name={isSelected ? 'checkmark-circle' : 'create-outline'}
+                            size={18}
+                            color={isSelected ? colors.primary : colors.textSecondary}
+                        />
+                        <Text style={[styles.budgetLabel, { color: isSelected ? colors.primary : colors.text }]}>
+                            Specific amount
+                        </Text>
+                    </View>
+                    <Text style={[styles.budgetDescription, { color: colors.textSecondary }]}>
+                        Match gear to your exact peso budget
+                    </Text>
+                    <View
+                        style={[
+                            styles.customBudgetInputShell,
+                            {
+                                backgroundColor: isDark ? '#111827' : '#F9FAFB',
+                                borderColor: isSelected ? colors.primary : colors.border,
+                            },
+                        ]}
+                    >
+                        <Text style={[styles.customBudgetCurrency, { color: isSelected ? colors.primary : colors.textSecondary }]}>
+                            {PHP_SYMBOL}
+                        </Text>
+                        <TextInput
+                            value={customBudgetAmount}
+                            onChangeText={(value) => {
+                                setStarterBudget('custom');
+                                setCustomBudgetAmount(formatBudgetAmountInput(value));
+                            }}
+                            onFocus={() => setStarterBudget('custom')}
+                            style={[styles.customBudgetInput, { color: colors.text }]}
+                            placeholder="5,000"
+                            placeholderTextColor={colors.textSecondary}
+                            keyboardType={Platform.OS === 'ios' ? 'number-pad' : 'numeric'}
+                            maxLength={12}
+                        />
+                    </View>
+                    {isSelected && !selectedCustomBudgetPhp && (
+                        <Text style={[styles.customBudgetHelper, { color: colors.textSecondary }]}>
+                            Enter an amount above {PHP_SYMBOL}0
+                        </Text>
+                    )}
+                </TouchableOpacity>
+            </View>
+        );
+    };
+
+    const renderJourneySummary = () => {
+        const topSuggestion = suggestions[0];
+        if (!topSuggestion) return null;
+
+        const purposeLabel = PURPOSE_OPTIONS.find((option) => option.value === purpose)?.label || purpose;
+        const journeyStats = [
+            { label: 'Recommended Role', value: topSuggestion.recommendedRole || topSuggestion.perfectFor || 'Musician' },
+            { label: 'Best Instrument', value: topSuggestion.name },
+            { label: 'Goal', value: purposeLabel },
+            { label: 'Match Score', value: `${topSuggestion.score}%` },
+            { label: 'Budget Level', value: formatBudgetLevel(topSuggestion.budgetLevel) },
+            { label: 'Starter Budget', value: topSuggestion.estimatedStarterBudget || getSelectedBudgetLabel() },
+            { label: 'Learning Plan', value: '30 days' },
+            { label: 'Next Mission', value: topSuggestion.nextMission || 'Upload your first practice clip' },
+        ];
+
+        return (
+            <View style={[styles.journeyPanel, { backgroundColor: isDark ? '#111827' : '#FFFFFF', borderColor: colors.border }]}>
+                <View style={styles.journeyHeader}>
+                    <View style={[styles.journeyIcon, { backgroundColor: colors.primary + '20' }]}>
+                        <Ionicons name="map-outline" size={20} color={colors.primary} />
+                    </View>
+                    <View style={styles.journeyHeaderCopy}>
+                        <Text style={[styles.journeyTitle, { color: colors.text }]}>Your Music Journey</Text>
+                        <Text style={[styles.journeySubtitle, { color: colors.textSecondary }]}>
+                            Built from your role, genres, goal, and starter budget
+                        </Text>
+                    </View>
+                </View>
+
+                <View style={styles.journeyGrid}>
+                    {journeyStats.map((item) => (
+                        <View
+                            key={item.label}
+                            style={[styles.journeyStat, { backgroundColor: isDark ? '#1F2937' : '#F3F4F6' }]}
+                        >
+                            <Text style={[styles.journeyStatLabel, { color: colors.textSecondary }]}>{item.label}</Text>
+                            <Text style={[styles.journeyStatValue, { color: colors.text }]}>{item.value}</Text>
+                        </View>
+                    ))}
+                </View>
+
+                {topSuggestion.starterGear && topSuggestion.starterGear.length > 0 && (
+                    <View style={styles.journeyBlock}>
+                        <Text style={[styles.journeyBlockTitle, { color: colors.text }]}>Suggested Gear</Text>
+                        <View style={styles.gearChipRow}>
+                            {topSuggestion.starterGear.slice(0, 5).map((gear) => (
+                                <View key={gear} style={[styles.gearChip, { backgroundColor: colors.primary + '16' }]}>
+                                    <Text style={[styles.gearChipText, { color: colors.primary }]}>{gear}</Text>
+                                </View>
+                            ))}
+                        </View>
+                    </View>
+                )}
+
+                {topSuggestion.learningPlan && topSuggestion.learningPlan.length > 0 && (
+                    <View style={styles.journeyBlock}>
+                        <Text style={[styles.journeyBlockTitle, { color: colors.text }]}>30-Day Learning Plan</Text>
+                        {topSuggestion.learningPlan.map((stepItem) => (
+                            <View key={stepItem.title} style={styles.learningPlanRow}>
+                                <Text style={[styles.learningPlanTitle, { color: colors.primary }]}>{stepItem.title}</Text>
+                                <Text style={[styles.learningPlanDetail, { color: colors.textSecondary }]}>{stepItem.detail}</Text>
+                            </View>
+                        ))}
+                    </View>
+                )}
+            </View>
+        );
+    };
+
+    const renderCommunitySection = () => {
+        if (step !== 'results' || suggestions.length === 0) {
+            return null;
+        }
+
+        const renderMatchGroup = (title: string, matches: CommunityMatch[]) => {
+            if (matches.length === 0) return null;
+            return (
+                <View style={styles.communityGroup}>
+                    <Text style={[styles.communityGroupTitle, { color: colors.text }]}>{title}</Text>
+                    {matches.map((match) => (
+                        <View
+                            key={match.id}
+                            style={[styles.communityCard, { backgroundColor: isDark ? '#1F2937' : '#F9FAFB', borderColor: colors.border }]}
+                        >
+                            {match.image ? (
+                                <Image source={{ uri: match.image }} style={styles.communityImage} resizeMode="cover" />
+                            ) : (
+                                <View style={[styles.communityImageFallback, { backgroundColor: colors.primary + '20' }]}>
+                                    <Ionicons
+                                        name={match.kind === 'person' ? 'person-outline' : 'people-outline'}
+                                        size={18}
+                                        color={colors.primary}
+                                    />
+                                </View>
+                            )}
+                            <View style={styles.communityInfo}>
+                                <Text style={[styles.communityName, { color: colors.text }]}>{match.name}</Text>
+                                <Text style={[styles.communitySubtitle, { color: colors.textSecondary }]} numberOfLines={1}>
+                                    {match.subtitle || (match.kind === 'person' ? 'MusikaLokal musician' : 'MusikaLokal profile')}
+                                </Text>
+                                <Text style={[styles.communityReason, { color: colors.primary }]}>{match.reason}</Text>
+                            </View>
+                        </View>
+                    ))}
+                </View>
+            );
+        };
+
+        const people = communityMatches.filter((match) => match.kind === 'person');
+        const duos = communityMatches.filter((match) => match.kind === 'duo');
+        const groups = communityMatches.filter((match) => match.kind === 'group');
+
+        return (
+            <View style={[styles.journeyPanel, { backgroundColor: isDark ? '#111827' : '#FFFFFF', borderColor: colors.border }]}>
+                <View style={styles.journeyHeader}>
+                    <View style={[styles.journeyIcon, { backgroundColor: '#0EA5E9' + '20' }]}>
+                        <Ionicons name="people-outline" size={20} color="#0EA5E9" />
+                    </View>
+                    <View style={styles.journeyHeaderCopy}>
+                        <Text style={[styles.journeyTitle, { color: colors.text }]}>Connect Next</Text>
+                        <Text style={[styles.journeySubtitle, { color: colors.textSecondary }]}>
+                            Suggested people, duos, and groups already inside MusikaLokal
+                        </Text>
+                    </View>
+                </View>
+
+                {loadingCommunity ? (
+                    <View style={styles.communityLoading}>
+                        <ActivityIndicator color={colors.primary} />
+                        <Text style={[styles.communitySubtitle, { color: colors.textSecondary }]}>Finding MusikaLokal matches...</Text>
+                    </View>
+                ) : communityMatches.length > 0 ? (
+                    <>
+                        {renderMatchGroup('Suggested People', people)}
+                        {renderMatchGroup('Suggested Duos', duos)}
+                        {renderMatchGroup('Suggested Groups', groups)}
+                    </>
+                ) : (
+                    <Text style={[styles.emptyCommunityText, { color: colors.textSecondary }]}>
+                        Real MusikaLokal matches will appear here when matching profiles are available.
+                    </Text>
+                )}
+            </View>
+        );
+    };
+
     // Render suggestion card - Enhanced AI-powered design
     const renderSuggestionCard = (suggestion: InstrumentSuggestion, index: number) => {
         const matchPercentage = suggestion.score;
@@ -849,6 +1313,16 @@ export default function AiSuggestionsScreen() {
                     </View>
                 )}
 
+                {suggestion.recommendedRole && (
+                    <View style={[styles.roleFitBox, { backgroundColor: isDark ? '#0F172A' : '#F8FAFC', borderColor: colors.border }]}>
+                        <Text style={[styles.roleFitLabel, { color: colors.textSecondary }]}>Recommended Role</Text>
+                        <Text style={[styles.roleFitValue, { color: colors.text }]}>{suggestion.recommendedRole}</Text>
+                        {suggestion.roleFitReason && (
+                            <Text style={[styles.roleFitReason, { color: colors.textSecondary }]}>{suggestion.roleFitReason}</Text>
+                        )}
+                    </View>
+                )}
+
                 {/* AI Explanation */}
                 <Text style={[styles.matchReason, { color: colors.text }]}>
                     {suggestion.matchReason}
@@ -877,6 +1351,26 @@ export default function AiSuggestionsScreen() {
                     </View>
                 </View>
 
+                {suggestion.estimatedStarterBudget && (
+                    <View style={[styles.budgetEstimateBox, { backgroundColor: isDark ? '#132016' : '#F0FDF4', borderColor: '#22C55E' + '55' }]}>
+                        <View style={styles.budgetEstimateHeader}>
+                            <Ionicons name="wallet-outline" size={16} color="#16A34A" />
+                            <Text style={styles.budgetEstimateLabel}>Estimated Starter Budget</Text>
+                            <Text style={styles.budgetEstimateValue}>{suggestion.estimatedStarterBudget}</Text>
+                        </View>
+                        {suggestion.starterGear && suggestion.starterGear.length > 0 && (
+                            <Text style={[styles.budgetGearText, { color: isDark ? '#BBF7D0' : '#166534' }]}>
+                                Includes: {suggestion.starterGear.slice(0, 5).join(', ')}
+                            </Text>
+                        )}
+                        {suggestion.budgetNote && (
+                            <Text style={[styles.budgetNoteText, { color: isDark ? '#DCFCE7' : '#166534' }]}>
+                                {suggestion.budgetNote}
+                            </Text>
+                        )}
+                    </View>
+                )}
+
                 {/* Pro Tip */}
                 {suggestion.proTip && (
                     <View style={[styles.proTipContainer, { backgroundColor: '#FEF3C7' }]}>
@@ -897,6 +1391,16 @@ export default function AiSuggestionsScreen() {
                         <Text style={[styles.famousPlayersText, { color: colors.text }]}>
                             {suggestion.famousPlayers.join(', ')}
                         </Text>
+                    </View>
+                )}
+
+                {suggestion.nextMission && (
+                    <View style={[styles.nextMissionBox, { backgroundColor: colors.primary + '12', borderColor: colors.primary + '44' }]}>
+                        <Ionicons name="flag-outline" size={16} color={colors.primary} />
+                        <View style={styles.nextMissionCopy}>
+                            <Text style={[styles.nextMissionLabel, { color: colors.primary }]}>Next Mission</Text>
+                            <Text style={[styles.nextMissionText, { color: colors.text }]}>{suggestion.nextMission}</Text>
+                        </View>
                     </View>
                 )}
 
@@ -930,6 +1434,7 @@ export default function AiSuggestionsScreen() {
             {renderGenreChips()}
             {renderExperienceSelector()}
             {renderPurposeSelector()}
+            {renderBudgetSelector()}
 
             {/* Get Suggestions Button */}
             <TouchableOpacity activeOpacity={1}
@@ -1039,6 +1544,9 @@ export default function AiSuggestionsScreen() {
                     <View style={[styles.preferenceTag, { backgroundColor: colors.primary + '20' }]}>
                         <Text style={[styles.preferenceTagText, { color: colors.primary }]}>{purpose}</Text>
                     </View>
+                    <View style={[styles.preferenceTag, { backgroundColor: colors.primary + '20' }]}>
+                        <Text style={[styles.preferenceTagText, { color: colors.primary }]}>{getSelectedBudgetLabel()}</Text>
+                    </View>
                 </View>
             </View>
 
@@ -1076,6 +1584,8 @@ export default function AiSuggestionsScreen() {
                 </View>
             )}
 
+            {renderJourneySummary()}
+            {renderCommunitySection()}
             {renderFollowupChatSection()}
 
             {/* Suggestion Cards */}
@@ -1447,6 +1957,65 @@ const styles = StyleSheet.create({
         fontFamily: 'Poppins_600SemiBold',
         textAlign: 'center',
     },
+    budgetGrid: {
+        gap: 8,
+    },
+    budgetCard: {
+        padding: 12,
+        borderRadius: 12,
+        borderWidth: 1.5,
+    },
+    customBudgetCard: {
+        marginTop: 8,
+        gap: 8,
+    },
+    budgetCardHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+        marginBottom: 4,
+    },
+    budgetLabel: {
+        flexShrink: 1,
+        fontSize: 13,
+        lineHeight: 17,
+        fontFamily: 'Poppins_600SemiBold',
+        includeFontPadding: false,
+    },
+    budgetDescription: {
+        fontSize: 11,
+        lineHeight: 16,
+        fontFamily: 'Poppins_400Regular',
+    },
+    customBudgetInputShell: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        minHeight: 44,
+        borderWidth: 1,
+        borderRadius: 10,
+        paddingHorizontal: 12,
+    },
+    customBudgetCurrency: {
+        fontSize: 14,
+        lineHeight: 18,
+        fontFamily: 'Poppins_600SemiBold',
+        marginRight: 6,
+    },
+    customBudgetInput: {
+        flex: 1,
+        height: 36,
+        fontSize: 15,
+        lineHeight: 20,
+        fontFamily: 'Poppins_600SemiBold',
+        includeFontPadding: false,
+        padding: 0,
+        margin: 0,
+    },
+    customBudgetHelper: {
+        fontSize: 10,
+        lineHeight: 14,
+        fontFamily: 'Poppins_400Regular',
+    },
     helperText: {
         fontSize: 11,
         fontFamily: 'Poppins_400Regular',
@@ -1706,6 +2275,158 @@ const styles = StyleSheet.create({
         fontFamily: 'Poppins_500Medium',
         color: '#1D4ED8',
     },
+    journeyPanel: {
+        padding: 14,
+        borderRadius: 16,
+        borderWidth: 1,
+        marginBottom: 16,
+    },
+    journeyHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 10,
+        marginBottom: 12,
+    },
+    journeyIcon: {
+        width: 38,
+        height: 38,
+        borderRadius: 19,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    journeyHeaderCopy: {
+        flex: 1,
+        minWidth: 0,
+    },
+    journeyTitle: {
+        fontSize: 16,
+        lineHeight: 20,
+        fontFamily: 'Poppins_700Bold',
+    },
+    journeySubtitle: {
+        fontSize: 11,
+        lineHeight: 16,
+        fontFamily: 'Poppins_400Regular',
+    },
+    journeyGrid: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        gap: 8,
+    },
+    journeyStat: {
+        width: '48%',
+        minHeight: 70,
+        padding: 10,
+        borderRadius: 12,
+        justifyContent: 'center',
+    },
+    journeyStatLabel: {
+        fontSize: 10,
+        lineHeight: 14,
+        fontFamily: 'Poppins_500Medium',
+        marginBottom: 2,
+    },
+    journeyStatValue: {
+        fontSize: 12,
+        lineHeight: 16,
+        fontFamily: 'Poppins_700Bold',
+    },
+    journeyBlock: {
+        marginTop: 12,
+    },
+    journeyBlockTitle: {
+        fontSize: 12,
+        fontFamily: 'Poppins_700Bold',
+        marginBottom: 8,
+    },
+    gearChipRow: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        gap: 6,
+    },
+    gearChip: {
+        paddingHorizontal: 9,
+        paddingVertical: 5,
+        borderRadius: 10,
+    },
+    gearChipText: {
+        fontSize: 10,
+        lineHeight: 13,
+        fontFamily: 'Poppins_600SemiBold',
+    },
+    learningPlanRow: {
+        marginBottom: 8,
+    },
+    learningPlanTitle: {
+        fontSize: 11,
+        lineHeight: 15,
+        fontFamily: 'Poppins_700Bold',
+    },
+    learningPlanDetail: {
+        fontSize: 11,
+        lineHeight: 16,
+        fontFamily: 'Poppins_400Regular',
+    },
+    communityGroup: {
+        marginTop: 10,
+    },
+    communityGroupTitle: {
+        fontSize: 12,
+        lineHeight: 16,
+        fontFamily: 'Poppins_700Bold',
+        marginBottom: 8,
+    },
+    communityCard: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 10,
+        borderWidth: 1,
+        borderRadius: 12,
+        padding: 10,
+        marginBottom: 8,
+    },
+    communityImage: {
+        width: 42,
+        height: 42,
+        borderRadius: 21,
+    },
+    communityImageFallback: {
+        width: 42,
+        height: 42,
+        borderRadius: 21,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    communityInfo: {
+        flex: 1,
+        minWidth: 0,
+    },
+    communityName: {
+        fontSize: 13,
+        lineHeight: 17,
+        fontFamily: 'Poppins_700Bold',
+    },
+    communitySubtitle: {
+        fontSize: 11,
+        lineHeight: 15,
+        fontFamily: 'Poppins_400Regular',
+    },
+    communityReason: {
+        fontSize: 11,
+        lineHeight: 15,
+        fontFamily: 'Poppins_600SemiBold',
+        marginTop: 2,
+    },
+    communityLoading: {
+        alignItems: 'center',
+        gap: 8,
+        paddingVertical: 12,
+    },
+    emptyCommunityText: {
+        fontSize: 12,
+        lineHeight: 18,
+        fontFamily: 'Poppins_400Regular',
+    },
     suggestionCard: {
         padding: 16,
         borderRadius: 16,
@@ -1806,6 +2527,29 @@ const styles = StyleSheet.create({
         fontFamily: 'Poppins_600SemiBold',
         textTransform: 'uppercase',
     },
+    roleFitBox: {
+        borderWidth: 1,
+        borderRadius: 12,
+        padding: 10,
+        marginBottom: 10,
+    },
+    roleFitLabel: {
+        fontSize: 10,
+        lineHeight: 13,
+        fontFamily: 'Poppins_500Medium',
+        marginBottom: 2,
+    },
+    roleFitValue: {
+        fontSize: 13,
+        lineHeight: 17,
+        fontFamily: 'Poppins_700Bold',
+    },
+    roleFitReason: {
+        fontSize: 11,
+        lineHeight: 16,
+        fontFamily: 'Poppins_400Regular',
+        marginTop: 2,
+    },
     matchReason: {
         fontSize: 13,
         fontFamily: 'Poppins_400Regular',
@@ -1836,6 +2580,42 @@ const styles = StyleSheet.create({
         fontSize: 12,
         fontFamily: 'Poppins_600SemiBold',
         textTransform: 'capitalize',
+    },
+    budgetEstimateBox: {
+        borderWidth: 1,
+        borderRadius: 12,
+        padding: 12,
+        marginBottom: 12,
+    },
+    budgetEstimateHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        flexWrap: 'wrap',
+        gap: 6,
+        marginBottom: 6,
+    },
+    budgetEstimateLabel: {
+        fontSize: 11,
+        lineHeight: 15,
+        fontFamily: 'Poppins_700Bold',
+        color: '#166534',
+    },
+    budgetEstimateValue: {
+        fontSize: 12,
+        lineHeight: 16,
+        fontFamily: 'Poppins_700Bold',
+        color: '#16A34A',
+    },
+    budgetGearText: {
+        fontSize: 11,
+        lineHeight: 16,
+        fontFamily: 'Poppins_500Medium',
+        marginBottom: 4,
+    },
+    budgetNoteText: {
+        fontSize: 10,
+        lineHeight: 15,
+        fontFamily: 'Poppins_400Regular',
     },
     proTipContainer: {
         padding: 12,
@@ -1868,6 +2648,30 @@ const styles = StyleSheet.create({
     famousPlayersText: {
         fontSize: 12,
         fontFamily: 'Poppins_600SemiBold',
+    },
+    nextMissionBox: {
+        flexDirection: 'row',
+        alignItems: 'flex-start',
+        gap: 8,
+        borderWidth: 1,
+        borderRadius: 12,
+        padding: 10,
+        marginBottom: 12,
+    },
+    nextMissionCopy: {
+        flex: 1,
+        minWidth: 0,
+    },
+    nextMissionLabel: {
+        fontSize: 10,
+        lineHeight: 13,
+        fontFamily: 'Poppins_700Bold',
+        marginBottom: 2,
+    },
+    nextMissionText: {
+        fontSize: 12,
+        lineHeight: 17,
+        fontFamily: 'Poppins_500Medium',
     },
     tagsRow: {
         flexDirection: 'row',

@@ -222,6 +222,8 @@ const BookingDetailsSheet = forwardRef<
         return "#F59E0B";
       case "cancelled":
         return "#EF4444";
+      case "refunded":
+        return "#0EA5E9";
       case "declined":
         return "#EF4444";
       case "rejected":
@@ -243,6 +245,8 @@ const BookingDetailsSheet = forwardRef<
         return "time-outline";
       case "cancelled":
         return "close-circle";
+      case "refunded":
+        return "cash-outline";
       case "declined":
         return "close-circle";
       case "rejected":

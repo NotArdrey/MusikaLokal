@@ -162,6 +162,39 @@ function getRecordingRule(source: any) {
   };
 }
 
+function weeklyScheduleAllowsDate(
+  source: any,
+  bookingDate: string,
+  fallback?: any,
+): boolean {
+  const scope =
+    source?.weekly_schedule_scope ??
+    fallback?.weekly_schedule_scope ??
+    "indefinite";
+
+  if (scope === "until") {
+    const endDate =
+      source?.weekly_schedule_end_date ?? fallback?.weekly_schedule_end_date;
+    return typeof endDate === "string" && endDate.length > 0
+      ? bookingDate <= endDate
+      : true;
+  }
+
+  if (scope === "specific_dates") {
+    const dates =
+      source?.weekly_schedule_dates ?? fallback?.weekly_schedule_dates;
+    if (Array.isArray(dates)) {
+      return dates.includes(bookingDate);
+    }
+    if (dates && typeof dates === "object") {
+      return Boolean(dates[bookingDate]);
+    }
+    return false;
+  }
+
+  return true;
+}
+
 function getRequiredRecordingBlocks(
   songCount: number,
   rule: { songsPerBlock: number },
@@ -1028,7 +1061,9 @@ serve(async (req: Request) => {
                     : b.status === "checked_in"
                       ? "In Progress"
                       : b.status === "cancelled"
-                        ? "Declined"
+                        ? String(b.payment_status || "").toLowerCase() === "refunded" || toMoneyNumber(b.refund_amount) > 0
+                          ? "Refunded"
+                          : "Declined"
                         : b.status,
             type: isVenue ? "Venue Booking" : "Studio Booking",
             isCancelled: b.status === "cancelled",
@@ -1060,6 +1095,8 @@ serve(async (req: Request) => {
             payment_amount: b.payment_amount || b.final_price,
             payment_type: b.payment_type || null,
             remaining_balance: b.remaining_balance || 0,
+            refund_amount: toMoneyNumber(b.refund_amount),
+            refunded_at: b.refunded_at || null,
             studio_owner_id: b.studio?.owner_id || null,
             relocation_requested_at: b.relocation_requested_at,
             relocation_expires_at: b.relocation_expires_at,
@@ -1227,7 +1264,9 @@ serve(async (req: Request) => {
                       : b.status === "checked_in"
                         ? "In Progress"
                         : b.status === "cancelled"
-                          ? "Declined"
+                          ? String(b.payment_status || "").toLowerCase() === "refunded" || toMoneyNumber(b.refund_amount) > 0
+                            ? "Refunded"
+                            : "Declined"
                           : b.status,
               type: isVenue ? "Venue Booking" : "Studio Booking",
               isCancelled: b.status === "cancelled",
@@ -1258,6 +1297,8 @@ serve(async (req: Request) => {
               payment_amount: b.payment_amount || b.final_price,
               payment_type: b.payment_type || null,
               remaining_balance: b.remaining_balance || 0,
+              refund_amount: toMoneyNumber(b.refund_amount),
+              refunded_at: b.refunded_at || null,
               relocation_requested_at: b.relocation_requested_at,
               relocation_expires_at: b.relocation_expires_at,
               relocation_proposed_date: b.relocation_proposed_date,
@@ -2077,6 +2118,8 @@ serve(async (req: Request) => {
         );
       }
 
+      let weeklyOperatingHoursForDate: any[] = [];
+
       if (!dateOverrides || dateOverrides.length === 0) {
         const bookingWeekDate = new Date(`${date}T00:00:00Z`);
         if (Number.isNaN(bookingWeekDate.getTime())) {
@@ -2116,6 +2159,8 @@ serve(async (req: Request) => {
             },
           );
         }
+
+        weeklyOperatingHoursForDate = weeklyOperatingHours || [];
 
         if (weeklyOperatingHours && weeklyOperatingHours.length > 0) {
           const weeklyAllowsSession = weeklyOperatingHours.some((row: any) =>
@@ -2177,7 +2222,7 @@ serve(async (req: Request) => {
       }
 
       const extendedStudioSettingsSelect =
-        "lead_time_hours, booking_horizon_days, min_booking_duration_hours, recording_songs_per_block, recording_hours_per_block";
+        "lead_time_hours, booking_horizon_days, min_booking_duration_hours, recording_songs_per_block, recording_hours_per_block, weekly_schedule_scope, weekly_schedule_end_date, weekly_schedule_dates";
       const legacyStudioSettingsSelect =
         "lead_time_hours, booking_horizon_days, min_booking_duration_hours";
 
@@ -2189,8 +2234,13 @@ serve(async (req: Request) => {
 
       if (
         studioSettingsResult.error &&
-        String(studioSettingsResult.error.message || "").includes(
+        [
           "recording_songs_per_block",
+          "weekly_schedule_scope",
+          "weekly_schedule_end_date",
+          "weekly_schedule_dates",
+        ].some((column) =>
+          String(studioSettingsResult.error?.message || "").includes(column),
         )
       ) {
         studioSettingsResult = await supabaseClient
@@ -2205,6 +2255,28 @@ serve(async (req: Request) => {
 
       if (studioSettingsError) {
         console.warn("⚠️ Could not load studio settings, using defaults:", studioSettingsError);
+      }
+
+      if (
+        (!dateOverrides || dateOverrides.length === 0) &&
+        !weeklyScheduleAllowsDate(
+          weeklyOperatingHoursForDate.find(
+            (row: any) => row?.weekly_schedule_scope,
+          ) ?? weeklyOperatingHoursForDate[0],
+          date,
+          studioSettingsData,
+        )
+      ) {
+        return new Response(
+          JSON.stringify({
+            error:
+              "This date is outside the studio's weekly schedule. Please choose a date shown as available by the studio.",
+          }),
+          {
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+            status: 409,
+          },
+        );
       }
 
       const leadTimeHours = Math.max(0, Number(studioSettingsData?.lead_time_hours ?? 24));
@@ -2776,11 +2848,12 @@ serve(async (req: Request) => {
             message: `New booking request for ${studioInfo.name} on ${date}.`,
             image: null,
             read: false,
-            meta: {
+            meta: buildNotificationRouteMeta("/bookings", { tab: "Pending" }, {
               studio_id,
               booking_id: data.id,
               booking_date: date,
-            },
+              event_type: "booking_request_created",
+            }),
           });
         }
       } catch (notifyError) {
@@ -3050,12 +3123,16 @@ serve(async (req: Request) => {
                   cancellationActorRole = "musician";
                 } else {
                   targetUserId = bookingInfoWithLegacy.user_id;
-                  notificationTitle = "Booking Declined";
-                  const refundSuffix = ownerCancellationRefundResult?.refund_amount
-                    ? ` A full refund of ₱${Number(ownerCancellationRefundResult.refund_amount).toLocaleString()} has been credited to your wallet.`
-                    : "";
-                  notificationMessage = `Your booking at ${bookingInfoWithLegacy.studio.name} has been declined/cancelled.${reasonSuffix}${refundSuffix}`;
-                  notificationType = "error";
+                  const refundAmount = toMoneyNumber(ownerCancellationRefundResult?.refund_amount);
+                  if (refundAmount > 0) {
+                    notificationTitle = "Booking Refunded";
+                    notificationMessage = `Your booking at ${bookingInfoWithLegacy.studio.name} has been refunded. A full refund of ₱${refundAmount.toLocaleString()} has been credited to your wallet.${reasonSuffix}`;
+                    notificationType = "success";
+                  } else {
+                    notificationTitle = "Booking Cancelled";
+                    notificationMessage = `Your booking at ${bookingInfoWithLegacy.studio.name} has been cancelled.${reasonSuffix}`;
+                    notificationType = "warning";
+                  }
                   cancellationActorRole = cancelledByOwner ? "studio_owner" : "unknown";
                 }
               } else if (new_status === "confirmed") {
@@ -3186,6 +3263,10 @@ serve(async (req: Request) => {
                 status: new_status,
                 event_type: notificationEventType,
                 cancellation_reason: cancellation_reason || null,
+                refund_amount: toMoneyNumber(ownerCancellationRefundResult?.refund_amount),
+                payment_status: ownerCancellationRefundResult?.owner_cancelled
+                  ? "refunded"
+                  : null,
                 cancelled_by_user_id: new_status === "cancelled" || new_status === "resigned" || new_status === "fired" ? authUser.id : null,
                 cancelled_by_role: cancellationActorRole,
               },

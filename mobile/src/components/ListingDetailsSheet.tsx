@@ -42,6 +42,14 @@ import { useListingSheetEffects } from "../hooks/useListingSheetEffects";
 import { useProfileCompletion } from "../hooks/useProfileCompletion";
 import { emitFavoriteChanged } from "../utils/favoriteEvents";
 import { submitListingRequest, uploadListingRequestDocument } from "../utils/listingRequests";
+import {
+  clearListingDetailsRequestInFlight,
+  getListingDetailsCacheEntry,
+  hasListingDetailsRequestInFlight,
+  LISTING_DETAILS_CACHE_TTL_MS,
+  markListingDetailsRequestInFlight,
+  setListingDetailsCacheEntry,
+} from "../utils/listingDetailsCache";
 import { usePageLoadLogger } from "../utils/loadTimeLogger";
 import { bottomSheetSpringConfig } from "../utils/motion";
 import { isFanUserRole } from "../utils/roleRouting";
@@ -72,16 +80,6 @@ const debugLog = (..._args: unknown[]) => { };
 
 const { width, height } = Dimensions.get("window");
 const IMG_HEIGHT = height < 700 ? height * 0.3 : height * 0.35;
-const LISTING_DETAILS_CACHE_TTL_MS = 60_000;
-
-type ListingDetailsCacheEntry = {
-  data: any;
-  existingBookings: any[];
-  fetchedAt: number;
-};
-
-const listingDetailsCache = new Map<string, ListingDetailsCacheEntry>();
-const listingDetailsInFlight = new Set<string>();
 
 // Responsive scaling utilities - optimized for iPhone SE and smaller devices
 const scale = (size: number) => {
@@ -127,10 +125,71 @@ const toLocalDateKey = (value: Date) => {
   return `${year}-${month}-${day}`;
 };
 
+type ScheduleSessionType = "rehearsal" | "recording" | "both";
+
+const normalizeScheduleSessionType = (
+  value: unknown,
+  fallback: ScheduleSessionType = "both",
+): ScheduleSessionType => {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (
+    normalized === "rehearsal" ||
+    normalized === "recording" ||
+    normalized === "both"
+  ) {
+    return normalized;
+  }
+  return fallback;
+};
+
+const parseScheduleSessionType = (
+  reason: unknown,
+  fallback: ScheduleSessionType = "both",
+): ScheduleSessionType => {
+  const match = String(reason || "").match(/session_type:(rehearsal|recording|both)/i);
+  return match ? normalizeScheduleSessionType(match[1], fallback) : fallback;
+};
+
+const getRequestedScheduleSessionType = (
+  studioType?: string | null,
+  selectedSessionType?: "Rehearsal" | "Recording" | null,
+): ScheduleSessionType | null => {
+  if (selectedSessionType === "Rehearsal") return "rehearsal";
+  if (selectedSessionType === "Recording") return "recording";
+
+  const normalizedStudioType = normalizeStudioType(studioType);
+  if (normalizedStudioType === "Rehearsal") return "rehearsal";
+  if (normalizedStudioType === "Recording") return "recording";
+  return null;
+};
+
+const getScheduleSessionType = (schedule: any): ScheduleSessionType =>
+  normalizeScheduleSessionType(
+    schedule?.sessionType ?? schedule?.session_type,
+    parseScheduleSessionType(schedule?.reason, "both"),
+  );
+
+const scheduleAllowsRequestedSession = (
+  schedule: any,
+  studioType?: string | null,
+  selectedSessionType?: "Rehearsal" | "Recording" | null,
+) => {
+  const requestedSessionType = getRequestedScheduleSessionType(
+    studioType,
+    selectedSessionType,
+  );
+  if (!requestedSessionType) return true;
+
+  const scheduleSessionType = getScheduleSessionType(schedule);
+  return scheduleSessionType === "both" || scheduleSessionType === requestedSessionType;
+};
+
 const getDateOverrideSchedule = (
   dateStr: string,
   date: Date,
   dateOverrides?: any[],
+  studioType?: string | null,
+  selectedSessionType?: "Rehearsal" | "Recording" | null,
 ) => {
   if (!Array.isArray(dateOverrides)) {
     return undefined;
@@ -143,6 +202,9 @@ const getDateOverrideSchedule = (
 
   const openRows = rows
     .filter((override) => override?.is_open && override?.open_time && override?.close_time)
+    .filter((override) =>
+      scheduleAllowsRequestedSession(override, studioType, selectedSessionType),
+    )
     .sort((a, b) => {
       const orderDiff = Number(a?.slot_order ?? 0) - Number(b?.slot_order ?? 0);
       if (orderDiff !== 0) return orderDiff;
@@ -158,10 +220,61 @@ const getDateOverrideSchedule = (
     slots: openRows.map((override) => ({
       start: override.open_time,
       end: override.close_time,
+      sessionType: getScheduleSessionType(override),
     })),
     isOverride: true,
   };
 };
+
+const weeklyScheduleAllowsDate = (
+  settings: any,
+  dateStr: string,
+  daySchedule?: any,
+): boolean => {
+  const scope =
+    daySchedule?.weekly_schedule_scope ??
+    daySchedule?.weeklyScheduleScope ??
+    settings?.weekly_schedule_scope ??
+    "indefinite";
+  if (scope === "until") {
+    const endDate =
+      daySchedule?.weekly_schedule_end_date ??
+      daySchedule?.weeklyScheduleEndDate ??
+      settings?.weekly_schedule_end_date;
+    return typeof endDate === "string" && endDate.length > 0
+      ? dateStr <= endDate
+      : true;
+  }
+
+  if (scope === "specific_dates") {
+    const dates =
+      daySchedule?.weekly_schedule_dates ??
+      daySchedule?.weeklyScheduleDates ??
+      settings?.weekly_schedule_dates;
+    if (Array.isArray(dates)) {
+      return dates.includes(dateStr);
+    }
+    if (dates && typeof dates === "object") {
+      return Boolean(dates[dateStr]);
+    }
+    return false;
+  }
+
+  return true;
+};
+
+const withDefaultStudioSettings = (settings?: any | null) => ({
+  lead_time_hours: 24,
+  weekend_multiplier: 1.0,
+  peak_season_multiplier: 1.0,
+  peak_season_dates: [],
+  off_peak_multiplier: 1.0,
+  off_peak_dates: [],
+  weekly_schedule_scope: "indefinite",
+  weekly_schedule_end_date: null,
+  weekly_schedule_dates: [],
+  ...(settings || {}),
+});
 
 const toPositiveNumber = (value: unknown) => {
   const parsed = Number(value);
@@ -217,38 +330,12 @@ const normalizeListingKind = (value: unknown) => {
   return null;
 };
 
-const normalizeInitialListing = (listing: any, listingId: string | null) => {
+const getInitialListingKind = (listing: any, listingId: string | null) => {
   if (!listing || !listingId || String(listing.id || "") !== String(listingId)) {
     return null;
   }
 
-  const type = normalizeListingKind(listing.type) || "Group";
-  const image = listing.image || listing.avatar_url || listing.logo_url || null;
-  const images = Array.isArray(listing.images)
-    ? listing.images
-    : image
-      ? [image]
-      : [];
-
-  return {
-    ...listing,
-    type,
-    name: listing.name || listing.full_name || "Listing",
-    description: listing.description || listing.bio || "",
-    image,
-    images,
-    location: listing.location || listing.address || "",
-    owner_id: listing.owner_id || listing.organizer_id || (type === "Artist" ? listing.id : null),
-    organizer_id: listing.organizer_id || null,
-    rate:
-      listing.hourly_rate?.toString?.() ||
-      listing.budget?.toString?.() ||
-      listing.rate?.toString?.() ||
-      "0",
-    review_count: Number(listing.review_count || 0),
-    rating: Number(listing.rating || 0),
-    studio_type: listing.studio_type || listing.type || null,
-  };
+  return normalizeListingKind(listing.type);
 };
 
 const fetchListingBaseByKind = async (listingId: string, kind: string | null) => {
@@ -304,8 +391,8 @@ const ListingDetailsSheet = forwardRef<
   const { userId, userRole, isGuest, isSystemLocked, showLockAlert } = useAuth();
   const { contentBottomPadding } = useBottomBarClearance(24);
   const { isProfileComplete } = useProfileCompletion();
-  const initialListingPreview = useMemo(
-    () => normalizeInitialListing(initialListing, listingId),
+  const initialListingKind = useMemo(
+    () => getInitialListingKind(initialListing, listingId),
     [initialListing, listingId],
   );
   const [loading, setLoading] = useState(false);
@@ -614,10 +701,17 @@ const ListingDetailsSheet = forwardRef<
             .order("override_date", { ascending: true })
             .order("slot_order", { ascending: true });
 
+          const { data: studioSettings, error: settingsError } = await supabase
+            .from("studio_settings")
+            .select("*")
+            .eq("studio_id", listingId)
+            .maybeSingle();
+
           let freshAvailability = group.availability;
           let freshDateOverrides = group.dateOverrides;
+          let freshSettings = group.settings;
 
-          if (!hoursError && operatingHours) {
+          if (!hoursError && Array.isArray(operatingHours) && operatingHours.length > 0) {
             debugLog("📅 Fresh operating hours fetched:", operatingHours.length);
             const dayNames = [
               "Sunday",
@@ -637,7 +731,15 @@ const ListingDetailsSheet = forwardRef<
                 slots: dayHours.map((h: any) => ({
                   start: h.open_time,
                   end: h.close_time,
+                  sessionType: getScheduleSessionType(h),
                 })),
+                sessionType: dayHours[0] ? getScheduleSessionType(dayHours[0]) : "both",
+                weekly_schedule_scope: dayHours[0]?.weekly_schedule_scope,
+                weekly_schedule_end_date: dayHours[0]?.weekly_schedule_end_date,
+                weekly_schedule_dates: dayHours[0]?.weekly_schedule_dates,
+                weeklyScheduleScope: dayHours[0]?.weekly_schedule_scope,
+                weeklyScheduleEndDate: dayHours[0]?.weekly_schedule_end_date,
+                weeklyScheduleDates: dayHours[0]?.weekly_schedule_dates,
               };
             });
             // Update group state with fresh availability
@@ -649,6 +751,12 @@ const ListingDetailsSheet = forwardRef<
             freshDateOverrides = dateOverrides;
             // Update group state with fresh date overrides
             setGroup((prev: any) => prev ? { ...prev, dateOverrides: freshDateOverrides } : prev);
+          }
+
+          if (!settingsError && studioSettings) {
+            debugLog("⚙️ Fresh studio settings fetched");
+            freshSettings = withDefaultStudioSettings(studioSettings);
+            setGroup((prev: any) => prev ? { ...prev, settings: freshSettings } : prev);
           }
 
           // Fetch fresh bookings
@@ -689,6 +797,7 @@ const ListingDetailsSheet = forwardRef<
               fetchedBookings,
               freshDateOverrides,
               bookings,
+              freshSettings,
             );
           }
         } catch (e) {
@@ -960,6 +1069,7 @@ const ListingDetailsSheet = forwardRef<
           freshBookings,
           group.dateOverrides,
           bookings,
+          group.settings,
         );
       }
       // Re-check unpaid booking status
@@ -1612,6 +1722,9 @@ const ListingDetailsSheet = forwardRef<
     debugLog("=== ListingDetailsSheet useEffect triggered ===");
     debugLog("listingId:", listingId);
     if (listingId) {
+      setGroup(null);
+      setExistingBookings([]);
+      setLoading(true);
       debugLog("Fetching group details for:", listingId);
       const interactionTask = InteractionManager.runAfterInteractions(() => {
         fetchGroupDetails();
@@ -1656,6 +1769,10 @@ const ListingDetailsSheet = forwardRef<
         interactionTask.cancel();
       };
     }
+
+    setGroup(null);
+    setExistingBookings([]);
+    setLoading(false);
   }, [listingId]);
 
   // Check for existing application when group data is loaded
@@ -1778,7 +1895,7 @@ const ListingDetailsSheet = forwardRef<
     const activeListingId = listingId;
     if (!activeListingId) return;
 
-    const cachedDetails = listingDetailsCache.get(activeListingId);
+    const cachedDetails = getListingDetailsCacheEntry(activeListingId);
     if (cachedDetails?.data) {
       setGroup(cachedDetails.data);
       setExistingBookings(cachedDetails.existingBookings || []);
@@ -1790,27 +1907,31 @@ const ListingDetailsSheet = forwardRef<
           cachedDetails.data.availability,
           cachedDetails.existingBookings || [],
           cachedDetails.data.dateOverrides,
+          undefined,
+          cachedDetails.data.settings,
         );
       }
 
-      if (Date.now() - cachedDetails.fetchedAt < LISTING_DETAILS_CACHE_TTL_MS) {
+      const isCachedStudio =
+        cachedDetails.data?.type === "Studio" ||
+        cachedDetails.data?.type === "Venue";
+
+      if (
+        !isCachedStudio &&
+        Date.now() - cachedDetails.fetchedAt < LISTING_DETAILS_CACHE_TTL_MS
+      ) {
         setLoading(false);
         return;
       }
     }
 
-    if (!cachedDetails && initialListingPreview) {
-      setGroup(initialListingPreview);
-      setExistingBookings([]);
-    }
-
-    if (listingDetailsInFlight.has(activeListingId)) {
-      setLoading(!cachedDetails && !initialListingPreview);
+    if (hasListingDetailsRequestInFlight(activeListingId)) {
+      setLoading(!cachedDetails);
       return;
     }
 
-    listingDetailsInFlight.add(activeListingId);
-    setLoading(!cachedDetails && !initialListingPreview);
+    markListingDetailsRequestInFlight(activeListingId);
+    setLoading(!cachedDetails);
     try {
       const {
         data: { user },
@@ -1822,7 +1943,7 @@ const ListingDetailsSheet = forwardRef<
       let ownerId = null;
       const preferredListing = await fetchListingBaseByKind(
         activeListingId,
-        normalizeListingKind(initialListingPreview?.type),
+        initialListingKind,
       );
 
       if (preferredListing) {
@@ -2124,7 +2245,7 @@ const ListingDetailsSheet = forwardRef<
             }
           }
 
-          if (!hoursError && operatingHours) {
+          if (!hoursError && Array.isArray(operatingHours) && operatingHours.length > 0) {
             debugLog("📅 Operating hours fetched:", operatingHours);
             // Convert operating hours to availability format - now supports multiple slots per day
             const dayNames = [
@@ -2145,48 +2266,49 @@ const ListingDetailsSheet = forwardRef<
                 slots: dayHours.map((h: any) => ({
                   start: h.open_time,
                   end: h.close_time,
+                  sessionType: getScheduleSessionType(h),
                 })),
+                sessionType: dayHours[0] ? getScheduleSessionType(dayHours[0]) : "both",
+                weekly_schedule_scope: dayHours[0]?.weekly_schedule_scope,
+                weekly_schedule_end_date: dayHours[0]?.weekly_schedule_end_date,
+                weekly_schedule_dates: dayHours[0]?.weekly_schedule_dates,
+                weeklyScheduleScope: dayHours[0]?.weekly_schedule_scope,
+                weeklyScheduleEndDate: dayHours[0]?.weekly_schedule_end_date,
+                weeklyScheduleDates: dayHours[0]?.weekly_schedule_dates,
               };
             });
             normalizedData.availability = availability;
             debugLog("📅 Converted availability:", availability);
-          } else if (!data.availability) {
+          } else if (data.availability) {
             debugLog(
               "⚠️ No operating hours found, checking availability column...",
             );
             // Fallback: check if availability exists in the data (JSONB column)
-            if (data.availability) {
-              normalizedData.availability = data.availability;
-              debugLog(
-                "📅 Using availability from JSONB column:",
-                data.availability,
-              );
-            }
+            normalizedData.availability = data.availability;
+            debugLog(
+              "📅 Using availability from JSONB column:",
+              data.availability,
+            );
           }
 
           // Store date overrides for use in availability processing
-          if (!overridesError && dateOverrides && dateOverrides.length > 0) {
-            debugLog("📅 Date overrides fetched:", dateOverrides);
+          if (!overridesError && Array.isArray(dateOverrides)) {
+            if (dateOverrides.length > 0) {
+              debugLog("📅 Date overrides fetched:", dateOverrides);
+            }
             normalizedData.dateOverrides = dateOverrides;
           }
 
           if (!settingsError && studioSettings) {
             debugLog("⚙️ Studio settings fetched:", studioSettings);
-            normalizedData.settings = studioSettings;
+            normalizedData.settings = withDefaultStudioSettings(studioSettings);
           } else {
             debugLog("⚠️ No studio settings found, using defaults");
-            normalizedData.settings = {
-              lead_time_hours: 24,
-              weekend_multiplier: 1.0,
-              peak_season_multiplier: 1.0,
-              peak_season_dates: [],
-              off_peak_multiplier: 1.0,
-              off_peak_dates: [],
-            };
+            normalizedData.settings = withDefaultStudioSettings();
           }
         }
 
-        listingDetailsCache.set(activeListingId, {
+        setListingDetailsCacheEntry(activeListingId, {
           data: normalizedData,
           existingBookings: cachedDetails?.existingBookings || [],
           fetchedAt: Date.now(),
@@ -2215,7 +2337,7 @@ const ListingDetailsSheet = forwardRef<
           // Fetch existing bookings for availability calculation
           const fetchedBookings = await fetchStudioBookings(data.id);
 
-          listingDetailsCache.set(activeListingId, {
+          setListingDetailsCacheEntry(activeListingId, {
             data: normalizedData,
             existingBookings: fetchedBookings,
             fetchedAt: Date.now(),
@@ -2234,12 +2356,14 @@ const ListingDetailsSheet = forwardRef<
               normalizedData.availability,
               fetchedBookings,
               normalizedData.dateOverrides,
+              undefined,
+              normalizedData.settings,
             );
           } else {
             debugLog("⚠️ No availability data to process");
           }
         } else {
-          listingDetailsCache.set(activeListingId, {
+          setListingDetailsCacheEntry(activeListingId, {
             data: normalizedData,
             existingBookings: [],
             fetchedAt: Date.now(),
@@ -2252,7 +2376,7 @@ const ListingDetailsSheet = forwardRef<
     } catch (e) {
       debugLog("Error fetching details:", e);
     } finally {
-      listingDetailsInFlight.delete(activeListingId);
+      clearListingDetailsRequestInFlight(activeListingId);
       setLoading(false);
       debugLog("fetchGroupDetails complete, loading:", false);
     }
@@ -2263,6 +2387,7 @@ const ListingDetailsSheet = forwardRef<
     dbBookings: any[],
     dateOverrides?: any[],
     cartBookings?: any[],
+    settingsOverride?: any,
   ) => {
     // Safeguard against undefined or non-array dbBookings
     const safeDbBookings = Array.isArray(dbBookings) ? dbBookings : [];
@@ -2278,7 +2403,8 @@ const ListingDetailsSheet = forwardRef<
     today.setHours(0, 0, 0, 0);
 
     // Get lead time for filtering slots that are too soon
-    const leadTimeHours = group?.settings?.lead_time_hours || 0;
+    const effectiveSettings = settingsOverride ?? group?.settings;
+    const leadTimeHours = effectiveSettings?.lead_time_hours || 0;
     const minBookingTime = new Date();
     minBookingTime.setHours(minBookingTime.getHours() + leadTimeHours);
 
@@ -2334,21 +2460,54 @@ const ListingDetailsSheet = forwardRef<
 
       if (dateOverrideRows) {
         // Use date override instead of weekly schedule
-        daySchedule = getDateOverrideSchedule(dateStr, date, dateOverrideRows);
+        daySchedule = getDateOverrideSchedule(
+          dateStr,
+          date,
+          dateOverrideRows,
+          group?.studio_type,
+          selectedSessionType,
+        );
         if (daySchedule) {
           debugLog(`📅 Using date override for ${dateStr}:`, daySchedule);
         }
       } else {
         // Use weekly schedule
-        daySchedule = availabilityMap[dayIndex];
+        daySchedule = weeklyScheduleAllowsDate(
+          effectiveSettings,
+          dateStr,
+          availabilityMap[dayIndex],
+        )
+          ? availabilityMap[dayIndex]
+          : null;
       }
 
       // Check if Open
       if (daySchedule && daySchedule.slots && daySchedule.slots.length > 0) {
+        const sessionAllowedSlots = daySchedule.slots.filter((slot: any) =>
+          scheduleAllowsRequestedSession(
+            {
+              ...slot,
+              sessionType: slot?.sessionType ?? slot?.session_type ?? daySchedule?.sessionType ?? daySchedule?.session_type,
+              reason: slot?.reason ?? daySchedule?.reason,
+            },
+            group?.studio_type,
+            selectedSessionType,
+          ),
+        );
+
+        if (sessionAllowedSlots.length === 0) {
+          marked[dateStr] = {
+            disabled: true,
+            disableTouchEvent: true,
+            textColor: isDark ? "#4B5563" : "#D1D5DB",
+          };
+          continue;
+        }
+
         // Calculate if Fully Booked
         // 1. Generate all potential slots for this day (considering lead time)
         const potentialSlots: string[] = [];
-        daySchedule.slots.forEach((slot: any) => {
+        sessionAllowedSlots.forEach((slot: any) => {
           const start = new Date(`${dateStr}T${slot.start}`);
           const end = new Date(`${dateStr}T${slot.end}`);
           const current = new Date(start);
@@ -2504,7 +2663,13 @@ const ListingDetailsSheet = forwardRef<
       );
       if (dateOverrideRows.length > 0) {
         debugLog("🕐 Found date override:", dateOverrideRows);
-        daySchedule = getDateOverrideSchedule(dateStr, selectedDate, dateOverrideRows);
+        daySchedule = getDateOverrideSchedule(
+          dateStr,
+          selectedDate,
+          dateOverrideRows,
+          group?.studio_type,
+          selectedSessionType,
+        );
         if (!daySchedule) {
           // Date is closed
           debugLog("⚠️ Date override marks this date as closed");
@@ -2516,15 +2681,39 @@ const ListingDetailsSheet = forwardRef<
 
     // Fall back to weekly schedule if no override
     if (!daySchedule) {
-      daySchedule = group.availability.find(
+      const weeklyDaySchedule = group.availability.find(
         (a: any) => a.day.toLowerCase() === dayName,
       );
+      if (
+        weeklyDaySchedule &&
+        weeklyScheduleAllowsDate(group?.settings, dateStr, weeklyDaySchedule)
+      ) {
+        daySchedule = weeklyDaySchedule;
+      }
     }
 
     debugLog("🕐 Found day schedule:", daySchedule);
 
     if (!daySchedule || !daySchedule.slots) {
       debugLog("⚠️ No slots for this day");
+      setAvailableSlots([]);
+      return [];
+    }
+
+    const sessionAllowedSlots = daySchedule.slots.filter((slot: any) =>
+      scheduleAllowsRequestedSession(
+        {
+          ...slot,
+          sessionType: slot?.sessionType ?? slot?.session_type ?? daySchedule?.sessionType ?? daySchedule?.session_type,
+          reason: slot?.reason ?? daySchedule?.reason,
+        },
+        group?.studio_type,
+        selectedSessionType,
+      ),
+    );
+
+    if (sessionAllowedSlots.length === 0) {
+      debugLog("⚠️ No slots for selected session type on this day");
       setAvailableSlots([]);
       return [];
     }
@@ -2621,7 +2810,7 @@ const ListingDetailsSheet = forwardRef<
 
     debugLog("🕐 Blocked times (including cart):", Array.from(blockedTimes));
 
-    daySchedule.slots.forEach((slot: any) => {
+    sessionAllowedSlots.forEach((slot: any) => {
       debugLog("🕐 Processing slot:", slot);
       const start = new Date(`${dateStr}T${slot.start}`);
       const end = new Date(`${dateStr}T${slot.end}`);

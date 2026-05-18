@@ -29,6 +29,7 @@ type RadioQueueTrack = {
   playlistTitle: string;
   slotLabel: string;
   sourceArtistName: string;
+  isLiveStream?: boolean;
 };
 
 type RadioPlayerContextValue = {
@@ -130,6 +131,57 @@ const readTimestampMs = (value: unknown) => {
   if (typeof value !== "string") return null;
   const timestampMs = Date.parse(value);
   return Number.isFinite(timestampMs) ? timestampMs : null;
+};
+
+const readTrimmedString = (value: unknown) => (
+  typeof value === "string" ? value.trim() : ""
+);
+
+const getStationBroadcastStreamUrl = (stationData: any) => {
+  const streamUrl = readTrimmedString(stationData?.stream_url);
+  if (!streamUrl || stationData?.is_active === false) return "";
+
+  const streamStatus = readTrimmedString(stationData?.stream_status).toLowerCase();
+  if (streamStatus === "offline") return "";
+
+  return streamUrl;
+};
+
+const buildStationBroadcastTrack = (stationData: any): RadioQueueTrack | null => {
+  const streamUrl = getStationBroadcastStreamUrl(stationData);
+  if (!streamUrl) return null;
+
+  const stationId = readTrimmedString(stationData?.id) || "station";
+  const stationName = readTrimmedString(stationData?.name) || "Live Station";
+  const artist =
+    readTrimmedString(stationData?.now_playing_artist) ||
+    readTrimmedString(stationData?.managed_profile?.full_name) ||
+    readTrimmedString(stationData?.creator?.full_name) ||
+    "MusikaLokal";
+  const title = readTrimmedString(stationData?.now_playing_title) || stationName;
+  const artwork = resolveRadioMediaUrl(
+    stationData?.cover_image_url ||
+    stationData?.managed_profile?.avatar_url ||
+    stationData?.creator?.avatar_url,
+  );
+
+  return {
+    id: `${stationId}:live-stream`,
+    itemId: `${stationId}:live-stream`,
+    stationId,
+    queueIndex: 0,
+    slotIndex: 0,
+    itemIndex: 0,
+    stationName,
+    playlistTitle: "Live broadcast",
+    slotLabel: "Live",
+    sourceArtistName: artist,
+    url: streamUrl,
+    title,
+    artist,
+    artwork: artwork || undefined,
+    isLiveStream: true,
+  };
 };
 
 const getStationAnchorTimestampMs = (stationData: any) => {
@@ -439,6 +491,16 @@ export function RadioPlayerProvider({ children }: { children: ReactNode }) {
       const playableStation = await ensureStationData(stationData);
       if (requestId !== requestIdRef.current) return;
 
+      const broadcastTrack = buildStationBroadcastTrack(playableStation);
+      if (broadcastTrack) {
+        activeStationRef.current = playableStation;
+        queueRef.current = [broadcastTrack];
+        setQueueLength(1);
+        setActiveStation(playableStation);
+        await playQueueIndex(0, true, 0);
+        return;
+      }
+
       const queue = await buildStationQueue(playableStation);
       if (requestId !== requestIdRef.current) return;
 
@@ -588,6 +650,10 @@ export function RadioPlayerProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (!activeStation?.id || queueRef.current.length === 0 || activeStation?.is_active === false) {
+      return undefined;
+    }
+
+    if (getStationBroadcastStreamUrl(activeStation)) {
       return undefined;
     }
 

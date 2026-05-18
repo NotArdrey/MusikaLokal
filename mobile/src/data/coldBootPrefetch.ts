@@ -107,6 +107,7 @@ const prefetchFeed = (queryClient: QueryClient, userId: string | null) => {
           action: "get_feed",
           cursor: pageParam,
           feed_type: personalize ? "for_you" : "public",
+          include_entities: true,
           limit: FEED_PAGE_SIZE,
           personalize,
           ...(userId ? { userId } : {}),

@@ -6,7 +6,9 @@ import React, { forwardRef, useCallback, useEffect, useMemo, useState } from 're
 import { ActivityIndicator, Dimensions, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Easing } from 'react-native-reanimated';
 import { supabase } from '../../lib/supabase';
+import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
+import { getRecentlyViewedStorageKey } from '../utils/recentlyViewed';
 import ListingCard from './ListingCard';
 
 const { width, height } = Dimensions.get('window');
@@ -37,11 +39,16 @@ interface RecentlyViewedSheetProps {
 
 const RecentlyViewedSheet = forwardRef<BottomSheetModal, RecentlyViewedSheetProps>(({ onClose, onItemPress, onProductionTeamPress, onChat }, ref) => {
     const { colors, isDark } = useTheme();
+    const { isGuest, userId } = useAuth();
     const snapPoints = useMemo(() => ['90%'], []);
     const animationConfigs = useBottomSheetTimingConfigs({
         duration: 320,
         easing: Easing.inOut(Easing.cubic),
     });
+    const recentlyViewedStorageKey = useMemo(
+        () => getRecentlyViewedStorageKey(userId, isGuest),
+        [isGuest, userId],
+    );
 
     const [data, setData] = useState<any[]>([]);
     const [loading, setLoading] = useState(false);
@@ -91,8 +98,7 @@ const RecentlyViewedSheet = forwardRef<BottomSheetModal, RecentlyViewedSheetProp
         const fetchRecentlyViewed = async () => {
             setLoading(true);
             try {
-                // Use the same key as home.tsx: 'recently_viewed_items'
-                const historyJson = await AsyncStorage.getItem('recently_viewed_items');
+                const historyJson = await AsyncStorage.getItem(recentlyViewedStorageKey);
                 if (!historyJson) {
                     setData([]);
                     setLoading(false);
@@ -196,7 +202,7 @@ const RecentlyViewedSheet = forwardRef<BottomSheetModal, RecentlyViewedSheetProp
         };
 
         fetchRecentlyViewed();
-    }, []);
+    }, [recentlyViewedStorageKey]);
 
     const renderItem = useCallback(({ item }: { item: any }) => (
         <View style={{ paddingHorizontal: scale(24), marginBottom: moderateScale(16) }}>

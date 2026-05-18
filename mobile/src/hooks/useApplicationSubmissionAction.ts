@@ -3,6 +3,7 @@ import { supabase } from "../../lib/supabase";
 import { getGigApplicationDeadlineInfo } from "../utils/gigApplication";
 import { submitListingRequest } from "../utils/listingRequests";
 import { buildNotificationRouteMeta } from "../utils/notificationNavigation";
+import { sanitizeStorageFileName, uploadStorageObject } from "../utils/storageUpload";
 
 interface AlertConfig {
   type: "success" | "error" | "warning" | "info";
@@ -112,19 +113,17 @@ export const useApplicationSubmissionAction = ({
 
   const uploadDocument = useCallback(async (file: any) => {
     try {
-
-      const response = await fetch(file.uri);
-      const arrayBuffer = await response.arrayBuffer();
-
       const fileExt = file.name.split(".").pop() || "pdf";
-      const fileName = `${userId}/cvs/${Date.now()}_cv.${fileExt}`;
+      const safeFileName = sanitizeStorageFileName(file.name || `cv.${fileExt}`, `cv.${fileExt}`);
+      const fileName = `${userId}/cvs/${Date.now()}_${safeFileName}`;
 
-      const { data, error } = await supabase.storage
-        .from("documents")
-        .upload(fileName, arrayBuffer, {
-          contentType: file.mimeType || "application/pdf",
-          upsert: false,
-        });
+      const { data, error } = await uploadStorageObject({
+        bucket: "documents",
+        path: fileName,
+        uri: file.uri,
+        contentType: file.mimeType || "application/pdf",
+        upsert: false,
+      });
 
       if (error) throw error;
 

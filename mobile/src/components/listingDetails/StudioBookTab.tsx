@@ -34,6 +34,17 @@ const PROMOTION_CRITERIA_PREFIX = "how to get promo:";
 const PROMOTION_MIN_HOURS_PREFIX = "minimum booking hours:";
 const PROMOTION_MIN_SPEND_PREFIX = "minimum spend:";
 type BookingSessionType = "recording" | "rehearsal";
+type TimeSlotRange = { start: string; end: string };
+type RecordingDurationStatus = {
+  songCount: number;
+  selectedHours: number;
+  requiredHours: number;
+  remainingHours: number;
+  isComplete: boolean;
+};
+type RecordingDurationIssue = RecordingDurationStatus & { bookingIndex: number };
+
+const HOURS_EPSILON = 1e-9;
 
 const supabaseUrl =
   Constants.expoConfig?.extra?.supabaseUrl ||
@@ -256,12 +267,45 @@ const StudioBookTab = ({
   };
 
   const getTotalSlotDurationHours = (
-    slots: { start: string; end: string }[],
+    slots: TimeSlotRange[],
   ): number =>
     (Array.isArray(slots) ? slots : []).reduce(
       (total, slot) => total + getSlotDurationHours(slot.start, slot.end),
       0,
     );
+
+  const getRecordingDurationStatus = (
+    songCount: number | null,
+    slots: TimeSlotRange[],
+  ): RecordingDurationStatus | null => {
+    if (!songCount) return null;
+
+    const selectedHours = getTotalSlotDurationHours(slots);
+    const requiredHours = getRecordingRequiredTotalHours(songCount);
+    const remainingHours = Math.max(requiredHours - selectedHours, 0);
+
+    return {
+      songCount,
+      selectedHours,
+      requiredHours,
+      remainingHours,
+      isComplete: selectedHours + HOURS_EPSILON >= requiredHours,
+    };
+  };
+
+  const getRecordingDurationMessage = (
+    status: RecordingDurationStatus,
+  ): string => {
+    const selectedLabel = formatRecordingHours(status.selectedHours);
+    const requiredLabel = formatRecordingHours(status.requiredHours);
+    const songLabel = status.songCount === 1 ? "song" : "songs";
+
+    if (status.isComplete) {
+      return `${selectedLabel}h selected / ${requiredLabel}h required for ${status.songCount} ${songLabel}.`;
+    }
+
+    return `Add ${formatRecordingHours(status.remainingHours)}h more before submitting. ${selectedLabel}h selected / ${requiredLabel}h required for ${status.songCount} ${songLabel}.`;
+  };
 
   const toValidDate = (value: any): Date | null => {
     if (!value) return null;
@@ -500,6 +544,68 @@ const StudioBookTab = ({
     return Math.max(0, rawLeadTime);
   };
 
+  const hasDateOverrideForDate = (bookingDate: string): boolean =>
+    Array.isArray(group?.dateOverrides) &&
+    group.dateOverrides.some((override: any) => override?.override_date === bookingDate);
+
+  const getWeeklyDayScheduleForDate = (bookingDate: string): any => {
+    if (!bookingDate || !Array.isArray(group?.availability)) return null;
+    const [year, month, day] = bookingDate.split("-").map(Number);
+    const date = new Date(year, (month || 1) - 1, day || 1);
+    const dayName = [
+      "sunday",
+      "monday",
+      "tuesday",
+      "wednesday",
+      "thursday",
+      "friday",
+      "saturday",
+    ][date.getDay()];
+    return group.availability.find(
+      (schedule: any) => String(schedule?.day || "").toLowerCase() === dayName,
+    );
+  };
+
+  const getWeeklyScheduleScopeViolationMessage = (
+    bookingDate: string,
+  ): string | null => {
+    if (!bookingDate || hasDateOverrideForDate(bookingDate)) return null;
+
+    const settings = group?.settings || {};
+    const daySchedule = getWeeklyDayScheduleForDate(bookingDate);
+    const scheduleLabel = daySchedule?.day || "weekly";
+    const scope =
+      daySchedule?.weekly_schedule_scope ??
+      daySchedule?.weeklyScheduleScope ??
+      settings.weekly_schedule_scope;
+
+    if (scope === "until") {
+      const endDate =
+        daySchedule?.weekly_schedule_end_date ??
+        daySchedule?.weeklyScheduleEndDate ??
+        settings.weekly_schedule_end_date;
+      if (typeof endDate === "string" && endDate && bookingDate > endDate) {
+        return `The studio's ${scheduleLabel} schedule is only available until ${formatDashedNumericDate(endDate)}. Please choose another date.`;
+      }
+    }
+
+    if (scope === "specific_dates") {
+      const dates =
+        daySchedule?.weekly_schedule_dates ??
+        daySchedule?.weeklyScheduleDates ??
+        settings.weekly_schedule_dates;
+      const isAllowed = Array.isArray(dates)
+        ? dates.includes(bookingDate)
+        : Boolean(dates?.[bookingDate]);
+
+      if (!isAllowed) {
+        return `The studio's ${scheduleLabel} schedule does not include ${formatDashedNumericDate(bookingDate)}. Please choose a date marked as available.`;
+      }
+    }
+
+    return null;
+  };
+
   const activePromotionsForBooking = React.useMemo(() => {
     const today = new Date().toISOString().slice(0, 10);
     const normalizedPromotions = Array.isArray(promotions) ? promotions : [];
@@ -670,7 +776,8 @@ const StudioBookTab = ({
       normalized.includes("bookings can only be made up to") ||
       normalized.includes("time slot") ||
       normalized.includes("already have a pending booking") ||
-      normalized.includes("outside operating hours")
+      normalized.includes("outside operating hours") ||
+      normalized.includes("weekly schedule")
     );
   };
 
@@ -694,6 +801,10 @@ const StudioBookTab = ({
       return "We couldn't verify availability for this time slot. Please try again in a moment.";
     }
 
+    if (normalizedMessage.includes("weekly schedule")) {
+      return rawMessage;
+    }
+
     if (normalizedMessage.includes("pricing calculation failed")) {
       return "We couldn't calculate the price for this session. Please try again.";
     }
@@ -714,7 +825,8 @@ const StudioBookTab = ({
       showAlert("warning", "Advance Notice Required", errorMsg);
     } else if (
       normalizedRawMessage.includes("cannot create a booking in the past") ||
-      normalizedRawMessage.includes("bookings can only be made up to")
+      normalizedRawMessage.includes("bookings can only be made up to") ||
+      normalizedRawMessage.includes("weekly schedule")
     ) {
       showAlert("warning", "Date Not Available", errorMsg);
     } else if (
@@ -790,6 +902,49 @@ const StudioBookTab = ({
     bookings.length > 0 && recordingBookingCount === bookings.length;
   const hasMixedBookingTypes =
     recordingBookingCount > 0 && recordingBookingCount < bookings.length;
+  const recordingDurationIssues = bookings
+    .map((booking, index): RecordingDurationIssue | null => {
+      if (getBookingSessionType(booking) !== "recording") return null;
+
+      const status = getRecordingDurationStatus(
+        getBookingSongCount(booking),
+        getBookingSlots(booking),
+      );
+
+      if (!status || status.isComplete) return null;
+
+      return {
+        ...status,
+        bookingIndex: index,
+      };
+    })
+    .filter((issue): issue is RecordingDurationIssue => Boolean(issue));
+  const firstRecordingDurationIssue = recordingDurationIssues[0] || null;
+  const hasRecordingDurationIssue = Boolean(firstRecordingDurationIssue);
+  const canSubmitBookings =
+    bookings.length > 0 && !loading && !hasRecordingDurationIssue;
+  const getDraftRecordingDurationStatus = (): RecordingDurationStatus | null => {
+    if (!isRecordingMode || !date || !endTime || !selectedSlot) return null;
+
+    const songCount = getRecordingSongCount();
+    const bookingDate = toDateKey(date);
+    if (!songCount || !bookingDate) return null;
+
+    const currentSlot: TimeSlotRange = {
+      start: toTimeLabel(date),
+      end: toTimeLabel(endTime),
+    };
+    const existingBooking = bookings.find(
+      (booking) => toDateKey(booking.date) === bookingDate,
+    );
+    const existingSlots = existingBooking ? getBookingSlots(existingBooking) : [];
+    const draftSlots = [...existingSlots, currentSlot].sort((a, b) =>
+      a.start.localeCompare(b.start),
+    );
+
+    return getRecordingDurationStatus(songCount, draftSlots);
+  };
+  const draftRecordingDurationStatus = getDraftRecordingDurationStatus();
 
   const isJwtLike = (token?: string | null): token is string => {
     if (typeof token !== "string") return false;
@@ -1262,6 +1417,10 @@ const StudioBookTab = ({
               },
             ];
             const isMultiSlot = slots.length > 1;
+            const recordingDurationStatus =
+              bookingSessionType === "recording"
+                ? getRecordingDurationStatus(bookingSongCount, slots)
+                : null;
 
             return (
               <View
@@ -1270,7 +1429,10 @@ const StudioBookTab = ({
                   styles.bookingCard,
                   {
                     backgroundColor: isDark ? "#1F2937" : "#F9FAFB",
-                    borderColor: colors.border,
+                    borderColor:
+                      recordingDurationStatus && !recordingDurationStatus.isComplete
+                        ? "#F59E0B"
+                        : colors.border,
                     marginBottom: 8,
                   },
                 ]}
@@ -1383,6 +1545,49 @@ const StudioBookTab = ({
                       </View>
                     )}
                   </View>
+                  {recordingDurationStatus && (
+                    <View
+                      style={{
+                        alignItems: "flex-start",
+                        backgroundColor: recordingDurationStatus.isComplete
+                          ? "rgba(16, 185, 129, 0.12)"
+                          : "rgba(245, 158, 11, 0.12)",
+                        borderRadius: 8,
+                        flexDirection: "row",
+                        gap: 6,
+                        marginTop: 8,
+                        paddingHorizontal: 8,
+                        paddingVertical: 6,
+                      }}
+                    >
+                      <Ionicons
+                        name={
+                          recordingDurationStatus.isComplete
+                            ? "checkmark-circle-outline"
+                            : "alert-circle-outline"
+                        }
+                        size={14}
+                        color={recordingDurationStatus.isComplete ? "#10B981" : "#F59E0B"}
+                      />
+                      <Text
+                        style={{
+                          color: recordingDurationStatus.isComplete
+                            ? "#10B981"
+                            : isDark
+                              ? "#FCD34D"
+                              : "#92400E",
+                          flex: 1,
+                          fontFamily: "Poppins_500Medium",
+                          fontSize: 11,
+                          lineHeight: 16,
+                        }}
+                      >
+                        {recordingDurationStatus.isComplete
+                          ? `Recording time ready. ${getRecordingDurationMessage(recordingDurationStatus)}`
+                          : getRecordingDurationMessage(recordingDurationStatus)}
+                      </Text>
+                    </View>
+                  )}
                 </View>
                 <View style={{ flexDirection: "row", alignItems: "center", gap: 10, marginLeft: 12 }}>
                   <TouchableOpacity
@@ -1528,6 +1733,63 @@ const StudioBookTab = ({
                   return `Recording sessions are priced per song. Time rule: ${recordingRuleShort}. ${previewSongCount} song${previewSongCount > 1 ? "s" : ""} requires ${formatRecordingHours(requiredHours)} hr${requiredHours === 1 ? "" : "s"} across ${requiredBlocks} block${requiredBlocks > 1 ? "s" : ""}.`;
                 })()}
               </Text>
+              {draftRecordingDurationStatus && (
+                <View
+                  style={{
+                    alignItems: "flex-start",
+                    backgroundColor: draftRecordingDurationStatus.isComplete
+                      ? "rgba(16, 185, 129, 0.12)"
+                      : "rgba(245, 158, 11, 0.12)",
+                    borderColor: draftRecordingDurationStatus.isComplete
+                      ? "rgba(16, 185, 129, 0.35)"
+                      : "rgba(245, 158, 11, 0.35)",
+                    borderRadius: 10,
+                    borderWidth: 1,
+                    flexDirection: "row",
+                    gap: 8,
+                    marginTop: 8,
+                    padding: 10,
+                  }}
+                >
+                  <Ionicons
+                    name={
+                      draftRecordingDurationStatus.isComplete
+                        ? "checkmark-circle-outline"
+                        : "alert-circle-outline"
+                    }
+                    size={16}
+                    color={draftRecordingDurationStatus.isComplete ? "#10B981" : "#F59E0B"}
+                  />
+                  <View style={{ flex: 1 }}>
+                    <Text
+                      style={{
+                        color: draftRecordingDurationStatus.isComplete
+                          ? "#10B981"
+                          : isDark
+                            ? "#FCD34D"
+                            : "#92400E",
+                        fontFamily: "Poppins_600SemiBold",
+                        fontSize: 12,
+                      }}
+                    >
+                      {draftRecordingDurationStatus.isComplete
+                        ? "Recording time requirement met"
+                        : "Recording time still short"}
+                    </Text>
+                    <Text
+                      style={{
+                        color: colors.textSecondary,
+                        fontFamily: "Poppins_400Regular",
+                        fontSize: 11,
+                        lineHeight: 16,
+                        marginTop: 2,
+                      }}
+                    >
+                      {getRecordingDurationMessage(draftRecordingDurationStatus)}
+                    </Text>
+                  </View>
+                </View>
+              )}
             </View>
           )}
 
@@ -1550,6 +1812,17 @@ const StudioBookTab = ({
                   const bookingDate = toDateKey(date);
                   if (!bookingDate) {
                     showAlert("warning", "Date Not Selected", "Please select a valid booking date before continuing.");
+                    setIsCheckingAvailability(false);
+                    return;
+                  }
+                  const weeklyScheduleViolation =
+                    getWeeklyScheduleScopeViolationMessage(bookingDate);
+                  if (weeklyScheduleViolation) {
+                    showAlert(
+                      "warning",
+                      "Date Unavailable",
+                      weeklyScheduleViolation,
+                    );
                     setIsCheckingAvailability(false);
                     return;
                   }
@@ -1615,7 +1888,6 @@ const StudioBookTab = ({
                     const songCount = recordingSongCount || 1;
                     const currentSlotHours = getSlotDurationHours(startTime, endTime2);
                     const baseRecordingPrice = recordingRate * songCount;
-                    const requiredTotalHours = getRecordingRequiredTotalHours(songCount);
 
                     finalPricing = {
                       base_rate: recordingRate,
@@ -1777,7 +2049,6 @@ const StudioBookTab = ({
                     if (isRecordingMode) {
                       const songCount = recordingSongCount || 1;
                       const totalHours = getSlotDurationHours(startTime, endTime2);
-                      const requiredTotalHours = getRecordingRequiredTotalHours(songCount);
 
                       setBookings([
                         ...bookings,
@@ -1901,6 +2172,47 @@ const StudioBookTab = ({
         </View>
       </View>
 
+      {firstRecordingDurationIssue &&
+        !(hasExistingStudioBooking && existingStudioBookingStatus === "unpaid") && (
+        <View
+          style={{
+            alignItems: "flex-start",
+            backgroundColor: isDark ? "rgba(245, 158, 11, 0.14)" : "#FFFBEB",
+            borderColor: isDark ? "rgba(245, 158, 11, 0.38)" : "#FDE68A",
+            borderRadius: 12,
+            borderWidth: 1,
+            flexDirection: "row",
+            gap: 10,
+            marginBottom: 16,
+            padding: 12,
+          }}
+        >
+          <Ionicons name="alert-circle-outline" size={18} color="#F59E0B" />
+          <View style={{ flex: 1 }}>
+            <Text
+              style={{
+                color: isDark ? "#FCD34D" : "#92400E",
+                fontFamily: "Poppins_600SemiBold",
+                fontSize: 13,
+              }}
+            >
+              Complete the recording time before booking
+            </Text>
+            <Text
+              style={{
+                color: colors.textSecondary,
+                fontFamily: "Poppins_400Regular",
+                fontSize: 12,
+                lineHeight: 18,
+                marginTop: 2,
+              }}
+            >
+              Session {firstRecordingDurationIssue.bookingIndex + 1}: {getRecordingDurationMessage(firstRecordingDurationIssue)}
+            </Text>
+          </View>
+        </View>
+      )}
+
       {bookings.length > 0 && !(hasExistingStudioBooking && existingStudioBookingStatus === "unpaid") && (
         <View
           style={[
@@ -1951,14 +2263,23 @@ const StudioBookTab = ({
             style={[
               styles.primaryBtn,
               {
-                backgroundColor: bookings.length > 0 ? colors.primary : colors.border,
+                backgroundColor: canSubmitBookings ? colors.primary : colors.border,
                 opacity: bookings.length === 0 || loading ? 0.6 : 1,
               },
             ]}
             disabled={bookings.length === 0 || loading}
             activeOpacity={bookings.length === 0 || loading ? 1 : 0.78}
-            onPress={() =>
-              bookings.length > 0 &&
+            onPress={() => {
+              if (firstRecordingDurationIssue) {
+                showAlert(
+                  "warning",
+                  "Recording Time Incomplete",
+                  getRecordingDurationMessage(firstRecordingDurationIssue),
+                );
+                return;
+              }
+
+              if (bookings.length > 0) {
               handleConfirm(
                 async () => {
                   try {
@@ -1982,13 +2303,13 @@ const StudioBookTab = ({
                     setLoading(true);
                     const results = [];
                     const errors = [];
-                    const preflightRequests: Array<{
+                    const preflightRequests: {
                       booking: any;
                       bookingDate: string;
                       slots: { start: string; end: string }[];
                       sessionType: "recording" | "rehearsal";
                       songCount: number | null;
-                    }> = [];
+                    }[] = [];
                     const queuedSlotsByDate = new Map<string, { start: string; end: string }[]>();
 
                     debugLog("🛒 Total bookings to create:", bookings.length);
@@ -2033,6 +2354,19 @@ const StudioBookTab = ({
                       const sortedByStart = [...normalizedSlots].sort((a, b) =>
                         a.start.localeCompare(b.start),
                       );
+
+                      const weeklyScheduleViolation =
+                        getWeeklyScheduleScopeViolationMessage(bookingDate);
+                      if (weeklyScheduleViolation) {
+                        errors.push({
+                          booking,
+                          error: {
+                            message: weeklyScheduleViolation,
+                            serverError: null,
+                          },
+                        });
+                        continue;
+                      }
 
                       const hasInternalOverlap = sortedByStart.some((slot, index) =>
                         index > 0 ? slotsOverlap(sortedByStart[index - 1], slot) : false,
@@ -2099,7 +2433,7 @@ const StudioBookTab = ({
                         const requiredHours =
                           getRecordingRequiredTotalHours(bookingSongCount);
 
-                        if (totalSelectedHours + 1e-9 < requiredHours) {
+                        if (totalSelectedHours + HOURS_EPSILON < requiredHours) {
                           errors.push({
                             booking,
                             error: {
@@ -2252,7 +2586,7 @@ const StudioBookTab = ({
                           const requiredHours =
                             getRecordingRequiredTotalHours(bookingSongCount);
 
-                          if (totalSelectedHours + 1e-9 < requiredHours) {
+                          if (totalSelectedHours + HOURS_EPSILON < requiredHours) {
                             errors.push({
                               booking,
                               error: {
@@ -2369,7 +2703,7 @@ const StudioBookTab = ({
                                 if (serverError?.error) {
                                   errorMessage = serverError.error;
                                 }
-                              } catch (e) {
+                              } catch {
                                 if (typeof textBody === "string" && textBody.trim().length > 0) {
                                   errorMessage = textBody.trim();
                                 }
@@ -2485,8 +2819,9 @@ const StudioBookTab = ({
                   ? `Book ${bookings.length} recording session(s) at ${group.name}\nTotal: ₱${totalBookingsCost.toLocaleString()}\n\nRecording uses time slots and is priced per song. Time rule: ${recordingRuleShort}. The studio owner will review and approve your booking request.`
                   : `Book ${bookings.length} session(s) at ${group.name}\nTotal: ₱${totalBookingsCost.toLocaleString()}\n\nThe studio owner will review and approve your booking request.`,
                 { requireTerms: true, contractUrl: group?.contract_url ?? null, contractName: group?.name },
-              )
-            }
+              );
+              }
+            }}
           >
             {loading ? (
               <ActivityIndicator size="small" color="#FFFFFF" />
@@ -2495,11 +2830,15 @@ const StudioBookTab = ({
                 style={[
                   styles.primaryBtnText,
                   {
-                    color: bookings.length > 0 ? "#FFFFFF" : colors.textSecondary,
+                    color: canSubmitBookings ? "#FFFFFF" : colors.textSecondary,
                   },
                 ]}
+                numberOfLines={1}
+                adjustsFontSizeToFit
               >
-                {bookings.length > 0
+                {firstRecordingDurationIssue
+                  ? `Add ${formatRecordingHours(firstRecordingDurationIssue.remainingHours)}h more recording time`
+                  : bookings.length > 0
                   ? hasOnlyRecordingBookings
                     ? `Book ${bookings.length} Recording Session${bookings.length > 1 ? "s" : ""}`
                     : `Book ${bookings.length} Session${bookings.length > 1 ? "s" : ""}`

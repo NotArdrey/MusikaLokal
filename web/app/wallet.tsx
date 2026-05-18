@@ -45,6 +45,50 @@ interface WithdrawalErrorPayload {
   suggestion?: string;
 }
 
+const TRANSACTION_CATEGORY_LABELS: Record<string, string> = {
+  booking: 'Booking',
+  booking_balance: 'Balance',
+  booking_downpayment: 'Downpayment',
+  booking_payment: 'Full payment',
+  credit: 'Credit',
+  debit: 'Debit',
+  deposit: 'Deposit',
+  earning: 'Earning',
+  refund: 'Refund',
+  withdrawal: 'Withdrawal',
+};
+
+const formatTransactionText = (value: unknown) => {
+  const text = String(value || '').trim();
+  if (!text) return '';
+
+  return text
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+};
+
+const getTransactionCategory = (tx: any) => {
+  const referenceType = String(tx?.reference_type || '').trim().toLowerCase();
+  if (referenceType) return referenceType;
+
+  return String(tx?.type || '').trim().toLowerCase() || 'other';
+};
+
+const getTransactionCategoryLabel = (tx: any) => {
+  const category = getTransactionCategory(tx);
+  return TRANSACTION_CATEGORY_LABELS[category] || formatTransactionText(category);
+};
+
+const getTransactionTitle = (tx: any) => {
+  const type = String(tx?.type || '').trim().toLowerCase();
+  if (type === 'deposit') return 'Deposit';
+  if (type === 'withdrawal') return 'Withdrawal';
+  if (type === 'earning') return 'Earning';
+  if (type === 'refund') return 'Refund';
+
+  return formatTransactionText(type) || 'Wallet Transaction';
+};
+
 export default function WalletScreen() {
   const { colors, isDark } = useTheme();
   const { isGuest } = useAuth();
@@ -76,11 +120,6 @@ export default function WalletScreen() {
   const [unpaidBookings, setUnpaidBookings] = useState<any[]>([]);
   const [payingBookingId, setPayingBookingId] = useState<string | null>(null);
 
-  // Top-up state
-  const [topUpModalVisible, setTopUpModalVisible] = useState(false);
-  const [topUpAmount, setTopUpAmount] = useState('');
-  const [isTopping, setIsTopping] = useState(false);
-
   const [alertVisible, setAlertVisible] = useState(false);
   const [alertConfig, setAlertConfig] = useState<{
     type: AlertType;
@@ -92,8 +131,6 @@ export default function WalletScreen() {
     title: '',
     message: '',
   });
-  const parsedTopUpAmount = Number(topUpAmount);
-  const isTopUpReady = Number.isFinite(parsedTopUpAmount) && parsedTopUpAmount >= 50;
   const parsedWithdrawAmount = Number(withdrawAmount);
   const isWithdrawReady =
     Number.isFinite(parsedWithdrawAmount) &&
@@ -104,7 +141,6 @@ export default function WalletScreen() {
     newAccountName.trim().length > 0 &&
     newAccountNumber.trim().length > 0 &&
     (newPayoutType !== 'bank' || newBankName.trim().length > 0);
-  const isTopUpSubmitDisabled = isTopping || !isTopUpReady;
   const isWithdrawSubmitDisabled = withdrawing || !isWithdrawReady;
   const isPayoutMethodSubmitDisabled = addingPayoutMethod || !isPayoutMethodReady;
 
@@ -363,56 +399,6 @@ export default function WalletScreen() {
     }
   };
 
-  // Wallet top-up via PayMongo
-  const handleTopUp = async () => {
-    const amount = parseFloat(topUpAmount);
-    if (!amount || amount < 50) {
-      Alert.alert('Invalid Amount', 'Minimum top-up amount is PHP 50.');
-      return;
-    }
-    try {
-      setIsTopping(true);
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
-
-      const redirectUrl = ExpoLinking.createURL('payment-result', {
-        queryParams: { status: 'success', type: 'deposit', amount: String(amount) }
-      });
-      const cancelRedirectUrl = ExpoLinking.createURL('payment-result', {
-        queryParams: { status: 'cancelled', type: 'deposit' }
-      });
-
-      const { data: depositData, error: depositError } = await supabase.functions.invoke('paymongo', {
-        body: {
-          action: 'create_deposit',
-          user_id: user.id,
-          amount,
-          redirect_url: redirectUrl,
-          cancel_redirect_url: cancelRedirectUrl,
-        }
-      });
-
-      if (depositError || !depositData?.checkout_url) {
-        Alert.alert('Error', 'Failed to create top-up session. Please try again.');
-        return;
-      }
-
-      setTopUpModalVisible(false);
-      setTopUpAmount('');
-
-      const canOpen = await Linking.canOpenURL(depositData.checkout_url);
-      if (canOpen) {
-        await Linking.openURL(depositData.checkout_url);
-      } else {
-        Alert.alert('Error', 'Unable to open payment page.');
-      }
-    } catch (e: any) {
-      Alert.alert('Error', e?.message || 'Failed to initiate top-up.');
-    } finally {
-      setIsTopping(false);
-    }
-  };
-
   useFocusEffect(
     useCallback(() => {
       fetchWallet();
@@ -660,14 +646,17 @@ export default function WalletScreen() {
 
   const filteredTransactions = useMemo(() => {
     if (txFilter === "all") return transactions;
-    return transactions.filter((tx: any) => tx.reference_type === txFilter);
+    return transactions.filter((tx: any) => getTransactionCategory(tx) === txFilter);
   }, [transactions, txFilter]);
 
   const txFilterOptions = [
-    { key: "all", label: "All earnings" },
+    { key: "all", label: "All activity" },
+    { key: "deposit", label: "Deposits" },
+    { key: "withdrawal", label: "Withdrawals" },
     { key: "booking_payment", label: "Full payment" },
     { key: "booking_downpayment", label: "Downpayment" },
     { key: "booking_balance", label: "Balance" },
+    { key: "refund", label: "Refunds" },
   ];
 
   if (isGuest) {
@@ -733,16 +722,6 @@ export default function WalletScreen() {
                 <Ionicons name="arrow-down-circle-outline" size={20} color={colors.primary} />
                 <Text style={{ fontFamily: 'Poppins_600SemiBold', color: colors.primary }}>Withdraw</Text>
               </TouchableOpacity>
-              <TouchableOpacity activeOpacity={1}
-                onPress={() => setTopUpModalVisible(true)}
-                style={[
-                  styles.actionButton,
-                  { backgroundColor: colors.surface, borderColor: colors.border }
-                ]}
-              >
-                <Ionicons name="add-circle-outline" size={20} color={colors.primary} />
-                <Text style={{ fontFamily: 'Poppins_600SemiBold', color: colors.primary }}>Top Up</Text>
-              </TouchableOpacity>
             </View>
           </View>
 
@@ -753,14 +732,19 @@ export default function WalletScreen() {
                 <View style={styles.unpaidHeader}>
                   <View style={styles.unpaidHeaderLeft}>
                     <Ionicons name="warning" size={24} color="#DC2626" />
-                    <View>
-                      <Text style={styles.unpaidTitle}>Outstanding Balance</Text>
-                      <Text style={styles.unpaidSubtitle}>
+                    <View style={styles.unpaidTitleBlock}>
+                      <Text style={styles.unpaidTitle} numberOfLines={2}>Outstanding Balance</Text>
+                      <Text style={styles.unpaidSubtitle} numberOfLines={2}>
                         {unpaidBookings.length} booking{unpaidBookings.length > 1 ? 's' : ''} with pending payment
                       </Text>
                     </View>
                   </View>
-                  <Text style={styles.unpaidTotal}>
+                  <Text
+                    style={styles.unpaidTotal}
+                    numberOfLines={1}
+                    adjustsFontSizeToFit
+                    minimumFontScale={0.75}
+                  >
                     PHP {unpaidBookings.reduce((sum, b) => sum + (b.remaining_balance || 0), 0).toLocaleString()}
                   </Text>
                 </View>
@@ -862,7 +846,7 @@ export default function WalletScreen() {
 
           {/* Transaction History */}
           <View style={styles.historySection}>
-            <Text style={[styles.historyTitle, { color: colors.text }]}>Earnings Activity</Text>
+            <Text style={[styles.historyTitle, { color: colors.text }]}>Wallet Activity</Text>
 
             {/* Filter chips */}
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 10 }}>
@@ -893,10 +877,14 @@ export default function WalletScreen() {
                 </View>
               ) : filteredTransactions.length === 0 ? (
                 <View style={{ padding: 20, alignItems: 'center' }}>
-                  <Text style={{ color: colors.textSecondary, fontFamily: 'Poppins_400Regular' }}>No booking earnings yet</Text>
+                  <Text style={{ color: colors.textSecondary, fontFamily: 'Poppins_400Regular' }}>No wallet activity yet</Text>
                 </View>
               ) : (
-                filteredTransactions.map((tx, index) => (
+                filteredTransactions.map((tx, index) => {
+                  const txCategoryLabel = getTransactionCategoryLabel(tx);
+                  const txAmount = Number(tx.amount || 0);
+
+                  return (
                   <View
                     key={tx.id}
                     style={[
@@ -917,23 +905,29 @@ export default function WalletScreen() {
                           color={tx.is_credit ? '#10B981' : '#EF4444'}
                         />
                       </View>
-                      <View>
-                        <Text style={[styles.transactionType, { color: colors.text }]}>{tx.type.charAt(0).toUpperCase() + tx.type.slice(1)}</Text>
-                        {tx.reference_type && tx.reference_type !== 'booking' && (
-                          <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 11, color: colors.primary }}>
-                            {tx.reference_type.replace(/_/g, ' ')}
+                      <View style={styles.transactionTextBlock}>
+                        <Text style={[styles.transactionType, { color: colors.text }]} numberOfLines={1}>
+                          {getTransactionTitle(tx)}
+                        </Text>
+                        {txCategoryLabel && getTransactionCategory(tx) !== 'booking' && (
+                          <Text
+                            style={{ fontFamily: 'Poppins_400Regular', fontSize: 11, color: colors.primary }}
+                            numberOfLines={1}
+                          >
+                            {txCategoryLabel}
                           </Text>
                         )}
-                        <Text style={[styles.transactionDate, { color: colors.textSecondary }]}>
+                        <Text style={[styles.transactionDate, { color: colors.textSecondary }]} numberOfLines={1}>
                           {formatDashedNumericDate(tx.created_at)}
                         </Text>
                       </View>
                     </View>
                     <Text style={[styles.transactionAmount, { color: tx.is_credit ? '#10B981' : '#EF4444' }]}>
-                      {tx.is_credit ? '+' : '-'}₱{tx.amount.toFixed(2)}
+                      {tx.is_credit ? '+' : '-'}₱{txAmount.toFixed(2)}
                     </Text>
                   </View>
-                ))
+                  );
+                })
               )}
             </View>
           </View>
@@ -943,95 +937,6 @@ export default function WalletScreen() {
           <Navbar />
         </View>
       </View>
-
-      {/* Top-Up Modal */}
-      <RNModal
-        visible={topUpModalVisible}
-        animationType="slide"
-        transparent={true}
-        onRequestClose={() => setTopUpModalVisible(false)}
-      >
-        <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          style={styles.modalOverlay}
-        >
-          <View style={[styles.withdrawModal, { backgroundColor: colors.background }]}>
-            <View style={styles.withdrawModalHeader}>
-              <View>
-                <Text style={[styles.withdrawModalTitle, { color: colors.text }]}>Top Up Wallet</Text>
-                <Text style={[styles.withdrawModalSubtitle, { color: colors.textSecondary }]}>
-                  Add funds via GCash or Card
-                </Text>
-              </View>
-              <TouchableOpacity activeOpacity={1}
-                onPress={() => setTopUpModalVisible(false)}
-                style={[styles.closeModalButton, { backgroundColor: colors.surface }]}
-              >
-                <Ionicons name="close" size={24} color={colors.text} />
-              </TouchableOpacity>
-            </View>
-
-            <View style={styles.inputSection}>
-              <Text style={[styles.inputLabel, { color: colors.text }]}>Amount to Add</Text>
-              <View style={[styles.amountInputContainer, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-                <Text style={[styles.currencyPrefix, { color: colors.textSecondary }]}>₱</Text>
-                <TextInput
-                  style={[styles.amountInput, { color: colors.text }]}
-                  placeholder="0.00"
-                  placeholderTextColor={colors.textSecondary}
-                  keyboardType="decimal-pad"
-                  value={topUpAmount}
-                  onChangeText={setTopUpAmount}
-                />
-              </View>
-              <Text style={[styles.inputHint, { color: colors.textSecondary }]}>
-                Minimum top-up: PHP 50
-              </Text>
-            </View>
-
-            <View style={styles.quickAmounts}>
-              {[100, 250, 500, 1000].map((preset) => (
-                <TouchableOpacity activeOpacity={1}
-                  key={preset}
-                  onPress={() => setTopUpAmount(String(preset))}
-                  style={[
-                    styles.quickAmountBtn,
-                    {
-                      backgroundColor: parseFloat(topUpAmount) === preset ? colors.primary : colors.surface,
-                      borderColor: colors.border
-                    }
-                  ]}
-                >
-                  <Text style={[
-                    styles.quickAmountText,
-                    { color: parseFloat(topUpAmount) === preset ? 'white' : colors.text }
-                  ]}>
-                    PHP {preset}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-
-            <TouchableOpacity activeOpacity={isTopUpSubmitDisabled ? 1 : 0.78}
-              onPress={handleTopUp}
-              disabled={isTopUpSubmitDisabled}
-              style={[
-                styles.withdrawSubmitBtn,
-                {
-                  backgroundColor: isTopUpReady ? colors.primary : colors.border,
-                  marginTop: 24,
-                  opacity: isTopUpSubmitDisabled ? 0.6 : 1,
-                }
-              ]}
-            >
-              {isTopping
-                ? <ActivityIndicator size="small" color="white" />
-                : <Text style={[styles.withdrawSubmitText, { color: isTopUpReady ? "white" : colors.textSecondary }]}>Proceed to Payment</Text>
-              }
-            </TouchableOpacity>
-          </View>
-        </KeyboardAvoidingView>
-      </RNModal>
 
       {/* Withdraw Modal */}
       <RNModal
@@ -1474,6 +1379,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
+    flex: 1,
+    minWidth: 0,
+  },
+  transactionTextBlock: {
+    flex: 1,
+    minWidth: 0,
   },
   transactionIcon: {
     width: 40,
@@ -1493,6 +1404,7 @@ const styles = StyleSheet.create({
   transactionAmount: {
     fontFamily: 'Poppins_600SemiBold',
     fontSize: 14,
+    flexShrink: 0,
   },
   navbarContainer: {
     position: 'absolute',
@@ -1510,12 +1422,19 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
+    gap: 12,
     marginBottom: 16,
   },
   unpaidHeaderLeft: {
     flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
+    alignItems: 'flex-start',
+    gap: 10,
+    flex: 1,
+    minWidth: 0,
+  },
+  unpaidTitleBlock: {
+    flex: 1,
+    minWidth: 0,
   },
   unpaidTitle: {
     fontSize: 16,
@@ -1528,9 +1447,13 @@ const styles = StyleSheet.create({
     color: '#B91C1C',
   },
   unpaidTotal: {
-    fontSize: 20,
+    fontSize: 18,
+    lineHeight: 24,
     fontFamily: 'Poppins_700Bold',
     color: '#DC2626',
+    flexShrink: 0,
+    maxWidth: 132,
+    textAlign: 'right',
   },
   unpaidItem: {
     flexDirection: 'row',
@@ -1545,6 +1468,7 @@ const styles = StyleSheet.create({
   },
   unpaidInfo: {
     flex: 1,
+    minWidth: 0,
   },
   unpaidName: {
     fontSize: 14,

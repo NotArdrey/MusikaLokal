@@ -30,7 +30,7 @@ export default function PrivacyPolicyScreen() {
           </Text>
 
           <Text style={[styles.text, { color: colors.textSecondary }]}>
-            For booking cancellations, Musika Lokal applies a non-refundable policy. If a booking is cancelled, any amount already paid (including downpayments or full payments) may be forfeited and credited to the provider according to our Terms and Conditions.
+            For booking cancellations, Musika Lokal records the cancellation actor, reason, payment status, and related wallet activity where applicable. Cancelled booking payments are treated as non-refundable according to our Terms and Conditions.
           </Text>
 
           <Text style={[styles.text, { color: colors.textSecondary }]}>

@@ -34,6 +34,7 @@ export type RadioQueueTrack = {
   playlistTitle: string;
   slotLabel: string;
   sourceArtistName: string;
+  isLiveStream?: boolean;
 };
 
 export type LiveStationCursor = {
@@ -159,6 +160,58 @@ const readTimestampMs = (value: unknown) => {
   }
 
   return timestampMs;
+};
+
+export const getStationBroadcastStreamUrl = (stationData: any) => {
+  const streamUrl = readTrimmedString(stationData?.stream_url);
+  if (!streamUrl || stationData?.is_active === false) {
+    return "";
+  }
+
+  const streamStatus = readTrimmedString(stationData?.stream_status).toLowerCase();
+  if (streamStatus === "offline") {
+    return "";
+  }
+
+  return streamUrl;
+};
+
+export const buildStationBroadcastTrack = (stationData: any): RadioQueueTrack | null => {
+  const streamUrl = getStationBroadcastStreamUrl(stationData);
+  if (!streamUrl) {
+    return null;
+  }
+
+  const stationId = readTrimmedString(stationData?.id) || "station";
+  const stationName = readTrimmedString(stationData?.name) || "Live Station";
+  const artist = readTrimmedString(stationData?.now_playing_artist) ||
+    readTrimmedString(stationData?.managed_profile?.full_name) ||
+    readTrimmedString(stationData?.creator?.full_name) ||
+    "MusikaLokal";
+  const title = readTrimmedString(stationData?.now_playing_title) || stationName;
+  const artwork = getTrackArtworkUrl(stationData, null, null, null);
+
+  return {
+    id: `${stationId}:live-stream`,
+    radioTrackId: `${stationId}:live-stream`,
+    stationId,
+    queueIndex: 0,
+    slotIndex: 0,
+    itemIndex: 0,
+    itemId: `${stationId}:live-stream`,
+    stationName,
+    playlistTitle: "Live broadcast",
+    slotLabel: "Live",
+    sourceArtistName: artist,
+    url: streamUrl,
+    title,
+    artist,
+    album: stationName,
+    artwork: artwork || undefined,
+    description: readTrimmedString(stationData?.description) || undefined,
+    genre: readTrimmedString(stationData?.genre) || undefined,
+    isLiveStream: true,
+  };
 };
 
 const getStationAnchorTimestampMs = (stationData: any) => {

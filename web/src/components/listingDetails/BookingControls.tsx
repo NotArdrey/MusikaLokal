@@ -49,6 +49,14 @@ const toLocalDateKey = (value: Date) => {
   return `${year}-${month}-${day}`;
 };
 
+const BOOKING_LOOKAHEAD_DAYS = 90;
+
+const addLocalDays = (value: Date, days: number) => {
+  const next = new Date(value);
+  next.setDate(next.getDate() + days);
+  return next;
+};
+
 const BookingControls = ({
   colors,
   isDark,
@@ -80,6 +88,9 @@ const BookingControls = ({
   const now = new Date();
   const minLeadDateTime = new Date(now.getTime() + leadTimeHours * 60 * 60 * 1000);
   const minSelectableDate = toLocalDateKey(minLeadDateTime);
+  const maxSelectableDate = toLocalDateKey(
+    addLocalDays(now, BOOKING_LOOKAHEAD_DAYS - 1),
+  );
   const normalizedStudioType = normalizeStudioType(group?.studio_type);
   const supportsSessionTypeSelection = normalizedStudioType === "Both";
 
@@ -302,6 +313,7 @@ const BookingControls = ({
       <Calendar
         current={toLocalDateKey(new Date())}
         minDate={minSelectableDate}
+        maxDate={maxSelectableDate}
         markedDates={{
           ...markedDates,
           [selectedDate]: {
@@ -320,7 +332,7 @@ const BookingControls = ({
           },
         }}
         onDayPress={async (day) => {
-          if (day.dateString < minSelectableDate) {
+          if (day.dateString < minSelectableDate || day.dateString > maxSelectableDate) {
             return;
           }
 
@@ -562,7 +574,7 @@ const BookingControls = ({
                       else grouped.Evening.push(slot);
                     });
 
-                    return (Object.keys(grouped) as Array<keyof typeof grouped>).map(
+                    return (Object.keys(grouped) as (keyof typeof grouped)[]).map(
                       (period) => {
                         if (grouped[period].length === 0) return null;
                         return (

@@ -1820,6 +1820,7 @@ export default function AddGroupScreen() {
         message={`"${groupName}" has been successfully created.`}
         buttonText={"Manage Group"}
         onClose={handleSuccessRedirect}
+        showCancelButton={false}
       />
 
       <Modal

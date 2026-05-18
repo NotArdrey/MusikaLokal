@@ -17,8 +17,10 @@ import { supabase } from "../../lib/supabase";
 import TrackPlayer, { Event, RepeatMode, State, isTrackPlayerAvailable } from "../audio/safeTrackPlayer";
 import {
   buildStationQueue,
+  buildStationBroadcastTrack,
   ensureRadioPlayerSetup,
   getLiveStationCursor,
+  getStationBroadcastStreamUrl,
   type RadioQueueTrack,
   updateRadioPlayerCapabilities,
 } from "../audio/radioTrackPlayer";
@@ -590,6 +592,19 @@ export function RadioPlayerProvider({ children }: { children: ReactNode }) {
         return;
       }
 
+      const broadcastTrack = buildStationBroadcastTrack(playableStation);
+      if (broadcastTrack) {
+        await applyPlayerQueue(
+          playableStation,
+          [broadcastTrack],
+          0,
+          true,
+          requestId,
+          0,
+        );
+        return;
+      }
+
       const queue = await buildStationQueue(playableStation);
       if (!isPlaybackRequestCurrent(requestId)) {
         return;
@@ -811,6 +826,10 @@ export function RadioPlayerProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (!activeStation?.id || fullQueueRef.current.length === 0 || activeStation?.is_active === false) {
+      return undefined;
+    }
+
+    if (getStationBroadcastStreamUrl(activeStation)) {
       return undefined;
     }
 

@@ -79,6 +79,31 @@ function normalizeOptionalAudioUrl(value: unknown): string | null {
   return trimmed;
 }
 
+function normalizeOptionalStationStreamUrl(value: unknown): string | null {
+  const trimmed = typeof value === "string" ? value.trim() : "";
+  if (!trimmed) {
+    return null;
+  }
+
+  let parsed: URL;
+  try {
+    parsed = new URL(trimmed);
+  } catch (_) {
+    throw new Error("stream_url must be a valid http or https URL");
+  }
+
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    throw new Error("stream_url must be a valid http or https URL");
+  }
+
+  return trimmed;
+}
+
+function normalizeStationStreamStatus(value: unknown, fallback = "offline") {
+  const normalized = typeof value === "string" ? value.trim().toLowerCase() : "";
+  return ["offline", "live", "autoplay"].includes(normalized) ? normalized : fallback;
+}
+
 function normalizePositiveInteger(
   value: unknown,
   fallback: number,
@@ -213,7 +238,7 @@ async function transferManagedProfileStationsToAdmin(
 async function getPrimaryManagedStation(supabaseAdmin: any, managedProfileId: string) {
   const { data, error } = await supabaseAdmin
     .from("stations")
-    .select("id, creator_id, managed_profile_id")
+    .select("id, creator_id, managed_profile_id, last_seen_live_at")
     .eq("managed_profile_id", managedProfileId)
     .is("managed_group_id", null)
     .order("created_at", { ascending: false })
@@ -235,7 +260,7 @@ async function getPrimaryManagedSourceStation(
 ) {
   let query = supabaseAdmin
     .from("stations")
-    .select("id, creator_id, managed_profile_id, managed_group_id, is_active, is_featured")
+    .select("id, creator_id, managed_profile_id, managed_group_id, is_active, is_featured, stream_url, stream_status, now_playing_title, now_playing_artist, last_seen_live_at")
     .order("created_at", { ascending: false })
     .limit(1);
 
@@ -322,6 +347,11 @@ function getSourceStationSummary(stationsBySourceKey: Map<string, any>, sourceKe
     is_active: station.is_active,
     is_featured: station.is_featured,
     rotation_interval_minutes: station.rotation_interval_minutes,
+    stream_url: station.stream_url || null,
+    stream_status: station.stream_status || "offline",
+    now_playing_title: station.now_playing_title || null,
+    now_playing_artist: station.now_playing_artist || null,
+    last_seen_live_at: station.last_seen_live_at || null,
     slot_count: station.slot_count || 0,
     slot_playlist_ids: station.slot_playlist_ids || [],
   };
@@ -386,7 +416,7 @@ async function listAdminStationSources(supabaseAdmin: any) {
       : Promise.resolve({ data: [], error: null }),
     supabaseAdmin
       .from("stations")
-      .select("id, creator_id, name, description, genre, cover_image_url, is_active, is_featured, rotation_interval_minutes, managed_profile_id, managed_group_id"),
+      .select("id, creator_id, name, description, genre, cover_image_url, is_active, is_featured, rotation_interval_minutes, stream_url, stream_status, now_playing_title, now_playing_artist, last_seen_live_at, managed_profile_id, managed_group_id"),
   ]);
 
   if (groupLinksError) {
@@ -727,6 +757,17 @@ async function upsertStationFromSource(
     is_active: "is_active" in params ? params.is_active !== false : existingStation?.is_active ?? true,
     is_featured: "is_featured" in params ? params.is_featured === true : existingStation?.is_featured ?? false,
     rotation_interval_minutes: normalizeStationRotationIntervalMinutes(params.rotation_interval_minutes),
+    stream_url: "stream_url" in params
+      ? normalizeOptionalStationStreamUrl(params.stream_url)
+      : existingStation?.stream_url || null,
+    stream_status: "stream_status" in params
+      ? normalizeStationStreamStatus(params.stream_status, existingStation?.stream_status || "offline")
+      : existingStation?.stream_status || "offline",
+    now_playing_title: params.now_playing_title || null,
+    now_playing_artist: params.now_playing_artist || null,
+    last_seen_live_at: params.stream_status === "live"
+      ? new Date().toISOString()
+      : existingStation?.last_seen_live_at || null,
   };
 
   let station: any;
@@ -1558,9 +1599,21 @@ Deno.serve(async (req: Request) => {
         genre,
         cover_image_url,
         rotation_interval_minutes,
+        stream_url,
+        stream_status,
+        now_playing_title,
+        now_playing_artist,
         managed_profile_id,
       } = params;
       if (!name) return jsonResponse({ error: "name is required" }, 400);
+
+      let normalizedStreamUrl: string | null;
+      try {
+        normalizedStreamUrl = normalizeOptionalStationStreamUrl(stream_url);
+      } catch (error: any) {
+        return jsonResponse({ error: error.message || "Invalid stream_url" }, 400);
+      }
+      const normalizedStreamStatus = normalizeStationStreamStatus(stream_status);
 
       const managedProfileId = resolveManagedProfileId(requesterRole, uid, managed_profile_id);
 
@@ -1582,6 +1635,13 @@ Deno.serve(async (req: Request) => {
             genre: genre || null,
             cover_image_url: cover_image_url || null,
             rotation_interval_minutes: normalizeStationRotationIntervalMinutes(rotation_interval_minutes),
+            stream_url: normalizedStreamUrl,
+            stream_status: normalizedStreamStatus,
+            now_playing_title: now_playing_title || null,
+            now_playing_artist: now_playing_artist || null,
+            last_seen_live_at: normalizedStreamStatus === "live"
+              ? new Date().toISOString()
+              : existingManagedStation.last_seen_live_at || null,
           })
           .eq("id", existingManagedStation.id)
           .select()
@@ -1602,6 +1662,13 @@ Deno.serve(async (req: Request) => {
           genre: genre || null,
           cover_image_url: cover_image_url || null,
           rotation_interval_minutes: normalizeStationRotationIntervalMinutes(rotation_interval_minutes),
+          stream_url: normalizedStreamUrl,
+          stream_status: normalizedStreamStatus,
+          now_playing_title: now_playing_title || null,
+          now_playing_artist: now_playing_artist || null,
+          last_seen_live_at: normalizedStreamStatus === "live"
+            ? new Date().toISOString()
+            : null,
         })
         .select()
         .single();
@@ -1710,7 +1777,7 @@ Deno.serve(async (req: Request) => {
 
       await transferStationToAdminIfNeeded(supabaseAdmin, existing, uid);
 
-      const allowed = ["name", "description", "genre", "cover_image_url", "is_active", "is_featured", "rotation_interval_minutes"];
+      const allowed = ["name", "description", "genre", "cover_image_url", "is_active", "is_featured", "rotation_interval_minutes", "stream_url", "stream_status", "now_playing_title", "now_playing_artist"];
       const patch: Record<string, any> = {};
       for (const key of allowed) {
         if (key in updates) patch[key] = updates[key];
@@ -1724,6 +1791,21 @@ Deno.serve(async (req: Request) => {
         patch.rotation_interval_minutes = normalizeStationRotationIntervalMinutes(
           patch.rotation_interval_minutes,
         );
+      }
+
+      if ("stream_url" in patch) {
+        try {
+          patch.stream_url = normalizeOptionalStationStreamUrl(patch.stream_url);
+        } catch (error: any) {
+          return jsonResponse({ error: error.message || "Invalid stream_url" }, 400);
+        }
+      }
+
+      if ("stream_status" in patch) {
+        patch.stream_status = normalizeStationStreamStatus(patch.stream_status);
+        if (patch.stream_status === "live") {
+          patch.last_seen_live_at = new Date().toISOString();
+        }
       }
 
       const { data, error } = await supabaseAdmin

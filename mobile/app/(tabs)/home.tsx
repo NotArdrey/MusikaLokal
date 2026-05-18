@@ -37,6 +37,7 @@ import {
   getGroqModelInfo,
   rerankHomeFeedWithGroq,
 } from "../../src/services/groqModelRouter";
+import { getRecentlyViewedStorageKey } from "../../src/utils/recentlyViewed";
 import { getScreenCacheKey, peekScreenCache, readScreenCache, writeScreenCache } from "../../src/utils/screenCache";
 import { usePageLoadLogger } from "../../src/utils/loadTimeLogger";
 
@@ -281,7 +282,6 @@ const HOME_FOCUS_REFRESH_COOLDOWN_MS = 20_000;
 const HOME_AI_RERANK_COOLDOWN_MS = 5 * 60 * 1000;
 const HOME_PROFILE_CACHE_TTL_MS = 5 * 60 * 1000;
 const VIEWED_NEW_ARRIVALS_STORAGE_KEY = "viewed_new_arrivals";
-const RECENTLY_VIEWED_STORAGE_KEY = "recently_viewed_items";
 
 type HomeFeedCachePayload = {
   fetchedAt: number;
@@ -349,6 +349,10 @@ export default function HomeScreen() {
   const insets = useSafeAreaInsets();
   const { contentBottomPadding } = useBottomBarClearance(24);
   const params = useLocalSearchParams<{ reopenListingId?: string }>();
+  const recentlyViewedStorageKey = useMemo(
+    () => getRecentlyViewedStorageKey(userId, isGuest),
+    [isGuest, userId],
+  );
 
   const homeCacheBaseParams = useMemo(
     () => ({
@@ -894,7 +898,7 @@ export default function HomeScreen() {
         isActive = false;
         focusTask.cancel();
       };
-    }, [discover.length, featured.length, homeDataQuery.refetch, isGuest, loadViewedNewArrivals, params.reopenListingId, roleResolved, userId, userRole]),
+    }, [discover.length, featured.length, homeDataQuery.refetch, isGuest, loadViewedNewArrivals, params.reopenListingId, recentlyViewedStorageKey, roleResolved, userId, userRole]),
   );
 
   // Home realtime invalidation now runs through the shared query channel in RootLayout.
@@ -907,7 +911,7 @@ export default function HomeScreen() {
       fetchRecentlyViewed(),
     ]);
     setRefreshing(false);
-  }, [homeDataQuery.refetch]);
+  }, [homeDataQuery.refetch, recentlyViewedStorageKey]);
 
   const setTimeBasedGreeting = () => {
     const hour = new Date().getHours();
@@ -1719,7 +1723,7 @@ export default function HomeScreen() {
   const saveToRecentlyViewed = async (item: any) => {
     try {
       debugLog("saveToRecentlyViewed called with:", item.name, item.type);
-      const existingJson = await AsyncStorage.getItem(RECENTLY_VIEWED_STORAGE_KEY);
+      const existingJson = await AsyncStorage.getItem(recentlyViewedStorageKey);
       let items = existingJson ? JSON.parse(existingJson) : [];
       debugLog("Existing items count:", items.length);
 
@@ -1752,7 +1756,7 @@ export default function HomeScreen() {
       // Keep only last 10
       items = items.slice(0, 10);
 
-      await AsyncStorage.setItem(RECENTLY_VIEWED_STORAGE_KEY, JSON.stringify(items));
+      await AsyncStorage.setItem(recentlyViewedStorageKey, JSON.stringify(items));
       debugLog("Saved. New count:", items.length);
 
       // Update state
@@ -1765,7 +1769,7 @@ export default function HomeScreen() {
 
   const fetchRecentlyViewed = async () => {
     try {
-      const existingJson = await AsyncStorage.getItem(RECENTLY_VIEWED_STORAGE_KEY);
+      const existingJson = await AsyncStorage.getItem(recentlyViewedStorageKey);
       debugLog(
         "Recently viewed from storage:",
         existingJson ? "Found" : "Empty",

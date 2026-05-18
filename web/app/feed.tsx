@@ -1,6 +1,7 @@
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect } from "@react-navigation/native";
-import { router } from "expo-router";
+import { router, useLocalSearchParams } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -20,6 +21,7 @@ import { supabase } from "../lib/supabase";
 import CachedImage from "../src/components/CachedImage";
 import CustomAlert, { AlertType } from "../src/components/CustomAlert";
 import Header from "../src/components/header";
+import ListingDetailsSheet from "../src/components/ListingDetailsSheet";
 import { normalizeVisibleInput } from "../src/components/modal";
 import Navbar from "../src/components/navbar";
 import PostDetailsModal from "../src/components/PostDetailsModal";
@@ -371,6 +373,7 @@ const LiveRadioCard = React.memo(function LiveRadioCard({
 });
 
 const FEED_PAGE_SIZE = 20;
+const PENDING_REOPEN_LISTING_STORAGE_KEY = "pending_reopen_listing_id";
 const SOCIAL_MEDIA_ASPECT_RATIO = 1.45;
 const PESO_SIGN = "\u20B1";
 const KNOWN_FEED_MEDIA_BUCKETS = ["post-media", "posts", "images", "listings", "documents", "avatars"];
@@ -864,6 +867,7 @@ export default function FeedScreen() {
   const { colors, isDark } = useTheme();
   const { session, isGuest } = useAuth();
   const { width } = useWindowDimensions();
+  const params = useLocalSearchParams<{ reopenListingId?: string }>();
   const isWebDesktop = Platform.OS === "web" && width >= 768;
 
   const [tab, setTab] = useState<FeedTab>("for_you");
@@ -873,6 +877,9 @@ export default function FeedScreen() {
   const [showCreate, setShowCreate] = useState(false);
   const [selectedMedia, setSelectedMedia] = useState<{ file: File; preview: string }[]>([]);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const listingDetailsRef = useRef<any>(null);
+  const [selectedListingId, setSelectedListingId] = useState<string | null>(null);
+  const [pendingReopenListingId, setPendingReopenListingId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -934,10 +941,100 @@ export default function FeedScreen() {
     [isGuest, posts.length, session],
   );
 
+  const presentListingDetailsWithRetry = useCallback(() => {
+    let attempts = 0;
+    const maxAttempts = 10;
+
+    const presentWhenReady = () => {
+      if (listingDetailsRef.current?.present) {
+        listingDetailsRef.current.present();
+        setPendingReopenListingId(null);
+        return;
+      }
+
+      attempts += 1;
+      if (attempts < maxAttempts) {
+        setTimeout(presentWhenReady, 60);
+      } else {
+        setPendingReopenListingId(null);
+      }
+    };
+
+    const schedule = (callback: () => void) => {
+      if (typeof requestAnimationFrame === "function") {
+        requestAnimationFrame(callback);
+        return;
+      }
+
+      setTimeout(callback, 0);
+    };
+
+    schedule(() => {
+      schedule(presentWhenReady);
+    });
+  }, []);
+
+  const openListingDetails = useCallback((listingId: string) => {
+    if (!listingId) return;
+    setSelectedListingId(listingId);
+    setPendingReopenListingId(listingId);
+  }, []);
+
+  const handleListingDetailsDismiss = useCallback(() => {
+    setSelectedListingId(null);
+    setPendingReopenListingId(null);
+  }, []);
+
+  useEffect(() => {
+    if (!pendingReopenListingId) return;
+    if (selectedListingId !== pendingReopenListingId) return;
+
+    presentListingDetailsWithRetry();
+  }, [pendingReopenListingId, presentListingDetailsWithRetry, selectedListingId]);
+
+  useEffect(() => {
+    const reopenListingId = Array.isArray(params.reopenListingId)
+      ? params.reopenListingId[0]
+      : params.reopenListingId;
+
+    if (!reopenListingId || reopenListingId.length === 0) return;
+
+    openListingDetails(reopenListingId);
+
+    try {
+      router.setParams({ reopenListingId: undefined as any });
+    } catch {
+      // Older router states may not accept clearing params here; the listing still opens.
+    }
+  }, [openListingDetails, params.reopenListingId]);
+
   useFocusEffect(
     useCallback(() => {
       fetchFeed(tab);
-    }, [fetchFeed, tab]),
+
+      let isActive = true;
+
+      const restorePendingReopen = async () => {
+        try {
+          const storedListingId = await AsyncStorage.getItem(PENDING_REOPEN_LISTING_STORAGE_KEY);
+
+          if (!isActive || !storedListingId || storedListingId.length === 0) {
+            return;
+          }
+
+          openListingDetails(storedListingId);
+          await AsyncStorage.removeItem(PENDING_REOPEN_LISTING_STORAGE_KEY);
+        } catch {
+          // Ignore cache restore failures; explicit route params still work.
+        }
+      };
+
+      void restorePendingReopen();
+
+      return () => {
+        isActive = false;
+      };
+    }, [fetchFeed, openListingDetails, tab]),
   );
 
   const refresh = () => {
@@ -1121,8 +1218,8 @@ export default function FeedScreen() {
 
   const openStudioDetails = useCallback((studioId: string) => {
     if (!studioId) return;
-    router.push({ pathname: "/feed", params: { reopenListingId: studioId } });
-  }, []);
+    openListingDetails(studioId);
+  }, [openListingDetails]);
 
   const renderPost = useCallback(
     ({ item }: { item: any }) => (
@@ -1491,6 +1588,12 @@ export default function FeedScreen() {
           </Pressable>
         </Pressable>
       </Modal>
+
+      <ListingDetailsSheet
+        ref={listingDetailsRef}
+        listingId={selectedListingId}
+        onDismiss={handleListingDetailsDismiss}
+      />
 
       {!isWebDesktop && <Navbar />}
     </View>

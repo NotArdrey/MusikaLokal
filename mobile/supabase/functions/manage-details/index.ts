@@ -89,6 +89,16 @@ const getRelatedListingViewName = (rawType: unknown): string => {
 
 const getFavoriteTargetColumn = (type: FavoriteTargetType): string => favoriteTargetColumnMap[type]
 
+const getReviewTargetColumn = (type: FavoriteTargetType): string =>
+    type === 'profile' ? 'user_id' : getFavoriteTargetColumn(type)
+
+const mapReviewRow = (row: any) => ({
+    ...row,
+    author: row?.author ?? row?.profiles ?? null,
+    content: row?.content ?? row?.comment ?? null,
+    likes_count: Number(row?.likes_count ?? row?.computed_likes_count ?? 0),
+})
+
 const normalizeRequiredText = (rawValue: unknown, maxLength: number): string => {
     const value = typeof rawValue === 'string' ? rawValue.trim() : ''
     if (!value) return ''
@@ -232,24 +242,20 @@ serve(async (req: Request) => {
 
             const favoritesCount = await getFavoritesCount(supabaseClient, normalizedFavoriteType, id)
 
-            const reviewTargetColumn =
-                normalizedFavoriteType === 'profile'
-                    ? 'user_id'
-                    : getFavoriteTargetColumn(normalizedFavoriteType)
+            const reviewTargetColumn = getReviewTargetColumn(normalizedFavoriteType)
 
-            // Fetch Reviews with computed likes count (using view)
-            const { data: reviews } = await supabaseClient
-                .from('reviews_with_stats')
-                .select('*, profiles(full_name, avatar_url)')
+            const { data: reviews, error: reviewsError } = await supabaseClient
+                .from('reviews')
+                .select('*, author:profiles!reviews_author_id_fkey(id, full_name, avatar_url, updated_at)')
                 .eq(reviewTargetColumn, id)
                 .order('created_at', { ascending: false })
                 .limit(5)
 
-            // Map computed fields to expected names for frontend compatibility
-            const mappedReviews = (reviews || []).map((r: any) => ({
-                ...r,
-                likes_count: r.computed_likes_count || 0
-            }))
+            if (reviewsError) {
+                console.warn('Could not fetch listing reviews:', reviewsError)
+            }
+
+            const mappedReviews = (reviews || []).map(mapReviewRow)
 
             let auxiliary: Record<string, any> = {}
 

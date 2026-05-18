@@ -30,6 +30,73 @@ const buildWeeklyScheduleReason = (source: any): string =>
 const buildDateOverrideReason = (source: any): string =>
     `Custom schedule [session_type:${normalizeScheduleSessionType(source?.session_type ?? source?.sessionType)}]`
 
+const normalizeWeeklyScheduleScope = (value: any): string => {
+    const normalized = String(value || '').trim().toLowerCase()
+    return ['indefinite', 'until', 'specific_dates'].includes(normalized) ? normalized : 'indefinite'
+}
+
+const normalizeWeeklyScheduleDates = (value: any): string[] =>
+    Array.isArray(value) ? value.filter((date) => typeof date === 'string') : []
+
+const weeklyScheduleColumnNames = [
+    'weekly_schedule_scope',
+    'weekly_schedule_end_date',
+    'weekly_schedule_dates',
+]
+
+const isMissingWeeklyScheduleColumns = (error: any): boolean => {
+    const message = String(error?.message || '')
+    return (
+        error?.code === 'PGRST204' &&
+        weeklyScheduleColumnNames.some((column) => message.includes(column))
+    )
+}
+
+const stripWeeklyScheduleColumns = (row: any) => {
+    const {
+        weekly_schedule_scope,
+        weekly_schedule_end_date,
+        weekly_schedule_dates,
+        ...rest
+    } = row || {}
+
+    return rest
+}
+
+const buildWeeklyScheduleScopeColumns = (source: any) => {
+    const scope = normalizeWeeklyScheduleScope(source?.weekly_schedule_scope ?? source?.weeklyScheduleScope)
+    return {
+        weekly_schedule_scope: scope,
+        weekly_schedule_end_date:
+            scope === 'until'
+                ? source?.weekly_schedule_end_date ?? source?.weeklyScheduleEndDate ?? null
+                : null,
+        weekly_schedule_dates:
+            scope === 'specific_dates'
+                ? normalizeWeeklyScheduleDates(source?.weekly_schedule_dates ?? source?.weeklyScheduleDates)
+                : [],
+    }
+}
+
+const insertStudioOperatingHours = async (client: any, operatingHours: any[]) => {
+    if (!operatingHours.length) return
+
+    let { error } = await client
+        .from('studio_operating_hours')
+        .insert(operatingHours)
+
+    if (error && isMissingWeeklyScheduleColumns(error)) {
+        console.warn('studio_operating_hours weekly schedule columns are not available yet; retrying without them.', error)
+        ;({ error } = await client
+            .from('studio_operating_hours')
+            .insert(operatingHours.map(stripWeeklyScheduleColumns)))
+    }
+
+    if (error) {
+        console.warn('Could not save studio operating hours:', error)
+    }
+}
+
 serve(async (req: Request) => {
     if (req.method === 'OPTIONS') {
         return new Response('ok', { headers: corsHeaders })
@@ -276,6 +343,7 @@ serve(async (req: Request) => {
                         const dayHours = operatingHours.filter((h: any) => h.day_of_week === index && h.is_open);
                         return {
                             day: dayName,
+                            ...buildWeeklyScheduleScopeColumns(dayHours[0]),
                             slots: dayHours.map((h: any) => ({
                                 start: h.open_time,
                                 end: h.close_time
@@ -285,11 +353,23 @@ serve(async (req: Request) => {
                     data.availability = availability;
                 }
 
-                const { data: studioSettings, error: settingsError } = await supabaseClient
+                const extendedStudioSettingsSelect = 'lead_time_hours, weekend_multiplier, peak_season_multiplier, peak_season_dates, off_peak_multiplier, off_peak_dates, weekly_schedule_scope, weekly_schedule_end_date, weekly_schedule_dates'
+                const legacyStudioSettingsSelect = 'lead_time_hours, weekend_multiplier, peak_season_multiplier, peak_season_dates, off_peak_multiplier, off_peak_dates'
+                let studioSettingsResult = await supabaseClient
                     .from('studio_settings')
-                    .select('lead_time_hours, weekend_multiplier, peak_season_multiplier, peak_season_dates, off_peak_multiplier, off_peak_dates')
+                    .select(extendedStudioSettingsSelect)
                     .eq('studio_id', id)
                     .maybeSingle();
+
+                if (studioSettingsResult.error && isMissingWeeklyScheduleColumns(studioSettingsResult.error)) {
+                    studioSettingsResult = await supabaseClient
+                        .from('studio_settings')
+                        .select(legacyStudioSettingsSelect)
+                        .eq('studio_id', id)
+                        .maybeSingle();
+                }
+
+                const { data: studioSettings, error: settingsError } = studioSettingsResult
 
                 if (!settingsError && studioSettings) {
                     data.lead_time_hours = studioSettings.lead_time_hours;
@@ -304,7 +384,10 @@ serve(async (req: Request) => {
                         peak_season_multiplier: studioSettings.peak_season_multiplier,
                         peak_season_dates: studioSettings.peak_season_dates,
                         off_peak_multiplier: studioSettings.off_peak_multiplier,
-                        off_peak_dates: studioSettings.off_peak_dates
+                        off_peak_dates: studioSettings.off_peak_dates,
+                        weekly_schedule_scope: studioSettings.weekly_schedule_scope,
+                        weekly_schedule_end_date: studioSettings.weekly_schedule_end_date,
+                        weekly_schedule_dates: studioSettings.weekly_schedule_dates
                     };
                 }
             }
@@ -524,6 +607,7 @@ serve(async (req: Request) => {
                                     open_time: slot.start,
                                     close_time: slot.end,
                                     slot_order: slotIndex,
+                                    ...buildWeeklyScheduleScopeColumns(daySchedule),
                                     reason: buildWeeklyScheduleReason(daySchedule)
                                 });
                             });
@@ -544,7 +628,7 @@ serve(async (req: Request) => {
                     }
                 }
 
-                await supabaseClient.from('studio_operating_hours').insert(operatingHours)
+                await insertStudioOperatingHours(supabaseClient, operatingHours)
 
                 if (calendarAvailability && Array.isArray(calendarAvailability) && calendarAvailability.length > 0) {
                     const dateOverrides: any[] = [];
@@ -730,15 +814,14 @@ serve(async (req: Request) => {
                                 open_time: slot.start,
                                 close_time: slot.end,
                                 slot_order: slotIndex,
+                                ...buildWeeklyScheduleScopeColumns(daySchedule),
                                 reason: buildWeeklyScheduleReason(daySchedule)
                             });
                         });
                     }
                 }
 
-                if (operatingHours.length > 0) {
-                    await supabaseClient.from('studio_operating_hours').insert(operatingHours);
-                }
+                await insertStudioOperatingHours(supabaseClient, operatingHours);
             }
 
             // Update studio date overrides

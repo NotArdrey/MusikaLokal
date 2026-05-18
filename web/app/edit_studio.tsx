@@ -1,5 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
-import * as FileSystem from "expo-file-system/legacy";
+import * as FileSystem from "expo-file-system/src/legacy";
 import * as ImagePicker from "expo-image-picker";
 import { router } from "expo-router";
 import React, { useCallback, useEffect, useRef, useState } from "react";
@@ -156,6 +156,36 @@ const isMissingStudioInstrumentDetailColumns = (error: any): boolean => {
   );
 };
 
+const isMissingWeeklyScheduleColumns = (error: any): boolean => {
+  const haystack = [
+    error?.code,
+    error?.message,
+    error?.details,
+    error?.hint,
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+
+  return (
+    haystack.includes("weekly_schedule_") &&
+    (haystack.includes("pgrst204") ||
+      haystack.includes("schema cache") ||
+      haystack.includes("could not find") ||
+      haystack.includes("column"))
+  );
+};
+
+const stripWeeklyScheduleColumns = (row: any) => {
+  const {
+    weekly_schedule_scope,
+    weekly_schedule_end_date,
+    weekly_schedule_dates,
+    ...rest
+  } = row;
+  return rest;
+};
+
 const buildStudioInstrumentRows = (
   studioId: string,
   instruments: any[] = [],
@@ -272,6 +302,114 @@ const normalizePromotionTarget = (
 
 type DateOverrideSessionType = "rehearsal" | "recording" | "both";
 type WeeklySessionType = DateOverrideSessionType;
+type WeeklyScheduleScope = "indefinite" | "until" | "specific_dates";
+type WeeklyScheduleFields = {
+  weeklyScheduleScope: WeeklyScheduleScope;
+  weeklyScheduleEndDate: string;
+  weeklyScheduleDates: Record<string, boolean>;
+};
+type WeeklyAvailabilityDay = {
+  day: string;
+  slots: { start: string; end: string }[];
+  sessionType?: WeeklySessionType;
+} & WeeklyScheduleFields;
+type ScheduleSlot = { start: string; end: string };
+type ProtectedDateOverrideMap = Record<
+  string,
+  {
+    slots: ScheduleSlot[];
+    sessionType?: DateOverrideSessionType;
+  }
+>;
+
+const ISO_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+
+const getLocalDateKey = (date = new Date()): string => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
+
+const parseLocalDateKey = (dateStr: string): Date => {
+  const [year, month, day] = dateStr.split("-").map(Number);
+  return new Date(year, (month || 1) - 1, day || 1);
+};
+
+const formatReadableDate = (dateStr: string): string => {
+  if (!ISO_DATE_PATTERN.test(dateStr)) return "";
+  return parseLocalDateKey(dateStr).toLocaleDateString("en-US", {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+};
+
+const normalizeWeeklyScheduleScope = (
+  value: unknown,
+): WeeklyScheduleScope => {
+  if (value === "until" || value === "indefinite") {
+    return value;
+  }
+  return "indefinite";
+};
+
+const weeklyScheduleDatesToMap = (
+  value: unknown,
+): Record<string, boolean> => {
+  if (!Array.isArray(value)) return {};
+  return value.reduce((acc: Record<string, boolean>, date) => {
+    if (typeof date === "string" && ISO_DATE_PATTERN.test(date)) {
+      acc[date] = true;
+    }
+    return acc;
+  }, {});
+};
+
+const toWeeklyScheduleDateList = (dates: Record<string, boolean>): string[] =>
+  Object.keys(dates)
+    .filter((date) => dates[date])
+    .sort((a, b) => a.localeCompare(b));
+
+const getDefaultWeeklyScheduleFields = (
+  fallback?: Partial<WeeklyScheduleFields>,
+): WeeklyScheduleFields => ({
+  weeklyScheduleScope: normalizeWeeklyScheduleScope(
+    fallback?.weeklyScheduleScope,
+  ),
+  weeklyScheduleEndDate:
+    typeof fallback?.weeklyScheduleEndDate === "string"
+      ? fallback.weeklyScheduleEndDate
+      : "",
+  weeklyScheduleDates: { ...(fallback?.weeklyScheduleDates || {}) },
+});
+
+const normalizeWeeklyAvailabilityDay = (
+  day: {
+    day: string;
+    slots: { start: string; end: string }[];
+    sessionType?: WeeklySessionType;
+  } & Partial<WeeklyScheduleFields>,
+  fallback?: Partial<WeeklyScheduleFields>,
+): WeeklyAvailabilityDay => ({
+  ...day,
+  ...getDefaultWeeklyScheduleFields({
+    weeklyScheduleScope:
+      day.weeklyScheduleScope ?? fallback?.weeklyScheduleScope,
+    weeklyScheduleEndDate:
+      day.weeklyScheduleEndDate ?? fallback?.weeklyScheduleEndDate,
+    weeklyScheduleDates:
+      day.weeklyScheduleDates ?? fallback?.weeklyScheduleDates,
+  }),
+});
+
+const getLocalDateTime = (dateStr: string, time24: string): Date => {
+  const date = parseLocalDateKey(dateStr);
+  const [hours, minutes] = time24.substring(0, 5).split(":").map(Number);
+  date.setHours(hours || 0, minutes || 0, 0, 0);
+  return date;
+};
 
 const getDefaultDateOverrideSessionType = (
   type: "Rehearsal" | "Recording" | "Both",
@@ -479,6 +617,10 @@ export default function EditStudioScreen() {
   }, [handleReturnToTabs, saving]);
 
   const toggleCalendarDate = (dateStr: string) => {
+    if (dateStr < getLocalDateKey()) {
+      return;
+    }
+
     setSelectedDates((prev) => {
       const next = { ...prev };
       if (next[dateStr]?.selected) {
@@ -523,14 +665,8 @@ export default function EditStudioScreen() {
     "Saturday",
     "Sunday",
   ];
-  const [availability, setAvailability] = useState<
-    {
-      day: string;
-      slots: { start: string; end: string }[];
-      sessionType?: WeeklySessionType;
-    }[]
-  >(
-    daysOfWeek.map((day) => ({
+  const [availability, setAvailability] = useState<WeeklyAvailabilityDay[]>(
+    daysOfWeek.map((day) => normalizeWeeklyAvailabilityDay({
       day,
       slots: [],
       sessionType: getDefaultWeeklySessionType("Both"),
@@ -569,21 +705,16 @@ export default function EditStudioScreen() {
       sessionType?: DateOverrideSessionType;
     };
   }>({});
-
+  const [activeWeeklyEndDatePickerDay, setActiveWeeklyEndDatePickerDay] =
+    useState<string | null>(null);
   // Conflict Resolution State
   const [conflictModalVisible, setConflictModalVisible] = useState(false);
   const [conflictingBookings, setConflictingBookings] = useState<
     ConflictingBooking[]
   >([]);
   const [pendingSavePayload, setPendingSavePayload] = useState<any>(null);
-  const originalAvailabilityRef = useRef<
-    {
-      day: string;
-      slots: { start: string; end: string }[];
-      sessionType?: WeeklySessionType;
-    }[]
-  >(
-    daysOfWeek.map((day) => ({
+  const originalAvailabilityRef = useRef<WeeklyAvailabilityDay[]>(
+    daysOfWeek.map((day) => normalizeWeeklyAvailabilityDay({
       day,
       slots: [],
       sessionType: getDefaultWeeklySessionType("Both"),
@@ -596,6 +727,110 @@ export default function EditStudioScreen() {
       sessionType?: DateOverrideSessionType;
     };
   }>({});
+  const nearTermProtectedDateOverridesRef =
+    useRef<ProtectedDateOverrideMap>({});
+
+  const getWeeklyScheduleForDate = (
+    dateStr: string,
+    weeklySchedule: WeeklyAvailabilityDay[] = availability,
+  ) => {
+    const dayName = getDayOfWeekName(dateStr);
+    return weeklySchedule.find((daySchedule) => daySchedule.day === dayName);
+  };
+
+  const weeklyScheduleAllowsDate = (
+    dateStr: string,
+    daySchedule: WeeklyAvailabilityDay,
+  ): boolean => {
+    if (
+      daySchedule.weeklyScheduleScope === "until" &&
+      daySchedule.weeklyScheduleEndDate
+    ) {
+      return dateStr <= daySchedule.weeklyScheduleEndDate;
+    }
+    if (daySchedule.weeklyScheduleScope === "specific_dates") {
+      return Boolean(daySchedule.weeklyScheduleDates[dateStr]);
+    }
+    return true;
+  };
+
+  const isWeeklyScheduleDateAllowed = (
+    dateStr: string,
+    weeklySchedule: WeeklyAvailabilityDay[] = availability,
+  ): boolean => {
+    const daySchedule = getWeeklyScheduleForDate(dateStr, weeklySchedule);
+    return Boolean(
+      daySchedule &&
+        daySchedule.slots.length > 0 &&
+        weeklyScheduleAllowsDate(dateStr, daySchedule),
+    );
+  };
+
+  const updateWeeklyScheduleForDay = (
+    dayIndex: number,
+    patch: Partial<WeeklyScheduleFields>,
+  ) => {
+    setAvailability((prev) =>
+      prev.map((day, index) =>
+        index === dayIndex ? normalizeWeeklyAvailabilityDay({ ...day, ...patch }) : day,
+      ),
+    );
+  };
+
+  const isWeeklyScheduleScopeValid = (): boolean => {
+    const todayKey = getLocalDateKey();
+    const openDays = availability.filter((day) => day.slots.length > 0);
+
+    for (const daySchedule of openDays) {
+      if (daySchedule.weeklyScheduleScope === "until") {
+        if (!ISO_DATE_PATTERN.test(daySchedule.weeklyScheduleEndDate)) {
+          showAlert(
+            "warning",
+            `${daySchedule.day} Schedule End Date`,
+            `Choose a ${daySchedule.day} weekly schedule end date from the calendar.`,
+          );
+          return false;
+        }
+        if (daySchedule.weeklyScheduleEndDate < todayKey) {
+          showAlert(
+            "warning",
+            `${daySchedule.day} Schedule End Date`,
+            `The ${daySchedule.day} weekly schedule end date must be today or a future date.`,
+          );
+          return false;
+        }
+      }
+
+      if (daySchedule.weeklyScheduleScope === "specific_dates") {
+        const selectedWeeklyDates = toWeeklyScheduleDateList(
+          daySchedule.weeklyScheduleDates,
+        );
+        if (selectedWeeklyDates.length === 0) {
+          showAlert(
+            "warning",
+            `${daySchedule.day} Schedule Dates`,
+            `Select at least one ${daySchedule.day} date for this weekly schedule.`,
+          );
+          return false;
+        }
+
+        const unsupportedDate = selectedWeeklyDates.find(
+          (dateStr) =>
+            dateStr < todayKey || getDayOfWeekName(dateStr) !== daySchedule.day,
+        );
+        if (unsupportedDate) {
+          showAlert(
+            "warning",
+            `${daySchedule.day} Schedule Dates`,
+            `${unsupportedDate} is not a future ${daySchedule.day}. Remove it or choose the matching weekday.`,
+          );
+          return false;
+        }
+      }
+    }
+
+    return true;
+  };
 
   const defaultPromotionAppliesTo =
     studioType === "Rehearsal"
@@ -1046,9 +1281,7 @@ export default function EditStudioScreen() {
           .order('created_at', { ascending: true }),
         supabase
           .from('studio_settings')
-          .select(
-            'lead_time_hours, weekend_multiplier, peak_season_multiplier, peak_season_dates, off_peak_multiplier, off_peak_dates, min_booking_duration_hours, recording_songs_per_block, recording_hours_per_block',
-          )
+          .select('*')
           .eq('studio_id', studioId)
           .maybeSingle(),
         supabase
@@ -1110,29 +1343,42 @@ export default function EditStudioScreen() {
       const fallbackWeeklySessionType = getDefaultWeeklySessionType(
         inferredStudioType,
       );
+      const loadedGlobalWeeklySchedule = getDefaultWeeklyScheduleFields({
+        weeklyScheduleScope: normalizeWeeklyScheduleScope(
+          studioSettingsData?.weekly_schedule_scope,
+        ),
+        weeklyScheduleEndDate:
+          typeof studioSettingsData?.weekly_schedule_end_date === "string"
+            ? studioSettingsData.weekly_schedule_end_date
+            : "",
+        weeklyScheduleDates: weeklyScheduleDatesToMap(
+          studioSettingsData?.weekly_schedule_dates,
+        ),
+      });
+      const getWeeklyScheduleDatesForDay = (
+        dates: Record<string, boolean>,
+        dayName: string,
+      ) =>
+        Object.fromEntries(
+          Object.entries(dates).filter(
+            ([dateStr]) => getDayOfWeekName(dateStr) === dayName,
+          ),
+        );
 
-      const availabilityByDay: Record<
-        string,
-        {
-          slots: { start: string; end: string }[];
-          sessionType: WeeklySessionType;
-        }
-      > =
+      const availabilityByDay: Record<string, WeeklyAvailabilityDay> =
         dayIndexToName.reduce((acc, day) => {
-          acc[day] = {
+          acc[day] = normalizeWeeklyAvailabilityDay({
             slots: [],
             sessionType: fallbackWeeklySessionType,
-          };
+            ...loadedGlobalWeeklySchedule,
+            weeklyScheduleDates: getWeeklyScheduleDatesForDay(
+              loadedGlobalWeeklySchedule.weeklyScheduleDates,
+              day,
+            ),
+            day,
+          });
           return acc;
-        },
-        {} as Record<
-          string,
-          {
-            slots: { start: string; end: string }[];
-            sessionType: WeeklySessionType;
-          }
-        >,
-      );
+        }, {} as Record<string, WeeklyAvailabilityDay>);
 
       (operatingHoursData || []).forEach((row: any) => {
         const dayName = dayIndexToName[row.day_of_week];
@@ -1144,6 +1390,26 @@ export default function EditStudioScreen() {
         availabilityByDay[dayName].sessionType = parseWeeklySessionType(
           row.reason,
           fallbackWeeklySessionType,
+        );
+        availabilityByDay[dayName] = normalizeWeeklyAvailabilityDay(
+          {
+            ...availabilityByDay[dayName],
+            weeklyScheduleScope: normalizeWeeklyScheduleScope(
+              row.weekly_schedule_scope ??
+                loadedGlobalWeeklySchedule.weeklyScheduleScope,
+            ),
+            weeklyScheduleEndDate:
+              typeof row.weekly_schedule_end_date === "string"
+                ? row.weekly_schedule_end_date
+                : loadedGlobalWeeklySchedule.weeklyScheduleEndDate,
+            weeklyScheduleDates: getWeeklyScheduleDatesForDay(
+              Array.isArray(row.weekly_schedule_dates)
+                ? weeklyScheduleDatesToMap(row.weekly_schedule_dates)
+                : loadedGlobalWeeklySchedule.weeklyScheduleDates,
+              dayName,
+            ),
+          },
+          loadedGlobalWeeklySchedule,
         );
       });
 
@@ -1170,6 +1436,9 @@ export default function EditStudioScreen() {
         slots: availabilityByDay[day]?.slots || [],
         sessionType:
           availabilityByDay[day]?.sessionType || fallbackWeeklySessionType,
+        weeklyScheduleScope: availabilityByDay[day]?.weeklyScheduleScope,
+        weeklyScheduleEndDate: availabilityByDay[day]?.weeklyScheduleEndDate,
+        weeklyScheduleDates: availabilityByDay[day]?.weeklyScheduleDates || {},
       }));
 
       // If no data returned, user doesn't own this studio
@@ -1209,6 +1478,12 @@ export default function EditStudioScreen() {
           studioSettingsData?.min_booking_duration_hours ??
           3,
         recording_rate_negotiable: false,
+        weekly_schedule_scope:
+          studioSettingsData?.weekly_schedule_scope ?? "indefinite",
+        weekly_schedule_end_date:
+          studioSettingsData?.weekly_schedule_end_date ?? "",
+        weekly_schedule_dates:
+          studioSettingsData?.weekly_schedule_dates ?? [],
       } as any;
 
       console.log("? ===== DATA VALIDATION PASSED =====");
@@ -1384,7 +1659,6 @@ export default function EditStudioScreen() {
       setRecordingHoursPerBlock(
         loadedHoursPerBlock ? String(loadedHoursPerBlock) : "",
       );
-
 
       const paxValue = data.pax?.toString() || "";
       console.log(
@@ -1599,6 +1873,8 @@ export default function EditStudioScreen() {
         setPromotions(loadedPromos);
       }
 
+      const todayKey = getLocalDateKey();
+
       // Load calendar availability from date overrides table
       const { data: dateOverrides, error: overridesError } = await supabase
         .from("studio_date_overrides")
@@ -1606,7 +1882,7 @@ export default function EditStudioScreen() {
         .eq("studio_id", studioId)
         .order("override_date", { ascending: true })
         .order("slot_order", { ascending: true })
-        .gte("override_date", new Date().toISOString().split("T")[0]); // Only future dates
+        .gte("override_date", todayKey); // Only today/future dates
 
       if (!overridesError && dateOverrides && dateOverrides.length > 0) {
         // Helper function to convert 24-hour to 12-hour format
@@ -1671,7 +1947,7 @@ export default function EditStudioScreen() {
           inferStudioTypeFromRows(normalizedTypes),
         );
         data.calendar_availability.forEach((item: any) => {
-          if (item.date) {
+          if (item.date && item.date >= todayKey) {
             calendarDates[item.date] = {
               selected: true,
               slots:
@@ -1709,7 +1985,7 @@ export default function EditStudioScreen() {
 
         const loadedAvailability = daysOfWeek.map((day) => {
           const dayData = data.availability.find((a: any) => a.day === day);
-          return {
+          return normalizeWeeklyAvailabilityDay({
             day,
             slots: dayData?.slots
               ? dayData.slots.map((slot: any) => ({
@@ -1721,7 +1997,18 @@ export default function EditStudioScreen() {
               dayData?.sessionType,
               getDefaultWeeklySessionType(data.type || "Both"),
             ),
-          };
+            weeklyScheduleScope: normalizeWeeklyScheduleScope(
+              dayData?.weeklyScheduleScope ?? dayData?.weekly_schedule_scope,
+            ),
+            weeklyScheduleEndDate:
+              typeof (dayData?.weeklyScheduleEndDate ?? dayData?.weekly_schedule_end_date) === "string"
+                ? dayData.weeklyScheduleEndDate
+                  ?? dayData.weekly_schedule_end_date
+                : "",
+            weeklyScheduleDates:
+              dayData?.weeklyScheduleDates ??
+              weeklyScheduleDatesToMap(dayData?.weekly_schedule_dates),
+          });
         });
         console.log("?? Loaded availability:", loadedAvailability);
         setAvailability(loadedAvailability);
@@ -1735,7 +2022,7 @@ export default function EditStudioScreen() {
           day,
           slots: [],
           sessionType: getDefaultWeeklySessionType(data.type || "Both"),
-        }));
+        })).map((day) => normalizeWeeklyAvailabilityDay(day));
         setAvailability(defaultAvailability);
         originalAvailabilityRef.current = JSON.parse(
           JSON.stringify(defaultAvailability),
@@ -1962,6 +2249,9 @@ export default function EditStudioScreen() {
     if (!validateScheduleConflicts()) {
       return false;
     }
+    if (!isWeeklyScheduleScopeValid()) {
+      return false;
+    }
     if (selectedImages.length === 0) {
       showAlert(
         "warning",
@@ -2076,7 +2366,7 @@ export default function EditStudioScreen() {
   };
 
   const getDayOfWeekName = (dateStr: string): string => {
-    const date = new Date(dateStr);
+    const date = parseLocalDateKey(dateStr);
     const days = [
       "Sunday",
       "Monday",
@@ -2091,7 +2381,14 @@ export default function EditStudioScreen() {
 
   const getEditedAvailableSlotsForDate = (
     dateStr: string,
+    protectedDateOverrides: ProtectedDateOverrideMap =
+      nearTermProtectedDateOverridesRef.current,
   ): { start: string; end: string }[] => {
+    const protectedOverride = protectedDateOverrides[dateStr];
+    if (protectedOverride) {
+      return protectedOverride.slots;
+    }
+
     if (selectedDates[dateStr]?.selected) {
       if (!selectedDates[dateStr].slots.length) {
         return [];
@@ -2100,6 +2397,10 @@ export default function EditStudioScreen() {
         start: convertTo24HourForSchedule(slot.start),
         end: convertTo24HourForSchedule(slot.end),
       }));
+    }
+
+    if (!isWeeklyScheduleDateAllowed(dateStr)) {
+      return [];
     }
 
     const dayName = getDayOfWeekName(dateStr);
@@ -2134,8 +2435,12 @@ export default function EditStudioScreen() {
     });
   };
 
-  const findScheduleConflictsForEditedState = async (studioId: string) => {
-    const today = new Date().toISOString().split("T")[0];
+  const findScheduleConflictsForEditedState = async (
+    studioId: string,
+    protectedDateOverrides: ProtectedDateOverrideMap =
+      nearTermProtectedDateOverridesRef.current,
+  ) => {
+    const today = getLocalDateKey();
 
     const { data: existingBookings, error: bookingsError } = await supabase
       .from("studio_bookings")
@@ -2170,7 +2475,10 @@ export default function EditStudioScreen() {
         const bookingDate = booking.booking_date;
         const bookingStart = booking.start_time.substring(0, 5);
         const bookingEnd = booking.end_time.substring(0, 5);
-        const availableSlots = getEditedAvailableSlotsForDate(bookingDate);
+        const availableSlots = getEditedAvailableSlotsForDate(
+          bookingDate,
+          protectedDateOverrides,
+        );
 
         const bookingFits = bookingFitsInSlots(
           bookingStart,
@@ -2199,6 +2507,7 @@ export default function EditStudioScreen() {
             bookingDate,
             bookingStart,
             bookingEnd,
+            protectedDateOverrides,
           );
           conflict.newAvailableSlot = nextSlot;
           conflicts.push(conflict);
@@ -2222,7 +2531,10 @@ export default function EditStudioScreen() {
     const conflictingHoldCount = (activeHolds || []).filter((hold: any) => {
       const holdStart = hold.start_time.substring(0, 5);
       const holdEnd = hold.end_time.substring(0, 5);
-      const availableSlots = getEditedAvailableSlotsForDate(hold.booking_date);
+      const availableSlots = getEditedAvailableSlotsForDate(
+        hold.booking_date,
+        protectedDateOverrides,
+      );
       return !bookingFitsInSlots(holdStart, holdEnd, availableSlots);
     }).length;
 
@@ -2231,11 +2543,7 @@ export default function EditStudioScreen() {
 
   const getScheduleSlotsForDate = (
     dateStr: string,
-    weeklySchedule: {
-      day: string;
-      slots: { start: string; end: string }[];
-      sessionType?: WeeklySessionType;
-    }[],
+    weeklySchedule: WeeklyAvailabilityDay[],
     dateOverrides: {
       [date: string]: {
         selected: boolean;
@@ -2253,7 +2561,11 @@ export default function EditStudioScreen() {
 
     const dayName = getDayOfWeekName(dateStr);
     const daySchedule = weeklySchedule.find((a) => a.day === dayName);
-    if (!daySchedule || !daySchedule.slots.length) {
+    if (
+      !daySchedule ||
+      !daySchedule.slots.length ||
+      !weeklyScheduleAllowsDate(dateStr, daySchedule)
+    ) {
       return [];
     }
 
@@ -2263,8 +2575,8 @@ export default function EditStudioScreen() {
     }));
   };
 
-  const oldSlotsCoveredByNewSlots = (
-    oldSlots: { start: string; end: string }[],
+  const oldSlotCoveredByNewSlots = (
+    oldSlot: { start: string; end: string },
     newSlots: { start: string; end: string }[],
   ): boolean => {
     const toMinutes = (time: string) => {
@@ -2272,27 +2584,42 @@ export default function EditStudioScreen() {
       return h * 60 + m;
     };
 
-    return oldSlots.every((oldSlot) => {
-      const oldStart = toMinutes(oldSlot.start);
-      const oldEnd = toMinutes(oldSlot.end);
-      return newSlots.some((newSlot) => {
-        const newStart = toMinutes(newSlot.start);
-        const newEnd = toMinutes(newSlot.end);
-        return newStart <= oldStart && newEnd >= oldEnd;
-      });
+    const oldStart = toMinutes(oldSlot.start);
+    const oldEnd = toMinutes(oldSlot.end);
+    return newSlots.some((newSlot) => {
+      const newStart = toMinutes(newSlot.start);
+      const newEnd = toMinutes(newSlot.end);
+      return newStart <= oldStart && newEnd >= oldEnd;
     });
+  };
+
+  const slotOverlapsLockWindow = (
+    dateStr: string,
+    slot: { start: string; end: string },
+    windowStart: Date,
+    windowEnd: Date,
+  ): boolean => {
+    const slotStart = getLocalDateTime(dateStr, slot.start);
+    const slotEnd = getLocalDateTime(dateStr, slot.end);
+    return slotEnd > windowStart && slotStart < windowEnd;
   };
 
   const detectNearTermScheduleReduction = (
     lockHours: number,
-  ): { blocked: boolean; affectedDate?: string } => {
+  ): {
+    blocked: boolean;
+    affectedDate?: string;
+    protectedDateOverrides: ProtectedDateOverrideMap;
+  } => {
     const now = new Date();
     const horizon = new Date(now.getTime() + lockHours * 60 * 60 * 1000);
-    const iterDate = new Date(now);
+    const horizonKey = getLocalDateKey(horizon);
+    const iterDate = parseLocalDateKey(getLocalDateKey(now));
     const datesToCheck = new Set<string>();
+    const protectedDateOverrides: ProtectedDateOverrideMap = {};
 
-    while (iterDate <= horizon) {
-      datesToCheck.add(iterDate.toISOString().split("T")[0]);
+    while (getLocalDateKey(iterDate) <= horizonKey) {
+      datesToCheck.add(getLocalDateKey(iterDate));
       iterDate.setDate(iterDate.getDate() + 1);
     }
 
@@ -2308,13 +2635,41 @@ export default function EditStudioScreen() {
         continue;
       }
 
-      const stillCovered = oldSlotsCoveredByNewSlots(oldSlots, newSlots);
-      if (!stillCovered) {
-        return { blocked: true, affectedDate: dateStr };
+      const reducedLockedSlot = oldSlots.some(
+        (oldSlot) =>
+          slotOverlapsLockWindow(dateStr, oldSlot, now, horizon) &&
+          !oldSlotCoveredByNewSlots(oldSlot, newSlots),
+      );
+      if (!reducedLockedSlot) {
+        continue;
       }
+
+      const oldHadDateOverride =
+        originalSelectedDatesRef.current[dateStr]?.selected;
+      const newHasDateOverride = selectedDates[dateStr]?.selected;
+
+      if (oldHadDateOverride || newHasDateOverride) {
+        return {
+          blocked: true,
+          affectedDate: dateStr,
+          protectedDateOverrides: {},
+        };
+      }
+
+      const dayName = getDayOfWeekName(dateStr);
+      const originalDaySchedule = originalAvailabilityRef.current.find(
+        (a) => a.day === dayName,
+      );
+      protectedDateOverrides[dateStr] = {
+        slots: oldSlots,
+        sessionType: normalizeDateOverrideSessionType(
+          originalDaySchedule?.sessionType,
+          getDefaultDateOverrideSessionType(studioType),
+        ),
+      };
     }
 
-    return { blocked: false };
+    return { blocked: false, protectedDateOverrides };
   };
 
   const performSave = async () => {
@@ -2348,12 +2703,17 @@ export default function EditStudioScreen() {
         setSaving(false);
         return;
       }
+      nearTermProtectedDateOverridesRef.current =
+        reductionCheck.protectedDateOverrides;
 
       // Check for booking conflicts before saving
       console.log("?? Checking for booking conflicts...");
 
       const { conflicts, conflictingHoldCount } =
-        await findScheduleConflictsForEditedState(studioId);
+        await findScheduleConflictsForEditedState(
+          studioId,
+          reductionCheck.protectedDateOverrides,
+        );
 
       if (conflicts.length > 0) {
         console.log("?? Found conflicts:", conflicts.length);
@@ -2373,7 +2733,7 @@ export default function EditStudioScreen() {
         return;
       }
 
-      await executeSave();
+      await executeSave(reductionCheck.protectedDateOverrides);
     } catch (e: any) {
       console.error("? Error checking bookings:", e);
       showAlert(
@@ -2391,6 +2751,8 @@ export default function EditStudioScreen() {
     currentDate: string,
     bookingStart: string,
     bookingEnd: string,
+    protectedDateOverrides: ProtectedDateOverrideMap =
+      nearTermProtectedDateOverridesRef.current,
   ): Promise<{ date: string; start_time: string; end_time: string } | null> => {
     const bookingDuration = (() => {
       const [sH, sM] = bookingStart.split(":").map(Number);
@@ -2409,7 +2771,7 @@ export default function EditStudioScreen() {
     };
 
     const getDayOfWeek = (dateStr: string): string => {
-      const date = new Date(dateStr);
+      const date = parseLocalDateKey(dateStr);
       const days = [
         "Sunday",
         "Monday",
@@ -2423,19 +2785,21 @@ export default function EditStudioScreen() {
     };
 
     // Search for next 30 days
-    const startDate = new Date(currentDate);
+    const startDate = parseLocalDateKey(currentDate);
     startDate.setDate(startDate.getDate() + 1); // Start from next day
 
     for (let i = 0; i < 30; i++) {
       const checkDate = new Date(startDate);
       checkDate.setDate(checkDate.getDate() + i);
-      const dateStr = checkDate.toISOString().split("T")[0];
+      const dateStr = getLocalDateKey(checkDate);
 
       // Get available slots for this date
       let availableSlots: { start: string; end: string }[] = [];
 
       // Check date overrides first
-      if (
+      if (protectedDateOverrides[dateStr]) {
+        availableSlots = protectedDateOverrides[dateStr].slots;
+      } else if (
         selectedDates[dateStr]?.selected &&
         selectedDates[dateStr]?.slots.length > 0
       ) {
@@ -2445,13 +2809,15 @@ export default function EditStudioScreen() {
         }));
       } else {
         // Check weekly schedule
-        const dayName = getDayOfWeek(dateStr);
-        const daySchedule = availability.find((a) => a.day === dayName);
-        if (daySchedule && daySchedule.slots.length > 0) {
-          availableSlots = daySchedule.slots.map((slot) => ({
-            start: convertTo24Hour(slot.start),
-            end: convertTo24Hour(slot.end),
-          }));
+        if (isWeeklyScheduleDateAllowed(dateStr)) {
+          const dayName = getDayOfWeek(dateStr);
+          const daySchedule = availability.find((a) => a.day === dayName);
+          if (daySchedule && daySchedule.slots.length > 0) {
+            availableSlots = daySchedule.slots.map((slot) => ({
+              start: convertTo24Hour(slot.start),
+              end: convertTo24Hour(slot.end),
+            }));
+          }
         }
       }
 
@@ -2723,7 +3089,10 @@ export default function EditStudioScreen() {
     }
   };
 
-  const executeSave = async () => {
+  const executeSave = async (
+    protectedDateOverrides: ProtectedDateOverrideMap =
+      nearTermProtectedDateOverridesRef.current,
+  ) => {
     try {
       const {
         data: { user },
@@ -2743,7 +3112,10 @@ export default function EditStudioScreen() {
 
       // Final preflight: re-check right before writing to reduce stale-state races.
       const { conflicts: latestConflicts, conflictingHoldCount } =
-        await findScheduleConflictsForEditedState(studioId);
+        await findScheduleConflictsForEditedState(
+          studioId,
+          protectedDateOverrides,
+        );
 
       if (latestConflicts.length > 0) {
         setConflictingBookings(latestConflicts);
@@ -2779,9 +3151,13 @@ export default function EditStudioScreen() {
         return `${hours}:${minutes}`;
       };
 
-      // Convert calendar-based availability to the payload format
-      const calendarAvailability = Object.entries(selectedDates)
-        .filter(([_, data]) => data.selected)
+      const todayKey = getLocalDateKey();
+
+      // Convert calendar-based availability to the payload format.
+      // Past overrides are intentionally omitted from the edit payload and left
+      // untouched in the database for history/audit context.
+      const selectedDateAvailability = Object.entries(selectedDates)
+        .filter(([date, data]) => data.selected && date >= todayKey)
         .map(([date, data]) => ({
           date,
           session_type:
@@ -2797,6 +3173,23 @@ export default function EditStudioScreen() {
             end: convertTo24Hour(slot.end),
           })),
         }));
+
+      const protectedDateAvailability = Object.entries(protectedDateOverrides)
+        .filter(([date]) => date >= todayKey && !selectedDates[date]?.selected)
+        .map(([date, data]) => ({
+          date,
+          session_type: normalizeDateOverrideSessionType(
+            data.sessionType,
+            getDefaultDateOverrideSessionType(studioType),
+          ),
+          is_open: data.slots.length > 0,
+          slots: data.slots,
+        }));
+
+      const calendarAvailability = [
+        ...selectedDateAvailability,
+        ...protectedDateAvailability,
+      ].sort((a, b) => a.date.localeCompare(b.date));
 
       const equipmentPayload = equipment.map((e) => ({
         name: e.name,
@@ -2846,20 +3239,32 @@ export default function EditStudioScreen() {
         business_permit_url: businessPermitUrl || null,
         availability: availability
           .filter((day) => day.slots.length > 0)
-          .map((day) => ({
-            day: day.day,
-            session_type:
-              studioType === "Both"
-                ? normalizeWeeklySessionType(
-                    day.sessionType,
-                    getDefaultWeeklySessionType(studioType),
-                  )
-                : getDefaultWeeklySessionType(studioType),
-            slots: day.slots.map((slot) => ({
-              start: convertTo24Hour(slot.start),
-              end: convertTo24Hour(slot.end),
-            })),
-          })),
+          .map((day) => {
+            const dayWeeklyScope = normalizeWeeklyScheduleScope(
+              day.weeklyScheduleScope,
+            );
+            return {
+              day: day.day,
+              session_type:
+                studioType === "Both"
+                  ? normalizeWeeklySessionType(
+                      day.sessionType,
+                      getDefaultWeeklySessionType(studioType),
+                    )
+                  : getDefaultWeeklySessionType(studioType),
+              weekly_schedule_scope: dayWeeklyScope,
+              weekly_schedule_end_date:
+                dayWeeklyScope === "until" ? day.weeklyScheduleEndDate : null,
+              weekly_schedule_dates:
+                dayWeeklyScope === "specific_dates"
+                  ? toWeeklyScheduleDateList(day.weeklyScheduleDates)
+                  : [],
+              slots: day.slots.map((slot) => ({
+                start: convertTo24Hour(slot.start),
+                end: convertTo24Hour(slot.end),
+              })),
+            };
+          }),
         calendar_availability: calendarAvailability,
         // Booking settings - default 24hr advance booking
         booking_settings: {
@@ -2878,6 +3283,9 @@ export default function EditStudioScreen() {
           recording_hours_per_block:
             parsePositiveDecimal(recordingHoursPerBlock) || 3,
           recording_rate_negotiable: false,
+          weekly_schedule_scope: "indefinite",
+          weekly_schedule_end_date: null,
+          weekly_schedule_dates: [],
         },
       };
 
@@ -3008,29 +3416,60 @@ export default function EditStudioScreen() {
       }
 
       // Update studio settings
-      await supabase
+      const settingsRow = {
+        studio_id: studioId,
+        lead_time_hours: payload.booking_settings.lead_time_hours || 24,
+        weekend_multiplier: payload.booking_settings.weekend_multiplier || 1.0,
+        peak_season_multiplier: payload.booking_settings.peak_season_multiplier || 1.0,
+        peak_season_dates: payload.booking_settings.peak_season_dates || [],
+        off_peak_multiplier: payload.booking_settings.off_peak_multiplier || 1.0,
+        off_peak_dates: payload.booking_settings.off_peak_dates || [],
+        min_booking_duration_hours:
+          parsePositiveDecimal(
+            payload.booking_settings.min_booking_duration_hours,
+          ) ||
+          (studioType === 'Recording' || studioType === 'Both' ? 3 : 2),
+        recording_songs_per_block:
+          parsePositiveInteger(payload.booking_settings.recording_songs_per_block) || 1,
+        recording_hours_per_block:
+          parsePositiveDecimal(payload.booking_settings.recording_hours_per_block) ||
+          parsePositiveDecimal(payload.booking_settings.min_booking_duration_hours) ||
+          3,
+        recording_rate_negotiable: false,
+        weekly_schedule_scope: normalizeWeeklyScheduleScope(
+          payload.booking_settings.weekly_schedule_scope,
+        ),
+        weekly_schedule_end_date:
+          payload.booking_settings.weekly_schedule_scope === "until"
+            ? payload.booking_settings.weekly_schedule_end_date
+            : null,
+        weekly_schedule_dates: Array.isArray(
+          payload.booking_settings.weekly_schedule_dates,
+        )
+          ? payload.booking_settings.weekly_schedule_dates
+          : [],
+      };
+      let { error: settingsError } = await supabase
         .from('studio_settings')
-        .upsert({
-          studio_id: studioId,
-          lead_time_hours: payload.booking_settings.lead_time_hours || 24,
-          weekend_multiplier: payload.booking_settings.weekend_multiplier || 1.0,
-          peak_season_multiplier: payload.booking_settings.peak_season_multiplier || 1.0,
-          peak_season_dates: payload.booking_settings.peak_season_dates || [],
-          off_peak_multiplier: payload.booking_settings.off_peak_multiplier || 1.0,
-          off_peak_dates: payload.booking_settings.off_peak_dates || [],
-          min_booking_duration_hours:
-            parsePositiveDecimal(
-              payload.booking_settings.min_booking_duration_hours,
-            ) ||
-            (studioType === 'Recording' || studioType === 'Both' ? 3 : 2),
-          recording_songs_per_block:
-            parsePositiveInteger(payload.booking_settings.recording_songs_per_block) || 1,
-          recording_hours_per_block:
-            parsePositiveDecimal(payload.booking_settings.recording_hours_per_block) ||
-            parsePositiveDecimal(payload.booking_settings.min_booking_duration_hours) ||
-            3,
-          recording_rate_negotiable: false,
-        }, { onConflict: 'studio_id' });
+        .upsert(settingsRow, { onConflict: 'studio_id' });
+
+      if (settingsError && isMissingWeeklyScheduleColumns(settingsError)) {
+        console.warn(
+          "studio_settings weekly schedule columns are not available yet; retrying without them.",
+          settingsError,
+        );
+        ({ error: settingsError } = await supabase
+          .from('studio_settings')
+          .upsert(stripWeeklyScheduleColumns(settingsRow), {
+            onConflict: 'studio_id',
+          }));
+      }
+
+      if (settingsError) {
+        throw new Error(
+          `Failed to save booking settings: ${settingsError.message}`,
+        );
+      }
 
       // Update promotions (delete-and-re-insert)
       await supabase.from('studio_promotions').delete().eq('studio_id', studioId);
@@ -3089,6 +3528,18 @@ export default function EditStudioScreen() {
                 open_time: slot.start,
                 close_time: slot.end,
                 slot_order: slotIndex,
+                weekly_schedule_scope: normalizeWeeklyScheduleScope(
+                  daySchedule.weekly_schedule_scope,
+                ),
+                weekly_schedule_end_date:
+                  daySchedule.weekly_schedule_scope === "until"
+                    ? daySchedule.weekly_schedule_end_date
+                    : null,
+                weekly_schedule_dates: Array.isArray(
+                  daySchedule.weekly_schedule_dates,
+                )
+                  ? daySchedule.weekly_schedule_dates
+                  : [],
                 reason: buildWeeklyScheduleReason(
                   normalizeWeeklySessionType(
                     daySchedule.session_type,
@@ -3102,9 +3553,23 @@ export default function EditStudioScreen() {
       }
 
       if (operatingHours.length > 0) {
-        const { error: operatingHoursError } = await supabase
+        let { error: operatingHoursError } = await supabase
           .from('studio_operating_hours')
           .insert(operatingHours);
+
+        if (
+          operatingHoursError &&
+          isMissingWeeklyScheduleColumns(operatingHoursError)
+        ) {
+          console.warn(
+            "studio_operating_hours weekly schedule columns are not available yet; retrying without them.",
+            operatingHoursError,
+          );
+          ({ error: operatingHoursError } = await supabase
+            .from('studio_operating_hours')
+            .insert(operatingHours.map(stripWeeklyScheduleColumns)));
+        }
+
         if (operatingHoursError) {
           throw new Error(
             `Failed to save weekly schedule: ${operatingHoursError.message}`,
@@ -3116,16 +3581,17 @@ export default function EditStudioScreen() {
       const { error: deleteDateOverridesError } = await supabase
         .from('studio_date_overrides')
         .delete()
-        .eq('studio_id', studioId);
+        .eq('studio_id', studioId)
+        .gte('override_date', todayKey);
       if (deleteDateOverridesError) {
         throw new Error(
-          `Failed to clear calendar availability: ${deleteDateOverridesError.message}`,
+          `Failed to clear future calendar availability: ${deleteDateOverridesError.message}`,
         );
       }
 
       if (payload.calendar_availability && Array.isArray(payload.calendar_availability) && payload.calendar_availability.length > 0) {
         const dateOverrides = payload.calendar_availability
-          .filter((entry: any) => entry.date)
+          .filter((entry: any) => entry.date && entry.date >= todayKey)
           .flatMap((entry: any) => {
             const hasSlots = Array.isArray(entry.slots) && entry.slots.length > 0;
             const slots = hasSlots ? entry.slots : [null];
@@ -3652,6 +4118,257 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
       </View>
     );
   };
+
+  const renderWeeklyScheduleDurationCard = (
+    daySchedule: WeeklyAvailabilityDay,
+    dayIndex: number,
+  ) => (
+    <View
+      style={[
+        styles.weeklyScopeInline,
+        { borderTopColor: colors.border },
+      ]}
+    >
+      <Text
+        style={{
+          color: colors.textSecondary,
+          fontSize: 11,
+          marginBottom: 8,
+          fontFamily: "Poppins_600SemiBold",
+        }}
+      >
+        {daySchedule.day.toUpperCase()} WEEKLY HOURS APPLY
+      </Text>
+      <Text
+        style={{
+          color: colors.textSecondary,
+          fontSize: 12,
+          marginBottom: 10,
+          fontFamily: "Poppins_400Regular",
+        }}
+      >
+        Choose how long {daySchedule.day} weekly hours should stay active. Date overrides still take priority.
+      </Text>
+      <View style={styles.sessionTypeOptions}>
+        {([
+          { value: "indefinite", label: "Every week" },
+          { value: "until", label: "Until a date" },
+        ] as const).map((option) => {
+          const isSelected = daySchedule.weeklyScheduleScope === option.value;
+          return (
+            <TouchableOpacity
+              key={option.value}
+              activeOpacity={1}
+              onPress={() => {
+                const nextScope = normalizeWeeklyScheduleScope(option.value);
+                updateWeeklyScheduleForDay(dayIndex, {
+                  weeklyScheduleScope: nextScope,
+                });
+                setActiveWeeklyEndDatePickerDay(
+                  nextScope === "until" ? daySchedule.day : null,
+                );
+              }}
+              style={[
+                styles.sessionTypeChip,
+                {
+                  borderColor: isSelected ? colors.primary : colors.border,
+                  backgroundColor: isSelected
+                    ? `${colors.primary}20`
+                    : "transparent",
+                },
+              ]}
+            >
+              <Text
+                style={{
+                  color: isSelected ? colors.primary : colors.textSecondary,
+                  fontSize: 11,
+                  lineHeight: 16,
+                  includeFontPadding: false,
+                  fontFamily: "Poppins_500Medium",
+                }}
+              >
+                {option.label}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+
+      {daySchedule.weeklyScheduleScope === "until" && (
+        <View style={{ marginTop: 12 }}>
+          <TouchableOpacity
+            activeOpacity={0.8}
+            onPress={() =>
+              setActiveWeeklyEndDatePickerDay(
+                activeWeeklyEndDatePickerDay === daySchedule.day
+                  ? null
+                  : daySchedule.day,
+              )
+            }
+            style={{
+              borderWidth: 1,
+              borderColor: daySchedule.weeklyScheduleEndDate
+                ? `${colors.primary}80`
+                : colors.border,
+              borderRadius: 12,
+              padding: 12,
+              backgroundColor: isDark ? "#111827" : "#FFFFFF",
+              flexDirection: "row",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 10,
+            }}
+          >
+            <View
+              style={{
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 10,
+                flex: 1,
+                minWidth: 0,
+              }}
+            >
+              <View
+                style={{
+                  width: 34,
+                  height: 34,
+                  borderRadius: 17,
+                  alignItems: "center",
+                  justifyContent: "center",
+                  backgroundColor: `${colors.primary}18`,
+                }}
+              >
+                <Ionicons
+                  name="calendar-outline"
+                  size={18}
+                  color={colors.primary}
+                />
+              </View>
+              <View style={{ flex: 1, minWidth: 0 }}>
+                <Text
+                  style={{
+                    color: colors.textSecondary,
+                    fontSize: 10,
+                    fontFamily: "Poppins_600SemiBold",
+                    textTransform: "uppercase",
+                  }}
+                >
+                  {daySchedule.day} hours end on
+                </Text>
+                <Text
+                  numberOfLines={1}
+                  style={{
+                    color: daySchedule.weeklyScheduleEndDate
+                      ? colors.text
+                      : colors.textSecondary,
+                    fontSize: 14,
+                    marginTop: 2,
+                    fontFamily: "Poppins_600SemiBold",
+                  }}
+                >
+                  {daySchedule.weeklyScheduleEndDate
+                    ? formatReadableDate(daySchedule.weeklyScheduleEndDate)
+                    : "Pick from calendar"}
+                </Text>
+              </View>
+            </View>
+            <Ionicons
+              name={
+                activeWeeklyEndDatePickerDay === daySchedule.day
+                  ? "chevron-up"
+                  : "chevron-down"
+              }
+              size={18}
+              color={colors.textSecondary}
+            />
+          </TouchableOpacity>
+
+          {daySchedule.weeklyScheduleEndDate ? (
+            <TouchableOpacity
+              activeOpacity={0.8}
+              onPress={() => {
+                updateWeeklyScheduleForDay(dayIndex, {
+                  weeklyScheduleEndDate: "",
+                });
+                setActiveWeeklyEndDatePickerDay(daySchedule.day);
+              }}
+              style={{
+                alignSelf: "flex-start",
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 6,
+                marginTop: 8,
+                paddingVertical: 6,
+                paddingHorizontal: 2,
+              }}
+            >
+              <Ionicons
+                name="close-circle-outline"
+                size={15}
+                color={colors.textSecondary}
+              />
+              <Text
+                style={{
+                  color: colors.textSecondary,
+                  fontSize: 12,
+                  fontFamily: "Poppins_500Medium",
+                }}
+              >
+                Clear date
+              </Text>
+            </TouchableOpacity>
+          ) : null}
+
+          {activeWeeklyEndDatePickerDay === daySchedule.day && (
+            <View
+              style={{
+                marginTop: 10,
+                borderRadius: 12,
+                borderWidth: 1,
+                borderColor: colors.border,
+                overflow: "hidden",
+                backgroundColor: isDark ? "#111827" : "#FFFFFF",
+              }}
+            >
+              <Calendar
+                current={daySchedule.weeklyScheduleEndDate || getLocalDateKey()}
+                minDate={getLocalDateKey()}
+                onDayPress={(day) => {
+                  updateWeeklyScheduleForDay(dayIndex, {
+                    weeklyScheduleEndDate: day.dateString,
+                  });
+                  setActiveWeeklyEndDatePickerDay(null);
+                }}
+                markedDates={
+                  ISO_DATE_PATTERN.test(daySchedule.weeklyScheduleEndDate)
+                    ? {
+                        [daySchedule.weeklyScheduleEndDate]: {
+                          selected: true,
+                          selectedColor: colors.primary,
+                          selectedTextColor: "#FFFFFF",
+                        },
+                      }
+                    : {}
+                }
+                theme={{
+                  backgroundColor: "transparent",
+                  calendarBackground: "transparent",
+                  textSectionTitleColor: colors.textSecondary,
+                  selectedDayBackgroundColor: colors.primary,
+                  selectedDayTextColor: "#FFFFFF",
+                  todayTextColor: colors.primary,
+                  dayTextColor: colors.text,
+                  textDisabledColor: isDark ? "#4B5563" : "#D1D5DB",
+                  monthTextColor: colors.text,
+                  arrowColor: colors.primary,
+                }}
+              />
+            </View>
+          )}
+        </View>
+      )}
+    </View>
+  );
 
   // Show loading while checking authorization
   if (checkingAuth) {
@@ -4519,7 +5236,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                             setShowPromoStartCalendar(false);
                           }}
                           markedDates={promotionForm.start_date ? { [promotionForm.start_date]: { selected: true, selectedColor: colors.primary } } : {}}
-                          minDate={new Date().toISOString().split("T")[0]}
+                          minDate={getLocalDateKey()}
                           theme={{
                             backgroundColor: "transparent",
                             calendarBackground: "transparent",
@@ -4541,7 +5258,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                             setShowPromoEndCalendar(false);
                           }}
                           markedDates={promotionForm.end_date ? { [promotionForm.end_date]: { selected: true, selectedColor: colors.primary } } : {}}
-                          minDate={promotionForm.start_date || new Date().toISOString().split("T")[0]}
+                          minDate={promotionForm.start_date || getLocalDateKey()}
                           theme={{
                             backgroundColor: "transparent",
                             calendarBackground: "transparent",
@@ -4978,10 +5695,11 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                       </TouchableOpacity>
                     </View>
                   </View>
-                </View>
-              ))}
             </View>
-          )}
+          ))}
+
+        </View>
+      )}
 
           {equipment.length > 0 && (
             <Text
@@ -5067,7 +5785,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
               { color: colors.textSecondary, marginBottom: 16 },
             ]}
           >
-            Set your regular weekly schedule and/or select specific dates
+            Set your regular weekly schedule and optional date overrides
           </Text>
 
           {/* Calendar Date Selection */}
@@ -5082,7 +5800,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
             >
               <Ionicons name="calendar" size={16} color={colors.primary} />
               <Text style={[styles.sectionSubtitle, { color: colors.text }]}>
-                Specific Dates
+                Date Overrides
               </Text>
             </View>
             <Text
@@ -5093,7 +5811,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                 marginBottom: 12,
               }}
             >
-              Tap on dates to set special hours or override weekly schedule
+              Use these for one-off changes like closures, holidays, or special hours. These override the regular weekly schedule.
             </Text>
 
             <View
@@ -5106,12 +5824,12 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
               ]}
             >
               <Calendar
-                current={new Date().toISOString().split("T")[0]}
-                minDate={new Date().toISOString().split("T")[0]}
+                current={getLocalDateKey()}
+                minDate={getLocalDateKey()}
                 maxDate={(() => {
                   const maxDate = new Date();
                   maxDate.setDate(maxDate.getDate() + 90);
-                  return maxDate.toISOString().split("T")[0];
+                  return getLocalDateKey(maxDate);
                 })()}
                 markedDates={Object.entries(selectedDates).reduce(
                   (acc, [dateStr, data]) => {
@@ -5135,7 +5853,11 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                   return (
                     <TouchableOpacity
                       activeOpacity={1}
-                      onPress={() => toggleCalendarDate(date.dateString)}
+                      onPress={() => {
+                        if (!isDisabled) {
+                          toggleCalendarDate(date.dateString);
+                        }
+                      }}
                       style={{
                         width: 32,
                         height: 32,
@@ -5952,10 +6674,12 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                       fontFamily: "Poppins_500Medium",
                     }}
                   >
-                    Add Time Slot
-                  </Text>
-                </TouchableOpacity>
+                  Add Time Slot
+                </Text>
+              </TouchableOpacity>
               )}
+              {daySchedule.slots.length > 0 &&
+                renderWeeklyScheduleDurationCard(daySchedule, dayIndex)}
             </View>
           ))}
 
@@ -6414,6 +7138,12 @@ const styles = StyleSheet.create({
     textAlign: "left",
     textAlignVertical: "center",
   },
+  textInput: {
+    padding: 16,
+    fontFamily: "Poppins_400Regular",
+    textAlign: "left",
+    textAlignVertical: "center",
+  },
   addAmenityContainer: {
     flexDirection: "row",
     gap: 8,
@@ -6697,6 +7427,18 @@ const styles = StyleSheet.create({
     minHeight: 32,
     alignItems: "center",
     justifyContent: "center",
+  },
+  weeklyScopeInline: {
+    borderTopWidth: 1,
+    marginTop: 14,
+    paddingTop: 14,
+  },
+  weeklyScopeCard: {
+    borderRadius: 12,
+    borderWidth: 1,
+    padding: 12,
+    marginTop: 4,
+    marginBottom: 12,
   },
   timeSlotRow: {
     flexDirection: "row",

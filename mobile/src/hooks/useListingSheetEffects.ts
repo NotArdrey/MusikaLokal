@@ -23,6 +23,22 @@ interface UseListingSheetEffectsParams {
   setRelatedListings: (value: any[]) => void;
 }
 
+const getReviewTargetColumn = (type: unknown) => {
+  const normalized = String(type || "").trim().toLowerCase();
+  if (normalized === "studio" || normalized === "venue") return "studio_id";
+  if (normalized === "gig") return "gig_id";
+  if (normalized === "artist" || normalized === "musician" || normalized === "profile") return "user_id";
+  return "group_id";
+};
+
+const normalizeReviewRows = (rows: any[] = []) =>
+  rows.map((row) => ({
+    ...row,
+    author: row?.author ?? row?.profiles ?? null,
+    content: row?.content ?? row?.comment ?? null,
+    likes_count: Number(row?.likes_count ?? row?.computed_likes_count ?? 0),
+  }));
+
 export const useListingSheetEffects = ({
   group,
   listingId,
@@ -40,6 +56,7 @@ export const useListingSheetEffects = ({
   const listingDetailsType = group?.type
     ? String(group.type).trim().toLowerCase()
     : null;
+  const groupType = group?.type;
   const listingDetailsQuery = useListingDetailsQuery({
     enabled: Boolean(listingId && listingDetailsType),
     id: listingId,
@@ -86,7 +103,7 @@ export const useListingSheetEffects = ({
               p_weight: 0.05,
             });
           }
-        } catch (e) {
+        } catch {
         }
       }
     };
@@ -95,17 +112,64 @@ export const useListingSheetEffects = ({
   }, [listingId, group]);
 
   useEffect(() => {
-    if (!listingId || !group || !listingDetailsQuery.data) return;
+    if (!listingId || !group) {
+      setReviews([]);
+      setRelatedListings([]);
+      return;
+    }
+
+    if (!listingDetailsQuery.data) return;
 
     const payload = listingDetailsQuery.data as any;
-    const reviews = (payload?.reviews || []).map((row: any) => ({
-      ...row,
-      content: row?.content ?? row?.comment ?? null,
-    }));
+    const reviews = normalizeReviewRows(
+      Array.isArray(payload?.reviews) ? payload.reviews : [],
+    );
 
-    setReviews(reviews);
+    if (reviews.length > 0) {
+      setReviews(reviews);
+    }
     setRelatedListings(
       Array.isArray(payload?.related_listings) ? payload.related_listings : [],
     );
   }, [group, listingDetailsQuery.data, listingId, setRelatedListings, setReviews]);
+
+  useEffect(() => {
+    let active = true;
+
+    if (!listingId || !group) {
+      setReviews([]);
+      return () => {
+        active = false;
+      };
+    }
+
+    void (async () => {
+      try {
+        const col = getReviewTargetColumn(groupType);
+        const { data, error } = await supabase
+          .from("reviews")
+          .select("*, author:profiles!reviews_author_id_fkey(id, full_name, avatar_url, updated_at)")
+          .eq(col, listingId)
+          .order("created_at", { ascending: false })
+          .limit(5);
+
+        if (!active) return;
+
+        if (error) {
+          setReviews([]);
+          return;
+        }
+
+        setReviews(normalizeReviewRows(data || []));
+      } catch {
+        if (active) {
+          setReviews([]);
+        }
+      }
+    })();
+
+    return () => {
+      active = false;
+    };
+  }, [group, groupType, listingId, setReviews]);
 };

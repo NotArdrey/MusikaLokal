@@ -21,7 +21,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import * as FileSystem from "expo-file-system/legacy";
+import * as FileSystem from "expo-file-system/src/legacy";
 import * as ImagePicker from "expo-image-picker";
 import * as VideoThumbnails from "expo-video-thumbnails";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -38,6 +38,7 @@ import Navbar, {
 } from "../../src/components/navbar";
 import PostDetailsModal from "../../src/components/PostDetailsModal";
 import ProductionTeamDetailsSheet from "../../src/components/ProductionTeamDetailsSheet";
+import ReportModal from "../../src/components/ReportModal";
 import SearchBottomSheet from "../../src/components/SearchBottomSheet";
 import Skeleton from "../../src/components/Skeleton";
 import SlidingTabBar from "../../src/components/SlidingTabBar";
@@ -64,7 +65,6 @@ import {
 import type { SocialFollowTargetType } from "../../src/utils/socialFollow";
 import {
   getGroqModelInfo,
-  rerankHomeFeedWithGroq,
 } from "../../src/services/groqModelRouter";
 import { screenUploadsWithAi } from "../../src/services/uploadSafetyScreen";
 import { logLoadTime, usePageLoadLogger } from "../../src/utils/loadTimeLogger";
@@ -240,6 +240,20 @@ const ensureFeedCardImage = <T extends { id?: string | null; type?: string; imag
     images: validImages.length > 0 ? validImages : [primaryImage],
   };
 };
+
+const getFeedItemCreatedTime = (item: any) => {
+  const timestamp = typeof item?.created_at === "string" && item.created_at.length > 0
+    ? item.created_at
+    : typeof item?.updated_at === "string" && item.updated_at.length > 0
+      ? item.updated_at
+      : "";
+  const time = timestamp ? new Date(timestamp).getTime() : 0;
+  return Number.isFinite(time) ? time : 0;
+};
+
+const sortFeedItemsNewestFirst = (items: any[]) =>
+  [...items].sort((a, b) => getFeedItemCreatedTime(b) - getFeedItemCreatedTime(a));
+
 const feedLastFetchAt: Record<FeedTab, number> = {
   for_you: 0,
   following: 0,
@@ -632,6 +646,7 @@ const fetchPublicFeedPostsFallback = async (
       action: "get_feed",
       cursor: cursor ?? null,
       feed_type: "public",
+      include_entities: true,
       limit,
       personalize: false,
       ...(userId ? { userId } : {}),
@@ -740,7 +755,7 @@ const normalizeFollowingEntity = (row: any, ownerAvatarById: Map<string, string>
       name: group?.name || formatGroupTypeLabel(group?.group_type),
       avatar_url: images[0] || ownerAvatarUrl || getFeedFallbackImage("Group", id),
       group_type: group?.group_type || null,
-      created_at: row?.created_at || null,
+      created_at: group?.created_at || row?.created_at || null,
     };
   }
 
@@ -760,7 +775,7 @@ const normalizeFollowingEntity = (row: any, ownerAvatarById: Map<string, string>
     name: followed?.full_name || "User",
     avatar_url: resolveFeedMediaUrl(followed?.avatar_url || "") || getFeedFallbackImage("Artist", id),
     role: followed?.role || "",
-    created_at: row?.created_at || null,
+    created_at: followed?.created_at || row?.created_at || null,
   };
 };
 
@@ -807,181 +822,8 @@ const dedupeFeedItems = (items: any[]) => {
   return uniqueItems;
 };
 
-const normalizeSignal = (value: unknown) => {
-  if (typeof value !== "string") return "";
-  return value
-    .toLowerCase()
-    .replace(/[^a-z0-9\s]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-};
-
-const uniqueNormalizedSignals = (values: unknown[]) => {
-  const seen = new Set<string>();
-  const out: string[] = [];
-
-  for (const value of values) {
-    const normalized = normalizeSignal(value);
-    if (!normalized || seen.has(normalized)) continue;
-    seen.add(normalized);
-    out.push(normalized);
-  }
-
-  return out;
-};
-
-const scoreFreshness = (createdAt: unknown) => {
-  if (typeof createdAt !== "string") return 0.35;
-
-  const created = new Date(createdAt).getTime();
-  if (Number.isNaN(created)) return 0.35;
-
-  const ageDays = Math.max(0, (Date.now() - created) / (1000 * 60 * 60 * 24));
-  if (ageDays <= 7) return 1;
-  if (ageDays <= 30) return 0.8;
-  if (ageDays <= 90) return 0.55;
-  return 0.35;
-};
-
-const buildOnDeviceReason = (
-  skillMatches: string[],
-  genreMatches: string[],
-  itemType: string,
-) => {
-  if (skillMatches.length > 0 && genreMatches.length > 0) {
-    return `Matches your ${skillMatches[0]} skills and ${genreMatches[0]} taste.`;
-  }
-  if (skillMatches.length > 0) {
-    return `Recommended because of your ${skillMatches[0]} background.`;
-  }
-  if (genreMatches.length > 0) {
-    return `Popular among ${genreMatches[0]} listeners and creators.`;
-  }
-  if (itemType === "Gig") {
-    return "Trending opportunity with strong current engagement.";
-  }
-  return "Strong overall quality and relevance right now.";
-};
-
-const ensureRecommendationTypeCoverage = (
-  items: any[],
-  fallbackItems: any[],
-  type: string,
-  limit: number,
-  minimumCount = 1,
-) => {
-  if (!Array.isArray(items) || !Array.isArray(fallbackItems) || minimumCount <= 0) {
-    return Array.isArray(items) ? items.slice(0, limit) : [];
-  }
-
-  const currentCount = items.filter((item) => item?.type === type).length;
-  if (currentCount >= minimumCount) {
-    return items.slice(0, limit);
-  }
-
-  const seen = new Set(items.map((item) => `${item?.type || "item"}:${item?.id || ""}`));
-  const additions = fallbackItems
-    .filter((item) => item?.type === type)
-    .filter((item) => !seen.has(`${item?.type || "item"}:${item?.id || ""}`))
-    .slice(0, minimumCount - currentCount);
-
-  if (additions.length === 0) {
-    return items.slice(0, limit);
-  }
-
-  return [...items.slice(0, Math.max(0, limit - additions.length)), ...additions].slice(0, limit);
-};
-
 const normalizeFeedUserRole = (role: unknown) =>
   typeof role === "string" ? role.trim().toLowerCase().replace(/[_\s]+/g, "-") : "";
-
-const shouldShowListingForUserRole = (item: any, role: unknown) => {
-  const normalizedRole = normalizeFeedUserRole(role);
-  const itemType = String(item?.type || "").toLowerCase();
-
-  if (!itemType) return false;
-
-  if (normalizedRole === "venue-owner" || normalizedRole === "studio-owner") {
-    return itemType === "group" || itemType === "artist";
-  }
-
-  if (normalizedRole === "producer") {
-    return itemType === "group" || itemType === "artist" || itemType === "studio";
-  }
-
-  if (normalizedRole === "fan") {
-    return itemType === "group" || itemType === "artist" || itemType === "production";
-  }
-
-  return true;
-};
-
-const rankForYouOnDevice = (
-  items: any[],
-  profileSignals: { skills: string[]; genres: string[] },
-  limit: number,
-) => {
-  const normalizedSkills = uniqueNormalizedSignals(profileSignals.skills);
-  const normalizedGenres = uniqueNormalizedSignals(profileSignals.genres);
-
-  return [...items]
-    .map((item) => {
-      const signalPool = uniqueNormalizedSignals([
-        item?.name,
-        item?.location,
-        item?.genre,
-        item?.description,
-        item?.owner_name,
-        ...(Array.isArray(item?.genres) ? item.genres : []),
-        ...(Array.isArray(item?.skills) ? item.skills : []),
-      ]);
-
-      const skillMatches = normalizedSkills.filter((skill) =>
-        signalPool.some((signal) => signal.includes(skill) || skill.includes(signal)),
-      );
-      const genreMatches = normalizedGenres.filter((genre) =>
-        signalPool.some((signal) => signal.includes(genre) || genre.includes(signal)),
-      );
-
-      const skillScore = normalizedSkills.length
-        ? Math.min(skillMatches.length / Math.min(3, normalizedSkills.length), 1)
-        : 0;
-      const genreScore = normalizedGenres.length
-        ? Math.min(genreMatches.length / Math.min(3, normalizedGenres.length), 1)
-        : 0;
-      const popularityScore = Math.min(Number(item?.rating || 0) / 5, 1);
-      const recencyScore = scoreFreshness(item?.created_at);
-
-      let similarity =
-        skillScore * 0.35 +
-        genreScore * 0.35 +
-        popularityScore * 0.2 +
-        recencyScore * 0.1;
-
-      if (normalizedSkills.length === 0 && normalizedGenres.length === 0) {
-        similarity = popularityScore * 0.7 + recencyScore * 0.3;
-      }
-
-      return {
-        ...item,
-        similarity: Number(Math.max(0.05, Math.min(1, similarity)).toFixed(4)),
-        aiReason: buildOnDeviceReason(skillMatches, genreMatches, item?.type || "Listing"),
-      };
-    })
-    .sort((a, b) => (b.similarity || 0) - (a.similarity || 0))
-    .slice(0, Math.max(8, limit));
-};
-
-const isGroqQuotaExhaustedMessage = (value: unknown) => {
-  const message = typeof value === "string" ? value.toLowerCase() : "";
-  if (!message) return false;
-  return (
-    message.includes("out of api calls") ||
-    message.includes("rate limit") ||
-    message.includes("free-tier") ||
-    message.includes("quota")
-  );
-};
 
 const getPositiveInteger = (value: unknown) => {
   if (value === null || value === undefined || value === "") return 0;
@@ -1326,6 +1168,52 @@ const getFeedDisplayName = (item: any) =>
   item?.__feedKind === "ai_card"
     ? item?.name || "MusikaLokal"
     : item?.author_name || "MusikaLokal";
+
+const getFeedReportTargetType = (item: any) => {
+  if (!item) return "";
+  if (item?.__feedKind !== "ai_card") return "post";
+
+  const type = String(item?.type || "").trim().toLowerCase();
+  if (type === "artist" || type === "musician" || type === "profile") return "profile";
+  if (type === "group") return "group";
+  if (type === "studio" || type === "venue") return "studio";
+  if (type === "gig") return "gig";
+  if (type === "product") return "product";
+  if (type === "playlist" || type === "music") return "playlist";
+  return "";
+};
+
+const getFeedReportTypeLabel = (item: any) => {
+  if (item?.__feedKind !== "ai_card") return "Post";
+  const type = String(item?.type || "").trim();
+  if (!type) return "Card";
+  if (type.toLowerCase() === "artist") return "Artist";
+  return type;
+};
+
+const isOwnFeedReportTarget = (item: any, currentUserId?: string | null) => {
+  if (!item || !currentUserId) return false;
+  if (item?.__feedKind !== "ai_card") {
+    return item?.author_id === currentUserId;
+  }
+
+  const targetType = getFeedReportTargetType(item);
+  if (targetType === "profile") return item?.id === currentUserId;
+  return item?.owner_id === currentUserId || item?.organizer_id === currentUserId || item?.seller_id === currentUserId;
+};
+
+const getFeedOptionViewLabel = (item: any) => {
+  if (item?.__feedKind !== "ai_card") return "Open Post";
+  const type = String(item?.type || "").trim().toLowerCase();
+  if (type === "artist" || type === "profile" || type === "musician") return "View Profile";
+  if (type === "group") return "View Group";
+  if (type === "studio" || type === "venue") return "View Studio";
+  if (type === "gig") return "View Gig";
+  if (type === "production") return "View Team";
+  if (type === "product") return "View Product";
+  if (type === "playlist" || type === "music") return "View Playlist";
+  return "View Details";
+};
 
 const getFeedMetaLabel = (item: any) => {
   if (item?.__feedKind !== "ai_card") {
@@ -1972,12 +1860,16 @@ const SocialFeedCard = React.memo(function SocialFeedCard({
   const hasLiked = Boolean(item?.my_reaction || item?.user_reaction);
 
   const handleMoreOptions = useCallback(() => {
+    if (onOpenPostOptions) {
+      onOpenPostOptions(item);
+      return;
+    }
+
     if (isSuggestion) {
       handleOpenPrimary();
       return;
     }
 
-    onOpenPostOptions?.(item);
   }, [handleOpenPrimary, isSuggestion, item, onOpenPostOptions]);
 
   const reactionCount = Number(item?.reaction_count || 0);
@@ -2231,6 +2123,7 @@ export default function FeedScreen() {
   const { colors, isDark } = useTheme();
   const { session, userId, isGuest, loading: authLoading, roleResolved, userRole } = useAuth();
   const resolvedUserId = session?.user?.id ?? userId ?? null;
+  const canUseSocialActions = Boolean(session?.access_token && resolvedUserId && !isGuest);
   const params = useLocalSearchParams<{ reopenListingId?: string }>();
   const { clearBottomOverlays } = useBottomOverlay();
   const { activeStation } = useRadioPlayerPresence();
@@ -2264,6 +2157,7 @@ export default function FeedScreen() {
 
   const [alert, setAlert] = useState<{ type: AlertType; title: string; message: string } | null>(null);
   const [postOptionsTarget, setPostOptionsTarget] = useState<any | null>(null);
+  const [reportTarget, setReportTarget] = useState<any | null>(null);
   const [deletePostTarget, setDeletePostTarget] = useState<any | null>(null);
   const composerInputRef = React.useRef<TextInput>(null);
   const composerFocusTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -2916,7 +2810,6 @@ export default function FeedScreen() {
         ...normalizedArtists,
         ...normalizedTeams,
       ]
-        .filter((item) => shouldShowListingForUserRole(item, userRole))
         .map(withFeedDistance)
         .map(ensureFeedCardImage);
 
@@ -2924,64 +2817,12 @@ export default function FeedScreen() {
         return { cards: [], provider: "", message: "" };
       }
 
-      const [skillsResult, genresResult] = await Promise.all([
-        supabase.from("profile_skills").select("skill").eq("profile_id", resolvedUserId),
-        supabase.from("profile_genres").select("genre").eq("profile_id", resolvedUserId),
-      ]);
-
-      const profileSignals = {
-        skills: (skillsResult.data || [])
-          .map((row: any) => row?.skill)
-          .filter((value: any): value is string => typeof value === "string" && value.trim().length > 0),
-        genres: (genresResult.data || [])
-          .map((row: any) => row?.genre)
-          .filter((value: any): value is string => typeof value === "string" && value.trim().length > 0),
-      };
-
-      const localRankedBase = rankForYouOnDevice(allCandidates, profileSignals, AI_CARD_LIMIT + 8);
-      const localRanked = ensureRecommendationTypeCoverage(
-        localRankedBase,
-        normalizedTeams,
-        "Production",
-        AI_CARD_LIMIT,
-        normalizedTeams.length > 0 ? 1 : 0,
-      );
-      const llmResult = await rerankHomeFeedWithGroq({
-        candidates: localRanked,
-        profileSignals,
-        limit: AI_CARD_LIMIT,
-      });
-
-      if (isGroqQuotaExhaustedMessage(llmResult.message)) {
-        return {
-          cards: localRanked.slice(0, AI_CARD_LIMIT).map((item) => ({ ...ensureFeedCardImage(item), __feedKind: "ai_card" })),
-          provider: "Normal Feed",
-          message: "Groq free-tier limit reached. Showing normal recommendation cards.",
-        };
-      }
-
-      if (llmResult.aiPowered && llmResult.recommendations.length > 0) {
-        const ensuredRecommendations = ensureRecommendationTypeCoverage(
-          llmResult.recommendations,
-          normalizedTeams,
-          "Production",
-          AI_CARD_LIMIT,
-          normalizedTeams.length > 0 ? 1 : 0,
-        );
-
-        return {
-          cards: ensuredRecommendations
-            .slice(0, AI_CARD_LIMIT)
-            .map((item: any) => ({ ...ensureFeedCardImage(item), __feedKind: "ai_card" })),
-          provider: llmResult.aiProvider || groqModelLabel,
-          message: llmResult.message || `Realtime For You cards reranked by ${groqModelLabel}.`,
-        };
-      }
-
       return {
-        cards: localRanked.slice(0, AI_CARD_LIMIT).map((item) => ({ ...ensureFeedCardImage(item), __feedKind: "ai_card" })),
-        provider: llmResult.aiProvider || "Local Ranker",
-        message: llmResult.message || "Using local ranking for Feed cards.",
+        cards: sortFeedItemsNewestFirst(allCandidates)
+          .slice(0, AI_CARD_LIMIT)
+          .map((item) => ({ ...ensureFeedCardImage(item), __feedKind: "ai_card" })),
+        provider: "Latest",
+        message: "Showing the newest posts and listings.",
       };
     } catch (error: any) {
       console.error("Feed AI cards error:", error);
@@ -2991,7 +2832,7 @@ export default function FeedScreen() {
         message: error?.message || "Unable to load recommendation cards right now.",
       };
     }
-  }, [groqModelLabel, resolvedUserId, roleResolved, session, userRole]);
+  }, [groqModelLabel, resolvedUserId, roleResolved, session]);
 
   const loadFollowingGraph = useCallback(async () => {
     if (!session) {
@@ -3039,9 +2880,257 @@ export default function FeedScreen() {
         .map((row: any) => buildSocialFollowKey(row?.followed_type, row?.followed_id))
         .filter((value: string) => value.length > 0),
     );
-    const entities = rows
+    const followedProfileIds = Array.from(
+      new Set(
+        rows
+          .filter((row: any) => normalizeSocialFollowTargetType(row?.followed_type) === "profile")
+          .map((row: any) => row?.followed_id)
+          .filter((value: any): value is string => typeof value === "string" && value.length > 0),
+      ),
+    );
+    const followedGroupIds = Array.from(
+      new Set(
+        rows
+          .filter((row: any) => normalizeSocialFollowTargetType(row?.followed_type) === "group")
+          .map((row: any) => row?.followed_id)
+          .filter((value: any): value is string => typeof value === "string" && value.length > 0),
+      ),
+    );
+    const fallbackEntities = rows
       .map((row: any) => normalizeFollowingEntity(row, ownerAvatarById))
       .filter((value: any) => value !== null);
+
+    const emptyQueryResult = { data: [], error: null } as any;
+    const [
+      followedProfilesResult,
+      followedGroupsResult,
+      ownedGroupsResult,
+      studiosResult,
+      gigsResult,
+      teamsResult,
+    ] = await Promise.all([
+      followedProfileIds.length > 0
+        ? supabase
+            .from("profiles")
+            .select("id, full_name, avatar_url, address, role, created_at")
+            .in("id", followedProfileIds)
+        : Promise.resolve(emptyQueryResult),
+      followedGroupIds.length > 0
+        ? supabase
+            .from("groups_with_stats")
+            .select("*")
+            .in("id", followedGroupIds)
+            .order("created_at", { ascending: false })
+            .limit(AI_CARD_LIMIT)
+        : Promise.resolve(emptyQueryResult),
+      followedProfileIds.length > 0
+        ? supabase
+            .from("groups_with_stats")
+            .select("*")
+            .in("owner_id", followedProfileIds)
+            .order("created_at", { ascending: false })
+            .limit(AI_CARD_LIMIT)
+        : Promise.resolve(emptyQueryResult),
+      followedProfileIds.length > 0
+        ? supabase
+            .from("studios_with_stats")
+            .select("*")
+            .eq("permit_status", "approved")
+            .in("owner_id", followedProfileIds)
+            .order("created_at", { ascending: false })
+            .limit(AI_CARD_LIMIT)
+        : Promise.resolve(emptyQueryResult),
+      followedProfileIds.length > 0
+        ? supabase
+            .from("gigs_with_stats")
+            .select("*")
+            .eq("status", "open")
+            .eq("permit_status", "approved")
+            .in("organizer_id", followedProfileIds)
+            .order("created_at", { ascending: false })
+            .limit(AI_CARD_LIMIT)
+        : Promise.resolve(emptyQueryResult),
+      followedProfileIds.length > 0
+        ? supabase
+            .from("production_teams")
+            .select("*")
+            .in("owner_id", followedProfileIds)
+            .order("created_at", { ascending: false })
+            .limit(AI_CARD_LIMIT)
+        : Promise.resolve(emptyQueryResult),
+    ]);
+
+    const partialErrors = [
+      followedProfilesResult,
+      followedGroupsResult,
+      ownedGroupsResult,
+      studiosResult,
+      gigsResult,
+      teamsResult,
+    ]
+      .map((result: any) => result?.error?.message)
+      .filter((message: any): message is string => typeof message === "string" && message.length > 0);
+
+    if (partialErrors.length > 0) {
+      logLoadTime("Feed", "following-entities-partial", {
+        errors: partialErrors.slice(0, 3),
+      });
+    }
+
+    const followedProfiles = followedProfilesResult.data || [];
+    const followedProfilesById = new Map<string, any>(
+      followedProfiles
+        .filter((profile: any) => typeof profile?.id === "string")
+        .map((profile: any) => [profile.id, profile] as [string, any]),
+    );
+    const normalizeImages = (images: any) =>
+      Array.isArray(images)
+        ? images
+            .map((image: any) => resolveFeedMediaUrl(image))
+            .filter((image: string) => image.length > 0)
+        : [];
+    const toProfileCard = (profile: any) => {
+      const avatar = resolveFeedMediaUrl(profile?.avatar_url || "");
+      return ensureFeedCardImage({
+        __feedKind: "ai_card",
+        id: profile.id,
+        type: "Artist",
+        name: profile.full_name || "Musician",
+        image: avatar || null,
+        images: avatar ? [avatar] : [],
+        rating: 0,
+        review_count: 0,
+        location: profile.address || "",
+        genre: "",
+        created_at: profile.created_at || null,
+        updated_at: profile.created_at || null,
+        owner_id: profile.id,
+        social_follow_target_id: profile.id,
+        social_follow_target_type: "profile",
+        is_following: true,
+      });
+    };
+    const toGroupCard = (item: any) => {
+      const images = normalizeImages(item?.images);
+      return ensureFeedCardImage({
+        __feedKind: "ai_card",
+        id: item.id,
+        type: "Group",
+        name: item.name || "Unnamed Group",
+        image: images[0] || null,
+        images,
+        rating: Number(item.rating || 0),
+        review_count: Number(item.review_count || 0),
+        location: item.location || "",
+        latitude: item.latitude ?? null,
+        longitude: item.longitude ?? null,
+        genre: item.genre || "",
+        group_type: item.group_type || null,
+        created_at: item.created_at || null,
+        updated_at: item.updated_at || null,
+        owner_id: item.owner_id || null,
+        social_follow_target_id: item.id,
+        social_follow_target_type: "group",
+        is_following: keys.has(buildSocialFollowKey("group", item.id)),
+      });
+    };
+    const toStudioCard = (item: any) => {
+      const images = normalizeImages(item?.images);
+      return ensureFeedCardImage({
+        __feedKind: "ai_card",
+        id: item.id,
+        type: "Studio",
+        name: item.name || "Unnamed Studio",
+        image: images[0] || null,
+        images,
+        rating: Number(item.rating || 0),
+        review_count: Number(item.review_count || 0),
+        location: item.address || item.location || "",
+        latitude: item.latitude ?? null,
+        longitude: item.longitude ?? null,
+        genre: item.type || "Studio",
+        created_at: item.created_at || null,
+        updated_at: item.updated_at || null,
+        owner_id: item.owner_id || null,
+        hourly_rate: item.hourly_rate?.toString() || null,
+        rehearsal_rate: item.rehearsal_rate?.toString() || null,
+        recording_rate: item.recording_rate?.toString() || null,
+        studio_type: item.type || null,
+        social_follow_target_id: item.owner_id || null,
+        social_follow_target_type: "profile",
+        is_following: keys.has(buildSocialFollowKey("profile", item.owner_id)),
+      });
+    };
+    const toGigCard = (item: any) => {
+      const images = normalizeImages(item?.images);
+      return ensureFeedCardImage({
+        __feedKind: "ai_card",
+        id: item.id,
+        type: "Gig",
+        name: item.name || "Untitled Gig",
+        image: images[0] || null,
+        images,
+        rating: Number(item.rating || 0),
+        review_count: Number(item.review_count || 0),
+        location: item.location || "",
+        latitude: item.latitude ?? null,
+        longitude: item.longitude ?? null,
+        genre: Array.isArray(item?.requirements?.genres)
+          ? item.requirements.genres.join(", ")
+          : item?.requirements?.genre || "",
+        created_at: item.created_at || null,
+        updated_at: item.updated_at || null,
+        organizer_id: item.organizer_id || null,
+        budget: item.budget?.toString() || null,
+        rate: item.rate?.toString() || null,
+        requirements: item.requirements || null,
+        social_follow_target_id: item.organizer_id || null,
+        social_follow_target_type: "profile",
+        is_following: keys.has(buildSocialFollowKey("profile", item.organizer_id)),
+      });
+    };
+    const toTeamCard = (item: any) => {
+      const owner = followedProfilesById.get(item.owner_id);
+      const ownerAvatar = resolveFeedMediaUrl(owner?.avatar_url || "");
+      const primaryImage = resolveFeedMediaUrl(item.logo_url || "") || ownerAvatar || null;
+
+      return ensureFeedCardImage({
+        __feedKind: "ai_card",
+        id: item.id,
+        type: "Production",
+        name: item.name || "Production Team",
+        image: primaryImage,
+        images: primaryImage ? [primaryImage] : [],
+        rating: 0,
+        review_count: 0,
+        location: item.description || owner?.full_name || "Production Team",
+        genre: "",
+        description: item.description || "",
+        created_at: item.created_at || null,
+        updated_at: item.updated_at || null,
+        owner_id: item.owner_id || null,
+        owner_name: owner?.full_name || null,
+        logo_url: item.logo_url || null,
+        open_production_applications: item.open_production_applications === true,
+        social_follow_target_id: item.owner_id || null,
+        social_follow_target_type: "profile",
+        is_following: keys.has(buildSocialFollowKey("profile", item.owner_id)),
+      });
+    };
+
+    const latestEntityCards = dedupeFeedItems(
+      sortFeedItemsNewestFirst([
+        ...followedProfiles
+          .filter((profile: any) => normalizeFeedUserRole(profile?.role) === "musician")
+          .map(toProfileCard),
+        ...(followedGroupsResult.data || []).map(toGroupCard),
+        ...(ownedGroupsResult.data || []).map(toGroupCard),
+        ...(studiosResult.data || []).map(toStudioCard),
+        ...(gigsResult.data || []).map(toGigCard),
+        ...(teamsResult.data || []).map(toTeamCard),
+      ]),
+    ).slice(0, AI_CARD_LIMIT);
+    const entities = latestEntityCards.length > 0 ? latestEntityCards : fallbackEntities;
 
     setFollowingKeys(keys);
     setFollowingEntities(entities);
@@ -3752,6 +3841,15 @@ export default function FeedScreen() {
     targetType: SocialFollowTargetType,
     isFollowing: boolean,
   ) => {
+    if (!canUseSocialActions) {
+      emitToast({
+        type: "warning",
+        title: "Sign in required",
+        message: "Please sign in to follow creators.",
+      });
+      return;
+    }
+
     const followKey = buildSocialFollowKey(targetType, targetId);
 
     if (!targetId || !followKey || followBusyByKey[followKey]) {
@@ -3817,7 +3915,7 @@ export default function FeedScreen() {
         return next;
       });
     }
-  }, [fetchFeed, followBusyByKey, invalidateFeedCache, loadFollowingGraph, tab]);
+  }, [canUseSocialActions, fetchFeed, followBusyByKey, invalidateFeedCache, loadFollowingGraph, tab]);
 
   /* ── Renderers ── */
 
@@ -3943,34 +4041,78 @@ export default function FeedScreen() {
     }
   }, [patchPostEverywhere, session]);
 
-  const handleReportPost = useCallback(async (post: any) => {
-    if (!session || !post?.id) {
-      emitToast({ type: "info", title: "Sign in required", message: "Please sign in to report this post." });
+  const openReportTarget = useCallback((target: any) => {
+    if (!session || !resolvedUserId) {
+      emitToast({ type: "info", title: "Sign in required", message: "Please sign in to submit a report." });
       return;
     }
 
-    if (post.author_id === userId) {
-      emitToast({ type: "info", title: "Owner action", message: "You cannot report your own post." });
+    if (!target?.id) {
+      setAlert({ type: "error", title: "Report unavailable", message: "Missing item details." });
       return;
     }
 
-    try {
-      const { data, error } = await supabase.functions.invoke("manage-social-feed", {
+    if (isOwnFeedReportTarget(target, resolvedUserId)) {
+      const label = getFeedReportTypeLabel(target).toLowerCase();
+      emitToast({ type: "info", title: "Owner action", message: `You cannot report your own ${label}.` });
+      return;
+    }
+
+    if (!getFeedReportTargetType(target)) {
+      setAlert({
+        type: "info",
+        title: "Report unavailable",
+        message: "Reporting is not available for this card yet.",
+      });
+      return;
+    }
+
+    setReportTarget(target);
+  }, [resolvedUserId, session]);
+
+  const submitReportTarget = useCallback(async (reason: string, details?: string) => {
+    if (!reportTarget?.id) {
+      throw new Error("Missing item details.");
+    }
+
+    if (!resolvedUserId) {
+      throw new Error("Sign in to submit a report.");
+    }
+
+    if (reportTarget.__feedKind === "ai_card") {
+      const targetType = getFeedReportTargetType(reportTarget);
+      if (!targetType) {
+        throw new Error("Reporting is not available for this card yet.");
+      }
+
+      const { data, error } = await supabase.functions.invoke("manage-details", {
         body: {
-          action: "report_post",
-          post_id: post.id,
-          reason: "Inappropriate content",
+          action: "report",
+          type: targetType,
+          id: reportTarget.id,
+          userId: resolvedUserId,
+          reason,
+          details: details || null,
         },
       });
 
       if (error) throw error;
       if (data?.error) throw new Error(String(data.error));
-
-      emitToast({ type: "info", title: "Reported", message: "Post has been reported for review." });
-    } catch (error: any) {
-      setAlert({ type: "error", title: "Report failed", message: error?.message || "Please try again." });
+      return;
     }
-  }, [session, userId]);
+
+    const { data, error } = await supabase.functions.invoke("manage-social-feed", {
+      body: {
+        action: "report_post",
+        post_id: reportTarget.id,
+        reason,
+        details: details || null,
+      },
+    });
+
+    if (error) throw error;
+    if (data?.error) throw new Error(String(data.error));
+  }, [reportTarget, resolvedUserId]);
 
   const handleSharePost = useCallback(async (post: any) => {
     if (!post?.id) return;
@@ -4013,6 +4155,42 @@ export default function FeedScreen() {
     if (!productId) return;
     router.push({ pathname: "/product_details", params: { product_id: productId } });
   }, []);
+
+  const openFeedOptionTarget = useCallback((target: any) => {
+    if (!target?.id) return;
+
+    if (target.__feedKind !== "ai_card") {
+      openPostDetails(target.id);
+      return;
+    }
+
+    const type = String(target.type || "").trim().toLowerCase();
+    if (type === "production") {
+      openProductionTeamDetails(target.id);
+      return;
+    }
+    if (type === "artist" || type === "profile" || type === "musician") {
+      openProfileDetails(target.id);
+      return;
+    }
+    if (type === "product") {
+      openProductDetails(target.id);
+      return;
+    }
+    if (type === "playlist" || type === "music") {
+      openPlaylistDetails(target.id);
+      return;
+    }
+
+    openListingDetails(target.id, target);
+  }, [
+    openListingDetails,
+    openPlaylistDetails,
+    openPostDetails,
+    openProductDetails,
+    openProductionTeamDetails,
+    openProfileDetails,
+  ]);
 
   const timeAgo = useCallback((dateStr: string) => {
     const diff = Date.now() - new Date(dateStr).getTime();
@@ -4133,11 +4311,15 @@ export default function FeedScreen() {
     }
 
     if (post?.__feedKind === "ai_card") {
-      const followTarget = getListingSocialFollowTarget(post, userId);
+      const followTarget = canUseSocialActions
+        ? getListingSocialFollowTarget(post, resolvedUserId)
+        : null;
       const followKey = followTarget
         ? buildSocialFollowKey(followTarget.type, followTarget.id)
         : "";
-      const isFollowingSuggestion = followKey ? followingKeys.has(followKey) : false;
+      const isFollowingSuggestion = followKey
+        ? post.is_following === true || followingKeys.has(followKey)
+        : false;
       const isFollowBusy = followKey ? followBusyByKey[followKey] === true : false;
 
       return (
@@ -4169,7 +4351,7 @@ export default function FeedScreen() {
     const cardBg = isDark ? "#1E293B" : "#FFFFFF";
     const borderColor = isDark ? "#334155" : "#EEF0F4";
     const authorFollowTarget =
-      post.author_id && post.author_id !== userId
+      canUseSocialActions && post.author_id && post.author_id !== resolvedUserId
         ? { id: post.author_id, type: "profile" as SocialFollowTargetType }
         : null;
     const authorFollowKey = authorFollowTarget
@@ -4206,6 +4388,7 @@ export default function FeedScreen() {
     );
   }, [
     colors,
+    canUseSocialActions,
     followBusyByKey,
     followingKeys,
     handleFollow,
@@ -4219,8 +4402,8 @@ export default function FeedScreen() {
     openProductDetails,
     openProfileDetails,
     openProductionTeamDetails,
+    resolvedUserId,
     timeAgo,
-    userId,
   ]);
 
   const renderHeader = useCallback(() => {
@@ -4397,12 +4580,12 @@ export default function FeedScreen() {
   const feedItems = useMemo(() => {
     if (loading) return [];
     if (tab === "for_you") {
-      return dedupeFeedItems([...posts, ...aiCards]);
+      return sortFeedItemsNewestFirst(dedupeFeedItems([...posts, ...aiCards]));
     }
     if (tab === "following") {
-      return dedupeFeedItems([...posts, ...followingEntities]);
+      return sortFeedItemsNewestFirst(dedupeFeedItems([...posts, ...followingEntities]));
     }
-    return dedupeFeedItems(posts);
+    return sortFeedItemsNewestFirst(dedupeFeedItems(posts));
   }, [aiCards, followingEntities, loading, posts, tab]);
 
   const isShowingAiCards = tab === "for_you" && posts.length === 0 && aiCards.length > 0;
@@ -4460,7 +4643,7 @@ export default function FeedScreen() {
           </Text>
           <Text style={[styles.emptySubtitle, { color: colors.textSecondary }]}>
             {tab === "following"
-              ? "Follow musicians, groups, and duos to see their updates here. Followed profiles and groups will also appear until they have posts."
+              ? "Follow musicians, groups, and creators to see their latest posts and newly created listings here."
               : "Explore musicians, groups, studios, and gigs to help shape your For You feed."}
           </Text>
 
@@ -4491,6 +4674,40 @@ export default function FeedScreen() {
     [feedBottomSpacer],
   );
   const feedContentContainerStyle = useMemo(() => ({ paddingBottom: 0 }), []);
+  const optionsTargetIsPost = postOptionsTarget ? postOptionsTarget.__feedKind !== "ai_card" : false;
+  const optionsTargetIsOwn = postOptionsTarget ? isOwnFeedReportTarget(postOptionsTarget, resolvedUserId) : false;
+  const optionsTargetLabel = postOptionsTarget ? getFeedReportTypeLabel(postOptionsTarget) : "Post";
+  const optionsTargetTitle = optionsTargetIsPost ? "Post options" : `${optionsTargetLabel} options`;
+  const optionsTargetMessage = optionsTargetIsOwn
+    ? (optionsTargetIsPost ? "Manage this post." : `This is your ${optionsTargetLabel.toLowerCase()}.`)
+    : (optionsTargetIsPost ? "Choose an action for this post." : "Choose an action for this card.");
+  const optionsTargetButtons = postOptionsTarget
+    ? optionsTargetIsPost
+      ? optionsTargetIsOwn
+        ? [
+            { text: "Edit Post", onPress: () => handleEditPost(postOptionsTarget) },
+            { text: "Delete Post", style: "destructive" as const, onPress: () => handleDeletePost(postOptionsTarget) },
+            { text: "Cancel", style: "cancel" as const },
+          ]
+        : [
+            { text: "Report Post", style: "destructive" as const, onPress: () => openReportTarget(postOptionsTarget) },
+            { text: "Cancel", style: "cancel" as const },
+          ]
+      : optionsTargetIsOwn
+        ? [
+            { text: getFeedOptionViewLabel(postOptionsTarget), onPress: () => openFeedOptionTarget(postOptionsTarget) },
+            { text: "Cancel", style: "cancel" as const },
+          ]
+        : [
+            { text: getFeedOptionViewLabel(postOptionsTarget), onPress: () => openFeedOptionTarget(postOptionsTarget) },
+            {
+              text: `Report ${optionsTargetLabel}`,
+              style: "destructive" as const,
+              onPress: () => openReportTarget(postOptionsTarget),
+            },
+            { text: "Cancel", style: "cancel" as const },
+          ]
+    : [];
 
   if (isGuest) {
     return (
@@ -4772,27 +4989,23 @@ export default function FeedScreen() {
           visible
           forceModal
           type="info"
-          title="Post options"
-          message={
-            postOptionsTarget.author_id === userId
-              ? "Manage this post."
-              : "Choose an action for this post."
-          }
-          buttons={
-            postOptionsTarget.author_id === userId
-              ? [
-                  { text: "Edit Post", onPress: () => handleEditPost(postOptionsTarget) },
-                  { text: "Delete Post", style: "destructive", onPress: () => handleDeletePost(postOptionsTarget) },
-                  { text: "Cancel", style: "cancel" },
-                ]
-              : [
-                  { text: "Report Post", style: "destructive", onPress: () => handleReportPost(postOptionsTarget) },
-                  { text: "Cancel", style: "cancel" },
-                ]
-          }
+          title={optionsTargetTitle}
+          message={optionsTargetMessage}
+          buttons={optionsTargetButtons}
           onClose={() => setPostOptionsTarget(null)}
         />
       )}
+
+      {reportTarget ? (
+        <ReportModal
+          visible
+          onClose={() => setReportTarget(null)}
+          onSubmit={submitReportTarget}
+          targetName={getFeedDisplayName(reportTarget)}
+          title={`Report ${getFeedReportTypeLabel(reportTarget)}`}
+          reportType={getFeedReportTargetType(reportTarget)}
+        />
+      ) : null}
 
       {deletePostTarget && (
         <CustomAlert

@@ -74,11 +74,16 @@ export default function AdminStationsPage() {
   const [stationFilter, setStationFilter] = useState<StationFilter>('all');
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [sourcePickerVisible, setSourcePickerVisible] = useState(false);
+  const [sourceSearch, setSourceSearch] = useState('');
   const [editingSource, setEditingSource] = useState<any | null>(null);
   const [stationName, setStationName] = useState('');
   const [stationDescription, setStationDescription] = useState('');
   const [stationGenre, setStationGenre] = useState('');
   const [rotationMinutes, setRotationMinutes] = useState('15');
+  const [streamUrl, setStreamUrl] = useState('');
+  const [streamStatus, setStreamStatus] = useState<'offline' | 'live' | 'autoplay'>('offline');
+  const [nowPlayingTitle, setNowPlayingTitle] = useState('');
+  const [nowPlayingArtist, setNowPlayingArtist] = useState('');
   const [selectedPlaylistIds, setSelectedPlaylistIds] = useState<string[]>([]);
 
   const invokePlaylistAction = useCallback(async (body: Record<string, unknown>) => {
@@ -171,6 +176,24 @@ export default function AdminStationsPage() {
     ));
   }, [sources]);
 
+  const filteredManualStationSources = useMemo(() => {
+    const query = sourceSearch.trim().toLowerCase();
+    if (!query) return manualStationSources;
+
+    return manualStationSources.filter((source) => {
+      const playlistTitles = Array.isArray(source?.playlists)
+        ? source.playlists.map((playlist: any) => playlist?.title)
+        : [];
+
+      return [
+        source?.name,
+        source?.genre,
+        source?.kind,
+        ...playlistTitles,
+      ].some((value) => String(value || '').toLowerCase().includes(query));
+    });
+  }, [manualStationSources, sourceSearch]);
+
   const hasStations = stations.length > 0;
   const hasEligibleStationSources = manualStationSources.length > 0;
   const isStationEditorReady = selectedPlaylistIds.length > 0;
@@ -180,11 +203,20 @@ export default function AdminStationsPage() {
   const openSourceEditor = useCallback((source: any) => {
     setStationActionMessage(null);
     setSourcePickerVisible(false);
+    setSourceSearch('');
     setEditingSource(source);
     setStationName(source?.station?.name || `${source?.name || 'Artist'} Radio`);
     setStationDescription(source?.station?.description || '');
     setStationGenre(source?.station?.genre || source?.genre || '');
     setRotationMinutes(String(source?.station?.rotation_interval_minutes || 15));
+    setStreamUrl(source?.station?.stream_url || '');
+    setStreamStatus(
+      ['offline', 'live', 'autoplay'].includes(source?.station?.stream_status)
+        ? source.station.stream_status
+        : 'offline',
+    );
+    setNowPlayingTitle(source?.station?.now_playing_title || '');
+    setNowPlayingArtist(source?.station?.now_playing_artist || '');
     setSelectedPlaylistIds(getDefaultSelectedPlaylistIds(source));
   }, []);
 
@@ -199,8 +231,14 @@ export default function AdminStationsPage() {
     }
 
     setStationActionMessage(null);
+    setSourceSearch('');
     setSourcePickerVisible(true);
   }, [dataError, loadingData]);
+
+  const closeSourcePicker = useCallback(() => {
+    setSourcePickerVisible(false);
+    setSourceSearch('');
+  }, []);
 
   const closeEditor = useCallback(() => {
     setEditingSource(null);
@@ -234,6 +272,10 @@ export default function AdminStationsPage() {
         genre: stationGenre.trim() || null,
         cover_image_url: editingSource.cover_image_url || null,
         rotation_interval_minutes: Number(rotationMinutes) || 15,
+        stream_url: streamUrl.trim() || null,
+        stream_status: streamStatus,
+        now_playing_title: nowPlayingTitle.trim() || null,
+        now_playing_artist: nowPlayingArtist.trim() || null,
         playlist_ids: selectedPlaylistIds,
         is_active: editingSource.station?.is_active !== false,
       });
@@ -251,11 +293,15 @@ export default function AdminStationsPage() {
     editingSource,
     fetchData,
     invokePlaylistAction,
+    nowPlayingArtist,
+    nowPlayingTitle,
     rotationMinutes,
     selectedPlaylistIds,
     stationDescription,
     stationGenre,
     stationName,
+    streamStatus,
+    streamUrl,
   ]);
 
   const updateStationFlag = useCallback(async (
@@ -517,6 +563,11 @@ export default function AdminStationsPage() {
                 <Text style={{ color: colors.textSecondary, fontSize: 12 }}>
                   {item.rotation_interval_minutes || 15} min rotation
                 </Text>
+                {item.stream_url ? (
+                  <Text style={{ color: item.stream_status === 'offline' ? colors.textSecondary : '#22C55E', fontSize: 12, fontWeight: '700' }}>
+                    Stream {item.stream_status || 'offline'}
+                  </Text>
+                ) : null}
                 {item.is_featured ? (
                   <Text style={{ color: colors.primary, fontSize: 12, fontWeight: '700' }}>Featured</Text>
                 ) : null}
@@ -651,7 +702,7 @@ export default function AdminStationsPage() {
         )}
       </ScrollView>
 
-      <Modal visible={sourcePickerVisible} animationType="fade" transparent onRequestClose={() => setSourcePickerVisible(false)}>
+      <Modal visible={sourcePickerVisible} animationType="fade" transparent onRequestClose={closeSourcePicker}>
         <View style={styles.modalBackdrop}>
           <View
             testID="admin-station-source-picker-modal"
@@ -671,16 +722,42 @@ export default function AdminStationsPage() {
                 testID="admin-station-source-picker-close-button"
                 accessibilityLabel="admin-station-source-picker-close-button"
                 activeOpacity={1}
-                onPress={() => setSourcePickerVisible(false)}
+                onPress={closeSourcePicker}
                 style={styles.iconButton}
               >
                 <Ionicons name="close" size={22} color={colors.text} />
               </TouchableOpacity>
             </View>
 
+            <View style={[styles.modalSearchBox, { borderColor: colors.border, backgroundColor: isDark ? '#0F172A' : '#F8FAFC' }]}>
+              <Ionicons name="search-outline" size={18} color={colors.textSecondary} />
+              <TextInput
+                testID="admin-station-source-search-input"
+                accessibilityLabel="admin-station-source-search-input"
+                value={sourceSearch}
+                onChangeText={setSourceSearch}
+                placeholder="Search playlist owners or playlists"
+                placeholderTextColor={colors.textSecondary}
+                autoCapitalize="none"
+                autoCorrect={false}
+                style={[styles.modalSearchInput, { color: colors.text }]}
+              />
+              {sourceSearch.trim().length > 0 ? (
+                <TouchableOpacity
+                  testID="admin-station-source-search-clear-button"
+                  accessibilityLabel="admin-station-source-search-clear-button"
+                  activeOpacity={1}
+                  onPress={() => setSourceSearch('')}
+                  style={styles.searchClearButton}
+                >
+                  <Ionicons name="close-circle" size={18} color={colors.textSecondary} />
+                </TouchableOpacity>
+              ) : null}
+            </View>
+
             <ScrollView style={styles.sourcePicker}>
-              {manualStationSources.length > 0 ? (
-                manualStationSources.map((source) => {
+              {filteredManualStationSources.length > 0 ? (
+                filteredManualStationSources.map((source) => {
                   const sourceKey = source?.key || `${source?.kind || 'source'}:${source?.id || ''}`;
                   return (
                     <TouchableOpacity
@@ -714,10 +791,12 @@ export default function AdminStationsPage() {
                 >
                   <Ionicons name="musical-notes-outline" size={28} color={colors.primary} />
                   <Text style={{ color: colors.text, fontSize: 15, fontWeight: '800', marginTop: 8 }}>
-                    No eligible playlist sources
+                    {manualStationSources.length > 0 ? 'No matching sources' : 'No eligible playlist sources'}
                   </Text>
                   <Text style={{ color: colors.textSecondary, fontSize: 13, textAlign: 'center', marginTop: 5, lineHeight: 19 }}>
-                    Create a public musician or group playlist first, then add it as a station.
+                    {manualStationSources.length > 0
+                      ? 'Try a source name, genre, kind, or playlist title.'
+                      : 'Create a public musician or group playlist first, then add it as a station.'}
                   </Text>
                 </View>
               )}
@@ -801,6 +880,71 @@ export default function AdminStationsPage() {
                   placeholder="Minutes"
                   placeholderTextColor={colors.textSecondary}
                   keyboardType="number-pad"
+                  style={[styles.modalInput, { color: colors.text, borderColor: colors.border, backgroundColor: isDark ? '#0F172A' : '#F8FAFC' }]}
+                />
+              </View>
+            </View>
+
+            <View style={styles.field}>
+              <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>Continuous stream URL</Text>
+              <TextInput
+                testID="admin-station-stream-url-input"
+                accessibilityLabel="admin-station-stream-url-input"
+                value={streamUrl}
+                onChangeText={setStreamUrl}
+                placeholder="https://your-radio.example/live"
+                placeholderTextColor={colors.textSecondary}
+                autoCapitalize="none"
+                keyboardType="url"
+                style={[styles.modalInput, { color: colors.text, borderColor: colors.border, backgroundColor: isDark ? '#0F172A' : '#F8FAFC' }]}
+              />
+            </View>
+
+            <View style={styles.field}>
+              <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>Stream status</Text>
+              <View style={styles.statusSelectorRow}>
+                {(['offline', 'live', 'autoplay'] as const).map((status) => {
+                  const selected = streamStatus === status;
+                  return (
+                    <TouchableOpacity
+                      key={status}
+                      activeOpacity={1}
+                      onPress={() => setStreamStatus(status)}
+                      style={[
+                        styles.statusSelectorButton,
+                        {
+                          borderColor: selected ? colors.primary : colors.border,
+                          backgroundColor: selected ? colors.primary : (isDark ? '#0F172A' : '#F8FAFC'),
+                        },
+                      ]}
+                    >
+                      <Text style={{ color: selected ? '#FFFFFF' : colors.text, fontSize: 12, fontWeight: '700', textTransform: 'capitalize' }}>
+                        {status}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            </View>
+
+            <View style={styles.modalInputRow}>
+              <View style={styles.halfField}>
+                <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>Now playing title</Text>
+                <TextInput
+                  value={nowPlayingTitle}
+                  onChangeText={setNowPlayingTitle}
+                  placeholder="Optional"
+                  placeholderTextColor={colors.textSecondary}
+                  style={[styles.modalInput, { color: colors.text, borderColor: colors.border, backgroundColor: isDark ? '#0F172A' : '#F8FAFC' }]}
+                />
+              </View>
+              <View style={styles.halfField}>
+                <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>Now playing artist</Text>
+                <TextInput
+                  value={nowPlayingArtist}
+                  onChangeText={setNowPlayingArtist}
+                  placeholder="Optional"
+                  placeholderTextColor={colors.textSecondary}
                   style={[styles.modalInput, { color: colors.text, borderColor: colors.border, backgroundColor: isDark ? '#0F172A' : '#F8FAFC' }]}
                 />
               </View>
@@ -983,6 +1127,28 @@ const styles = StyleSheet.create({
   },
   modalHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 12 },
   iconButton: { width: 38, height: 38, alignItems: 'center', justifyContent: 'center' },
+  modalSearchBox: {
+    minHeight: 42,
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    marginBottom: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  modalSearchInput: {
+    flex: 1,
+    minWidth: 0,
+    fontSize: 14,
+    paddingVertical: 9,
+  },
+  searchClearButton: {
+    width: 30,
+    height: 30,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   sourcePicker: { maxHeight: 420 },
   sourceEmpty: {
     borderWidth: 1,
@@ -1014,6 +1180,16 @@ const styles = StyleSheet.create({
   field: { marginBottom: 10 },
   fieldLabel: { fontSize: 12, fontWeight: '700', marginBottom: 6 },
   halfField: { flex: 1 },
+  statusSelectorRow: { flexDirection: 'row', gap: 8 },
+  statusSelectorButton: {
+    flex: 1,
+    minHeight: 38,
+    borderWidth: 1,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 10,
+  },
   playlistPicker: { maxHeight: 260 },
   playlistOption: {
     borderWidth: 1,

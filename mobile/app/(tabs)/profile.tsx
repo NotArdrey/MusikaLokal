@@ -7,7 +7,7 @@ import {
   useBottomSheetSpringConfigs,
 } from "@gorhom/bottom-sheet";
 import * as DocumentPicker from "expo-document-picker";
-import * as FileSystem from "expo-file-system/legacy";
+import * as FileSystem from "expo-file-system/src/legacy";
 import * as ImagePicker from "expo-image-picker";
 import * as VideoThumbnails from "expo-video-thumbnails";
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
@@ -996,7 +996,8 @@ export default function ProfileScreen() {
   const followListSheetRef = useRef<BottomSheetModal>(null);
   const followListSnapPoints = useMemo(() => ["48%", "78%"], []);
   const followListAnimationConfigs = useBottomSheetSpringConfigs(bottomSheetSpringConfig);
-  const profileFetchInFlightRef = useRef(false);
+  const profileFetchInFlightRef = useRef<string | null>(null);
+  const profileFetchRequestIdRef = useRef(0);
   const profilePostsFetchInFlightRef = useRef<string | null>(null);
   const profilePlaylistsFetchInFlightRef = useRef<string | null>(null);
   const profileStationFetchInFlightRef = useRef<string | null>(null);
@@ -1563,11 +1564,10 @@ export default function ProfileScreen() {
   const fetchProfile = useCallback(async (
     options: { showLoading?: boolean } = {},
   ) => {
-    if (profileFetchInFlightRef.current) {
-      return;
-    }
+    let targetIdForRequest: string | null = null;
+    let requestId = 0;
+    let skippedDuplicateFetch = false;
 
-    profileFetchInFlightRef.current = true;
     try {
       if (options.showLoading !== false) {
         setLoading(true);
@@ -1631,9 +1631,21 @@ export default function ProfileScreen() {
         return;
       }
 
+      targetIdForRequest = targetId;
+      if (profileFetchInFlightRef.current === targetId) {
+        skippedDuplicateFetch = true;
+        return;
+      }
+
+      requestId = profileFetchRequestIdRef.current + 1;
+      profileFetchRequestIdRef.current = requestId;
+      profileFetchInFlightRef.current = targetId;
+      const shouldApplyFetchResult = () => profileFetchRequestIdRef.current === requestId;
+
 
       // Check ownership
       const ownership = resolvedCurrentUserId && targetId === resolvedCurrentUserId;
+      if (!shouldApplyFetchResult()) return;
       setIsOwner(!!ownership);
 
       const classifyGigBucket = (gig: any): "active" | "upcoming" | "done" => {
@@ -1681,6 +1693,8 @@ export default function ProfileScreen() {
         throw profileError ?? new Error("Profile not found");
       }
 
+      if (!shouldApplyFetchResult()) return;
+
       const hasGigVisibilityPreference = Object.prototype.hasOwnProperty.call(
         profileData,
         "show_gig_statuses",
@@ -1719,6 +1733,8 @@ export default function ProfileScreen() {
               .in("group_id", groupIds)
             : Promise.resolve({ data: [] as any[] }),
         ]);
+
+        if (!shouldApplyFetchResult()) return;
 
         const stats = { active: 0, upcoming: 0, done: 0 };
         const timelineBuckets: { active: any[]; upcoming: any[]; done: any[] } = {
@@ -1778,6 +1794,8 @@ export default function ProfileScreen() {
           .order("sort_order", { ascending: true }),
       ]);
 
+      if (!shouldApplyFetchResult()) return;
+
       const normalizedAvatarUrl =
         sanitizeAvatarUrl(profileData?.avatar_url) ||
         sanitizeAvatarUrl(profileStatsData?.avatar_url);
@@ -1826,6 +1844,8 @@ export default function ProfileScreen() {
             .eq("follower_id", targetId),
         ]);
 
+        if (!shouldApplyFetchResult()) return;
+
         if (!followerCountResult.error && typeof followerCountResult.count === "number") {
           nextProfileFollowerCount = Math.max(0, followerCountResult.count);
           setProfileFollowerCount(nextProfileFollowerCount);
@@ -1861,6 +1881,8 @@ export default function ProfileScreen() {
           const followersResponse = followersResult.data;
           const followersError = followersResult.error;
 
+          if (!shouldApplyFetchResult()) return;
+
           if (!followingError && Array.isArray(followingResponse?.data)) {
             nextProfileFollowingCount = followingResponse.data.length;
             setProfileFollowingCount(nextProfileFollowingCount);
@@ -1874,9 +1896,11 @@ export default function ProfileScreen() {
               nextProfileFollowing = await fetchProfileFollowingDirect(targetId);
             }
 
+            if (!shouldApplyFetchResult()) return;
             setProfileFollowing(nextProfileFollowing);
           } else {
             nextProfileFollowing = await fetchProfileFollowingDirect(targetId);
+            if (!shouldApplyFetchResult()) return;
             nextProfileFollowingCount = Math.max(nextProfileFollowingCount, nextProfileFollowing.length);
             setProfileFollowingCount(nextProfileFollowingCount);
             setProfileFollowing(nextProfileFollowing);
@@ -1884,6 +1908,7 @@ export default function ProfileScreen() {
 
           if (followersError) {
             nextProfileFollowers = await fetchProfileFollowersDirect(targetId);
+            if (!shouldApplyFetchResult()) return;
           } else {
             const seenFollowerIds = new Set<string>();
             nextProfileFollowers = (Array.isArray(followersResponse?.data) ? followersResponse.data : [])
@@ -1903,6 +1928,7 @@ export default function ProfileScreen() {
             nextProfileFollowers.length === 0
           ) {
             nextProfileFollowers = await fetchProfileFollowersDirect(targetId);
+            if (!shouldApplyFetchResult()) return;
           }
 
           setProfileFollowers(nextProfileFollowers);
@@ -1911,11 +1937,16 @@ export default function ProfileScreen() {
         } catch {
           // Counts still render when the follower list endpoint is unavailable.
         } finally {
-          setLoadingProfileFollowers(false);
+          if (shouldApplyFetchResult()) {
+            setLoadingProfileFollowers(false);
+          }
         }
       } else {
+        if (!shouldApplyFetchResult()) return;
         setLoadingProfileFollowers(false);
       }
+
+      if (!shouldApplyFetchResult()) return;
 
       profileScreenCache.set(targetId, {
         profile: nextProfile,
@@ -1935,8 +1966,12 @@ export default function ProfileScreen() {
       void fetchStation(targetId);
     } catch (e) {
     } finally {
-      profileFetchInFlightRef.current = false;
-      setLoading(false);
+      if (targetIdForRequest && profileFetchInFlightRef.current === targetIdForRequest) {
+        profileFetchInFlightRef.current = null;
+      }
+      if (!skippedDuplicateFetch && (!requestId || profileFetchRequestIdRef.current === requestId)) {
+        setLoading(false);
+      }
     }
   }, [currentUserId, fetchBookmarkedListings, fetchPlaylists, fetchStation, isGuest, normalizedParamUserId]);
 
@@ -2646,7 +2681,12 @@ export default function ProfileScreen() {
   const profileAvatarUrl = sanitizeAvatarUrl(profile?.avatar_url);
   const viewedProfileId = typeof profile?.id === "string" ? profile.id.trim() : "";
   const profileFollowKey = buildSocialFollowKey("profile", viewedProfileId);
-  const canFollowProfile = !isGuest && !isOwner && viewedProfileId.length > 0;
+  const canFollowProfile =
+    Boolean(currentUserId) &&
+    !isGuest &&
+    !isOwner &&
+    viewedProfileId.length > 0 &&
+    viewedProfileId !== currentUserId;
   const openCreatePlaylist = useCallback(() => {
     const targetUserId = viewedProfileId || currentUserId || normalizedParamUserId || "";
 
@@ -2845,7 +2885,11 @@ export default function ProfileScreen() {
       : Array.isArray(profile?.genres) && typeof profile.genres[0] === "string"
         ? profile.genres[0]
         : "";
-  const stationIsLive = hasStation && userStation?.is_active !== false && stationSlotCount > 0;
+  const stationHasLiveStream =
+    typeof userStation?.stream_url === "string" &&
+    userStation.stream_url.trim().length > 0 &&
+    userStation?.stream_status !== "offline";
+  const stationIsLive = hasStation && userStation?.is_active !== false && (stationSlotCount > 0 || stationHasLiveStream);
   const stationIsCurrentSource = Boolean(
     hasStation && activeStation?.id && activeStation.id === userStation?.id,
   );
@@ -3679,7 +3723,9 @@ export default function ProfileScreen() {
                           </Text>
 
                           <Text style={{ fontSize: 11, color: colors.textSecondary, marginTop: 4 }} numberOfLines={1}>
-                            {stationSlotCount} playlist{stationSlotCount === 1 ? "" : "s"}
+                            {stationHasLiveStream
+                              ? "Continuous live stream"
+                              : `${stationSlotCount} playlist${stationSlotCount === 1 ? "" : "s"}`}
                             {stationGenre ? ` \u2022 ${stationGenre}` : ""}
                           </Text>
                         </View>

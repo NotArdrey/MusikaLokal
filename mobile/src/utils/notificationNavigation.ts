@@ -92,6 +92,45 @@ const isProductionTeamInviteNotification = (
   return senderEntityType === "production_team" || requestKind === "invite";
 };
 
+const resolveBookingRequestNotificationTarget = (
+  notificationType: string | undefined,
+  record: Record<string, unknown>,
+  meta: Record<string, unknown>,
+): NotificationNavigationTarget | null => {
+  const bookingId = readStringId(
+    record.booking_id,
+    record.bookingId,
+    meta.booking_id,
+    meta.bookingId,
+  );
+  if (!bookingId) return null;
+
+  const eventType = notificationType || "";
+  const title = readStringId(record.title, meta.title)?.toLowerCase() || "";
+  const message = readStringId(record.message, meta.message)?.toLowerCase() || "";
+  const isBookingRequest =
+    eventType.includes("booking_request") ||
+    title.includes("booking request") ||
+    message.includes("booking request");
+
+  if (!isBookingRequest) return null;
+
+  const status = readStringId(meta.status, record.status)?.toLowerCase();
+  const isTerminal =
+    eventType.includes("cancelled") ||
+    eventType.includes("canceled") ||
+    eventType.includes("declined") ||
+    eventType.includes("rejected") ||
+    ["cancelled", "canceled", "declined", "rejected"].includes(status || "");
+
+  return {
+    pathname: "/bookings",
+    params: {
+      tab: isTerminal || (status && status !== "pending") ? "History" : "Pending",
+    },
+  };
+};
+
 export const normalizeNotificationRouteParams = (value: unknown) => {
   if (!isRecord(value)) {
     return undefined;
@@ -145,6 +184,11 @@ export const resolveNotificationNavigationTarget = (
 
   if (isProductionTeamInviteNotification(notificationType, record, meta)) {
     return { pathname: "/bookings", params: { tab: "Pending" } };
+  }
+
+  const bookingRequestTarget = resolveBookingRequestNotificationTarget(notificationType, record, meta);
+  if (bookingRequestTarget) {
+    return bookingRequestTarget;
   }
 
   if (notificationType === "listing_connection_request") {

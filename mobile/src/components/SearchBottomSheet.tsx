@@ -10,7 +10,6 @@ import React, {
     useCallback,
     useEffect,
   useMemo,
-    useRef,
     useState,
 } from "react";
 import {
@@ -28,7 +27,6 @@ import {
     useWindowDimensions,
     View,
 } from "react-native";
-import { FlashList } from "@shopify/flash-list";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { supabase } from "../../lib/supabase";
 import { useAuth } from "../context/AuthContext";
@@ -48,6 +46,7 @@ import { usePageLoadLogger } from "../utils/loadTimeLogger";
 import { bottomSheetSpringConfig } from "../utils/motion";
 import { NAVBAR_BOTTOM_OFFSET } from "./navbar";
 import ListingCard from "./ListingCard";
+import SafeBottomSheetFlatList from "./SafeBottomSheetFlatList";
 import TrackedBottomSheetModal from "./TrackedBottomSheetModal";
 
 const debugLog = (..._args: unknown[]) => {};
@@ -97,15 +96,32 @@ const SORT_OPTIONS = [
 
 const PAGE_SIZE = 10;
 
-const getSearchResultKey = (item: any, index: number) => {
+const getSearchResultIdentity = (item: any) => {
   const typeKey =
     typeof item?.type === "string" && item.type.length > 0 ? item.type : "item";
   const idKey =
     item?.id !== null && item?.id !== undefined && String(item.id).length > 0
       ? String(item.id)
-      : String(index);
+      : "";
 
-  return `${typeKey}-${idKey}`;
+  return idKey ? `${typeKey}-${idKey}` : null;
+};
+
+const getSearchResultKey = (item: any, index: number) => {
+  return getSearchResultIdentity(item) || `item-${index}`;
+};
+
+const dedupeSearchResults = (items: any[]) => {
+  const seenKeys = new Set<string>();
+
+  return items.filter((item) => {
+    const key = getSearchResultIdentity(item);
+    if (!key) return true;
+    if (seenKeys.has(key)) return false;
+
+    seenKeys.add(key);
+    return true;
+  });
 };
 
 interface SearchBottomSheetProps {
@@ -148,11 +164,8 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
     // Basic State
     const [activeFilter, setActiveFilter] = useState("All");
     const [searchQuery, setSearchQuery] = useState("");
-    const [data, setData] = useState<any[]>([]);
+    const [debouncedSearchQuery, setDebouncedSearchQuery] = useState("");
     const [isSheetOpen, setIsSheetOpen] = useState(false);
-    const [loading, setLoading] = useState(false);
-    const [loadingMore, setLoadingMore] = useState(false);
-    const requestIdRef = useRef(0);
     const [followingKeys, setFollowingKeys] = useState<Set<string>>(new Set());
     const [followBusyByKey, setFollowBusyByKey] = useState<Record<string, boolean>>({});
 
@@ -180,46 +193,41 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
 
     const searchResultsQuery = useSearchResultsQuery({
       activeFilter,
-      enabled: false,
+      enabled: isSheetOpen,
       isGuest,
       isOwner,
       minRating,
       pageSize: PAGE_SIZE,
       priceRange,
-      query: searchQuery,
+      query: debouncedSearchQuery,
       selectedGenre,
       sortBy,
     });
 
     const queriedResults = useMemo(
-      () =>
-        (searchResultsQuery.data?.pages || []).flatMap((page: any) =>
+      () => {
+        const items = (searchResultsQuery.data?.pages || []).flatMap((page: any) =>
           Array.isArray(page?.items) ? page.items : Array.isArray(page?.data) ? page.data : [],
-        ),
+        );
+
+        return dedupeSearchResults(items);
+      },
       [searchResultsQuery.data],
     );
 
-    useEffect(() => {
-      setData(queriedResults);
-      setLoading(searchResultsQuery.isLoading && queriedResults.length === 0);
-      setLoadingMore(searchResultsQuery.isFetchingNextPage);
-    }, [
-      queriedResults,
-      searchResultsQuery.isFetchingNextPage,
-      searchResultsQuery.isLoading,
-    ]);
-
-    const visibleData = data;
+    const visibleData = queriedResults;
+    const loading = searchResultsQuery.isLoading && queriedResults.length === 0;
+    const loadingMore = searchResultsQuery.isFetchingNextPage;
     const hasMoreResults = Boolean(searchResultsQuery.hasNextPage);
 
     usePageLoadLogger({
       counts: {
-        results: data.length,
+        results: visibleData.length,
       },
       details: {
         activeFilter,
         hasMore: hasMoreResults,
-        queryLength: searchQuery.trim().length,
+        queryLength: debouncedSearchQuery.trim().length,
         selectedGenre,
         sortBy,
       },
@@ -250,8 +258,6 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
 
     const handleClose = useCallback(() => {
       setIsSheetOpen(false);
-      setLoading(false);
-      setLoadingMore(false);
       Keyboard.dismiss();
       onClose?.();
     }, [onClose]);
@@ -259,14 +265,7 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
     const handleSheetChange = useCallback((index: number) => {
       const nextOpen = index >= 0;
       setIsSheetOpen(nextOpen);
-
-      if (!nextOpen) {
-        setLoading(false);
-        setLoadingMore(false);
-      } else if (data.length === 0) {
-        setLoading(true);
-      }
-    }, [data.length]);
+    }, []);
 
     // Toggle filter panel with animation
     const toggleFilters = useCallback(() => {
@@ -283,60 +282,17 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
       setSortBy("newest");
     }, []);
 
-    // Search effect with filters
-    const fetchSearchPage = useCallback(
-      async (mode: "reset" | "append") => {
-        const isReset = mode === "reset";
-        const requestId = ++requestIdRef.current;
-
-        if (isReset) {
-          setLoading(true);
-        } else {
-          setLoadingMore(true);
-        }
-
-        try {
-          if (isReset) {
-            await searchResultsQuery.refetch();
-          } else if (searchResultsQuery.hasNextPage) {
-            await searchResultsQuery.fetchNextPage();
-          }
-        } finally {
-          if (requestId === requestIdRef.current) {
-            setLoading(false);
-            setLoadingMore(false);
-          }
-        }
-      },
-      [
-        searchResultsQuery.fetchNextPage,
-        searchResultsQuery.hasNextPage,
-        searchResultsQuery.refetch,
-      ],
-    );
-
     useEffect(() => {
       if (!isSheetOpen) {
         return;
       }
 
       const timeout = setTimeout(() => {
-        fetchSearchPage("reset");
+        setDebouncedSearchQuery(searchQuery);
       }, 300);
 
       return () => clearTimeout(timeout);
-    }, [
-      activeFilter,
-      fetchSearchPage,
-      isGuest,
-      isOwner,
-      isSheetOpen,
-      minRating,
-      priceRange,
-      searchQuery,
-      selectedGenre,
-      sortBy,
-    ]);
+    }, [isSheetOpen, searchQuery]);
 
     // Search invalidation is handled by the shared RootLayout query channel.
 
@@ -584,7 +540,7 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
         );
       }
 
-      if (!hasMoreResults || data.length === 0) {
+      if (!hasMoreResults || visibleData.length === 0) {
         return <View style={styles.paginationFooterSpacer} />;
       }
 
@@ -595,15 +551,15 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
           </Text>
         </View>
       );
-    }, [colors.primary, colors.textSecondary, data.length, hasMoreResults, loadingMore]);
+    }, [colors.primary, colors.textSecondary, visibleData.length, hasMoreResults, loadingMore]);
 
     const resultsLabelText = useMemo(() => {
-      if (data.length === 0) return "Top Results";
+      if (visibleData.length === 0) return "Top Results";
       if (hasMoreResults) {
-        return `${data.length}+ Result${data.length !== 1 ? "s" : ""}`;
+        return `${visibleData.length}+ Result${visibleData.length !== 1 ? "s" : ""}`;
       }
-      return `${data.length} Result${data.length !== 1 ? "s" : ""}`;
-    }, [data.length, hasMoreResults]);
+      return `${visibleData.length} Result${visibleData.length !== 1 ? "s" : ""}`;
+    }, [visibleData.length, hasMoreResults]);
 
     // Filter Section Component
     const renderFilterSection = useMemo(() => {
@@ -1058,7 +1014,8 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
             <ActivityIndicator size="large" color={colors.primary} />
           </View>
         ) : (
-          <FlashList
+          <SafeBottomSheetFlatList
+            style={styles.resultsList}
             data={visibleData}
             renderItem={renderItem}
             keyExtractor={keyExtractor}
@@ -1071,8 +1028,10 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
             ]}
             keyboardShouldPersistTaps="handled"
             showsVerticalScrollIndicator={false}
-            drawDistance={720}
-            maintainVisibleContentPosition={{ disabled: true }}
+            initialNumToRender={6}
+            maxToRenderPerBatch={6}
+            updateCellsBatchingPeriod={40}
+            windowSize={5}
             nestedScrollEnabled
             onEndReached={handleLoadMore}
             onEndReachedThreshold={0.35}
@@ -1219,6 +1178,9 @@ const styles = StyleSheet.create({
   },
   resultCardWrap: {
     position: "relative",
+  },
+  resultsList: {
+    flex: 1,
   },
   followBadgeBtn: {
     minHeight: 40,

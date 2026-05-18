@@ -1,5 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
-import * as FileSystem from "expo-file-system/legacy";
+import * as FileSystem from "expo-file-system/src/legacy";
 import * as ImagePicker from "expo-image-picker";
 import * as Linking from "expo-linking";
 import { router, useLocalSearchParams } from "expo-router";
@@ -150,6 +150,36 @@ const isMissingStudioInstrumentDetailColumns = (error: any): boolean => {
   );
 };
 
+const isMissingWeeklyScheduleColumns = (error: any): boolean => {
+  const haystack = [
+    error?.code,
+    error?.message,
+    error?.details,
+    error?.hint,
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+
+  return (
+    haystack.includes("weekly_schedule_") &&
+    (haystack.includes("pgrst204") ||
+      haystack.includes("schema cache") ||
+      haystack.includes("could not find") ||
+      haystack.includes("column"))
+  );
+};
+
+const stripWeeklyScheduleColumns = (row: any) => {
+  const {
+    weekly_schedule_scope,
+    weekly_schedule_end_date,
+    weekly_schedule_dates,
+    ...rest
+  } = row;
+  return rest;
+};
+
 const buildStudioInstrumentRows = (
   studioId: string,
   instruments: any[] = [],
@@ -220,6 +250,87 @@ const normalizePromotionTarget = (
 
 type DateOverrideSessionType = "rehearsal" | "recording" | "both";
 type WeeklySessionType = DateOverrideSessionType;
+type WeeklyScheduleScope = "indefinite" | "until" | "specific_dates";
+type WeeklyScheduleFields = {
+  weeklyScheduleScope: WeeklyScheduleScope;
+  weeklyScheduleEndDate: string;
+  weeklyScheduleDates: Record<string, boolean>;
+};
+type WeeklyAvailabilityDay = {
+  day: string;
+  slots: { start: string; end: string }[];
+  sessionType?: WeeklySessionType;
+} & WeeklyScheduleFields;
+
+const ISO_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+
+const getLocalDateKey = (date = new Date()): string => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
+
+const parseLocalDateKey = (dateStr: string): Date => {
+  const [year, month, day] = dateStr.split("-").map(Number);
+  return new Date(year, (month || 1) - 1, day || 1);
+};
+
+const formatReadableDate = (dateStr: string): string => {
+  if (!ISO_DATE_PATTERN.test(dateStr)) return "";
+  return parseLocalDateKey(dateStr).toLocaleDateString("en-US", {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+};
+
+const normalizeWeeklyScheduleScope = (
+  value: unknown,
+): WeeklyScheduleScope => {
+  if (value === "until" || value === "indefinite") {
+    return value;
+  }
+  return "indefinite";
+};
+
+const toWeeklyScheduleDateList = (dates: Record<string, boolean>): string[] =>
+  Object.keys(dates)
+    .filter((date) => dates[date])
+    .sort((a, b) => a.localeCompare(b));
+
+const getDefaultWeeklyScheduleFields = (
+  fallback?: Partial<WeeklyScheduleFields>,
+): WeeklyScheduleFields => ({
+  weeklyScheduleScope: normalizeWeeklyScheduleScope(
+    fallback?.weeklyScheduleScope,
+  ),
+  weeklyScheduleEndDate:
+    typeof fallback?.weeklyScheduleEndDate === "string"
+      ? fallback.weeklyScheduleEndDate
+      : "",
+  weeklyScheduleDates: { ...(fallback?.weeklyScheduleDates || {}) },
+});
+
+const normalizeWeeklyAvailabilityDay = (
+  day: {
+    day: string;
+    slots: { start: string; end: string }[];
+    sessionType?: WeeklySessionType;
+  } & Partial<WeeklyScheduleFields>,
+  fallback?: Partial<WeeklyScheduleFields>,
+): WeeklyAvailabilityDay => ({
+  ...day,
+  ...getDefaultWeeklyScheduleFields({
+    weeklyScheduleScope:
+      day.weeklyScheduleScope ?? fallback?.weeklyScheduleScope,
+    weeklyScheduleEndDate:
+      day.weeklyScheduleEndDate ?? fallback?.weeklyScheduleEndDate,
+    weeklyScheduleDates:
+      day.weeklyScheduleDates ?? fallback?.weeklyScheduleDates,
+  }),
+});
 
 const getDefaultDateOverrideSessionType = (
   type: "Rehearsal" | "Recording" | "Both",
@@ -409,6 +520,8 @@ export default function AddStudioScreen() {
   const [currentMonth, setCurrentMonth] = useState(
     new Date().toISOString().slice(0, 7),
   );
+  const [activeWeeklyEndDatePickerDay, setActiveWeeklyEndDatePickerDay] =
+    useState<string | null>(null);
 
   // Legacy instruments state for backward compatibility
   const [selectedInstruments, setSelectedInstruments] = useState<
@@ -522,14 +635,8 @@ export default function AddStudioScreen() {
     "Saturday",
     "Sunday",
   ];
-  const [availability, setAvailability] = useState<
-    {
-      day: string;
-      slots: { start: string; end: string }[];
-      sessionType?: WeeklySessionType;
-    }[]
-  >(
-    daysOfWeek.map((day) => ({
+  const [availability, setAvailability] = useState<WeeklyAvailabilityDay[]>(
+    daysOfWeek.map((day) => normalizeWeeklyAvailabilityDay({
       day,
       slots: [],
       sessionType: getDefaultWeeklySessionType("Both"),
@@ -999,6 +1106,10 @@ export default function AddStudioScreen() {
     if (step < 4) {
       setStep(step + 1);
     } else {
+      if (!isWeeklyScheduleScopeValid()) {
+        return;
+      }
+
       // System lock check
       if (isSystemLocked) {
         showLockAlert();
@@ -1037,6 +1148,86 @@ export default function AddStudioScreen() {
       }
       return next;
     });
+  };
+
+  const getDayOfWeekName = (dateStr: string): string => {
+    const date = parseLocalDateKey(dateStr);
+    const days = [
+      "Sunday",
+      "Monday",
+      "Tuesday",
+      "Wednesday",
+      "Thursday",
+      "Friday",
+      "Saturday",
+    ];
+    return days[date.getDay()];
+  };
+
+  const updateWeeklyScheduleForDay = (
+    dayIndex: number,
+    patch: Partial<WeeklyScheduleFields>,
+  ) => {
+    setAvailability((prev) =>
+      prev.map((day, index) =>
+        index === dayIndex ? normalizeWeeklyAvailabilityDay({ ...day, ...patch }) : day,
+      ),
+    );
+  };
+
+  const isWeeklyScheduleScopeValid = (): boolean => {
+    const todayKey = getLocalDateKey();
+    const openDays = availability.filter((day) => day.slots.length > 0);
+
+    for (const daySchedule of openDays) {
+      if (daySchedule.weeklyScheduleScope === "until") {
+        if (!ISO_DATE_PATTERN.test(daySchedule.weeklyScheduleEndDate)) {
+          showAlert(
+            "warning",
+            `${daySchedule.day} Schedule End Date`,
+            `Choose a ${daySchedule.day} weekly schedule end date from the calendar.`,
+          );
+          return false;
+        }
+        if (daySchedule.weeklyScheduleEndDate < todayKey) {
+          showAlert(
+            "warning",
+            `${daySchedule.day} Schedule End Date`,
+            `The ${daySchedule.day} weekly schedule end date must be today or a future date.`,
+          );
+          return false;
+        }
+      }
+
+      if (daySchedule.weeklyScheduleScope === "specific_dates") {
+        const selectedWeeklyDates = toWeeklyScheduleDateList(
+          daySchedule.weeklyScheduleDates,
+        );
+        if (selectedWeeklyDates.length === 0) {
+          showAlert(
+            "warning",
+            `${daySchedule.day} Schedule Dates`,
+            `Select at least one ${daySchedule.day} date for this weekly schedule.`,
+          );
+          return false;
+        }
+
+        const unsupportedDate = selectedWeeklyDates.find(
+          (dateStr) =>
+            dateStr < todayKey || getDayOfWeekName(dateStr) !== daySchedule.day,
+        );
+        if (unsupportedDate) {
+          showAlert(
+            "warning",
+            `${daySchedule.day} Schedule Dates`,
+            `${unsupportedDate} is not a future ${daySchedule.day}. Remove it or choose the matching weekday.`,
+          );
+          return false;
+        }
+      }
+    }
+
+    return true;
   };
 
   const createStudio = async () => {
@@ -1089,20 +1280,36 @@ export default function AddStudioScreen() {
       // Also include weekly availability for recurring schedule
       const weeklyAvailability = availability
         .filter((day) => day.slots.length > 0)
-        .map((day) => ({
-          day: day.day,
-          session_type:
-            studioType === "Both"
-              ? normalizeWeeklySessionType(
-                  day.sessionType,
-                  getDefaultWeeklySessionType(studioType),
-                )
-              : getDefaultWeeklySessionType(studioType),
-          slots: day.slots.map((slot) => ({
-            start: convertTo24Hour(slot.start),
-            end: convertTo24Hour(slot.end),
-          })),
-        }));
+        .map((day) => {
+          const dayWeeklyScope = normalizeWeeklyScheduleScope(
+            day.weeklyScheduleScope,
+          );
+          return {
+            day: day.day,
+            session_type:
+              studioType === "Both"
+                ? normalizeWeeklySessionType(
+                    day.sessionType,
+                    getDefaultWeeklySessionType(studioType),
+                  )
+                : getDefaultWeeklySessionType(studioType),
+            weekly_schedule_scope: dayWeeklyScope,
+            weekly_schedule_end_date:
+              dayWeeklyScope === "until" ? day.weeklyScheduleEndDate : null,
+            weekly_schedule_dates:
+              dayWeeklyScope === "specific_dates"
+                ? toWeeklyScheduleDateList(day.weeklyScheduleDates)
+                : [],
+            slots: day.slots.map((slot) => ({
+              start: convertTo24Hour(slot.start),
+              end: convertTo24Hour(slot.end),
+            })),
+          };
+        });
+
+      if (!isWeeklyScheduleScopeValid()) {
+        return;
+      }
 
       const equipmentPayload = equipment.map((e) => ({
         name: e.name,
@@ -1169,6 +1376,9 @@ export default function AddStudioScreen() {
           recording_hours_per_block:
             parsePositiveDecimal(recordingHoursPerBlock) || 3,
           recording_rate_negotiable: false,
+          weekly_schedule_scope: "indefinite",
+          weekly_schedule_end_date: null,
+          weekly_schedule_dates: [],
         },
       };
 
@@ -1302,7 +1512,7 @@ export default function AddStudioScreen() {
 
       // Insert studio settings
       const bookingSettings = payload.booking_settings || {};
-      await supabase.from('studio_settings').insert({
+      const settingsRow = {
         studio_id: studioId,
         buffer_minutes: 30,
         bulk_discount_threshold_hours: 10,
@@ -1322,7 +1532,37 @@ export default function AddStudioScreen() {
         off_peak_multiplier: Number(bookingSettings.off_peak_multiplier) || 1.0,
         off_peak_dates: bookingSettings.off_peak_dates || [],
         recording_rate_negotiable: false,
-      });
+        weekly_schedule_scope:
+          normalizeWeeklyScheduleScope(bookingSettings.weekly_schedule_scope),
+        weekly_schedule_end_date:
+          bookingSettings.weekly_schedule_scope === "until"
+            ? bookingSettings.weekly_schedule_end_date
+            : null,
+        weekly_schedule_dates: Array.isArray(
+          bookingSettings.weekly_schedule_dates,
+        )
+          ? bookingSettings.weekly_schedule_dates
+          : [],
+      };
+      let { error: settingsError } = await supabase
+        .from('studio_settings')
+        .insert(settingsRow);
+
+      if (settingsError && isMissingWeeklyScheduleColumns(settingsError)) {
+        console.warn(
+          "studio_settings weekly schedule columns are not available yet; retrying without them.",
+          settingsError,
+        );
+        ({ error: settingsError } = await supabase
+          .from('studio_settings')
+          .insert(stripWeeklyScheduleColumns(settingsRow)));
+      }
+
+      if (settingsError) {
+        throw new Error(
+          `Failed to save booking settings: ${settingsError.message}`,
+        );
+      }
 
       // Insert promotions
       if (promotions.length > 0) {
@@ -1370,6 +1610,18 @@ export default function AddStudioScreen() {
                 open_time: slot.start,
                 close_time: slot.end,
                 slot_order: slotIndex,
+                weekly_schedule_scope: normalizeWeeklyScheduleScope(
+                  daySchedule.weekly_schedule_scope,
+                ),
+                weekly_schedule_end_date:
+                  daySchedule.weekly_schedule_scope === "until"
+                    ? daySchedule.weekly_schedule_end_date
+                    : null,
+                weekly_schedule_dates: Array.isArray(
+                  daySchedule.weekly_schedule_dates,
+                )
+                  ? daySchedule.weekly_schedule_dates
+                  : [],
                 reason: buildWeeklyScheduleReason(
                   normalizeWeeklySessionType(
                     daySchedule.session_type,
@@ -1383,9 +1635,23 @@ export default function AddStudioScreen() {
       }
 
       if (operatingHours.length > 0) {
-        const { error: operatingHoursError } = await supabase
+        let { error: operatingHoursError } = await supabase
           .from('studio_operating_hours')
           .insert(operatingHours);
+
+        if (
+          operatingHoursError &&
+          isMissingWeeklyScheduleColumns(operatingHoursError)
+        ) {
+          console.warn(
+            "studio_operating_hours weekly schedule columns are not available yet; retrying without them.",
+            operatingHoursError,
+          );
+          ({ error: operatingHoursError } = await supabase
+            .from('studio_operating_hours')
+            .insert(operatingHours.map(stripWeeklyScheduleColumns)));
+        }
+
         if (operatingHoursError) {
           throw new Error(
             `Failed to save weekly schedule: ${operatingHoursError.message}`,
@@ -3821,7 +4087,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                   { color: colors.textSecondary, marginBottom: 16 },
                 ]}
               >
-                Set your regular weekly schedule and/or select specific dates
+                Set your regular weekly schedule and optional date overrides
               </Text>
 
               {/* Calendar Date Selection */}
@@ -3838,7 +4104,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                   <Text
                     style={[styles.sectionSubtitle, { color: colors.text }]}
                   >
-                    Specific Dates
+                    Date Overrides
                   </Text>
                 </View>
                 <Text
@@ -3849,7 +4115,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                     marginBottom: 12,
                   }}
                 >
-                  Tap on dates to set special hours or override weekly schedule
+                  Use these for one-off changes like closures, holidays, or special hours. These override the regular weekly schedule.
                 </Text>
 
                 <View
@@ -4768,6 +5034,279 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                         </Text>
                       </TouchableOpacity>
                     )}
+
+                  {daySchedule.slots.length > 0 && (
+                    <View
+                      style={[
+                        styles.weeklyScopeInline,
+                        { borderTopColor: colors.border },
+                      ]}
+                    >
+                      <Text
+                        style={{
+                          color: colors.textSecondary,
+                          fontSize: 11,
+                          marginBottom: 8,
+                          fontFamily: "Poppins_600SemiBold",
+                        }}
+                      >
+                        {daySchedule.day.toUpperCase()} WEEKLY HOURS APPLY
+                      </Text>
+                      <Text
+                        style={{
+                          color: colors.textSecondary,
+                          fontSize: 12,
+                          marginBottom: 10,
+                          fontFamily: "Poppins_400Regular",
+                        }}
+                      >
+                        Choose how long {daySchedule.day} weekly hours should stay active. Date overrides still take priority.
+                      </Text>
+                      <View style={styles.sessionTypeOptions}>
+                        {([
+                          { value: "indefinite", label: "Every week" },
+                          { value: "until", label: "Until a date" },
+                        ] as const).map((option) => {
+                          const isSelected =
+                            daySchedule.weeklyScheduleScope === option.value;
+                          return (
+                            <TouchableOpacity
+                              key={option.value}
+                              activeOpacity={1}
+                              onPress={() => {
+                                const nextScope =
+                                  normalizeWeeklyScheduleScope(option.value);
+                                updateWeeklyScheduleForDay(dayIndex, {
+                                  weeklyScheduleScope: nextScope,
+                                });
+                                setActiveWeeklyEndDatePickerDay(
+                                  nextScope === "until"
+                                    ? daySchedule.day
+                                    : null,
+                                );
+                              }}
+                              style={[
+                                styles.sessionTypeChip,
+                                {
+                                  borderColor: isSelected
+                                    ? colors.primary
+                                    : colors.border,
+                                  backgroundColor: isSelected
+                                    ? `${colors.primary}20`
+                                    : "transparent",
+                                },
+                              ]}
+                            >
+                              <Text
+                                style={{
+                                  color: isSelected
+                                    ? colors.primary
+                                    : colors.textSecondary,
+                                  fontSize: 11,
+                                  lineHeight: 16,
+                                  includeFontPadding: false,
+                                  fontFamily: "Poppins_500Medium",
+                                }}
+                              >
+                                {option.label}
+                              </Text>
+                            </TouchableOpacity>
+                          );
+                        })}
+                      </View>
+
+                      {daySchedule.weeklyScheduleScope === "until" && (
+                        <View style={{ marginTop: 12 }}>
+                          <TouchableOpacity
+                            activeOpacity={0.8}
+                            onPress={() =>
+                              setActiveWeeklyEndDatePickerDay(
+                                activeWeeklyEndDatePickerDay ===
+                                  daySchedule.day
+                                  ? null
+                                  : daySchedule.day,
+                              )
+                            }
+                            style={{
+                              borderWidth: 1,
+                              borderColor: daySchedule.weeklyScheduleEndDate
+                                ? `${colors.primary}80`
+                                : colors.border,
+                              borderRadius: 12,
+                              padding: 12,
+                              backgroundColor: isDark ? "#111827" : "#FFFFFF",
+                              flexDirection: "row",
+                              alignItems: "center",
+                              justifyContent: "space-between",
+                              gap: 10,
+                            }}
+                          >
+                            <View
+                              style={{
+                                flexDirection: "row",
+                                alignItems: "center",
+                                gap: 10,
+                                flex: 1,
+                                minWidth: 0,
+                              }}
+                            >
+                              <View
+                                style={{
+                                  width: 34,
+                                  height: 34,
+                                  borderRadius: 17,
+                                  alignItems: "center",
+                                  justifyContent: "center",
+                                  backgroundColor: `${colors.primary}18`,
+                                }}
+                              >
+                                <Ionicons
+                                  name="calendar-outline"
+                                  size={18}
+                                  color={colors.primary}
+                                />
+                              </View>
+                              <View style={{ flex: 1, minWidth: 0 }}>
+                                <Text
+                                  style={{
+                                    color: colors.textSecondary,
+                                    fontSize: 10,
+                                    fontFamily: "Poppins_600SemiBold",
+                                    textTransform: "uppercase",
+                                  }}
+                                >
+                                  {daySchedule.day} hours end on
+                                </Text>
+                                <Text
+                                  numberOfLines={1}
+                                  style={{
+                                    color:
+                                      daySchedule.weeklyScheduleEndDate
+                                        ? colors.text
+                                        : colors.textSecondary,
+                                    fontSize: 14,
+                                    marginTop: 2,
+                                    fontFamily: "Poppins_600SemiBold",
+                                  }}
+                                >
+                                  {daySchedule.weeklyScheduleEndDate
+                                    ? formatReadableDate(
+                                        daySchedule.weeklyScheduleEndDate,
+                                      )
+                                    : "Pick from calendar"}
+                                </Text>
+                              </View>
+                            </View>
+                            <Ionicons
+                              name={
+                                activeWeeklyEndDatePickerDay ===
+                                daySchedule.day
+                                  ? "chevron-up"
+                                  : "chevron-down"
+                              }
+                              size={18}
+                              color={colors.textSecondary}
+                            />
+                          </TouchableOpacity>
+
+                          {daySchedule.weeklyScheduleEndDate ? (
+                            <TouchableOpacity
+                              activeOpacity={0.8}
+                              onPress={() => {
+                                updateWeeklyScheduleForDay(dayIndex, {
+                                  weeklyScheduleEndDate: "",
+                                });
+                                setActiveWeeklyEndDatePickerDay(
+                                  daySchedule.day,
+                                );
+                              }}
+                              style={{
+                                alignSelf: "flex-start",
+                                flexDirection: "row",
+                                alignItems: "center",
+                                gap: 6,
+                                marginTop: 8,
+                                paddingVertical: 6,
+                                paddingHorizontal: 2,
+                              }}
+                            >
+                              <Ionicons
+                                name="close-circle-outline"
+                                size={15}
+                                color={colors.textSecondary}
+                              />
+                              <Text
+                                style={{
+                                  color: colors.textSecondary,
+                                  fontSize: 12,
+                                  fontFamily: "Poppins_500Medium",
+                                }}
+                              >
+                                Clear date
+                              </Text>
+                            </TouchableOpacity>
+                          ) : null}
+
+                          {activeWeeklyEndDatePickerDay ===
+                            daySchedule.day && (
+                            <View
+                              style={{
+                                marginTop: 10,
+                                borderRadius: 12,
+                                borderWidth: 1,
+                                borderColor: colors.border,
+                                overflow: "hidden",
+                                backgroundColor: isDark
+                                  ? "#111827"
+                                  : "#FFFFFF",
+                              }}
+                            >
+                              <Calendar
+                                current={
+                                  daySchedule.weeklyScheduleEndDate ||
+                                  getLocalDateKey()
+                                }
+                                minDate={getLocalDateKey()}
+                                onDayPress={(day) => {
+                                  updateWeeklyScheduleForDay(dayIndex, {
+                                    weeklyScheduleEndDate: day.dateString,
+                                  });
+                                  setActiveWeeklyEndDatePickerDay(null);
+                                }}
+                                markedDates={
+                                  ISO_DATE_PATTERN.test(
+                                    daySchedule.weeklyScheduleEndDate,
+                                  )
+                                    ? {
+                                        [daySchedule.weeklyScheduleEndDate]: {
+                                          selected: true,
+                                          selectedColor: colors.primary,
+                                          selectedTextColor: "#FFFFFF",
+                                        },
+                                      }
+                                    : {}
+                                }
+                                theme={{
+                                  backgroundColor: "transparent",
+                                  calendarBackground: "transparent",
+                                  textSectionTitleColor: colors.textSecondary,
+                                  selectedDayBackgroundColor: colors.primary,
+                                  selectedDayTextColor: "#FFFFFF",
+                                  todayTextColor: colors.primary,
+                                  dayTextColor: colors.text,
+                                  textDisabledColor: isDark
+                                    ? "#4B5563"
+                                    : "#D1D5DB",
+                                  monthTextColor: colors.text,
+                                  arrowColor: colors.primary,
+                                }}
+                              />
+                            </View>
+                          )}
+                        </View>
+                      )}
+                    </View>
+                  )}
                 </View>
               ))}
             </View>
@@ -4892,7 +5431,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                         <View key={promo.id} style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 6, marginTop: 4 }}>
                           <Ionicons name="pricetag-outline" size={12} color={colors.primary} />
                           <Text style={{ color: colors.text, fontFamily: "Poppins_500Medium", fontSize: 12 }}>
-                            "{promo.name}": {promo.discount_type === "percentage" ? `${promo.discount_value}% off` : `₱${promo.discount_value}/hr off`}
+                            {promo.name}: {promo.discount_type === "percentage" ? `${promo.discount_value}% off` : `₱${promo.discount_value}/hr off`}
                             {" "}({promo.applies_to === "both" ? "All" : promo.applies_to})
                             {promo.criteria ? ` � ${promo.criteria}` : ""}
                             {promo.minimum_booking_hours ? ` � Min ${promo.minimum_booking_hours} hr` : ""}
@@ -5181,6 +5720,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
         message={`Studio "${studioName}" has been successfully listed!`}
         buttonText="Go to Studio"
         onClose={handleSuccessRedirect}
+        showCancelButton={false}
       />
 
       <Modal
@@ -6007,6 +6547,18 @@ const styles = StyleSheet.create({
     minHeight: 32,
     alignItems: "center",
     justifyContent: "center",
+  },
+  weeklyScopeInline: {
+    borderTopWidth: 1,
+    marginTop: 14,
+    paddingTop: 14,
+  },
+  weeklyScopeCard: {
+    borderRadius: 12,
+    borderWidth: 1,
+    padding: 12,
+    marginTop: 4,
+    marginBottom: 12,
   },
   timeSlotRow: {
     flexDirection: "row",

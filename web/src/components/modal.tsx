@@ -28,6 +28,7 @@ type CustomModalProps = {
   contractName?: string;
   loading?: boolean;
   loadingMessage?: string;
+  showCancelButton?: boolean;
 };
 
 const IS_WEB = Platform.OS === 'web';
@@ -65,7 +66,8 @@ const CustomModal: React.FC<CustomModalProps> = ({
   contractUrl,
   contractName,
   loading = false,
-  loadingMessage = 'Please wait...'
+  loadingMessage = 'Please wait...',
+  showCancelButton = true
 }) => {
   const { colors } = useTheme();
   const [isTermsAccepted, setIsTermsAccepted] = React.useState(false);
@@ -385,20 +387,22 @@ const CustomModal: React.FC<CustomModalProps> = ({
                   <Text style={styles.confirmButtonText}>{buttonText}</Text>
                 </TouchableOpacity>
 
-                <TouchableOpacity
-                  activeOpacity={!canInteract ? 1 : 0.78}
-                  style={[
-                    styles.cancelButton,
-                    {
-                      borderColor: colors.border,
-                      backgroundColor: colors.background,
-                    },
-                  ]}
-                  disabled={!canInteract}
-                  onPress={onClose}
-                >
-                  <Text style={[styles.cancelButtonText, { color: colors.textSecondary }]}>Cancel</Text>
-                </TouchableOpacity>
+                {showCancelButton ? (
+                  <TouchableOpacity
+                    activeOpacity={!canInteract ? 1 : 0.78}
+                    style={[
+                      styles.cancelButton,
+                      {
+                        borderColor: colors.border,
+                        backgroundColor: colors.background,
+                      },
+                    ]}
+                    disabled={!canInteract}
+                    onPress={onClose}
+                  >
+                    <Text style={[styles.cancelButtonText, { color: colors.textSecondary }]}>Cancel</Text>
+                  </TouchableOpacity>
+                ) : null}
               </View>
             </>
           )}
@@ -431,7 +435,7 @@ const CustomModal: React.FC<CustomModalProps> = ({
               <Text style={[styles.termsBody, { color: colors.textSecondary }]}>- All transactions are processed via the Musika Lokal Wallet.{"\n"}- Funds are held in escrow and released 48-72 hours after event completion if no dispute is raised.{"\n"}- Musika Lokal acts only as a facilitator and is not a party to the actual performance contract.</Text>
 
               <Text style={[styles.termsSectionTitle, { color: colors.text }]}>2. Cancellation and Force Majeure</Text>
-              <Text style={[styles.termsBody, { color: colors.textSecondary }]}>- More than 7 days: 80% refund to client.{"\n"}- 3-7 days: 70% refund to client.{"\n"}- Less than 3 days: No refund; 100% to provider.{"\n\n"}In cases of extreme weather, government-mandated lockdowns, or national emergencies, either party may cancel without penalty, subject to verification.</Text>
+              <Text style={[styles.termsBody, { color: colors.textSecondary }]}>- All confirmed booking cancellations are non-refundable once payment has been made.{"\n"}- Paid downpayments and full payments are non-refundable and will not be returned after cancellation.{"\n"}- Provider availability issues, admin-reviewed incidents, verified access issues, and approved force majeure cases may be handled through rescheduling or support review, but booking payments remain non-refundable.</Text>
 
               <Text style={[styles.termsSectionTitle, { color: colors.text }]}>3. Limitation of Liability</Text>
               <Text style={[styles.termsBody, { color: colors.textSecondary }]}>{'Musika Lokal is provided "as-is" and is not liable for personal injury or property damage during sessions/events, external payment network failures, or loss of income due to app downtime.'}</Text>

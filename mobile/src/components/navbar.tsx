@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
 import { useQueryClient } from '@tanstack/react-query';
-import { usePathname } from 'expo-router';
+import { router, usePathname } from 'expo-router';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Animated as RNAnimated, Easing, InteractionManager, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -297,7 +297,16 @@ export function GlobalNavbar({ forceVisible = false, navigation, state }: Global
             canPreventDefault: true,
         });
 
-        if (activeTab !== item.id && !event.defaultPrevented) {
+        if (event.defaultPrevented) {
+            return;
+        }
+
+        if (item.id === 'profile') {
+            router.replace('/profile' as any);
+            return;
+        }
+
+        if (activeTab !== item.id) {
             navigation.navigate(targetRoute.name, targetRoute.params);
         }
     }, [activeTab, navigation, state]);

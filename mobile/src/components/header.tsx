@@ -12,6 +12,14 @@ import { isFanUserRole, resolveRoleManageRoute } from '../utils/roleRouting';
 const AnimatedIcon = Animated.createAnimatedComponent(Ionicons);
 const AnimatedTouchableOpacity = Animated.createAnimatedComponent(TouchableOpacity);
 
+const normalizeHeaderPathname = (value: string) => {
+    const normalizedSegments = value
+        .split('/')
+        .filter((segment) => segment && !(segment.startsWith('(') && segment.endsWith(')')));
+
+    return `/${normalizedSegments.join('/')}`;
+};
+
 interface HeaderProps {
     title: string;
     transparent?: boolean;
@@ -30,78 +38,81 @@ function Header({ title, transparent, onBackPress, showBack, leftComponent, righ
     const isFan = isFanUserRole(userRole);
 
     const pathname = usePathname();
+    const routePathname = useMemo(() => normalizeHeaderPathname(pathname), [pathname]);
     const [hasUnread, setHasUnread] = useState(false);
     const [hasUnreadChats, setHasUnreadChats] = useState(false);
     const [guestMenuVisible, setGuestMenuVisible] = useState(false);
+    const isBrandMainHeader = title.trim().toLowerCase() === 'musikalokal';
     const isMainNavPath = useMemo(
-        () => pathname === "/home" || pathname === "/feed" || pathname === "/manage" || pathname === "/bookings" || pathname === "/ai_suggestions" || pathname === "/marketplace" || pathname === "/chat",
-        [pathname],
+        () => routePathname === "/home" || routePathname === "/feed" || routePathname === "/manage" || routePathname === "/bookings" || routePathname === "/ai_suggestions" || routePathname === "/marketplace" || routePathname === "/chat",
+        [routePathname],
     );
 
     const isSettingsOrProfile = useMemo(
-        () => pathname === "/settings" || pathname === "/profile",
-        [pathname],
+        () => routePathname === "/settings" || routePathname === "/profile",
+        [routePathname],
     );
 
     const isMyListingPath = useMemo(
-        () => pathname === "/my_group" || pathname === "/my_venue" || pathname === "/my_studio" || pathname === "/my_production",
-        [pathname],
+        () => routePathname === "/my_group" || routePathname === "/my_venue" || routePathname === "/my_studio" || routePathname === "/my_production",
+        [routePathname],
     );
 
-    const computedBackVisible = !!onBackPress || !(isMainNavPath || isSettingsOrProfile || isMyListingPath);
+    const computedBackVisible = !!onBackPress || !(isMainNavPath || isSettingsOrProfile || isMyListingPath || isBrandMainHeader);
     const backVisible = showBack === false ? false : showBack === true ? true : computedBackVisible;
     const addbtnvisible = useMemo(() => {
         if (!isMyListingPath) return false;
-        if (pathname === "/my_group") return userRole === "musician";
-        if (pathname === "/my_venue") return userRole === "venue-owner";
-        if (pathname === "/my_studio") return userRole === "studio-owner";
-        if (pathname === "/my_production") return userRole === "producer";
+        if (routePathname === "/my_group") return userRole === "musician";
+        if (routePathname === "/my_venue") return userRole === "venue-owner";
+        if (routePathname === "/my_studio") return userRole === "studio-owner";
+        if (routePathname === "/my_production") return userRole === "producer";
         return false;
-    }, [isMyListingPath, pathname, userRole]);
-    const notifVisible = !isGuest && (isMainNavPath || (isMyListingPath && !addbtnvisible));
+    }, [isMyListingPath, routePathname, userRole]);
+    const notifVisible = !isGuest && (isMainNavPath || isBrandMainHeader || (isMyListingPath && !addbtnvisible));
     const titleOverline = useMemo(() => {
         const normalizedTitle = title.trim().toLowerCase();
 
         if (normalizedTitle === 'musikalokal') {
-            if (pathname === '/feed') return 'Social Feed';
-            if (pathname === '/home') return 'Discover';
-            if (pathname === '/marketplace') return 'Marketplace';
-            if (pathname === '/bookings') return 'Activity';
-            if (pathname === '/manage') return 'Workspace';
+            if (routePathname === '/feed') return 'Social Feed';
+            if (routePathname === '/home') return 'Discover';
+            if (routePathname === '/marketplace') return 'Marketplace';
+            if (routePathname === '/bookings') return 'Activity';
+            if (routePathname === '/manage') return 'Workspace';
             return 'MusikaLokal';
         }
 
-        if (pathname.startsWith('/add_')) return 'Create';
-        if (pathname.startsWith('/edit_')) return 'Edit';
-        if (pathname.startsWith('/manage')) return 'Workspace';
-        if (pathname === '/profile') return 'Account';
-        if (pathname === '/production_team') return 'Production';
-        if (pathname === '/notifications') return 'Updates';
-        if (pathname === '/chat') return 'Messages';
+        if (routePathname.startsWith('/add_')) return 'Create';
+        if (routePathname.startsWith('/edit_')) return 'Edit';
+        if (routePathname.startsWith('/manage')) return 'Workspace';
+        if (routePathname === '/profile') return 'Account';
+        if (routePathname === '/production_team') return 'Production';
+        if (routePathname === '/notifications') return 'Updates';
+        if (routePathname === '/chat') return 'Messages';
         return 'MusikaLokal';
-    }, [pathname, title]);
+    }, [routePathname, title]);
 
     const btn = useMemo<'/add_gig' | '/add_studio' | '/add_group' | '/add_production'>(() => {
-        if (pathname === "/my_venue") return '/add_gig';
-        if (pathname === "/my_studio") return '/add_studio';
-        if (pathname === "/my_production") return '/add_production';
+        if (routePathname === "/my_venue") return '/add_gig';
+        if (routePathname === "/my_studio") return '/add_studio';
+        if (routePathname === "/my_production") return '/add_production';
         return '/add_group';
-    }, [pathname]);
+    }, [routePathname]);
 
     const defaultBackRoute = useMemo(() => {
-        if (pathname === "/edit_profile") return "/profile";
-        if (pathname === "/add_gig" || pathname === "/edit_gig") return "/my_venue";
-        if (pathname === "/add_group" || pathname === "/add_duo" || pathname === "/edit_group") return "/my_group";
-        if (pathname === "/add_studio" || pathname === "/edit_studio") return "/my_studio";
-        if (pathname === "/add_production" || pathname === "/edit_production") return "/my_production";
-        if (pathname === "/manage_gig") return "/my_venue";
-        if (pathname === "/manage_group") return "/my_group";
-        if (pathname === "/manage_studio") return "/my_studio";
-        if (pathname.startsWith("/add_") || pathname.startsWith("/edit_")) {
+        if (routePathname === "/notifications" && isFan) return "/feed";
+        if (routePathname === "/edit_profile") return "/profile";
+        if (routePathname === "/add_gig" || routePathname === "/edit_gig") return "/my_venue";
+        if (routePathname === "/add_group" || routePathname === "/add_duo" || routePathname === "/edit_group") return "/my_group";
+        if (routePathname === "/add_studio" || routePathname === "/edit_studio") return "/my_studio";
+        if (routePathname === "/add_production" || routePathname === "/edit_production") return "/my_production";
+        if (routePathname === "/manage_gig") return "/my_venue";
+        if (routePathname === "/manage_group") return "/my_group";
+        if (routePathname === "/manage_studio") return "/my_studio";
+        if (routePathname.startsWith("/add_") || routePathname.startsWith("/edit_")) {
             return resolveRoleManageRoute(userRole);
         }
         return null;
-    }, [pathname, userRole]);
+    }, [isFan, routePathname, userRole]);
 
     const handleBackPress = useCallback(() => {
         if (onBackPress) {
