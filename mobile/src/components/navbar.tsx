@@ -1,12 +1,14 @@
 import { Ionicons } from '@expo/vector-icons';
 import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
+import { useQueryClient } from '@tanstack/react-query';
 import { usePathname } from 'expo-router';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Animated as RNAnimated, Easing, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Animated as RNAnimated, Easing, InteractionManager, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../context/AuthContext';
 import { useBottomOverlay } from '../context/BottomOverlayContext';
 import { useTheme } from '../context/ThemeContext';
+import { prefetchNavbarColdBootQueries } from '../data/coldBootPrefetch';
 import { isE2EFixtureMode } from '../utils/e2eFixtures';
 import { isFanUserRole, resolveRoleManageRoute } from '../utils/roleRouting';
 
@@ -36,7 +38,6 @@ const E2E_NAVBAR_HIDDEN_ROUTES = new Set([
     '/add_studio',
     '/create_playlist',
     '/edit_production',
-    '/marketplace',
     '/wallet',
 ]);
 
@@ -88,12 +89,13 @@ type NavTabProps = {
     active: boolean;
     colors: ReturnType<typeof useTheme>['colors'];
     compact?: boolean;
+    iconOnly?: boolean;
     isDark: boolean;
     item: NavItem;
     onPress: (item: NavItem) => void;
 };
 
-function NavTab({ active, colors, compact = false, isDark, item, onPress }: NavTabProps) {
+function NavTab({ active, colors, compact = false, iconOnly = false, isDark, item, onPress }: NavTabProps) {
     const progress = useRef(new RNAnimated.Value(active ? 1 : 0)).current;
 
     useEffect(() => {
@@ -110,6 +112,7 @@ function NavTab({ active, colors, compact = false, isDark, item, onPress }: NavT
         outputRange: [0.98, 1],
     });
     const iconColor = active ? colors.primary : colors.textSecondary;
+    const showActiveLabel = active && !iconOnly;
 
     return (
         <AnimatedTouchableOpacity
@@ -122,9 +125,10 @@ function NavTab({ active, colors, compact = false, isDark, item, onPress }: NavT
             style={[
                 styles.tabButton,
                 compact ? styles.compactTabButton : null,
+                iconOnly ? styles.iconOnlyTabButton : null,
                 { transform: [{ scale: tabScale }] },
                 active ? [
-                    styles.activeTabButton,
+                    iconOnly ? styles.iconOnlyActiveTabButton : styles.activeTabButton,
                     compact ? styles.compactActiveTabButton : null,
                     {
                         backgroundColor: isDark ? NAVBAR_DARK_ACTIVE_SURFACE : NAVBAR_LIGHT_ACTIVE_SURFACE,
@@ -140,7 +144,7 @@ function NavTab({ active, colors, compact = false, isDark, item, onPress }: NavT
                 icon={item.icon}
                 progress={progress}
             />
-            {active ? (
+            {showActiveLabel ? (
                 <Text
                     numberOfLines={1}
                     style={[styles.activeLabel, { color: colors.primary }]}
@@ -222,6 +226,8 @@ export function GlobalNavbar({ forceVisible = false, navigation, state }: Global
     const { isGuest, roleResolved, session, userRole } = useAuth();
     const { isBottomOverlayActive } = useBottomOverlay();
     const insets = useSafeAreaInsets();
+    const { width: windowWidth } = useWindowDimensions();
+    const queryClient = useQueryClient();
     const pathname = usePathname();
     const [manageRoute, setManageRoute] = useState('/manage'); // Fallback
     const isFan = isFanUserRole(userRole);
@@ -271,6 +277,9 @@ export function GlobalNavbar({ forceVisible = false, navigation, state }: Global
         [isFan, isGuest, manageRoute],
     );
     const useCompactFanNavbar = isFan && !isGuest;
+    const hasMainTabSet = navItems.length >= 6;
+    const useNarrowMainNavbar = !useCompactFanNavbar && hasMainTabSet && windowWidth < 430;
+    const useIconOnlyNavbar = useNarrowMainNavbar && windowWidth < 390;
 
     const handleNavPress = useCallback((item: NavItem) => {
         if (!navigation || !state) {
@@ -308,7 +317,30 @@ export function GlobalNavbar({ forceVisible = false, navigation, state }: Global
         });
     }, [activeTab, focusedRoute?.name, forceVisible, insets.bottom, isBottomOverlayActive, manageRoute, pathname, shouldRenderGlobalNavbar]);
 
-    if (isGuest || !shouldRenderGlobalNavbar) {
+    useEffect(() => {
+        if (!shouldRenderGlobalNavbar || isGuest || !session?.user?.id) {
+            return;
+        }
+
+        let warmupTimer: ReturnType<typeof setTimeout> | null = null;
+        const interactionTask = InteractionManager.runAfterInteractions(() => {
+            warmupTimer = setTimeout(() => {
+                prefetchNavbarColdBootQueries(queryClient, {
+                    isGuest,
+                    roleResolved,
+                    sessionReady: Boolean(session?.user?.id),
+                    userId: session?.user?.id,
+                });
+            }, 900);
+        });
+
+        return () => {
+            interactionTask.cancel();
+            if (warmupTimer) clearTimeout(warmupTimer);
+        };
+    }, [isGuest, queryClient, roleResolved, session?.user?.id, shouldRenderGlobalNavbar]);
+
+    if (!shouldRenderGlobalNavbar) {
         return null;
     }
 
@@ -326,6 +358,7 @@ export function GlobalNavbar({ forceVisible = false, navigation, state }: Global
                 style={[
                     styles.navbarSurface,
                     useCompactFanNavbar ? styles.compactNavbarSurface : null,
+                    useNarrowMainNavbar ? styles.narrowMainNavbarSurface : null,
                 ]}
             >
                 <View
@@ -337,7 +370,13 @@ export function GlobalNavbar({ forceVisible = false, navigation, state }: Global
                         }
                     ]}
                 >
-                    <View style={[styles.container, useCompactFanNavbar ? styles.compactContainer : null]}>
+                    <View
+                        style={[
+                            styles.container,
+                            useCompactFanNavbar ? styles.compactContainer : null,
+                            useIconOnlyNavbar ? styles.iconOnlyContainer : null,
+                        ]}
+                    >
                         {navItems.map((item) => {
                             const isActive = activeTab === item.id;
                             return (
@@ -345,6 +384,7 @@ export function GlobalNavbar({ forceVisible = false, navigation, state }: Global
                                     active={isActive}
                                     compact={useCompactFanNavbar}
                                     colors={colors}
+                                    iconOnly={useIconOnlyNavbar}
                                     isDark={isDark}
                                     item={item}
                                     key={item.id}
@@ -390,6 +430,10 @@ const styles = StyleSheet.create({
         width: 216,
         maxWidth: '62%',
     },
+    narrowMainNavbarSurface: {
+        width: '94%',
+        maxWidth: 420,
+    },
     blurContainer: {
         borderRadius: 22,
         overflow: 'hidden',
@@ -408,6 +452,10 @@ const styles = StyleSheet.create({
         paddingHorizontal: 7,
         gap: 6,
     },
+    iconOnlyContainer: {
+        gap: 2,
+        paddingHorizontal: 6,
+    },
     tabButton: {
         minWidth: 40,
         height: 48,
@@ -423,11 +471,21 @@ const styles = StyleSheet.create({
         minWidth: 48,
         paddingHorizontal: 11,
     },
+    iconOnlyTabButton: {
+        flex: 1,
+        minWidth: 0,
+        paddingHorizontal: 0,
+    },
     activeTabButton: {
         minWidth: 84,
         maxWidth: 108,
         paddingHorizontal: 12,
         gap: 6,
+    },
+    iconOnlyActiveTabButton: {
+        flex: 1,
+        minWidth: 0,
+        paddingHorizontal: 0,
     },
     compactActiveTabButton: {
         minWidth: 96,

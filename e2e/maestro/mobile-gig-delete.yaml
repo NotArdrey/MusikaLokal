@@ -11,7 +11,14 @@ appId: ${APP_ID}
     id: ${E2E_GIG_DELETE_ID}
 - tapOn:
     id: "app-modal-input"
-- inputText: "E2E cancellation cleanup"
+- inputText: "Gig delete cleanup"
+- hideKeyboard
+- waitForAnimationToEnd:
+    timeout: 2000
+- extendedWaitUntil:
+    visible:
+      id: "app-modal-confirm-button"
+    timeout: 60000
 - tapOn:
     id: "app-modal-confirm-button"
 - tapOn:

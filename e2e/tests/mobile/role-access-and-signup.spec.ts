@@ -132,10 +132,11 @@ test.describe('mobile role access and signup flows', () => {
   for (const role of ['fan', 'musician'] as const) {
     test(`reaches manual review signup step for ${role} registration`, async () => {
       await resetMobileAppForMaestro();
+      const emailToken = makeRunId(`mobile-signup-${role}`).replace(/[^a-z0-9]+/gi, '').toLowerCase();
       await runMaestroFlow('mobile-signup-manual-review.yaml', {
         E2E_SIGNUP_ROLE_ID: `signup-role-${role}`,
-        E2E_SIGNUP_EMAIL: `e2e.${makeRunId(`mobile-signup-${role}`)}@musikalokal.test`,
-        E2E_SIGNUP_PASSWORD: 'E2E-password-123',
+        E2E_SIGNUP_EMAIL: `signup${role}${emailToken}@musikalokal.test`,
+        E2E_SIGNUP_PASSWORD: 'Password-123',
       });
     });
   }

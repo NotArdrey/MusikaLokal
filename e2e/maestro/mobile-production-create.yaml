@@ -4,8 +4,6 @@ appId: ${APP_ID}
 - assertVisible:
     id: "mobile-add-production-page"
 - tapOn:
-    id: "e2e-image-upload-button"
-- tapOn:
     id: "mobile-production-name-input"
 - inputText: ${E2E_PRODUCTION_NAME}
 - hideKeyboard
@@ -21,5 +19,16 @@ appId: ${APP_ID}
     element:
       id: "mobile-production-submit-button"
     direction: DOWN
+    timeout: 60000
+    speed: 80
+    visibilityPercentage: 50
+    centerElement: true
 - tapOn:
     id: "mobile-production-submit-button"
+- waitForAnimationToEnd:
+    timeout: 2000
+- tapOn:
+    id: "mobile-production-submit-button"
+- extendedWaitUntil:
+    visible: "Production Team Created"
+    timeout: 60000

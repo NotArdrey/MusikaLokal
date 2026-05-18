@@ -23,6 +23,7 @@ import CustomAlert, { AlertType } from '../src/components/CustomAlert';
 import TrackedBottomSheetModal from '../src/components/TrackedBottomSheetModal';
 import { emitToast } from '../src/events/toastBus';
 import { useTheme } from '../src/context/ThemeContext';
+import { isE2EFixtureMode } from '../src/utils/e2eFixtures';
 import { bottomSheetSpringConfig } from '../src/utils/motion';
 
 type OnboardingStep = 'details' | 'verification' | 'email_verification';
@@ -85,6 +86,8 @@ const PH_DOCUMENT_OPTIONS: DocumentOption[] = [
 const getDocumentOptionByKey = (key: string) => {
     return PH_DOCUMENT_OPTIONS.find((option) => option.key === key) ?? PH_DOCUMENT_OPTIONS[0];
 };
+
+const DEFAULT_SIGNUP_DOCUMENT_KEY = isE2EFixtureMode() ? 'health_insurance' : PH_DOCUMENT_OPTIONS[0].key;
 
 const getLocalDateInputValue = (date = new Date()) => {
     const year = date.getFullYear();
@@ -376,7 +379,7 @@ export default function SignupScreen() {
     const [sessionId, setSessionId] = useState<string>('');
     const [sessionNonce, setSessionNonce] = useState<string>('');
     const [verificationMode, setVerificationMode] = useState<VerificationMode>('didit');
-    const [selectedDocumentKey, setSelectedDocumentKey] = useState<string>(PH_DOCUMENT_OPTIONS[0].key);
+    const [selectedDocumentKey, setSelectedDocumentKey] = useState<string>(DEFAULT_SIGNUP_DOCUMENT_KEY);
     const [documentModalVisible, setDocumentModalVisible] = useState(false);
     const [manualFrontImage, setManualFrontImage] = useState<ManualUploadAsset | null>(null);
     const [manualBackImage, setManualBackImage] = useState<ManualUploadAsset | null>(null);

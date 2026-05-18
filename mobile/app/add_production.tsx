@@ -12,6 +12,7 @@ import { useBottomBarClearance } from '../src/hooks/useBottomBarClearance';
 import { useAuth, useRequireAuth } from '../src/context/AuthContext';
 import { emitToast } from '../src/events/toastBus';
 import { useTheme } from '../src/context/ThemeContext';
+import { createE2EImageFixtureUrls, isE2EFixtureMode } from '../src/utils/e2eFixtures';
 import { ProductionInviteTarget, sendProductionTeamInvites } from '../src/utils/productionTeamInvites';
 
 const readFunctionErrorBody = async (error: any) => {
@@ -53,6 +54,12 @@ export default function AddProductionScreen() {
       router.replace('/manage');
     }
   }, [authLoading, isAuthenticated, userRole]);
+
+  useEffect(() => {
+    if (!isE2EFixtureMode()) return;
+
+    setLogoImages((current) => current.length > 0 ? current : createE2EImageFixtureUrls(1));
+  }, []);
 
   const invokeProduction = useCallback(async (body: Record<string, unknown>) => {
     const { data, error } = await supabase.functions.invoke('manage-production', { body });

@@ -2146,7 +2146,8 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
           multiline={multiline}
           numberOfLines={multiline ? 4 : 1}
           keyboardType={keyboardType}
-          autoCapitalize={isE2EFixtureMode() && normalizedLabel.includes("description") ? "none" : "sentences"}
+          autoCapitalize={isE2EFixtureMode() ? "none" : "sentences"}
+          autoCorrect={!isE2EFixtureMode()}
           style={[
             styles.textInput,
             {

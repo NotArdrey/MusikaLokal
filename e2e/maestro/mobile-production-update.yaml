@@ -21,5 +21,16 @@ appId: ${APP_ID}
     element:
       id: "mobile-edit-production-save-button"
     direction: DOWN
+    timeout: 60000
+    speed: 80
+    visibilityPercentage: 50
+    centerElement: true
 - tapOn:
     id: "mobile-edit-production-save-button"
+- waitForAnimationToEnd:
+    timeout: 2000
+- tapOn:
+    id: "mobile-edit-production-save-button"
+- extendedWaitUntil:
+    visible: "Production Team Updated"
+    timeout: 60000

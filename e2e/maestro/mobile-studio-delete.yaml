@@ -12,6 +12,13 @@ appId: ${APP_ID}
 - tapOn:
     id: "app-modal-input"
 - inputText: ${E2E_STUDIO_NAME}
+- hideKeyboard
+- waitForAnimationToEnd:
+    timeout: 2000
+- extendedWaitUntil:
+    visible:
+      id: "app-modal-confirm-button"
+    timeout: 60000
 - tapOn:
     id: "app-modal-confirm-button"
 - tapOn:

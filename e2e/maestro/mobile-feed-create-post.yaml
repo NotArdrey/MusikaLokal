@@ -14,6 +14,11 @@ appId: ${APP_ID}
 - tapOn:
     id: "mobile-feed-create-post-input"
 - inputText: ${E2E_POST_CONTENT}
+- hideKeyboard
+- extendedWaitUntil:
+    visible:
+      id: "mobile-feed-post-submit-button"
+    timeout: 60000
 - tapOn:
     id: "mobile-feed-post-submit-button"
 - waitForAnimationToEnd:

@@ -493,6 +493,9 @@ export default function HomeScreen() {
   const [selectedListingId, setSelectedListingId] = useState<string | null>(
     null,
   );
+  const [selectedListingPreview, setSelectedListingPreview] = useState<any | null>(
+    null,
+  );
   const [selectedProductionTeamId, setSelectedProductionTeamId] = useState<string | null>(
     null,
   );
@@ -579,11 +582,13 @@ export default function HomeScreen() {
     (
       listingId: string,
       options?: {
+        initialListing?: any | null;
         restoreSearchOnClose?: boolean;
       },
     ) => {
       restoreSearchAfterDetailsCloseRef.current =
         options?.restoreSearchOnClose === true;
+      setSelectedListingPreview(options?.initialListing || null);
       setSelectedListingId(listingId);
       openDetailsSheet();
     },
@@ -591,6 +596,8 @@ export default function HomeScreen() {
   );
 
   const handleListingDetailsDismiss = useCallback(() => {
+    setSelectedListingPreview(null);
+
     if (!restoreSearchAfterDetailsCloseRef.current) {
       return;
     }
@@ -1647,7 +1654,7 @@ export default function HomeScreen() {
       debugLog("selectedProductionTeamId set to:", item.id);
       debugLog("openProductionTeamSheet called");
     } else {
-      openListingDetails(item.id);
+      openListingDetails(item.id, { initialListing: item });
       debugLog("selectedListingId set to:", item.id);
       debugLog("openDetailsSheet called");
     }
@@ -3307,6 +3314,7 @@ export default function HomeScreen() {
 
       <ListingDetailsSheet
         ref={bottomSheetRef}
+        initialListing={selectedListingPreview}
         listingId={selectedListingId}
         onDismiss={handleListingDetailsDismiss}
       />

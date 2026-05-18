@@ -135,6 +135,16 @@ test.describe('social posting and follower notifications', () => {
     const blockedMediaBody = await expectHttpErrorBody(blockedMedia.error);
     expect(String(blockedMediaBody?.error || '')).toContain('Media must pass AI safety screening');
 
+    const blockedFilipinoPost = await invokeSocial(mediaClient, {
+      action: 'create_post',
+      content: 'E2E t@ng!na local moderation should block this post',
+      visibility: 'public',
+    });
+    expect(blockedFilipinoPost.error).toBeNull();
+    expect(blockedFilipinoPost.data?.blocked).toBe(true);
+    expect(blockedFilipinoPost.data?.status).toBe('blocked');
+    expect(blockedFilipinoPost.data?.moderation?.categories).toContain('filipino_profanity');
+
     const postId = createdPostIds[0];
     const comment = await invokeSocial(fanClient, {
       action: 'add_comment',
@@ -153,6 +163,16 @@ test.describe('social posting and follower notifications', () => {
     expect(blockedComment.error).toBeNull();
     expect(blockedComment.data?.blocked).toBe(true);
     expect(blockedComment.data?.status).toBe('blocked');
+
+    const blockedFilipinoComment = await invokeSocial(fanClient, {
+      action: 'add_comment',
+      post_id: postId,
+      content: 'E2E g@go ka',
+    });
+    expect(blockedFilipinoComment.error).toBeNull();
+    expect(blockedFilipinoComment.data?.blocked).toBe(true);
+    expect(blockedFilipinoComment.data?.status).toBe('blocked');
+    expect(blockedFilipinoComment.data?.moderation?.categories).toContain('filipino_profanity');
 
     const share = await invokeSocial(fanClient, {
       action: 'share_post',

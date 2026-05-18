@@ -300,6 +300,7 @@ export const useMarketplaceProductsQuery = <TItem = any>(params: {
     getNextPageParam: (lastPage: PaginatedResponse<TItem>) =>
       lastPage.nextOffset ?? undefined,
     initialPageParam: 0,
+    meta: { persist: true },
     placeholderData: keepPreviousData,
     queryFn: async ({ pageParam }) => {
       const offset = Math.max(0, Number(pageParam) || 0);
@@ -359,6 +360,7 @@ export const useMarketplaceProductDetailsQuery = <TData = any>(
 ) => {
   return useQuery({
     enabled: Boolean(productId) && (options?.enabled ?? true),
+    meta: { persist: true },
     placeholderData: keepPreviousData,
     queryFn: () =>
       invokeEdgeFunction<TData>("manage-marketplace", {

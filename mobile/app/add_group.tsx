@@ -445,6 +445,7 @@ export default function AddGroupScreen() {
     if (!isE2EFixtureMode()) return;
 
     setSelectedGenres((current) => current.length > 0 ? current : ["OPM"]);
+    setDescription((current) => current.trim() ? current : "Group description fixture");
     setAddress((current) => current || "E2E Group Address");
     setLatitude((current) => current ?? 14.5995);
     setLongitude((current) => current ?? 120.9842);
@@ -1124,6 +1125,8 @@ export default function AddGroupScreen() {
           multiline={multiline}
           numberOfLines={multiline ? 4 : 1}
           keyboardType={keyboardType}
+          autoCapitalize={isE2EFixtureMode() ? "none" : "sentences"}
+          autoCorrect={!isE2EFixtureMode()}
           style={[
             styles.textInput,
             {

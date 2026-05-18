@@ -2,7 +2,8 @@ appId: ${APP_ID}
 ---
 - launchApp
 - extendedWaitUntil:
-    visible: "MusikaLokal"
+    visible:
+      id: "auth-email-input"
     timeout: 120000
 - tapOn:
     id: "auth-register-link"
@@ -14,28 +15,48 @@ appId: ${APP_ID}
 - tapOn:
     id: "signup-email-input"
 - inputText: ${E2E_SIGNUP_EMAIL}
+- hideKeyboard
+- scrollUntilVisible:
+    element:
+      id: "signup-password-input"
+    direction: DOWN
+    timeout: 60000
+    speed: 80
+    visibilityPercentage: 100
+    centerElement: true
 - tapOn:
     id: "signup-password-input"
 - inputText: ${E2E_SIGNUP_PASSWORD}
-- pressKey: Back
+- hideKeyboard
+- scrollUntilVisible:
+    element:
+      id: "signup-confirm-password-input"
+    direction: DOWN
+    timeout: 60000
+    speed: 80
+    visibilityPercentage: 100
+    centerElement: true
 - tapOn:
     id: "signup-confirm-password-input"
 - inputText: ${E2E_SIGNUP_PASSWORD}
-- pressKey: Back
-- tapOn:
-    id: "signup-document-select-button"
-- scrollUntilVisible:
-    element:
-      id: "signup-document-option-health_insurance"
-    direction: DOWN
-- tapOn:
-    id: "signup-document-option-health_insurance"
+- hideKeyboard
 - scrollUntilVisible:
     element:
       id: "signup-next-button"
     direction: DOWN
+    timeout: 60000
+    speed: 80
+    visibilityPercentage: 100
+    centerElement: true
+- waitForAnimationToEnd:
+    timeout: 2000
 - tapOn:
     id: "signup-next-button"
+    point: "50%,50%"
+- tapOn:
+    id: "signup-next-button"
+    point: "50%,50%"
+    optional: true
 - extendedWaitUntil:
     visible:
       id: "signup-manual-review-page"

@@ -100,6 +100,7 @@ const moderateScale = (size: number, factor = 0.3) => {
 };
 
 interface ListingDetailsSheetProps {
+  initialListing?: any | null;
   listingId: string | null;
   onDismiss?: () => void;
 }
@@ -206,14 +207,107 @@ const inferStudioTypeFromTypeRows = (rows: unknown[]) => {
   return null;
 };
 
+const normalizeListingKind = (value: unknown) => {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (normalized === "group") return "Group";
+  if (normalized === "studio" || normalized === "rehearsal" || normalized === "recording") return "Studio";
+  if (normalized === "venue") return "Venue";
+  if (normalized === "gig") return "Gig";
+  if (normalized === "artist" || normalized === "musician") return "Artist";
+  return null;
+};
+
+const normalizeInitialListing = (listing: any, listingId: string | null) => {
+  if (!listing || !listingId || String(listing.id || "") !== String(listingId)) {
+    return null;
+  }
+
+  const type = normalizeListingKind(listing.type) || "Group";
+  const image = listing.image || listing.avatar_url || listing.logo_url || null;
+  const images = Array.isArray(listing.images)
+    ? listing.images
+    : image
+      ? [image]
+      : [];
+
+  return {
+    ...listing,
+    type,
+    name: listing.name || listing.full_name || "Listing",
+    description: listing.description || listing.bio || "",
+    image,
+    images,
+    location: listing.location || listing.address || "",
+    owner_id: listing.owner_id || listing.organizer_id || (type === "Artist" ? listing.id : null),
+    organizer_id: listing.organizer_id || null,
+    rate:
+      listing.hourly_rate?.toString?.() ||
+      listing.budget?.toString?.() ||
+      listing.rate?.toString?.() ||
+      "0",
+    review_count: Number(listing.review_count || 0),
+    rating: Number(listing.rating || 0),
+    studio_type: listing.studio_type || listing.type || null,
+  };
+};
+
+const fetchListingBaseByKind = async (listingId: string, kind: string | null) => {
+  if (kind === "Group") {
+    const { data } = await supabase
+      .from("groups_with_stats")
+      .select("*")
+      .eq("id", listingId)
+      .single();
+    return data ? { data, ownerId: data.owner_id, type: "Group" } : null;
+  }
+
+  if (kind === "Studio" || kind === "Venue") {
+    const { data } = await supabase
+      .from("studios_with_stats")
+      .select("*")
+      .eq("id", listingId)
+      .single();
+    if (!data) return null;
+
+    const resolvedType = kind === "Venue" || data.amenities?.includes("Stage") ? "Venue" : "Studio";
+    return { data, ownerId: data.owner_id, type: resolvedType };
+  }
+
+  if (kind === "Gig") {
+    const { data } = await supabase
+      .from("gigs_with_stats")
+      .select("*")
+      .eq("id", listingId)
+      .single();
+    return data ? { data, ownerId: data.organizer_id, type: "Gig" } : null;
+  }
+
+  if (kind === "Artist") {
+    const { data } = await supabase
+      .from("profiles_with_stats")
+      .select("*")
+      .eq("id", listingId)
+      .single();
+    return data && data.role === "musician"
+      ? { data, ownerId: data.id, type: "Artist" }
+      : null;
+  }
+
+  return null;
+};
+
 const ListingDetailsSheet = forwardRef<
   BottomSheetModal,
   ListingDetailsSheetProps
->(function ListingDetailsSheet({ listingId, onDismiss }, ref) {
+>(function ListingDetailsSheet({ initialListing = null, listingId, onDismiss }, ref) {
   const { colors, isDark } = useTheme();
   const { userId, userRole, isGuest, isSystemLocked, showLockAlert } = useAuth();
   const { contentBottomPadding } = useBottomBarClearance(24);
   const { isProfileComplete } = useProfileCompletion();
+  const initialListingPreview = useMemo(
+    () => normalizeInitialListing(initialListing, listingId),
+    [initialListing, listingId],
+  );
   const [loading, setLoading] = useState(false);
   const [group, setGroup] = useState<any>(null);
   const latestListingIdRef = useRef(listingId);
@@ -1705,13 +1799,18 @@ const ListingDetailsSheet = forwardRef<
       }
     }
 
+    if (!cachedDetails && initialListingPreview) {
+      setGroup(initialListingPreview);
+      setExistingBookings([]);
+    }
+
     if (listingDetailsInFlight.has(activeListingId)) {
-      setLoading(!cachedDetails);
+      setLoading(!cachedDetails && !initialListingPreview);
       return;
     }
 
     listingDetailsInFlight.add(activeListingId);
-    setLoading(!cachedDetails);
+    setLoading(!cachedDetails && !initialListingPreview);
     try {
       const {
         data: { user },
@@ -1721,69 +1820,79 @@ const ListingDetailsSheet = forwardRef<
       let data: any = null;
       let type = "Group";
       let ownerId = null;
+      const preferredListing = await fetchListingBaseByKind(
+        activeListingId,
+        normalizeListingKind(initialListingPreview?.type),
+      );
 
-      // Try Group
-      const { data: groupData } = await supabase
-        .from("groups_with_stats")
-        .select("*")
-        .eq("id", activeListingId)
-        .single();
-
-      if (groupData) {
-        data = groupData;
-        type = "Group";
-        ownerId = groupData.owner_id;
+      if (preferredListing) {
+        data = preferredListing.data;
+        type = preferredListing.type;
+        ownerId = preferredListing.ownerId;
       } else {
-        // Try Studio
-        const { data: studioData } = await supabase
-          .from("studios_with_stats")
+        // Try Group
+        const { data: groupData } = await supabase
+          .from("groups_with_stats")
           .select("*")
           .eq("id", activeListingId)
           .single();
 
-        if (studioData) {
-          data = studioData;
-          type = "Studio";
-          ownerId = studioData.owner_id;
-          if (studioData.amenities?.includes("Stage")) type = "Venue";
+        if (groupData) {
+          data = groupData;
+          type = "Group";
+          ownerId = groupData.owner_id;
         } else {
-          // Try Gig
-          const { data: gigData } = await supabase
-            .from("gigs_with_stats")
+          // Try Studio
+          const { data: studioData } = await supabase
+            .from("studios_with_stats")
             .select("*")
             .eq("id", activeListingId)
             .single();
 
-          if (gigData) {
-            data = gigData;
-            type = "Gig";
-            ownerId = gigData.organizer_id;
+          if (studioData) {
+            data = studioData;
+            type = "Studio";
+            ownerId = studioData.owner_id;
+            if (studioData.amenities?.includes("Stage")) type = "Venue";
           } else {
-            // Try Profile (Solo Artist)
-            const { data: profileData } = await supabase
-              .from("profiles_with_stats")
+            // Try Gig
+            const { data: gigData } = await supabase
+              .from("gigs_with_stats")
               .select("*")
               .eq("id", activeListingId)
               .single();
 
-            if (profileData && profileData.role === "musician") {
-              data = profileData;
-              type = "Artist";
-              ownerId = profileData.id; // Self-managed
+            if (gigData) {
+              data = gigData;
+              type = "Gig";
+              ownerId = gigData.organizer_id;
             } else {
-              const { data: productionTeamData } = await supabase
-                .from("production_teams")
-                .select("id")
+              // Try Profile (Solo Artist)
+              const { data: profileData } = await supabase
+                .from("profiles_with_stats")
+                .select("*")
                 .eq("id", activeListingId)
-                .maybeSingle();
+                .single();
 
-              if (productionTeamData?.id) {
-                setGroup(null);
-                router.push({
-                  pathname: "/production_team",
-                  params: { teamId: productionTeamData.id },
-                });
-                return;
+              if (profileData && profileData.role === "musician") {
+                data = profileData;
+                type = "Artist";
+                ownerId = profileData.id; // Self-managed
+              } else {
+                const { data: productionTeamData } = await supabase
+                  .from("production_teams")
+                  .select("id")
+                  .eq("id", activeListingId)
+                  .maybeSingle();
+
+                if (productionTeamData?.id) {
+                  setGroup(null);
+                  router.push({
+                    pathname: "/production_team",
+                    params: { teamId: productionTeamData.id },
+                  });
+                  return;
+                }
               }
             }
           }
@@ -3746,7 +3855,7 @@ const ListingDetailsSheet = forwardRef<
         onChange={handleSheetChanges}
         onDismiss={onDismiss}
       >
-        {loading ? (
+        {loading && !group ? (
           <View
             style={[
               styles.loadingContainer,

@@ -17,7 +17,7 @@ import { useCallback, useEffect, useRef } from "react";
 import { AppState, LogBox, Platform, View } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import "../global.css";
-import { prepareRealtimeAuth, supabase } from "../lib/supabase";
+import { clearSupabaseAuthStorage, prepareRealtimeAuth, supabase } from "../lib/supabase";
 import { AuthProvider, useAuth } from "../src/context/AuthContext";
 import { BottomOverlayProvider } from "../src/context/BottomOverlayContext";
 import { usePushNotifications } from "../src/hooks/usePushNotifications";
@@ -753,11 +753,14 @@ function RootContent() {
 
         if (email && password) {
           void (async () => {
-            const { error } = await supabase.auth.signInWithPassword({ email, password });
-            if (!error) {
+            await clearSupabaseAuthStorage();
+            resetPrivateQueryStateForAuthChange();
+
+            const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+            if (!error && data.session?.user?.id) {
               router.replace("/feed");
             } else if (__DEV__) {
-              console.warn("[e2e-login] Failed to sign in", error.message);
+              console.warn("[e2e-login] Failed to sign in", error?.message || "Missing session");
             }
           })();
         }

@@ -272,25 +272,60 @@ export default function EditProfileScreen() {
       }
 
       if (resolvedProfile) {
+        const profileSkills = Array.isArray(resolvedProfile.skills)
+          ? resolvedProfile.skills
+          : [];
+        const profileGenres = Array.isArray(resolvedProfile.genres)
+          ? resolvedProfile.genres
+          : [];
+
+        const needsNormalizedProfileLists = profileSkills.length === 0 || profileGenres.length === 0;
+        const [normalizedSkillsResult, normalizedGenresResult] = needsNormalizedProfileLists
+          ? await Promise.all([
+              supabase
+                .from("profile_skills")
+                .select("skill")
+                .eq("profile_id", user.id),
+              supabase
+                .from("profile_genres")
+                .select("genre")
+                .eq("profile_id", user.id),
+            ])
+          : [{ data: [], error: null }, { data: [], error: null }] as const;
+
+        if (normalizedSkillsResult.error) {
+          throw normalizedSkillsResult.error;
+        }
+        if (normalizedGenresResult.error) {
+          throw normalizedGenresResult.error;
+        }
+
+        const resolvedSkills = profileSkills.length > 0
+          ? profileSkills
+          : (normalizedSkillsResult.data || [])
+              .map((item: any) => item.skill)
+              .filter((value: unknown): value is string => typeof value === "string" && value.trim().length > 0);
+        const resolvedGenres = profileGenres.length > 0
+          ? profileGenres
+          : (normalizedGenresResult.data || [])
+              .map((item: any) => item.genre)
+              .filter((value: unknown): value is string => typeof value === "string" && value.trim().length > 0);
+
         setDisplayName(resolvedProfile.full_name || "");
         setContactNumber(resolvedProfile.contact_number || "");
         setLocation(resolvedProfile.address || resolvedProfile.location || "");
         setBio(resolvedProfile.bio || "");
         const normalizedAvatarUrl = sanitizeAvatarUrl(resolvedProfile.avatar_url);
         setAvatarUrl(normalizedAvatarUrl || DEFAULT_AVATAR);
-        setSelectedRoles(Array.isArray(resolvedProfile.skills) ? resolvedProfile.skills : []);
-        setSelectedGenres(Array.isArray(resolvedProfile.genres) ? resolvedProfile.genres : []);
+        setSelectedRoles(resolvedSkills);
+        setSelectedGenres(resolvedGenres);
 
         initialSnapshotRef.current = {
           contactNumber: (resolvedProfile.contact_number || "").trim(),
           location: (resolvedProfile.address || resolvedProfile.location || "").trim(),
           bio: (resolvedProfile.bio || "").trim(),
-          roles: normalizeList(
-            Array.isArray(resolvedProfile.skills) ? resolvedProfile.skills : [],
-          ),
-          genres: normalizeList(
-            Array.isArray(resolvedProfile.genres) ? resolvedProfile.genres : [],
-          ),
+          roles: normalizeList(resolvedSkills),
+          genres: normalizeList(resolvedGenres),
         };
 
       }

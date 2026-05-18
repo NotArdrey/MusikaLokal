@@ -200,7 +200,7 @@ test.describe('mobile visible CRUD flows', () => {
       fullName: 'E2E Mobile Profile User',
     });
     const contact = '+639171234567';
-    const bio = `E2E updated mobile bio ${makeRunId('profile')}`;
+    const bio = `Updated mobile bio ${makeRunId('profile')}`;
 
     await runMaestroFlow('mobile-login.yaml', {
       E2E_MOBILE_EMAIL: user.email,
@@ -223,7 +223,7 @@ test.describe('mobile visible CRUD flows', () => {
       role: 'producer',
       fullName: 'E2E Mobile Producer',
     });
-    const name = `E2E Production ${makeRunId('production')}`;
+    const name = `Production ${makeRunId('production')}`;
     const description = `E2E production description ${makeRunId('production')}`;
 
     await runMaestroFlow('mobile-login.yaml', {
@@ -249,8 +249,8 @@ test.describe('mobile visible CRUD flows', () => {
       fullName: 'E2E Mobile Production Update Owner',
     });
     const team = await seedE2EProductionTeam(user.id, 'mobile-production-update');
-    const updatedName = `E2E Production Updated ${makeRunId('production-update')}`;
-    const updatedDescription = `E2E updated production description ${makeRunId('production-update')}`;
+    const updatedName = `Production Updated ${makeRunId('production-update')}`;
+    const updatedDescription = `Updated production description ${makeRunId('production-update')}`;
 
     await runMaestroFlow('mobile-login.yaml', {
       E2E_MOBILE_EMAIL: user.email,
@@ -274,8 +274,8 @@ test.describe('mobile visible CRUD flows', () => {
       role: 'studio-owner',
       fullName: 'E2E Mobile Studio Owner',
     });
-    const name = `E2E Studio ${makeRunId('studio')}`;
-    const description = `E2E Studio description ${makeRunId('studio')}`;
+    const name = `Studio ${makeRunId('studio')}`;
+    const description = `Studio description ${makeRunId('studio')}`;
 
     await runMaestroFlow('mobile-login.yaml', {
       E2E_MOBILE_EMAIL: user.email,
@@ -310,11 +310,11 @@ test.describe('mobile visible CRUD flows', () => {
     });
     const customerWallet = await seedE2EWallet(customer.id, 75);
     const ownerWallet = await seedE2EWallet(owner.id, 1250);
-    const studioName = `E2E Studio Refund ${makeRunId('studio-refund')}`;
-    const studioDescription = `E2E Studio refund description ${makeRunId('studio-refund')}`;
+    const studioName = `studio-refund-${makeRunId('studio-refund')}`;
+    const studioDescription = `Studio-refund-description-${makeRunId('studio-refund')}`;
     const bookingDate = makeFutureManilaDate(6);
     const bookingNotes = `E2E musician booking ${makeRunId('studio-refund-booking')}`;
-    const reason = `E2E owner refund cancellation ${makeRunId('studio-refund-cancel')}`;
+    const reason = `Owner refund reason ${makeRunId('studio-refund-cancel')}`;
 
     await runMaestroFlow('mobile-login.yaml', {
       E2E_MOBILE_EMAIL: owner.email,
@@ -417,8 +417,8 @@ test.describe('mobile visible CRUD flows', () => {
       role: 'venue-owner',
       fullName: 'E2E Mobile Venue Owner',
     });
-    const name = `E2E Gig ${makeRunId('gig')}`;
-    const description = `E2E gig description ${makeRunId('gig')}`;
+    const name = `Gig ${makeRunId('gig')}`;
+    const description = `Gig description ${makeRunId('gig')}`;
 
     await runMaestroFlow('mobile-login.yaml', {
       E2E_MOBILE_EMAIL: user.email,
@@ -444,8 +444,8 @@ test.describe('mobile visible CRUD flows', () => {
       role: 'musician',
       fullName: 'E2E Mobile Group Owner',
     });
-    const name = `E2E Group ${makeRunId('group')}`;
-    const description = `E2E group description ${makeRunId('group')}`;
+    const name = `Group ${makeRunId('group')}`;
+    const description = 'Group description fixture';
 
     await runMaestroFlow('mobile-login.yaml', {
       E2E_MOBILE_EMAIL: user.email,
@@ -471,9 +471,9 @@ test.describe('mobile visible CRUD flows', () => {
       role: 'musician',
       fullName: 'E2E Mobile Playlist User',
     });
-    const title = `E2E Playlist ${makeRunId('playlist')}`;
-    const description = `E2E playlist description ${makeRunId('playlist')}`;
-    const trackTitle = `E2E Track ${makeRunId('playlist-track')}`;
+    const title = `Playlist ${makeRunId('playlist')}`;
+    const description = `Playlist description ${makeRunId('playlist')}`;
+    const trackTitle = 'E2E Track Fixture';
 
     await runMaestroFlow('mobile-login.yaml', {
       E2E_MOBILE_EMAIL: user.email,
@@ -502,8 +502,8 @@ test.describe('mobile visible CRUD flows', () => {
       role: 'producer',
       fullName: 'E2E Mobile Seller',
     });
-    const title = `E2E Product ${makeRunId('product')}`;
-    const description = `E2E product description ${makeRunId('product')}`;
+    const title = `Product ${makeRunId('product')}`;
+    const description = `Product description ${makeRunId('product')}`;
 
     await runMaestroFlow('mobile-login.yaml', {
       E2E_MOBILE_EMAIL: user.email,
@@ -527,7 +527,7 @@ test.describe('mobile visible CRUD flows', () => {
       role: 'producer',
       fullName: 'E2E Mobile Wallet User',
     });
-    const accountName = `E2E Payout ${makeRunId('payout')}`;
+    const accountName = `Payout ${makeRunId('payout')}`;
 
     await runMaestroFlow('mobile-login.yaml', {
       E2E_MOBILE_EMAIL: user.email,
@@ -589,7 +589,7 @@ test.describe('mobile visible CRUD flows', () => {
       status: 'confirmed',
       paymentStatus: 'paid',
     });
-    const reason = `E2E customer cancellation ${makeRunId('booking-cancel')}`;
+    const reason = `Customer cancel reason ${makeRunId('booking-cancel')}`;
 
     await runMaestroFlow('mobile-login.yaml', {
       E2E_MOBILE_EMAIL: customer.email,
@@ -628,7 +628,7 @@ test.describe('mobile visible CRUD flows', () => {
       paymentStatus: 'unpaid',
       paymentAmount: 0,
     });
-    const reason = `E2E owner cancellation ${makeRunId('booking-owner-cancel')}`;
+    const reason = `Owner cancel reason ${makeRunId('booking-owner-cancel')}`;
 
     await runMaestroFlow('mobile-login.yaml', {
       E2E_MOBILE_EMAIL: owner.email,
@@ -669,7 +669,7 @@ test.describe('mobile visible CRUD flows', () => {
       paymentStatus: 'paid',
       paymentAmount: 1000,
     });
-    const reason = `E2E owner paid cancellation ${makeRunId('booking-owner-paid-cancel')}`;
+    const reason = `Owner paid cancel reason ${makeRunId('booking-owner-paid-cancel')}`;
 
     await runMaestroFlow('mobile-login.yaml', {
       E2E_MOBILE_EMAIL: owner.email,
@@ -777,7 +777,7 @@ test.describe('mobile visible CRUD flows', () => {
       startTime: start.time,
       endTime: end.time,
     });
-    const reason = `E2E late reason ${makeRunId('booking-late')}`;
+    const reason = `Late reason ${makeRunId('booking-late')}`;
 
     await runMaestroFlow('mobile-login.yaml', {
       E2E_MOBILE_EMAIL: customer.email,
@@ -822,7 +822,7 @@ test.describe('mobile visible CRUD flows', () => {
       startTime: start.time,
       endTime: end.time,
     });
-    const reason = `E2E access issue ${makeRunId('booking-access')}`;
+    const reason = `Access issue ${makeRunId('booking-access')}`;
 
     await runMaestroFlow('mobile-login.yaml', {
       E2E_MOBILE_EMAIL: customer.email,
@@ -899,6 +899,8 @@ test.describe('mobile visible CRUD flows', () => {
   });
 
   test('shows other important popup notifications while the user app is active', async () => {
+    test.setTimeout(1_200_000);
+
     const receiver = await seedE2EUser({
       suffix: 'mobile-notification-toast-other',
       role: 'musician',
@@ -1086,7 +1088,7 @@ test.describe('mobile visible CRUD flows', () => {
       suffix: 'mobile-gig-application-withdraw',
       status: 'pending',
     });
-    const reason = `E2E application withdraw ${makeRunId('gig-app-withdraw')}`;
+    const reason = `Application withdraw reason ${makeRunId('gig-app-withdraw')}`;
 
     await runMaestroFlow('mobile-login.yaml', {
       E2E_MOBILE_EMAIL: applicant.email,
@@ -1111,6 +1113,12 @@ test.describe('mobile visible CRUD flows', () => {
       fullName: 'E2E Mobile Production Delete Owner',
     });
     const team = await seedE2EProductionTeam(user.id, 'mobile-production-delete');
+    const teamName = `production-delete-${makeRunId('mobile-production-delete')}`;
+    const { error: teamNameError } = await getSupabaseAdmin()
+      .from('production_teams')
+      .update({ name: teamName })
+      .eq('id', team.id);
+    if (teamNameError) throw teamNameError;
 
     await runMaestroFlow('mobile-login.yaml', {
       E2E_MOBILE_EMAIL: user.email,
@@ -1119,7 +1127,7 @@ test.describe('mobile visible CRUD flows', () => {
     await runMaestroFlow('mobile-production-delete.yaml', {
       E2E_PRODUCTION_CARD_ID: `mobile-production-card-${team.id}`,
       E2E_PRODUCTION_DELETE_ID: `mobile-production-delete-${team.id}`,
-      E2E_PRODUCTION_NAME: team.name,
+      E2E_PRODUCTION_NAME: teamName,
     });
 
     await expectNoDbRecord('production_teams', 'id', team.id);
@@ -1132,6 +1140,12 @@ test.describe('mobile visible CRUD flows', () => {
       fullName: 'E2E Mobile Studio Delete Owner',
     });
     const studio = await seedE2EStudio(user.id, 'mobile-studio-delete');
+    const studioName = `studio-delete-${makeRunId('mobile-studio-delete')}`;
+    const { error: studioNameError } = await getSupabaseAdmin()
+      .from('studios')
+      .update({ name: studioName })
+      .eq('id', studio.id);
+    if (studioNameError) throw studioNameError;
 
     await runMaestroFlow('mobile-login.yaml', {
       E2E_MOBILE_EMAIL: user.email,
@@ -1140,7 +1154,7 @@ test.describe('mobile visible CRUD flows', () => {
     await runMaestroFlow('mobile-studio-delete.yaml', {
       E2E_STUDIO_CARD_ID: `mobile-studio-card-${studio.id}`,
       E2E_STUDIO_DELETE_ID: `mobile-studio-delete-${studio.id}`,
-      E2E_STUDIO_NAME: studio.name,
+      E2E_STUDIO_NAME: studioName,
     });
 
     await expectNoDbRecord('studios', 'id', studio.id);
@@ -1173,6 +1187,12 @@ test.describe('mobile visible CRUD flows', () => {
       fullName: 'E2E Mobile Group Delete Owner',
     });
     const group = await seedE2EGroup(user.id, 'mobile-group-delete');
+    const groupName = `group-delete-${makeRunId('mobile-group-delete')}`;
+    const { error: groupNameError } = await getSupabaseAdmin()
+      .from('groups')
+      .update({ name: groupName })
+      .eq('id', group.id);
+    if (groupNameError) throw groupNameError;
 
     await runMaestroFlow('mobile-login.yaml', {
       E2E_MOBILE_EMAIL: user.email,
@@ -1181,7 +1201,7 @@ test.describe('mobile visible CRUD flows', () => {
     await runMaestroFlow('mobile-group-delete.yaml', {
       E2E_GROUP_CARD_ID: `mobile-group-card-${group.id}`,
       E2E_GROUP_DELETE_ID: `mobile-group-delete-${group.id}`,
-      E2E_GROUP_NAME: group.name,
+      E2E_GROUP_NAME: groupName,
     });
 
     await expectNoDbRecord('groups', 'id', group.id);

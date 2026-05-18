@@ -1,4 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
+import { useFocusEffect } from "@react-navigation/native";
 import { useQueryClient } from "@tanstack/react-query";
 import { router } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -25,12 +26,14 @@ import SmoothTabTransition from "../../src/components/SmoothTabTransition";
 import CustomAlert, { AlertType } from "../../src/components/CustomAlert";
 import { useBottomBarClearance } from "../../src/hooks/useBottomBarClearance";
 import { useAuth } from "../../src/context/AuthContext";
+import { useBottomOverlay } from "../../src/context/BottomOverlayContext";
 import { emitToast } from "../../src/events/toastBus";
 import { useTheme } from "../../src/context/ThemeContext";
 import {
   useMarketplaceProductsQuery,
   useSellerProductsQuery,
 } from "../../src/data/hooks";
+import { prefetchMarketplaceProductDetails } from "../../src/data/coldBootPrefetch";
 import { createE2EImageFixtureUrls, isE2EFixtureMode } from "../../src/utils/e2eFixtures";
 import { getSmoothTabIndex, setSmoothTab } from "../../src/utils/smoothTabs";
 
@@ -67,6 +70,7 @@ export default function MarketplaceScreen() {
   const { colors, isDark } = useTheme();
   const { contentBottomPadding } = useBottomBarClearance(24);
   const { session, isGuest, userId, userRole, roleResolved, loading: authLoading } = useAuth();
+  const { clearBottomOverlays } = useBottomOverlay();
   const queryClient = useQueryClient();
   const e2eProductSubmitInFlightRef = useRef(false);
   const resolvedUserId = session?.user?.id ?? userId ?? null;
@@ -101,6 +105,12 @@ export default function MarketplaceScreen() {
   const [deleteLoadingId, setDeleteLoadingId] = useState<string | null>(null);
 
   const [alert, setAlert] = useState<{ type: AlertType; title: string; message: string; buttons?: any[] } | null>(null);
+
+  useFocusEffect(useCallback(() => {
+    if (!showAddProduct) {
+      clearBottomOverlays();
+    }
+  }, [clearBottomOverlays, showAddProduct]));
 
   const productsQuery = useMarketplaceProductsQuery<any>({
     category,
@@ -164,6 +174,10 @@ export default function MarketplaceScreen() {
     if (loading || loadingMore || !hasMoreProducts) return;
     void productsQuery.fetchNextPage();
   };
+
+  const warmProductDetails = useCallback((productId: string | null | undefined) => {
+    void prefetchMarketplaceProductDetails(queryClient, productId);
+  }, [queryClient]);
 
   const browseProducts = useMemo(() => {
     const merged = new Map<string, any>();
@@ -612,6 +626,7 @@ export default function MarketplaceScreen() {
                       opacity: isSold ? 0.78 : 1,
                     },
                   ]}
+                  onPressIn={() => warmProductDetails(product.id)}
                   onPress={() => router.push({ pathname: "/product_details", params: { product_id: product.id } })}
                 >
                   <View style={styles.productImageWrap}>
@@ -743,6 +758,7 @@ export default function MarketplaceScreen() {
               activeOpacity={1}
               key={product.id}
               style={[styles.sellerProductCard, { backgroundColor: colors.surface, borderColor: isDark ? "#334155" : "#E2E8F0" }]}
+              onPressIn={() => warmProductDetails(product.id)}
               onPress={() => router.push({ pathname: "/product_details", params: { product_id: product.id } })}
             >
               {getProductImage(product) ? (

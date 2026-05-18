@@ -119,6 +119,17 @@ export default function CreatePlaylistScreen() {
   const [uploadingTrackAudioId, setUploadingTrackAudioId] = useState<string | null>(null);
   const [audioUploadMessage, setAudioUploadMessage] = useState<string | null>(null);
 
+  useEffect(() => {
+    if (!isE2EFixtureMode() || isEditing) return;
+    setGenre((current) => current.trim() ? current : "OPM");
+    setTrackDrafts((current) => current.length > 0 ? current : [{
+      id: "e2e-track-fixture",
+      title: "E2E Track Fixture",
+      artist_name: "E2E Artist",
+      audio_file: createE2EPlaylistAudioFixture(),
+    }]);
+  }, [isEditing]);
+
   const logPlaylistInvokeError = useCallback((context: string, error: any, body: Record<string, unknown>) => {
     console.error(`manage-playlists ${context} failed`, {
       message: error?.message,
@@ -449,6 +460,8 @@ export default function CreatePlaylistScreen() {
           placeholderTextColor={colors.textSecondary}
           value={title}
           onChangeText={setTitle}
+          autoCapitalize={isE2EFixtureMode() ? "none" : "sentences"}
+          autoCorrect={!isE2EFixtureMode()}
         />
 
         <Text style={[styles.label, { color: colors.text }]}>Description</Text>
@@ -463,6 +476,7 @@ export default function CreatePlaylistScreen() {
           multiline
           numberOfLines={4}
           autoCapitalize={isE2EFixtureMode() ? "none" : "sentences"}
+          autoCorrect={!isE2EFixtureMode()}
         />
 
         <Text style={[styles.label, { color: colors.text }]}>Genre</Text>
@@ -474,6 +488,8 @@ export default function CreatePlaylistScreen() {
           placeholderTextColor={colors.textSecondary}
           value={genre}
           onChangeText={setGenre}
+          autoCapitalize={isE2EFixtureMode() ? "none" : "sentences"}
+          autoCorrect={!isE2EFixtureMode()}
         />
 
         <Text style={[styles.label, { color: colors.text }]}>Visibility</Text>
@@ -563,6 +579,8 @@ export default function CreatePlaylistScreen() {
                     placeholderTextColor={colors.textSecondary}
                     value={track.title}
                     onChangeText={(value) => updateTrackDraft(track.id, "title", value)}
+                    autoCapitalize={isE2EFixtureMode() ? "none" : "sentences"}
+                    autoCorrect={!isE2EFixtureMode()}
                   />
                   <TextInput
                     testID={`mobile-playlist-track-artist-${index}`}
@@ -572,6 +590,8 @@ export default function CreatePlaylistScreen() {
                     placeholderTextColor={colors.textSecondary}
                     value={track.artist_name}
                     onChangeText={(value) => updateTrackDraft(track.id, "artist_name", value)}
+                    autoCapitalize={isE2EFixtureMode() ? "none" : "sentences"}
+                    autoCorrect={!isE2EFixtureMode()}
                   />
                   <TouchableOpacity
                     testID={`mobile-playlist-track-audio-${index}`}

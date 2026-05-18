@@ -212,6 +212,171 @@ function moderationTargetLabel(target: TextModerationTarget) {
   return target === "post" ? "Post" : "Comment";
 }
 
+type RuleNormalizedText = {
+  normalizedText: string;
+  compactText: string;
+  compactSquashedText: string;
+  tokens: Set<string>;
+};
+
+const FILIPINO_STRONG_PROFANITY_TERMS = [
+  "putangina",
+  "putang ina",
+  "tangina",
+  "tang ina",
+  "pukinangina",
+  "kingina",
+  "kinangina",
+  "pakyu",
+  "pak yu",
+  "pakyo",
+  "pakshet",
+  "pakshit",
+  "punyeta",
+  "punyemas",
+  "hinayupak",
+  "tarantado",
+];
+
+const FILIPINO_ABUSIVE_TERMS = [
+  "gago",
+  "bobo",
+  "tanga",
+  "ulol",
+  "kupal",
+  "leche",
+  "bwisit",
+  "lintik",
+  "inutil",
+  "buang",
+  "boang",
+  "yawa",
+  "piste",
+  "pokpok",
+];
+
+const FILIPINO_TARGETED_ABUSE_PATTERNS = [
+  /\b(hayop|animal)\s+(ka|mo|kayo|nyo|niyo|sila|siya)\b/i,
+  /\b(ikaw|ka|mo|kayo|nyo|niyo|sila|siya)\s+(?:ay\s+)?(gago|bobo|tanga|ulol|kupal|tarantado|inutil|buang|boang|pokpok)\b/i,
+  /\b(gago|bobo|tanga|ulol|kupal|tarantado|inutil|buang|boang|pokpok)\s+(ka|mo|kayo|nyo|niyo|sila|siya)\b/i,
+];
+
+const LEETISH_CHAR_MAP: Record<string, string> = {
+  "0": "o",
+  "1": "i",
+  "!": "i",
+  "|": "i",
+  "3": "e",
+  "4": "a",
+  "@": "a",
+  "5": "s",
+  "$": "s",
+  "7": "t",
+  "+": "t",
+  "8": "b",
+};
+
+function normalizeTextForRules(content: string): RuleNormalizedText {
+  const withoutMarks = content
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "");
+  let normalized = "";
+
+  for (const char of withoutMarks) {
+    if (LEETISH_CHAR_MAP[char]) {
+      normalized += LEETISH_CHAR_MAP[char];
+    } else if (/[a-z0-9]/.test(char)) {
+      normalized += char;
+    } else {
+      normalized += " ";
+    }
+  }
+
+  const normalizedText = ` ${normalized.replace(/\s+/g, " ").trim()} `;
+  const compactText = normalizedText.replace(/\s+/g, "");
+  const compactSquashedText = compactText.replace(/([a-z])\1+/g, "$1");
+  const tokens = new Set(normalizedText.trim().split(/\s+/).filter(Boolean));
+
+  return { normalizedText, compactText, compactSquashedText, tokens };
+}
+
+function compactRuleTerm(term: string) {
+  return term.toLowerCase().replace(/[^a-z0-9]+/g, "");
+}
+
+function findRuleTerm(ruleText: RuleNormalizedText, terms: string[], compactMinimumLength = 6) {
+  for (const term of terms) {
+    const compactTerm = compactRuleTerm(term);
+    if (!compactTerm) continue;
+
+    if (ruleText.tokens.has(compactTerm)) {
+      return term;
+    }
+
+    if (
+      compactTerm.length >= compactMinimumLength &&
+      (ruleText.compactText.includes(compactTerm) || ruleText.compactSquashedText.includes(compactTerm))
+    ) {
+      return term;
+    }
+  }
+
+  return null;
+}
+
+function hasFilipinoTargetedAbuse(normalizedText: string) {
+  return FILIPINO_TARGETED_ABUSE_PATTERNS.some((pattern) => pattern.test(normalizedText));
+}
+
+function filipinoProfanityModeration(
+  target: TextModerationTarget,
+  content: string,
+): TextModerationDecision | null {
+  const ruleText = normalizeTextForRules(content);
+  const strongTerm = findRuleTerm(ruleText, FILIPINO_STRONG_PROFANITY_TERMS, 5);
+  if (strongTerm) {
+    return {
+      status: "blocked",
+      reason: "Filipino or Taglish profanity detected.",
+      categories: ["abusive", "filipino_profanity"],
+      score: 0.94,
+      provider: "local-text-rules",
+      metadata: { rule: "filipino_strong_profanity", target, matched_term: strongTerm },
+    };
+  }
+
+  const abusiveTerm = findRuleTerm(ruleText, FILIPINO_ABUSIVE_TERMS, 99);
+  const targetedAbuse = hasFilipinoTargetedAbuse(ruleText.normalizedText);
+  if ((abusiveTerm && target === "comment") || targetedAbuse) {
+    return {
+      status: "blocked",
+      reason: "Filipino or Taglish abusive language detected.",
+      categories: ["abusive", "harassment", "filipino_profanity"],
+      score: targetedAbuse ? 0.9 : 0.82,
+      provider: "local-text-rules",
+      metadata: {
+        rule: targetedAbuse ? "filipino_targeted_abuse" : "filipino_abusive_comment",
+        target,
+        matched_term: abusiveTerm,
+      },
+    };
+  }
+
+  if (abusiveTerm || targetedAbuse) {
+    return {
+      status: "pending_review",
+      reason: "Possible Filipino or Taglish abusive language.",
+      categories: ["abusive", "filipino_profanity"],
+      score: 0.7,
+      provider: "local-text-rules",
+      metadata: { rule: "filipino_abusive_review", target, matched_term: abusiveTerm },
+    };
+  }
+
+  return null;
+}
+
 function localTextModeration(target: TextModerationTarget, content: string): TextModerationDecision | null {
   const lower = content.toLowerCase();
   const urlCount = (lower.match(/https?:\/\/|www\./g) || []).length;
@@ -247,6 +412,9 @@ function localTextModeration(target: TextModerationTarget, content: string): Tex
       metadata: { rule: "hate_or_threat", target },
     };
   }
+
+  const filipinoProfanity = filipinoProfanityModeration(target, content);
+  if (filipinoProfanity) return filipinoProfanity;
 
   if (urlCount >= 4 || repeatedPhrases || suspiciousRepeats) {
     return {
@@ -344,7 +512,7 @@ async function moderateTextWithGroq(
           {
             role: "system",
             content:
-              "Moderate MusikaLokal social feed posts and comments. Check whether the content is safe, respectful, truthful enough to publish, and valid community content. Block violence, threats, self-harm encouragement, hate speech, harassment, inappropriate sexual content, spam, scams, impersonation, and clearly fake or harmful misinformation. Put uncertain cases in pending_review. Return JSON only with status approved, pending_review, or blocked; reason; categories array; score 0 to 1.",
+              "Moderate MusikaLokal social feed posts and comments. Check whether the content is safe, respectful, truthful enough to publish, and valid community content. Evaluate English, Filipino, Tagalog, Taglish, Bisaya/Cebuano, and code-switched Philippine slang, including profanity hidden with spaces, punctuation, repeated letters, or leetspeak. Block violence, threats, self-harm encouragement, hate speech, harassment, Filipino bad words used as abuse, inappropriate sexual content, spam, scams, impersonation, and clearly fake or harmful misinformation. Put uncertain cases in pending_review. Return JSON only with status approved, pending_review, or blocked; reason; categories array; score 0 to 1.",
           },
           {
             role: "user",
@@ -353,7 +521,7 @@ async function moderateTextWithGroq(
               [label]: content,
               context,
               policy:
-                "Approve normal music, booking, community, and casual conversation. Block unsafe or abusive content. Do not block mild criticism or harmless opinions. Treat repeated links, scams, fake urgent claims, and impersonation as spam or misinformation.",
+                "Approve normal music, booking, community, and casual conversation. Block unsafe or abusive content, including Filipino or Taglish profanity aimed at another person. Do not block mild criticism or harmless opinions. Treat repeated links, scams, fake urgent claims, and impersonation as spam or misinformation.",
             }),
           },
         ],

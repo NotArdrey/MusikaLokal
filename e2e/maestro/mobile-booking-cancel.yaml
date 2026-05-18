@@ -16,5 +16,11 @@ appId: ${APP_ID}
 - tapOn:
     id: "app-modal-input"
 - inputText: ${E2E_BOOKING_CANCEL_REASON}
+- hideKeyboard
+- waitForAnimationToEnd:
+    timeout: 2000
 - tapOn:
     id: "app-modal-confirm-button"
+- tapOn:
+    id: "app-modal-confirm-button"
+    optional: true

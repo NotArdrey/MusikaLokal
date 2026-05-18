@@ -15,29 +15,71 @@ appId: ${APP_ID}
     id: "mobile-add-studio-description-input"
 - inputText: ${E2E_STUDIO_DESCRIPTION}
 - hideKeyboard
+- waitForAnimationToEnd:
+    timeout: 2000
+- swipe:
+    start: "50%,80%"
+    end: "50%,35%"
+    duration: 900
+    waitToSettleTimeoutMs: 500
+- swipe:
+    start: "50%,80%"
+    end: "50%,35%"
+    duration: 900
+    waitToSettleTimeoutMs: 500
 - scrollUntilVisible:
     element:
       id: "mobile-add-studio-next-button"
     direction: DOWN
+    timeout: 60000
+    speed: 80
+    visibilityPercentage: 50
+    centerElement: true
 - tapOn:
     id: "mobile-add-studio-next-button"
 - scrollUntilVisible:
     element:
       id: "mobile-add-studio-next-button"
     direction: DOWN
+    timeout: 60000
+    speed: 80
+    visibilityPercentage: 50
+    centerElement: true
 - tapOn:
     id: "mobile-add-studio-next-button"
 - scrollUntilVisible:
     element:
       id: "mobile-add-studio-next-button"
     direction: DOWN
+    timeout: 60000
+    speed: 80
+    visibilityPercentage: 50
+    centerElement: true
 - tapOn:
     id: "mobile-add-studio-next-button"
 - scrollUntilVisible:
     element:
       id: "mobile-add-studio-next-button"
     direction: DOWN
+    timeout: 60000
+    speed: 80
+    visibilityPercentage: 50
+    centerElement: true
 - tapOn:
     id: "mobile-add-studio-next-button"
+- scrollUntilVisible:
+    element:
+      id: "mobile-add-studio-next-button"
+    direction: DOWN
+    timeout: 60000
+    speed: 80
+    visibilityPercentage: 50
+    centerElement: true
+- tapOn:
+    id: "mobile-add-studio-next-button"
+- extendedWaitUntil:
+    visible:
+      id: "custom-alert-button-create"
+    timeout: 60000
 - tapOn:
     id: "custom-alert-button-create"

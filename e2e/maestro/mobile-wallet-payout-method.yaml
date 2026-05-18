@@ -16,8 +16,19 @@ appId: ${APP_ID}
 - tapOn:
     id: "mobile-wallet-account-name-input"
 - inputText: ${E2E_PAYOUT_ACCOUNT_NAME}
+- hideKeyboard
+- scrollUntilVisible:
+    element:
+      id: "mobile-wallet-add-payout-submit-button"
+    direction: DOWN
+    timeout: 60000
+    speed: 80
+    visibilityPercentage: 50
+    centerElement: true
 - tapOn:
     id: "mobile-wallet-add-payout-submit-button"
+- waitForAnimationToEnd:
+    timeout: 1500
 - tapOn:
     id: "mobile-wallet-add-payout-submit-button"
     optional: true

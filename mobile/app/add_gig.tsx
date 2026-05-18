@@ -23,7 +23,7 @@ import Modal from "../src/components/modal";
 import Navbar from "../src/components/navbar";
 import { PH_MUSIC_GROUP_TYPES } from "../src/constants/groupTypes";
 import { useTheme } from "../src/context/ThemeContext";
-import { isE2EFixtureMode } from "../src/utils/e2eFixtures";
+import { createE2EImageFixtureUrls, isE2EFixtureMode } from "../src/utils/e2eFixtures";
 
 // Decode base64 to Uint8Array without using fetch().arrayBuffer() which crashes on Android New Architecture
 const base64ToUint8Array = (base64: string): Uint8Array => {
@@ -194,6 +194,24 @@ export default function AddGigScreen() {
   const [uploadingBusinessPermit, setUploadingBusinessPermit] = useState(false);
   const businessPermitInputRef = useRef<HTMLInputElement>(null);
   const documentPickerInProgressRef = useRef(false);
+
+  useEffect(() => {
+    if (!isE2EFixtureMode()) return;
+    const e2eEventDate = getE2EEventDate();
+    setImages((current) => current.length > 0 ? current : createE2EImageFixtureUrls(1));
+    setAddress((current) => current.trim() ? current : "E2E Venue Address");
+    setLatitude((current) => current ?? 14.5995);
+    setLongitude((current) => current ?? 120.9842);
+    setAddressVerified(true);
+    setAddressVerificationStatus("verified");
+    setCost((current) => current.trim() ? current : "5000");
+    setEventDate((current) => current.trim() ? current : e2eEventDate);
+    setEventSchedules((current) => current.length > 0 ? current : [{
+      date: e2eEventDate,
+      start_time: "06:00 PM",
+      end_time: "11:00 PM",
+    }]);
+  }, []);
 
   // Requirements state
   const [requiredGenres, setRequiredGenres] = useState<string[]>([]);
@@ -907,6 +925,8 @@ export default function AddGigScreen() {
           multiline={multiline}
           numberOfLines={multiline ? 4 : 1}
           keyboardType={keyboardType}
+          autoCapitalize={isE2EFixtureMode() ? "none" : "sentences"}
+          autoCorrect={!isE2EFixtureMode()}
           style={[
             styles.textInput,
             {

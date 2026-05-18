@@ -2281,6 +2281,7 @@ export default function FeedScreen() {
   const hasFocusedFeedRef = React.useRef(false);
   const previousTabRef = React.useRef<FeedTab>(tab);
   const [selectedListingId, setSelectedListingId] = useState<string | null>(null);
+  const [selectedListingPreview, setSelectedListingPreview] = useState<any | null>(null);
   const [selectedPostId, setSelectedPostId] = useState<string | null>(null);
   const [selectedProductionTeamId, setSelectedProductionTeamId] = useState<string | null>(null);
   const [pendingReopenListingId, setPendingReopenListingId] = useState<string | null>(null);
@@ -2544,8 +2545,9 @@ export default function FeedScreen() {
   }, [presentModalWithRetry]);
 
   const openListingDetails = useCallback(
-    (listingId: string) => {
+    (listingId: string, initialListing?: any | null) => {
       if (!listingId) return;
+      setSelectedListingPreview(initialListing || null);
       setSelectedListingId(listingId);
       openDetailsSheet();
     },
@@ -2568,6 +2570,7 @@ export default function FeedScreen() {
   const handleDetailsSheetDismiss = useCallback(() => {
     clearBottomOverlays();
     setSelectedListingId(null);
+    setSelectedListingPreview(null);
     setPendingReopenListingId(null);
   }, [clearBottomOverlays]);
 
@@ -4041,7 +4044,11 @@ export default function FeedScreen() {
           activeOpacity={1}
           onPress={() => {
             if (isGroup) {
-              openListingDetails(post.id);
+              openListingDetails(post.id, {
+                ...post,
+                type: "Group",
+                name: post.name || post.group_name || "Group",
+              });
               return;
             }
 
@@ -4744,6 +4751,7 @@ export default function FeedScreen() {
 
       <ListingDetailsSheet
         ref={bottomSheetRef}
+        initialListing={selectedListingPreview}
         listingId={selectedListingId}
         onDismiss={handleDetailsSheetDismiss}
       />
