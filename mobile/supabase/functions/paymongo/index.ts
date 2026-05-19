@@ -1865,32 +1865,52 @@ serve(async (req: Request) => {
     // 6. EXPIRE UNPAID BOOKINGS (Can be called by a cron job)
     // ====================================================================
     if (action === "expire_unpaid") {
-      const { hours_threshold = 24 } = params;
+      const rawThresholdMinutes =
+        params.minutes_threshold ??
+        params.threshold_minutes ??
+        (params.hours_threshold ? Number(params.hours_threshold) * 60 : 30);
+      const thresholdMinutes = Math.max(
+        1,
+        Number.isFinite(Number(rawThresholdMinutes)) ? Number(rawThresholdMinutes) : 30,
+      );
 
-      // Find bookings that are unpaid for more than threshold hours
-      const thresholdDate = new Date();
-      thresholdDate.setHours(thresholdDate.getHours() - hours_threshold);
+      const { data: expiredCount, error } = await supabaseAdmin.rpc(
+        "expire_unresolved_studio_payments",
+        { p_threshold_minutes: thresholdMinutes },
+      );
 
-      const { data: expiredBookings, error } = await supabaseAdmin
-        .from("studio_bookings")
-        .update({
-          status: "cancelled",
-          cancellation_reason: "Payment not received within time limit",
-        })
-        .eq("payment_status", "unpaid")
-        .eq("status", "pending")
-        .lt("created_at", thresholdDate.toISOString())
-        .select("id");
-
+      let fallbackExpiredCount = 0;
       if (error) {
-        console.error("Error expiring bookings:", error);
+        console.error("Error expiring bookings through RPC:", error);
+
+        const thresholdDate = new Date();
+        thresholdDate.setMinutes(thresholdDate.getMinutes() - thresholdMinutes);
+
+        const { data: expiredBookings, error: fallbackError } = await supabaseAdmin
+          .from("studio_bookings")
+          .update({
+            status: "cancelled",
+            cancellation_reason: "Payment not received within time limit",
+            updated_at: new Date().toISOString(),
+          })
+          .in("payment_status", ["unpaid", "pending", "failed"])
+          .in("status", ["pending", "confirmed"])
+          .lt("created_at", thresholdDate.toISOString())
+          .select("id");
+
+        if (fallbackError) {
+          console.error("Fallback error expiring bookings:", fallbackError);
+        }
+
+        fallbackExpiredCount = expiredBookings?.length || 0;
       }
 
 
       return new Response(
         JSON.stringify({
           success: true,
-          expired_count: expiredBookings?.length || 0,
+          expired_count: error ? fallbackExpiredCount : expiredCount || 0,
+          threshold_minutes: thresholdMinutes,
         }),
         {
           headers: { ...corsHeaders, "Content-Type": "application/json" },

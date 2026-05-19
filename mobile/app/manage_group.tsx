@@ -484,33 +484,26 @@ export default function GroupDetailsScreen() {
         const {
           data: { user },
         } = await supabase.auth.getUser();
-        if (!user) return;
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
 
-        const { data: appRow, error: appFetchError } = await supabase
-          .from("gig_applications")
-          .select("id, group_id, group:groups!group_id(owner_id)")
-          .eq("id", app.id)
-          .maybeSingle();
+        if (!user || !session) return;
 
-        if (appFetchError) throw appFetchError;
-        if (!appRow) throw new Error("Application not found.");
-        const appGroup = Array.isArray(appRow.group) ? appRow.group[0] : appRow.group;
-        if (appGroup?.owner_id !== user.id) {
-          throw new Error("You are not authorized to update this application.");
-        }
-
-        const { data, error } = await supabase
-          .from("gig_applications")
-          .update({
-            leader_approval_status: decision,
-            leader_reviewed_at: new Date().toISOString(),
-          })
-          .eq("id", app.id)
-          .eq("group_id", appRow.group_id)
-          .select("id, leader_approval_status, leader_reviewed_at")
-          .single();
+        const { data, error } = await supabase.functions.invoke("gig-applications", {
+          body: {
+            action: "update_leader_approval",
+            applicationId: app.id,
+            decision,
+            userId: user.id,
+          },
+          headers: {
+            Authorization: `Bearer ${session.access_token}`,
+          },
+        });
 
         if (error) throw error;
+        if (data?.error) throw new Error(data.error);
 
         setApplications((prev) =>
           prev.map((a) => (a.id === app.id ? { ...a, ...data } : a)),

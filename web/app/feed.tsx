@@ -401,10 +401,20 @@ const LiveRadioCard = React.memo(function LiveRadioCard({
 });
 
 const FEED_PAGE_SIZE = 20;
+const AI_CARD_LIMIT = 8;
+const AI_RECOMMENDATION_TIMEOUT_MS = 2500;
 const PENDING_REOPEN_LISTING_STORAGE_KEY = "pending_reopen_listing_id";
 const SOCIAL_MEDIA_ASPECT_RATIO = 1.45;
 const PESO_SIGN = "\u20B1";
 const KNOWN_FEED_MEDIA_BUCKETS = ["post-media", "posts", "images", "listings", "documents", "avatars"];
+
+const withAiRecommendationTimeout = async <T,>(promise: Promise<T>): Promise<T | null> =>
+  Promise.race([
+    promise,
+    new Promise<null>((resolve) => {
+      setTimeout(() => resolve(null), AI_RECOMMENDATION_TIMEOUT_MS);
+    }),
+  ]);
 
 const normalizeRelativeSupabaseStorageUrl = (value: string) => {
   const trimmed = value.trim();
@@ -471,6 +481,50 @@ const normalizeFeedPost = (post: any) => {
     visibility: visibility || "public",
     media,
   };
+};
+
+const normalizeAiRecommendationCard = (item: any) => {
+  const type = typeof item?.type === "string" && item.type.trim().length > 0 ? item.type.trim() : "Group";
+  const isGroup = type.toLowerCase() === "group";
+  const isGig = type.toLowerCase() === "gig";
+  const ownerId = typeof item?.owner_id === "string" ? item.owner_id : null;
+  const organizerId = typeof item?.organizer_id === "string" ? item.organizer_id : null;
+  const targetId = isGroup ? item?.id : isGig ? organizerId : ownerId;
+
+  return {
+    ...item,
+    __feedKind: "ai_card",
+    id: item?.id,
+    type,
+    name: item?.name || `Recommended ${type}`,
+    image: typeof item?.image === "string" ? item.image : null,
+    images: Array.isArray(item?.images) ? item.images : [],
+    body: typeof item?.aiReason === "string" && item.aiReason.trim()
+      ? item.aiReason.trim()
+      : `Recommended ${type.toLowerCase()} for your profile.`,
+    rating: Number(item?.rating || 0),
+    review_count: Number(item?.review_count || 0),
+    location: item?.location || "",
+    genre: item?.genre || "",
+    created_at: item?.created_at || null,
+    updated_at: item?.updated_at || item?.created_at || null,
+    owner_id: ownerId,
+    organizer_id: organizerId,
+    rate: item?.rate?.toString?.() || null,
+    hourly_rate: item?.hourly_rate?.toString?.() || null,
+    budget: item?.budget?.toString?.() || null,
+    similarity: Number(item?.similarity || 0),
+    aiReason: typeof item?.aiReason === "string" ? item.aiReason : "",
+    aiScore: Number(item?.aiScore || 0),
+    social_follow_target_id: typeof targetId === "string" && targetId.length > 0 ? targetId : null,
+    social_follow_target_type: isGroup ? "group" : "profile",
+  };
+};
+
+const getFeedItemListKey = (item: any, index: number) => {
+  const kind = item?.__feedKind || "post";
+  const type = item?.type || item?.post_type || "item";
+  return item?.id ? `${kind}:${type}:${item.id}` : `row:${index}`;
 };
 
 const getPositiveInteger = (value: unknown) => {
@@ -600,6 +654,7 @@ const SocialMediaGallery = React.memo(function SocialMediaGallery({
 const getSocialAvatarUri = (item: any) =>
   resolveFeedMediaUrl(
     item?.author_avatar ||
+      item?.image ||
       item?.studio?.image ||
       item?.studio?.avatar_url ||
       item?.linked_studio?.image ||
@@ -608,9 +663,15 @@ const getSocialAvatarUri = (item: any) =>
   );
 
 const getSocialDisplayName = (item: any) =>
-  item?.studio?.name || item?.linked_studio?.name || item?.author_name || "MusikaLokal";
+  item?.name || item?.studio?.name || item?.linked_studio?.name || item?.author_name || "MusikaLokal";
 
 const getSocialMetaLabel = (item: any) => {
+  if (item?.__feedKind === "ai_card") {
+    const location = typeof item?.location === "string" ? item.location.trim() : "";
+    const genre = typeof item?.genre === "string" ? item.genre.trim() : "";
+    return location || genre || item?.type || "Recommended";
+  }
+
   const linkedStudio = item?.linked_studio || item?.studio || {};
   const location =
     typeof item?.location === "string" && item.location.trim()
@@ -628,6 +689,13 @@ const getSocialMetaLabel = (item: any) => {
 };
 
 const getSocialCaption = (item: any) => {
+  if (item?.__feedKind === "ai_card") {
+    const aiReason = typeof item?.aiReason === "string" ? item.aiReason.trim() : "";
+    if (aiReason) return aiReason;
+    const body = typeof item?.body === "string" ? item.body.trim() : "";
+    if (body) return body;
+  }
+
   const body = typeof item?.body === "string" ? item.body.trim() : "";
   if (body) return body;
   const studioName = item?.studio?.name || item?.linked_studio?.name;
@@ -651,6 +719,14 @@ const getTimestampLabel = (value: unknown) => {
 };
 
 const getSocialServiceBadges = (item: any) => {
+  if (item?.__feedKind === "ai_card") {
+    const type = typeof item?.type === "string" ? item.type : "Recommended";
+    const badges = [type === "Gig" ? "Live Gig" : type];
+    const score = Number(item?.similarity || 0);
+    if (score > 0) badges.push(`${Math.round(score * 100)}% match`);
+    return Array.from(new Set(badges.filter(Boolean))).slice(0, 3);
+  }
+
   const source = item?.linked_studio || item?.studio || item;
   const studioType = typeof source?.studio_type === "string" ? source.studio_type : typeof source?.type === "string" ? source.type : "";
   const badges: string[] = [];
@@ -681,7 +757,21 @@ const getSocialPriceChips = (item: any) => {
 };
 
 const getLinkedStudioId = (item: any) =>
-  item?.linked_studio?.id || item?.studio?.id || item?.studio_id || item?.listing_id || "";
+  item?.__feedKind === "ai_card"
+    ? item?.id || ""
+    : item?.linked_studio?.id || item?.studio?.id || item?.studio_id || item?.listing_id || "";
+
+const getSocialPrimaryCtaLabel = (item: any, listingId: string) => {
+  if (item?.__feedKind === "ai_card") {
+    const type = String(item?.type || "").toLowerCase();
+    if (type === "group") return "View Group";
+    if (type === "gig") return "View Gig";
+    if (type === "studio") return "View Studio";
+    return "View Details";
+  }
+
+  return listingId ? "View Studio" : "View Post";
+};
 
 type SocialPostCardProps = {
   item: any;
@@ -710,29 +800,35 @@ const SocialPostCard = React.memo(function SocialPostCard({
   onOpenStudio,
   onRequestDelete,
 }: SocialPostCardProps) {
+  const isSuggestion = item?.__feedKind === "ai_card";
   const mediaUrls = useMemo(() => getWebFeedMediaUrls(item), [item]);
   const serviceBadges = useMemo(() => getSocialServiceBadges(item), [item]);
   const priceChips = useMemo(() => getSocialPriceChips(item), [item]);
   const avatarUri = useMemo(() => getSocialAvatarUri(item), [item]);
-  const studioId = getLinkedStudioId(item);
+  const listingId = getLinkedStudioId(item);
+  const primaryCtaLabel = getSocialPrimaryCtaLabel(item, listingId);
 
   const handleOpenPost = useCallback(() => {
+    if (isSuggestion && listingId) {
+      onOpenStudio(listingId);
+      return;
+    }
     onOpenPost(item.id);
-  }, [item?.id, onOpenPost]);
+  }, [isSuggestion, item?.id, listingId, onOpenPost, onOpenStudio]);
 
   const handleOpenCta = useCallback(
     (event?: any) => {
       event?.stopPropagation?.();
-      if (studioId) {
-        onOpenStudio(studioId);
+      if (listingId) {
+        onOpenStudio(listingId);
         return;
       }
       onOpenPost(item.id);
     },
-    [item?.id, onOpenPost, onOpenStudio, studioId],
+    [item?.id, listingId, onOpenPost, onOpenStudio],
   );
 
-  const isOwner = !!currentUserId && item?.author_id === currentUserId;
+  const isOwner = !isSuggestion && !!currentUserId && item?.author_id === currentUserId;
   const [menuOpen, setMenuOpen] = useState(false);
 
   const handleMenuPress = useCallback(
@@ -797,7 +893,7 @@ const SocialPostCard = React.memo(function SocialPostCard({
           </View>
         </View>
 
-        <View style={styles.socialMenuWrap}>
+        {!isSuggestion ? <View style={styles.socialMenuWrap}>
           <TouchableOpacity
             activeOpacity={0.78}
             accessibilityRole="button"
@@ -837,7 +933,7 @@ const SocialPostCard = React.memo(function SocialPostCard({
               </View>
             </>
           )}
-        </View>
+        </View> : null}
       </View>
 
       <Text style={[styles.socialCaption, { color: colors.text }]} numberOfLines={3}>
@@ -870,7 +966,7 @@ const SocialPostCard = React.memo(function SocialPostCard({
       <View style={styles.socialCtaRow}>
         <TouchableOpacity activeOpacity={0.78} onPress={handleOpenCta} style={styles.socialPrimaryCta}>
           <Text style={[styles.socialPrimaryCtaText, { color: colors.primary }]}>
-            {studioId ? "View Studio" : "View Post"}
+            {primaryCtaLabel}
           </Text>
           <Ionicons name="chevron-forward" size={15} color={colors.primary} />
         </TouchableOpacity>
@@ -900,6 +996,7 @@ export default function FeedScreen() {
 
   const [tab, setTab] = useState<FeedTab>("for_you");
   const [posts, setPosts] = useState<any[]>([]);
+  const [aiCards, setAiCards] = useState<any[]>([]);
   const [postBody, setPostBody] = useState("");
   const [postVisibility, setPostVisibility] = useState<"public" | "followers">("public");
   const [showCreate, setShowCreate] = useState(false);
@@ -921,14 +1018,67 @@ export default function FeedScreen() {
 
   const canCreatePost = !!session && !isGuest && (normalizeVisibleInput(postBody).length > 0 || selectedMedia.length > 0);
 
+  const fetchAiCardsForYou = useCallback(async () => {
+    if (!session?.user?.id || isGuest) {
+      setAiCards([]);
+      return;
+    }
+
+    try {
+      const aiInvokeResult = await withAiRecommendationTimeout(
+        supabase.functions.invoke("home-feed", {
+          body: {
+            action: "for-you",
+            limit: AI_CARD_LIMIT,
+            userId: session.user.id,
+          },
+        }),
+      );
+
+      if (!aiInvokeResult) {
+        return;
+      }
+
+      if (aiInvokeResult.error) {
+        logFeedInvokeError("home-feed:for-you", aiInvokeResult.error, {
+          action: "for-you",
+          timeoutMs: AI_RECOMMENDATION_TIMEOUT_MS,
+        });
+        return;
+      }
+
+      const recommendations = Array.isArray(aiInvokeResult.data?.recommendations)
+        ? aiInvokeResult.data.recommendations
+        : Array.isArray(aiInvokeResult.data?.aiRecommendations)
+          ? aiInvokeResult.data.aiRecommendations
+          : [];
+
+      const cards = recommendations
+        .map(normalizeAiRecommendationCard)
+        .filter((card: any) => typeof card?.id === "string" && card.id.length > 0)
+        .slice(0, AI_CARD_LIMIT);
+
+      setAiCards(cards);
+    } catch (aiError: any) {
+      logFeedInvokeError("home-feed:for-you", aiError, {
+        action: "for-you",
+      });
+    }
+  }, [isGuest, session?.user?.id]);
+
   const fetchFeed = useCallback(
     async (feedTab: FeedTab, append = false) => {
       if (!session || isGuest) {
         setPosts([]);
+        setAiCards([]);
         setHasMore(false);
         setLoading(false);
         setRefreshing(false);
         return;
+      }
+
+      if (!append && feedTab !== "for_you") {
+        setAiCards([]);
       }
 
       if (!append) setLoading(true);
@@ -957,6 +1107,10 @@ export default function FeedScreen() {
         const page = Array.isArray(data?.data) ? data.data.map(normalizeFeedPost) : [];
         setPosts((current) => (append ? [...current, ...page] : page));
         setHasMore(page.length === FEED_PAGE_SIZE);
+
+        if (feedTab === "for_you" && !append) {
+          void fetchAiCardsForYou();
+        }
       } catch (e: any) {
         setAlert({ type: "error", title: "Error", message: e?.message || "Failed to load feed." });
         if (!append) setPosts([]);
@@ -966,7 +1120,7 @@ export default function FeedScreen() {
         setLoadingMore(false);
       }
     },
-    [isGuest, posts.length, session],
+    [fetchAiCardsForYou, isGuest, posts.length, session],
   );
 
   const presentListingDetailsWithRetry = useCallback(() => {
@@ -1249,6 +1403,11 @@ export default function FeedScreen() {
     openListingDetails(studioId);
   }, [openListingDetails]);
 
+  const feedItems = useMemo(
+    () => (tab === "for_you" ? [...aiCards, ...posts] : posts),
+    [aiCards, posts, tab],
+  );
+
   const renderPost = useCallback(
     ({ item }: { item: any }) => (
       <SocialPostCard
@@ -1276,8 +1435,8 @@ export default function FeedScreen() {
         <View style={[styles.centerColumn, isWebDesktop && { width: contentWidth }]}>
           <SmoothTabTransition activeKey={tab} style={{ flex: 1 }}>
             <FlatList
-              data={posts}
-              keyExtractor={(item) => item.id}
+              data={feedItems}
+              keyExtractor={getFeedItemListKey}
               renderItem={renderPost}
               refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={colors.primary} />}
               onEndReached={loadMore}

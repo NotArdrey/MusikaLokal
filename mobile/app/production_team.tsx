@@ -419,7 +419,16 @@ export default function ProductionTeamScreen() {
 
       setTeamRoster((data?.roster || []) as TeamRosterEntry[]);
       invalidateListingCaches(userId, ["bookings", "details", "home", "notifications"]);
-      showAlert("success", "Roster Updated", `${entry.display_name || "Performer"} was removed from the production roster.`);
+      const affectedApplications = Number(
+        data?.affected_applications_updated ?? data?.fired_applications_updated ?? 0,
+      );
+      showAlert(
+        "success",
+        "Roster Updated",
+        affectedApplications > 0
+          ? `${entry.display_name || "Performer"} was removed. ${affectedApplications} linked application${affectedApplications === 1 ? "" : "s"} updated.`
+          : `${entry.display_name || "Performer"} was removed from the production roster.`,
+      );
     } catch (e: any) {
       showAlert("error", "Error", e.message || "Failed to remove roster entry");
     } finally {

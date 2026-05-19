@@ -28,6 +28,22 @@ const corsHeaders = {
 }
 
 const allowedSignupRoles = new Set(['fan', 'musician'])
+const PASSWORD_REQUIREMENT_ERROR = 'Password must be at least 8 characters and include uppercase, lowercase, a number, and a symbol.'
+
+function getPasswordValidationError(value: unknown) {
+    const password = String(value || '')
+    if (
+        password.length < 8 ||
+        !/[A-Z]/.test(password) ||
+        !/[a-z]/.test(password) ||
+        !/[0-9]/.test(password) ||
+        !/[^A-Za-z0-9\s]/.test(password)
+    ) {
+        return PASSWORD_REQUIREMENT_ERROR
+    }
+
+    return ''
+}
 
 async function deleteRowsByIds(client: any, table: string, column: string, ids: string[]) {
     const uniqueIds = Array.from(new Set(ids.map((id) => String(id || '').trim()).filter(Boolean)))
@@ -484,6 +500,14 @@ serve(async (req) => {
 
         if (!email || !password) {
             return new Response(JSON.stringify({ error: 'Email and password required' }), {
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                status: 400,
+            })
+        }
+
+        const passwordValidationError = getPasswordValidationError(password)
+        if (passwordValidationError) {
+            return new Response(JSON.stringify({ error: passwordValidationError }), {
                 headers: { ...corsHeaders, 'Content-Type': 'application/json' },
                 status: 400,
             })

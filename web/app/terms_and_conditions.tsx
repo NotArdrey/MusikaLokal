@@ -85,7 +85,8 @@ export default function TermsAndConditionsScreen() {
             Users are strictly prohibited from:{"\n"}
             - Circumventing the platform to pay "under the table."{"\n"}
             - Harassing other users or posting defamatory content.{"\n"}
-            - Creating multiple accounts for fraudulent reviews.
+            - Creating multiple accounts for fraudulent reviews.{"\n"}
+            - Submitting repetitive, duplicate, misleading, or abusive applications, booking requests, production-team requests, gig applications, or studio bookings. Musika Lokal may block duplicate active requests, restrict repeated cancellations or reapplications, reject invalid or overlapping studio bookings, and require unpaid bookings to be settled before new bookings are made.
           </Text>
 
           {/* 6. GOVERNING LAW */}

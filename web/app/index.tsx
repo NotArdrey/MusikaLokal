@@ -477,7 +477,7 @@ export default function LoginScreen() {
                 <View style={styles.logoSection}>
                   <View style={styles.logoWrapper}>
                     <Image
-                      source={require('../assets/images/Musika-lokal-logo-theme.png')}
+                      source={require('../assets/images/musika-lokal-logo-modern-wordmark.png')}
                       style={styles.logoImage}
                       resizeMode="contain"
                     />
@@ -493,11 +493,13 @@ export default function LoginScreen() {
 
                 {isWebDesktop && (
                   <View style={styles.webFormHeader}>
-                    <Image
-                      source={require('../assets/images/Musika-lokal-logo-theme.png')}
-                      style={styles.webFormLogo}
-                      resizeMode="contain"
-                    />
+                    <View style={styles.webFormLogoFrame}>
+                      <Image
+                        source={require('../assets/images/musika-lokal-logo-modern-wordmark.png')}
+                        style={styles.webFormLogo}
+                        resizeMode="contain"
+                      />
+                    </View>
                     <Text style={[styles.appName, themeStyles.text, { textAlign: 'left', fontSize: 36, marginBottom: 8 }]}>Sign In</Text>
                     <Text style={[themeStyles.textSecondary, { fontFamily: 'Poppins_400Regular', fontSize: 18 }]}>Please enter your details to continue.</Text>
                   </View>
@@ -712,10 +714,17 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
     marginBottom: 32,
   },
+  webFormLogoFrame: {
+    width: 86,
+    height: 112,
+    overflow: 'hidden',
+    marginBottom: 18,
+  },
   webFormLogo: {
+    // Crop the transparent padding baked into the wordmark asset.
     width: 132,
     height: 132,
-    marginBottom: 24,
+    marginLeft: -29,
   },
   logoSection: {
     alignItems: 'center',

@@ -471,7 +471,9 @@ export const useApplicationSubmissionAction = ({
           setAlertConfig({
             type: "error",
             title: "Duplicate Application",
-            message: "This group has already applied to this gig.",
+            message: selectedGroupId
+              ? "This group has already applied to this gig."
+              : "You already have an active application for this gig.",
           });
         } else {
           setAlertConfig({

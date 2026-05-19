@@ -186,24 +186,24 @@ test.describe('admin payment transactions and audit', () => {
   test('shows payment paid, partial, pending, failed, cancelled, refunded, and refund-pending audit entries', async ({ page }) => {
     await loginAsAdmin(page, adminEmail, adminPassword);
     await page.goto('/admin/audit');
-    await expect(page.getByPlaceholder('Search audit log')).toBeVisible({ timeout: 45_000 });
+    await expect(page.getByPlaceholder('Search activity history')).toBeVisible({ timeout: 45_000 });
 
     const cases = [
-      { id: paidBookingId, label: 'Payment Paid' },
-      { id: partialBookingId, label: 'Partial Payment' },
-      { id: pendingBookingId, label: 'Payment Pending' },
-      { id: failedBookingId, label: 'Payment Failed' },
-      { id: cancelledBookingId, label: 'Payment Cancelled' },
-      { id: refundedBookingId, label: 'Payment Refunded' },
-      { id: refundPendingBookingId, label: 'Refund Pending' },
+      { id: paidBookingId, label: 'Payment completed' },
+      { id: partialBookingId, label: 'Partially paid' },
+      { id: pendingBookingId, label: 'Waiting for payment' },
+      { id: failedBookingId, label: 'Payment failed' },
+      { id: cancelledBookingId, label: 'Payment cancelled' },
+      { id: refundedBookingId, label: 'Payment refunded' },
+      { id: refundPendingBookingId, label: 'Refund in progress' },
     ];
 
     for (const item of cases) {
-      await page.getByPlaceholder('Search audit log').fill(item.id);
+      await page.getByPlaceholder('Search activity history').fill(item.id);
       const card = page.getByTestId(`admin-audit-card-payment-${item.id}`);
       await expect(card).toBeVisible({ timeout: 45_000 });
-      await expect(card.getByText(`Action: ${item.label}`)).toBeVisible();
-      await expect(card.getByText('Type: payment')).toBeVisible();
+      await expect(card.getByText(`What happened: ${item.label}`)).toBeVisible();
+      await expect(card.getByText('Area: Payments')).toBeVisible();
     }
   });
 });

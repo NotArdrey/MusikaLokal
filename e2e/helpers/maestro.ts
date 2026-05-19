@@ -139,7 +139,7 @@ const ensureMetroForDevBuild = async () => {
     const command = process.platform === 'win32' ? 'npx.cmd' : 'npx';
     metroProcess = spawn(
       command,
-      ['expo', 'start', '--dev-client', '--host', 'localhost', '--port', port],
+      ['expo', 'start', '--dev-client', '--host', 'lan', '--port', port],
       {
         cwd: resolve(__dirname, '..', '..', 'mobile'),
         shell: process.platform === 'win32',
@@ -512,6 +512,13 @@ const runMobileLoginFlow = async (extraEnv: Record<string, string>) => {
   }, 240_000);
 };
 
+const nativeInputMaestroFlows = new Set([
+  'mobile-booking-cancel.yaml',
+  'mobile-booking-report-access.yaml',
+  'mobile-booking-report-late.yaml',
+  'mobile-gig-application-withdraw.yaml',
+]);
+
 export async function requireAndroidApp() {
   const env = loadE2EEnv();
   const childEnv = getChildEnvWithAndroidTools();
@@ -579,6 +586,11 @@ export async function runMaestroFlow(flowName: string, extraEnv: Record<string, 
   await ensureMetroForDevBuild();
   if (flowName === 'mobile-login.yaml') {
     await runMobileLoginFlow(extraEnv);
+    return;
+  }
+
+  if (nativeInputMaestroFlows.has(flowName)) {
+    await runMaestroCliFlow(flowName, extraEnv);
     return;
   }
 

@@ -28,8 +28,6 @@ appId: ${APP_ID}
     id: "mobile-profile-save-button"
 - waitForAnimationToEnd:
     timeout: 2000
-- tapOn:
-    id: "mobile-profile-save-button"
 - extendedWaitUntil:
     visible:
       id: "custom-alert-button-ok"

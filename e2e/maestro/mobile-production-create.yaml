@@ -27,8 +27,6 @@ appId: ${APP_ID}
     id: "mobile-production-submit-button"
 - waitForAnimationToEnd:
     timeout: 2000
-- tapOn:
-    id: "mobile-production-submit-button"
 - extendedWaitUntil:
     visible: "Production Team Created"
     timeout: 60000

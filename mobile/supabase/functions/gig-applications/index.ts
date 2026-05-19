@@ -23,8 +23,9 @@ function extractAccessToken(authHeader: string): string | null {
     return trimmed
 }
 
-const ALLOWED_ORGANIZER_STATUSES = new Set(['accepted', 'rejected', 'cancelled', 'completed', 'fired'])
+const ALLOWED_ORGANIZER_STATUSES = new Set(['accepted', 'approved', 'rejected', 'cancelled', 'completed', 'fired'])
 const ALLOWED_LEADER_DECISIONS = new Set(['approved', 'rejected'])
+const ACTIVE_GIG_APPLICATION_STATUSES = ['pending', 'accepted', 'approved']
 
 const GIG_APPLICATION_SELECT = `
     *,
@@ -68,7 +69,7 @@ function getApplicationStatusNotification(
         }
     }
 
-    if (normalizedStatus === 'accepted') {
+    if (normalizedStatus === 'accepted' || normalizedStatus === 'approved') {
         return {
             type: 'success',
             title: 'Application Accepted!',
@@ -527,7 +528,7 @@ Deno.serve(async (req: Request) => {
                 .select('id, status')
                 .eq('gig_id', gigId)
                 .eq('production_team_id', teamId)
-                .neq('status', 'rejected')
+                .in('status', ACTIVE_GIG_APPLICATION_STATUSES)
                 .maybeSingle();
 
             if (existingTeamApplicationError) throw existingTeamApplicationError;
@@ -659,6 +660,7 @@ Deno.serve(async (req: Request) => {
                 .select(GIG_APPLICATION_SELECT)
                 .eq('gig_id', gigId)
                 .eq('production_team_id', teamId)
+                .in('status', ACTIVE_GIG_APPLICATION_STATUSES)
                 .order('created_at', { ascending: false })
                 .limit(1)
                 .maybeSingle();
@@ -713,20 +715,42 @@ Deno.serve(async (req: Request) => {
                 })
             }
 
-            const { data, error } = await supabaseClient
-                .from('gig_applications')
-                .update({ status: normalizedStatus })
-                .eq('id', applicationId)
-                .select()
-                .single();
+            let data: any = null;
 
-            if (error) throw error;
+            if (normalizedStatus === 'accepted' || normalizedStatus === 'approved') {
+                const { data: acceptedApplication, error: acceptError } = await supabaseClient.rpc(
+                    'accept_gig_application_safely',
+                    {
+                        p_application_id: applicationId,
+                        p_actor_user_id: effectiveUserId,
+                        p_new_status: normalizedStatus,
+                    },
+                );
+
+                if (acceptError) throw acceptError;
+                data = acceptedApplication;
+            } else {
+                const { data: updatedApplication, error } = await supabaseClient
+                    .from('gig_applications')
+                    .update({ status: normalizedStatus })
+                    .eq('id', applicationId)
+                    .select()
+                    .single();
+
+                if (error) throw error;
+                data = updatedApplication;
+            }
 
             const gigName = appDetails.gig?.name || 'the gig';
+            const performerSnapshot =
+                appDetails.performer_snapshot && typeof appDetails.performer_snapshot === 'object'
+                    ? appDetails.performer_snapshot
+                    : {};
             const performerName =
                 appDetails.group?.name ||
                 appDetails.production_roster?.roster_profile?.full_name ||
                 appDetails.production_roster?.roster_group?.name ||
+                performerSnapshot.display_name ||
                 appDetails.applicant?.full_name ||
                 'Applicant';
             const productionLabel = appDetails.production_team?.name
@@ -874,7 +898,7 @@ Deno.serve(async (req: Request) => {
 
         // CHECK ELIGIBILITY (Spam Block Check)
         if (action === 'check_eligibility') {
-            const { gigId } = params;
+            const { gigId, groupId, productionTeamId } = params;
 
             if (!gigId) {
                 return new Response(JSON.stringify({ blocked: false }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 });
@@ -883,13 +907,27 @@ Deno.serve(async (req: Request) => {
             const thirtyDaysAgo = new Date();
             thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
 
-            const { count, error: countError } = await supabaseClient
+            let cancellationQuery = supabaseClient
                 .from('gig_applications')
                 .select('id', { count: 'exact', head: true })
                 .eq('status', 'cancelled')
-                .eq('applicant_id', effectiveUserId)
                 .eq('gig_id', gigId)
                 .gte('updated_at', thirtyDaysAgo.toISOString());
+
+            if (productionTeamId) {
+                cancellationQuery = cancellationQuery.eq('production_team_id', productionTeamId);
+            } else if (groupId) {
+                cancellationQuery = cancellationQuery
+                    .eq('group_id', groupId)
+                    .is('production_team_id', null);
+            } else {
+                cancellationQuery = cancellationQuery
+                    .eq('applicant_id', effectiveUserId)
+                    .is('group_id', null)
+                    .is('production_team_id', null);
+            }
+
+            const { count, error: countError } = await cancellationQuery;
 
             if (countError) throw countError;
 
@@ -906,7 +944,7 @@ Deno.serve(async (req: Request) => {
 
             const { data: existingApp, error: fetchError } = await supabaseClient
                 .from('gig_applications')
-                .select('applicant_id, submitted_by_user_id, group_id, production_team_id, group:groups!group_id(owner_id), gig:gig_id(name)')
+                .select('applicant_id, submitted_by_user_id, gig_id, group_id, production_team_id, group:groups!group_id(owner_id), gig:gig_id(name)')
                 .eq('id', applicationId)
                 .single();
 
@@ -960,33 +998,32 @@ Deno.serve(async (req: Request) => {
 
             let cancellationCount = 0;
 
-            const { data: appData } = await supabaseClient
-                .from('gig_applications')
-                .select('gig_id')
-                .eq('id', applicationId)
-                .single();
+            if (existingApp.gig_id) {
+                const thirtyDaysAgo = new Date();
+                thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
 
-            if (appData?.gig_id) {
-                const { data: gigData } = await supabaseClient
-                    .from('gigs')
-                    .select('organizer_id')
-                    .eq('id', appData.gig_id)
-                    .single();
+                let cancellationQuery = supabaseClient
+                    .from('gig_applications')
+                    .select('id', { count: 'exact', head: true })
+                    .eq('status', 'cancelled')
+                    .eq('gig_id', existingApp.gig_id)
+                    .gte('updated_at', thirtyDaysAgo.toISOString());
 
-                if (gigData) {
-                    const thirtyDaysAgo = new Date();
-                    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-
-                    const { count } = await supabaseClient
-                        .from('gig_applications')
-                        .select('id, gig:gigs!inner(organizer_id)', { count: 'exact', head: true })
-                        .eq('status', 'cancelled')
-                        .eq('applicant_id', effectiveUserId)
-                        .eq('gig.organizer_id', gigData.organizer_id)
-                        .gte('updated_at', thirtyDaysAgo.toISOString());
-
-                    cancellationCount = count || 0;
+                if (existingApp.production_team_id) {
+                    cancellationQuery = cancellationQuery.eq('production_team_id', existingApp.production_team_id);
+                } else if (existingApp.group_id) {
+                    cancellationQuery = cancellationQuery
+                        .eq('group_id', existingApp.group_id)
+                        .is('production_team_id', null);
+                } else {
+                    cancellationQuery = cancellationQuery
+                        .eq('applicant_id', existingApp.applicant_id)
+                        .is('group_id', null)
+                        .is('production_team_id', null);
                 }
+
+                const { count } = await cancellationQuery;
+                cancellationCount = count || 0;
             }
 
             return new Response(JSON.stringify({ success: true, cancellation_count: cancellationCount }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 });

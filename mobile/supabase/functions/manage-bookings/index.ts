@@ -117,6 +117,62 @@ function toHours(start: string, end: string) {
   return (endMinutes - startMinutes) / 60;
 }
 
+function toTimeMinutes(value?: string | null) {
+  const normalized = normalizeTime(value);
+  const [hour, minute] = normalized.split(":").map(Number);
+
+  if (
+    !Number.isFinite(hour) ||
+    !Number.isFinite(minute) ||
+    hour < 0 ||
+    hour > 24 ||
+    minute < 0 ||
+    minute > 59 ||
+    (hour === 24 && minute !== 0)
+  ) {
+    return null;
+  }
+
+  return hour * 60 + minute;
+}
+
+function getInternalSlotConflictMessage(slots: Array<{ start: string; end: string }>) {
+  const ranges = slots
+    .map((slot, index) => ({
+      index,
+      start: normalizeTime(slot?.start).slice(0, 5),
+      end: normalizeTime(slot?.end).slice(0, 5),
+      startMinutes: toTimeMinutes(slot?.start),
+      endMinutes: toTimeMinutes(slot?.end),
+    }))
+    .sort((a, b) => (a.startMinutes ?? 0) - (b.startMinutes ?? 0));
+
+  for (const range of ranges) {
+    if (
+      range.startMinutes === null ||
+      range.endMinutes === null ||
+      range.endMinutes <= range.startMinutes
+    ) {
+      return `Invalid time slot: ${range.start} - ${range.end}.`;
+    }
+  }
+
+  for (let index = 1; index < ranges.length; index += 1) {
+    const previous = ranges[index - 1];
+    const current = ranges[index];
+
+    if (current.startMinutes === previous.startMinutes && current.endMinutes === previous.endMinutes) {
+      return `Duplicate time slot: ${current.start} - ${current.end}.`;
+    }
+
+    if ((current.startMinutes ?? 0) < (previous.endMinutes ?? 0)) {
+      return `Overlapping time slots: ${previous.start} - ${previous.end} and ${current.start} - ${current.end}.`;
+    }
+  }
+
+  return null;
+}
+
 function toManilaDateTime(dateValue: string, timeValue: string): Date | null {
   if (!dateValue || !timeValue) return null;
 
@@ -2068,6 +2124,17 @@ serve(async (req: Request) => {
         );
       }
 
+      const internalSlotConflict = getInternalSlotConflictMessage(slots);
+      if (internalSlotConflict) {
+        return new Response(
+          JSON.stringify({ error: internalSlotConflict }),
+          {
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+            status: 409,
+          },
+        );
+      }
+
       const { data: dateOverrides, error: dateOverrideError } =
         await supabaseClient
           .from("studio_date_overrides")
@@ -2982,7 +3049,7 @@ serve(async (req: Request) => {
           isProductionManager = !!productionMembership;
         }
 
-        const organizerAllowedStatuses = ["accepted", "rejected", "completed", "cancelled", "fired"];
+        const organizerAllowedStatuses = ["accepted", "approved", "rejected", "completed", "cancelled", "fired"];
         const applicantAllowedStatuses = ["cancelled", "resigned"];
         const productionManagerAllowedStatuses = ["cancelled", "resigned", "fired"];
 
@@ -3008,14 +3075,29 @@ serve(async (req: Request) => {
 
 
       const updateClient = table === "gig_applications" ? supabaseAdmin : supabaseClient;
+      let data: any = null;
+      let error: any = null;
 
-      const { data, error } = await updateClient
-        .from(table)
-        .update(updateData)
-        .eq("id", booking_id)
-        .select()
-        .maybeSingle();
+      if (table === "gig_applications" && (new_status === "accepted" || new_status === "approved")) {
+        const acceptResult = await supabaseAdmin.rpc("accept_gig_application_safely", {
+          p_application_id: booking_id,
+          p_actor_user_id: authUser.id,
+          p_new_status: new_status,
+        });
 
+        data = acceptResult.data;
+        error = acceptResult.error;
+      } else {
+        const updateResult = await updateClient
+          .from(table)
+          .update(updateData)
+          .eq("id", booking_id)
+          .select()
+          .maybeSingle();
+
+        data = updateResult.data;
+        error = updateResult.error;
+      }
 
       if (error) throw error;
 
@@ -3074,7 +3156,7 @@ serve(async (req: Request) => {
 
       // NOTIFICATION LOGIC
       if (
-        ["cancelled", "resigned", "rejected", "confirmed", "accepted", "completed", "fired"].includes(new_status)
+        ["cancelled", "resigned", "rejected", "confirmed", "accepted", "approved", "completed", "fired"].includes(new_status)
       ) {
         try {
           const notificationEventType =
@@ -3590,6 +3672,47 @@ serve(async (req: Request) => {
         start: normalizeTime(slot?.start),
         end: normalizeTime(slot?.end),
       }));
+
+      const acceptedSlotConflict = getInternalSlotConflictMessage(normalizedAcceptedSlots);
+      if (acceptedSlotConflict) {
+        return new Response(
+          JSON.stringify({ error: acceptedSlotConflict }),
+          {
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+            status: 409,
+          },
+        );
+      }
+
+      const { data: acceptedSlotsAvailable, error: acceptedSlotsAvailabilityError } =
+        await supabaseAdmin.rpc("are_slots_available", {
+          p_studio_id: bookingDetails.studio_id,
+          p_booking_date: bookingDetails.booking_date,
+          p_time_slots: normalizedAcceptedSlots,
+          p_user_id: bookingDetails.user_id,
+          p_exclude_booking_id: booking_id,
+        });
+
+      if (acceptedSlotsAvailabilityError) {
+        console.error("Accepted slot availability check failed:", acceptedSlotsAvailabilityError);
+        return new Response(
+          JSON.stringify({ error: "Failed to validate accepted slots. Please try again." }),
+          {
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+            status: 400,
+          },
+        );
+      }
+
+      if (!acceptedSlotsAvailable) {
+        return new Response(
+          JSON.stringify({ error: "One or more accepted slots are no longer available." }),
+          {
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+            status: 409,
+          },
+        );
+      }
 
       const totalHours = normalizedAcceptedSlots.reduce(
         (sum: number, slot: any) => sum + toHours(slot.start, slot.end),
@@ -4361,8 +4484,18 @@ serve(async (req: Request) => {
         );
       }
 
+      if (owner_id !== authUser.id) {
+        return new Response(
+          JSON.stringify({ error: "You are not authorized to modify this booking" }),
+          {
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+            status: 403,
+          },
+        );
+      }
+
       // 1. Get the booking and verify ownership
-      const { data: booking, error: bookingError } = await supabaseClient
+      const { data: booking, error: bookingError } = await supabaseAdmin
         .from("studio_bookings")
         .select("*, studio:studios(id, owner_id, name)")
         .eq("id", booking_id)
@@ -4403,7 +4536,7 @@ serve(async (req: Request) => {
       const balanceAmount = booking.remaining_balance;
 
       // 4. Update the booking to clear the balance
-      const { error: updateError } = await supabaseClient
+      const { error: updateError } = await supabaseAdmin
         .from("studio_bookings")
         .update({
           remaining_balance: 0,

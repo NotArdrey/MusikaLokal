@@ -6,6 +6,7 @@ import * as ExpoLinking from "expo-linking";
 import { router, useLocalSearchParams } from "expo-router";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
+    ActivityIndicator,
     AppState,
     Dimensions,
     FlatList,
@@ -720,6 +721,29 @@ const normalizeBookingTestId = (value: unknown) =>
 const bookingActionTestId = (item: any, action: string) =>
   `mobile-bookings-${normalizeBookingTestId(item?.type_id || "item")}-${action}-${item?.id}`;
 
+type BookingActionLoadingState = {
+  itemId: string;
+  message: string;
+} | null;
+
+const getStatusActionLoadingMessage = (status: string, typeId: string = "studio_booking") => {
+  const normalizedStatus = String(status || "").trim().toLowerCase();
+  const normalizedType = String(typeId || "").trim().toLowerCase();
+
+  if (normalizedStatus === "confirmed") return "Confirming booking";
+  if (normalizedStatus === "accepted" || normalizedStatus === "approved") {
+    return normalizedType === "gig_application" ? "Accepting application" : "Accepting request";
+  }
+  if (normalizedStatus === "rejected") return "Declining application";
+  if (normalizedStatus === "resigned") return "Resigning from gig";
+  if (normalizedStatus === "fired") return "Terminating agreement";
+  if (normalizedStatus === "completed") return "Completing contract";
+  if (normalizedStatus === "late") return "Sending late report";
+  if (normalizedStatus === "cancelled") return "Cancelling booking";
+
+  return "Updating booking";
+};
+
 type ConnectionRequestMediaMaps = {
   gigImages: Map<string, string>;
   groupImages: Map<string, string>;
@@ -1008,6 +1032,7 @@ export default function BookingsScreen() {
   const [locallyReportedLateBookings, setLocallyReportedLateBookings] = useState<Record<string, boolean>>({});
   const [locallyReportedAccessIssueBookings, setLocallyReportedAccessIssueBookings] = useState<Record<string, boolean>>({});
   const [requestActionId, setRequestActionId] = useState<string | null>(null);
+  const [actionLoading, setActionLoading] = useState<BookingActionLoadingState>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [activeFilter, setActiveFilter] = useState("All");
   const [showActivityFilters, setShowActivityFilters] = useState(false);
@@ -1032,6 +1057,26 @@ export default function BookingsScreen() {
   const bookingsSummaryQuery = useBookingsSummaryQuery(userId, {
     enabled: isAuthenticated && Boolean(userId),
   });
+  const startActionLoading = useCallback((itemId: unknown, message: string) => {
+    const normalizedItemId = String(itemId || "").trim();
+    if (!normalizedItemId) return;
+    setActionLoading({ itemId: normalizedItemId, message });
+  }, []);
+  const clearActionLoading = useCallback((itemId?: unknown) => {
+    const normalizedItemId = itemId === undefined || itemId === null ? "" : String(itemId).trim();
+    setActionLoading((current) => {
+      if (!current) return null;
+      if (normalizedItemId && current.itemId !== normalizedItemId) return current;
+      return null;
+    });
+  }, []);
+  const isActionLoadingFor = useCallback(
+    (itemOrId: any) => {
+      const itemId = typeof itemOrId === "object" ? itemOrId?.id : itemOrId;
+      return Boolean(actionLoading?.itemId && String(itemId || "") === actionLoading.itemId);
+    },
+    [actionLoading],
+  );
   const bookingsQueryStateRef = useRef({
     isFetching: bookingsSummaryQuery.isFetching,
     isLoading: bookingsSummaryQuery.isLoading,
@@ -1643,10 +1688,15 @@ export default function BookingsScreen() {
       const normalizedStatus = String(app.status || "").toLowerCase();
       const gig = app.gig;
       const dateStr = gig?.event_date || app.created_at?.split("T")[0] || "TBA";
+      const performerSnapshot =
+        app.performer_snapshot && typeof app.performer_snapshot === "object"
+          ? app.performer_snapshot
+          : {};
       const performerName =
         app.group?.name ||
         app.production_roster?.roster_profile?.full_name ||
         app.production_roster?.roster_group?.name ||
+        performerSnapshot.display_name ||
         "Performer";
 
       let eventDate: Date | null = null;
@@ -1673,6 +1723,7 @@ export default function BookingsScreen() {
         date: dateStr,
         image:
           app.production_roster?.roster_profile?.avatar_url ||
+          performerSnapshot.avatar_url ||
           app.production_team?.logo_url ||
           gig?.organizer?.avatar_url ||
           "https://images.unsplash.com/photo-1516280440614-37939bbacd81?w=400&h=200&fit=crop",
@@ -1780,10 +1831,15 @@ export default function BookingsScreen() {
       const gig = gigById.get(app.gig_id);
       const normalizedStatus = String(app.status || "").toLowerCase();
       const dateStr = gig?.event_date || "TBA";
+      const performerSnapshot =
+        app.performer_snapshot && typeof app.performer_snapshot === "object"
+          ? app.performer_snapshot
+          : {};
       const performerName =
         app.group?.name ||
         app.production_roster?.roster_profile?.full_name ||
         app.production_roster?.roster_group?.name ||
+        performerSnapshot.display_name ||
         app.applicant?.full_name ||
         "Performer";
 
@@ -1812,6 +1868,7 @@ export default function BookingsScreen() {
         image:
           app.group?.images?.[0] ||
           app.production_roster?.roster_profile?.avatar_url ||
+          performerSnapshot.avatar_url ||
           app.production_team?.logo_url ||
           app.applicant?.avatar_url ||
           "https://picsum.photos/400/300",
@@ -2640,6 +2697,8 @@ export default function BookingsScreen() {
         reason,
       });
 
+      startActionLoading(bookingId, getStatusActionLoadingMessage(newStatus, typeId));
+
       const attendanceStatuses = ["late", "no_show"];
 
       let data: any = null;
@@ -2744,6 +2803,8 @@ export default function BookingsScreen() {
         (typeof e === "string" ? e : "Failed to update booking status.");
       Alert.alert("Error", errorMessage);
       return false;
+    } finally {
+      clearActionLoading(bookingId);
     }
   }
 
@@ -2757,6 +2818,8 @@ export default function BookingsScreen() {
     }
 
     try {
+      startActionLoading(item.id, "Submitting report");
+
       const { data, error } = await supabase.functions.invoke("manage-bookings", {
         body: {
           action: "create_incident",
@@ -2820,6 +2883,8 @@ export default function BookingsScreen() {
           : "We could not submit your report. Please try again.");
       Alert.alert("Error", errorMessage);
       return false;
+    } finally {
+      clearActionLoading(item.id);
     }
   }
 
@@ -2882,6 +2947,10 @@ export default function BookingsScreen() {
     }
 
     setRequestActionId(item.id);
+    startActionLoading(
+      item.id,
+      nextStatus === "accepted" ? "Accepting request" : "Declining request",
+    );
 
     try {
       const isProductionInvite = isProductionTeamInviteRequest(item);
@@ -3073,6 +3142,7 @@ export default function BookingsScreen() {
       );
     } finally {
       setRequestActionId(null);
+      clearActionLoading(item.id);
     }
   };
 
@@ -3478,6 +3548,11 @@ export default function BookingsScreen() {
     decision: "approved" | "rejected",
   ) => {
     try {
+      startActionLoading(
+        item?.id,
+        decision === "approved" ? "Approving submission" : "Rejecting submission",
+      );
+
       const invokeOptions: Record<string, any> = {
         body: {
           action: "update_leader_approval",
@@ -3508,6 +3583,8 @@ export default function BookingsScreen() {
         "Error",
         err?.message || "Failed to process leader confirmation.",
       );
+    } finally {
+      clearActionLoading(item?.id);
     }
   };
 
@@ -3526,6 +3603,7 @@ export default function BookingsScreen() {
     if (!userId || !item?.id) return;
 
     try {
+      startActionLoading(item.id, accepted ? "Accepting move" : "Declining move");
       setLoading(true);
 
       const { data: latestBooking, error: latestError } = await supabase
@@ -3649,6 +3727,7 @@ export default function BookingsScreen() {
       );
     } finally {
       setLoading(false);
+      clearActionLoading(item.id);
     }
   };
 
@@ -3749,6 +3828,7 @@ export default function BookingsScreen() {
     }
 
     try {
+      startActionLoading(selectedItem.id, "Sending renewal offer");
       setLoading(true);
 
       const { data, error } = await supabase.functions.invoke(
@@ -3780,6 +3860,7 @@ export default function BookingsScreen() {
       );
     } finally {
       setLoading(false);
+      clearActionLoading(selectedItem?.id);
     }
   };
 
@@ -3821,6 +3902,7 @@ export default function BookingsScreen() {
     if (!item || !userId) return;
 
     try {
+      startActionLoading(item.id, "Preparing payment");
       setLoading(true);
       const bookingIds = getBookingIdsForPaymentItem(item);
       const primaryBookingId = bookingIds[0] || item.id;
@@ -3898,6 +3980,7 @@ export default function BookingsScreen() {
       );
     } finally {
       setLoading(false);
+      clearActionLoading(item.id);
     }
   };
 
@@ -3916,6 +3999,7 @@ export default function BookingsScreen() {
     }
 
     try {
+      startActionLoading(item.id, "Preparing payment");
       setLoading(true);
       const bookingIds = getBookingIdsForPaymentItem(item);
       const primaryBookingId = bookingIds[0] || item.id;
@@ -3981,6 +4065,7 @@ export default function BookingsScreen() {
       );
     } finally {
       setLoading(false);
+      clearActionLoading(item.id);
     }
   };
 
@@ -3991,11 +4076,12 @@ export default function BookingsScreen() {
     setModalVisible(true);
   };
 
-  // Process Clear Balance (called from modal confirm) - Direct DB queries
+  // Process Clear Balance (called from modal confirm)
   const processClearBalance = async () => {
     if (!selectedItem || !userId) return;
 
     try {
+      startActionLoading(selectedItem.id, "Clearing balance");
       setLoading(true);
       const bookingId = selectedItem.id;
       const balanceAmount = selectedItem.remaining_balance;
@@ -4007,88 +4093,49 @@ export default function BookingsScreen() {
         balanceAmount,
       );
 
-      // 1. Get the booking and verify ownership
-      const { data: booking, error: bookingError } = await supabase
-        .from("studio_bookings")
-        .select("*, studio:studios(id, owner_id, name)")
-        .eq("id", bookingId)
-        .single();
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
 
-      if (bookingError || !booking) {
-        throw new Error("Booking not found");
+      if (!session) {
+        throw new Error("Please sign in again to clear this balance.");
       }
 
-      // 2. Verify the owner owns this studio
-      if (booking.studio?.owner_id !== userId) {
-        throw new Error("You are not authorized to modify this booking");
-      }
-
-      // 3. Verify there's a remaining balance
-      if (!booking.remaining_balance || booking.remaining_balance <= 0) {
-        throw new Error("No remaining balance to clear");
-      }
-
-      // 4. Update the booking to clear the balance
-      const { error: updateError } = await supabase
-        .from("studio_bookings")
-        .update({
-          remaining_balance: 0,
-          payment_status: "paid",
-          payment_amount: booking.final_price,
-        })
-        .eq("id", bookingId);
-
-      if (updateError) {
-        console.error("Error updating booking:", updateError);
-        throw new Error("Failed to update booking");
-      }
-
-      // 5. Credit the owner's wallet
-      const { data: wallet, error: walletError } = await supabase
-        .from("wallets")
-        .select("id, balance")
-        .eq("user_id", userId)
-        .single();
-
-      if (!walletError && wallet) {
-        // Update wallet balance
-        await supabase
-          .from("wallets")
-          .update({ balance: (wallet.balance || 0) + balanceAmount })
-          .eq("id", wallet.id);
-
-        // Create transaction record
-        await supabase.from("wallet_transactions").insert({
-          wallet_id: wallet.id,
-          amount: balanceAmount,
-          type: "earning",
-          description: `Remaining balance payment received for booking at ${booking.studio?.name || "Studio"}`,
-          reference_id: bookingId,
-          reference_type: "booking_balance",
-          is_credit: true,
-          status: "completed",
-        });
-      }
-
-      // 6. Notify the customer
-      await supabase.from("notifications").insert({
-        user_id: booking.user_id,
-        type: "success",
-        title: "Balance Cleared!",
-        message: `Your remaining balance of ₱${balanceAmount.toLocaleString()} for ${booking.studio?.name || "your booking"} has been marked as paid.`,
-        read: false,
-        meta: buildNotificationRouteMeta("/bookings", undefined, {
-          type: "balance_cleared",
+      const { data, error } = await supabase.functions.invoke("manage-bookings", {
+        body: {
+          action: "clear_balance",
           booking_id: bookingId,
+          owner_id: userId,
           amount: balanceAmount,
-        }),
+        },
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+        },
       });
 
-      debugLog(`Balance cleared: ₱${balanceAmount} for booking ${bookingId}`);
+      if (error) {
+        let message = error.message || "Failed to clear balance";
+        const context = (error as any)?.context;
+        if (context && typeof context.json === "function") {
+          try {
+            const body = await context.json();
+            message = body?.error || body?.message || message;
+          } catch {
+            // Keep the client error message when the response body is unavailable.
+          }
+        }
+        throw new Error(message);
+      }
 
+      if (data?.error) {
+        throw new Error(data.error);
+      }
+
+      const clearedAmount = data?.amount || balanceAmount;
+      debugLog(`Balance cleared: ${clearedAmount} for booking ${bookingId}`);
       Alert.alert(
         "Balance Cleared",
-        `₱${balanceAmount?.toLocaleString()} has been marked as paid and credited to your wallet.`,
+        `₱${clearedAmount?.toLocaleString()} has been marked as paid and credited to your wallet.`,
       );
       setModalVisible(false);
       if (userId) fetchBookings(userId);
@@ -4100,6 +4147,7 @@ export default function BookingsScreen() {
       );
     } finally {
       setLoading(false);
+      clearActionLoading(selectedItem?.id);
     }
   };
 
@@ -4385,6 +4433,18 @@ export default function BookingsScreen() {
     showRenewModal;
   const isActivityFilterActive = activeFilter !== "All";
   const shouldShowActivityFilters = showActivityFilters;
+  const renderActionLoadingIndicator = (item: any, fallbackMessage = "Updating") => {
+    if (!isActionLoadingFor(item)) return null;
+
+    return (
+      <View style={styles.actionLoadingRow}>
+        <ActivityIndicator size="small" color={colors.primary} />
+        <Text style={[styles.actionLoadingText, { color: colors.textSecondary }]}>
+          {actionLoading?.message || fallbackMessage}...
+        </Text>
+      </View>
+    );
+  };
 
   const inferApplicationKind = (item: any): "solo" | "duo" | "group" => {
     const candidates = [
@@ -4801,6 +4861,9 @@ export default function BookingsScreen() {
                               ]}
                             >
                               <View style={styles.detailsButtonLabelContainer}>
+                                {permitDeleting === listing.id ? (
+                                  <ActivityIndicator size="small" color="#DC2626" />
+                                ) : null}
                                 <Text
                                   style={[
                                     styles.outlineButtonText,
@@ -5141,9 +5204,12 @@ export default function BookingsScreen() {
                         </View>
 
                         {isRequestActionPending && (
-                          <Text style={{ fontSize: moderateScale(11), color: colors.textSecondary }}>
-                            Updating request...
-                          </Text>
+                          <View style={styles.actionLoadingRow}>
+                            <ActivityIndicator size="small" color={colors.primary} />
+                            <Text style={[styles.actionLoadingText, { color: colors.textSecondary }]}>
+                              Updating request...
+                            </Text>
+                          </View>
                         )}
 
                         {!isHistoryTabView && (
@@ -5216,9 +5282,13 @@ export default function BookingsScreen() {
                                 ]}
                               >
                                 <View style={styles.detailsButtonLabelContainer}>
-                                  <Text style={[styles.outlineButtonText, { color: "#EF4444", fontFamily: "Poppins_600SemiBold" }]}>
-                                    Decline
-                                  </Text>
+                                  {isRequestActionPending ? (
+                                    <ActivityIndicator size="small" color="#EF4444" />
+                                  ) : (
+                                    <Text style={[styles.outlineButtonText, { color: "#EF4444", fontFamily: "Poppins_600SemiBold" }]}>
+                                      Decline
+                                    </Text>
+                                  )}
                                 </View>
                               </TouchableOpacity>
                             ) : null}
@@ -5244,9 +5314,13 @@ export default function BookingsScreen() {
                                 },
                               ]}
                             >
-                              <Text style={[styles.actionButtonText, { color: "#fff" }]}>
-                                Accept
-                              </Text>
+                              {isRequestActionPending ? (
+                                <ActivityIndicator size="small" color="#fff" />
+                              ) : (
+                                <Text style={[styles.actionButtonText, { color: "#fff" }]}>
+                                  Accept
+                                </Text>
+                              )}
                             </TouchableOpacity>
                           ) : null}
                           </View>
@@ -5593,6 +5667,7 @@ export default function BookingsScreen() {
                             </TouchableOpacity>
                           )}
                         </View>
+                        {renderActionLoadingIndicator(item)}
                         {!isHistoryTabView && (
                           <View
                             style={[
@@ -6740,6 +6815,8 @@ export default function BookingsScreen() {
                         )}
                       </View>
 
+                      {renderActionLoadingIndicator(item)}
+
                       {!isHistoryTabView && (
                         <View
                           style={[
@@ -6807,6 +6884,7 @@ export default function BookingsScreen() {
                               style={{ flexDirection: "row", gap: scale(8) }}
                             >
                               <TouchableOpacity activeOpacity={1}
+                                disabled={isActionLoadingFor(item)}
                                 onPress={() => {
                                   showAlert(
                                     "warning",
@@ -6829,13 +6907,19 @@ export default function BookingsScreen() {
                                     flex: 1,
                                     alignItems: "center",
                                     borderRadius: 100,
+                                    opacity: isActionLoadingFor(item) ? 0.65 : 1,
                                   },
                                 ]}
                               >
-                                <Text style={[styles.actionButtonText, { color: "white" }]}>Accept Move</Text>
+                                {isActionLoadingFor(item) ? (
+                                  <ActivityIndicator size="small" color="white" />
+                                ) : (
+                                  <Text style={[styles.actionButtonText, { color: "white" }]}>Accept Move</Text>
+                                )}
                               </TouchableOpacity>
 
                               <TouchableOpacity activeOpacity={1}
+                                disabled={isActionLoadingFor(item)}
                                 onPress={() => {
                                   showAlert(
                                     "warning",
@@ -6861,19 +6945,24 @@ export default function BookingsScreen() {
                                     flex: 1,
                                     alignItems: "center",
                                     borderRadius: 100,
+                                    opacity: isActionLoadingFor(item) ? 0.65 : 1,
                                   },
                                 ]}
                               >
-                                <Text
-                                  style={[
-                                    styles.cancelButtonText,
-                                    isDark
-                                      ? { color: "#F87171" }
-                                      : { color: "#DC2626" },
-                                  ]}
-                                >
-                                  Decline Move
-                                </Text>
+                                {isActionLoadingFor(item) ? (
+                                  <ActivityIndicator size="small" color={isDark ? "#F87171" : "#DC2626"} />
+                                ) : (
+                                  <Text
+                                    style={[
+                                      styles.cancelButtonText,
+                                      isDark
+                                        ? { color: "#F87171" }
+                                        : { color: "#DC2626" },
+                                    ]}
+                                  >
+                                    Decline Move
+                                  </Text>
+                                )}
                               </TouchableOpacity>
                             </View>
 
@@ -6953,6 +7042,7 @@ export default function BookingsScreen() {
                               {!isBookingPaymentSettled(item) &&
                                 !isBalancePaymentProcessing(item) && (
                                 <TouchableOpacity activeOpacity={1}
+                                  disabled={isActionLoadingFor(item)}
                                   testID={bookingActionTestId(item, "pay")}
                                   accessibilityLabel={bookingActionTestId(item, "pay")}
                                   onPress={() => showPaymentOptions(item)}
@@ -6965,17 +7055,22 @@ export default function BookingsScreen() {
                                       alignItems: "center",
                                       flexDirection: "row",
                                       gap: 6,
+                                      opacity: isActionLoadingFor(item) ? 0.65 : 1,
                                     },
                                   ]}
                                 >
-                                  <Text
-                                    style={[
-                                      styles.actionButtonText,
-                                      { color: "white" },
-                                    ]}
-                                  >
-                                    Pay
-                                  </Text>
+                                  {isActionLoadingFor(item) ? (
+                                    <ActivityIndicator size="small" color="white" />
+                                  ) : (
+                                    <Text
+                                      style={[
+                                        styles.actionButtonText,
+                                        { color: "white" },
+                                      ]}
+                                    >
+                                      Pay
+                                    </Text>
+                                  )}
                                 </TouchableOpacity>
                               )}
 
@@ -7300,6 +7395,7 @@ export default function BookingsScreen() {
                                 <>
                                   {userRole === "musician" ? (
                                     <TouchableOpacity activeOpacity={1}
+                                      disabled={isActionLoadingFor(item)}
                                       testID={bookingActionTestId(item, "pay-remaining")}
                                       accessibilityLabel={bookingActionTestId(item, "pay-remaining")}
                                       onPress={() => handlePayBalance(item)}
@@ -7312,20 +7408,25 @@ export default function BookingsScreen() {
                                           flexDirection: "row",
                                           justifyContent: "center",
                                           borderRadius: 100,
+                                          opacity: isActionLoadingFor(item) ? 0.65 : 1,
                                         },
                                       ]}
                                     >
-                                      <Text
-                                        style={[
-                                          styles.actionButtonText,
-                                          {
-                                            color: "white",
-                                            fontSize: moderateScale(14),
-                                          },
-                                        ]}
-                                      >
-                                        Pay Remaining ₱{item.remaining_balance?.toLocaleString()}
-                                      </Text>
+                                      {isActionLoadingFor(item) ? (
+                                        <ActivityIndicator size="small" color="white" />
+                                      ) : (
+                                        <Text
+                                          style={[
+                                            styles.actionButtonText,
+                                            {
+                                              color: "white",
+                                              fontSize: moderateScale(14),
+                                            },
+                                          ]}
+                                        >
+                                          Pay Remaining ₱{item.remaining_balance?.toLocaleString()}
+                                        </Text>
+                                      )}
                                     </TouchableOpacity>
                                   ) : null}
 
@@ -7465,6 +7566,8 @@ export default function BookingsScreen() {
       <BookingActionModal
         visible={modalVisible}
         onClose={() => setModalVisible(false)}
+        loading={modalVisible && selectedItem ? isActionLoadingFor(selectedItem) : false}
+        loadingMessage={actionLoading?.message ? `${actionLoading.message}...` : "Updating..."}
         title={
           modalMode === "confirm"
             ? selectedItem?.type_id === "gig_application"
@@ -8357,6 +8460,17 @@ const styles = StyleSheet.create({
     gap: scale(8),
     marginTop: 0,
     width: "100%",
+  },
+  actionLoadingRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: scale(8),
+    minHeight: moderateScale(24),
+  },
+  actionLoadingText: {
+    fontSize: moderateScale(11),
+    lineHeight: moderateScale(15),
+    fontFamily: "Poppins_500Medium",
   },
   messageIconButton: {
     width: moderateScale(34),

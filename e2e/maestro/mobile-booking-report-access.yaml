@@ -16,7 +16,6 @@ appId: ${APP_ID}
 - tapOn:
     id: "app-modal-input"
 - inputText: ${E2E_BOOKING_ACCESS_REASON}
-- hideKeyboard
 - waitForAnimationToEnd:
     timeout: 2000
 - tapOn:

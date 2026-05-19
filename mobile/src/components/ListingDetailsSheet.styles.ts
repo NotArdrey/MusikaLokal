@@ -397,6 +397,7 @@ const styles = StyleSheet.create({
     width: "100%",
   },
   primaryBtn: {
+    paddingHorizontal: moderateScale(18),
     paddingVertical: moderateScale(16),
     borderRadius: moderateScale(16),
     alignItems: "center",

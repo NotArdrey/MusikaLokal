@@ -678,11 +678,13 @@ export default function SidebarNav() {
             <>
                 <View style={[styles.sidebarContainer, { backgroundColor: isDark ? '#1F2937' : '#FFFFFF', borderRightColor: colors.border }]}>
                     <View style={styles.logoSection}>
-                        <Image
-                            source={require('../../assets/images/Musika-lokal-logo-theme.png')}
-                            style={styles.logoImage}
-                            resizeMode="contain"
-                        />
+                        <View style={styles.logoFrame}>
+                            <Image
+                                source={require('../../assets/images/musika-lokal-logo-modern-wordmark.png')}
+                                style={styles.logoImage}
+                                resizeMode="contain"
+                            />
+                        </View>
                     </View>
 
                     <View style={styles.navContainer} />
@@ -721,11 +723,13 @@ export default function SidebarNav() {
                 >
                     <View style={styles.topBarContent}>
                         <View style={[styles.logoSection, styles.logoSectionTop]}>
-                            <Image
-                                source={require('../../assets/images/Musika-lokal-logo-theme.png')}
-                                style={styles.logoImage}
-                                resizeMode="contain"
-                            />
+                            <View style={styles.logoFrame}>
+                                <Image
+                                    source={require('../../assets/images/musika-lokal-logo-modern-wordmark.png')}
+                                    style={styles.logoImage}
+                                    resizeMode="contain"
+                                />
+                            </View>
                         </View>
 
                         <ScrollView
@@ -982,11 +986,13 @@ export default function SidebarNav() {
         <>
             <View style={[styles.sidebarContainer, { backgroundColor: isDark ? '#1F2937' : '#FFFFFF', borderRightColor: colors.border }]}>
                 <View style={styles.logoSection}>
-                    <Image
-                        source={require('../../assets/images/Musika-lokal-logo-theme.png')}
-                        style={styles.logoImage}
-                        resizeMode="contain"
-                    />
+                    <View style={styles.logoFrame}>
+                        <Image
+                            source={require('../../assets/images/musika-lokal-logo-modern-wordmark.png')}
+                            style={styles.logoImage}
+                            resizeMode="contain"
+                        />
+                    </View>
                 </View>
 
                 <ScrollView style={styles.navContainer}>
@@ -1577,11 +1583,18 @@ const styles = StyleSheet.create({
     logoSectionTop: {
         padding: 0,
         gap: 0,
-        minWidth: 74,
+        minWidth: 54,
+    },
+    logoFrame: {
+        width: 38,
+        height: 50,
+        overflow: 'hidden',
     },
     logoImage: {
+        // Crop the transparent padding baked into the wordmark asset.
         width: 58,
         height: 58,
+        marginLeft: -13,
     },
     navContainer: {
         flex: 1,
