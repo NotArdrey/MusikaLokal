@@ -48,7 +48,7 @@ test.describe('social posting and follower notifications', () => {
     await cleanupE2ERecords();
   });
 
-  test('allows creator roles to post, blocks fans, validates media safety, and supports fan comments/shares', async () => {
+  test('allows creator and fan roles to post, validates media safety, and supports fan comments/shares', async () => {
     const creatorInputs = [
       { suffix: 'post-role-musician', role: 'musician' as const, fullName: 'E2E Post Role Musician' },
       { suffix: 'post-role-producer', role: 'producer' as const, fullName: 'E2E Post Role Producer' },
@@ -82,12 +82,23 @@ test.describe('social posting and follower notifications', () => {
 
     const fanCreate = await invokeSocial(fanClient, {
       action: 'create_post',
-      content: 'E2E fan should not be able to create this post',
+      content: 'E2E social post by fan',
       visibility: 'public',
     });
-    expect(fanCreate.error).toBeTruthy();
-    const fanCreateBody = await expectHttpErrorBody(fanCreate.error);
-    expect(String(fanCreateBody?.error || '')).toContain('Fans cannot create posts');
+    expect(fanCreate.error).toBeNull();
+    expect(fanCreate.data?.success).toBe(true);
+    expect(fanCreate.data?.data?.id).toBeTruthy();
+    createdPostIds.push(String(fanCreate.data.data.id));
+
+    const blockedFanPost = await invokeSocial(fanClient, {
+      action: 'create_post',
+      content: 'E2E fan t@ng!na local moderation should block this post',
+      visibility: 'public',
+    });
+    expect(blockedFanPost.error).toBeNull();
+    expect(blockedFanPost.data?.blocked).toBe(true);
+    expect(blockedFanPost.data?.status).toBe('blocked');
+    expect(blockedFanPost.data?.moderation?.categories).toContain('filipino_profanity');
 
     const mediaOwner = creators[0];
     const mediaClient = await clientFor(mediaOwner);

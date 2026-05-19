@@ -17,7 +17,7 @@ test.describe('mobile social posting', () => {
     await cleanupE2ERecords();
   });
 
-  test('creates a feed post as a creator and hides the composer for fans', async () => {
+  test('creates feed posts as a creator and fan', async () => {
     test.setTimeout(900_000);
 
     const creator = await seedE2EMobileUser(
@@ -31,6 +31,7 @@ test.describe('mobile social posting', () => {
       'E2E Mobile Social Post Fan',
     );
     const content = `Mobile feed post ${makeRunId('mobile-social-post')}`;
+    const fanContent = `Mobile fan feed post ${makeRunId('mobile-social-post-fan')}`;
 
     await runMaestroFlow('mobile-login.yaml', {
       E2E_MOBILE_EMAIL: creator.email,
@@ -50,6 +51,14 @@ test.describe('mobile social posting', () => {
       E2E_MOBILE_EMAIL: fan.email,
       E2E_MOBILE_PASSWORD: fan.password,
     });
-    await runMaestroFlow('mobile-feed-fan-no-composer.yaml');
+    await runMaestroFlow('mobile-feed-create-post.yaml', {
+      E2E_POST_CONTENT: fanContent,
+    });
+
+    await expectDbRecord<any>('feed_posts', 'content', fanContent, (record) => (
+      record.author_id === fan.id &&
+      record.visibility === 'public' &&
+      record.is_hidden === false
+    ));
   });
 });

@@ -1866,15 +1866,16 @@ serve(async (req: Request) => {
 
       const reviewRoleForClaim = String(review.submitted_role || preDecisionProfile?.role || "musician").trim().toLowerCase();
       let duplicateMatchesForApproval: any[] = [];
+      const documentFingerprintForDecision = String(review.document_fingerprint || "").trim() || null;
 
       if (decision === "APPROVED") {
         const reviewEmail = String(preDecisionProfile?.email || review.submitted_by_email || "").trim().toLowerCase();
         const approvalProfilesById = new Map<string, any>();
-        if (review.document_fingerprint) {
+        if (documentFingerprintForDecision) {
           const { data: duplicateClaims, error: duplicateClaimsError } = await client
             .from("identity_document_claims")
             .select("id, user_id, normalized_email, profiles:user_id(id, email, role)")
-            .eq("document_fingerprint", review.document_fingerprint)
+            .eq("document_fingerprint", documentFingerprintForDecision)
             .eq("role", reviewRoleForClaim)
             .eq("status", "APPROVED");
 
@@ -1947,9 +1948,9 @@ serve(async (req: Request) => {
           }, 400);
         }
 
-        if (!review.document_fingerprint) {
+        if (!documentFingerprintForDecision) {
           return jsonResponse({
-            error: "This review is missing a verified document fingerprint and cannot be approved automatically. Keep it in review until the document number, type, and country are verified.",
+            error: "This review is missing verified document fingerprint data and cannot be approved. Require the user to repeat identity verification instead.",
           }, 400);
         }
       }
@@ -2000,16 +2001,18 @@ serve(async (req: Request) => {
           : {}),
       };
 
+      const reviewUpdatePayload: Record<string, unknown> = {
+        status: profileVerificationStatus,
+        review_notes: reviewNotes,
+        reviewed_by: actorId,
+        reviewed_at: nowIso,
+        metadata: nextReviewMetadata,
+        updated_at: nowIso,
+      };
+
       const { data: updatedReview, error: updateReviewError } = await client
         .from("manual_identity_reviews")
-        .update({
-          status: profileVerificationStatus,
-          review_notes: reviewNotes,
-          reviewed_by: actorId,
-          reviewed_at: nowIso,
-          metadata: nextReviewMetadata,
-          updated_at: nowIso,
-        })
+        .update(reviewUpdatePayload)
         .eq("id", reviewId)
         .select("*")
         .maybeSingle();
@@ -2066,12 +2069,12 @@ serve(async (req: Request) => {
         birthDate: review.birth_date,
       });
 
-      if (review.document_fingerprint) {
+      if (documentFingerprintForDecision) {
         if (decision === "APPROVED") {
           const approvalClaim = normalizeApprovalClaimResult(await claimApprovedIdentityDocument(client, {
             userId: review.user_id,
             role: reviewRoleForClaim,
-            documentFingerprint: review.document_fingerprint,
+            documentFingerprint: documentFingerprintForDecision,
             documentType: review.document_type,
             documentTypeKey: review.document_type_key,
             documentCountry: review.document_country || "PHL",
@@ -2104,7 +2107,7 @@ serve(async (req: Request) => {
           await recordIdentityDocumentClaim(client, {
             userId: review.user_id,
             role: reviewRoleForClaim,
-            documentFingerprint: review.document_fingerprint,
+            documentFingerprint: documentFingerprintForDecision,
             documentType: review.document_type,
             documentTypeKey: review.document_type_key,
             documentCountry: review.document_country || "PHL",

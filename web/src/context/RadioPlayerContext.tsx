@@ -456,6 +456,26 @@ export function RadioPlayerProvider({ children }: { children: ReactNode }) {
       : new Error("No playable radio tracks are available.");
   }, [beginRequest, ensureAudio, setQueueState]);
 
+  const recordStationTuneIn = useCallback((stationData: any) => {
+    const stationId = typeof stationData?.id === "string" ? stationData.id : "";
+    if (!stationId) return;
+
+    void supabase.functions.invoke("manage-playlists", {
+      body: {
+        action: "record_play_event",
+        event_type: "station_tune_in",
+        station_id: stationId,
+        playlist_id: null,
+        item_id: null,
+        platform: "web",
+      },
+    }).then(({ error }) => {
+      if (error) console.warn("Radio station tune-in event error:", error);
+    }).catch((error) => {
+      console.warn("Radio station tune-in event error:", error);
+    });
+  }, []);
+
   const tuneIn = useCallback(async (stationData: any, slotIdx = 0) => {
     if (!stationData) return;
 
@@ -478,21 +498,39 @@ export function RadioPlayerProvider({ children }: { children: ReactNode }) {
     if (stationId) setLoadingStationId(stationId);
 
     try {
-      const playableStation = await ensureStationData(stationData);
-      if (requestId !== requestIdRef.current) return;
-
-      const broadcastTrack = buildStationBroadcastTrack(playableStation);
+      let playableStation = stationData;
+      let broadcastTrack = buildStationBroadcastTrack(playableStation);
       if (broadcastTrack) {
         activeStationRef.current = playableStation;
         queueRef.current = [broadcastTrack];
         setQueueLength(1);
         setActiveStation(playableStation);
         await playQueueIndex(0, true, 0);
+        recordStationTuneIn(playableStation);
         return;
       }
 
-      const queue = await buildStationQueue(playableStation);
+      let queue = await buildStationQueue(playableStation);
       if (requestId !== requestIdRef.current) return;
+
+      if (queue.length === 0 && playableStation.__queueReady !== true) {
+        playableStation = await ensureStationData(stationData);
+        if (requestId !== requestIdRef.current) return;
+
+        broadcastTrack = buildStationBroadcastTrack(playableStation);
+        if (broadcastTrack) {
+          activeStationRef.current = playableStation;
+          queueRef.current = [broadcastTrack];
+          setQueueLength(1);
+          setActiveStation(playableStation);
+          await playQueueIndex(0, true, 0);
+          recordStationTuneIn(playableStation);
+          return;
+        }
+
+        queue = await buildStationQueue(playableStation);
+        if (requestId !== requestIdRef.current) return;
+      }
 
       if (queue.length === 0) {
         queueRef.current = [];
@@ -514,12 +552,13 @@ export function RadioPlayerProvider({ children }: { children: ReactNode }) {
         true,
         liveCursor.isSynchronized ? liveCursor.positionSeconds : 0,
       );
+      recordStationTuneIn(playableStation);
     } finally {
       if (stationId) {
         setLoadingStationId((currentId) => (currentId === stationId ? null : currentId));
       }
     }
-  }, [beginRequest, ensureAudio, ensureStationData, playQueueIndex]);
+  }, [beginRequest, ensureAudio, ensureStationData, playQueueIndex, recordStationTuneIn]);
 
   const togglePlayPause = useCallback(async () => {
     const audio = ensureAudio();

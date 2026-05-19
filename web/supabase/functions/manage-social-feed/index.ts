@@ -31,7 +31,7 @@ function normalizeFollowTargetType(value: unknown): FollowTargetType {
   return value === "group" ? "group" : "profile";
 }
 
-const POST_CREATOR_ROLES = new Set(["musician", "producer", "studio-owner", "venue-owner", "admin"]);
+const POST_AUTHOR_ROLES = new Set(["fan", "musician", "producer", "studio-owner", "venue-owner", "admin"]);
 const POST_VISIBILITIES = new Set(["public", "followers", "unlisted"]);
 const POST_MEDIA_TYPES = new Set(["image", "video"]);
 const SAFE_IMAGE_MIME_TYPES = new Set([
@@ -839,8 +839,8 @@ Deno.serve(async (req: Request) => {
     if (action === "create_post") {
       const { content, post_type, visibility, linked_playlist_id, linked_product_id, media } = params;
       const role = await getRequesterRole();
-      if (!POST_CREATOR_ROLES.has(role)) {
-        return jsonResponse({ error: "Fans cannot create posts" }, 403);
+      if (!POST_AUTHOR_ROLES.has(role)) {
+        return jsonResponse({ error: "This account type cannot create posts" }, 403);
       }
 
       const trimmedContent = normalizeContent(content);
@@ -1034,12 +1034,19 @@ Deno.serve(async (req: Request) => {
           .order("created_at", { ascending: false });
       } else {
         // Public feed
-        query = supabaseAdmin
-          .from("feed_posts")
-          .select(feedPostSelect)
-          .eq("visibility", "public")
-          .eq("is_hidden", false)
-          .order("created_at", { ascending: false });
+        query = uid
+          ? supabaseAdmin
+              .from("feed_posts")
+              .select(feedPostSelect)
+              .eq("is_hidden", false)
+              .or(`visibility.eq.public,author_id.eq.${uid}`)
+              .order("created_at", { ascending: false })
+          : supabaseAdmin
+              .from("feed_posts")
+              .select(feedPostSelect)
+              .eq("visibility", "public")
+              .eq("is_hidden", false)
+              .order("created_at", { ascending: false });
       }
 
       if (cursorCreatedAt) {

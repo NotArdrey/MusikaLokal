@@ -63,6 +63,17 @@ const moderateScale = (size: number, factor = 0.3) => {
 
 const debugLog = (..._args: unknown[]) => { };
 const HOME_HORIZONTAL_FLASHLIST_OVERRIDE_PROPS = { initialDrawBatchSize: 4 };
+const PENDING_REOPEN_LISTING_STORAGE_KEY = "pending_reopen_listing_id";
+const PENDING_REOPEN_LISTING_TYPE_STORAGE_KEY = "pending_reopen_listing_type";
+
+const firstRouteParam = (value?: string | string[] | null) =>
+  Array.isArray(value) ? value[0] : value;
+
+const normalizeListingTypeParam = (value?: string | string[] | null) =>
+  (firstRouteParam(value) || "").toLowerCase().replace(/-/g, "_").trim();
+
+const isProductionTeamListingType = (listingType: string) =>
+  listingType === "production_team" || listingType === "production";
 
 const clampValue = (value: number, min = 0, max = 1) => {
   return Math.max(min, Math.min(max, value));
@@ -348,7 +359,14 @@ export default function HomeScreen() {
   const { userRole, userId, isGuest, roleResolved } = useAuth();
   const insets = useSafeAreaInsets();
   const { contentBottomPadding } = useBottomBarClearance(24);
-  const params = useLocalSearchParams<{ reopenListingId?: string }>();
+  const params = useLocalSearchParams<{
+    reopenListingId?: string;
+    listingType?: string;
+    listing_type?: string;
+    productionTeamId?: string;
+    production_team_id?: string;
+    teamId?: string;
+  }>();
   const recentlyViewedStorageKey = useMemo(
     () => getRecentlyViewedStorageKey(userId, isGuest),
     [isGuest, userId],
@@ -863,21 +881,54 @@ export default function HomeScreen() {
         void loadViewedNewArrivals();
         setTimeBasedGreeting();
 
-        const reopenListingId = Array.isArray(params.reopenListingId)
-          ? params.reopenListingId[0]
-          : params.reopenListingId;
+        const listingType = normalizeListingTypeParam(
+          params.listingType || params.listing_type,
+        );
+        const reopenListingId = firstRouteParam(params.reopenListingId);
+        const routeProductionTeamId =
+          firstRouteParam(params.productionTeamId) ||
+          firstRouteParam(params.production_team_id) ||
+          firstRouteParam(params.teamId) ||
+          (isProductionTeamListingType(listingType) ? reopenListingId : undefined);
 
-        if (reopenListingId && reopenListingId.length > 0) {
+        if (routeProductionTeamId && routeProductionTeamId.length > 0) {
+          openProductionTeamDetails(routeProductionTeamId);
+          void AsyncStorage.multiRemove([
+            PENDING_REOPEN_LISTING_STORAGE_KEY,
+            PENDING_REOPEN_LISTING_TYPE_STORAGE_KEY,
+          ]);
+          setTimeout(() => {
+            router.setParams({
+              reopenListingId: undefined as any,
+              listingType: undefined as any,
+              listing_type: undefined as any,
+              productionTeamId: undefined as any,
+              production_team_id: undefined as any,
+              teamId: undefined as any,
+            });
+          }, 250);
+        } else if (reopenListingId && reopenListingId.length > 0) {
           setSelectedListingId(reopenListingId);
           setPendingReopenListingId(reopenListingId);
+          void AsyncStorage.multiRemove([
+            PENDING_REOPEN_LISTING_STORAGE_KEY,
+            PENDING_REOPEN_LISTING_TYPE_STORAGE_KEY,
+          ]);
           setTimeout(() => {
-            router.setParams({ reopenListingId: undefined as any });
+            router.setParams({
+              reopenListingId: undefined as any,
+              listingType: undefined as any,
+              listing_type: undefined as any,
+            });
           }, 250);
         }
 
         const restorePendingReopen = async () => {
           const storedListingId = await AsyncStorage.getItem(
-            "pending_reopen_listing_id",
+            PENDING_REOPEN_LISTING_STORAGE_KEY,
+          );
+          const storedListingType = normalizeListingTypeParam(
+            await AsyncStorage.getItem(PENDING_REOPEN_LISTING_TYPE_STORAGE_KEY),
           );
 
           if (!isActive) {
@@ -885,9 +936,16 @@ export default function HomeScreen() {
           }
 
           if (storedListingId && storedListingId.length > 0) {
-            setSelectedListingId(storedListingId);
-            setPendingReopenListingId(storedListingId);
-            await AsyncStorage.removeItem("pending_reopen_listing_id");
+            if (isProductionTeamListingType(storedListingType)) {
+              openProductionTeamDetails(storedListingId);
+            } else {
+              setSelectedListingId(storedListingId);
+              setPendingReopenListingId(storedListingId);
+            }
+            await AsyncStorage.multiRemove([
+              PENDING_REOPEN_LISTING_STORAGE_KEY,
+              PENDING_REOPEN_LISTING_TYPE_STORAGE_KEY,
+            ]);
           }
         };
 
@@ -898,7 +956,24 @@ export default function HomeScreen() {
         isActive = false;
         focusTask.cancel();
       };
-    }, [discover.length, featured.length, homeDataQuery.refetch, isGuest, loadViewedNewArrivals, params.reopenListingId, recentlyViewedStorageKey, roleResolved, userId, userRole]),
+    }, [
+      discover.length,
+      featured.length,
+      homeDataQuery.refetch,
+      isGuest,
+      loadViewedNewArrivals,
+      openProductionTeamDetails,
+      params.listingType,
+      params.listing_type,
+      params.productionTeamId,
+      params.production_team_id,
+      params.reopenListingId,
+      params.teamId,
+      recentlyViewedStorageKey,
+      roleResolved,
+      userId,
+      userRole,
+    ]),
   );
 
   // Home realtime invalidation now runs through the shared query channel in RootLayout.

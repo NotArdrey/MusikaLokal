@@ -31,7 +31,7 @@ function normalizeFollowTargetType(value: unknown): FollowTargetType {
   return value === "group" ? "group" : "profile";
 }
 
-const POST_CREATOR_ROLES = new Set(["musician", "producer", "studio-owner", "venue-owner", "admin"]);
+const POST_AUTHOR_ROLES = new Set(["fan", "musician", "producer", "studio-owner", "venue-owner", "admin"]);
 const POST_VISIBILITIES = new Set(["public", "followers", "unlisted"]);
 const POST_MEDIA_TYPES = new Set(["image", "video"]);
 const SAFE_IMAGE_MIME_TYPES = new Set([
@@ -839,8 +839,8 @@ Deno.serve(async (req: Request) => {
     if (action === "create_post") {
       const { content, post_type, visibility, linked_playlist_id, linked_product_id, media } = params;
       const role = await getRequesterRole();
-      if (!POST_CREATOR_ROLES.has(role)) {
-        return jsonResponse({ error: "Fans cannot create posts" }, 403);
+      if (!POST_AUTHOR_ROLES.has(role)) {
+        return jsonResponse({ error: "This account type cannot create posts" }, 403);
       }
 
       const trimmedContent = normalizeContent(content);
@@ -1197,13 +1197,7 @@ Deno.serve(async (req: Request) => {
           ),
         );
 
-        if (includeEntityCards && followedProfileIds.length === 0 && followedGroupIds.length === 0) {
-          return jsonResponse({ success: true, data: [], items: [], nextCursor: null });
-        }
-
-        const postAuthorIds = includeEntityCards
-          ? followedProfileIds
-          : Array.from(new Set([...followedProfileIds, uid].filter(Boolean)));
+        const postAuthorIds = Array.from(new Set([...followedProfileIds, uid].filter(Boolean)));
         let followedPostsQuery = supabaseAdmin
           .from("feed_posts")
           .select(feedPostSelect)
@@ -1326,11 +1320,17 @@ Deno.serve(async (req: Request) => {
           productionTeamsResult,
         ] = await Promise.all([
           withCursorAndLimit(
-            supabaseAdmin
-              .from("feed_posts")
-              .select(feedPostSelect)
-              .eq("visibility", "public")
-              .eq("is_hidden", false),
+            (uid
+              ? supabaseAdmin
+                  .from("feed_posts")
+                  .select(feedPostSelect)
+                  .eq("is_hidden", false)
+                  .or(`visibility.eq.public,author_id.eq.${uid}`)
+              : supabaseAdmin
+                  .from("feed_posts")
+                  .select(feedPostSelect)
+                  .eq("visibility", "public")
+                  .eq("is_hidden", false))
           ),
           includeEntityCards ? withCursorAndLimit(artistsQuery) : emptyResult(),
           includeEntityCards

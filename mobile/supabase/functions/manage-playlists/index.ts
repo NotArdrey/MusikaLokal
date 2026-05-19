@@ -18,6 +18,18 @@ const PLAYLIST_AUDIO_SIGNED_URL_SECONDS = 24 * 60 * 60;
 const KNOWN_PLAYLIST_AUDIO_BUCKETS = new Set(["documents", "playlist-assets"]);
 const KNOWN_PLAYLIST_STORAGE_BUCKETS = new Set(["documents", "playlist-assets", "post-media"]);
 const PLAYLIST_ASSET_BUCKET = "playlist-assets";
+const GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions";
+const GROQ_API_KEY = Deno.env.get("GROQ_API_KEY")?.trim() || "";
+const GROQ_MODEL_CANDIDATES = [
+  "llama-3.3-70b-versatile",
+  "llama-3.1-8b-instant",
+  "openai/gpt-oss-120b",
+  "openai/gpt-oss-20b",
+];
+const GROQ_RETRYABLE_STATUS_CODES = new Set([403, 404, 408, 409, 429, 498, 500, 502, 503, 504]);
+const AI_LOCAL_ONLY = ["1", "true", "yes", "on"].includes(
+  (Deno.env.get("PLAYLIST_RADIO_LOCAL_ONLY") || Deno.env.get("AI_LOCAL_ONLY") || "").trim().toLowerCase(),
+);
 
 function jsonResponse(body: any, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -186,6 +198,496 @@ function getStationQueueAnchorTimestampMs(station: any, slots: any[]) {
   }
 
   return Math.max(...candidateTimestamps);
+}
+
+function clamp(value: number, min = 0, max = 1) {
+  return Math.max(min, Math.min(max, value));
+}
+
+function normalizeRecommendationText(value: unknown) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function splitRecommendationTerms(raw: unknown): string[] {
+  if (typeof raw !== "string") {
+    return [];
+  }
+
+  return getUniqueStringValues(
+    raw
+      .split(/[,\n|/]+/)
+      .map((part) => part.trim())
+      .filter(Boolean),
+  );
+}
+
+function stationFreshnessScore(createdAt: unknown) {
+  const timestampMs = readTimestampMs(createdAt);
+  if (!timestampMs) {
+    return 0.35;
+  }
+
+  const ageDays = Math.max(0, (Date.now() - timestampMs) / (1000 * 60 * 60 * 24));
+  if (ageDays <= 7) return 1;
+  if (ageDays <= 30) return 0.8;
+  if (ageDays <= 90) return 0.55;
+  return 0.35;
+}
+
+function getStationRecommendationOwnerName(station: any) {
+  return (
+    station?.managed_group?.name ||
+    station?.managed_profile?.full_name ||
+    station?.creator?.full_name ||
+    "local artists"
+  );
+}
+
+function getStationRecommendationText(station: any, slots: any[]) {
+  const values = [
+    station?.name,
+    station?.description,
+    station?.genre,
+    station?.creator?.full_name,
+    station?.managed_profile?.full_name,
+    station?.managed_group?.name,
+    station?.managed_group?.genre,
+  ];
+
+  for (const slot of slots || []) {
+    values.push(
+      slot?.label,
+      slot?.playlist?.title,
+      slot?.playlist?.description,
+      slot?.playlist?.genre,
+    );
+
+    for (const item of slot?.playlist?.items || []) {
+      values.push(item?.title, item?.artist_name);
+    }
+  }
+
+  return values
+    .map((value) => (typeof value === "string" ? value.trim() : ""))
+    .filter(Boolean)
+    .join(" ");
+}
+
+function getStationRecommendationGenres(station: any, slots: any[]) {
+  const values = [
+    station?.genre,
+    station?.managed_group?.genre,
+    ...(slots || []).map((slot: any) => slot?.playlist?.genre),
+  ];
+
+  return getUniqueStringValues(values.flatMap(splitRecommendationTerms));
+}
+
+function getStationRecommendationTrackCount(station: any, slots: any[]) {
+  const slotTrackCount = (slots || []).reduce((total: number, slot: any) => {
+    const itemCount = Array.isArray(slot?.playlist?.items) ? slot.playlist.items.length : 0;
+    const playlistCount = Number(slot?.playlist?.track_count || 0);
+    return total + Math.max(itemCount, Number.isFinite(playlistCount) ? playlistCount : 0);
+  }, 0);
+
+  return Math.max(slotTrackCount, Number(station?.slot_count || 0));
+}
+
+function normalizeStationRecommendationMode(value: unknown) {
+  const normalized = typeof value === "string" ? value.trim().toLowerCase() : "";
+  return ["for_you", "for-you", "ai", "recommended"].includes(normalized) ? "for_you" : "";
+}
+
+async function fetchStationRecommendationProfile(supabaseAdmin: any, userId: string | null) {
+  if (!userId) {
+    return {
+      userId: null,
+      skills: [],
+      genres: [],
+      followedProfileIds: new Set<string>(),
+      followedGroupIds: new Set<string>(),
+      favoriteProfileIds: new Set<string>(),
+      favoriteGroupIds: new Set<string>(),
+      playedStationIds: new Set<string>(),
+    };
+  }
+
+  const [
+    skillsResult,
+    genresResult,
+    followsResult,
+    favoritesResult,
+    playEventsResult,
+  ] = await Promise.all([
+    supabaseAdmin.from("profile_skills").select("skill").eq("profile_id", userId),
+    supabaseAdmin.from("profile_genres").select("genre").eq("profile_id", userId),
+    supabaseAdmin.from("follows").select("followed_id, followed_type").eq("follower_id", userId).limit(200),
+    supabaseAdmin.from("favorites").select("profile_id, group_id").eq("user_id", userId).limit(200),
+    supabaseAdmin
+      .from("playlist_play_events")
+      .select("station_id")
+      .eq("user_id", userId)
+      .not("station_id", "is", null)
+      .order("created_at", { ascending: false })
+      .limit(100),
+  ]);
+
+  for (const [scope, result] of [
+    ["skills", skillsResult],
+    ["genres", genresResult],
+    ["follows", followsResult],
+    ["favorites", favoritesResult],
+    ["play_events", playEventsResult],
+  ] as const) {
+    if (result.error) {
+      console.warn(`Station recommendation ${scope} lookup error:`, result.error.message);
+    }
+  }
+
+  return {
+    userId,
+    skills: getUniqueStringValues((skillsResult.data || []).map((row: any) => row?.skill)),
+    genres: getUniqueStringValues((genresResult.data || []).map((row: any) => row?.genre)),
+    followedProfileIds: new Set(
+      (followsResult.data || [])
+        .filter((row: any) => row?.followed_type === "profile")
+        .map((row: any) => row?.followed_id)
+        .filter(Boolean),
+    ),
+    followedGroupIds: new Set(
+      (followsResult.data || [])
+        .filter((row: any) => row?.followed_type === "group")
+        .map((row: any) => row?.followed_id)
+        .filter(Boolean),
+    ),
+    favoriteProfileIds: new Set(
+      (favoritesResult.data || [])
+        .map((row: any) => row?.profile_id)
+        .filter(Boolean),
+    ),
+    favoriteGroupIds: new Set(
+      (favoritesResult.data || [])
+        .map((row: any) => row?.group_id)
+        .filter(Boolean),
+    ),
+    playedStationIds: new Set(
+      (playEventsResult.data || [])
+        .map((row: any) => row?.station_id)
+        .filter(Boolean),
+    ),
+  };
+}
+
+function buildStationRecommendationReason(details: {
+  favoriteMatch: boolean;
+  followedMatch: boolean;
+  genreMatches: string[];
+  skillMatches: string[];
+  playedMatch: boolean;
+  station: any;
+}) {
+  if (details.favoriteMatch) {
+    return `Based on artists and groups you saved.`;
+  }
+  if (details.followedMatch) {
+    return `Because you follow ${getStationRecommendationOwnerName(details.station)}.`;
+  }
+  if (details.genreMatches.length > 0) {
+    return `Matches your ${details.genreMatches[0]} taste.`;
+  }
+  if (details.skillMatches.length > 0) {
+    return `Fits your ${details.skillMatches[0]} profile.`;
+  }
+  if (details.playedMatch) {
+    return "More radio like stations you played.";
+  }
+  if (details.station?.is_featured) {
+    return "Featured station with an active playlist rotation.";
+  }
+  if (details.station?.genre) {
+    return `Fresh ${details.station.genre} radio from local artists.`;
+  }
+  return "Recommended from active MusikaLokal stations.";
+}
+
+function scoreStationForRecommendation(station: any, slots: any[], profile: any) {
+  const searchableText = normalizeRecommendationText(getStationRecommendationText(station, slots));
+  const stationGenres = getStationRecommendationGenres(station, slots);
+  const normalizedStationGenres = stationGenres.map(normalizeRecommendationText).filter(Boolean);
+  const normalizedSkills = (profile.skills || []).map(normalizeRecommendationText).filter(Boolean);
+  const normalizedGenres = (profile.genres || []).map(normalizeRecommendationText).filter(Boolean);
+
+  const skillMatches = normalizedSkills.filter((skill: string) => searchableText.includes(skill));
+  const genreMatches = normalizedGenres.filter((genre: string) => (
+    normalizedStationGenres.includes(genre) ||
+    searchableText.includes(genre)
+  ));
+
+  const skillScore = normalizedSkills.length > 0
+    ? clamp(skillMatches.length / Math.min(3, normalizedSkills.length))
+    : 0;
+  const genreScore = normalizedGenres.length > 0
+    ? clamp(genreMatches.length / Math.min(3, normalizedGenres.length))
+    : 0;
+
+  const ownerProfileId = station?.managed_profile_id || station?.creator_id || "";
+  const groupId = station?.managed_group_id || "";
+  const followedMatch = Boolean(
+    (ownerProfileId && profile.followedProfileIds?.has(ownerProfileId)) ||
+    (groupId && profile.followedGroupIds?.has(groupId)),
+  );
+  const favoriteMatch = Boolean(
+    (ownerProfileId && profile.favoriteProfileIds?.has(ownerProfileId)) ||
+    (groupId && profile.favoriteGroupIds?.has(groupId)),
+  );
+  const playedMatch = Boolean(station?.id && profile.playedStationIds?.has(station.id));
+  const trackCount = getStationRecommendationTrackCount(station, slots);
+  const popularityScore = clamp(
+    (Number(station?.listener_count || 0) / 50) +
+    (trackCount / 80) +
+    ((slots || []).length / 20),
+  );
+  const featuredScore = station?.is_featured ? 1 : 0;
+  const freshness = stationFreshnessScore(station?.created_at);
+  const hasUserSignals = Boolean(
+    normalizedSkills.length ||
+    normalizedGenres.length ||
+    profile.followedProfileIds?.size ||
+    profile.followedGroupIds?.size ||
+    profile.favoriteProfileIds?.size ||
+    profile.favoriteGroupIds?.size ||
+    profile.playedStationIds?.size
+  );
+
+  const score = hasUserSignals
+    ? (
+      genreScore * 0.34 +
+      skillScore * 0.16 +
+      (followedMatch ? 1 : 0) * 0.16 +
+      (favoriteMatch ? 1 : 0) * 0.12 +
+      (playedMatch ? 1 : 0) * 0.10 +
+      featuredScore * 0.05 +
+      popularityScore * 0.04 +
+      freshness * 0.03
+    )
+    : (
+      featuredScore * 0.25 +
+      popularityScore * 0.35 +
+      freshness * 0.25 +
+      (station?.genre ? 0.15 : 0)
+    );
+
+  return {
+    score: Math.round(clamp(score) * 100),
+    reason: buildStationRecommendationReason({
+      favoriteMatch,
+      followedMatch,
+      genreMatches,
+      skillMatches,
+      playedMatch,
+      station,
+    }),
+    searchableText,
+    stationGenres,
+    trackCount,
+  };
+}
+
+function extractStationJsonObject(content: string) {
+  const fenced = content.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  if (fenced?.[1]) {
+    return fenced[1].trim();
+  }
+
+  const firstBrace = content.indexOf("{");
+  const lastBrace = content.lastIndexOf("}");
+  if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+    return content.slice(firstBrace, lastBrace + 1);
+  }
+
+  return content;
+}
+
+async function rankStationsWithGroq(profile: any, candidates: any[], limit: number) {
+  if (!GROQ_API_KEY || AI_LOCAL_ONLY || candidates.length === 0) {
+    return null;
+  }
+
+  const compactCandidates = candidates.slice(0, 30).map((entry) => ({
+    id: entry.station.id,
+    name: entry.station.name,
+    owner: getStationRecommendationOwnerName(entry.station),
+    genre: entry.station.genre || entry.station.managed_group?.genre || "",
+    playlistCount: entry.slots.length,
+    trackCount: entry.trackCount,
+    featured: entry.station.is_featured === true,
+    heuristicScore: entry.score,
+    heuristicReason: entry.reason,
+  }));
+
+  const systemPrompt = "You are MusikaLokal radio recommendation AI. Return JSON only.";
+  const userPrompt = [
+    "Goal: Rank playlist-radio stations for the feed's For You radio card.",
+    "Important: every station keeps one shared playback timeline; only rank which station to recommend.",
+    `User skills: ${(profile.skills || []).join(", ") || "none"}`,
+    `User genres: ${(profile.genres || []).join(", ") || "none"}`,
+    "Return JSON shape:",
+    `{"recommendations":[{"id":"station-id","score":0-100,"reason":"short reason"}]}.`,
+    "Rules:",
+    "- Use only station ids provided.",
+    "- Keep reason under 90 characters.",
+    `- Return up to ${limit} stations sorted best to worst.`,
+    `Stations: ${JSON.stringify(compactCandidates)}`,
+  ].join("\n");
+
+  try {
+    for (const model of GROQ_MODEL_CANDIDATES) {
+      for (const useJsonMode of [true, false]) {
+        const requestPayload: Record<string, unknown> = {
+          model,
+          messages: [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: userPrompt },
+          ],
+          temperature: 0.35,
+          max_completion_tokens: 900,
+        };
+
+        if (useJsonMode) {
+          requestPayload.response_format = { type: "json_object" };
+        }
+
+        const response = await fetch(GROQ_API_URL, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${GROQ_API_KEY}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(requestPayload),
+        });
+
+        if (!response.ok) {
+          const errorBody = await response.text();
+          console.error("manage-playlists station radio groq error:", {
+            model,
+            useJsonMode,
+            status: response.status,
+            errorBody,
+          });
+          if (!GROQ_RETRYABLE_STATUS_CODES.has(response.status)) {
+            return null;
+          }
+          continue;
+        }
+
+        const payload = await response.json();
+        const content = payload?.choices?.[0]?.message?.content;
+        if (!content || typeof content !== "string") {
+          continue;
+        }
+
+        const parsed = JSON.parse(extractStationJsonObject(content));
+        const recommendations = Array.isArray(parsed?.recommendations) ? parsed.recommendations : [];
+        if (recommendations.length === 0) {
+          continue;
+        }
+
+        const byId = new Map(candidates.map((entry) => [entry.station.id, entry]));
+        const ranked: any[] = [];
+
+        for (const rec of recommendations) {
+          const id = typeof rec?.id === "string" ? rec.id : "";
+          if (!id || !byId.has(id)) continue;
+
+          const base = byId.get(id)!;
+          const parsedScore = Number(rec?.score);
+          const aiScore = Number.isFinite(parsedScore)
+            ? Math.round(clamp(parsedScore / 100) * 100)
+            : base.score;
+          const reason = typeof rec?.reason === "string" && rec.reason.trim().length > 0
+            ? rec.reason.trim().slice(0, 120)
+            : base.reason;
+
+          ranked.push({
+            ...base,
+            score: aiScore,
+            reason,
+          });
+        }
+
+        if (ranked.length === 0) {
+          continue;
+        }
+
+        const usedIds = new Set(ranked.map((entry) => entry.station.id));
+        for (const fallback of candidates) {
+          if (ranked.length >= limit) break;
+          if (usedIds.has(fallback.station.id)) continue;
+          ranked.push(fallback);
+        }
+
+        return {
+          provider: model,
+          ranked: ranked.slice(0, limit),
+        };
+      }
+    }
+  } catch (error) {
+    console.error("manage-playlists station radio groq parse error:", error);
+  }
+
+  return null;
+}
+
+async function rankStationsForRecommendation(
+  supabaseAdmin: any,
+  stationRows: any[],
+  slotsByStationId: Map<string, any[]>,
+  userId: string | null,
+  limit: number,
+) {
+  const profile = await fetchStationRecommendationProfile(supabaseAdmin, userId);
+  const deterministicRank = stationRows
+    .map((station) => {
+      const slots = slotsByStationId.get(station.id) || [];
+      const scored = scoreStationForRecommendation(station, slots, profile);
+      return {
+        station,
+        slots,
+        ...scored,
+      };
+    })
+    .sort((left, right) => right.score - left.score);
+
+  const aiRank = await rankStationsWithGroq(profile, deterministicRank, Math.max(1, limit));
+  const ranked = aiRank?.ranked?.length ? aiRank.ranked : deterministicRank.slice(0, Math.max(1, limit));
+  const provider = aiRank?.provider || (AI_LOCAL_ONLY ? "Local Ranker" : GROQ_API_KEY ? "Local Ranker" : "Local Ranker");
+  const aiPowered = Boolean(aiRank?.provider);
+  const message = aiPowered
+    ? "AI-ranked playlist radio is active."
+    : GROQ_API_KEY && !AI_LOCAL_ONLY
+      ? "Using local radio ranking while AI provider is unavailable."
+      : "Using local radio ranking.";
+
+  return {
+    aiPowered,
+    message,
+    provider,
+    stations: ranked.map((entry: any) => ({
+      ...entry.station,
+      ai_powered: aiPowered,
+      ai_provider: provider,
+      ai_reason: entry.reason,
+      ai_score: entry.score,
+      recommendation_mode: "for_you",
+      recommendation_reason: entry.reason,
+      recommendation_score: entry.score,
+    })),
+  };
 }
 
 async function getRequesterRole(supabaseAdmin: any, authUser: any, uid: string) {
@@ -1112,6 +1614,7 @@ async function attachPlaylistItemsToSlots(supabaseAdmin: any, slots: any[], item
     playlistIds.map((playlistId) => [playlistId, []]),
   );
 
+  const limitedItems: any[] = [];
   for (const item of items || []) {
     const playlistId = typeof item?.playlist_id === "string" ? item.playlist_id : "";
     if (!playlistId) continue;
@@ -1121,11 +1624,27 @@ async function attachPlaylistItemsToSlots(supabaseAdmin: any, slots: any[], item
       continue;
     }
 
-    current.push({
+    current.push(item);
+    itemsByPlaylistId.set(playlistId, current);
+    limitedItems.push(item);
+  }
+
+  const signedItems = await Promise.all(
+    limitedItems.map(async (item: any) => ({
       ...item,
       audio_url: await getSignedPlaylistAudioUrl(supabaseAdmin, item?.audio_url),
-    });
-    itemsByPlaylistId.set(playlistId, current);
+    })),
+  );
+
+  const signedItemsByOriginalItem = new Map(
+    limitedItems.map((item: any, index: number) => [item, signedItems[index]]),
+  );
+
+  for (const [playlistId, playlistItems] of itemsByPlaylistId.entries()) {
+    itemsByPlaylistId.set(
+      playlistId,
+      playlistItems.map((item: any) => signedItemsByOriginalItem.get(item) || item),
+    );
   }
 
   return (slots || []).map((slot: any) => {
@@ -1144,7 +1663,7 @@ async function fetchStationSlotsByStation(supabaseAdmin: any, stationIds: string
 
   const { data: slots, error } = await supabaseAdmin
     .from("station_playlist_slots")
-    .select("*, playlist:playlists!playlist_id(id, title, cover_image_url, track_count, created_at, updated_at)")
+    .select("*, playlist:playlists!playlist_id(id, title, description, genre, cover_image_url, track_count, created_at, updated_at)")
     .in("station_id", uniqueStationIds)
     .order("station_id", { ascending: true })
     .order("position", { ascending: true });
@@ -2163,7 +2682,16 @@ Deno.serve(async (req: Request) => {
 
     // ── browse_stations ─────────────────────────────────────────────
     if (action === "browse_stations") {
-      const { genre, featured_only, include_items, limit: lim } = params;
+      const { genre, featured_only, include_items, limit: lim, recommendation_mode } = params;
+      const recommendationMode = normalizeStationRecommendationMode(recommendation_mode);
+      const shouldRankForUser = recommendationMode === "for_you" && Boolean(uid);
+      const requestedLimit = Number(lim);
+      const responseLimit = Number.isFinite(requestedLimit) && requestedLimit > 0
+        ? Math.min(Math.max(Math.round(requestedLimit), 1), 50)
+        : 0;
+      const queryLimit = shouldRankForUser
+        ? Math.min(Math.max(responseLimit || 10, 10) * 4, 80)
+        : responseLimit;
       let query = supabaseAdmin
         .from("stations")
         .select("*, creator:profiles!creator_id(id, full_name, avatar_url), managed_profile:profiles!managed_profile_id(id, full_name, avatar_url), managed_group:groups!managed_group_id(id, name, group_type, genre)")
@@ -2172,7 +2700,7 @@ Deno.serve(async (req: Request) => {
 
       if (genre) query = query.eq("genre", genre);
       if (featured_only) query = query.eq("is_featured", true);
-      if (lim) query = query.limit(Number(lim));
+      if (queryLimit) query = query.limit(queryLimit);
 
       const { data, error } = await query;
       if (error) return jsonResponse({ error: error.message }, 500);
@@ -2185,12 +2713,39 @@ Deno.serve(async (req: Request) => {
         { includeItems: shouldIncludeItems, itemLimit: 3 },
       );
 
-      const enriched = stationRows.map((st: any) => ({
-        ...decorateStationWithLiveRotation(st, slotsByStationId.get(st.id) || []),
-        __queueReady: false,
-      }));
+      let aiProvider = "";
+      let aiPowered = false;
+      let recommendationMessage = "";
+      let orderedStationRows = stationRows;
 
-      return jsonResponse({ success: true, data: enriched });
+      if (shouldRankForUser && stationRows.length > 0) {
+        const rankedResult = await rankStationsForRecommendation(
+          supabaseAdmin,
+          stationRows,
+          slotsByStationId,
+          uid,
+          responseLimit || stationRows.length,
+        );
+        orderedStationRows = rankedResult.stations;
+        aiProvider = rankedResult.provider;
+        aiPowered = rankedResult.aiPowered;
+        recommendationMessage = rankedResult.message;
+      }
+
+      const enriched = orderedStationRows
+        .slice(0, responseLimit || orderedStationRows.length)
+        .map((st: any) => ({
+          ...decorateStationWithLiveRotation(st, slotsByStationId.get(st.id) || []),
+          __queueReady: false,
+        }));
+
+      return jsonResponse({
+        success: true,
+        data: enriched,
+        aiPowered,
+        aiProvider,
+        message: recommendationMessage,
+      });
     }
 
     // ── add_station_slot ────────────────────────────────────────────

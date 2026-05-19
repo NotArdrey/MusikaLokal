@@ -31,7 +31,7 @@ type TopbarNotification = {
     meta?: any;
 };
 
-type AdminTab = 'dashboard' | 'users' | 'reports' | 'audit' | 'stations';
+type AdminTab = 'dashboard' | 'users' | 'reports' | 'audit' | 'stations' | 'manage';
 type UsersSection = 'users_list' | 'identity_reviews';
 type ReportsSection = 'reports_list' | 'booking_incidents';
 
@@ -81,6 +81,7 @@ const resolveAdminTab = (pathname: string): AdminTab => {
     if (pathname.startsWith('/admin/reports')) return 'reports';
     if (pathname.startsWith('/admin/audit')) return 'audit';
     if (pathname.startsWith('/admin/stations')) return 'stations';
+    if (pathname.startsWith('/admin/manage')) return 'manage';
     return 'dashboard';
 };
 
@@ -524,6 +525,7 @@ export default function SidebarNav() {
                 { id: 'users', icon: 'people', label: 'Users', route: '/admin/users' },
                 { id: 'reports', icon: 'shield-checkmark', label: 'Reports', route: '/admin/reports' },
                 { id: 'stations', icon: 'radio', label: 'Stations', route: '/admin/stations' },
+                { id: 'manage', icon: 'briefcase', label: 'Manage', route: '/admin/manage' },
                 { id: 'audit', icon: 'time', label: 'Audit', route: '/admin/audit' },
             ];
         }

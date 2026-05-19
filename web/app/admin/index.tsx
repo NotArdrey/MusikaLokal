@@ -328,11 +328,6 @@ const formatHours = (value?: number | null) => {
   return `${safeValue.toFixed(1)}h`;
 };
 
-const formatPercent = (value?: number | null) => {
-  const safeValue = Number(value || 0);
-  return `${safeValue.toFixed(1)}%`;
-};
-
 const formatMetricCount = (value?: number | null) => {
   const safeValue = Math.max(0, Math.round(Number(value || 0)));
   return safeValue.toLocaleString('en-PH');
@@ -1993,41 +1988,6 @@ export default function AdminDashboardPage() {
               <Text style={[styles.pulseSubtitle, { color: colors.textSecondary, marginTop: 2 }]}>Gross: {formatCurrency(metrics.grossRevenue)} | Platform net: {formatCurrency(metrics.netRevenue)}</Text>
             </View>
 
-            <View style={[styles.pulseCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
-              <View style={styles.pulseHeader}>
-                <Text style={[styles.pulseTitle, { color: colors.textSecondary }]}>System Status</Text>
-                <Ionicons name="server-outline" size={20} color={metrics.dbHealthy && metrics.apiHealthy ? '#10b981' : '#ef4444'} />
-              </View>
-              <View style={styles.pulseRow}>
-                <Text style={[styles.pulseValueMain, { color: colors.text, fontSize: 18 }]}>Live Checks</Text>
-              </View>
-              <View style={{ marginTop: 12, gap: 6 }}>
-                <View style={styles.legendItem}>
-                  <View style={[styles.legendDot, { backgroundColor: metrics.dbHealthy ? '#10b981' : '#ef4444' }]} />
-                  <Text style={[styles.legendText, { color: colors.textSecondary }]}>Database: {metrics.dbHealthy ? 'Operational' : 'Issue detected'}</Text>
-                </View>
-                <View style={styles.legendItem}>
-                  <View style={[styles.legendDot, { backgroundColor: metrics.apiHealthy ? '#10b981' : '#ef4444' }]} />
-                  <Text style={[styles.legendText, { color: colors.textSecondary }]}>API: {metrics.apiHealthy ? 'Operational' : 'Issue detected'}</Text>
-                </View>
-                <View style={styles.legendItem}>
-                  <View style={[styles.legendDot, { backgroundColor: metrics.paymongoHealthy ? '#10b981' : '#f59e0b' }]} />
-                  <Text style={[styles.legendText, { color: colors.textSecondary }]}>
-                    Payment success: {formatPercent(metrics.paymongoSuccessRate)}
-                    {metrics.paymentMetricsAvailable ? ` (${formatMetricCount(metrics.paymentAttempts)} events)` : ''}
-                  </Text>
-                </View>
-                {metrics.paymentMetricsAvailable && (
-                  <View style={styles.legendItem}>
-                    <View style={[styles.legendDot, { backgroundColor: metrics.paymongoLinkedPaymentRate >= 90 ? '#10b981' : '#f59e0b' }]} />
-                    <Text style={[styles.legendText, { color: colors.textSecondary }]}>
-                      PayMongo-linked: {formatMetricCount(metrics.paymongoLinkedPaymentEvents)}/{formatMetricCount(metrics.paidPaymentEvents)}
-                    </Text>
-                  </View>
-                )}
-              </View>
-              <Text style={[styles.pulseSubtitle, { color: colors.textSecondary, marginTop: 8 }]}>Avg report resolve: {formatHours(metrics.avgReportResolutionHours)}</Text>
-            </View>
           </View>
 
           <View

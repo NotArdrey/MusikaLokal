@@ -247,6 +247,12 @@ const readTrimmedString = (value: unknown) => (
   typeof value === "string" ? value.trim() : ""
 );
 
+const readPublicStationArtistName = (stationData: any) => (
+  readTrimmedString(stationData?.managed_group?.name) ||
+  readTrimmedString(stationData?.managed_profile?.full_name) ||
+  readTrimmedString(stationData?.name)
+);
+
 const readTimestampMs = (value: unknown) => {
   if (typeof value !== "string") {
     return null;
@@ -283,8 +289,7 @@ export const buildStationBroadcastTrack = (stationData: any): RadioQueueTrack | 
   const stationId = readTrimmedString(stationData?.id) || "station";
   const stationName = readTrimmedString(stationData?.name) || "Live Station";
   const artist = readTrimmedString(stationData?.now_playing_artist) ||
-    readTrimmedString(stationData?.managed_profile?.full_name) ||
-    readTrimmedString(stationData?.creator?.full_name) ||
+    readPublicStationArtistName(stationData) ||
     "MusikaLokal";
   const title = readTrimmedString(stationData?.now_playing_title) || stationName;
   const artwork = getTrackArtworkUrl(stationData, null, null, null);
@@ -509,13 +514,10 @@ export const buildStationQueue = async (stationData: any): Promise<RadioQueueTra
         : typeof entry.slot?.label === "string" && entry.slot.label.trim().length > 0
           ? entry.slot.label.trim()
           : `Track ${queueIndex + 1}`;
+    const stationArtistName = readPublicStationArtistName(stationData);
     const artist = typeof entry.item?.artist_name === "string" && entry.item.artist_name.trim().length > 0
       ? entry.item.artist_name.trim()
-      : typeof stationData?.creator?.full_name === "string" && stationData.creator.full_name.trim().length > 0
-        ? stationData.creator.full_name.trim()
-        : typeof stationData?.name === "string" && stationData.name.trim().length > 0
-          ? stationData.name.trim()
-          : "MusikaLokal";
+      : stationArtistName || "MusikaLokal";
     const artwork = getTrackArtworkUrl(stationData, entry.slot, entry.playlist, entry.item);
     const track: RadioQueueTrack = {
       id: trackId,

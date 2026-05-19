@@ -46,6 +46,8 @@ const DRAWER_WIDTH = 320;
 const DRAWER_OPEN_ANIMATION_MS = 320;
 const DRAWER_CLOSE_ANIMATION_MS = 240;
 const DRAWER_NAVIGATION_DELAY_MS = DRAWER_CLOSE_ANIMATION_MS;
+const PENDING_REOPEN_LISTING_STORAGE_KEY = "pending_reopen_listing_id";
+const PENDING_REOPEN_LISTING_TYPE_STORAGE_KEY = "pending_reopen_listing_type";
 const MAX_INLINE_SCREEN_BYTES = 4 * 1024 * 1024;
 const SAFETY_CHECK_TIMEOUT_MS = 6000;
 type PortfolioUploadAsset = ImagePicker.ImagePickerAsset | DocumentPicker.DocumentPickerAsset;
@@ -127,7 +129,26 @@ const PORTFOLIO_MIME_BY_EXTENSION: Record<string, string> = {
 const EMPTY_BOOKMARKS = {
   studios: [] as any[],
   gigs: [] as any[],
-  musicians: [] as any[],
+  artists: [] as any[],
+  groups: [] as any[],
+  production: [] as any[],
+};
+
+const getBookmarkListingTypeParam = (item: any) => {
+  switch (item?.type) {
+    case "Studio":
+      return "studio";
+    case "Gig":
+      return "gig";
+    case "Artist":
+      return "profile";
+    case "Group":
+      return "group";
+    case "Production Team":
+      return "production_team";
+    default:
+      return "";
+  }
 };
 
 type ProfileTabKey = "about" | "posts" | "gigs" | "bookmarks" | "playlists";
@@ -799,6 +820,7 @@ export default function ProfileScreen() {
   const [profilePosts, setProfilePosts] = useState<any[]>([]);
   const [loadingProfilePosts, setLoadingProfilePosts] = useState(false);
   const [isOwner, setIsOwner] = useState(false);
+  const isProfileFan = isFanUserRole(profile?.role) || (isOwner && isFanUserRole(userRole));
   const [, setGigStats] = useState({ active: 0, upcoming: 0, done: 0 });
   const [gigTimeline, setGigTimeline] = useState<{
     active: any[];
@@ -815,7 +837,7 @@ export default function ProfileScreen() {
   const [isMenuMounted, setIsMenuMounted] = useState(false);
   const [isMenuTouchable, setIsMenuTouchable] = useState(false);
   const drawerProgress = useRef(new Animated.Value(0)).current;
-  const [bookmarkFilter, setBookmarkFilter] = useState<"all" | "studios" | "gigs" | "musicians">("all");
+  const [bookmarkFilter, setBookmarkFilter] = useState<"all" | "studios" | "gigs" | "artists" | "groups" | "production">("all");
   const [userPlaylists, setUserPlaylists] = useState<any[]>([]);
   const [loadingPlaylists, setLoadingPlaylists] = useState(false);
   const [playlistActionId, setPlaylistActionId] = useState<string | null>(null);
@@ -986,6 +1008,10 @@ export default function ProfileScreen() {
       return entry.image;
     }
 
+    if (typeof entry?.logo_url === "string" && entry.logo_url.trim().length > 0) {
+      return entry.logo_url;
+    }
+
     if (typeof entry?.avatar_url === "string" && entry.avatar_url.trim().length > 0) {
       return entry.avatar_url;
     }
@@ -1008,7 +1034,7 @@ export default function ProfileScreen() {
     try {
       const { data: favoritesData, error: favoritesError } = await supabase
         .from("favorites")
-        .select("group_id, profile_id, studio_id, gig_id, created_at")
+        .select("group_id, profile_id, studio_id, gig_id, production_team_id, created_at")
         .eq("user_id", viewerId)
         .order("created_at", { ascending: false });
 
@@ -1027,8 +1053,11 @@ export default function ProfileScreen() {
       const gigIds = favorites
         .map((entry: any) => entry.gig_id)
         .filter((value: any): value is string => typeof value === "string");
+      const productionTeamIds = favorites
+        .map((entry: any) => entry.production_team_id)
+        .filter((value: any): value is string => typeof value === "string");
 
-      const [groupsResult, profilesResult, studiosResult, gigsResult] = await Promise.all([
+      const [groupsResult, profilesResult, studiosResult, gigsResult, productionTeamsResult] = await Promise.all([
         groupIds.length > 0
           ? supabase
             .from("groups_with_stats")
@@ -1053,48 +1082,49 @@ export default function ProfileScreen() {
             .select("id, name, location, event_date, image, images")
             .in("id", gigIds)
           : Promise.resolve({ data: [] as any[], error: null }),
+        productionTeamIds.length > 0
+          ? supabase
+            .from("production_teams")
+            .select("id, name, description, logo_url")
+            .in("id", productionTeamIds)
+          : Promise.resolve({ data: [] as any[], error: null }),
       ]);
 
       if (groupsResult.error) throw groupsResult.error;
       if (profilesResult.error) throw profilesResult.error;
       if (studiosResult.error) throw studiosResult.error;
       if (gigsResult.error) throw gigsResult.error;
+      if (productionTeamsResult.error) throw productionTeamsResult.error;
 
       const groupById = new Map((groupsResult.data || []).map((entry: any) => [entry.id, entry]));
       const profileById = new Map((profilesResult.data || []).map((entry: any) => [entry.id, entry]));
       const studioById = new Map((studiosResult.data || []).map((entry: any) => [entry.id, entry]));
       const gigById = new Map((gigsResult.data || []).map((entry: any) => [entry.id, entry]));
+      const productionTeamById = new Map((productionTeamsResult.data || []).map((entry: any) => [entry.id, entry]));
 
-      const musicians = favorites
-        .map((entry: any) => {
-          if (entry.profile_id) {
-            const artist = profileById.get(entry.profile_id);
-            if (!artist) return null;
+      const artists = favorites
+        .filter((entry: any) => !!entry.profile_id)
+        .map((entry: any) => profileById.get(entry.profile_id))
+        .filter(Boolean)
+        .map((entry: any) => ({
+          id: entry.id,
+          name: entry.full_name || "Unnamed Artist",
+          subtitle: entry.location || "Artist",
+          image: resolveBookmarkImage(entry),
+          type: "Artist",
+        }));
 
-            return {
-              id: artist.id,
-              name: artist.full_name || "Unnamed Artist",
-              subtitle: artist.location || "Artist",
-              image: resolveBookmarkImage(artist),
-              type: "Artist",
-            };
-          }
-
-          if (entry.group_id) {
-            const musician = groupById.get(entry.group_id);
-            if (!musician) return null;
-
-            return {
-              id: musician.id,
-              name: musician.name || "Unnamed Musician",
-              subtitle: musician.location || musician.genre || "Musician",
-              image: resolveBookmarkImage(musician),
-              type: "Musician",
-            };
-          }
-
-          return null;
-        })
+      const groups = favorites
+        .filter((entry: any) => !!entry.group_id)
+        .map((entry: any) => groupById.get(entry.group_id))
+        .filter(Boolean)
+        .map((entry: any) => ({
+          id: entry.id,
+          name: entry.name || "Unnamed Group",
+          subtitle: entry.location || entry.genre || "Group",
+          image: resolveBookmarkImage(entry),
+          type: "Group",
+        }))
         .filter(Boolean);
 
       const studios = favorites
@@ -1129,10 +1159,24 @@ export default function ProfileScreen() {
           type: "Gig",
         }));
 
+      const production = favorites
+        .filter((entry: any) => !!entry.production_team_id)
+        .map((entry: any) => productionTeamById.get(entry.production_team_id))
+        .filter(Boolean)
+        .map((entry: any) => ({
+          id: entry.id,
+          name: entry.name || "Unnamed Production Team",
+          subtitle: entry.description || "Production Team",
+          image: resolveBookmarkImage(entry),
+          type: "Production Team",
+        }));
+
       setBookmarkedListings({
         studios: studios.slice(0, 8),
         gigs: gigs.slice(0, 8),
-        musicians: musicians.slice(0, 8),
+        artists: artists.slice(0, 8),
+        groups: groups.slice(0, 8),
+        production: production.slice(0, 8),
       });
     } catch (bookmarkError) {
       console.log("Error fetching bookmarks:", bookmarkError);
@@ -1509,7 +1553,7 @@ export default function ProfileScreen() {
           .order("sort_order", { ascending: true }),
       ]);
 
-      setProfile({
+      const nextProfile = {
         ...(profileStatsData || {}),
         ...profileData,
         skills: (skillsResult.data || []).map((row: any) => row.skill).filter(Boolean),
@@ -1517,10 +1561,16 @@ export default function ProfileScreen() {
         portfolio_urls: (portfolioResult.data || [])
           .map((row: any) => row.portfolio_url)
           .filter(Boolean),
-      });
+      };
+      setProfile(nextProfile);
 
       await fetchBookmarkedListings(targetId, !!ownership && !isGuest);
-      void fetchPlaylists(targetId);
+      if (isFanUserRole(nextProfile.role)) {
+        setUserPlaylists([]);
+        setLoadingPlaylists(false);
+      } else {
+        void fetchPlaylists(targetId);
+      }
       void fetchProfilePosts(targetId);
       void refreshProfileFollowLists(targetId);
       void loadProfileFollowState(targetId);
@@ -1717,9 +1767,9 @@ export default function ProfileScreen() {
       "posts",
       ...(profile?.role === "musician" && profile?.show_gig_statuses !== false ? ["gigs"] : []),
       ...(isOwner && !isGuest ? ["bookmarks"] : []),
-      "playlists",
+      ...(!isProfileFan ? ["playlists"] : []),
     ] as ProfileTabKey[],
-    [isGuest, isOwner, profile?.role, profile?.show_gig_statuses],
+    [isGuest, isOwner, isProfileFan, profile?.role, profile?.show_gig_statuses],
   );
 
   useEffect(() => {
@@ -1861,7 +1911,7 @@ export default function ProfileScreen() {
       : params.returnListingId;
 
     if (shouldReturnHome && returnListingId) {
-      void AsyncStorage.setItem("pending_reopen_listing_id", returnListingId)
+      void AsyncStorage.setItem(PENDING_REOPEN_LISTING_STORAGE_KEY, returnListingId)
         .catch(() => { })
         .finally(() => {
           router.back();
@@ -1872,16 +1922,32 @@ export default function ProfileScreen() {
     router.back();
   }, [params.returnListingId, params.returnToHome]);
 
-  const openBookmarkedListing = async (itemId: string) => {
+  const openBookmarkedListing = async (item: any) => {
+    const itemId = item?.id;
     if (!itemId) return;
+    const listingType = getBookmarkListingTypeParam(item);
 
     try {
-      await AsyncStorage.setItem("pending_reopen_listing_id", itemId);
+      const pendingWrites: [string, string][] = [
+        [PENDING_REOPEN_LISTING_STORAGE_KEY, itemId],
+      ];
+
+      if (listingType) {
+        pendingWrites.push([PENDING_REOPEN_LISTING_TYPE_STORAGE_KEY, listingType]);
+      }
+
+      await AsyncStorage.multiSet(pendingWrites);
     } catch {
       // Continue navigation even if cache write fails.
     }
 
-    router.push("/feed");
+    router.push({
+      pathname: "/feed",
+      params: {
+        reopenListingId: itemId,
+        listingType,
+      },
+    } as any);
   };
 
   const submitProfileReport = async (reason: string, details?: string) => {
@@ -2650,7 +2716,7 @@ export default function ProfileScreen() {
                 ) : (
                   <>
                     <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 16, paddingVertical: 8, gap: 12, flexGrow: 0 }} style={{ maxHeight: 60, marginBottom: 8 }}>
-                       {['all', 'studios', 'gigs', 'musicians'].map((key) => {
+                       {['all', 'studios', 'gigs', 'artists', 'groups', 'production'].map((key) => {
                           const isActive = bookmarkFilter === key;
                           return (
                             <TouchableOpacity activeOpacity={1} key={key} onPress={() => setBookmarkFilter(key as any)} style={{ paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20, backgroundColor: isActive ? colors.primary : surfaceBackground, justifyContent: "center" }}>
@@ -2664,7 +2730,13 @@ export default function ProfileScreen() {
                       {(() => {
                           let displayedItems: any[] = [];
                           if (bookmarkFilter === "all") {
-                             displayedItems = [...bookmarkedListings.studios, ...bookmarkedListings.gigs, ...bookmarkedListings.musicians];
+                             displayedItems = [
+                               ...bookmarkedListings.studios,
+                               ...bookmarkedListings.gigs,
+                               ...bookmarkedListings.artists,
+                               ...bookmarkedListings.groups,
+                               ...bookmarkedListings.production,
+                             ];
                           } else {
                              displayedItems = bookmarkedListings[bookmarkFilter];
                           }
@@ -2678,13 +2750,21 @@ export default function ProfileScreen() {
                          }
 
                          return displayedItems.map((item, index) => {
-                             let icon = item.type === "Studio" ? "business-outline" : item.type === "Gig" ? "mic-outline" : "people-outline";
+                             let icon = item.type === "Studio"
+                               ? "business-outline"
+                               : item.type === "Gig"
+                                 ? "mic-outline"
+                                 : item.type === "Artist"
+                                   ? "person-outline"
+                                 : item.type === "Production Team"
+                                   ? "people-circle-outline"
+                                   : "people-outline";
 
                              return (
                                 <TouchableOpacity
                                   key={`${item.type}-${item.id}-${index}`}
                                   activeOpacity={1}
-                                  onPress={() => openBookmarkedListing(item.id)}
+                                  onPress={() => openBookmarkedListing(item)}
                                   style={[
                                     styles.bookmarkCard,
                                     { backgroundColor: pageCardBackground, borderColor: borderSoft, width: "100%", flexDirection: "row", padding: 12, gap: 12 },
@@ -2784,7 +2864,7 @@ export default function ProfileScreen() {
                 </View>
               )}
 
-              {activeTab === "playlists" && (
+              {activeTab === "playlists" && !isProfileFan && (
                 <View style={styles.profileTabContent}>
                   <View style={[styles.playlistsSection, { backgroundColor: surfaceBackground, borderColor: borderSoft }]}>
                     <View style={styles.playlistsHeader}>

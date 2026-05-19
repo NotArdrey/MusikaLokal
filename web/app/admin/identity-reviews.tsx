@@ -361,6 +361,12 @@ const isE2EManualIdentityReview = (review?: ManualIdentityReviewEntry | null) =>
   return fingerprint.startsWith('e2e-') || submittedEmail.startsWith('e2e+');
 };
 
+const needsIdentityVerificationRetry = (review?: ManualIdentityReviewEntry | null) => (
+  Boolean(review) && !String(review?.document_fingerprint || '').trim()
+);
+
+const MISSING_FINGERPRINT_RETRY_NOTE = 'Didit did not return a verified document fingerprint from the document country, type, and number. Please repeat identity verification with a valid, readable ID.';
+
 const getErrorMessage = async (error: unknown, fallback: string) => {
   if (!error) return fallback;
 
@@ -927,10 +933,14 @@ export default function AdminIdentityReviewsPage() {
     }
   }, [identityMatchAssetCache, invokeAdminUsersManagement, showAlert]);
 
-  const openManualReviewDecisionModal = useCallback((targetReview: ManualIdentityReviewEntry, decision: 'APPROVED' | 'DECLINED') => {
+  const openManualReviewDecisionModal = useCallback((
+    targetReview: ManualIdentityReviewEntry,
+    decision: 'APPROVED' | 'DECLINED',
+    initialNotes = '',
+  ) => {
     setManualReviewTarget(targetReview);
     setManualReviewDecision(decision);
-    setManualReviewNotes('');
+    setManualReviewNotes(initialNotes);
     setDuplicateOverrideConfirmed(false);
     setManualReviewModalVisible(true);
   }, []);
@@ -953,6 +963,14 @@ export default function AdminIdentityReviewsPage() {
     const e2eDuplicateOverride = manualReviewDecision === 'APPROVED' && isE2EManualIdentityReview(manualReviewTarget);
     const effectiveDuplicateOverrideConfirmed = duplicateOverrideConfirmed || e2eDuplicateOverride;
     const requiresDuplicateOverride = manualReviewDecision === 'APPROVED' && Boolean(getIdentityMatchWarning(manualReviewTarget));
+    const requiresIdentityRetry = manualReviewDecision === 'APPROVED' && needsIdentityVerificationRetry(manualReviewTarget);
+    const isRetryRequest = manualReviewDecision === 'DECLINED' && needsIdentityVerificationRetry(manualReviewTarget);
+
+    if (requiresIdentityRetry) {
+      showAlert('warning', 'Verification retry required', 'Didit did not return the document data needed for approval. Require the user to repeat identity verification instead.');
+      return;
+    }
+
     if (requiresDuplicateOverride && (!effectiveDuplicateOverrideConfirmed || !manualReviewNotes.trim())) {
       showAlert('warning', 'Duplicate override required', 'Confirm the duplicate override and add admin notes before approving this review.');
       return;
@@ -996,7 +1014,11 @@ export default function AdminIdentityReviewsPage() {
 
       showAlert(
         emailSent ? 'success' : 'warning',
-        manualReviewDecision === 'APPROVED' ? 'Identity approved' : 'Identity declined',
+        manualReviewDecision === 'APPROVED'
+          ? 'Identity approved'
+          : isRetryRequest
+            ? 'Verification retry requested'
+            : 'Identity declined',
         emailMessage,
       );
 
@@ -1063,6 +1085,7 @@ export default function AdminIdentityReviewsPage() {
 
   const manualReviewDiditInfo = getDiditReviewInfo(manualReviewTarget);
   const manualReviewMatchWarning = getIdentityMatchWarning(manualReviewTarget);
+  const manualReviewRequiresRetry = manualReviewDecision === 'DECLINED' && needsIdentityVerificationRetry(manualReviewTarget);
   const identityPreviewWarning = getIdentityMatchWarning(identityMatchPreview);
   const identityPreviewAccounts = identityPreviewWarning?.matched_accounts || [];
   const identityPreviewStaleAccounts = identityPreviewWarning?.stale_matched_accounts || [];
@@ -1197,6 +1220,7 @@ export default function AdminIdentityReviewsPage() {
                 const matchTypeLabels = (identityMatchWarning?.match_types || [identityMatchWarning?.matched_on])
                   .filter(Boolean)
                   .map((matchType) => formatIdentityMatchType(String(matchType)));
+                const requiresVerificationRetry = needsIdentityVerificationRetry(review);
 
                 return (
                   <View
@@ -1312,41 +1336,63 @@ export default function AdminIdentityReviewsPage() {
                         <Text style={[styles.smallActionText, { color: colors.text }]}>Selfie</Text>
                       </TouchableOpacity>
 
-                      <TouchableOpacity
-                        testID={`admin-identity-review-approve-${review.id}`}
-                        accessibilityLabel={`admin-identity-review-approve-${review.id}`}
-                        activeOpacity={1}
-                        disabled={isReviewBusy}
-                        onPress={() => openManualReviewDecisionModal(review, 'APPROVED')}
-                        style={[
-                          styles.smallActionButtonFilled,
-                          { backgroundColor: '#16A34A', opacity: isReviewBusy ? 0.6 : 1 },
-                        ]}
-                      >
-                        {isReviewBusy ? (
-                          <ActivityIndicator size="small" color="#FFFFFF" />
-                        ) : (
-                          <Text style={styles.smallActionTextFilled}>Approve</Text>
-                        )}
-                      </TouchableOpacity>
+                      {requiresVerificationRetry ? (
+                        <TouchableOpacity
+                          testID={`admin-identity-review-retry-${review.id}`}
+                          accessibilityLabel={`admin-identity-review-retry-${review.id}`}
+                          activeOpacity={1}
+                          disabled={isReviewBusy}
+                          onPress={() => openManualReviewDecisionModal(review, 'DECLINED', MISSING_FINGERPRINT_RETRY_NOTE)}
+                          style={[
+                            styles.smallActionButtonFilled,
+                            { backgroundColor: '#D97706', opacity: isReviewBusy ? 0.6 : 1 },
+                          ]}
+                        >
+                          {isReviewBusy ? (
+                            <ActivityIndicator size="small" color="#FFFFFF" />
+                          ) : (
+                            <Text style={styles.smallActionTextFilled}>Require Retry</Text>
+                          )}
+                        </TouchableOpacity>
+                      ) : (
+                        <>
+                          <TouchableOpacity
+                            testID={`admin-identity-review-approve-${review.id}`}
+                            accessibilityLabel={`admin-identity-review-approve-${review.id}`}
+                            activeOpacity={1}
+                            disabled={isReviewBusy}
+                            onPress={() => openManualReviewDecisionModal(review, 'APPROVED')}
+                            style={[
+                              styles.smallActionButtonFilled,
+                              { backgroundColor: '#16A34A', opacity: isReviewBusy ? 0.6 : 1 },
+                            ]}
+                          >
+                            {isReviewBusy ? (
+                              <ActivityIndicator size="small" color="#FFFFFF" />
+                            ) : (
+                              <Text style={styles.smallActionTextFilled}>Approve</Text>
+                            )}
+                          </TouchableOpacity>
 
-                      <TouchableOpacity
-                        testID={`admin-identity-review-decline-${review.id}`}
-                        accessibilityLabel={`admin-identity-review-decline-${review.id}`}
-                        activeOpacity={1}
-                        disabled={isReviewBusy}
-                        onPress={() => openManualReviewDecisionModal(review, 'DECLINED')}
-                        style={[
-                          styles.smallActionButtonFilled,
-                          { backgroundColor: '#DC2626', opacity: isReviewBusy ? 0.6 : 1 },
-                        ]}
-                      >
-                        {isReviewBusy ? (
-                          <ActivityIndicator size="small" color="#FFFFFF" />
-                        ) : (
-                          <Text style={styles.smallActionTextFilled}>Decline</Text>
-                        )}
-                      </TouchableOpacity>
+                          <TouchableOpacity
+                            testID={`admin-identity-review-decline-${review.id}`}
+                            accessibilityLabel={`admin-identity-review-decline-${review.id}`}
+                            activeOpacity={1}
+                            disabled={isReviewBusy}
+                            onPress={() => openManualReviewDecisionModal(review, 'DECLINED')}
+                            style={[
+                              styles.smallActionButtonFilled,
+                              { backgroundColor: '#DC2626', opacity: isReviewBusy ? 0.6 : 1 },
+                            ]}
+                          >
+                            {isReviewBusy ? (
+                              <ActivityIndicator size="small" color="#FFFFFF" />
+                            ) : (
+                              <Text style={styles.smallActionTextFilled}>Decline</Text>
+                            )}
+                          </TouchableOpacity>
+                        </>
+                      )}
                     </View>
                   </View>
                 );
@@ -1380,6 +1426,17 @@ export default function AdminIdentityReviewsPage() {
             <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>
               Document: {manualReviewTarget?.document_type || '-'}
             </Text>
+            {manualReviewRequiresRetry ? (
+              <View style={[styles.duplicateWarningBox, { backgroundColor: isDark ? 'rgba(245, 158, 11, 0.10)' : '#FFFBEB', borderColor: isDark ? '#FBBF24' : '#F59E0B' }]}>
+                <View style={styles.duplicateWarningTitleRow}>
+                  <Ionicons name="refresh-outline" size={16} color={isDark ? '#FBBF24' : '#D97706'} />
+                  <Text style={[styles.duplicateWarningTitle, { color: isDark ? '#FBBF24' : '#B45309' }]}>Verification Retry Required</Text>
+                </View>
+                <Text style={[styles.duplicateWarningText, { color: isDark ? '#F8FAFC' : '#92400E' }]}>
+                  Didit did not return the verified document fingerprint data needed for approval. This decision sends the user back through verification.
+                </Text>
+              </View>
+            ) : null}
             {manualReviewDiditInfo ? (
               <View style={[styles.diditReviewBox, { backgroundColor: isDark ? '#172554' : '#EFF6FF', borderColor: '#3B82F6' }]}>
                 <View style={styles.duplicateWarningTitleRow}>
@@ -1500,7 +1557,11 @@ export default function AdminIdentityReviewsPage() {
                 {manualReviewSubmitting ? (
                   <ActivityIndicator size="small" color="#FFFFFF" />
                 ) : (
-                  <Text style={styles.modalButtonText}>Confirm {manualReviewDecision === 'APPROVED' ? 'Approval' : 'Decline'}</Text>
+                  <Text style={styles.modalButtonText}>
+                    {manualReviewRequiresRetry
+                      ? 'Require Retry'
+                      : `Confirm ${manualReviewDecision === 'APPROVED' ? 'Approval' : 'Decline'}`}
+                  </Text>
                 )}
               </TouchableOpacity>
             </View>

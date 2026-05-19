@@ -11,7 +11,7 @@ import React, {
   useState,
   type ReactNode,
 } from "react";
-import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { Platform, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { supabase } from "../../lib/supabase";
 import TrackPlayer, { Event, RepeatMode, State, isTrackPlayerAvailable } from "../audio/safeTrackPlayer";
@@ -35,6 +35,7 @@ import { useTheme } from "./ThemeContext";
 export const RADIO_MINI_PLAYER_HEIGHT = 60;
 export const RADIO_MINI_PLAYER_STACK_GAP = 8;
 const RADIO_MINI_PLAYER_DEBUG_LOGS = __DEV__;
+const RADIO_PLAYER_START_QUEUE_SIZE = 6;
 
 const logRadioMiniPlayerDebug = (event: string, payload: Record<string, unknown>) => {
   if (RADIO_MINI_PLAYER_DEBUG_LOGS) {
@@ -44,6 +45,38 @@ const logRadioMiniPlayerDebug = (event: string, payload: Record<string, unknown>
 const normalizeQueueIndex = (queueLength: number, index: number) => {
   if (queueLength <= 0) return 0;
   return ((index % queueLength) + queueLength) % queueLength;
+};
+
+const buildInitialPlayerQueue = (
+  fullQueue: RadioQueueTrack[],
+  startIndex: number,
+  autoplayEnabled: boolean,
+) => {
+  if (fullQueue.length === 0) {
+    return {
+      initialQueue: [],
+      remainingQueue: [],
+    };
+  }
+
+  const safeIndex = normalizeQueueIndex(fullQueue.length, startIndex);
+
+  if (!autoplayEnabled) {
+    return {
+      initialQueue: [fullQueue[safeIndex]],
+      remainingQueue: [],
+    };
+  }
+
+  const orderedQueue = fullQueue.map((_, offset) => (
+    fullQueue[normalizeQueueIndex(fullQueue.length, safeIndex + offset)]
+  ));
+  const initialQueueLength = Math.min(RADIO_PLAYER_START_QUEUE_SIZE, orderedQueue.length);
+
+  return {
+    initialQueue: orderedQueue.slice(0, initialQueueLength),
+    remainingQueue: orderedQueue.slice(initialQueueLength),
+  };
 };
 
 const deriveIsPlaying = (playWhenReady: boolean, playbackState: string | null) => {
@@ -414,9 +447,11 @@ export function RadioPlayerProvider({ children }: { children: ReactNode }) {
     }
 
     const safeIndex = normalizeQueueIndex(fullQueue.length, targetIndex);
-    const playerQueue = isAutoplayEnabledRef.current
-      ? fullQueue
-      : fullQueue.slice(0, safeIndex + 1);
+    const { initialQueue: playerQueue, remainingQueue } = buildInitialPlayerQueue(
+      fullQueue,
+      safeIndex,
+      isAutoplayEnabledRef.current,
+    );
 
     queueTransitionInFlightRef.current = true;
 
@@ -453,7 +488,7 @@ export function RadioPlayerProvider({ children }: { children: ReactNode }) {
         return;
       }
 
-      await TrackPlayer.skip(safeIndex);
+      await TrackPlayer.skip(0);
       if (!isCurrentRequest()) {
         return;
       }
@@ -479,6 +514,23 @@ export function RadioPlayerProvider({ children }: { children: ReactNode }) {
       } else {
         setIsPlaying(false);
       }
+
+      if (remainingQueue.length > 0) {
+        void (async () => {
+          if (!isCurrentRequest()) {
+            return;
+          }
+
+          try {
+            await TrackPlayer.add(remainingQueue);
+            if (isCurrentRequest()) {
+              playerQueueLengthRef.current = playerQueue.length + remainingQueue.length;
+            }
+          } catch (error) {
+            console.warn("Radio append remaining queue error:", error);
+          }
+        })();
+      }
     } catch (error) {
       if (!isCurrentRequest()) {
         return;
@@ -503,6 +555,30 @@ export function RadioPlayerProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     playQueueIndexRef.current = playQueueIndex;
   }, [playQueueIndex]);
+
+  const recordStationTuneIn = useCallback((stationData: any) => {
+    const stationId = typeof stationData?.id === "string" ? stationData.id : "";
+    if (!stationId) {
+      return;
+    }
+
+    void supabase.functions.invoke("manage-playlists", {
+      body: {
+        action: "record_play_event",
+        event_type: "station_tune_in",
+        station_id: stationId,
+        playlist_id: null,
+        item_id: null,
+        platform: Platform.OS,
+      },
+    }).then(({ error }) => {
+      if (error) {
+        console.warn("Radio station tune-in event error:", error);
+      }
+    }).catch((error) => {
+      console.warn("Radio station tune-in event error:", error);
+    });
+  }, []);
 
   const tuneIn = useCallback(async (stationData: any, slotIdx = 0) => {
     if (!stationData) return;
@@ -556,12 +632,8 @@ export function RadioPlayerProvider({ children }: { children: ReactNode }) {
     }
 
     try {
-      const playableStation = await ensureStationData(stationData);
-      if (!isPlaybackRequestCurrent(requestId)) {
-        return;
-      }
-
-      const broadcastTrack = buildStationBroadcastTrack(playableStation);
+      let playableStation = stationData;
+      let broadcastTrack = buildStationBroadcastTrack(playableStation);
       if (broadcastTrack) {
         await applyPlayerQueue(
           playableStation,
@@ -571,12 +643,39 @@ export function RadioPlayerProvider({ children }: { children: ReactNode }) {
           requestId,
           0,
         );
+        recordStationTuneIn(playableStation);
         return;
       }
 
-      const queue = await buildStationQueue(playableStation);
+      let queue = await buildStationQueue(playableStation);
       if (!isPlaybackRequestCurrent(requestId)) {
         return;
+      }
+
+      if (queue.length === 0 && playableStation.__queueReady !== true) {
+        playableStation = await ensureStationData(stationData);
+        if (!isPlaybackRequestCurrent(requestId)) {
+          return;
+        }
+
+        broadcastTrack = buildStationBroadcastTrack(playableStation);
+        if (broadcastTrack) {
+          await applyPlayerQueue(
+            playableStation,
+            [broadcastTrack],
+            0,
+            true,
+            requestId,
+            0,
+          );
+          recordStationTuneIn(playableStation);
+          return;
+        }
+
+        queue = await buildStationQueue(playableStation);
+        if (!isPlaybackRequestCurrent(requestId)) {
+          return;
+        }
       }
 
       if (queue.length === 0) {
@@ -600,12 +699,13 @@ export function RadioPlayerProvider({ children }: { children: ReactNode }) {
         requestId,
         startPositionSeconds,
       );
+      recordStationTuneIn(playableStation);
     } finally {
       if (stationId) {
         setLoadingStationId((currentId) => (currentId === stationId ? null : currentId));
       }
     }
-  }, [applyPlayerQueue, beginPlaybackRequest, clearLocalPlaybackState, ensureStationData, invalidatePlaybackRequests, isPlaybackRequestCurrent, isPlaying]);
+  }, [applyPlayerQueue, beginPlaybackRequest, clearLocalPlaybackState, ensureStationData, invalidatePlaybackRequests, isPlaybackRequestCurrent, isPlaying, recordStationTuneIn]);
 
   const skipPrevious = useCallback(async () => {
     const stationData = activeStationRef.current;

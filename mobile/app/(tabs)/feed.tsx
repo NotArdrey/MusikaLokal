@@ -78,6 +78,7 @@ const moderateScale = (size: number, factor = 0.3) => {
 };
 
 type FeedTab = "for_you" | "following";
+const isForYouFeedTab = (feedTab: FeedTab) => feedTab === "for_you";
 const FEED_TABS = [
   { key: "for_you", label: "For You" },
   { key: "following", label: "Following" },
@@ -300,6 +301,89 @@ const getFeedItemCreatedTime = (item: any) => {
 
 const sortFeedItemsNewestFirst = (items: any[]) =>
   [...items].sort((a, b) => getFeedItemCreatedTime(b) - getFeedItemCreatedTime(a));
+
+const clampFeedScore = (value: number, min = 0, max = 100) => Math.max(min, Math.min(max, value));
+
+const normalizeRecommendationScore = (value: unknown) => {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return 0;
+  return clampFeedScore(numeric <= 1 ? numeric * 100 : numeric);
+};
+
+const getExplicitRecommendationScore = (item: any) => {
+  const score = normalizeRecommendationScore(item?.aiScore ?? item?.ai_score);
+  if (score > 0) return score;
+  return normalizeRecommendationScore(item?.similarity);
+};
+
+const getForYouRecencyScore = (item: any) => {
+  const createdTime = getFeedItemCreatedTime(item);
+  if (!createdTime) return 20;
+  const ageDays = Math.max(0, (Date.now() - createdTime) / (1000 * 60 * 60 * 24));
+  if (ageDays <= 1) return 100;
+  if (ageDays <= 7) return 82;
+  if (ageDays <= 30) return 58;
+  if (ageDays <= 90) return 34;
+  return 18;
+};
+
+const getForYouEngagementScore = (item: any) => {
+  const reactions = Number(item?.reaction_count || 0);
+  const comments = Number(item?.comment_count || 0);
+  const shares = Number(item?.share_count || 0);
+  return clampFeedScore(Math.log1p(Math.max(0, reactions) + Math.max(0, comments) * 2 + Math.max(0, shares) * 3) * 22);
+};
+
+const getRecommendationProfileTargetId = (item: any) => {
+  if (item?.social_follow_target_type === "profile" && typeof item?.social_follow_target_id === "string") {
+    return item.social_follow_target_id;
+  }
+
+  return [item?.owner_id, item?.organizer_id, item?.author_id].find(
+    (value) => typeof value === "string" && value.length > 0,
+  ) || "";
+};
+
+const buildForYouRecommendationSignals = (items: any[]) => {
+  const signals = new Map<string, number>();
+
+  for (const item of items) {
+    if (item?.__feedKind !== "ai_card") continue;
+    const targetId = getRecommendationProfileTargetId(item);
+    if (!targetId) continue;
+    const score = getExplicitRecommendationScore(item) || 62;
+    signals.set(targetId, Math.max(signals.get(targetId) || 0, score));
+  }
+
+  return signals;
+};
+
+const sortForYouFeedItems = (items: any[]) => {
+  const recommendationSignals = buildForYouRecommendationSignals(items);
+
+  return [...items].sort((a, b) => {
+    const scoreItem = (item: any) => {
+      const explicitScore = getExplicitRecommendationScore(item);
+      const recencyScore = getForYouRecencyScore(item);
+      const engagementScore = getForYouEngagementScore(item);
+
+      if (item?.__feedKind === "ai_card") {
+        return (explicitScore || 62) * 0.7 + recencyScore * 0.2 + engagementScore * 0.1;
+      }
+
+      const authorSignal = typeof item?.author_id === "string"
+        ? recommendationSignals.get(item.author_id) || 0
+        : 0;
+      const followSignal = item?.is_following === true ? 52 : 0;
+
+      return Math.max(authorSignal, followSignal) * 0.55 + recencyScore * 0.3 + engagementScore * 0.15;
+    };
+
+    const scoreDelta = scoreItem(b) - scoreItem(a);
+    if (Math.abs(scoreDelta) > 0.001) return scoreDelta;
+    return getFeedItemCreatedTime(b) - getFeedItemCreatedTime(a);
+  });
+};
 
 const feedLastFetchAt: Record<FeedTab, number> = {
   for_you: 0,
@@ -674,84 +758,6 @@ const normalizeFeedPost = (post: any) => {
     my_reaction: post?.my_reaction ?? post?.user_reaction ?? null,
     visibility: visibility || "public",
     media,
-  };
-};
-
-const fetchPublicFeedPostsFallback = async (
-  limit = FEED_PAGE_SIZE,
-  cursor?: string | null,
-  userId?: string | null,
-) => {
-  const startedAt = Date.now();
-  logLoadTime("Feed", "public-fallback-start", {
-    cursor: cursor ? "present" : undefined,
-    userId,
-  });
-
-  const { data, error } = await supabase.functions.invoke("manage-social-feed", {
-    body: {
-      action: "get_feed",
-      cursor: cursor ?? null,
-      feed_type: "public",
-      include_entities: true,
-      limit,
-      personalize: false,
-      ...(userId ? { userId } : {}),
-    },
-  });
-  if (error) throw error;
-
-  let rows = Array.isArray(data?.items)
-    ? data.items
-    : Array.isArray(data?.data)
-      ? data.data
-      : [];
-  let nextCursor = data?.nextCursor || null;
-
-  logLoadTime("Feed", "public-fallback-edge-complete", {
-    durationMs: Date.now() - startedAt,
-    posts: rows.length,
-  });
-
-  if (rows.length === 0 && !cursor) {
-    const directStartedAt = Date.now();
-    let query = supabase
-      .from("feed_posts")
-      .select(
-        "id, author_id, post_type, content, visibility, is_pinned, linked_playlist_id, linked_product_id, reaction_count, comment_count, share_count, created_at, updated_at, author:profiles!author_id(id, full_name, avatar_url, role), media:post_media(id, post_id, media_type, storage_path, thumbnail_path, is_cover, mime_type, width, height, duration_seconds, display_order, safety_status, safety_metadata)",
-      )
-      .eq("visibility", "public")
-      .eq("is_hidden", false)
-      .order("created_at", { ascending: false })
-      .limit(limit + 1);
-
-    const { data: directRows, error: directError } = await query;
-    if (directError) {
-      logLoadTime("Feed", "public-fallback-direct-failed", {
-        durationMs: Date.now() - directStartedAt,
-        message: directError.message,
-      });
-    } else {
-      const directPage = directRows || [];
-      rows = directPage.slice(0, limit);
-      nextCursor =
-        directPage.length > limit
-          ? rows[rows.length - 1]?.created_at || null
-          : null;
-      logLoadTime("Feed", "public-fallback-direct-complete", {
-        durationMs: Date.now() - directStartedAt,
-        posts: rows.length,
-      });
-    }
-  }
-
-  logLoadTime("Feed", "public-fallback-complete", {
-    posts: rows.length,
-  });
-
-  return {
-    posts: rows.map(normalizeFeedPost),
-    nextCursor,
   };
 };
 
@@ -1325,13 +1331,6 @@ const getStationBroadcastStreamUrl = (station: any) => {
   return streamStatus === "live" ? streamUrl : "";
 };
 
-const getStationTrackCount = (station: any) =>
-  getStationSlots(station).reduce((total: number, slot: any) => {
-    const items = Array.isArray(slot?.playlist?.items) ? slot.playlist.items : [];
-    const playlistCount = Number(slot?.playlist?.track_count || 0);
-    return total + Math.max(items.length, playlistCount);
-  }, 0);
-
 const hasStationPlayableItem = (item: any) => {
   const storagePath = typeof item?.teaser?.storage_path === "string" && item.teaser.storage_path.trim().length > 0;
   const teaserFilePath = typeof item?.teaser?.file_path === "string" && item.teaser.file_path.trim().length > 0;
@@ -1390,13 +1389,28 @@ const getStationNowPlayingTitle = (station: any, slotIndex = 0) => {
 
 const FEED_RADIO_CACHE_TTL_MS = 60_000;
 const FEED_RADIO_DEFER_MS = 250;
-let feedRadioStationCache: { fetchedAt: number; station: any | null } = {
+type FeedLiveRadioRequest = {
+  recommendationEnabled?: boolean;
+  recommendationUserId?: string | null;
+};
+let feedRadioStationCache: { fetchedAt: number; key: string; station: any | null } = {
   fetchedAt: 0,
+  key: "guest",
   station: null,
 };
-let feedRadioStationPromise: Promise<any | null> | null = null;
+let feedRadioStationPromise: { key: string; promise: Promise<any | null> } | null = null;
 
-const getFreshFeedRadioStationCache = () => {
+const getFeedRadioCacheKey = (request?: FeedLiveRadioRequest) => (
+  request?.recommendationEnabled && request.recommendationUserId
+    ? `for-you:${request.recommendationUserId}`
+    : "guest"
+);
+
+const getFreshFeedRadioStationCache = (cacheKey = "guest") => {
+  if (feedRadioStationCache.key !== cacheKey) {
+    return null;
+  }
+
   if (Date.now() - feedRadioStationCache.fetchedAt >= FEED_RADIO_CACHE_TTL_MS) {
     return null;
   }
@@ -1404,11 +1418,14 @@ const getFreshFeedRadioStationCache = () => {
   return feedRadioStationCache;
 };
 
-const fetchFeedLiveRadioStation = async () => {
-  const freshCache = getFreshFeedRadioStationCache();
+const fetchFeedLiveRadioStation = async (request?: FeedLiveRadioRequest) => {
+  const cacheKey = getFeedRadioCacheKey(request);
+  const shouldUseRecommendation = Boolean(request?.recommendationEnabled && request?.recommendationUserId);
+  const freshCache = getFreshFeedRadioStationCache(cacheKey);
   if (freshCache) {
     logLoadTime("FeedRadio", "cache-hit", {
       details: {
+        cacheKey,
         playableStations: freshCache.station && isStationPlayable(freshCache.station) ? 1 : 0,
         stations: freshCache.station ? 1 : 0,
       },
@@ -1416,22 +1433,23 @@ const fetchFeedLiveRadioStation = async () => {
     return freshCache.station;
   }
 
-  if (feedRadioStationPromise) {
+  if (feedRadioStationPromise?.key === cacheKey) {
     logLoadTime("FeedRadio", "dedupe-hit", {
-      details: { includeItems: true },
+      details: { cacheKey, includeItems: true },
     });
-    return feedRadioStationPromise;
+    return feedRadioStationPromise.promise;
   }
 
-  feedRadioStationPromise = (async () => {
-    const fetchStations = async (featuredOnly: boolean) => {
+  const promise = (async () => {
+    const fetchStations = async (featuredOnly: boolean, useRecommendation = false) => {
       const startedAt = Date.now();
       const { data, error } = await supabase.functions.invoke("manage-playlists", {
         body: {
           action: "browse_stations",
           featured_only: featuredOnly,
           include_items: true,
-          limit: 5,
+          limit: useRecommendation ? 12 : 5,
+          ...(useRecommendation ? { recommendation_mode: "for_you" } : {}),
         },
       });
 
@@ -1448,6 +1466,8 @@ const fetchFeedLiveRadioStation = async () => {
       logLoadTime("FeedRadio", "edge-complete", {
         details: {
           featuredOnly,
+          provider: data?.aiProvider || "",
+          recommended: useRecommendation,
           playableStations: rows.filter(isStationPlayable).length,
           stations: rows.length,
         },
@@ -1559,13 +1579,20 @@ const fetchFeedLiveRadioStation = async () => {
 
     const startedAt = Date.now();
     logLoadTime("FeedRadio", "fetch-start", {
-      details: { includeItems: true },
+      details: { cacheKey, includeItems: true, recommended: shouldUseRecommendation },
     });
 
-    const featuredStations = await fetchStations(true);
-    let stations = featuredStations.some(isStationPlayable)
-      ? featuredStations
-      : await fetchStations(false);
+    const recommendedStations = shouldUseRecommendation
+      ? await fetchStations(false, true)
+      : [];
+    const featuredStations = recommendedStations.some(isStationPlayable)
+      ? []
+      : await fetchStations(true);
+    let stations = recommendedStations.some(isStationPlayable)
+      ? recommendedStations
+      : featuredStations.some(isStationPlayable)
+        ? featuredStations
+        : await fetchStations(false);
     if (!stations.some(isStationPlayable)) {
       const playlistStation = await fetchPlaylistStationFallback();
       stations = playlistStation ? [playlistStation] : stations;
@@ -1574,12 +1601,14 @@ const fetchFeedLiveRadioStation = async () => {
     const station = stations.find(isStationPlayable) || stations[0] || null;
     feedRadioStationCache = {
       fetchedAt: Date.now(),
+      key: cacheKey,
       station,
     };
 
     logLoadTime("FeedRadio", "fetch-complete", {
       details: {
         playableStations: stations.filter(isStationPlayable).length,
+        recommended: shouldUseRecommendation,
         stations: stations.length,
       },
       durationMs: Date.now() - startedAt,
@@ -1587,11 +1616,14 @@ const fetchFeedLiveRadioStation = async () => {
 
     return station;
   })();
+  feedRadioStationPromise = { key: cacheKey, promise };
 
   try {
-    return await feedRadioStationPromise;
+    return await promise;
   } finally {
-    feedRadioStationPromise = null;
+    if (feedRadioStationPromise?.key === cacheKey) {
+      feedRadioStationPromise = null;
+    }
   }
 };
 
@@ -1600,6 +1632,8 @@ type LiveRadioCardProps = {
   cardColor: string;
   isDark: boolean;
   primaryColor: string;
+  recommendationEnabled: boolean;
+  recommendationUserId: string | null;
   textColor: string;
   mutedTextColor: string;
 };
@@ -1609,6 +1643,8 @@ const LiveRadioCard = React.memo(function LiveRadioCard({
   cardColor,
   isDark,
   primaryColor,
+  recommendationEnabled,
+  recommendationUserId,
   textColor,
   mutedTextColor,
 }: LiveRadioCardProps) {
@@ -1621,13 +1657,18 @@ const LiveRadioCard = React.memo(function LiveRadioCard({
     togglePlayPause,
     tuneIn,
   } = useRadioPlayer();
-  const cachedRadioStation = getFreshFeedRadioStationCache()?.station ?? null;
+  const radioRequest = useMemo<FeedLiveRadioRequest>(() => ({
+    recommendationEnabled,
+    recommendationUserId,
+  }), [recommendationEnabled, recommendationUserId]);
+  const radioCacheKey = useMemo(() => getFeedRadioCacheKey(radioRequest), [radioRequest]);
+  const cachedRadioStation = getFreshFeedRadioStationCache(radioCacheKey)?.station ?? null;
   const [featuredStation, setFeaturedStation] = useState<any | null>(cachedRadioStation);
   const [loadingStation, setLoadingStation] = useState(!cachedRadioStation);
 
   useEffect(() => {
     let cancelled = false;
-    const cachedStation = getFreshFeedRadioStationCache()?.station ?? null;
+    const cachedStation = getFreshFeedRadioStationCache(radioCacheKey)?.station ?? null;
 
     if (cachedStation) {
       setFeaturedStation(cachedStation);
@@ -1639,7 +1680,7 @@ const LiveRadioCard = React.memo(function LiveRadioCard({
 
     setLoadingStation(true);
     const deferTimer = setTimeout(() => {
-      void fetchFeedLiveRadioStation()
+      void fetchFeedLiveRadioStation(radioRequest)
         .then((station) => {
           if (!cancelled) {
             setFeaturedStation(station);
@@ -1665,7 +1706,7 @@ const LiveRadioCard = React.memo(function LiveRadioCard({
       cancelled = true;
       clearTimeout(deferTimer);
     };
-  }, []);
+  }, [radioCacheKey, radioRequest]);
 
   useEffect(() => {
     if (!activeStation?.id) {
@@ -1681,9 +1722,7 @@ const LiveRadioCard = React.memo(function LiveRadioCard({
   const displayStation = activeStation || liveFeaturedStation || null;
   const hasDisplayStation = Boolean(displayStation?.id);
   const hasBroadcastStream = Boolean(getStationBroadcastStreamUrl(displayStation));
-  const stationSlots = getStationSlots(displayStation);
   const stationSlotCount = getStationSlotCount(displayStation);
-  const stationTrackCount = getStationTrackCount(displayStation);
   const stationPlayableTrackCount = getStationPlayableTrackCount(displayStation);
   const isCurrentStation = Boolean(
     displayStation?.id && activeStation?.id && displayStation.id === activeStation.id,
@@ -1707,48 +1746,27 @@ const LiveRadioCard = React.memo(function LiveRadioCard({
       ? currentTrack?.title || getStationNowPlayingTitle(displayStation, currentSlotIndex)
       : getStationNowPlayingTitle(displayStation, 0)
     : "Check back for live stations";
-  const rotationSummary = hasDisplayStation
-    ? hasBroadcastStream
-      ? "Live stream"
-      : stationTrackCount > 0
-      ? `${stationTrackCount} track${stationTrackCount === 1 ? "" : "s"}`
-      : stationSlotCount > 0
-        ? `${stationSlotCount} playlist${stationSlotCount === 1 ? "" : "s"}`
-        : "No station"
-    : "Offline";
-  const playButtonLabel = loadingStation || isTuneInLoading
-    ? "Loading"
-    : !canTuneIn
-      ? "Offline"
-      : isCurrentStation && isPlaying
-        ? "Pause"
-        : isCurrentStation
-          ? "Resume"
-          : "Listen";
-  const playIcon = loadingStation || isTuneInLoading
-    ? null
-    : isCurrentStation && isPlaying
-      ? "pause"
-      : "play";
-  const statusBadgeLabel = loadingStation ? "..." : canTuneIn ? "LIVE" : "OFF";
   const primaryTrackTitle = hasDisplayStation
     ? currentTrack?.title || getStationNowPlayingTitle(displayStation, currentSlotIndex)
     : nowPlayingTitle;
+  const stationRecommendationReason =
+    displayStation?.ai_reason ||
+    displayStation?.recommendation_reason ||
+    "";
   const primaryArtistName =
-    currentTrack?.artist ||
-    displayStation?.creator?.full_name ||
-    displayStation?.creator?.stage_name ||
+    currentTrack?.sourceArtistName ||
+    displayStation?.now_playing_artist ||
+    displayStation?.managed_group?.name ||
+    displayStation?.managed_profile?.full_name ||
     "MusikaLokal artists";
+  const liveRadioSubtitle = Array.from(
+    new Set(
+      [primaryTrackTitle, primaryArtistName]
+        .map((value) => (typeof value === "string" ? value.trim() : ""))
+        .filter(Boolean),
+    ),
+  ).join(" | ");
   const stationArtworkUrl = displayStation?.cover_image_url || displayStation?.creator?.avatar_url || null;
-
-  const openStationDetails = useCallback(() => {
-    if (!displayStation?.id) return;
-
-    router.push({
-      pathname: "/station_details" as any,
-      params: { station_id: String(displayStation.id) },
-    });
-  }, [displayStation?.id]);
 
   const handlePlayPress = useCallback(async () => {
     if (!displayStation || loadingStation || isTuneInLoading) {
@@ -1810,16 +1828,20 @@ const LiveRadioCard = React.memo(function LiveRadioCard({
       <View style={styles.liveRadioContent}>
         <View style={styles.liveRadioEyebrowRow}>
           <View style={[styles.liveDot, { backgroundColor: isPlaying && isCurrentStation ? "#22C55E" : primaryColor }]} />
-          <Text style={[styles.liveRadioEyebrow, { color: primaryColor }]}>Live Radio</Text>
+          <Text style={[styles.liveRadioEyebrow, { color: primaryColor }]}>
+            {stationRecommendationReason ? "For You Radio" : "Live Radio"}
+          </Text>
         </View>
         <Text style={[styles.liveRadioTitle, { color: textColor }]} numberOfLines={1}>
           {stationName}
         </Text>
         <Text style={[styles.liveRadioSubtitle, { color: mutedTextColor }]} numberOfLines={1}>
-          {primaryTrackTitle} | {primaryArtistName}
+          {liveRadioSubtitle}
         </Text>
         <Text style={[styles.liveRadioMeta, { color: mutedTextColor }]} numberOfLines={1}>
-          {hasBroadcastStream
+          {stationRecommendationReason
+            ? stationRecommendationReason
+            : hasBroadcastStream
             ? "Broadcast stream"
             : `${stationSlotCount} ${stationSlotCount === 1 ? "slot" : "slots"} | ${stationPlayableTrackCount} playable tracks`}
         </Text>
@@ -2255,7 +2277,7 @@ export default function FeedScreen() {
   const [pendingReopenListingId, setPendingReopenListingId] = useState<string | null>(null);
   const canCreatePosts = useMemo(() => {
     const role = typeof userRole === "string" ? userRole.toLowerCase() : "";
-    return Boolean(session && resolvedUserId && ["musician", "producer", "studio-owner", "venue-owner", "admin"].includes(role));
+    return Boolean(session && resolvedUserId && ["fan", "musician", "producer", "studio-owner", "venue-owner", "admin"].includes(role));
   }, [resolvedUserId, session, userRole]);
   const shouldPersonalizeForYouFeed = Boolean(resolvedUserId && !isGuest);
   const openPostOptions = useCallback((post: any) => {
@@ -2324,6 +2346,27 @@ export default function FeedScreen() {
   useEffect(() => {
     followingKeysRef.current = followingKeys;
   }, [followingKeys]);
+
+  const applyFollowingStateToRecommendationCards = useCallback((cards: any[]) => {
+    const keys = followingKeysRef.current;
+
+    return cards.map((card) => {
+      const targetType = card?.social_follow_target_type === "group" ? "group" : "profile";
+      const targetId = typeof card?.social_follow_target_id === "string" && card.social_follow_target_id.length > 0
+        ? card.social_follow_target_id
+        : null;
+      const followKey = targetId ? buildSocialFollowKey(targetType, targetId) : "";
+
+      if (!followKey) {
+        return card;
+      }
+
+      return {
+        ...card,
+        is_following: card?.is_following === true || keys.has(followKey),
+      };
+    });
+  }, []);
 
   usePageLoadLogger({
     counts: {
@@ -2640,7 +2683,7 @@ export default function FeedScreen() {
 
           if (cards.length > 0) {
             return {
-              cards,
+              cards: applyFollowingStateToRecommendationCards(cards),
               provider: normalizeAiFeedProvider(aiInvokeResult.data?.aiProvider || aiInvokeResult.data?.provider || groqModelLabel),
               message: normalizeAiFeedMessage(
                 aiInvokeResult.data?.message ||
@@ -2943,9 +2986,11 @@ export default function FeedScreen() {
       }
 
       return {
-        cards: sortFeedItemsNewestFirst(allCandidates)
-          .slice(0, AI_CARD_LIMIT)
-          .map((item) => ({ ...ensureFeedCardImage(item), __feedKind: "ai_card" })),
+        cards: applyFollowingStateToRecommendationCards(
+          sortFeedItemsNewestFirst(allCandidates)
+            .slice(0, AI_CARD_LIMIT)
+            .map((item) => ({ ...ensureFeedCardImage(item), __feedKind: "ai_card" })),
+        ),
         provider: "Latest",
         message: "Showing the newest posts and listings.",
       };
@@ -2957,7 +3002,7 @@ export default function FeedScreen() {
         message: error?.message || "Unable to load recommendation cards right now.",
       };
     }
-  }, [groqModelLabel, resolvedUserId, roleResolved, session]);
+  }, [applyFollowingStateToRecommendationCards, groqModelLabel, resolvedUserId, roleResolved, session]);
 
   const loadFollowingGraph = useCallback(async () => {
     if (!session) {
@@ -3257,6 +3302,7 @@ export default function FeedScreen() {
     ).slice(0, AI_CARD_LIMIT);
     const entities = latestEntityCards.length > 0 ? latestEntityCards : fallbackEntities;
 
+    followingKeysRef.current = keys;
     setFollowingKeys(keys);
     setFollowingEntities(entities);
 
@@ -3265,11 +3311,11 @@ export default function FeedScreen() {
 
   /* ── Data fetching ── */
   const fetchFeed = useCallback(async (feedTab: FeedTab, append = false, currentLength = 0) => {
-    if (authLoading || (feedTab === "for_you" && Boolean(resolvedUserId) && !isGuest && !roleResolved)) {
+    if (authLoading || (isForYouFeedTab(feedTab) && Boolean(resolvedUserId) && !isGuest && !roleResolved)) {
       return;
     }
 
-    if (feedTab === "for_you" && session && !isGuest && !resolvedUserId) {
+    if (isForYouFeedTab(feedTab) && session && !isGuest && !resolvedUserId) {
       return;
     }
 
@@ -3296,52 +3342,98 @@ export default function FeedScreen() {
     const requestId = ++feedRequestIdRef.current[feedTab];
 
     try {
-      if (
-        append &&
-        feedTab === "for_you" &&
-        shouldPersonalizeForYouFeed &&
-        feedPublicFallbackCursorRef.current
-      ) {
-        const publicFallback = await fetchPublicFeedPostsFallback(
-          FEED_PAGE_SIZE,
-          feedPublicFallbackCursorRef.current,
-          resolvedUserId,
-        );
+      if (isForYouFeedTab(feedTab)) {
+        if (append) {
+          const cachedEntry = feedCacheRef.current[feedTab];
+          const queryResult = await forYouFeedQueryRef.current.fetchNextPage();
+
+          if (queryResult.error) {
+            logFeedInvokeError("manage-social-feed:get_feed", queryResult.error, {
+              action: "get_feed",
+              feedTab,
+              feedType: shouldPersonalizeForYouFeed ? "for_you" : "public",
+              append,
+              currentLength,
+            });
+            throw queryResult.error;
+          }
+
+          const querySnapshot = buildFeedSnapshotFromPages(feedTab, queryResult.data);
+          const nextSnapshot: FeedCacheEntry = querySnapshot
+            ? {
+                ...querySnapshot,
+                aiCards: cachedEntry.aiCards,
+                aiFeedMessage: cachedEntry.aiFeedMessage,
+                aiFeedProvider: cachedEntry.aiFeedProvider,
+              }
+            : {
+                ...cachedEntry,
+                hasMore: false,
+                loaded: true,
+              };
+
+          feedCacheRef.current[feedTab] = nextSnapshot;
+          if (activeTabRef.current === feedTab) {
+            applyFeedSnapshot(nextSnapshot);
+          }
+
+          return;
+        }
+
+        feedPublicFallbackCursorRef.current = null;
+        setIsAiCardsLoading(true);
+
+        const [aiResult, queryResult] = await Promise.all([
+          fetchAiCardsForYou(),
+          forYouFeedQueryRef.current.refetch(),
+        ]);
 
         if (requestId !== feedRequestIdRef.current[feedTab]) {
           return;
         }
 
-        const cachedEntry = feedCacheRef.current[feedTab];
+        if (queryResult.error) {
+          logFeedInvokeError("manage-social-feed:get_feed", queryResult.error, {
+            action: "get_feed",
+            feedTab,
+            feedType: shouldPersonalizeForYouFeed ? "for_you" : "public",
+            append,
+            currentLength,
+          });
+        }
+
+        const postSnapshot = queryResult.error
+          ? null
+          : buildFeedSnapshotFromPages(feedTab, queryResult.data);
+
         const nextSnapshot: FeedCacheEntry = {
-          ...cachedEntry,
-          posts: dedupeFeedItems([...cachedEntry.posts, ...publicFallback.posts]),
-          hasMore: Boolean(publicFallback.nextCursor),
+          posts: postSnapshot?.posts || [],
+          aiCards: applyFollowingStateToRecommendationCards(aiResult.cards),
+          aiFeedMessage: normalizeAiFeedMessage(aiResult.message || ""),
+          aiFeedProvider: normalizeAiFeedProvider(aiResult.provider || groqModelLabel),
+          hasMore: postSnapshot?.hasMore || false,
           loaded: true,
         };
 
-        feedPublicFallbackCursorRef.current = publicFallback.nextCursor;
         feedCacheRef.current[feedTab] = nextSnapshot;
         feedLastFetchAt[feedTab] = Date.now();
 
         if (activeTabRef.current === feedTab) {
           applyFeedSnapshot(nextSnapshot);
+          setIsAiCardsLoading(false);
         }
+
+        void loadFollowingGraph().catch(() => {
+          // Follow metadata is nice-to-have; recommendations should render without waiting on it.
+        });
 
         return;
       }
 
-      const currentForYouQuery = forYouFeedQueryRef.current;
       const currentFollowingQuery = followingFeedQueryRef.current;
-      const refetchFeedPage =
-        feedTab === "following" ? currentFollowingQuery.refetch : currentForYouQuery.refetch;
-      const fetchNextFeedPage =
-        feedTab === "following"
-          ? currentFollowingQuery.fetchNextPage
-          : currentForYouQuery.fetchNextPage;
       const queryResult = append
-        ? await fetchNextFeedPage()
-        : await refetchFeedPage();
+        ? await currentFollowingQuery.fetchNextPage()
+        : await currentFollowingQuery.refetch();
 
       if (queryResult.error) {
         logFeedInvokeError("manage-social-feed:get_feed", queryResult.error, {
@@ -3358,8 +3450,8 @@ export default function FeedScreen() {
 
       const pages = queryResult.data?.pages || [];
       const latestPage = pages[pages.length - 1] as any;
-      let nextCursor = latestPage?.nextCursor || null;
-      let fetchedPosts = pages
+      const nextCursor = latestPage?.nextCursor || null;
+      const fetchedPosts = pages
         .flatMap((page: any) =>
           Array.isArray(page?.items)
             ? page.items
@@ -3382,31 +3474,10 @@ export default function FeedScreen() {
         posts: fetchedPosts.length,
       });
 
-      if (!append && feedTab === "for_you" && shouldPersonalizeForYouFeed && fetchedPosts.length === 0) {
-        const publicFallback = await fetchPublicFeedPostsFallback(FEED_PAGE_SIZE, null, resolvedUserId);
-        fetchedPosts = publicFallback.posts.map((post: any) => ({
-          ...post,
-          is_following:
-            post.is_following === true ||
-            nextFollowingKeys.has(buildSocialFollowKey("profile", post.author_id)),
-        }));
-        nextCursor = publicFallback.nextCursor;
-        feedPublicFallbackCursorRef.current = publicFallback.nextCursor;
-      } else if (!append && feedTab === "for_you") {
-        feedPublicFallbackCursorRef.current = null;
-      }
-
       const nextPosts = fetchedPosts;
-      const cachedEntry = feedCacheRef.current[feedTab];
-      let nextAiCards = cachedEntry.aiCards;
-      let nextAiFeedMessage = normalizeAiFeedMessage(cachedEntry.aiFeedMessage || "");
-      let nextAiFeedProvider = normalizeAiFeedProvider(cachedEntry.aiFeedProvider || groqModelLabel);
-
-      if (!append && feedTab !== "for_you") {
-        nextAiCards = [];
-        nextAiFeedMessage = "";
-        nextAiFeedProvider = groqModelLabel;
-      }
+      const nextAiCards: any[] = [];
+      const nextAiFeedMessage = "";
+      const nextAiFeedProvider = groqModelLabel;
 
       if (requestId !== feedRequestIdRef.current[feedTab]) {
         return;
@@ -3426,14 +3497,10 @@ export default function FeedScreen() {
         hasMore: Boolean(nextCursor),
         posts: nextPosts.length,
       });
-      const shouldLoadForYouRecommendations = !append && feedTab === "for_you";
-
       feedCacheRef.current[feedTab] = nextSnapshot;
       feedLastFetchAt[feedTab] = Date.now();
 
-      if (shouldLoadForYouRecommendations && activeTabRef.current === feedTab) {
-        setIsAiCardsLoading(true);
-      } else if (activeTabRef.current === feedTab) {
+      if (activeTabRef.current === feedTab) {
         setIsAiCardsLoading(false);
       }
 
@@ -3447,34 +3514,6 @@ export default function FeedScreen() {
         });
       }
 
-      if (shouldLoadForYouRecommendations) {
-        void fetchAiCardsForYou().then((aiResult) => {
-          if (requestId !== feedRequestIdRef.current[feedTab]) {
-            return;
-          }
-
-          const aiSnapshot: FeedCacheEntry = {
-            ...feedCacheRef.current[feedTab],
-            aiCards: aiResult.cards,
-            aiFeedMessage: normalizeAiFeedMessage(aiResult.message || ""),
-            aiFeedProvider: normalizeAiFeedProvider(aiResult.provider || groqModelLabel),
-            loaded: true,
-          };
-
-          feedCacheRef.current[feedTab] = aiSnapshot;
-          feedLastFetchAt[feedTab] = Date.now();
-
-          if (activeTabRef.current === feedTab) {
-            applyFeedSnapshot(aiSnapshot);
-            setIsAiCardsLoading(false);
-          }
-        }).catch((aiError) => {
-          console.error("Feed AI cards error:", aiError);
-          if (requestId === feedRequestIdRef.current[feedTab] && activeTabRef.current === feedTab) {
-            setIsAiCardsLoading(false);
-          }
-        });
-      }
     } catch (e: any) {
       logFeedInvokeError("fetchFeed", e, {
         feedTab,
@@ -3488,27 +3527,7 @@ export default function FeedScreen() {
 
       let fallbackSnapshot = feedCacheRef.current[feedTab];
 
-      if (!append && feedTab === "for_you") {
-        try {
-          const aiResult = await fetchAiCardsForYou();
-          fallbackSnapshot = {
-            posts: [],
-            aiCards: aiResult.cards,
-            aiFeedMessage: normalizeAiFeedMessage(aiResult.message || "Social feed is unavailable. Loading recommendation cards."),
-            aiFeedProvider: normalizeAiFeedProvider(aiResult.provider || groqModelLabel),
-            hasMore: false,
-            loaded: true,
-          };
-        } catch (aiError) {
-          console.error("Fallback AI cards error:", aiError);
-          fallbackSnapshot = {
-            ...createEmptyFeedCacheEntry(groqModelLabel),
-            aiFeedProvider: groqModelLabel,
-            hasMore: false,
-            loaded: true,
-          };
-        }
-      } else if (!fallbackSnapshot.loaded) {
+      if (!fallbackSnapshot.loaded) {
         fallbackSnapshot = {
           ...createEmptyFeedCacheEntry(groqModelLabel),
           hasMore: false,
@@ -3537,8 +3556,10 @@ export default function FeedScreen() {
       }
     }
   }, [
+    applyFollowingStateToRecommendationCards,
     applyFeedSnapshot,
     authLoading,
+    buildFeedSnapshotFromPages,
     fetchAiCardsForYou,
     groqModelLabel,
     isGuest,
@@ -3779,13 +3800,13 @@ export default function FeedScreen() {
       setAlert({
         type: "warning",
         title: "Posting unavailable",
-        message: userRole === "fan" ? "Fan accounts can react, comment, and share, but cannot create posts." : "Please sign in with a creator account to post.",
+        message: "Please sign in with an account that can post.",
       });
       return;
     }
     resetComposer();
     presentComposerSheet();
-  }, [canCreatePosts, presentComposerSheet, resetComposer, userRole]);
+  }, [canCreatePosts, presentComposerSheet, resetComposer]);
 
   const closeComposer = useCallback(() => {
     handleComposerClose();
@@ -3928,7 +3949,7 @@ export default function FeedScreen() {
   const handleCreatePost = async () => {
     const content = normalizeVisibleInput(postBody);
     if (!canCreatePosts) {
-      setAlert({ type: "warning", title: "Posting unavailable", message: "Fan accounts cannot create posts." });
+      setAlert({ type: "warning", title: "Posting unavailable", message: "Please sign in with an account that can post." });
       return;
     }
     if (!content && postMedia.length === 0 && !editingPost) {
@@ -3960,6 +3981,21 @@ export default function FeedScreen() {
       }
 
       if (data?.success) {
+        const createdPost = !editingPost && data?.data ? normalizeFeedPost(data.data) : null;
+        if (createdPost?.id) {
+          const addCreatedPost = (entry: FeedCacheEntry): FeedCacheEntry => ({
+            ...entry,
+            posts: sortFeedItemsNewestFirst(dedupeFeedItems([createdPost, ...entry.posts])),
+            loaded: true,
+          });
+
+          feedCacheRef.current = {
+            for_you: addCreatedPost(feedCacheRef.current.for_you),
+            following: addCreatedPost(feedCacheRef.current.following),
+          };
+          setPosts((current) => sortFeedItemsNewestFirst(dedupeFeedItems([createdPost, ...current])));
+        }
+
         emitToast({
           type: "success",
           title: editingPost ? "Post updated" : "Posted!",
@@ -4616,6 +4652,8 @@ export default function FeedScreen() {
           cardColor={isDark ? "#0F172A" : "#F8FAFC"}
           isDark={isDark}
           primaryColor={colors.primary}
+          recommendationEnabled={shouldPersonalizeForYouFeed && roleResolved}
+          recommendationUserId={resolvedUserId}
           textColor={colors.text}
           mutedTextColor={colors.textSecondary}
         />
@@ -4643,6 +4681,9 @@ export default function FeedScreen() {
     isDark,
     openCreateComposer,
     openSearchSheet,
+    resolvedUserId,
+    roleResolved,
+    shouldPersonalizeForYouFeed,
     tab,
   ]);
 
@@ -4731,7 +4772,7 @@ export default function FeedScreen() {
   const feedItems = useMemo(() => {
     if (loading) return [];
     if (tab === "for_you") {
-      return sortFeedItemsNewestFirst(dedupeFeedItems([...posts, ...aiCards]));
+      return sortForYouFeedItems(dedupeFeedItems([...posts, ...aiCards]));
     }
     if (tab === "following") {
       return sortFeedItemsNewestFirst(dedupeFeedItems([...posts, ...followingEntities]));

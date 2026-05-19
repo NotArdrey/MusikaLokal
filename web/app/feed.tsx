@@ -38,6 +38,8 @@ type LiveRadioCardProps = {
   cardColor: string;
   isDark: boolean;
   primaryColor: string;
+  recommendationEnabled: boolean;
+  recommendationUserId: string | null;
   textColor: string;
   mutedTextColor: string;
 };
@@ -175,6 +177,8 @@ const LiveRadioCard = React.memo(function LiveRadioCard({
   cardColor,
   isDark,
   primaryColor,
+  recommendationEnabled,
+  recommendationUserId,
   textColor,
   mutedTextColor,
 }: LiveRadioCardProps) {
@@ -197,13 +201,14 @@ const LiveRadioCard = React.memo(function LiveRadioCard({
       setLoadingStation(true);
 
       try {
-        const fetchStations = async (featuredOnly: boolean) => {
+        const fetchStations = async (featuredOnly: boolean, useRecommendation = false) => {
           const { data, error } = await supabase.functions.invoke("manage-playlists", {
             body: {
               action: "browse_stations",
               featured_only: featuredOnly,
               include_items: true,
-              limit: 5,
+              limit: useRecommendation ? 12 : 5,
+              ...(useRecommendation ? { recommendation_mode: "for_you" } : {}),
             },
           });
 
@@ -211,10 +216,17 @@ const LiveRadioCard = React.memo(function LiveRadioCard({
           return Array.isArray(data?.data) ? data.data : [];
         };
 
-        const featuredStations = await fetchStations(true);
-        const stations = featuredStations.some(isStationPlayable)
-          ? featuredStations
-          : await fetchStations(false);
+        const recommendedStations = recommendationEnabled && recommendationUserId
+          ? await fetchStations(false, true)
+          : [];
+        const featuredStations = recommendedStations.some(isStationPlayable)
+          ? []
+          : await fetchStations(true);
+        const stations = recommendedStations.some(isStationPlayable)
+          ? recommendedStations
+          : featuredStations.some(isStationPlayable)
+            ? featuredStations
+            : await fetchStations(false);
 
         if (!cancelled) {
           setFeaturedStation(stations.find(isStationPlayable) || stations[0] || null);
@@ -234,7 +246,7 @@ const LiveRadioCard = React.memo(function LiveRadioCard({
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [recommendationEnabled, recommendationUserId]);
 
   const liveFeaturedStation = featuredStation && isStationPlayable(featuredStation)
     ? featuredStation
@@ -283,16 +295,22 @@ const LiveRadioCard = React.memo(function LiveRadioCard({
     typeof displayStation?.creator?.full_name === "string" && displayStation.creator.full_name.trim()
       ? displayStation.creator.full_name.trim()
       : "";
+  const stationRecommendationReason =
+    displayStation?.ai_reason ||
+    displayStation?.recommendation_reason ||
+    "";
   const nowPlayingLine = loadingStation
     ? "Loading rotation"
     : stationCreator
       ? `${nowPlayingTitle} | ${stationCreator}`
       : nowPlayingTitle;
-  const stationMetaLine = hasBroadcastStream
-    ? "Live stream"
-    : stationSlotCount > 0 || stationPlayableTrackCount > 0
-      ? `${stationSlotCount || 1} slot | ${stationPlayableTrackCount || stationTrackCount || 0} playable tracks`
-      : rotationSummary;
+  const stationMetaLine = stationRecommendationReason
+    ? stationRecommendationReason
+    : hasBroadcastStream
+      ? "Live stream"
+      : stationSlotCount > 0 || stationPlayableTrackCount > 0
+        ? `${stationSlotCount || 1} slot | ${stationPlayableTrackCount || stationTrackCount || 0} playable tracks`
+        : rotationSummary;
 
   const handlePlayPress = useCallback(async () => {
     if (!displayStation || loadingStation || isTuneInLoading) return;
@@ -352,7 +370,7 @@ const LiveRadioCard = React.memo(function LiveRadioCard({
         <View style={styles.liveRadioEyebrowRow}>
           <View style={[styles.liveRadioLiveDot, { backgroundColor: primaryColor }]} />
           <Text style={[styles.liveRadioEyebrow, { color: primaryColor }]} numberOfLines={1}>
-            {badgeLabel === "LIVE" ? "LIVE RADIO" : "RADIO"}
+            {stationRecommendationReason ? "FOR YOU RADIO" : badgeLabel === "LIVE" ? "LIVE RADIO" : "RADIO"}
           </Text>
         </View>
 
@@ -395,9 +413,16 @@ const FEED_PAGE_SIZE = 20;
 const AI_CARD_LIMIT = 8;
 const AI_RECOMMENDATION_TIMEOUT_MS = 2500;
 const PENDING_REOPEN_LISTING_STORAGE_KEY = "pending_reopen_listing_id";
+const PENDING_REOPEN_LISTING_TYPE_STORAGE_KEY = "pending_reopen_listing_type";
 const SOCIAL_MEDIA_ASPECT_RATIO = 1.45;
 const PESO_SIGN = "\u20B1";
 const KNOWN_FEED_MEDIA_BUCKETS = ["post-media", "posts", "images", "listings", "documents", "avatars"];
+
+const normalizeListingTypeParam = (value?: string | null) =>
+  (value || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
+
+const isProductionTeamListingType = (listingType: string) =>
+  listingType === "production_team" || listingType === "production";
 
 const withAiRecommendationTimeout = async <T,>(promise: Promise<T>): Promise<T | null> =>
   Promise.race([
@@ -521,10 +546,123 @@ const normalizeAiRecommendationCard = (item: any) => {
   };
 };
 
-const getFeedItemListKey = (item: any, index: number) => {
+const getFeedItemStableKey = (item: any) => {
   const kind = item?.__feedKind || "post";
   const type = item?.type || item?.post_type || "item";
-  return item?.id ? `${kind}:${type}:${item.id}` : `row:${index}`;
+  return item?.id ? `${kind}:${type}:${item.id}` : "";
+};
+
+const getFeedItemListKey = (item: any, index: number) => {
+  return getFeedItemStableKey(item) || `row:${index}`;
+};
+
+const dedupeFeedItems = (items: any[]) => {
+  const seen = new Set<string>();
+  const uniqueItems: any[] = [];
+
+  for (const item of items) {
+    const key = getFeedItemStableKey(item);
+    if (key) {
+      if (seen.has(key)) continue;
+      seen.add(key);
+    }
+    uniqueItems.push(item);
+  }
+
+  return uniqueItems;
+};
+
+const getFeedItemCreatedTime = (item: any) => {
+  const timestamp = typeof item?.created_at === "string" && item.created_at.length > 0
+    ? item.created_at
+    : typeof item?.updated_at === "string" && item.updated_at.length > 0
+      ? item.updated_at
+      : "";
+  const time = timestamp ? new Date(timestamp).getTime() : 0;
+  return Number.isFinite(time) ? time : 0;
+};
+
+const clampFeedScore = (value: number, min = 0, max = 100) => Math.max(min, Math.min(max, value));
+
+const normalizeRecommendationScore = (value: unknown) => {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return 0;
+  return clampFeedScore(numeric <= 1 ? numeric * 100 : numeric);
+};
+
+const getExplicitRecommendationScore = (item: any) => {
+  const score = normalizeRecommendationScore(item?.aiScore ?? item?.ai_score);
+  if (score > 0) return score;
+  return normalizeRecommendationScore(item?.similarity);
+};
+
+const getForYouRecencyScore = (item: any) => {
+  const createdTime = getFeedItemCreatedTime(item);
+  if (!createdTime) return 20;
+  const ageDays = Math.max(0, (Date.now() - createdTime) / (1000 * 60 * 60 * 24));
+  if (ageDays <= 1) return 100;
+  if (ageDays <= 7) return 82;
+  if (ageDays <= 30) return 58;
+  if (ageDays <= 90) return 34;
+  return 18;
+};
+
+const getForYouEngagementScore = (item: any) => {
+  const reactions = Number(item?.reaction_count || 0);
+  const comments = Number(item?.comment_count || 0);
+  const shares = Number(item?.share_count || 0);
+  return clampFeedScore(Math.log1p(Math.max(0, reactions) + Math.max(0, comments) * 2 + Math.max(0, shares) * 3) * 22);
+};
+
+const getRecommendationProfileTargetId = (item: any) => {
+  if (item?.social_follow_target_type === "profile" && typeof item?.social_follow_target_id === "string") {
+    return item.social_follow_target_id;
+  }
+
+  return [item?.owner_id, item?.organizer_id, item?.author_id].find(
+    (value) => typeof value === "string" && value.length > 0,
+  ) || "";
+};
+
+const buildForYouRecommendationSignals = (items: any[]) => {
+  const signals = new Map<string, number>();
+
+  for (const item of items) {
+    if (item?.__feedKind !== "ai_card") continue;
+    const targetId = getRecommendationProfileTargetId(item);
+    if (!targetId) continue;
+    const score = getExplicitRecommendationScore(item) || 62;
+    signals.set(targetId, Math.max(signals.get(targetId) || 0, score));
+  }
+
+  return signals;
+};
+
+const sortForYouFeedItems = (items: any[]) => {
+  const recommendationSignals = buildForYouRecommendationSignals(items);
+
+  return [...items].sort((a, b) => {
+    const scoreItem = (item: any) => {
+      const explicitScore = getExplicitRecommendationScore(item);
+      const recencyScore = getForYouRecencyScore(item);
+      const engagementScore = getForYouEngagementScore(item);
+
+      if (item?.__feedKind === "ai_card") {
+        return (explicitScore || 62) * 0.7 + recencyScore * 0.2 + engagementScore * 0.1;
+      }
+
+      const authorSignal = typeof item?.author_id === "string"
+        ? recommendationSignals.get(item.author_id) || 0
+        : 0;
+      const followSignal = item?.is_following === true ? 52 : 0;
+
+      return Math.max(authorSignal, followSignal) * 0.55 + recencyScore * 0.3 + engagementScore * 0.15;
+    };
+
+    const scoreDelta = scoreItem(b) - scoreItem(a);
+    if (Math.abs(scoreDelta) > 0.001) return scoreDelta;
+    return getFeedItemCreatedTime(b) - getFeedItemCreatedTime(a);
+  });
 };
 
 const getPositiveInteger = (value: unknown) => {
@@ -1291,10 +1429,10 @@ export default function FeedScreen() {
 
   const canCreatePost = !!session && !isGuest && (normalizeVisibleInput(postBody).length > 0 || selectedMedia.length > 0);
 
-  const fetchAiCardsForYou = useCallback(async () => {
+  const fetchAiCardsForYou = useCallback(async (): Promise<any[]> => {
     if (!session?.user?.id || isGuest) {
       setAiCards([]);
-      return;
+      return [];
     }
 
     try {
@@ -1309,7 +1447,8 @@ export default function FeedScreen() {
       );
 
       if (!aiInvokeResult) {
-        return;
+        setAiCards([]);
+        return [];
       }
 
       if (aiInvokeResult.error) {
@@ -1317,7 +1456,8 @@ export default function FeedScreen() {
           action: "for-you",
           timeoutMs: AI_RECOMMENDATION_TIMEOUT_MS,
         });
-        return;
+        setAiCards([]);
+        return [];
       }
 
       const recommendations = Array.isArray(aiInvokeResult.data?.recommendations)
@@ -1332,10 +1472,13 @@ export default function FeedScreen() {
         .slice(0, AI_CARD_LIMIT);
 
       setAiCards(cards);
+      return cards;
     } catch (aiError: any) {
       logFeedInvokeError("home-feed:for-you", aiError, {
         action: "for-you",
       });
+      setAiCards([]);
+      return [];
     }
   }, [isGuest, session?.user?.id]);
 
@@ -1357,6 +1500,65 @@ export default function FeedScreen() {
       if (!append) setLoading(true);
 
       try {
+        if (feedTab === "for_you") {
+          if (append) {
+            const offset = posts.length;
+            const { data, error } = await supabase.functions.invoke("manage-social-feed", {
+              body: {
+                action: "get_feed",
+                feed_type: "for_you",
+                limit: FEED_PAGE_SIZE,
+                offset,
+              },
+            });
+
+            if (error) {
+              logFeedInvokeError("manage-social-feed:get_feed", error, {
+                action: "get_feed",
+                feedTab,
+                append,
+                offset,
+              });
+              throw error;
+            }
+
+            const page = Array.isArray(data?.data) ? data.data.map(normalizeFeedPost) : [];
+            setPosts((current) => [...current, ...page]);
+            setHasMore(page.length === FEED_PAGE_SIZE);
+            return;
+          }
+
+          const [cards, feedResult] = await Promise.all([
+            fetchAiCardsForYou(),
+            supabase.functions.invoke("manage-social-feed", {
+              body: {
+                action: "get_feed",
+                feed_type: "for_you",
+                limit: FEED_PAGE_SIZE,
+                offset: 0,
+              },
+            }),
+          ]);
+
+          if (feedResult.error) {
+            logFeedInvokeError("manage-social-feed:get_feed", feedResult.error, {
+              action: "get_feed",
+              feedTab,
+              append,
+              offset: 0,
+            });
+            throw feedResult.error;
+          }
+
+          const page = Array.isArray(feedResult.data?.data)
+            ? feedResult.data.data.map(normalizeFeedPost)
+            : [];
+          setPosts(page);
+          setAiCards(cards);
+          setHasMore(page.length === FEED_PAGE_SIZE);
+          return;
+        }
+
         const offset = append ? posts.length : 0;
         const { data, error } = await supabase.functions.invoke("manage-social-feed", {
           body: {
@@ -1380,10 +1582,6 @@ export default function FeedScreen() {
         const page = Array.isArray(data?.data) ? data.data.map(normalizeFeedPost) : [];
         setPosts((current) => (append ? [...current, ...page] : page));
         setHasMore(page.length === FEED_PAGE_SIZE);
-
-        if (feedTab === "for_you" && !append) {
-          void fetchAiCardsForYou();
-        }
       } catch (e: any) {
         setAlert({ type: "error", title: "Error", message: e?.message || "Failed to load feed." });
         if (!append) setPosts([]);
@@ -1449,10 +1647,9 @@ export default function FeedScreen() {
 
   useEffect(() => {
     const firstRouteParam = (value?: string | string[]) => Array.isArray(value) ? value[0] : value;
-    const listingType = (firstRouteParam(params.listingType) || firstRouteParam(params.listing_type) || "")
-      .trim()
-      .toLowerCase()
-      .replace(/[\s-]+/g, "_");
+    const listingType = normalizeListingTypeParam(
+      firstRouteParam(params.listingType) || firstRouteParam(params.listing_type),
+    );
     const reopenListingId =
       firstRouteParam(params.reopenListingId) ||
       firstRouteParam(params.studio_id) ||
@@ -1462,7 +1659,7 @@ export default function FeedScreen() {
 
     if (!reopenListingId || reopenListingId.length === 0) return;
 
-    if (listingType === "production_team" || listingType === "production") {
+    if (isProductionTeamListingType(listingType)) {
       router.push({ pathname: "/production_team", params: { teamId: reopenListingId } } as any);
       try {
         router.setParams({
@@ -1531,13 +1728,24 @@ export default function FeedScreen() {
       const restorePendingReopen = async () => {
         try {
           const storedListingId = await AsyncStorage.getItem(PENDING_REOPEN_LISTING_STORAGE_KEY);
+          const storedListingType = normalizeListingTypeParam(
+            await AsyncStorage.getItem(PENDING_REOPEN_LISTING_TYPE_STORAGE_KEY),
+          );
 
           if (!isActive || !storedListingId || storedListingId.length === 0) {
             return;
           }
 
-          openListingDetails(storedListingId);
-          await AsyncStorage.removeItem(PENDING_REOPEN_LISTING_STORAGE_KEY);
+          if (isProductionTeamListingType(storedListingType)) {
+            router.push({ pathname: "/production_team", params: { teamId: storedListingId } } as any);
+          } else {
+            openListingDetails(storedListingId);
+          }
+
+          await AsyncStorage.multiRemove([
+            PENDING_REOPEN_LISTING_STORAGE_KEY,
+            PENDING_REOPEN_LISTING_TYPE_STORAGE_KEY,
+          ]);
         } catch {
           // Ignore cache restore failures; explicit route params still work.
         }
@@ -1620,6 +1828,11 @@ export default function FeedScreen() {
       }
 
       if (data?.success) {
+        const createdPost = data?.data ? normalizeFeedPost(data.data) : null;
+        if (createdPost?.id) {
+          setPosts((current) => [createdPost, ...current.filter((post) => post.id !== createdPost.id)]);
+        }
+
         emitToast({ type: "success", title: "Posted!", message: "Your post is live." });
         setPostBody("");
         selectedMedia.forEach((m) => URL.revokeObjectURL(m.preview));
@@ -1858,7 +2071,7 @@ export default function FeedScreen() {
   }, [openListingDetails]);
 
   const feedItems = useMemo(
-    () => (tab === "for_you" ? [...aiCards, ...posts] : posts),
+    () => (tab === "for_you" ? sortForYouFeedItems(dedupeFeedItems([...posts, ...aiCards])) : posts),
     [aiCards, posts, tab],
   );
 
@@ -1995,6 +2208,8 @@ export default function FeedScreen() {
                     cardColor="#0F172A"
                     isDark
                     primaryColor={feedColors.primary}
+                    recommendationEnabled={Boolean(session?.user?.id && !isGuest)}
+                    recommendationUserId={session?.user?.id || null}
                     textColor={feedColors.text}
                     mutedTextColor={feedColors.textSecondary}
                   />

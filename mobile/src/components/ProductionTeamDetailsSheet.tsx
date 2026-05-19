@@ -177,6 +177,37 @@ const loadProductionTeamBaseDetails = async (
   };
 };
 
+const loadProductionTeamFavoriteMetadata = async (
+  targetTeamId: string,
+  targetUserId?: string | null,
+) => {
+  const totalFavoritePromise = supabase
+    .from("favorites")
+    .select("id", { count: "exact", head: true })
+    .eq("production_team_id", targetTeamId);
+
+  const userFavoritePromise = targetUserId
+    ? supabase
+        .from("favorites")
+        .select("id", { count: "exact", head: true })
+        .eq("production_team_id", targetTeamId)
+        .eq("user_id", targetUserId)
+    : Promise.resolve({ count: 0, error: null } as any);
+
+  const [totalFavoriteResult, userFavoriteResult] = await Promise.all([
+    totalFavoritePromise,
+    userFavoritePromise,
+  ]);
+
+  if (totalFavoriteResult.error) throw totalFavoriteResult.error;
+  if (userFavoriteResult.error) throw userFavoriteResult.error;
+
+  return {
+    count: Math.max(0, totalFavoriteResult.count || 0),
+    isFavorited: (userFavoriteResult.count || 0) > 0,
+  };
+};
+
 const ProductionTeamDetailsSheet = forwardRef<
   BottomSheetModal,
   ProductionTeamDetailsSheetProps
@@ -344,6 +375,36 @@ const ProductionTeamDetailsSheet = forwardRef<
         if (active) {
           setLoading(false);
         }
+      }
+    })();
+
+    return () => {
+      active = false;
+    };
+  }, [teamId, userId]);
+
+  useEffect(() => {
+    let active = true;
+
+    if (!teamId) {
+      setIsFavorited(false);
+      setFavoriteCount(0);
+      return () => {
+        active = false;
+      };
+    }
+
+    void (async () => {
+      try {
+        const metadata = await loadProductionTeamFavoriteMetadata(teamId, userId);
+        if (!active) return;
+        setIsFavorited(metadata.isFavorited);
+        setFavoriteCount(metadata.count);
+      } catch (error) {
+        console.error("Error loading production team favorites:", error);
+        if (!active) return;
+        setIsFavorited(false);
+        setFavoriteCount(0);
       }
     })();
 
@@ -577,21 +638,38 @@ const ProductionTeamDetailsSheet = forwardRef<
   }, [team]);
 
   const toggleFavorite = useCallback(async () => {
-    if (!userId || !team?.id) return;
+    if (!team?.id) return;
+    if (!userId) {
+      showSheetAlert("warning", "Login Required", "Please sign in to bookmark production teams.");
+      return;
+    }
+
     const prev = isFavorited;
     const prevCount = favoriteCount;
     setIsFavorited(!prev);
     setFavoriteCount(Math.max(0, prevCount + (prev ? -1 : 1)));
     try {
-      const { error } = await supabase.functions.invoke("manage-details", {
+      const { data, error } = await supabase.functions.invoke("manage-details", {
         body: { action: "toggle_favorite", type: "production_team", id: team.id, userId },
       });
       if (error) throw error;
-    } catch {
+
+      if (typeof data?.is_favorited === "boolean") {
+        setIsFavorited(data.is_favorited);
+      }
+      if (typeof data?.favorites_count === "number") {
+        setFavoriteCount(Math.max(0, data.favorites_count));
+      }
+    } catch (error: any) {
       setIsFavorited(prev);
       setFavoriteCount(prevCount);
+      showSheetAlert(
+        "error",
+        "Bookmark Failed",
+        error?.message || "Unable to update bookmark right now.",
+      );
     }
-  }, [userId, team?.id, isFavorited, favoriteCount]);
+  }, [favoriteCount, isFavorited, showSheetAlert, team?.id, userId]);
 
   const handleOpenFullPage = useCallback(() => {
     if (!team?.id) return;

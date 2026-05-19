@@ -2221,30 +2221,6 @@ export default function AdminPanel({ initialTab, children }: AdminPanelProps) {
                 <Text style={[styles.pulseSubtitle, { color: colors.textSecondary, marginTop: 2 }]}>Gross: {formatCurrency(metrics.grossRevenue)} | Net: {formatCurrency(metrics.netRevenue)}</Text>
               </View>
 
-              <View style={[styles.pulseCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
-                <View style={styles.pulseHeader}>
-                  <Text style={[styles.pulseTitle, { color: colors.textSecondary }]}>System Status</Text>
-                  <Ionicons name="server-outline" size={20} color={metrics.dbHealthy && metrics.apiHealthy ? '#10b981' : '#ef4444'} />
-                </View>
-                <View style={styles.pulseRow}>
-                  <Text style={[styles.pulseValueMain, { color: colors.text, fontSize: 18 }]}>Live Checks</Text>
-                </View>
-                <View style={{ marginTop: 12, gap: 6 }}>
-                  <View style={styles.legendItem}>
-                    <View style={[styles.legendDot, { backgroundColor: metrics.dbHealthy ? '#10b981' : '#ef4444' }]} />
-                    <Text style={[styles.legendText, { color: colors.textSecondary }]}>Database: {metrics.dbHealthy ? 'Operational' : 'Issue detected'}</Text>
-                  </View>
-                  <View style={styles.legendItem}>
-                    <View style={[styles.legendDot, { backgroundColor: metrics.apiHealthy ? '#10b981' : '#ef4444' }]} />
-                    <Text style={[styles.legendText, { color: colors.textSecondary }]}>API: {metrics.apiHealthy ? 'Operational' : 'Issue detected'}</Text>
-                  </View>
-                  <View style={styles.legendItem}>
-                    <View style={[styles.legendDot, { backgroundColor: metrics.paymongoHealthy ? '#10b981' : '#f59e0b' }]} />
-                    <Text style={[styles.legendText, { color: colors.textSecondary }]}>PayMongo health: {formatPercent(metrics.paymongoSuccessRate)}</Text>
-                  </View>
-                </View>
-                <Text style={[styles.pulseSubtitle, { color: colors.textSecondary, marginTop: 8 }]}>Avg report resolve: {formatHours(metrics.avgReportResolutionHours)}</Text>
-              </View>
             </View>
 
             <View style={styles.dataEngineRow}>
